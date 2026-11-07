@@ -175,6 +175,8 @@ rather than read as something else:
 | `let mut x` | The fix writes `var x`. |
 | `&x`, `&mut x` | The fix writes `x` or `mut x`. |
 | `\|x\| x + 1` | The fix writes `fn(x) => x + 1`. |
+| `Point { x: 1.0, y: 2.0 }` | Records are built with parentheses. The fix writes `Point(x: 1.0, y: 2.0)`. |
+| `copy(original, backup)` | Arguments after the first need a label. The fix writes `copy(original, destination: backup)`. |
 | `parse::<Int64>(text)` | The fix writes `parse[Int64](text)`. |
 | `x as Int64` | The fix writes `Int64.from(x)`, or `Int64.try_from(x)` when the conversion can lose information. |
 | `null`, `nil` | The fix suggests `None`. |
@@ -243,7 +245,8 @@ written under the type's name, like a method:
 public let pi: Float64 = 3.141592653589793
 
 public let UInt8.maximum: UInt8 = 255
-public let Instant.epoch: Instant = Instant { nanoseconds: 0 }
+public let Instant.epoch: Instant = Instant(nanoseconds: 0)
+public let seconds_per_day: Int64 = 24 * 60 * 60
 
 fn circle_area(radius: Float64) -> Float64 {
   pi * radius * radius
@@ -253,35 +256,66 @@ fn circle_area(radius: Float64) -> Float64 {
 - A constant's type is always written out.
 - Constants are values, so their names are `lower_snake_case`, like any other
   value. `UInt8.maximum` has no parentheses, because it is a value, not a call.
-- The value cannot use capabilities. There is no `var` at the top level, so
-  there are no mutable globals.
+- The value is a *constant expression*: literals, arithmetic on numbers, other
+  constants, and records, variants, lists, maps, and strings built from
+  constant parts. It cannot call functions. The compiler works it out when the
+  code is compiled. Calls to pure functions may be allowed later, once the
+  compiler can run code while compiling.
+- Like a string literal, a constant lives in the program's static memory.
+  Reading one costs nothing, and it is copied to the heap only when a change
+  needs more room.
+- There is no `var` at the top level, so there are no mutable globals.
 - A constant cannot be used as a pattern, because a `lower_snake_case` name in
   a pattern binds a new variable. Compare with `==` or a guard instead.
 
 ## Types
 
-All types are declared with `type`. A record has named fields. A sum type has
-one or more variants. A variant can carry named fields, a single unnamed value,
-or nothing.
+All types are declared with `type`. A record has named fields, listed in
+parentheses after its name. A sum type has one or more variants, and each
+variant has fields of its own or none.
 
 ```truss
-type Point = { x: Float64, y: Float64 }
+type Point(x: Float64, y: Float64)
 
 type Shape =
-  | Circle { center: Point, radius: Float64 }
-  | Rectangle { corner: Point, opposite_corner: Point }
+  | Circle(center: Point, radius: Float64)
+  | Rectangle(corner: Point, opposite_corner: Point)
   | Empty
 
 type Option[Value] =
-  | Some(Value)
+  | Some(value: Value)
   | None
 
-type Pair[First, Second] = { first: First, second: Second }
+type Pair[First, Second](first: First, second: Second)
 
-let origin = Point { x: 0.0, y: 0.0 }
-let unit_circle = Shape.Circle { center: origin, radius: 1.0 }
+type DiscardLog()
+
+let origin = Point(x: 0.0, y: 0.0)
+let unit_circle = Shape.Circle(center: origin, radius: 1.0)
 let found = Some(3)
+let quiet = DiscardLog()
 ```
+
+- Fields are declared exactly like a function's parameters, and a value is
+  built the same way a function is called. See
+  [Calls and arguments](#calls-and-arguments).
+- A field can have a default, as a parameter can. A field with a default can be
+  left out when the value is built:
+
+  ```truss
+  public type Request(
+    method: Method,
+    path: String,
+    headers: Map[String, String] = [:],
+  )
+
+  let request = Request(method: Method.Get, path)
+  ```
+
+- A record with no fields is declared `type DiscardLog()` and built as
+  `DiscardLog()`.
+- Long field lists can span several lines, since line breaks inside `(` are
+  ignored.
 
 In expressions, a variant is written under its type, as in `Shape.Circle` or
 `Shape.Empty`. From another module it also needs the module, as in
@@ -297,11 +331,11 @@ languages.
 To give a plain value its own type, wrap it in a record with one field:
 
 ```truss
-type UserId = { number: UInt64 }
-type Meters = { meters: Float64 }
+type UserId(number: UInt64)
+type Meters(meters: Float64)
 
-let user = UserId { number: 42 }
-let distance = Meters { meters: 12.5 }
+let user = UserId(42)
+let distance = Meters(12.5)
 let raw = user.number
 ```
 
@@ -319,9 +353,9 @@ Truss has no tuples. Values that belong together go in a record, so each one
 has a name. The standard library provides records for the common cases:
 
 ```truss
-public type Indexed[Element] = { index: USize, element: Element }
-public type Entry[Key, Value] = { key: Key, value: Value }
-public type Pair[First, Second] = { first: First, second: Second }
+public type Indexed[Element](index: USize, element: Element)
+public type Entry[Key, Value](key: Key, value: Value)
+public type Pair[First, Second](first: First, second: Second)
 ```
 
 `enumerate` produces `Indexed` values, maps hold `Entry` values, and `zip`
@@ -329,50 +363,57 @@ produces `Pair` values. A function that returns several values declares a
 record for its result:
 
 ```truss
-type Extremes = { lowest: Int64, highest: Int64 }
+type Extremes(lowest: Int64, highest: Int64)
 
 fn extremes(scores: Slice[Int64]) -> Option[Extremes]
 ```
 
 ### Patterns
 
-A record pattern is written without the type name, because a record type has
-only one shape. A variant pattern names the variant, without its type or
-module. The variant is looked up in the type of the value being matched, just
-as a method is looked up in the type of its receiver:
+A pattern is written the way the value is built. A variant pattern names the
+variant, without its type or module. The variant is looked up in the type of
+the value being matched, just as a method is looked up in the type of its
+receiver. A record pattern is written without the type name, because a record
+type has only one shape:
 
 ```truss
-for { index, element } in scores.enumerate() { ... }
+for (index, element) in scores.enumerate() { ... }
 
 match items.split_first() {
-  Some({ first, rest }) => ...,
+  Some((first, rest)) => ...,
   None => ...,
 }
 
 match shape {
-  Circle { radius, .. } => ...,
-  Rectangle { corner, opposite_corner } => ...,
+  Circle(radius, ..) => ...,
+  Rectangle(corner, opposite_corner) => ...,
   Empty => ...,
 }
 ```
 
-- `{ index, element }` binds each field to a variable with the same name.
-  `{ element: score }` binds the field `element` to a variable named `score`.
-- `..` skips the remaining fields.
-- Nested patterns work the same way: in `Some(Circle { .. })`, `Circle` is
-  looked up in the type inside the `Option`.
-- Building a record still needs the type name, as in
-  `Indexed { index, element }`, because a `{` at the start of an expression
-  begins a block.
+- A bare name that matches a field binds that field to a variable of the same
+  name, so `(index, element)` binds both fields of an `Indexed`, and
+  `Circle(radius, ..)` binds `radius`.
+- `field: pattern` matches one field against a pattern:
+  `(index, element: score)` binds the field `element` to a variable named
+  `score`.
+- In a record or variant with exactly one field, a bare pattern matches that
+  field whatever it is called, so `Some(count)` binds the value inside the
+  `Some` to `count`.
+- Fields can be written in any order. `..` skips the remaining fields.
+- Nested patterns work the same way: in `Some(Circle(..))`, `Circle` is looked
+  up in the type inside the `Option`.
+- Parentheses in a pattern always hold fields, so patterns have no grouping
+  parentheses.
 
 ### Updating records
 
 A `with` expression makes a record with some fields changed:
 
 ```truss
-let moved = origin with { x: 1.0 }
-let production = own config with { server.port: 443, log_level: LogLevel.Warning }
-let retry = request.copy() with { attempt: request.attempt + 1 }
+let moved = origin with (x: 1.0)
+let production = own config with (server.port: 443, log_level: LogLevel.Warning)
+let retry = request.copy() with (attempt: request.attempt + 1)
 ```
 
 It is shorthand for copying the base into a new variable, assigning to its
@@ -391,11 +432,12 @@ fields, and returning it:
   `own` to give it up, or call `copy()` to keep it. Types that copy implicitly
   (see [DESIGN.md](DESIGN.md#memory)) need neither, as with `origin` above.
 - A field can be a path, such as `server.port`, to update a nested field.
-- `origin with { x }` uses a local variable named `x`, as record literals do.
+- `origin with (x)` uses a local variable named `x`, as building a record
+  does.
 - `with` works on records. For a sum type, `match` on the variant first.
 - Only fields visible at that point can be updated.
 - `with` applies to the expression directly before it. To keep chaining, use
-  parentheses: `(own config with { debug: true }).validate()`.
+  parentheses: `(own config with (debug: true)).validate()`.
 
 ### Invariants
 
@@ -403,17 +445,17 @@ A type can state an `invariant`: a condition every value of the type
 satisfies.
 
 ```truss
-public type DateRange = { start: Date, end: Date }
+public type DateRange(start: Date, end: Date)
   invariant start <= end
 
-public type SortedList[Element: Ordered] = { items: List[Element] }
+public type SortedList[Element: Ordered](items: List[Element])
   invariant is_sorted(items)
 
-public type Port = { number: UInt16 }
+public type Port(number: UInt16)
   invariant number != 0
 
 public type Interval =
-  | Closed { low: Int64, high: Int64 } invariant low <= high
+  | Closed(low: Int64, high: Int64) invariant low <= high
   | Unbounded
 ```
 
@@ -440,8 +482,8 @@ returns an error for 0, and `SortedList.from` sorts its input.
 ```truss
 fn area(shape: Shape) -> Float64 {
   match shape {
-    Circle { radius, .. } => math::pi * radius * radius,
-    Rectangle { corner, opposite_corner } =>
+    Circle(radius, ..) => math::pi * radius * radius,
+    Rectangle(corner, opposite_corner) =>
       (opposite_corner.x - corner.x) * (opposite_corner.y - corner.y),
     Empty => 0.0,
   }
@@ -455,6 +497,51 @@ A function that returns nothing leaves out the return type, and its result is
 `Unit`. The formatter removes a written `-> Unit`. A function that never
 returns, such as one that always panics or runs a server forever, has the
 return type `Never`.
+
+### Calls and arguments
+
+Parameter names are part of a function's API. Arguments after the first are
+always named, either with a label or by passing a variable of the same name:
+
+```truss
+fn copy(source: Path, destination: Path)
+  uses FileRead, FileWrite
+fn connect(host: HostName, port: UInt16 = 443, secure: Bool = true) -> Result[Connection, NetworkError]
+  uses NetworkClient
+
+copy(original, destination: backup)
+copy(source: original, destination: backup)
+copy(source, destination)
+let connection = connect(host, port: 8080)?
+let root = sqrt(area)
+```
+
+1. `label: value` passes `value` to the parameter named `label`.
+2. A bare name that matches a parameter's name passes that variable to that
+   parameter. `copy(source, destination)` passes the variables `source` and
+   `destination`. A mode keyword can come first, as in `mut destination`.
+3. Any other first argument goes to the first parameter, as `original` and
+   `area` do above. Any other later argument is a compile error, with a fix
+   that adds the label.
+4. Arguments are written in the order of the parameters.
+
+A parameter can have a default, written after its type. A default follows the
+same rules as a [constant](#constants): it is a constant expression, and it
+cannot refer to other parameters. An argument for a parameter with a default
+can be left out, as `port` and `secure` are in `connect(host)`.
+
+Building a record or a variant follows the same rules, with two differences:
+
+- Fields can be written in any order, because the order of a record's fields
+  has no meaning.
+- Only a record or variant with exactly one field can take a bare value, as in
+  `Some(3)`, `UserId(42)`, and `ConfigError.Malformed(error)`. With more than
+  one field, every argument needs a label or a matching name, as in
+  `Point(x: 0.0, y: 0.0)` or `Summary(count, best, average)`.
+
+A call through a function value, such as `visit(item)` or
+`compare(left, right)`, passes its arguments by position, because function
+types have no parameter names.
 
 A signature can carry clauses between the return type and the body:
 
@@ -533,8 +620,8 @@ fn List[Element].sort_by(mut self, compare: fn(Element, Element) -> Ordering)
 fn Router.add(mut self, route: String, handler: own fn(Request) -> Response)
 ```
 
-`mut router.add("/users", list_users)` works. Passing a lambda that captures a
-local variable to `add` is a compile error.
+`mut router.add("/users", handler: list_users)` works. Passing a lambda that
+captures a local variable to `add` is a compile error.
 
 ### Parameter modes
 
@@ -550,9 +637,9 @@ caller's value. `push` takes ownership of `item`.
 | Call | Meaning |
 |---|---|
 | `sort(mut scores)` | `scores` may change. |
-| `push(mut names, own name)` | `name` is used up and cannot be used afterward. |
-| `push(mut names, name.copy())` | `name` is kept, and `push` gets a copy. |
-| `push(mut names, "Alice")` | A temporary value is never marked. |
+| `push(mut names, item: own name)` | `name` is used up and cannot be used afterward. |
+| `push(mut names, item: name.copy())` | `name` is kept, and `push` gets a copy. |
+| `push(mut names, item: "Alice")` | A temporary value is never marked. |
 
 When a *place* (a variable, a field, or an element, such as `scores`,
 `config.servers`, or `scores[0]`) is passed to a `mut` or `own` parameter, the
@@ -606,7 +693,7 @@ checks this within each function, with no annotations.
 Where an owned value is needed (a `var`, an `own` parameter, a record field, a
 collection element, or a return value), a place must be marked `own` or
 copied. `let name = config.name` needs neither, but
-`Person { name: config.name.copy() }` needs the copy.
+`Person(name: config.name.copy())` needs the copy.
 
 ## Methods
 
@@ -675,9 +762,10 @@ copying them. This is the only overloading Truss allows.
 | A descriptive name | Any other constructor: `List.with_capacity(64)`, `Set.from(["red", "green"])` |
 
 `new` is an ordinary name, not a keyword. A record whose fields are all visible
-can be built with a literal (`Point { x: 0.0, y: 0.0 }`) and does not need
-`new`. Lists and maps are built with literals too (`[]`, `[:]`), so they have
-no `new`.
+can be built directly (`Point(x: 0.0, y: 0.0)`) and does not need `new`. An
+`UpperCamelCase` name before `(` is always a type or variant being built,
+never a function, so building a value never looks like running code. Lists
+and maps are built with literals too (`[]`, `[:]`), so they have no `new`.
 
 ## Function bodies
 
@@ -689,7 +777,7 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
     if score > best { best = score }
   }
   let average = compute_average(scores)?
-  Ok(Summary { count, best, average })
+  Ok(Summary(count, best, average))
 }
 ```
 
@@ -698,9 +786,10 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
 - `?` returns early when a `Result` is an error. See Errors below.
 - Every value must be used. A statement whose value is not `Unit`, such as a
   call to `FileWrite.write` that returns a `Result`, is a compile error. To
-  discard a value on purpose, write `let _ = FileWrite.write(path, report)`.
-  The last expression of a block is the block's value, so it is always used.
-  An `if` or `match` written as a statement must have `Unit` branches.
+  discard a value on purpose, write
+  `let _ = FileWrite.write(path, contents: report)`. The last expression of a
+  block is the block's value, so it is always used. An `if` or `match`
+  written as a statement must have `Unit` branches.
 - Blocks, `if`, and `match` are expressions. A block's value is its last
   expression, so `summarize` returns the `Ok(...)` on its last line.
 - `match` must cover every case.
@@ -720,8 +809,8 @@ the function's. To convert, call `map_error` first:
 
 ```truss
 type ConfigError =
-  | Unreadable(FileError)
-  | Malformed(ParseError)
+  | Unreadable(error: FileError)
+  | Malformed(error: ParseError)
 
 fn load_config(file: Path) -> Result[Config, ConfigError]
   uses FileRead
@@ -732,7 +821,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 }
 ```
 
-A variant with a single value can be used as a function, so
+A variant with exactly one field can be used as a function, so
 `ConfigError.Unreadable` is a function from `FileError` to `ConfigError`. The same rule makes
 `names.map(Some)` work.
 
@@ -797,7 +886,7 @@ overflow a `UInt8`.
 | `for score in scores { ... }` | Read each element. |
 | `for score in mut scores { score = score / 2 }` | Change elements in place. |
 | `for item in own items { ... }` | Use up the collection. |
-| `for { index, element } in mut scores.enumerate() { ... }` | The mode applies to `scores`. |
+| `for (index, element) in mut scores.enumerate() { ... }` | The mode applies to `scores`. |
 | `for i in 0..items.length() { ... }` | Loop over a range. |
 | `while low < high { ... }` | Loop while a condition holds. |
 
@@ -875,13 +964,13 @@ trait implementation. Its methods take `self`, or `mut self` if they change
 the implementation's own state:
 
 ```truss
-type FixedClock = { time: Instant }
+type FixedClock(time: Instant)
 
 impl Clock for FixedClock {
   fn now(self) -> Instant { self.time }
 }
 
-let stamped = provide FixedClock { time: Instant.epoch } {
+let stamped = provide FixedClock(time: Instant.epoch) {
   timestamp_message("ready")
 }
 ```
@@ -892,8 +981,8 @@ mark, and a place is marked `mut` when its methods change its state. The
 changes then remain in the place afterward:
 
 ```truss
-var files = MemoryFiles { files: [:] }
-let config = provide mut files, DiscardLog {} {
+var files = MemoryFiles(files: [:])
+let config = provide mut files, DiscardLog() {
   save_and_reload(Path.new("app.toml"))
 }
 ```
@@ -963,7 +1052,7 @@ call and passes it on. Inside an implementation, calling the capability it
 implements goes to the next provider out:
 
 ```truss
-type FilesWithin = { root: Path }
+type FilesWithin(root: Path)
 
 impl FileRead for FilesWithin
   uses FileRead
@@ -973,7 +1062,7 @@ impl FileRead for FilesWithin
   }
 }
 
-let summary = provide FilesWithin { root: Path.new("logs") } {
+let summary = provide FilesWithin(root: Path.new("logs")) {
   log_report::summarize(Path.new("access.log"))
 }
 ```
@@ -1186,8 +1275,8 @@ becomes roughly:
 
 ```truss
 SqlQuery.from_template(Template.new(
-  [literal "select name from users where id = ", literal ""],
-  [SqlParameter.from(user_id)],
+  literals: [literal "select name from users where id = ", literal ""],
+  parts: [SqlParameter.from(user_id)],
 ))
 ```
 
@@ -1301,17 +1390,17 @@ A `derives` clause on a type asks the compiler to write trait implementations
 for it:
 
 ```truss
-type Point = { x: Float64, y: Float64 }
+type Point(x: Float64, y: Float64)
   derives Equal, Hash
 
 type Priority =
   | Low
   | Normal
-  | Urgent { deadline: Instant }
+  | Urgent(deadline: Instant)
   derives Equal, Ordered
 
 type Option[Value] =
-  | Some(Value)
+  | Some(value: Value)
   | None
   derives Equal, Hash, Ordered
 ```
@@ -1359,10 +1448,10 @@ trait Handler {
     cost time O(request.body.length())
 }
 
-type Server = { handlers: List[any Handler] }
+type Server(handlers: List[any Handler])
 
-mut server.handlers.push(any UserRoutes { users: [:] })
-mut server.handlers.push(any HealthCheck {})
+mut server.handlers.push(any UserRoutes(users: [:]))
+mut server.handlers.push(any HealthCheck())
 
 for handler in server.handlers {
   let response = handler.handle(request)
@@ -1383,8 +1472,8 @@ for handler in server.handlers {
 
 ```truss
 test "config loads with defaults" {
-  let files = MemoryFiles { files: [Path.new("app.toml"): ""] }
-  let config = provide files, DiscardLog {} {
+  let files = MemoryFiles(files: [Path.new("app.toml"): ""])
+  let config = provide files, DiscardLog() {
     load_config(Path.new("app.toml"))
   }
   assert config == Ok(Config.default())
@@ -1399,7 +1488,7 @@ real implementations of exactly those capabilities, as `main` does.
 test "writes the report"
   uses FileRead, FileWrite
 {
-  provide FilesWithin { root: Path.new("test_output/report") } {
+  provide FilesWithin(root: Path.new("test_output/report")) {
     write_report(sample_report())
   }
 }
@@ -1441,9 +1530,9 @@ theorem reverse_twice[Element](items: Slice[Element])
 {
   match items.split_first() {
     None => {},
-    Some({ first, rest }) => {
+    Some((first, rest)) => {
       reverse_twice(rest)
-      reverse_of_append(rest.reverse(), [first])
+      reverse_of_append(rest.reverse(), suffix: [first])
     },
   }
 }
@@ -1613,9 +1702,9 @@ changes only with a new language version.
 A public type can hide its contents with `opaque`:
 
 ```truss
-public type Point = { x: Float64, y: Float64 }
+public type Point(x: Float64, y: Float64)
 
-public opaque type SqlQuery = { text: String, parameters: List[SqlParameter] }
+public opaque type SqlQuery(text: String, parameters: List[SqlParameter])
 ```
 
 `Point` makes its name and fields public. `SqlQuery` makes only its name

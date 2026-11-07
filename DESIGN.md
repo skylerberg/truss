@@ -20,8 +20,16 @@ see [SYNTAX.md](SYNTAX.md). For the goals behind these decisions, see
   Only code generation and the affected tests run again.
 - **The order of a type's fields does not affect its hash.** Reordering fields
   rebuilds nothing, except code that uses a derived `Ordered`, which compares
-  fields in declaration order. The compiler chooses memory layout, so field
+  fields in declaration order. The compiler chooses memory layout, and a record
+  with more than one field is always built with named arguments, so field
   order is otherwise never observable.
+- **A parameter's default is hashed apart from the signature.** The signature
+  records only that the parameter has a default. Type checking in callers
+  depends only on that, so changing a default re-type-checks nothing. Callers
+  that leave the argument out depend on the default itself, so their proofs
+  and tests are checked again; callers that pass it are not affected. The
+  default is filled in by the function, not copied into each caller, so only
+  the function is compiled again.
 - **Each derived implementation is its own definition.** `derives Hash` on
   `Point` stands for a separate `impl Hash for Point`. Its hash comes from the
   trait, the shape of `Point`, and the version of the compiler's rule for
@@ -122,6 +130,16 @@ a design input rather than user error:
 - **Signatures are written out in full.** Parameter types, return types,
   top-level constants, and capabilities (`uses`) are never inferred, so a
   signature can be read on its own.
+- **Constants are worked out when compiling, from literals only.** A constant
+  is built from literals, arithmetic, other constants, and records and
+  collections of those, but it cannot call functions. This follows Go's
+  constants, and it keeps the first compiler free of an interpreter: allowing
+  calls would mean running Truss code while compiling, with exactly the same
+  results as the target machine, including float functions from libc and the
+  size of `USize`. Rust started with similarly limited constants and has
+  widened them release by release without breaking code, and Truss can do the
+  same once it has a compile-time evaluator. Tagged-template checks will need
+  that evaluator anyway, and constants should then share it.
 - **Bodies are inferred.** Local variables and lambdas do not need type
   annotations.
 
@@ -130,12 +148,13 @@ a design input rather than user error:
 Giving values that mean different things their own types, such as `UserId` and
 `OrderId`, or `Meters` and `Feet`, turns mixing them up into a type error.
 Truss does this with a record that has one field, such as
-`type UserId = { number: UInt64 }`, rather than a special wrapper syntax:
+`type UserId(number: UInt64)`, rather than a special wrapper syntax:
 
 - **No new concept.** It is an ordinary record, so construction, field access,
   `with`, invariants, and `opaque` all work as they do for any record.
 - **The author names the field.** `port.number` says what is inside. A built-in
-  name such as `.value` or Rust's `.0` would not.
+  name such as `.value` or Rust's `.0` would not. Building one still needs no
+  label, because a record with one field can take a bare value: `UserId(42)`.
 - **It costs nothing at run time.** A record with one field has exactly the
   same representation as the field.
 - **Operations are not inherited.** The record does not get the field's
@@ -159,12 +178,83 @@ Truss has no tuples. Values that belong together go in a record:
 
 The standard library provides `Indexed`, `Entry`, and `Pair` for the common
 cases, and record patterns leave out the type name, so taking a record apart
-stays short: `for { index, element } in scores.enumerate()`. Elm made a
+stays short: `for (index, element) in scores.enumerate()`. That pattern
+looks like a tuple but matches fields by name, so `(i, item)` is an error
+that names the real fields rather than a silent positional match. Elm made a
 similar choice when it limited tuples in favor of records, and Go has no
 tuples either.
 
 If small one-off groupings turn out to be too verbose, anonymous records with
-named fields could be added later. They would keep the names, unlike tuples.
+named fields could be added later, written `(lowest: 1, highest: 9)`. They
+would keep the names, unlike tuples.
+
+### Building values and calling functions
+
+A record is built the way a function is called, and its fields are declared
+the way parameters are: `type Point(x: Float64, y: Float64)` is built as
+`Point(x: 0.0, y: 0.0)` and matched as `Point(x, y)`. One set of rules covers
+calls, construction, and patterns.
+
+- **Arguments after the first are named.** The argument against tuples, that
+  two values of the same type can be swapped by accident, applies just as much
+  to `copy(backup, original)` or `connect(host, true, false)`. Google found
+  swapped arguments of the same type to be a recurring bug in production Java
+  ("Detecting Argument Selection Defects", OOPSLA 2017). A single-field record
+  type helps only when the two arguments have different types; labels also
+  tell `source: Path` from `destination: Path`.
+- **The first argument may be bare.** A function's name usually says what its
+  first argument is (`sqrt(area)`, `copy(original, ...)`), so a label there
+  would only repeat it. This is the Objective-C and Smalltalk convention, and
+  the one Swift's API guidelines arrive at. The first argument may still be
+  labeled when that reads better.
+- **A variable with the parameter's name needs no label.** `copy(source,
+  destination)` passes the variables `source` and `destination`, as OCaml's
+  `~source` and Gleam's `source:` do. Labels cost nothing when names already
+  agree, which is the common case, and must be written exactly when names
+  disagree, which is when swapping is possible. A bare name goes to the
+  parameter it names wherever it appears, so `copy(destination, source)` is
+  reported as out of order rather than silently swapping the two.
+- **No declaration syntax decides labeling.** Swift lets each parameter opt
+  out of its label with `_`, so how to call a function depends on choices its
+  author made. In Truss the rule is the same for every function, and parameter
+  names are always part of the API. Renaming one is a breaking change, which
+  the rename tool handles within a project.
+- **Calling through a function value is positional.** Function types have no
+  parameter names, as in Swift since SE-0111, where labels in function types
+  had created confusing conversions between otherwise identical types.
+- **Records differ in two ways.** Fields can be written in any order, and only
+  a record with exactly one field takes a bare value, as in `Some(3)`. Field
+  order has no meaning in a record, so a bare first argument would make it
+  part of the record's API, and reordering fields could change what callers
+  build. A function's parameter order is part of its API in every language.
+- **`{` always starts a block in an expression.** Building records with braces,
+  as Rust and Go do, makes `if kind == Kind.Unit { x }` ambiguous: it could be
+  a record with the field `x` or a block returning `x`. Rust and Go need a
+  special rule for record literals before a block. With parentheses, the
+  question never comes up.
+- **Declarations look like construction.** A record is declared as
+  `type Point(x: Float64, y: Float64)`, the shape it is built and matched in,
+  as with Java's records, Kotlin's data classes, and Scala's case classes.
+
+#### Defaults
+
+A parameter or field can have a default, which can be left out when calling or
+building:
+
+- **Adding a parameter is a change in one place.** Without defaults, every
+  caller must be edited, which in a codebase shared by many agents is a large
+  diff that collides with their work. With a default, only the function
+  changes.
+- **Without overloading, defaults are the alternative to near-duplicates.**
+  Languages without either grow workarounds: Rust's `sort`, `sort_by`, and
+  `sort_by_key`, Go's options structs, and builder types.
+- **A default is a constant.** It follows the rules for constants and cannot
+  refer to other parameters, so it is the same at every call. It cannot hide
+  an effect, and it costs what reading a constant costs.
+- **Defaults are applied by the function,** as in Kotlin, not copied into each
+  caller, as in C# and Swift. C# is known for callers keeping an old default
+  after a library changes it. In Truss, changing a default compiles only the
+  function again.
 
 ### Type invariants
 
@@ -178,7 +268,7 @@ the type.
 - **Invariants are proven at compile time, like `requires`.** They are never
   checked at run time.
 - **An invariant must hold wherever other code could see the value:** when the
-  value is built (by a literal or `with`), when it is passed to a call or
+  value is built (directly or with `with`), when it is passed to a call or
   returned, and when the function holding it ends. Between those points, a
   function body may break the invariant temporarily. For example,
   `SortedList.insert` can append an element and then move it into place. This
@@ -230,7 +320,7 @@ two variables never refer to the same changeable data.
   the code. The compiler works out which types copy implicitly from their
   fields; there is nothing to declare.
 - To keep a value while passing it to an `own` parameter, pass `value.copy()`.
-- Record updates (`own config with { server.port: 443 }`) follow the same
+- Record updates (`own config with (server.port: 443)`) follow the same
   rules. An owned base is reused in place, so the update costs one write per
   field. Updating a nested field takes a single path, as it does with
   assignment.
@@ -286,7 +376,7 @@ rules for views:
   it `own` lets the function keep it, and then only capture-free functions can
   be passed.
 - **Behavior with state is a record with a trait**, not a closure. A
-  `make_adder(5)` that returns a closure becomes `Adder { amount: 5 }` with an
+  `make_adder(5)` that returns a closure becomes `Adder(amount: 5)` with an
   `impl`.
 
 This avoids what Rust needs on top of plain closures: `move` closures and
@@ -818,8 +908,9 @@ gives the same result as running its parts one after another.
 
 - **No data races, by the same rule as calls.** Truss has no aliasing, and a
   place passed as `mut` can't be used by anything else at the same time. That
-  rule is what rejects `swap(mut a, mut a)`. Applying it across branches means
-  branches may share what they read but never what they change.
+  rule is what rejects `swap(mut first, second: mut first)`. Applying it
+  across branches means branches may share what they read but never what they
+  change.
 - **No capabilities inside.** A capability implementation can hold state, so
   two branches calling it would race, and the order of their calls would vary
   from run to run. Leaving capabilities out keeps the result fixed, and the
@@ -859,10 +950,10 @@ decided. The exact syntax for task groups and channels is not yet:
   lightweight tasks without any code changing, because code only sees the
   capability.
 - **A task gets its data as an owned argument.** `spawn` takes a function and
-  a value to hand over to it, as in `spawn(handle, own connection)`, the way
-  pthreads and Zig pass a function and its argument. So no closure ever needs
-  to own what it captures. The function may still read data from around its
-  task group, because tasks cannot outlive the group.
+  a value to hand over to it, as in `spawn(handle, input: own connection)`,
+  the way pthreads and Zig pass a function and its argument. So no closure
+  ever needs to own what it captures. The function may still read data from
+  around its task group, because tasks cannot outlive the group.
 - **Tests stay deterministic.** A test provides a `Tasks` implementation that
   runs tasks in an order chosen by a seed. A race then becomes a repeatable
   test failure instead of a rare, flaky one. This is how FoundationDB tests its
@@ -887,13 +978,14 @@ decided. The exact syntax for task groups and channels is not yet:
 - **Each collection has one way to be written.** `[a, b, c]` is always a
   `List`, and `[]` is the empty list, so there is no `List.new()` or
   `List.of(...)`. Maps use Swift's `[key: value]`, with `[:]` for the empty
-  map; `{ }` already means blocks and records. Sets have no literal, because
+  map; `{ }` already means blocks. Sets have no literal, because
   making `[...]` mean a `Set` from context would make a literal's meaning
   depend on its surroundings. `Set.from([...])` says it plainly.
-- **Literal allocation is counted.** A non-empty list or map literal counts as
-  one allocation in `cost` clauses, and an empty one as none. The compiler may
-  keep constant literals in static memory, but cost clauses don't depend on
-  that.
+- **Literal allocation is counted.** A non-empty list or map literal in a
+  function body counts as one allocation in `cost` clauses, and an empty one
+  as none. The compiler may keep such literals in static memory, but cost
+  clauses don't depend on that. Constants and defaults are different: they
+  always live in static memory, so reading one costs nothing.
 - **Duplicate keys in a map literal are a proof obligation.** Letting the last
   one win would silently hide a mistake.
 - **`Map` and `Set` iterate in insertion order,** like Python's `dict` and
