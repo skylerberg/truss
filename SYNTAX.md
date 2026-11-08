@@ -122,14 +122,14 @@ does not:
 1. Inside `(` and `[`, line breaks are ignored. Inside `{`, they count again,
    so a block inside a call's arguments works as usual.
 2. Elsewhere, a line break ends the statement only if both of these hold:
-   - The line ends with a token that can end an expression: a name, a
-     literal, `)`, `]`, `}`, `?`, `true`, `false`, `self`, `todo`,
+   - The line ends with a token that can end an expression: a name, `_`, a
+     literal, `)`, `]`, `}`, `?`, `true`, `false`, `self`, `Self`, `todo`,
      `unreachable`, `break`, `continue`, or `return`.
    - The next line does not start with a token that continues one: `.`,
-     `else`, `with`, `|`, `=>`, `->`, `yields`, a clause keyword (`uses`, `requires`,
-     `ensures`, `cost`, `invariant`, `decreases`, `derives`), or a binary
-     operator that cannot begin an expression (`+ * / % == != < <= > >= & ^
-     << >> && || .. ..=`).
+     `else`, `with`, `is`, `|`, `=>`, `->`, `yields`, a clause keyword
+     (`uses`, `requires`, `ensures`, `cost`, `invariant`, `decreases`,
+     `derives`), or a binary operator that cannot begin an expression
+     (`+ * / % == != < <= > >= & ^ << >> && || .. ..=`).
 3. The `{` that opens a body may start the next line, and a line break may
    come just before a closing `}`.
 
@@ -195,6 +195,11 @@ Truss has no comment syntax. Names, signatures, contracts, invariants, laws,
 costs, and tests carry what comments would otherwise say. See
 [DESIGN.md](DESIGN.md#no-comments) for the reasons. The code examples in this
 document are explained in the text around them.
+
+Some examples show only a function's signature, with no body, to focus on the
+signature. In real code, every function has a body, except a method declared
+in a trait or a capability. A function that is not written yet has the body
+`{ todo }`.
 
 ## Built-in types
 
@@ -293,7 +298,13 @@ type Option[Value] =
 type Pair[First, Second](first: First, second: Second)
 
 type DiscardLog()
+
+type Bit = Zero | One
 ```
+
+The `|` before the first variant is optional. `truss fmt` writes a short sum
+type on one line without it, as for `Bit`, and a longer one with each variant
+on its own line, starting with `|`, as for `Shape`.
 
 Values are built like this:
 
@@ -527,6 +538,10 @@ greet(user)
 - The names the pattern binds can be used in the rest of the enclosing block.
 - The `else` block must leave the block: it ends with `return`, `break`,
   `continue`, or `unreachable`, or has type `Never`.
+- `var` works the same way, binding mutable names.
+- The expression before `else` cannot end with `}`, so that the `else` cannot
+  be mistaken for part of it. Put such an expression in parentheses:
+  `let Some(choice) = (if ready { first } else { second }) else { ... }`.
 
 ### Updating records
 
@@ -1185,8 +1200,13 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
 }
 ```
 
-- `let` binds an immutable value. `var` binds a mutable one. `var` is only
-  allowed inside functions, so there are no mutable globals.
+- `let` binds an immutable value. `var` binds a mutable one. Both take a
+  pattern, as in `var (low, high) = bounds`, and every name a `var` binds is
+  mutable. `var` is only allowed inside functions, so there are no mutable
+  globals.
+- `return`, `break`, `continue`, and `unreachable` have the type `Never`, so
+  they can stand where a value is expected, such as in a `match` arm:
+  `None => return Err(error)`.
 - `?` returns early when a `Result` is an error. See Errors below.
 - Every value must be used. A statement whose value is not `Unit`, such as a
   call to `FileWrite.write` that returns a `Result`, is a compile error. To
@@ -1863,11 +1883,12 @@ where the tag is `String`.
   generic, the arguments are inferred.
 
 The pieces are never joined into a plain string. The first example above
-becomes roughly:
+becomes roughly the following, where `Literal(...)` stands for a piece of
+literal text, which only the compiler can make:
 
 ```truss
 SqlQuery.from_template(Template.new(
-  literals: [literal "select name from users where id = ", literal ""],
+  literals: [Literal("select name from users where id = "), Literal("")],
   parts: [SqlParameter.from(user_id)],
 ))
 ```
