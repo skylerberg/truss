@@ -48,7 +48,7 @@ Nothing is built yet. This is the design agreed so far.
 - Types, constructors, traits, and capabilities use `UpperCamelCase`. Values,
   constants, functions, and fields use `lower_snake_case`. The parser relies
   on this: in a pattern, `Circle` is a constructor and `radius` binds a new
-  variable.
+  variable, unless a constant named `radius` is in scope.
 - A name that starts with an uppercase letter is `UpperCamelCase` and cannot
   contain `_`. Any other name is `lower_snake_case`: it has no uppercase
   letters, and `_` appears only singly, between parts. Names cannot start or
@@ -86,17 +86,18 @@ These keywords are reserved everywhere and cannot be used as names:
 
 `any` `assert` `break` `capability` `continue` `cost` `decreases` `derives`
 `echo` `else` `ensures` `exists` `false` `fn` `for` `forall` `if` `impl` `in`
-`internal` `invariant` `law` `let` `match` `mut` `opaque` `own` `parallel`
-`proof` `provide` `public` `requires` `return` `self` `Self` `test` `theorem`
-`todo` `trait` `true` `type` `unreachable` `use` `uses` `var` `while` `with`
+`internal` `is` `invariant` `law` `let` `match` `mut` `opaque` `own`
+`parallel` `proof` `provide` `public` `requires` `return` `self` `Self` `test`
+`theorem` `todo` `trait` `true` `type` `unreachable` `use` `uses` `var`
+`while` `with` `yield` `yields`
 
 A few words are keywords only in one position and ordinary names everywhere
 else, because they are common names for variables and fields:
 
 | Keywords | Where |
 |---|---|
-| `time`, `allocations`, `allocated_bytes`, `calls`, `finite` | Inside a `cost` clause |
-| `result` | Inside `ensures`, where it names the return value |
+| `time`, `allocations`, `allocated_bytes`, `calls`, `finite`, `log`, `power`, `amortized`, `potential` | Inside a `cost` clause |
+| `result` | Inside `ensures` and `cost`, where it names the return value |
 | `old` | Inside specifications: `requires`, `ensures`, invariants, laws, `decreases`, `cost`, and proofs |
 
 A parameter cannot be named `result`, and a function cannot be named `old`,
@@ -106,8 +107,8 @@ it was when the function was called.
 These are reserved for possible later use, so they cannot be used as names
 either:
 
-`as` `async` `await` `const` `defer` `extern` `is` `loop` `macro` `static`
-`unsafe` `where` `yield`
+`as` `async` `await` `const` `defer` `extern` `loop` `macro` `static`
+`unsafe` `where`
 
 Reserving them now means adding one later breaks no code. It also lets the
 compiler give a clear error when code borrowed from another language uses one,
@@ -125,7 +126,7 @@ does not:
      literal, `)`, `]`, `}`, `?`, `true`, `false`, `self`, `todo`,
      `unreachable`, `break`, `continue`, or `return`.
    - The next line does not start with a token that continues one: `.`,
-     `else`, `with`, `|`, `=>`, `->`, a clause keyword (`uses`, `requires`,
+     `else`, `with`, `|`, `=>`, `->`, `yields`, a clause keyword (`uses`, `requires`,
      `ensures`, `cost`, `invariant`, `decreases`, `derives`), or a binary
      operator that cannot begin an expression (`+ * / % == != < <= > >= & ^
      << >> && || .. ..=`).
@@ -136,8 +137,8 @@ So all of these continue onto the next line:
 
 ```truss
 let active_names = users
-  .filter(fn(user) => user.is_active)
-  .map(fn(user) => user.name.copy())
+  .filter(fn(user) { user.is_active })
+  .map(fn(user) { user.name.copy() })
 
 let total = subtotal
   + shipping
@@ -167,17 +168,19 @@ rather than read as something else:
 |---|---|
 | `// ...`, `/* ... */`, `# ...` | Truss has no comments. The fix removes the comment, and the message says where its content belongs: a name, a contract, or a test. |
 | `;` | Statements end at a newline. The fix removes it. |
+| `A => 1,` in a `match` | Arms are separated by line breaks. The fix removes the comma. |
 | `'a'` | Truss has no character literal. The fix writes `Character"a"`. |
 | `` ` ``, `@` | Not used in Truss. |
-| `++`, `--` | No increment or decrement. The fix writes the assignment out. `--x` is rejected too; write `-(-x)`. |
+| `++`, `--` | No increment or decrement. The fix writes `i += 1` or `i -= 1`. `--x` is rejected too; write `-(-x)`. |
 | `===`, `!==` | The fix writes `==` or `!=`. |
 | `x ? a : b` | No conditional operator. The fix writes `if x { a } else { b }`. |
 | `let mut x` | The fix writes `var x`. |
 | `&x`, `&mut x` | The fix writes `x` or `mut x`. |
-| `\|x\| x + 1` | The fix writes `fn(x) => x + 1`. |
+| `\|x\| x + 1` | The fix writes `fn(x) { x + 1 }`. |
 | `Point { x: 1.0, y: 2.0 }` | Records are built with parentheses. The fix writes `Point(x: 1.0, y: 2.0)`. |
 | `copy(original, backup)` | Arguments after the first need a label. The fix writes `copy(original, destination: backup)`. |
 | `parse::<Int64>(text)` | The fix writes `parse[Int64](text)`. |
+| `items.map { it.name }`, `{ $0.name }` | The fix writes `items.map(fn(item) { item.name })`. |
 | `x as Int64` | The fix writes `Int64.from(x)`, or `Int64.try_from(x)` when the conversion can lose information. |
 | `null`, `nil` | The fix suggests `None`. |
 | `elif` | The fix writes `else if`. |
@@ -203,6 +206,7 @@ document are explained in the text around them.
 | `ISize` | Offsets and differences between positions |
 | `Float32`, `Float64` | IEEE 754 floating point |
 | `Bool`, `String` | The usual meanings |
+| `Array[Element, count]` | Exactly `count` elements, stored in place with no heap allocation. See [Arrays](#arrays). |
 | `Character` | A Unicode scalar value: any code point except the surrogates |
 | `Unit` | The result of a function that returns nothing. Its only value is also written `Unit`. |
 | `Never` | The result type of a function that never returns |
@@ -265,8 +269,8 @@ fn circle_area(radius: Float64) -> Float64 {
   Reading one costs nothing, and it is copied to the heap only when a change
   needs more room.
 - There is no `var` at the top level, so there are no mutable globals.
-- A constant cannot be used as a pattern, because a `lower_snake_case` name in
-  a pattern binds a new variable. Compare with `==` or a guard instead.
+- A constant can be used as a pattern, written as it is anywhere else. See
+  [Patterns](#patterns).
 
 ## Types
 
@@ -289,7 +293,11 @@ type Option[Value] =
 type Pair[First, Second](first: First, second: Second)
 
 type DiscardLog()
+```
 
+Values are built like this:
+
+```truss
 let origin = Point(x: 0.0, y: 0.0)
 let unit_circle = Shape.Circle(center: origin, radius: 1.0)
 let found = Some(3)
@@ -326,6 +334,11 @@ Generic parameters use square brackets. Angle brackets would clash with `<` and
 `>` as comparison operators, which forces awkward workarounds in other
 languages.
 
+A generic parameter can also be a value of type `USize`, written in
+`lower_snake_case` with its type: `[Element, count: USize]`. Its value is
+known when the code is compiled. It cannot be computed in a type, so
+`Array[Float64, rows * columns]` is not allowed.
+
 ### Single-field records
 
 To give a plain value its own type, wrap it in a record with one field:
@@ -342,7 +355,7 @@ let raw = user.number
 - `UserId` is a different type from `UInt64` and from any other wrapper, so
   they cannot be mixed up.
 - The record does not get the field's methods or operators. `distance +
-  distance` does not compile unless `Meters` defines the operation.
+  distance` does not compile unless `Meters` implements `Add[Meters]`.
 - A record with one field has exactly the same representation as the field, so
   it costs nothing at run time.
 - Truss has no type aliases, and there is no separate syntax for wrapper types.
@@ -380,14 +393,14 @@ type has only one shape:
 for (index, element) in scores.enumerate() { ... }
 
 match items.split_first() {
-  Some((first, rest)) => ...,
-  None => ...,
+  Some((first, rest)) => ...
+  None => ...
 }
 
 match shape {
-  Circle(radius, ..) => ...,
-  Rectangle(corner, opposite_corner) => ...,
-  Empty => ...,
+  Circle(radius, ..) => ...
+  Rectangle(corner, opposite_corner) => ...
+  Empty => ...
 }
 ```
 
@@ -405,6 +418,115 @@ match shape {
   up in the type inside the `Option`.
 - Parentheses in a pattern always hold fields, so patterns have no grouping
   parentheses.
+
+Patterns can also match values directly:
+
+```truss
+match status_code {
+  http::ok => ...
+  301 | 302 | 307 => ...
+  not_modified => ...
+  500..=599 => ...
+  code if code >= 400 => ...
+  _ => ...
+}
+```
+
+| Pattern | Matches |
+|---|---|
+| `200`, `-1`, `true`, `"GET"`, `Character"a"`, `UInt8"\n"` | A value equal to the literal |
+| `http::ok`, `Status.teapot`, `not_modified` | A value equal to the constant |
+| `500..=599`, `Character"a"..=Character"z"`, `0..10` | A value in the range, for integers and characters |
+| `301 \| 302 \| 307`, `Some(Low \| Normal)` | A value matching any of the alternatives |
+| `_` | Anything, without binding it |
+| `code` | Anything, binding it to `code` |
+
+- A bare name that names a constant in scope means that constant, wherever it
+  appears in a pattern. Any other bare name binds a new variable. Constants
+  from other modules and constants under a type are qualified, as everywhere
+  else: `http::ok`, `Status.teapot`.
+- Float literals cannot be patterns. A float `==` treats `-0.0` and `0.0` as
+  equal, so a pattern such as `0.0` would match both without saying so. Use a
+  guard: `value if value == 0.0`.
+- Every alternative of an or-pattern must bind the same names, with the same
+  types.
+- A *guard* is written `if condition` after the pattern. The arm is taken only
+  when the pattern matches and the condition is true.
+- Each arm of a `match` goes on its own line, with no comma between arms. An
+  arm's body can continue on the next line after `=>`, or be a block.
+- `match` must cover every case. An arm with a guard never counts toward
+  covering its pattern. When the guards cover everything, end with
+  `_ => unreachable`, which the prover checks.
+- An arm that can never be reached, because earlier arms already match
+  everything it matches, is a compile error.
+- A pattern in `let`, in `for`, or in a lambda's parameters must match every
+  value of its type, as `(first, rest)` does for a pair. A pattern that can
+  fail, such as `Some(user)`, needs a `match`, an `is` test, or
+  `let ... else`, described next.
+
+These rules keep a misspelled constant from passing silently. A misspelled
+constant binds a new variable that matches everything, which makes the arms
+after it unreachable, or leaves the binding unused. Either is a compile error.
+
+### Matching several values
+
+A `match` can take several values, separated by commas. Each arm then has one
+pattern per value, in the same order:
+
+```truss
+match state, event {
+  Idle, Start => ...
+  Running, Stop => ...
+  Idle | Paused, Tick if elapsed > limit => ...
+  _, Reset => ...
+}
+```
+
+- No tuple is made. The values are matched together, as if by nested
+  `match`es.
+- Every combination must be covered, and every arm must be reachable, across
+  all the values together.
+
+### Testing a pattern with `is`
+
+`value is pattern` is `true` when the value matches the pattern:
+
+```truss
+if response is Ok(body) && body.length() > 0 {
+  render(body)
+}
+
+while queue.pop() is Some(task) {
+  run(task)
+}
+
+let is_quiet = level is Low | Normal
+```
+
+- `is` binds like a comparison, so it combines with `&&` and `||`.
+- The pattern can be anything a `match` arm can have.
+- The names a pattern binds can be used only where the test is known to be
+  true: in the rest of an `&&` chain, in the block of the `if` or `while`, and
+  in a `match` arm whose guard contains the test. They cannot be used after
+  `||` or in an `else`.
+- To choose among several patterns, use `match`, which checks that every case
+  is covered.
+
+### `let ... else`
+
+A `let` whose pattern can fail has an `else` block, which runs when the
+pattern does not match:
+
+```truss
+let Some(user) = find_user(id) else {
+  return Err(LoginError.UnknownUser(id))
+}
+greet(user)
+```
+
+- The names the pattern binds can be used in the rest of the enclosing block.
+- The `else` block must leave the block: it ends with `return`, `break`,
+  `continue`, or `unreachable`, or has type `Never`.
 
 ### Updating records
 
@@ -455,12 +577,27 @@ public type Port(number: UInt16)
   invariant number != 0
 
 public type Interval =
-  | Closed(low: Int64, high: Int64) invariant low <= high
+  | Closed(low: Int64, high: Int64)
   | Unbounded
+  invariant match self {
+    Closed(low, high) => low <= high
+    Unbounded => true
+  }
+
+public type Tree =
+  | Leaf
+  | Node(left: Tree, value: Int64, right: Tree)
+  invariant is_balanced(self)
 ```
 
-- An invariant refers to fields by name. In a sum type, each variant can have
-  its own invariant.
+- An invariant belongs to the whole type. Clauses after the last variant,
+  such as `invariant` and `derives`, always apply to the type, never to that
+  variant.
+- In an invariant, `self` names the value. A record's fields can also be
+  used by name, as in `start <= end`.
+- A condition on one variant is written with `match`, as for `Interval`, or
+  by giving the variant a record that has its own invariant:
+  `| Closed(range: ClosedRange)`.
 - `invariant` may repeat. All of the conditions must hold.
 - Functions called in an invariant must be pure and have a `time` clause.
 
@@ -470,8 +607,15 @@ establishes it:
 
 ```truss
 fn DateRange.new(start: Date, end: Date) -> Option[DateRange]
-fn Port.try_from(number: UInt16) -> Result[Port, PortError]
-fn SortedList[Element: Ordered].from(items: own List[Element]) -> SortedList[Element]
+
+impl TryFrom[UInt16] for Port {
+  type Error = PortError
+  fn try_from(value: own UInt16) -> Result[Port, PortError] { ... }
+}
+
+impl From[List[Element]] for SortedList[Element: Ordered] {
+  fn from(value: own List[Element]) -> SortedList[Element] { ... }
+}
 ```
 
 `DateRange.new` returns `None` when `start` is after `end`, `Port.try_from`
@@ -482,10 +626,10 @@ returns an error for 0, and `SortedList.from` sorts its input.
 ```truss
 fn area(shape: Shape) -> Float64 {
   match shape {
-    Circle(radius, ..) => math::pi * radius * radius,
+    Circle(radius, ..) => math::pi * radius * radius
     Rectangle(corner, opposite_corner) =>
-      (opposite_corner.x - corner.x) * (opposite_corner.y - corner.y),
-    Empty => 0.0,
+      (opposite_corner.x - corner.x) * (opposite_corner.y - corner.y)
+    Empty => 0.0
   }
 }
 ```
@@ -543,14 +687,38 @@ A call through a function value, such as `visit(item)` or
 `compare(left, right)`, passes its arguments by position, because function
 types have no parameter names.
 
+### Explicit type arguments
+
+Type arguments are usually inferred. When they cannot be, they are written in
+square brackets after the function's name, as in a type:
+
+```truss
+let value = parse[Int64](text)?
+let names = items.map[String](describe)
+let builder = List[String].with_capacity(64)
+```
+
+- `parse[Int64]` is written the same way as indexing. Name resolution tells
+  them apart: `parse` is a generic function, so `[Int64]` gives its type
+  arguments. A local variable cannot be generic, so a variable followed by
+  `[...]` is always an index. For a method, such as `items.map[String]`, the
+  type of the receiver decides, as it does for every method call.
+- For the same reason, whether an expression starts with a place (see
+  [Parameter modes](#parameter-modes)) is known after name resolution, not
+  from the text alone: `mut parse[Int64](text)` starts with a function, not a
+  place.
+- When the compiler reports an error in `f[X]`, it says which reading
+  applied, such as "`parse` is a generic function, and `[Int64]` is its type
+  argument" or "`scores` is a `List`, so `[...]` indexes it".
+
 A signature can carry clauses between the return type and the body:
 
 ```truss
 public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Element) -> Option[USize]
   requires is_sorted(sorted)
   ensures match result {
-    Some(index) => sorted[index] == target,
-    None => !contains(sorted, target),
+    Some(index) => sorted[index] == target
+    None => !contains(sorted, target)
   }
   cost time O(log(sorted.length()))
   cost allocations == 0
@@ -564,11 +732,72 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 | `uses Capability, ...` | The capabilities the function may use. Leaving it out means the function is pure. At most once. |
 | `requires condition` | A precondition every caller must prove. May repeat. |
 | `ensures condition` | A postcondition the function must prove. `result` names the return value. May repeat. |
+| `decreases measure, ...` | Proves that recursion ends. See below. At most once. |
 | `cost resource bound` | A proven cost bound. Optional. May repeat. |
 
-Clauses may be written in any order. The formatter sorts them into the order
-`uses`, `requires`, `ensures`, `cost`. When a clause repeats, all of its
-conditions must hold.
+Clauses of different kinds may be written in any order. The formatter groups
+them in the order `uses`, `requires`, `ensures`, `decreases`, `cost`, but never
+reorders clauses of the same kind. When a clause repeats, all of its
+conditions must hold, and each one may rely on the ones before it:
+
+```truss
+fn bump(items: mut List[Int64], index: USize)
+  requires index < items.length()
+  requires items[index] < Int64.maximum
+```
+
+The second `requires` reads `items[index]`, which is in bounds because of
+the first. Each `requires` may rely on the `requires` before it. Each
+`ensures` may rely on every `requires` and on the `ensures` before it.
+Repeated `invariant` clauses, on types and on loops, work the same way.
+
+### Recursion
+
+A recursive function that must terminate, because it has a `time` clause or
+is used in a specification, needs to show that its recursion ends. Most
+recursion needs nothing written:
+
+```truss
+fn depth(tree: Tree) -> USize
+  cost time O(tree.size())
+{
+  match tree {
+    Leaf => 0
+    Node(left, right, ..) => 1 + depth(left).max(depth(right))
+  }
+}
+```
+
+`depth(left)` passes a field taken out of the parameter by a pattern, so the
+compiler can see that the recursion ends. Other recursion states a
+`decreases` clause:
+
+```truss
+fn search(sorted: Slice[Int64], target: Int64, low: USize, high: USize) -> Option[USize]
+  requires high <= sorted.length()
+  decreases high - low
+  cost time O(log(high - low))
+{
+  ...
+}
+
+fn merge(first: Slice[Int64], second: Slice[Int64]) -> List[Int64]
+  decreases first.length(), second.length()
+  cost time O(first.length() + second.length())
+{
+  ...
+}
+```
+
+- A measure is an integer expression, written in terms of the parameters,
+  that must stay at or above zero. Every recursive call must make it
+  smaller.
+- A list of measures is compared in order: each call makes the first one
+  smaller, or keeps it the same and makes the second one smaller, and so on.
+- When functions call each other in a cycle, each one states a `decreases`
+  clause, and every call between them must make it smaller.
+- A function without a `time` clause may not terminate, so it needs no
+  `decreases`.
 
 ### Cost clauses
 
@@ -583,8 +812,68 @@ A cost clause has the form `cost <resource> <bound>`.
 
 The target of `calls` is a function parameter (`calls(visit)`), a capability
 method (`calls(FileRead.read)`), or a whole capability (`calls(FileRead)`).
-Expressions are written in terms of the parameters. `time(visit)` refers to the
-time taken by a function parameter.
+`O(f)` means that the cost is at most `c * f + d` for every input, for some
+constants `c` and `d` that the prover finds. So `O(rows * columns)` and
+`O(text.length() + pattern.length())` mean exactly what they say, and small
+inputs need no special case.
+
+A bound is an expression that can use:
+
+- the parameters, `self`, their fields, and pure methods with a `time` clause,
+  such as `items.length()`
+- `result`, for bounds that depend on what the function returns, as in
+  `cost time O(text.length() + result.length())`
+- `+`, `*`, and `/` and `-` where the result stays at or above zero, all on
+  exact integers
+- `log(n)`, which means the smallest integer at least log₂(n + 1), so
+  `log(0)` is 0 and `log(1)` is 1
+- `power(base, exponent)`, for bounds such as `O(power(2, items.length()))`
+- `time(visit)`, a bound on the time of any one call to the function
+  parameter `visit`, and `calls(...)` as above
+
+`time(visit)` cannot depend on what `visit` is called with, because a
+function type's parameters have no names. If `visit` has the type
+`(fn(Item) cost time O(1))`, `time(visit)` is a constant. If it has
+`cost time finite`, `time(visit)` is a fixed bound that is not known. A
+callback whose time grows with its argument is better described by a trait
+whose method has a cost clause.
+
+`time` counts abstract steps: each primitive operation and each call counts
+as one. It never measures time on a machine.
+
+#### Amortized costs
+
+Some operations are cheap almost every time and occasionally expensive.
+Pushing onto a full `List` copies every element into a larger buffer, but
+over many pushes each one costs O(1) on average. Such a method promises an
+*amortized* bound:
+
+```truss
+public opaque type List[Element](buffer: Buffer[Element], length: USize, capacity: USize)
+  invariant length <= capacity
+  cost potential growth_credit(length, capacity)
+
+fn List[Element].push(mut self, item: own Element)
+  cost amortized time O(1)
+```
+
+- A type can declare a `cost potential`: an integer expression over its
+  fields that never goes below zero. Cheap operations raise it, and
+  expensive ones use it up.
+- `cost amortized time O(f)` promises that the method's actual cost, plus
+  the change in the potential of the values it changes or returns, is
+  within `O(f)`. `amortized` works with every resource that takes an `O(...)`
+  bound.
+- Amortized bounds add up. A function that pushes `count` times can promise
+  `cost amortized time O(count)`. It can also promise a plain bound that
+  includes the potential the list came in with, as in
+  `cost time O(count + items.length())`.
+- A value's potential belongs to that value alone. Values are never shared,
+  so two parts of a program can never use up the same potential.
+  `copy()` makes a new potential, and pays for it with its own cost.
+- Truss has no bounds that hold only on average over random choices, such
+  as a hash map's expected O(1). Cost clauses state bounds that hold for
+  every input.
 
 ```truss
 public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
@@ -595,20 +884,42 @@ public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
 
 ### Function types
 
-A function type is written `fn(Input) -> Output`, optionally followed by
-`uses`. As with definitions, `-> Unit` is left out. A function that passes on
-whatever capabilities its callback needs declares a capability parameter with
-`capability`:
+A function type is written `fn(Input) -> Output`. As with definitions,
+`-> Unit` is left out. A function type with clauses is written in
+parentheses, with the clauses after its return type, as in a definition:
 
 ```truss
-public fn for_each[Item, capability Granted](items: List[Item], visit: fn(Item) uses Granted)
+fn(Element, Element) -> Ordering
+(fn(Item) uses Clock, Random)
+(fn(Request) -> Response uses Database, Log cost time finite)
+```
+
+- A function type can have `uses` and `cost` clauses. Its parameters have no
+  names, so a `cost` clause cannot mention them: `cost time O(1)`,
+  `cost time finite`, and `cost allocations == 0` are allowed.
+- A function type without `uses` is pure, the same as a function definition
+  without `uses`. One without a `time` clause might not terminate.
+- The parentheses end the clauses, so they never run into the next parameter
+  or type argument, as in `List[(fn(Item) uses Clock, Random)]`.
+- Clauses after a definition's return type always belong to the definition.
+  A function that returns a function type with clauses puts it in
+  parentheses: `fn make_counter() -> (fn(Int64) -> Int64 uses Clock)`.
+
+A function that passes on whatever capabilities its callback needs declares a
+capability parameter with `capability`:
+
+```truss
+public fn for_each[Item, capability Granted](
+  items: List[Item],
+  visit: (fn(Item) uses Granted cost time finite),
+)
   uses Granted
   cost calls(visit) == items.length()
   cost time O(items.length() * time(visit))
 ```
 
-A function type without `uses` is pure, the same as a function definition
-without `uses`.
+`visit` promises to terminate, so `for_each` can promise a `time` bound.
+`time(visit)` stands for the time one call to `visit` takes.
 
 A function-typed parameter can be called but not kept, so it accepts lambdas
 that capture local variables. To store the function, declare the parameter
@@ -641,25 +952,43 @@ caller's value. `push` takes ownership of `item`.
 | `push(mut names, item: name.copy())` | `name` is kept, and `push` gets a copy. |
 | `push(mut names, item: "Alice")` | A temporary value is never marked. |
 
-When a *place* (a variable, a field, or an element, such as `scores`,
-`config.servers`, or `scores[0]`) is passed to a `mut` or `own` parameter, the
-call site repeats the keyword. A reader can see what happens to each existing
-value without looking up the signature.
+A *place* is a variable or `self`, followed by any number of field accesses
+and indexes: `scores`, `config.servers`, `scores[0]`. When a place is passed
+to a `mut` or `own` parameter, the call site repeats the keyword. A reader can
+see what happens to each existing value without looking up the signature.
 
 A temporary value, such as a literal or the result of a call, is never marked.
 Nothing else can see it, so it is always handed over as owned. Copies that
 would allocate are never made implicitly; `copy()` makes one explicitly.
 
-When the keyword comes before a longer expression, it applies to the place the
-expression starts with. This is how a method call marks its receiver:
+When the keyword comes before a longer expression, it marks the longest place
+the expression starts with. The first method call after that place takes it
+as its receiver, with the keyword's mode. Anything after that call works on
+the call's result, which is a temporary:
+
+| Expression | Marked place |
+|---|---|
+| `mut scores.sort()` | `scores` |
+| `mut config.servers.sort()` | `config.servers`, so `config.clients` can still be used, for example by another parallel branch |
+| `mut items[0].push(name)` | `items[0]` |
+| `mut config.load_servers().sort()` | `config`, for `load_servers`. `sort` then works on the list it returns. |
+| `own config with (debug: true)` | `config` |
+| `sort(mut items[..middle])` | `items[..middle]`, since there is no method call |
+
+An expression that does not start with a place cannot be marked:
+`mut make_list().push(1)` is a compile error, with a fix that removes `mut`.
+
+`own` can move a single field out of a record:
 
 ```truss
-mut scores.sort()
-mut config.servers.sort()
+let name = own config.name
+let port = config.port
+config.name = "default"
+save(own config)
 ```
 
-The first call modifies `scores`. In the second, the place is
-`config.servers`.
+After `own config.name`, the other fields of `config` can still be used, but
+`config` as a whole cannot, until `config.name` is given a new value.
 
 ### Views
 
@@ -677,12 +1006,16 @@ While such a name is still in use, the original cannot be changed or moved.
 Here `push` is allowed because `middle` is not used after it. The compiler
 checks this within each function, with no annotations.
 
-- A view cannot be stored in a record field, a collection, or a `var`, and
-  cannot be returned, with one exception: a method may return a view of
-  `self`, as `items[1..4]`, `split_at`, `split_first`, and `text.trim()` do. A
-  record holding views, such as the result of `split_at`, is a view itself.
-- `mut` access never has a name. It lasts only for a call, a `mut` loop, or a
-  `provide mut` block. Disjoint parts can be changed side by side, as in
+- A view cannot be stored in a record field or a collection, and cannot be
+  returned, with one exception: a method may return a view of `self`, as
+  `items[1..4]`, `split_at`, `split_first`, and `text.trim()` do. A record
+  holding views, such as the result of `split_at`, is a view itself.
+- A `var` can hold a view, such as a cursor over a list (see
+  [Yielding methods](#yielding-methods)), as long as the view never leaves the
+  function.
+- `mut` access is never stored. It has a name only as a `mut` parameter, a
+  `mut` loop's variable, or a lambda's `mut` parameter, and lasts only for
+  that call, iteration, or `provide mut` block. Disjoint parts can be changed side by side, as in
   `sort(mut items[..middle])` and `sort(mut items[middle..])`.
 - A view of a temporary cannot be bound with `let`. Bind the value first:
   `let loaded = load()`, then `let first = loaded.first()`.
@@ -752,6 +1085,77 @@ read-only one. On a temporary value, the `own` version is used if there is one,
 so `scores.filter(is_valid).enumerate()` moves the filtered elements instead of
 copying them. This is the only overloading Truss allows.
 
+### Yielding methods
+
+A method can *yield* a part of `self` instead of returning a value. The caller
+uses the part, and then the method continues:
+
+```truss
+fn Grid.cell(self, position: Position) yields Cell {
+  yield self.cells[position.row * self.width + position.column]
+}
+
+fn Grid.cell(mut self, position: Position) yields mut Cell {
+  yield mut self.cells[position.row * self.width + position.column]
+}
+
+let current = grid.cell(position).state
+mut grid.cell(position).visit()
+```
+
+- `yields Cell` takes the place of a return type. `yields mut Cell` lends
+  `mut` access, and `yields own Cell` hands over owned values. A method can
+  have a version for each receiver mode, as other methods can.
+- **A method that yields once** lends the part for the rest of the caller's
+  statement. Then it always continues after its `yield`, even if the
+  statement leaves early with `?` or `return`. So a type can update what
+  depends on the part, such as a cached total, after the caller changes it.
+- **A method that yields several times** drives a loop:
+
+  ```truss
+  fn Grid.each(mut self) yields mut Cell {
+    for index in 0..self.cells.length() {
+      yield mut self.cells[index]
+    }
+  }
+
+  for cell in mut grid {
+    cell.age += 1
+  }
+  ```
+
+  The loop's body runs at each `yield`. When the body leaves the loop with
+  `break`, `return`, or `?`, the method stops at that `yield` and does not
+  continue. A method may therefore end at any of its `yield`s, so the type's
+  invariants and the method's `ensures` must hold at each one, whatever the
+  caller did to the part it was lent.
+- `for item in items` uses `items.each()`, and `for item in mut items` and
+  `for item in own items` use the `mut self` and `own self` versions. A
+  user's type supports `for` by defining `each`.
+- **A method that yields read-only or owned values can also be pulled** one
+  value at a time, through a cursor:
+
+  ```truss
+  var first_cursor = first.each()
+  var second_cursor = second.each()
+  var differences = 0
+  while first_cursor.next() is Some(left) && second_cursor.next() is Some(right) {
+    if left != right { differences += 1 }
+  }
+  ```
+
+  `next()` runs the method to its next `yield` and returns `Some` of what it
+  yields, or `None` when the method ends. A cursor that is never pulled
+  again is simply dropped, which ends the method at its last `yield`, as
+  `break` does. A cursor from an `own self` method owns what it iterates
+  over, so it can be stored and returned like any value. A cursor from a
+  `self` method is a view. Cursors are how `zip`, merging sorted sequences,
+  and looking ahead with `peek` are written.
+- A method that yields `mut` access cannot be pulled, because a cursor would
+  have to store the access. To change two collections side by side, use
+  indexes, or the standard `zip` for indexable collections:
+  `for (name, age) in mut names.zip(mut ages)`.
+
 ### Constructors
 
 | Name | Use |
@@ -759,7 +1163,7 @@ copying them. This is the only overloading Truss allows.
 | `Type.new(...)` | The main way to make a value: `Account.new(owner)` |
 | `Type.from(value)`, `Type.try_from(value)` | Conversions, through standard traits |
 | `Type.default()` | A default value, through a standard trait |
-| A descriptive name | Any other constructor: `List.with_capacity(64)`, `Set.from(["red", "green"])` |
+| A descriptive name | Any other constructor: `List.with_capacity(64)`, `Map.seeded()` |
 
 `new` is an ordinary name, not a keyword. A record whose fields are all visible
 can be built directly (`Point(x: 0.0, y: 0.0)`) and does not need `new`. An
@@ -792,15 +1196,54 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
   written as a statement must have `Unit` branches.
 - Blocks, `if`, and `match` are expressions. A block's value is its last
   expression, so `summarize` returns the `Ok(...)` on its last line.
-- `match` must cover every case.
+- `match` must cover every case, and every arm must be reachable. See
+  [Patterns](#patterns).
+- Every variable must be used. A `let` or a pattern that binds a name nothing
+  reads is a compile error; bind it to `_` instead. Parameters are exempt,
+  because an implementation of a trait may not need all of them.
 - Statements end at a line break. There are no semicolons. See
   [Line breaks](#line-breaks) for when a line continues.
-- Lambdas: `fn(score) => score / 2`, or `fn(score) { ... }` with a block body.
-  A lambda can read local variables, as in
-  `scores.filter(fn(score) => score >= threshold)`, but cannot change them.
-  A lambda that reads local variables can only be passed as an argument, not
-  stored or returned.
-  Their types are inferred.
+- Lambdas are written `fn(score) { score / 2 }`. See [Lambdas](#lambdas).
+
+### Lambdas
+
+```truss
+let passing = scores.filter(fn(score) { score >= threshold })
+let total = entries.fold(0, combine: fn(sum, (value, ..)) { sum + value })
+mut scores.update_each(fn(score) { score = score / 2 })
+```
+
+- A lambda is written `fn(parameters) { body }`. Like any block, its body's
+  value is its last expression.
+- A lambda's parameter types, modes, and result type are never written. They
+  come from the function type the lambda is passed as. In `update_each`,
+  which takes `fn(mut Element)`, `score` can be changed.
+- Types are worked out from the outside in: the receiver and the other
+  arguments decide the function type first, and then the lambda's body is
+  checked. A parameter's type is never worked out from how the body uses it.
+- When nothing gives the lambda a function type, give one to the `let`, or
+  type arguments to the call:
+
+  ```truss
+  let is_ready: fn(Job) -> Bool = fn(job) { job.is_ready() }
+  let handler = make_handler[HttpRequest](fn(request) { respond(request) })
+  ```
+
+  `let length = fn(text) { text.length() }` is a compile error, with a fix
+  that adds a type to the `let`.
+- A parameter can be a pattern that matches every value, such as
+  `(value, ..)`, or `_` for a parameter that is not used.
+- A lambda can read local variables, but cannot change them. A lambda that
+  reads local variables can be bound with `let` and passed later in the same
+  function, but it cannot be stored in a field, a `var`, or a collection, or
+  returned.
+- A lambda's capabilities are inferred from its body. A lambda that calls
+  `Clock.now()` can only be passed where a function type with `uses Clock`
+  is expected.
+- Inside a lambda, `return` and `?` leave the lambda, not the function around
+  it. `break` and `continue` cannot reach a loop outside the lambda.
+- There is no shorthand for a lambda's parameter, such as Kotlin's `it` or
+  Swift's `$0`, and a lambda is always passed inside the parentheses.
 
 ### Errors
 
@@ -849,18 +1292,48 @@ overflow a `UInt8`.
 
 | Literal | Meaning |
 |---|---|
-| `[2, 3, 5, 7]` | A `List` |
-| `[]` | An empty `List` |
+| `[2, 3, 5, 7]` | A `List`, or an `Array` or `Set` where one is expected |
+| `[]` | An empty `List`, or an empty `Set` where one is expected |
 | `["http": 80, "https": 443]` | A `Map` |
 | `[:]` | An empty `Map` |
-| `Set.from(["red", "green"])` | A `Set`, which has no literal of its own |
 
+- A `[...]` literal is a `List` unless the expected type is an `Array` or a
+  `Set`, as in `let colors: Set[String] = ["red", "green"]`. An `Array`
+  literal must have exactly as many elements as the type says.
 - The element types of `[]` and `[:]` come from the context or an annotation,
   as in `let names: List[String] = []`.
 - Map keys are expressions, so `[name: 1]` uses the value of `name`. Keys in a
   literal must be proven distinct.
+- The keys of a `Map` and the elements of a `Set` must be `Hash` and
+  `Ordered`. Lookups, insertions, and removals cost O(log n) in the worst
+  case, and O(1) in typical use.
+- `Map.seeded()` and `Set.seeded()` make an empty collection whose hashing
+  takes a key from the `Random` capability, so their signatures declare
+  `uses Random`. They give the same results as ordinary ones, and stay fast
+  even when keys are chosen to collide.
 - Trailing commas are allowed. The formatter puts each element of a long
   literal on its own line.
+
+#### Arrays
+
+```truss
+let digest: Array[UInt8, 32] = Array.filled(0)
+let squares: Array[USize, 8] = Array.generate(fn(index) { index * index })
+public let round_constants: Array[UInt32, 4] = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5]
+
+fn sum[count: USize](values: Array[Int64, count]) -> Int64
+```
+
+- An `Array` holds its elements in place, with no heap allocation, and
+  copies implicitly when its elements do. `Array[UInt8, 32]` is plain data,
+  like an integer.
+- `Array.filled(value)` and `Array.generate(fn(index) { ... })` take the
+  length from the expected type. A literal works too, including in
+  constants.
+- Indexing and slicing work as for a `List`. An index must be proven
+  smaller than `count`.
+- An `Array` is never moved to the heap without being asked. A very large
+  one can overflow the stack.
 
 | Indexing | Meaning |
 |---|---|
@@ -876,8 +1349,10 @@ overflow a `UInt8`.
   brackets.
 - Strings cannot be indexed. Use `text.bytes()` or `text.characters()` to say
   which you mean.
-- A type supports `[]` by implementing the prelude trait `Index`, whose method
-  states with `requires` what an index must satisfy.
+- A type supports `[]` by implementing the prelude trait `Index`, whose
+  yielding methods give read and `mut` access to an element and state with
+  `requires` what an index must satisfy. See
+  [Yielding methods](#yielding-methods).
 
 ### Loops
 
@@ -932,12 +1407,96 @@ overflow, since `-Int8.minimum` does not fit.
 `Ordering.Greater`. Both sides must have the same type, so `Int64 == Int32`
 does not compile. `any` values and functions cannot be compared.
 
+The arithmetic operators go through traits with a type parameter for the
+right side and an associated type for the result, so the two sides can have
+different types:
+
+| Operator | Trait |
+|---|---|
+| `a + b` | `Add[Right]` |
+| `a - b` | `Subtract[Right]` |
+| `a * b` | `Multiply[Right]` |
+| `a / b` | `Divide[Right]` |
+| `a % b` | `Remainder[Right]` |
+| `-a` | `Negate` |
+
+```truss
+impl Add[Duration] for Instant {
+  type Output = Instant
+  fn add(self, right: Duration) -> Instant { ... }
+}
+
+let deadline = now + timeout
+let scaled = velocity * 2.0
+```
+
+The built-in number types implement these only with themselves on both
+sides. The bitwise operators and shifts work only on the built-in integer
+types.
+
 For floats, `==` follows IEEE 754 except that every NaN equals every other NaN,
 so `-0.0 == 0.0` is still true. In ordering, NaN comes after every number.
-`x.is_nan()` tests for NaN, and `x.ieee_equal(y)` gives exact IEEE equality.
+`x.is_nan()` tests for NaN. `x.ieee_equal(y)`, `x.ieee_less(y)`, and the
+other `ieee_` comparisons follow IEEE 754 exactly, and compile to a single
+instruction, for code where comparisons are the bottleneck.
 
-Mixing `&&` with `||`, or bitwise operators with comparisons, needs
-parentheses: `(is_ready && is_valid) || is_forced`.
+#### Precedence
+
+Operators bind in this order, tightest first:
+
+| Operators | Notes |
+|---|---|
+| `.` `()` `[]` `?` `with (...)` | `a.b()?.c()`. `with` applies to the expression directly before it. |
+| `-` `!` `~` | `-x.abs()` is `-(x.abs())`. `!is_ready == expected` is `(!is_ready) == expected`. |
+| `mut` `own` `any` | Apply to everything after them up to the next binary operator. See [Parameter modes](#parameter-modes) for which place they mark. |
+| `*` `/` `%` | |
+| `+` `-` | |
+| `..` `..=` | `0..count - 1` is `0..(count - 1)`. |
+| `==` `!=` `<` `<=` `>` `>=` `is` | `response is Ok(body)` tests a pattern. See [Testing a pattern](#testing-a-pattern-with-is). |
+| `&&`, `\|\|` | |
+| `echo`, and the body after `=>` in `forall` or `exists` | `echo player.wins * 3` shows the product. |
+
+Some combinations have no precedence at all and need parentheses:
+
+- **Shifts and bitwise operators** (`<<`, `>>`, `&`, `|`, `^`) can be combined
+  only with themselves: `a | b | c` is fine, but `(flags & 0xFF) | extra`,
+  `a << (b + 1)`, and `(flags & mask) != 0` need their parentheses.
+- **`&&` and `||`** cannot be mixed: `(is_ready && is_valid) || is_forced`.
+- **Comparisons, `is`, and ranges** cannot be chained: `a < b < c`,
+  `a == b == c`, and `0..10..20` are errors.
+
+Leaving the parentheses out is a compile error with a fix that adds them.
+
+#### Compound assignment
+
+```truss
+self.buckets[index].count += 1
+totals[region] += sale.amount
+deadline += extension
+flags |= Permission.write
+```
+
+- `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, and `>>=` exist
+  for each binary operator. There is no `++` or `--`.
+- `a += b` is a statement, like `=`. The left side must be a place.
+- It means `a = a + b`, with the place written and checked once: an index is
+  proven in bounds once.
+- The old value of `a` is replaced, so it is handed to the operator as owned.
+  When the operator's trait has a version that takes `own self`, that version
+  is used and can reuse the old value's memory, so `matrix += other` can
+  update in place.
+- `truss fmt` writes `x = x + y` as `x += y`.
+
+#### Integer division and shifts
+
+- `/` on integers rounds toward zero, and `%` gives a result with the sign of
+  the left operand, so `-7 / 2` is `-3` and `-7 % 3` is `-1`.
+  `value.floor_div(divisor)` and `value.floor_mod(divisor)` round down
+  instead.
+- `>>` on a signed integer copies the sign bit. On an unsigned integer it
+  shifts in zeros.
+- The shift amount can be any unsigned integer type, and must be proven
+  smaller than the number of bits in the value being shifted.
 
 ## Capabilities
 
@@ -1009,7 +1568,7 @@ These capabilities are in the prelude:
 | `NetworkServer` | Listening for and accepting incoming connections |
 | `Clock` | The current time, a monotonic clock, and sleeping |
 | `Random` | Random numbers from the operating system |
-| `Environment` | Environment variables and the current directory |
+| `Environment` | Environment variables, the current directory, and which operating system and processor the program runs on |
 | `Processes` | Running other programs |
 | `Tasks` | Starting concurrent tasks and using channels |
 | `Panic` | Ending the program |
@@ -1022,6 +1581,39 @@ required by `expect` and `unwrap`. Code cannot `provide` an implementation of
 as a `match` arm ruled out by an earlier check. It must be proven unreachable.
 If the prover cannot show that, it is an error, not a hidden crash.
 
+### Files, connections, and other resources
+
+A handle to something the operating system holds, such as an open file, a
+network connection, or a running process, is released automatically when its
+owner is done with it, the same way memory is:
+
+```truss
+fn first_line(path: Path) -> Result[String, FileError]
+  uses FileRead
+{
+  var file = FileRead.open(path)?
+  let line = mut file.read_line()?
+  Ok(line)
+}
+```
+
+The file is closed when `first_line` returns, on every path, including the
+early returns from `?`.
+
+- A handle's methods declare the capability they use, so `read_line` has
+  `uses FileRead`, and code that only holds a handle still cannot use it
+  without the capability.
+- Releasing a handle never runs Truss code and never fails. Types cannot
+  define code that runs when a value is released.
+- Anything that can fail, or that the program needs to know happened, is an
+  explicit call that returns a `Result`, such as `flush`, `sync`, `shutdown`
+  for closing a connection cleanly, and `wait` for a process's exit status.
+- A writer that may still hold unwritten data must be finished before its
+  owner is done with it: `own writer.finish()?` writes out the data and
+  reports any error. A path that drops an unfinished writer is a compile
+  error, because the data would be lost without anyone knowing.
+- When the program panics, the operating system releases everything.
+
 ### main
 
 A program starts at `main`, which always has this signature, plus whatever
@@ -1032,7 +1624,7 @@ fn main(arguments: List[String]) -> ExitCode
   uses Console, FileRead
 {
   match Config.parse(arguments) {
-    Ok(config) => run(config),
+    Ok(config) => run(config)
     Err(error) => {
       Console.print_error("${error}")
       ExitCode.failure
@@ -1103,12 +1695,12 @@ all of them have finished:
 
 ```truss
 fn total_score(players: Slice[Player]) -> Int64
-  time O(players.length())
+  cost time O(players.length())
 {
   let halves = players.split_at(players.length() / 2)
   parallel {
-    let left = total(halves.first)
-    let right = total(halves.second)
+    let left = sum_scores(halves.first)
+    let right = sum_scores(halves.second)
   }
   left.saturating_add(right)
 }
@@ -1281,13 +1873,16 @@ SqlQuery.from_template(Template.new(
 ```
 
 A type can be used as a tag by implementing the prelude trait `FromTemplate`,
-whose one method is `from_template`. Its parameter, `Template[Part]`, holds the
-literal text and the interpolated values, each already converted to `Part`.
+whose one method is `from_template`. The trait's associated type `Part` is the
+type each interpolated value is converted to, and the method's parameter,
+`Template[Part]`, holds the literal text and the converted values.
 
 A tag states what makes its literal text valid with `requires`:
 
 ```truss
 impl FromTemplate for Regex {
+  type Part = RegexPart
+
   fn from_template(template: Template[RegexPart]) -> Regex
     requires is_valid_pattern(template.literals)
   {
@@ -1380,9 +1975,112 @@ impl Loggable for Event {}
   `any`: `List[any Loggable]`. Its `impl` is empty because there is nothing to
   write.
 
-A method with a body, like `max`, is provided to every implementation and
-cannot be replaced by one. In the standard library, `Hash` and `Ordered` both
-require `Equal`.
+In the standard library, `Hash` and `Ordered` both require `Equal`.
+
+### Methods with bodies
+
+A method with a body, like `max`, is provided to every implementation. An
+implementation can replace it with a faster version, but only one proven to
+give the same result:
+
+```truss
+trait Ordered: Equal {
+  fn compare(self, other: Self) -> Ordering
+
+  fn max(own self, other: own Self) -> Self
+    ensures result == (if self.compare(other) == Ordering.Less { other } else { self })
+  {
+    if self.compare(other) == Ordering.Less { other } else { self }
+  }
+}
+
+impl Ordered for Int64 {
+  fn compare(self, other: Int64) -> Ordering { ... }
+  fn max(own self, other: own Int64) -> Int64 { Int64.maximum_of(self, other) }
+}
+```
+
+- The replacement must prove the `ensures` clauses of the method it
+  replaces. A method whose result its `ensures` clauses do not pin down
+  exactly cannot be replaced.
+- Code that calls the method reasons from the trait alone, so a replacement
+  never changes what a call means, only how fast it runs.
+
+### Implementing a trait for a generic type
+
+An `impl` for a generic type states its conditions on the type's parameters,
+as a method does:
+
+```truss
+impl Display for List[Element: Display] {
+  fn display(self, output: mut TextBuilder) { ... }
+}
+
+impl Equal for Option[Value: Equal] {
+  fn equal(self, other: Option[Value]) -> Bool { ... }
+}
+```
+
+`List[Element]` implements `Display` exactly when `Element` does. A type has
+at most one `impl` of each trait, whatever its type arguments, so an
+`impl Display for List[String]` cannot sit beside the one above.
+
+### Traits with type parameters
+
+A trait can take type parameters, and a type can implement the trait once for
+each set of arguments:
+
+```truss
+trait From[Source] {
+  fn from(value: own Source) -> Self
+}
+
+impl From[Int32] for Int64 { ... }
+impl From[UInt32] for Int64 { ... }
+
+let total = Int64.from(count)
+```
+
+- The `impl` is chosen by the types of the arguments, which are worked out
+  first, without looking at which `impl`s exist. A literal argument has its
+  default type. So adding an `impl` never changes which one an existing call
+  uses.
+- The `impl` is never chosen from the type the result is expected to have.
+  Truss has no `into()` that guesses its target from context: the target is
+  always named, as in `Int64.from(count)`.
+- Truss has no other overloading. Two functions cannot share a name and
+  differ only in their parameter types.
+
+### Associated types
+
+A trait can leave a type for each implementation to choose:
+
+```truss
+trait Index {
+  type Key
+  type Output
+  fn at(self, key: Self.Key) yields Self.Output
+  fn at(mut self, key: Self.Key) yields mut Self.Output
+}
+
+impl Index for Grid {
+  type Key = Position
+  type Output = Cell
+  fn at(self, key: Position) yields Cell { ... }
+  fn at(mut self, key: Position) yields mut Cell { ... }
+}
+
+fn total[Items: Iterable[Element = Int64]](items: Items) -> Int64
+fn first[Items: Iterable](items: Items) -> Option[Items.Element]
+```
+
+- `type Key = Position` can only appear in an `impl`, where it says which
+  type the implementation uses. Truss has no type aliases.
+- `Items.Element` names an associated type of a generic parameter.
+  `Iterable[Element = Int64]` constrains it in a bound.
+- A trait's own type parameters are the types an implementation can be
+  chosen by, as in `From[Source]`. Its associated types are the types each
+  implementation decides, as in `Index`'s `Output`.
 
 ### Deriving
 
@@ -1428,10 +2126,16 @@ hand.
 
 - Trait methods are called with a dot, like other methods, without importing
   the trait.
-- If two traits give a type methods with the same name, a call with a dot is a
-  compile error. Write the call in full instead: `Ordered.compare(first,
-  second)`.
-- A type's own methods cannot share a name with the methods of its traits.
+- A call with a dot finds the type's own methods, and the methods of the
+  traits it implements that come from the standard library, the calling
+  package, or a package the calling package lists in its manifest. Traits
+  from packages further away are not considered.
+- If two of those traits give a type methods with the same name, a call with
+  a dot is a compile error. Write the call in full instead:
+  `Ordered.compare(first, second)`.
+- A type's own methods cannot share a name with the methods of any trait it
+  implements. An `impl` that would give a type a second method with the same
+  name is a compile error, wherever the `impl` is.
 - An `impl` must be in the package of the trait or the package of the type.
 - Contracts and costs on a trait's methods apply to every `impl` and are
   proven for each one.
@@ -1454,7 +2158,7 @@ mut server.handlers.push(any UserRoutes(users: [:]))
 mut server.handlers.push(any HealthCheck())
 
 for handler in server.handlers {
-  let response = handler.handle(request)
+  mut responses.push(handler.handle(request))
 }
 ```
 
@@ -1488,9 +2192,10 @@ real implementations of exactly those capabilities, as `main` does.
 test "writes the report"
   uses FileRead, FileWrite
 {
-  provide FilesWithin(root: Path.new("test_output/report")) {
+  let written = provide FilesWithin(root: Path.new("test_output/report")) {
     write_report(sample_report())
   }
+  assert written == Ok(Unit)
 }
 ```
 
@@ -1529,11 +2234,11 @@ theorem reverse_twice[Element](items: Slice[Element])
   decreases items.length()
 {
   match items.split_first() {
-    None => {},
+    None => {}
     Some((first, rest)) => {
       reverse_twice(rest)
       reverse_of_append(rest.reverse(), suffix: [first])
-    },
+    }
   }
 }
 ```
@@ -1554,7 +2259,7 @@ point:
 
 ```truss
 fn SortedList[Element: Ordered].insert(mut self, item: own Element) {
-  let position = self.items.partition_point(fn(existing) => existing < item)
+  let position = self.items.partition_point(fn(existing) { existing < item })
   mut self.items.insert_at(position, item)
   proof {
     insert_at_partition_point_keeps_sorted(old(self.items), position, item)
@@ -1577,6 +2282,10 @@ proof Monoid.associative for Int64 {
 ```
 
 ### Writing specifications
+
+In specifications, `&&`, `||`, and `if` are read from left to right, so the
+right side can rely on the left: in `index < items.length() && items[index] > 0`,
+`items[index]` is in bounds because `index < items.length()` is true there.
 
 These forms can be used in `requires`, `ensures`, invariants, laws, and proofs:
 
@@ -1673,9 +2382,44 @@ let local = file_system::Path.new("app.toml")
   `file_system::Path` and `url::Path` cannot be confused.
 - There are no import aliases.
 - A full path such as `standard::json::parse(text)` works without a `use`. Use
-  it when two imported modules would have the same last name.
+  it when two imported modules would have the same last name. Importing two
+  modules with the same last name is a compile error.
+- `use` lines come before every definition in a file. `truss fmt` sorts them.
 
 The standard library's root module is `standard`.
+
+### Module paths
+
+Every `.truss` file in a package's directory is a module. Its path is the
+package's name, then the directories it is in, then its file name:
+
+| File in the `weather` package | Module |
+|---|---|
+| `forecast.truss` | `weather::forecast` |
+| `forecast/hourly.truss` | `weather::forecast::hourly` |
+
+- Every path starts with a package name: `standard`, a dependency's name from
+  the manifest, or the package's own name. A file names another file of its
+  own package the same way other packages do: `use weather::forecast::hourly`.
+- There are no relative paths, such as Rust's `super::`, so a module is
+  written the same way wherever it is used.
+- A directory is not a module by itself. `forecast.truss` and a `forecast/`
+  directory can sit side by side.
+- File and directory names must be `lower_snake_case` names.
+- Modules in a package can use each other freely, even in a cycle. The
+  dependencies between packages cannot form a cycle.
+
+A method can be defined in any file of its type's package. In another file,
+the type is named with its module:
+
+```truss
+use weather::forecast::hourly
+
+fn hourly::Forecast.summary(self) -> String { ... }
+```
+
+The type must be visible there, so a type that is private to its file has
+its methods in that file.
 
 A small, fixed *prelude* is in scope in every file without a `use`. It holds
 the names nearly every program needs, all of them `UpperCamelCase`, so they
@@ -1686,7 +2430,8 @@ never clash with variable or function names:
 - `Option` (`Some`, `None`) and `Result` (`Ok`, `Err`)
 - the core collections: `List`, `Slice`, `Map`, and `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
-  `Index`, and `FromTemplate`
+  `Index`, `FromTemplate`, and the arithmetic traits `Add`, `Subtract`,
+  `Multiply`, `Divide`, `Remainder`, and `Negate`
 - the standard capabilities, such as `Console`, `FileRead`, and `Panic`
 
 Everything else is imported with `use`. Projects cannot define their own
@@ -1712,6 +2457,18 @@ public. Outside its package, an opaque type can be named and passed around,
 but its fields cannot be read, built, updated, or matched on. Other packages
 use its methods instead. `opaque` is only allowed on `public` types, because
 private and `internal` types are only visible within the package anyway.
+
+### No foreign code
+
+Truss code cannot call functions written in other languages. There is no
+`extern` declaration and no raw pointer type, and `extern` and `unsafe` are
+reserved. The standard library reaches the operating system through the
+compiler, in ways that are not part of the language and that no other package
+can use.
+
+The standard library is also the only code that differs between operating
+systems. Other code asks which one it runs on through the `Environment`
+capability, so a test can provide a different answer.
 
 ### Package manifest
 
