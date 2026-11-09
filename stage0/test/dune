@@ -1,5 +1,5 @@
 (tests
- (names lexer_tests parser_tests hashing_tests query_tests resolve_tests)
+ (names lexer_tests parser_tests hashing_tests query_tests resolve_tests standard_library_tests)
  (libraries
   harness
   source
@@ -21,6 +21,7 @@
   workspace
   resolve
   hash
+  standard_library
   syntax_walk)
  (deps
   (glob_files %{workspace_root}/*.md)))

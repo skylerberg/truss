@@ -88,7 +88,7 @@ let file_diagnostics =
           (fun (declaration : Names.declaration) ->
             match
               Query.demand database resolved
-                { path = declaration.path; ordinal = declaration.ordinal }
+                (Names.key_of declaration)
             with
             | Some resolved -> resolved.imports_used
             | None -> [])
@@ -138,7 +138,7 @@ let diagnostics database module_ =
   let definitions =
     List.concat_map
       (fun (declaration : Names.declaration) ->
-        let key : Names.key = { path = declaration.path; ordinal = declaration.ordinal } in
+        let key = Names.key_of declaration in
         match (Query.demand database resolved key, Query.demand database Names.base key) with
         | Some resolved, Some (_, base) -> List.map (Diagnostic.move base) resolved.diagnostics
         | _ -> [])

@@ -1,0 +1,17 @@
+public opaque type Map[Key: Hash + Ordered, Value](entries: List[Entry[Key, Value]])
+
+public type Entry[Key, Value](key: Key, value: Value)
+
+public fn Map[Key: Hash + Ordered, Value].length(self) -> USize
+  cost time O(1)
+{
+  self.entries.length()
+}
+
+public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool {
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: own Value) {
+  todo
+}

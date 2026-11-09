@@ -1,0 +1,15 @@
+public opaque type Set[Element: Hash + Ordered](elements: List[Element])
+
+public fn Set[Element: Hash + Ordered].length(self) -> USize
+  cost time O(1)
+{
+  self.elements.length()
+}
+
+public fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool {
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].insert(mut self, element: own Element) {
+  todo
+}

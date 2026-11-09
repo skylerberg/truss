@@ -13,11 +13,11 @@ type t =
   | Test of { module_ : module_; name : string }
   | Law_proof of { module_ : module_; name : string }
 
-let rec module_of = function
+let rec package = function
   | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ } ->
-      module_
-  | Method { owner; _ } | Member_constant { owner; _ } -> module_of owner
-  | Derived { type_; _ } -> module_of type_
+      module_.package
+  | Method { owner; _ } | Member_constant { owner; _ } -> package owner
+  | Derived { type_; _ } -> package type_
 
 let rec show = function
   | Top { module_; name } -> show_module module_ ^ "::" ^ name

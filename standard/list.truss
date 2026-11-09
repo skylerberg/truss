@@ -1,0 +1,111 @@
+use standard::intrinsic
+
+public opaque type List[Element](storage: intrinsic::Storage[Element])
+
+public opaque type Slice[Element](elements: intrinsic::View[Element])
+
+public fn List[Element].with_capacity(capacity: USize) -> List[Element] {
+  List(storage: intrinsic::storage_with_capacity(capacity))
+}
+
+public fn List[Element].length(self) -> USize
+  cost time O(1)
+{
+  intrinsic::storage_length(self.storage)
+}
+
+public fn List[Element].is_empty(self) -> Bool
+  cost time O(1)
+{
+  self.length() == 0
+}
+
+public fn List[Element].push(mut self, item: own Element)
+  cost amortized time O(1)
+{
+  intrinsic::storage_push(mut self.storage, value: own item)
+}
+
+public fn List[Element].pop(mut self) -> Option[Element] {
+  if self.length() == 0 { None } else { Some(intrinsic::storage_pop(mut self.storage)) }
+}
+
+public fn List[Element].slice(self) -> Slice[Element]
+  cost time O(1)
+{
+  Slice(elements: intrinsic::storage_view(self.storage))
+}
+
+public fn List[Element].each(self) yields Element {
+  for index in 0..self.length() {
+    yield self[index]
+  }
+}
+
+public fn List[Element].each(mut self) yields mut Element {
+  for index in 0..self.length() {
+    yield mut self[index]
+  }
+}
+
+public fn List[Element].map[Output](self, transform: fn(Element) -> Output) -> List[Output] {
+  var results: List[Output] = []
+  for item in self {
+    mut results.push(transform(item))
+  }
+  results
+}
+
+public fn List[Element].filter(self, keep: fn(Element) -> Bool) -> List[Element] {
+  todo
+}
+
+public fn Slice[Element].length(self) -> USize
+  cost time O(1)
+{
+  intrinsic::view_length(self.elements)
+}
+
+public fn Slice[Element].each(self) yields Element {
+  for index in 0..self.length() {
+    yield self[index]
+  }
+}
+
+impl Index for List[Element] {
+  type Key = USize
+  type Output = Element
+
+  fn at(self, key: USize) lends Element
+    requires key < self.length()
+  {
+    yield intrinsic::storage_at(self.storage, index: key)
+  }
+
+  fn at(mut self, key: USize) lends mut Element
+    requires key < self.length()
+  {
+    yield intrinsic::storage_at_mut(mut self.storage, index: key)
+  }
+}
+
+impl Index for Slice[Element] {
+  type Key = USize
+  type Output = Element
+
+  fn at(self, key: USize) lends Element
+    requires key < self.length()
+  {
+    yield intrinsic::view_at(self.elements, index: key)
+  }
+
+  fn at(mut self, key: USize) lends mut Element {
+    todo
+  }
+}
+
+impl Equal for List[Element: Equal] {
+  fn equal(self, other: List[Element]) -> Bool {
+    todo
+  }
+}

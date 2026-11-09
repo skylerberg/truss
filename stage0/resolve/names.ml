@@ -38,6 +38,7 @@ let kind_name = function
    ordinal 0, is what the path names; the others are reported as
    duplicates. [index] is its place among the file's definitions. *)
 type declaration = {
+  module_ : Path.module_;  (** Where it is written. *)
   path : Path.t;
   ordinal : int;
   index : int;
@@ -46,7 +47,13 @@ type declaration = {
   generic : bool;
 }
 
-type key = { path : Path.t; ordinal : int }
+(* A definition: its path, where it is written, and its ordinal. The path
+   alone does not say where a method is written, since a method may be in
+   any file of its type's package. *)
+type key = { module_ : Path.module_; path : Path.t; ordinal : int }
+
+let key_of (declaration : declaration) =
+  { module_ = declaration.module_; path = declaration.path; ordinal = declaration.ordinal }
 
 let show_key key =
   if key.ordinal = 0 then Path.show key.path
@@ -188,10 +195,14 @@ let builtin_items () =
         name = Intrinsic.builtin_name builtin;
         kind = Type;
         visibility = Public;
-        generic = builtin = Intrinsic.Array;
+        generic = (match builtin with Array | Storage | View -> true | _ -> false);
         index = -1;
       })
     Intrinsic.builtins
+  @ List.map
+      (fun operation ->
+        { name = Intrinsic.operation_name operation; kind = Function; visibility = Public; generic = true; index = -1 })
+      Intrinsic.operations
 
 let entries =
   Query.query ~name:"entries" ~show:Path.show_module (fun database module_ ->
@@ -292,7 +303,7 @@ let declarations =
       let declare index (definition : definition) path kind generic =
         let ordinal = Option.value ~default:0 (Hashtbl.find_opt counts path) in
         Hashtbl.replace counts path (ordinal + 1);
-        Some { path; ordinal; index; kind; visibility = definition.visibility; generic }
+        Some { module_; path; ordinal; index; kind; visibility = definition.visibility; generic }
       in
       List.filter_map Fun.id
         (List.mapi
@@ -372,7 +383,7 @@ let members =
   Query.query ~name:"members"
     ~show:(fun (owner, name) -> Path.show owner ^ "." ^ name)
     (fun database ((owner : Path.t), name) ->
-      let package = (Path.module_of owner).package in
+      let package = Path.package owner in
       match Workspace.package database package with
       | None -> []
       | Some package ->
@@ -394,7 +405,7 @@ let members =
    file. *)
 let locate =
   Query.query ~name:"locate" ~show:show_key (fun database key ->
-      let module_ = Path.module_of key.path in
+      let module_ = key.module_ in
       let found =
         List.find_opt
           (fun (declaration : declaration) ->

@@ -1,0 +1,100 @@
+use standard::intrinsic
+
+public opaque type String(storage: intrinsic::Storage[UInt8])
+
+public opaque type StringSlice(bytes: intrinsic::View[UInt8])
+
+public opaque type TextBuilder(text: String)
+
+public trait FromTemplate {
+  type Part
+  fn from_template(template: Template[Self.Part]) -> Self
+}
+
+public opaque type Literal(text: StringSlice)
+
+public type Template[Part](literals: List[Literal], parts: List[Part])
+
+public fn String.length(self) -> USize
+  cost time O(1)
+{
+  intrinsic::storage_length(self.storage)
+}
+
+public fn String.is_empty(self) -> Bool
+  cost time O(1)
+{
+  self.length() == 0
+}
+
+public fn String.push(mut self, text: StringSlice) {
+  todo
+}
+
+public fn String.slice(self) -> StringSlice
+  cost time O(1)
+{
+  StringSlice(bytes: intrinsic::storage_view(self.storage))
+}
+
+public fn String.trim(self) -> StringSlice {
+  todo
+}
+
+public fn StringSlice.length(self) -> USize
+  cost time O(1)
+{
+  intrinsic::view_length(self.bytes)
+}
+
+public fn StringSlice.to_string(self) -> String {
+  todo
+}
+
+public fn TextBuilder.new() -> TextBuilder {
+  TextBuilder(text: String(storage: intrinsic::storage_empty()))
+}
+
+public fn TextBuilder.write(mut self, text: StringSlice) {
+  mut self.text.push(text)
+}
+
+public fn TextBuilder.finish(own self) -> String {
+  self.text
+}
+
+impl Equal for String {
+  fn equal(self, other: String) -> Bool {
+    todo
+  }
+}
+
+impl Ordered for String {
+  fn compare(self, other: String) -> Ordering {
+    todo
+  }
+}
+
+impl Hash for String {
+  fn hash(self, hasher: mut Hasher) {
+    todo
+  }
+}
+
+impl Display for String {
+  fn display(self, output: mut TextBuilder) {
+    mut output.write(self.slice())
+  }
+}
+
+impl Equal for StringSlice {
+  fn equal(self, other: StringSlice) -> Bool {
+    todo
+  }
+}
+
+impl Display for StringSlice {
+  fn display(self, output: mut TextBuilder) {
+    mut output.write(self)
+  }
+}

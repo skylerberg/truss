@@ -1,0 +1,70 @@
+public capability Console {
+  fn print_line(text: StringSlice)
+  fn print_error(text: StringSlice)
+  fn read_line() -> Option[String]
+}
+
+public capability FileRead {
+  fn read(file: Path) -> Result[Bytes, FileError]
+  fn read_text(file: Path) -> Result[String, FileError]
+}
+
+public capability FileWrite {
+  fn write(file: Path, contents: Bytes) -> Result[Unit, FileError]
+  fn write_text(file: Path, contents: StringSlice) -> Result[Unit, FileError]
+}
+
+public capability NetworkClient {
+  fn connect(host: StringSlice, port: UInt16) -> Result[Bytes, FileError]
+}
+
+public capability NetworkServer {
+  fn listen(port: UInt16) -> Result[Unit, FileError]
+}
+
+public capability Clock {
+  fn now() -> Instant
+  fn sleep(duration: Duration)
+}
+
+public capability Random {
+  fn next() -> UInt64
+}
+
+public capability Environment {
+  fn variable(name: StringSlice) -> Option[String]
+}
+
+public capability Processes {
+  fn run(program: Path, arguments: List[String]) -> Result[ExitCode, FileError]
+}
+
+public capability Tasks {
+  fn yield_now()
+}
+
+public capability Panic {
+  fn crash(message: StringSlice) -> Never
+}
+
+public type Instant(nanoseconds: Int64)
+  derives Equal
+
+public let Instant.epoch: Instant = Instant(nanoseconds: 0)
+
+public type Duration(nanoseconds: Int64)
+  derives Equal
+
+public opaque type Path(text: String)
+
+public fn Path.new(text: StringSlice) -> Path {
+  Path(text: text.to_string())
+}
+
+public type Bytes(data: List[UInt8])
+
+public type FileError =
+  | NotFound
+  | PermissionDenied
+  | Other(code: Int32)
+  derives Equal

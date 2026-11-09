@@ -1,0 +1,128 @@
+use standard::intrinsic
+
+public type Ordering = Less | Equal | Greater
+  derives Equal
+
+public trait Equal {
+  fn equal(self, other: Self) -> Bool
+
+  fn not_equal(self, other: Self) -> Bool {
+    !self.equal(other)
+  }
+}
+
+public trait Ordered: Equal {
+  fn compare(self, other: Self) -> Ordering
+
+  fn max(own self, other: own Self) -> Self {
+    if self.compare(other) == Ordering.Less { other } else { self }
+  }
+
+  fn min(own self, other: own Self) -> Self {
+    if self.compare(other) == Ordering.Greater { other } else { self }
+  }
+}
+
+public trait Hash: Equal {
+  fn hash(self, hasher: mut Hasher)
+}
+
+public opaque type Hasher(state: UInt64)
+
+public fn Hasher.new() -> Hasher {
+  Hasher(state: 14695981039346656037)
+}
+
+public fn Hasher.write(mut self, value: UInt64) {
+  self.state = intrinsic::wrapping_multiply(intrinsic::bit_xor(self.state, value), 1099511628211)
+}
+
+public fn Hasher.finish(self) -> UInt64 {
+  self.state
+}
+
+public trait Default {
+  fn default() -> Self
+}
+
+public trait Display {
+  fn display(self, output: mut TextBuilder)
+}
+
+public trait From[Source] {
+  fn from(value: own Source) -> Self
+}
+
+public trait TryFrom[Source] {
+  type Error
+  fn try_from(value: own Source) -> Result[Self, Self.Error]
+}
+
+public trait Copyable {
+  fn copy(self) -> Self
+}
+
+public trait Plain: Copyable {}
+
+public trait Add[Right] {
+  type Output
+  fn add(self, right: Right) -> Self.Output
+}
+
+public trait Subtract[Right] {
+  type Output
+  fn subtract(self, right: Right) -> Self.Output
+}
+
+public trait Multiply[Right] {
+  type Output
+  fn multiply(self, right: Right) -> Self.Output
+}
+
+public trait Divide[Right] {
+  type Output
+  fn divide(self, right: Right) -> Self.Output
+}
+
+public trait Remainder[Right] {
+  type Output
+  fn remainder(self, right: Right) -> Self.Output
+}
+
+public trait Negate {
+  type Output
+  fn negate(self) -> Self.Output
+}
+
+public trait Index {
+  type Key
+  type Output
+  fn at(self, key: Self.Key) lends Self.Output
+  fn at(mut self, key: Self.Key) lends mut Self.Output
+}
+
+public trait Iterable {
+  type Element
+  fn each(self) yields Self.Element
+}
+
+public trait Cursor {
+  type Element
+  fn next(mut self) -> Option[Self.Element]
+}
+
+public type Range[Value](start: Value, stop: Value, inclusive: Bool)
+
+public fn Range[Value].reverse(own self) -> Range[Value] {
+  todo
+}
+
+public type Indexed[Element](index: USize, element: Element)
+
+public type Pair[First, Second](first: First, second: Second)
+
+public type ExitCode(code: UInt8)
+
+public let ExitCode.success: ExitCode = ExitCode(0)
+
+public let ExitCode.failure: ExitCode = ExitCode(1)

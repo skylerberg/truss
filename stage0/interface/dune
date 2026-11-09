@@ -1,0 +1,3 @@
+(library
+ (name interface)
+ (libraries query path intrinsic types workspace syntax syntax_walk resolve diagnostic source zarith token))

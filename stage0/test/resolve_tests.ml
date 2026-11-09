@@ -102,7 +102,7 @@ let name_at database file text occurrence =
   let found =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key : Resolve.Names.key = { path = declaration.path; ordinal = declaration.ordinal } in
+        let key = Resolve.Names.key_of declaration in
         match
           ( Query.demand database Resolve.Names.definition key,
             Query.demand database Resolve.Names.base key,
@@ -306,7 +306,7 @@ let bracket_of text written occurrence =
   let declarations = Query.demand database Resolve.Names.declarations module_ in
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
-      let key : Resolve.Names.key = { path = declaration.path; ordinal = declaration.ordinal } in
+      let key = Resolve.Names.key_of declaration in
       match
         ( Query.demand database Resolve.Names.definition key,
           Query.demand database Resolve.Names.base key,
@@ -479,7 +479,7 @@ let () =
 let parts_of text name =
   let database = setup [ ("app::main", text) ] in
   let key : Resolve.Names.key =
-    { path = Top { module_ = module_of "app::main"; name }; ordinal = 0 }
+    { module_ = module_of "app::main"; path = Top { module_ = module_of "app::main"; name }; ordinal = 0 }
   in
   match Query.demand database Hash.parts key with
   | Some parts -> List.map (fun (part, digest) -> (Hash.show_part part, Hash.show digest)) parts
@@ -540,7 +540,7 @@ let () =
       let hash text =
         let database = database text in
         let key : Resolve.Names.key =
-          { path = Top { module_ = module_of "app::main"; name = "T" }; ordinal = 0 }
+          { module_ = module_of "app::main"; path = Top { module_ = module_of "app::main"; name = "T" }; ordinal = 0 }
         in
         Option.get (Query.demand database Hash.parts key)
       in
