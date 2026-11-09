@@ -13,7 +13,6 @@ module Lower = Interface.Lower
 open State
 open Hooks
 open Lookups
-open Pattern_typing
 
 let rec function_value_call state env (value : expression) (callee : expression) arguments =
   let callee_type = normalize state (expression state env callee) in

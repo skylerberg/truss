@@ -12,7 +12,6 @@ module Impls = Interface.Impls
 module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
-open Hooks
 
 let rec coerce state (value : expression) ~found ~expected =
   match resolve state found with

@@ -11,8 +11,6 @@ module Impls = Interface.Impls
 module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
-open Hooks
-open Lookups
 
 let rec binding_pattern state env written type_ ~mutable_ ~mode =
   pattern_with state env written type_ ~mutable_ ~mode

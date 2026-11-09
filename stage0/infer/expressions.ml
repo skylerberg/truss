@@ -24,10 +24,8 @@ module Impls = Interface.Impls
 module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
-open Hooks
 open Lookups
 open Pattern_typing
-open Calls
 open Methods
 open Operators
 open Statements
@@ -301,6 +299,4 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
 
 let () =
   Hooks.expression_hook := expression;
-  Hooks.check_hook := check;
-  Hooks.index_hook := index;
-  Hooks.call_hook := Methods.call
+  Hooks.check_hook := check

@@ -13,8 +13,6 @@ open State
 open Hooks
 open Lookups
 open Pattern_typing
-open Calls
-open Methods
 
 let rec try_ state env (value : expression) (inner : expression) =
   let inner_type = normalize state (expression state env inner) in

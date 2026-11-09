@@ -14,9 +14,6 @@ open State
 open Hooks
 open Lookups
 open Pattern_typing
-open Calls
-open Methods
-open Operators
 open Statements
 
 let rec string_literal state env ?expected (literal : string_literal) =

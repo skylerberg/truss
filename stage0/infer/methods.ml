@@ -13,7 +13,6 @@ module Lower = Interface.Lower
 open State
 open Hooks
 open Lookups
-open Pattern_typing
 open Calls
 
 let rec call state env ?expected (value : expression) (callee : expression)

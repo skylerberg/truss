@@ -13,8 +13,6 @@ open State
 open Hooks
 open Lookups
 open Pattern_typing
-open Calls
-open Methods
 open Operators
 
 let rec block_value state env ?expected (written : block) =
