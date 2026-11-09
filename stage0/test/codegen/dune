@@ -1,5 +1,25 @@
-(test
- (name codegen_tests)
+(tests
+ (names
+  layout_tests
+  lir_tests
+  drops_tests
+  yields_tests
+  glue_tests
+  build_tests
+  source_tests
+  feature_tests
+  program_tests)
+ (modules
+  codegen_support
+  layout_tests
+  lir_tests
+  drops_tests
+  yields_tests
+  glue_tests
+  build_tests
+  source_tests
+  feature_tests
+  program_tests)
  (libraries
   harness
   zarith
