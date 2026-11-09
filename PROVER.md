@@ -844,8 +844,18 @@ It proves, with one canonical, numbered, hashed query per obligation:
   them
 - indexing, through the `impl` of `Index` a call reaches, so every index
   into a `List` or a `Slice` is checked against `key < self.length()`; and
-  assigning to an element, after which the collection is not known any
-  more, since `lends mut` contracts are not read yet
+  assigning to an element, through the `lends mut` index, whose contract
+  says how the collection takes the element back
+- lending and yielding methods, as [Lending and yielding
+  methods](#lending-and-yielding-methods) describes: their own bodies show
+  the clauses that mention `result` at each `yield`, and the others, with
+  `finished`, where a loop may stop them and where they end; a call to a
+  lending method reads its contract with `yielded` holding the part as the
+  caller's statement left it; and a `for` loop over an `each` reads the
+  method's contract for each part and for how it ends, with `yielded` a
+  ghost sequence its invariants can name. Inside a yielding method's body,
+  a nested loop's invariants cannot yet name what the method has handed
+  out, and pulled cursors are not read yet.
 - functional bodies as definitions: a pure function with a `time` clause
   and a functional body is unfolded once at each call, where its
   `requires` holds, unless its body reads what the prover cannot
@@ -862,8 +872,7 @@ It proves, with one canonical, numbered, hashed query per obligation:
   read is in its type's range, and a counterexample shows a value by its
   variant and fields.
 - `while` loops, `for` loops over ranges of integers, and `for` loops over
-  an `each` method, whose elements are fresh values of their type, since
-  `yield`s' contracts are not read yet; with invariants on entry and after
+  an `each` method; with invariants on entry and after
   each iteration, and, in a function with a `time` clause, termination by
   `decreases`, the one measure the prover tries itself, or the `time`
   clause of the `each` a loop calls
@@ -921,8 +930,7 @@ method or a capability, gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
 definition that uses anything else, such as a string, a float, a cursor,
-a function named as a value, or a lending or yielding method's own body,
-is reported as
+or a function named as a value, is reported as
 `prover.unsupported` with what stopped it, and none of its obligations
 count as proven. A cost bound, and a loop's
 `cost`, are reported as not proven yet, while the rest of the definition is

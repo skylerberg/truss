@@ -688,6 +688,66 @@ let () =
          }\n"
         "prover.ensures")
 
+let couple =
+  "type Couple(first: Int64, second: Int64)\n\n\
+   fn Couple.each(self) yields Int64\n\
+  \  ensures result == self.first || result == self.second\n\
+  \  ensures yielded.length() <= 2\n\
+  \  ensures finished ==> yielded.length() == 2\n\
+  \  cost time finite\n\
+   {\n\
+  \  yield self.first\n\
+  \  yield self.second\n\
+   }\n\n"
+
+let () =
+  test "a yielding method keeps its contract at each yield and at its end" (fun () -> proven couple);
+  test "a yielding method that hands out more than it promises" (fun () ->
+      not_proven
+        "type Couple(first: Int64, second: Int64)\n\n\
+         fn Couple.each(self) yields Int64\n\
+        \  ensures yielded.length() <= 1\n\
+        \  cost time finite\n\
+         {\n\
+        \  yield self.first\n\
+        \  yield self.second\n\
+         }\n"
+        "prover.ensures");
+  test "a loop over a user's yielding method gets its facts" (fun () ->
+      proven
+        (couple
+       ^ "fn f(couple: Couple) -> USize\n\
+         \  ensures result == 2\n\
+          {\n\
+         \  var seen: USize = 0\n\
+         \  for value in couple\n\
+         \    invariant seen == yielded.length()\n\
+         \  {\n\
+         \    let _ = value\n\
+         \    seen += 1\n\
+         \  }\n\
+         \  seen\n\
+          }\n"));
+  test "assigning an element changes only that element" (fun () ->
+      proven
+        "fn f(items: mut List[Int64])\n\
+        \  requires items.length() > 1\n\
+        \  ensures items.length() == old(items.length())\n\
+        \  ensures items[0] == 0\n\
+        \  ensures items[1] == old(items[1])\n\
+         {\n\
+        \  items[0] = 0\n\
+         }\n");
+  test "a compound assignment to an element" (fun () ->
+      proven
+        "fn f(items: mut List[UInt8])\n\
+        \  requires items.length() > 0\n\
+        \  requires items[0] < 255\n\
+        \  ensures items[0] == old(items[0]) + 1\n\
+         {\n\
+        \  items[0] += 1\n\
+         }\n")
+
 (* Laws *)
 
 let monoid =

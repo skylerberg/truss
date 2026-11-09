@@ -1053,7 +1053,7 @@ and call context frame (written : expression) callee_expression arguments =
             (quote source written.span)
       | Some call_ -> resolved_call context frame written call_)
 
-and resolved_call context frame (written : expression) (call_ : C.call) =
+and resolved_call ?lent_final context frame (written : expression) (call_ : C.call) =
   let source = frame.source in
   (* Arguments run in the order written, except lambdas, which are proven
      last, as the type checker checks them, so that what the callee
@@ -1183,7 +1183,7 @@ and resolved_call context frame (written : expression) (call_ : C.call) =
   let with_contract ?(substitution_of = fun _ -> []) ?(instance = "") path = function
     | Some contract when contract.result_kind <> `Yields ->
         Some
-          (contract_call context frame written call_ path contract values ~havoc_mut
+          (contract_call ~lent_final context frame written call_ path contract values ~havoc_mut
              ~substitution_of ~instance)
     | Some _ -> unsupported written.span "a call to a yielding method outside a `for` loop"
     | None ->
@@ -2149,7 +2149,7 @@ and place_local frame (expression_ : expression) =
 (* A call to a function whose contract the prover reads: its [requires]
    must hold, its [ensures] holds after, and a recursive call decreases. *)
 and contract_call context frame (written : expression) (call_ : C.call) path contract values
-    ~havoc_mut ~substitution_of ~instance =
+    ~lent_final ~havoc_mut ~substitution_of ~instance =
   let caller = frame.source in
   let argument_at index =
     List.find_map
@@ -2367,9 +2367,29 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
             substitution = substitution_of part;
           }
         in
+        let ensures_frame =
+          match contract.result_kind with
+          | `Lends ->
+              (* The part as lent, and the parts handed out: the one part, as
+                 the caller's statement left it. *)
+              let part_type = substituted frame call_.result in
+              let left = match lent_final with Some term -> term | None -> result in
+              let none = empty_parts context after part_type in
+              {
+                ensures_frame with
+                yielded = Some (appended context after part_type none left);
+                finished = Some (L.Boolean true);
+              }
+          | `Returns | `Yields -> ensures_frame
+        in
         List.iter
           (fun (clause : expression) ->
-            match value context ensures_frame clause with
+            let frame_for_clause =
+              if contract.result_kind = `Lends && mentions_result part.callee clause then
+                { ensures_frame with locals = entry_locals; self = entry_self; yielded = None }
+              else ensures_frame
+            in
+            match value context frame_for_clause clause with
             | _, term -> assume context after (L.( ==> ) required term))
           part.ensures)
       contract.parts;
@@ -2473,10 +2493,54 @@ and statement_kind context frame (written : statement) : frame option =
         (fun frame branch ->
           match frame with Some frame -> statement context frame branch | None -> None)
         (Some frame) block_.statements
-  | Yield _ -> unsupported written.span "`yield`"
+  | Yield handed -> handing_out context frame written handed
   | Statement_error -> unsupported written.span "this statement"
 
 and is_test context = match context.current with Path.Test _ -> true | _ -> false
+
+(* A [yield] in a lending or yielding method's own body: the part meets
+   the clauses about each part; a [mut] part comes back as the caller left
+   it, which is any value of its type; and a yielding method may end here,
+   if a loop stops it, so its other clauses and [self]'s invariant hold. *)
+and handing_out context frame (written : statement) handed =
+  match (context.hands_out, context.handing, frame.handed_out) with
+  | Some (part_type, kind), Some (each, at_end), Some before ->
+      let frame, part = value context frame handed in
+      let show clauses ~at ~result ~yielded ~finished ~when_ =
+        List.iter
+          (fun (clause : expression) ->
+            let _, term =
+              value context
+                { at with result; yielded = Some yielded; finished; checking = false }
+                clause
+            in
+            oblige context at Ensures clause.span
+              (Printf.sprintf "`%s` may not hold %s." (quote at.source clause.span) when_)
+              term)
+          clauses
+      in
+      show each ~at:frame ~result:(Some part) ~yielded:before ~finished:None
+        ~when_:"for the part handed out here";
+      let frame, part_after =
+        match handed.kind with
+        | Mode (Mut, place) ->
+            let frame = havoc_root context frame place in
+            value context frame place
+        | _ -> (frame, part)
+      in
+      let after = appended context frame part_type before part_after in
+      let frame = { frame with handed_out = Some after } in
+      if kind = `Yields then begin
+        show at_end ~at:frame ~result:None ~yielded:after ~finished:(Some (L.Boolean false))
+          ~when_:"at this `yield`, where a loop may stop the method";
+        match (frame.self, frame.self_type) with
+        | Some self, Some self_type ->
+            check_valid context frame written.span self_type self ~deep:true
+              ~when_:"for `self` at this `yield`, where a loop may stop the method"
+        | _ -> ()
+      end;
+      Some frame
+  | _ -> unsupported written.span "`yield` outside a lending or yielding method's body"
 
 and is_self (expression_ : expression) =
   match expression_.kind with
@@ -2529,7 +2593,22 @@ and store context frame (place : expression) new_value =
               store context frame base rebuilt
           | _ -> unsupported place.span "assigning to a field of `%s`" (T.show type_))
       | _ -> unsupported place.span "assigning to this place")
-  | Bracket _ -> havoc_root context frame place
+  | Bracket _ -> (
+      (* An element is stored through the collection's [lends mut] index,
+         whose contract says how the collection takes the element back. *)
+      match source.checked.calls.(place.id) with
+      | Some ({ callee = Trait_method method_; arguments = receiver :: rest; _ } as recorded) -> (
+          let lend_mut =
+            {
+              recorded with
+              callee = Trait_method { method_ with receiver = Mut };
+              arguments = { receiver with mode = T.Mut } :: rest;
+            }
+          in
+          match resolved_call ~lent_final:new_value context frame place lend_mut with
+          | Some (after, _) -> after
+          | None -> havoc_root context frame place)
+      | _ -> havoc_root context frame place)
   | _ -> unsupported place.span "assigning to this place"
 
 and assignment context frame (written : statement) target operator assigned =
@@ -2567,12 +2646,8 @@ and assignment context frame (written : statement) target operator assigned =
           | _ -> (frame, opaque_operation context frame ty "assignment" [ current; right ])
           end
   in
-  (* An index is checked once, when the place is read or written. *)
-  let frame =
-    match (operator, target.kind) with
-    | Assign, Bracket _ -> fst (value context frame target)
-    | _ -> frame
-  in
+  (* Storing into an element checks its index, through the [lends mut]
+     call. *)
   Some (store context frame target new_value)
 
 (* The locals a loop's body may change, which are havocked at its head. *)
@@ -2963,9 +3038,6 @@ let costs_unproven context (clauses : clause list) =
 let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (source : source)
     ~path (signature : signature) (body : block) =
   reject_checker_obligations source;
-  (match signature.result with
-  | Some (Yields _ | Lends _) -> unsupported body.span "a lending or yielding method"
-  | _ -> ());
   let terminates =
     proof
     || List.exists
@@ -3034,6 +3106,27 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
       start signature.parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
+  (* A lending or yielding method hands out parts: its [ensures] that
+     mention [result] hold at each [yield], and its others where it ends. *)
+  let start =
+    match (signature.result, Query.demand database Interface.Environment.signature path) with
+    | Some (Yields _ | Lends _), Some { output = (Yields (_, part) | Lends (_, part)) as output; _ }
+      ->
+        let kind = match output with Lends _ -> `Lends | _ -> `Yields in
+        context.hands_out <- Some (part, kind);
+        let ensures =
+          List.filter_map
+            (fun (clause : clause) ->
+              match clause.kind with Ensures value_ -> Some value_ | _ -> None)
+            signature.clauses
+        in
+        context.handing <-
+          Some
+            ( List.filter (mentions_result source) ensures,
+              List.filter (fun clause -> not (mentions_result source clause)) ensures );
+        { start with handed_out = Some (empty_parts context start part) }
+    | _ -> start
+  in
   (* An [impl]'s method also keeps its trait's contract: the trait's
      [requires] is what callers through a bound show, so it is assumed,
      and implies the method's own; the trait's [ensures] is what they
@@ -3155,17 +3248,39 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
           check_valid context frame body.span self_type self ~deep:true
             ~when_:"for `self` when the method returns"
       | _ -> ());
-      List.iter
-        (fun (clause : clause) ->
-          match clause.kind with
-          | Ensures ensured ->
-              let _, term = value context frame ensured in
+      (match (context.handing, frame.handed_out) with
+      | Some (_, at_end), Some handed_out ->
+          (* The clauses about how a lending or yielding method ends, with
+             everything it handed out, having run to its end. *)
+          List.iter
+            (fun (ensured : expression) ->
+              let _, term =
+                value context
+                  {
+                    frame with
+                    yielded = Some handed_out;
+                    finished = Some (L.Boolean true);
+                    checking = false;
+                  }
+                  ensured
+              in
               oblige context frame Ensures ensured.span
-                (Printf.sprintf "`%s` may not hold when the function returns."
+                (Printf.sprintf "`%s` may not hold when the method ends."
                    (quote source ensured.span))
-                term
-          | _ -> ())
-        signature.clauses;
+                term)
+            at_end
+      | _ ->
+          List.iter
+            (fun (clause : clause) ->
+              match clause.kind with
+              | Ensures ensured ->
+                  let _, term = value context frame ensured in
+                  oblige context frame Ensures ensured.span
+                    (Printf.sprintf "`%s` may not hold when the function returns."
+                       (quote source ensured.span))
+                    term
+              | _ -> ())
+            signature.clauses);
       match trait_frame frame ~result:returned with
       | Some (part, inside) when List.length part.binding = List.length own_terms ->
           List.iter
