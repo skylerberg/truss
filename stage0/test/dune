@@ -4,4 +4,5 @@
  (deps
   %{workspace_root}/SYNTAX.md
   %{workspace_root}/DESIGN.md
-  %{workspace_root}/GRAMMAR.md))
+  %{workspace_root}/GRAMMAR.md
+  %{workspace_root}/CODEGEN.md))

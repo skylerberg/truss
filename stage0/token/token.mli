@@ -5,7 +5,7 @@ type span = Source.span = private { start : int; stop : int }
 type keyword =
   | Any | Assert | Break | Capability | Continue | Cost | Decreases | Derives
   | Echo | Else | Ensures | Exists | False | Fn | For | Forall | If | Impl | In
-  | Internal | Invariant | Is | Law | Let | Match | Mut | Opaque | Own
+  | Indirect | Internal | Invariant | Is | Law | Let | Match | Mut | Opaque | Own
   | Parallel | Proof | Provide | Public | Requires | Return
   | Self_value  (** [self] *)
   | Self_type  (** [Self] *)

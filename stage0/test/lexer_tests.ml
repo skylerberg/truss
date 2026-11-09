@@ -522,7 +522,7 @@ let () =
           test (Printf.sprintf "%s block %d lexes cleanly" name (index + 1)) (fun () ->
               equal_lists Fun.id "codes" [] (codes text)))
         (truss_blocks name))
-    [ "SYNTAX.md"; "DESIGN.md"; "GRAMMAR.md" ]
+    [ "SYNTAX.md"; "DESIGN.md"; "GRAMMAR.md"; "CODEGEN.md" ]
 
 let () =
   if !failures > 0 then begin

@@ -31,7 +31,7 @@ let can_begin = function
       | Unreachable | Use | Var | While | Yield ) ->
       true
   | Keyword
-      ( Cost | Decreases | Derives | Else | Ensures | In | Invariant | Is | Opaque | Requires
+      ( Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Opaque | Requires
       | Uses | With | Yields ) ->
       false
   | Punctuation _ | Newline | End_of_file -> false

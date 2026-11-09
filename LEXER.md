@@ -702,7 +702,7 @@ fact about a small input.
   punctuation list, and the line-break sets from GRAMMAR.md and compare them
   with `Token` and `Layout`.
 - **The documents' examples lex cleanly.** Each ` ```truss ` block in
-  SYNTAX.md, DESIGN.md, and GRAMMAR.md is a test of its own.
+  SYNTAX.md, DESIGN.md, GRAMMAR.md, and CODEGEN.md is a test of its own.
 - **The fuzzer**, `stage0/tools/fuzz`, is run by hand. It checks that no
   input raises or gives spans out of bounds or out of order, that one
   mistake inserted into a document example never loses its fix to the fix
