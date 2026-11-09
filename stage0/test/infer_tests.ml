@@ -388,4 +388,54 @@ let () =
       in
       if checked () <> checked () then fail "different")
 
+let () =
+  test "no checked form of the standard library holds an unsolved type" (fun () ->
+      let database = setup [] in
+      let rec unsolved = function
+        | Types.Variable _ | Types.Literal _ | Types.Hole -> true
+        | Types.Named { arguments; _ } | Types.Cursor { arguments; _ } ->
+            List.exists (function Types.Type type_ -> unsolved type_ | _ -> false) arguments
+        | Types.Function { inputs; output; _ } -> (
+            List.exists (fun (_, type_) -> unsolved type_) inputs
+            ||
+            match output with
+            | Returns type_ | Yields (_, type_) | Lends (_, type_) -> unsolved type_)
+        | _ -> false
+      in
+      let arguments =
+        List.exists (function
+          | Types.Type type_ -> unsolved type_
+          | Types.Value (Value_variable _) -> true
+          | _ -> false)
+      in
+      List.iter
+        (fun ((module_ : Path.module_), _) ->
+          List.iter
+            (fun (declaration : Resolve.Names.declaration) ->
+              match Query.demand database Infer.checked (Resolve.Names.key_of declaration) with
+              | Some { checked; _ } ->
+                  Array.iter
+                    (function
+                      | Some type_ when unsolved type_ ->
+                          fail "%s: an unsolved type" (Path.show declaration.path)
+                      | _ -> ())
+                    checked.types;
+                  Array.iter
+                    (function
+                      | Some
+                          ({
+                             callee =
+                               Intrinsic { type_arguments; _ } | Function { type_arguments; _ };
+                             _;
+                           } :
+                            Checked.call)
+                        when arguments type_arguments ->
+                          fail "%s: a call with unsolved type arguments"
+                            (Path.show declaration.path)
+                      | _ -> ())
+                    checked.calls
+              | None -> ())
+            (Query.demand database Resolve.Names.declarations module_))
+        Standard_library.modules)
+
 let () = finish ()
