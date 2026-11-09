@@ -405,6 +405,8 @@ at hand:
 - no function named `old`
 - no `lends own`: a part a `lends` method lends stays with `self`, and a fix
   removes the `own`
+- a function type's inputs named exactly when it has a `requires`
+- a loop's `cost` neither `amortized` nor `finite`
 - a body for every function outside a trait or a capability. A missing one
   gets the fix `{ todo }`, the body of unwritten code, indented as its
   signature is.
@@ -448,6 +450,8 @@ branch, and a method that yields or lends. It reports:
 - `echo` inside a specification, which never runs
 - a parameter named `result`, or, in a lending or yielding method, `yielded`
   or `finished`
+- a `requires` on a function type anywhere but at the top of a parameter's
+  type
 
 These need only the one definition's tree, so they belong to the parse stage
 and are cached with it. They are a separate walk, not part of each parsing

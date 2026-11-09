@@ -112,8 +112,37 @@ and loop_exit cursor context (value : expression) =
 
 and block cursor context (body : block) = List.iter (statement cursor context) body.statements
 
-and types cursor context type_ =
+and types ?(parameter = false) cursor context type_ =
+  requires_placement cursor ~top:parameter type_;
   Syntax_walk.type_expression (expression cursor (specification context)) type_
+
+(* A [requires] on a function type says what a callee passes its callback,
+   so it belongs only on the type of a definition's parameter, at its top:
+   never on a field's, a result's, or a type argument's. *)
+and requires_placement cursor ~top (type_ : type_expression) =
+  match type_.kind with
+  | Function_type { inputs; output; clauses; _ } ->
+      if not top then
+        List.iter
+          (fun (clause : clause) ->
+            match clause.kind with
+            | Requires _ ->
+                report cursor Misplaced_requires clause.span
+                  "A function type has a `requires` only as the type of a parameter, where it says \
+                   what the function passes its callback."
+            | _ -> ())
+          clauses;
+      List.iter (fun (_, input) -> requires_placement cursor ~top:false input) inputs;
+      Option.iter (requires_placement cursor ~top:false) output
+  | Path_type path | Any_type path -> path_requires_placement cursor path
+  | Self_type _ | Associated _ | Type_error -> ()
+
+and path_requires_placement cursor (path : path_type) =
+  List.iter
+    (function
+      | Type_argument type_ | Constraint (_, type_) -> requires_placement cursor ~top:false type_
+      | Count _ | Count_name _ -> ())
+    path.arguments
 
 and loop_clauses cursor context clauses =
   List.iter (Syntax_walk.loop_clause (expression cursor (specification context))) clauses
@@ -180,7 +209,7 @@ let parameters ?(hands_out = false) cursor (parameters : parameter list) =
                  name.text
                  (if name.text = "yielded" then "the parts handed out so far"
                   else "whether the method ran to its end"));
-          types cursor plain type_;
+          types ~parameter:true cursor plain type_;
           Option.iter (expression cursor plain) default
       | Self_parameter _ | Parameter_error -> ())
     parameters

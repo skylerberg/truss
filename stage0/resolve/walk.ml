@@ -258,10 +258,13 @@ let rec type_expression state scope (type_ : type_expression) =
                base.text
                (match type_.kind with Associated (_, name) -> name.text | _ -> "")
                base.text))
-  | Function_type { inputs; output; clauses } ->
+  | Function_type { inputs; input_names; output; clauses } ->
       List.iter (fun (_, input) -> type_expression state scope input) inputs;
       Option.iter (type_expression state scope) output;
-      List.iter (clause state scope) clauses
+      (* The names of the inputs are in scope in the type's own [requires],
+         after the parameters before it in a signature. *)
+      let named = List.fold_left (declare_parameter state) scope input_names in
+      List.iter (clause state named) clauses
   | Type_error -> ()
 
 and path_type state scope (path : path_type) =
@@ -751,11 +754,12 @@ and statement state scope (statement_ : statement) =
       scope
   | Statement_error -> scope
 
-and loop_clause state scope (clause : loop_clause) =
+and loop_clause state scope (written : loop_clause) =
   let specification = { scope with specification = in_specification } in
-  match clause.kind with
+  match written.kind with
   | Invariant value -> expression state specification value
   | Loop_decreases measures -> List.iter (expression state specification) measures
+  | Loop_cost cost -> clause state scope { kind = Cost cost; span = written.span; id = written.id }
 
 (* Generic parameters *)
 

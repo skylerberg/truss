@@ -486,6 +486,12 @@ the definition's interface: the types of its parameters and result, its
   error.
 - **An `own` function-typed parameter** accepts only functions that capture
   nothing. That is recorded in the interface, for checking callers.
+- **A function-typed parameter's `requires`** is a specification, a `Bool`
+  over the type's named inputs, with the types its inputs have, and the
+  parameters before it. It is not part of the parameter's type: two function
+  types that differ only in it are the same type, and the prover reads it
+  from the signature, both to show the function meets it at each call
+  through the parameter and to give a lambda passed there its facts.
 - **A private type in a public signature is an error,** and so is a private
   or `internal` type in a public type's visible fields, as in Rust and
   Swift. Callers in other packages could never name the type.
@@ -776,6 +782,8 @@ type of a bound.
   writes `let _ =`, as DESIGN.md requires. An `if` without an `else` has type
   `Unit`. The arms of an `if` or `match` are unified, ignoring arms of type
   `Never`.
+- **Loop clauses** are specifications: an `invariant` is a `Bool`, and a
+  `decreases` measure and a `cost` bound are integers, as in a signature.
 - **`while`** takes a `Bool`. A `while` whose condition is the literal
   `true`, and which no `break` leaves, has type `Never`, as Java and Kotlin
   treat it. Any other loop is a statement of type `Unit`.

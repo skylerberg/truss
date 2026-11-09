@@ -371,8 +371,8 @@ path_type   = [ module_path "::" ] UPPER_NAME [ type_arguments ] ;
 type_arguments = "[" type_argument { "," type_argument } [ "," ] "]" ;
 type_argument  = type | INTEGER | LOWER_NAME | UPPER_NAME "=" type ;
 
-function_type        = "fn" "(" list([ mode ] type) ")" [ "->" type ] ;
-function_type_clause = "uses" capability_list | "cost" cost ;
+function_type        = "fn" "(" list([ LOWER_NAME ":" ] [ mode ] type) ")" [ "->" type ] ;
+function_type_clause = "uses" capability_list | "cost" cost | "requires" expression ;
 ```
 
 - `UPPER_NAME "." UPPER_NAME` names an associated type of a generic
@@ -382,8 +382,11 @@ function_type_clause = "uses" capability_list | "cost" cost ;
   an expression.
 - `UPPER_NAME "=" type` constrains an associated type in a bound or after
   `any`, as in `Iterable[Element = Int64]` or `any Cursor[Element = Int64]`.
-- A function type with clauses must be in parentheses. The clauses of a
-  function type cannot mention parameters.
+- A function type with clauses must be in parentheses. Its `uses` and `cost`
+  clauses cannot mention parameters.
+- A function type names its inputs exactly when it has a `requires`, which
+  can mention them and the parameters before it in a signature. Only the
+  type of a definition's parameter, at its top, can have a `requires`.
 
 ```ebnf
 generics         = "[" generic_parameter { "," generic_parameter } [ "," ] "]" ;
@@ -448,10 +451,13 @@ statement = "let" pattern [ ":" type ] "=" expression [ "else" block ]
 
 assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
                     | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
-loop_clause = "invariant" expression | "decreases" expression { "," expression } ;
+loop_clause = "invariant" expression | "decreases" expression { "," expression }
+            | "cost" cost ;
 ```
 
-- A loop has at most one `decreases` clause. `invariant` may repeat.
+- A loop has at most one `decreases` clause. `invariant` and `cost` may
+  repeat. A loop's `cost` is never `amortized`, and its bound is never
+  `finite`.
 - The left side of an assignment must be a place.
 - Every name a `var` pattern binds is mutable.
 - In `let ... else` and `var ... else`, the expression must not end with `}`. Write

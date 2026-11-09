@@ -995,6 +995,36 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
   A function that returns a function type with clauses puts it in
   parentheses: `fn make_counter() -> (fn(Int64) -> Int64 uses Clock)`.
 
+The type of a function-typed parameter can say what the function passes it,
+with a `requires`. Its inputs are then named, so the `requires` can mention
+them, and it can also mention the parameters before it:
+
+```truss
+fn List[Element].map[Output](
+  self,
+  transform: (fn(element: Element) -> Output requires self.model().contains(element)),
+) -> List[Output]
+  ensures result.length() == self.length()
+{
+  todo
+}
+
+let picked = indices.map(fn(i) { values[i] })
+```
+
+- The function must meet the `requires` at every call it makes through
+  `transform`, and a lambda passed for it may rely on it. Above, the lambda
+  knows that `i` is one of `indices`, so `values[i]` is proven in bounds
+  when every index in `indices` is.
+- A named function passed for it must accept every argument the `requires`
+  allows.
+- The names are only for the `requires`. They are not labels, and calls
+  through a function value still pass arguments by position. A function
+  type names its inputs exactly when it has a `requires`.
+- Only a parameter's own type can have a `requires`, at its top: not a
+  field's type, a result type, or a type argument such as
+  `List[(fn(index: USize) requires ...)]`.
+
 A function that passes on whatever capabilities its callback needs declares a
 capability parameter with `capability`:
 
@@ -1597,6 +1627,36 @@ while low < high
 zero, which proves the loop ends. Both are optional. `invariant` may repeat;
 `decreases` appears at most once, and takes a list of measures compared in
 order, as for a function.
+
+A `cost` clause on a loop states what the loop has spent so far, at the
+start of every iteration and when it ends. A loop needs one only when its
+iterations cost different amounts, as when each one handles a row of its own
+length:
+
+```truss
+fn total_cells(rows: Sequence[List[Int64]]) -> Integer {
+  todo
+}
+
+fn sum_all(rows: List[List[Int64]]) -> Int64
+  cost time O(rows.length() + total_cells(rows.model()))
+{
+  var total = 0
+  for row in rows
+    cost time O(yielded.length() + total_cells(yielded))
+  {
+    for cell in row {
+      total = total.saturating_add(cell)
+    }
+  }
+  total
+}
+```
+
+- A loop's `cost` takes the resources and bounds of a function's, and may
+  repeat, but is never `amortized` or `finite`.
+- Its bound can use the variables in scope at the loop and, in a `for`
+  loop, `yielded`.
 
 ### Operators
 

@@ -210,18 +210,29 @@ and type_argument cursor =
       Constraint (name, type_expression cursor)
   | _ -> Type_argument (type_expression cursor)
 
-(* [fn(Element, Element) -> Ordering], with [uses] and [cost] clauses only
-   when it is in parentheses. *)
+(* [fn(Element, Element) -> Ordering], with [uses], [cost], and [requires]
+   clauses only when it is in parentheses. Its inputs are named, as in
+   [fn(element: Element)], exactly when it has a [requires], which names
+   them. *)
 and function_type cursor ~clauses:with_clauses =
+  let start = cursor.Cursor.index in
   Cursor.expect_keyword cursor Fn;
   if not (Cursor.is_punctuation cursor (Open Paren)) then
     Cursor.fail cursor "`(` after `fn` in a function type";
   let inputs =
     Cursor.bracketed cursor
       ~item:(fun cursor ->
+        let name =
+          match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
+          | Lower text, Punctuation Colon ->
+              let name = Atoms.name cursor (Cursor.next cursor) text in
+              Cursor.advance cursor;
+              Some name
+          | _ -> None
+        in
         let mode = mode cursor in
-        (mode, type_expression cursor))
-      ~recover:(fun span -> (None, { kind = Type_error; span; id = Cursor.fresh cursor }))
+        (name, (mode, type_expression cursor)))
+      ~recover:(fun span -> (None, (None, { kind = Type_error; span; id = Cursor.fresh cursor })))
   in
   let output =
     if Cursor.accept_punctuation cursor Arrow then Some (type_expression cursor) else None
@@ -230,16 +241,36 @@ and function_type cursor ~clauses:with_clauses =
     if with_clauses then
       let rec loop clauses =
         match Cursor.peek_kind cursor with
-        | Keyword (Uses | Cost) -> loop (clause cursor :: clauses)
-        | Keyword (Requires | Ensures | Decreases) ->
+        | Keyword (Uses | Cost | Requires) -> loop (clause cursor :: clauses)
+        | Keyword (Ensures | Decreases) ->
             Cursor.fail cursor
-              "`uses` or `cost`; the clauses of a function type cannot mention its parameters"
+              "`uses`, `cost`, or `requires`; a function type has no `ensures` or `decreases`"
         | _ -> List.rev clauses
       in
       loop []
     else []
   in
-  { inputs; output; clauses }
+  let names = List.filter_map fst inputs in
+  let requires =
+    List.exists (fun (clause : clause) -> match clause.kind with Requires _ -> true | _ -> false)
+  in
+  let span = (Cursor.token_at cursor start).span in
+  if requires clauses then
+    begin if List.length names <> List.length inputs then
+      Cursor.report cursor Function_type_names span
+        "A function type with `requires` names every input, as in `fn(index: USize)`, so that the \
+         `requires` can mention them."
+    end
+  else if names <> [] then
+    Cursor.report cursor Function_type_names span
+      "A function type names its inputs only when a `requires` mentions them; remove the names, \
+       since calls through a function value pass arguments by position.";
+  {
+    inputs = List.map snd inputs;
+    input_names = (if List.length names = List.length inputs then names else []);
+    output;
+    clauses;
+  }
 
 and parenthesized_function_type cursor =
   let start = cursor.Cursor.index in
@@ -1336,7 +1367,7 @@ and for_loop cursor ~parallel =
   let clauses = loop_clauses cursor in
   For { parallel; pattern; iterable; clauses; body = body cursor }
 
-(* [invariant] may repeat; [decreases] appears at most once. *)
+(* [invariant] and [cost] may repeat; [decreases] appears at most once. *)
 and loop_clauses cursor =
   let rec loop clauses =
     let start = cursor.Cursor.index in
@@ -1347,6 +1378,28 @@ and loop_clauses cursor =
         loop
           (({
               kind = Invariant value;
+              span = Cursor.span_from cursor start;
+              id = Cursor.fresh cursor;
+            }
+             : loop_clause)
+          :: clauses)
+    | Keyword Cost ->
+        let keyword = Cursor.next cursor in
+        let cost = cost cursor in
+        if cost.amortized || cost.bound = Finite then
+          Cursor.report cursor Loop_cost_bound keyword.span
+            (Printf.sprintf
+               "A loop's `cost` states what the loop has spent so far, so it takes `O(...)`, `<=`, \
+                or `==`%s. %s"
+               (if cost.bound = Finite then "" else ", and is never `amortized`")
+               (if cost.bound = Finite then
+                  "A loop shows that it ends with `decreases`, not with `time finite`."
+                else
+                  "Potential belongs to the values the loop changes, which the function's own \
+                   `cost` accounts for."));
+        loop
+          (({
+              kind = Loop_cost cost;
               span = Cursor.span_from cursor start;
               id = Cursor.fresh cursor;
             }

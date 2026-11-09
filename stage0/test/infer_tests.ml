@@ -687,4 +687,29 @@ let () =
          }\n"
         "types.not_assignable")
 
+(* Specifications on loops and on function-typed parameters *)
+
+let () =
+  test "a function-typed parameter's requires is a Bool over its inputs" (fun () ->
+      fine
+        "fn apply_all(limit: USize, visit: (fn(index: USize) requires index < limit)) {\n\
+        \  todo\n\
+         }\n");
+  test "a function-typed parameter's requires must be a Bool" (fun () ->
+      one_diagnostic
+        "fn apply_all(limit: USize, visit: (fn(index: USize) requires index + limit)) {\n\
+        \  todo\n\
+         }\n"
+        "types.mismatch");
+  test "a loop's cost bound is checked" (fun () ->
+      one_diagnostic
+        "fn f(count: USize) {\n\
+        \  for i in 0..count\n\
+        \    cost time O(missing)\n\
+        \  {\n\
+        \    let _ = i\n\
+        \  }\n\
+         }\n"
+        "resolve.unknown_name")
+
 let () = finish ()

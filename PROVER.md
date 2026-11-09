@@ -112,6 +112,9 @@ Every fact the prover must show, and where it comes from:
 | An `ensures` holds | Each way a function returns, and for a lending or yielding method, each `yield` and each way it ends |
 | A type's invariant holds | Each value built or updated with `with`, each argument and returned value, each `mut` parameter when its function ends, and each `yield` where a method may end |
 | A loop invariant holds | On entry to the loop, and at the end of each iteration |
+| A loop's `cost` holds | On entry to the loop, and at the end of each iteration |
+| A callback's `requires` holds | Each call through a function-typed parameter whose type has a `requires` |
+| A function passed as a callback accepts what it is promised | Each named function passed where a parameter's type has a `requires`: that `requires` implies the function's own |
 | Recursion and loops end | Each call in a cycle of the call graph, and each loop, in a function with a `time` clause |
 | A cost clause holds | Each function with one (see [Costs](#costs)) |
 | A law holds | Each law of each trait an `impl` implements by hand |
@@ -280,6 +283,13 @@ decides when a body is a definition. In the solver:
   `ensures result[i] == transform(self[i])` gives the caller facts about its
   own lambda. Only a function type that is pure and has a `time` clause can
   be applied in a specification, which the type checker ensures.
+- **A lambda passed where a parameter's type has a `requires`** is
+  checked with that `requires` assumed of its arguments, with the call's
+  arguments in place of the callee's parameters. In
+  `indices.map(fn(i) { values[i] })`, the lambda knows
+  `indices.model().contains(i)`, and the caller's facts about `indices` do
+  the rest. A call through such a parameter, in the callee's body, asserts
+  the `requires` of its arguments.
 
 Callers' proofs depend on whether a body is a definition, and on the body
 itself when it is. Both are in the trace of every proof that used the
@@ -629,9 +639,16 @@ plus what happens before and after:
   on entry plus the iterations so far times that bound, or, for an exact
   bound, exactly that.
 
-A loop whose iterations' cost cannot be bounded that way, such as one over
-rows of different lengths, cannot have its cost proven yet; see
-[Open questions](#open-questions).
+- **A loop with a `cost` clause** is not bounded iteration by iteration.
+  The clause is an invariant about the counter since the loop began: it is
+  asserted on entry, assumed at the head, and asserted again after each
+  iteration, and the loop's constants are found as a function's are, from
+  the same list. After the loop, its cost is counted as its bound, plus one,
+  in the state the loop ended in, as a call with that bound would be. So
+  a loop over rows of different lengths states
+  `cost time O(yielded.length() + total_cells(yielded))`, and each
+  iteration only has to show that it spent no more than its row adds to
+  the bound.
 
 ### Amortized bounds
 
@@ -791,18 +808,6 @@ input and states one fact about the result, and there are no golden files.
 
 ## Open questions
 
-- **Loops whose iterations cost different amounts.** A loop over rows of
-  different lengths costs the total of their lengths, which no bound on one
-  iteration gives. The likely answer is a `cost` clause on loops, an
-  invariant about what the loop has spent so far, as Creusot and the time
-  credits of Charguéraud and Pottier state it. Until then, such a function
-  states no `time` bound, or a looser one.
-- **Facts about a lambda's arguments.** A lambda passed to `map` knows
-  nothing about its argument, so `indices.map(fn(i) { values[i] })` cannot
-  prove its index. Dafny and Verus let a lambda state a `requires`, and a
-  callee promise what it passes. Truss's lambdas have no annotations, so
-  the answer is more likely a clause on the callee that says what it passes
-  its callback, as `yields` methods already say what they hand out.
 - **Turning off a definition.** Dafny and Verus can hide a body from the
   solver, which keeps large definitions from slowing queries that do not
   need them. Pruning may be enough; if not, a way to say so is needed.

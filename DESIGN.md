@@ -784,6 +784,21 @@ rules for views:
   function-typed parameter is non-escaping by default, as in Swift. Declaring
   it `own` lets the function keep it, and then only capture-free functions can
   be passed.
+- **A function says what it passes its callback.** A lambda's parameters
+  have no annotations, so on its own a lambda knows nothing about its
+  arguments, and `indices.map(fn(i) { values[i] })` could not prove its
+  index. So the type of a function-typed parameter can carry a `requires`
+  over named inputs and the parameters before it, as in
+  `transform: (fn(element: Element) -> Output requires self.model().contains(element))`.
+  The function must meet it at every call it makes through the parameter,
+  and a lambda passed there may rely on it. The names exist only for the
+  `requires`; calls through function values stay positional. This is the
+  refinement on a function's argument that F* and Liquid Haskell write as
+  `(x: int{x < n}) -> int`, and the precondition Dafny and Verus give a
+  lambda, stated by the callee, since Truss's lambdas are never annotated.
+  It is allowed only on a parameter's type, where a callee states what it
+  passes, so it never becomes part of a type that values are stored in or
+  compared by.
 - **Behavior with state is a record with a trait**, not a closure. A
   `make_adder(5)` that returns a closure becomes `Adder(amount: 5)` with an
   `impl`.
@@ -1451,6 +1466,16 @@ Cost clauses state proven bounds on what a function consumes.
 - **Costs compose through signatures.** A caller's cost is proven from its
   callees' cost clauses, without reading their bodies, so changing one function
   only re-checks what depends on it.
+- **Loops can state their cost.** Most loops need nothing: each iteration
+  costs at most some bound, and the loop runs a known number of times. A
+  loop whose iterations cost different amounts, such as one over rows of
+  different lengths, states what it has spent so far as a `cost` clause, an
+  invariant about the cost: `cost time O(cells(yielded))` holds at the start
+  of each iteration and when the loop ends, for the rows handled so far.
+  This is how Charguéraud and Pottier's time credits and Creusot's loop
+  invariants over spent resources state it. A loop's cost is never
+  `amortized`, since potential belongs to the values a loop changes, and
+  never `finite`, since a loop shows that it ends with `decreases`.
 
 ## Termination
 

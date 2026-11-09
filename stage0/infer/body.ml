@@ -87,6 +87,37 @@ let check_clauses state env (clauses : clause list) =
           | `Measure -> ignore (expression state env value)))
     (clause_expressions clauses)
 
+(* The [requires] of a function-typed parameter, a specification over the
+   type's named inputs and the parameters before it. *)
+let check_function_type_requires state env (written : parameter list) (signature : T.signature) =
+  let env = { env with specification = true } in
+  List.iter
+    (fun (parameter : parameter) ->
+      match parameter.kind with
+      | Named_parameter { name; type_ = { kind = Function_type { input_names; clauses; _ }; _ }; _ }
+        when input_names <> [] -> (
+          match
+            List.find_opt
+              (fun (info : T.parameter_info) -> info.name = name.text)
+              signature.parameters
+          with
+          | Some { type_ = T.Function lowered; _ }
+            when List.length lowered.inputs = List.length input_names ->
+              List.iter2
+                (fun (input : name) (mode, type_) ->
+                  declare state input type_ ~mutable_:false ~mode)
+                input_names lowered.inputs;
+              List.iter
+                (fun (clause : clause) ->
+                  match clause.kind with
+                  | Requires value ->
+                      in_statement state env value.span (fun () -> check state env value T.bool)
+                  | _ -> ())
+                clauses
+          | _ -> ())
+      | _ -> ())
+    written
+
 let check_defaults state env (written : parameter list) (signature : T.signature) =
   List.iter
     (fun (parameter : parameter) ->
@@ -116,6 +147,7 @@ let check_function state ~broken_body (written : signature) (body_block : block 
   in
   declare_parameters state written.parameters signature;
   check_defaults state no_output written.parameters signature;
+  check_function_type_requires state env written.parameters signature;
   check_clauses state env written.clauses;
   match body_block with Some block when not broken_body -> body state env block | _ -> ()
 

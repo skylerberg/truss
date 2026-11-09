@@ -58,6 +58,9 @@ module Code : sig
     | Repeated_clause
     | Cost_word
     | Finite_not_time
+    | Loop_cost_bound
+    | Function_type_names
+    | Misplaced_requires
     | Misplaced_potential
     | Increment
     | Double_negation

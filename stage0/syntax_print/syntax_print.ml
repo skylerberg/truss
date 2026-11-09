@@ -77,13 +77,18 @@ and type_argument = function
   | Count_name name -> name.text
   | Constraint (name, type_) -> name.text ^ " = " ^ type_expression type_
 
-and function_type { inputs; output; clauses } =
+and function_type { inputs; input_names; output; clauses } =
+  let named index =
+    match List.nth_opt input_names index with Some name -> name.text ^ ": " | None -> ""
+  in
   form "fn"
     ([
        form ""
-         (list
-            (fun (input_mode, input) ->
-              (match input_mode with Some m -> mode m ^ " " | None -> "") ^ type_expression input)
+         (List.mapi
+            (fun index (input_mode, input) ->
+              named index
+              ^ (match input_mode with Some m -> mode m ^ " " | None -> "")
+              ^ type_expression input)
             inputs);
      ]
     @ [ optional (fun output -> "-> " ^ type_expression output) output ]
@@ -229,6 +234,7 @@ and loop_clause (clause : loop_clause) =
   match clause.kind with
   | Invariant value -> form "invariant" [ expression value ]
   | Loop_decreases measures -> form "decreases" (list expression measures)
+  | Loop_cost cost_ -> cost cost_
 
 and statement (statement : statement) =
   match statement.kind with

@@ -50,6 +50,9 @@ module Code = struct
     | Repeated_clause
     | Cost_word
     | Finite_not_time
+    | Loop_cost_bound
+    | Function_type_names
+    | Misplaced_requires
     | Misplaced_potential
     | Increment
     | Double_negation
@@ -246,6 +249,9 @@ module Code = struct
     | Repeated_clause -> "repeated_clause"
     | Cost_word -> "cost_word"
     | Finite_not_time -> "finite_not_time"
+    | Loop_cost_bound -> "loop_cost_bound"
+    | Function_type_names -> "function_type_names"
+    | Misplaced_requires -> "misplaced_requires"
     | Misplaced_potential -> "misplaced_potential"
     | Increment -> "increment"
     | Double_negation -> "double_negation"

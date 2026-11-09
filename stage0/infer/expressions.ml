@@ -3347,6 +3347,9 @@ and loop_clause state env (clause : loop_clause) =
   | Invariant value -> check state env value T.bool
   | Loop_decreases measures ->
       List.iter (fun measure -> ignore (expression state env measure)) measures
+  | Loop_cost { bound = Big_o value | At_most value | Exactly value; _ } ->
+      ignore (expression state env value)
+  | Loop_cost { bound = Finite; _ } -> ()
 
 (* What a [for] loop drives: a range of built-in integers, a call to a
    [yields] method, a cursor, or the [each] method of the loop's mode. *)

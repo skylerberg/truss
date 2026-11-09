@@ -379,8 +379,20 @@ let () =
         "(fn (Item) (uses Clock Random) (cost time finite))");
   test "parentheses around a function type need clauses" (fun () ->
       error "fn f(value: (fn(Item))) {}" ~code:Unexpected_token ~at:"(fn");
-  test "requires in a function type" (fun () ->
-      error "fn f(value: (fn(Item) requires true)) {}" ~code:Unexpected_token ~at:"requires");
+  test "a function type's requires names its inputs" (fun () ->
+      definition "fn f(visit: (fn(index: USize) requires index < 3)) {}"
+        "(fn f ((visit: (fn (index: USize) (requires (< index 3))))) (block))");
+  test "requires in a function type needs every input named" (fun () ->
+      error "fn f(value: (fn(Item) requires true)) {}" ~code:Function_type_names ~at:"fn(Item)");
+  test "a function type without requires names no input" (fun () ->
+      error "fn f(value: fn(item: Item)) {}" ~code:Function_type_names ~at:"fn(item");
+  test "ensures in a function type" (fun () ->
+      error "fn f(value: (fn(item: Item) ensures true)) {}" ~code:Unexpected_token ~at:"ensures");
+  test "requires on a function type that is not a parameter's" (fun () ->
+      error "type T(visit: (fn(index: USize) requires index < 3))" ~code:Misplaced_requires
+        ~at:"requires";
+      error "fn f(visits: List[(fn(index: USize) requires index < 3)]) {}" ~code:Misplaced_requires
+        ~at:"requires");
   test "generic parameters" (fun () ->
       definition "fn f[Key: Hash + Ordered, count: USize, capability Granted]() {}"
         "(fn f[Key: Hash + Ordered, count: USize, capability Granted] () (block))")
@@ -791,6 +803,12 @@ let () =
       error "fn T.each(self, yielded: Int64) yields Int64 {\n  yield 1\n}" ~code:Reserved_name
         ~at:"yielded";
       definition "fn f(finished: Bool) {}" "(fn f ((finished: Bool)) (block))");
+  test "a loop's cost clause" (fun () ->
+      statement "for row in rows\n  cost time O(yielded.length())\n{}"
+        "(for row rows (cost time (O (call (. yielded length)))) (block))");
+  test "a loop's cost is not amortized or finite" (fun () ->
+      body_error "while a\n  cost amortized time O(1)\n{}" ~code:Loop_cost_bound ~at:"cost";
+      body_error "while a\n  cost time finite\n{}" ~code:Loop_cost_bound ~at:"cost");
   test "specifications allow forall" (fun () ->
       definition "type S(items: List[Int64])\n  invariant forall i in items => i > 0"
         "(type S ((items: List[Int64])) (invariant (forall (in i items) (> i 0))))";

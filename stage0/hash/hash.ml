@@ -138,13 +138,14 @@ let rec type_ context (written : type_expression) =
   | Self_type key -> node "self" [ option (fun (key : Syntax.name) -> text key.text) key ]
   | Associated (base, key) -> node "associated" [ name context base; text key.text ]
   | Any_type written -> node "any" [ path_type context written ]
-  | Function_type { inputs; output; clauses } ->
+  | Function_type { inputs; input_names; output; clauses } ->
       node "function"
         [
           list
             (fun (written_mode, input) ->
               Cbor.Array [ option mode written_mode; type_ context input ])
             inputs;
+          list (name context) input_names;
           option (type_ context) output;
           clause_groups context clauses;
         ]
@@ -385,6 +386,11 @@ and loop_clauses context (clauses : loop_clause list) =
         (List.filter_map
            (fun (clause : loop_clause) ->
              match clause.kind with Loop_decreases values -> Some values | _ -> None)
+           clauses);
+      list (cost context)
+        (List.filter_map
+           (fun (clause : loop_clause) ->
+             match clause.kind with Loop_cost written -> Some written | _ -> None)
            clauses);
     ]
 
