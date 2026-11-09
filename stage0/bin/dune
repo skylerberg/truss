@@ -1,3 +1,21 @@
 (executables
- (names truss_lex truss_parse)
- (libraries source diagnostic token lexer syntax syntax_print parser))
+ (names truss_lex truss_parse truss)
+ (libraries
+  source
+  diagnostic
+  token
+  lexer
+  syntax
+  syntax_print
+  parser
+  path
+  query
+  workspace
+  standard_library
+  resolve
+  interface
+  infer
+  memory_layout
+  toolchain
+  build
+  compile))

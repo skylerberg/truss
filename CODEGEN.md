@@ -856,8 +856,14 @@ The C `main` of a program is generated:
 1. Install a handler for stack overflow on an alternate signal stack. Truss
    code has no unsafe operations, so a segmentation fault means the stack
    ran out.
-2. Turn `argc` and `argv` into `List[String]`.
-3. Build the evidence for `main`'s `uses` clause.
+2. Turn `argc` and `argv` into `List[String]`, the program's path first, as
+   in C. Each `String`'s storage points at the argument itself, with
+   capacity 0, so it is never copied, unless it holds bad UTF-8, which a
+   copy replaces with U+FFFD.
+3. Build the evidence for `main`'s `uses` clause: static evidence for the
+   standard library's real implementation of each capability, its
+   `System` type, such as `SystemConsole`, whose table of entries is static
+   data too.
 4. Call Truss's `main` and return its `ExitCode` as the process's status.
 
 Failures end the process without running anything else:
@@ -1003,6 +1009,15 @@ recompiles objects but invalidates no test result.
 One C file per instance means many small compiler runs on a cold build. If
 that is slow, instances can be grouped by definition later. The change
 affects only build speed.
+
+### The command
+
+`truss test DIRECTORY` checks a package, reporting every diagnostic, then
+builds its tests into one test program and runs it. `truss run DIRECTORY
+ARGUMENTS` builds the package's program from its `main` and runs it with
+the arguments. A package is a directory with a `truss.toml` naming it, and
+each `.truss` file under it is one of its modules. Object files are cached
+in `~/.cache/truss/objects`.
 
 ### Linking
 
