@@ -2316,13 +2316,38 @@ test "recursion" {
   assert words == 3
 }
 |};
-  passes "pulling a view of an element gives a copy, and leaves the element"
-    {|test "view" {
-  let names: List[String] = ["${1}", "${2}"]
-  var each = names.each()
-  let first = mut each.next()
-  assert first == Some("1")
-  assert names[0] == "1"
+  passes "a recursive loop over views of strings gives copies, and leaves the tree whole"
+    {|type Tree =
+  | Leaf
+  | indirect Node(left: Tree, name: String, right: Tree)
+
+fn Tree.names(self) yields String {
+  match self {
+    Leaf => {}
+    Node(left, name, right) => {
+      for inner in left.names() {
+        yield inner
+      }
+      yield name
+      for inner in right.names() {
+        yield inner
+      }
+    }
+  }
+}
+
+test "names" {
+  let one = Tree.Node(left: Tree.Leaf, name: "${1}", right: Tree.Leaf)
+  let three = Tree.Node(left: Tree.Leaf, name: "${3}", right: Tree.Leaf)
+  let tree = Tree.Node(left: own one, name: "${2}", right: own three)
+  var joined: List[String] = []
+  for name in tree.names() {
+    mut joined.push(name.copy())
+  }
+  assert joined == ["1", "2", "3"]
+  for name in tree.names() {
+    assert name.length() == 1
+  }
 }
 |};
   passes "a constant that needs its code run is worked out while compiling"
@@ -2678,6 +2703,14 @@ let () =
   if FileRead.read_text(path) is Ok(text) {
     Console.print_line("${text.length()} bytes".slice())
   }
+  let streamed = Path.new("${arguments[1]}.streamed".slice())
+  let wrote = FileWrite.write_with(streamed, write: fn(writer) {
+    mut writer.write("one ".slice())?
+    mut writer.write("two".slice())
+  })
+  if wrote is Ok(_) && FileRead.read_text(streamed) is Ok(text) {
+    Console.print_line("streamed ${text}".slice())
+  }
   match FileRead.open(path) {
     Ok(file) => {
       var reader = own file
@@ -2698,7 +2731,7 @@ let () =
 |}
       in
       expect_int ~expected:0 status;
-      expect_string ~expected:"22 bytes\nfirst\nsecond line\nmissing\n" output)
+      expect_string ~expected:"22 bytes\nstreamed one two\nfirst\nsecond line\nmissing\n" output)
 
 let () =
   test "a program runs other programs and reads their exit status" (fun () ->

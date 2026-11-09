@@ -281,7 +281,9 @@ impl FileWrite for SystemFileWrite {
     file: Path,
     write: (fn(mut FileWriter) -> Result[Unit, FileError] uses FileWrite),
   ) -> Result[Unit, FileError] {
-    todo
+    let handle = open_handle(file, flags: 1)?
+    var writer = FileWriter(handle: own handle)
+    write(mut writer)
   }
 }
 

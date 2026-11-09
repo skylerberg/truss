@@ -856,9 +856,15 @@ for `parallel` code.
 - **Capability parameters are part of the instance.** `for_each[Item,
   capability Granted]` is compiled once for each set `Granted` stands for,
   and passes on that set's evidence.
-- **Function types with `uses`** take evidence when called, like functions.
-  A callback stored in an `own` parameter gets its evidence from whoever
+- **Function types with `uses`** take evidence when called, like functions,
+  after their parameters. A lambda's code reaches only that evidence. A
+  callback stored in an `own` parameter gets its evidence from whoever
   calls it.
+- **Inside an `impl` of a capability,** a function value that uses the
+  capability means the implementation itself, as the type checker rules,
+  so its evidence is the implementation's own, made on the stack like a
+  `provide`'s. This is how `FileWrite.write_with` hands its callback the
+  file system it writes to.
 - **`Panic` has no evidence.** It cannot be provided, so `Panic.crash` is a
   direct call into the runtime.
 

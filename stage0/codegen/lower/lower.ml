@@ -738,10 +738,60 @@ let any_entry_signature context (signature : T.signature) =
   ({ lir with parameters = Lir.Raw (Pointer Opaque) :: lir.parameters }, result)
 
 (* The evidence for a capability, where the code being lowered has it. *)
+(* The evidence for a capability, where the code being lowered has it. In a
+   method of an [impl] of the capability that does not use it, a function
+   value that uses it means the implementation itself, so the evidence is
+   the implementation's own, made on the stack: its [self], its table, and
+   what it captured. *)
 let evidence_of st capability =
   match List.find_opt (fun (path, _) -> Path.equal path capability) st.evidence with
   | Some (_, operand) -> operand
-  | None -> bug "no evidence for %s here" (Path.show capability)
+  | None -> (
+      let missing () = bug "no evidence for %s here" (Path.show capability) in
+      (* An [impl]'s methods are anchored at the [impl]. *)
+      match st.frame.code.anchor with
+      | Impl _ as impl when Path.equal (impl_interface st.context impl).implements.trait capability
+        ->
+          let interface = impl_interface st.context impl in
+          let self_ty =
+            Monomorphic.ground st.context.monomorphic st.frame.code.substitution interface.for_type
+          in
+          let implementation =
+            match st.frame.self_place with
+            | _ when (Memory_layout.of_type st.context.env self_ty).size = 0 -> Lir.Constant Null
+            | Some self -> Lir.Address { place = self; writable = true }
+            | None -> missing ()
+          in
+          let type_arguments =
+            List.map
+              (fun (g : T.generic) ->
+                match List.assoc_opt g.generic st.frame.code.substitution with
+                | Some a -> Monomorphic.ground_argument st.context.monomorphic [] a
+                | None -> bug "an unbound parameter of %s" (Path.show impl))
+              interface.impl_generics
+          in
+          let outer =
+            List.map
+              (fun captured ->
+                match List.find_opt (fun (path, _) -> Path.equal path captured) st.evidence with
+                | Some (_, operand) -> operand
+                | None -> bug "no evidence for %s here" (Path.show captured))
+              (evidence_for [] interface.impl_uses)
+          in
+          let slot = local st.b (Evidence (List.length outer)) in
+          emit st.b
+            (Call
+               {
+                 target = Intrinsic Evidence_fill;
+                 arguments =
+                   Address { place = at slot; writable = true }
+                   :: implementation
+                   :: Constant (Symbol_address (Table { impl; type_arguments }))
+                   :: outer;
+                 result = Discarded;
+               });
+          Lir.Address { place = at slot; writable = false }
+      | _ -> missing ())
 
 let call_instance st key ~(signature : T.signature) ~substitution
     ~(arguments : (T.mode * Ground.ty * Lir.place) list) ~mask ~destination =
@@ -1562,6 +1612,8 @@ and call_function_value st ~(callee : S.expression) ~(arguments : S.argument lis
            in
            Option.to_list (pass st types_mode ty place))
          f.parameters arguments)
+    (* Then the evidence for what the function value uses. *)
+    @ List.map (evidence_of st) f.uses
   in
   let target = Lir.Indirect { value = Copy value; signature } in
   match f.result with
@@ -1645,12 +1697,28 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
   let result_local =
     match result with Returned ty -> Some (local b ~name:"result" ty) | _ -> None
   in
+  (* The evidence for what the lambda's type uses, passed by whoever calls
+     it, after its own parameters: the only evidence its code can reach. *)
+  let evidence =
+    List.map (fun capability -> (capability, local b ~name:"evidence" Convention.evidence)) f.uses
+  in
   let environment_pointer = local b (Pointer { target = Environment index; writable = false }) in
   let inner =
     {
       st with
+      evidence = List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
       frame =
-        { st.frame with bindings = Hashtbl.copy st.frame.bindings; on_yield = None; exit = None };
+        {
+          st.frame with
+          bindings = Hashtbl.copy st.frame.bindings;
+          on_yield = None;
+          exit = None;
+          (* What the lambda returns, which a [?] in it returns early. *)
+          code =
+            (match raw_type_of st e.id with
+            | Some (T.Function f) -> { st.frame.code with result = f.output }
+            | _ -> st.frame.code);
+        };
       b;
       scopes = [ { owned = [] } ];
       loops = [];
@@ -1686,7 +1754,8 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
     Lir_builder.build b ?written_result:return_pointer
       ~parameters:
         ((environment_parameter :: Option.to_list return_pointer)
-        @ List.filter_map (fun (l, _, _, _) -> l) parameter_places)
+        @ List.filter_map (fun (l, _, _, _) -> l) parameter_places
+        @ List.map snd evidence)
       ~result:(match result with Returned ty -> Some ty | _ -> None)
   in
   st.nested :=
