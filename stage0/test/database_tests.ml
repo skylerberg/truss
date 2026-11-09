@@ -325,7 +325,9 @@ let rec dune_files directory =
 let () =
   test "no compiler stage lists the engine, the store, or the database" (fun () ->
       let root = "../../stage0" in
-      let outside_stages = [ "incremental"; "query"; "engine"; "store"; "database"; "bin"; "test"; "tools" ] in
+      let outside_stages =
+        [ "incremental"; "query"; "engine"; "store"; "database"; "bin"; "test"; "tools" ]
+      in
       List.iter
         (fun path ->
           let parts = String.split_on_char '/' path in
@@ -340,6 +342,7 @@ let () =
               (fun layer -> if List.mem layer words then fail "%s lists %s" path layer)
               [ "engine"; "store"; "database"; "incremental" ])
         (dune_files root);
-      if not (List.mem "../../stage0/infer/dune" (dune_files root)) then fail "found no stage's dune file")
+      if not (List.mem "../../stage0/infer/dune" (dune_files root)) then
+        fail "found no stage's dune file")
 
 let () = finish ()

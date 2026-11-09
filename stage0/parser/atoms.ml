@@ -1,7 +1,38 @@
-(* The smallest pieces the other parsing modules share: names, module
-   prefixes, and string literals. *)
+(* The smallest pieces the other parsing modules share: tree nodes, names,
+   module prefixes, string literals, what can start an expression or a
+   statement, and a mode's keyword. *)
 
 open Token
+open Syntax
+
+let expression_node cursor start kind : expression =
+  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
+
+let type_node cursor start kind : type_expression =
+  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
+
+let error_expression cursor start : expression = expression_node cursor start Expression_error
+
+(* Whether a token can start an expression. *)
+let begins_expression = function
+  | Upper _ | Lower _ | Integer _ | Float _ | String _ -> true
+  | Punctuation (Open _ | Minus | Bang | Tilde | Dot_dot | Dot_dot_equal) -> true
+  | Keyword
+      ( True | False | Todo | Unreachable | Break | Continue | Self_value | Self_type | Fn | If
+      | Match | Provide | Mut | Own | Any | Echo | Return | Forall | Exists ) ->
+      true
+  | _ -> false
+
+(* Whether a token can start a statement that is not an expression, or an
+   expression. *)
+let begins_statement = function
+  | Keyword (Let | Var | For | While | Parallel | Proof | Assert | Yield) -> true
+  | kind -> begins_expression kind
+
+let mode cursor =
+  if Cursor.accept_keyword cursor Mut then Some Mut
+  else if Cursor.accept_keyword cursor Own then Some Own
+  else None
 
 let name cursor (token : Token.t) text : Syntax.name =
   { text; span = Cursor.span cursor token.span; id = Cursor.fresh cursor }
