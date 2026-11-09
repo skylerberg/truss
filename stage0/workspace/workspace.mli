@@ -9,7 +9,14 @@
 type dependency = { package : string; capabilities : string list }
 (** A dependency from the manifest, with the capabilities it is granted. *)
 
-type package = { name : string; dependencies : dependency list; modules : Path.module_ list }
+type package = {
+  name : string;
+  dependencies : dependency list;
+  modules : Path.module_ list;
+  usize_bits : int;
+      (** 64 when the manifest says the package runs only on 64-bit targets, and 32 otherwise, so
+          that its code holds for both widths of [USize]. See DESIGN.md, "Integers". *)
+}
 
 val packages : (string, package) Query.input
 val file_text : (Path.module_, string) Query.input

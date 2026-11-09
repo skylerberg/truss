@@ -160,6 +160,18 @@ let () =
       let response = request directory Check in
       expect_status response 1;
       expect_contains response "truss.toml:2");
+  test "a package cannot depend on one that runs only on 64-bit targets unless it does too"
+    (fun () ->
+      fresh_store ();
+      let root = fresh "worktree" in
+      write root "wide/truss.toml" "[package]\nname = \"wide\"\nusize_bits = 64\n";
+      write root "wide/main.truss" program;
+      write root "app/truss.toml"
+        "[package]\nname = \"app\"\n\n[dependencies]\nwide = { version = \"1\" }\n";
+      write root "app/main.truss" program;
+      let response = request root Check in
+      expect_status response 1;
+      expect_contains response "wide runs only on 64-bit targets");
   test "a check in a package's directory checks only that package" (fun () ->
       fresh_store ();
       let root = fresh "worktree" in
@@ -301,5 +313,33 @@ let () =
       let response = request root (Overlap { other = None; merge = true }) in
       expect_status response 0;
       expect_contains response "merged: caller.truss: types.missing_argument")
+
+(* The layers stay apart *)
+
+let rec dune_files directory =
+  Array.to_list (Sys.readdir directory)
+  |> List.concat_map (fun entry ->
+      let path = Filename.concat directory entry in
+      if Sys.is_directory path then dune_files path else if entry = "dune" then [ path ] else [])
+
+let () =
+  test "no compiler stage lists the engine, the store, or the database" (fun () ->
+      let root = "../../stage0" in
+      let outside_stages = [ "incremental"; "query"; "engine"; "store"; "database"; "bin"; "test"; "tools" ] in
+      List.iter
+        (fun path ->
+          let parts = String.split_on_char '/' path in
+          let stage = List.nth parts 3 in
+          if not (List.mem stage outside_stages) then
+            let text = In_channel.with_open_bin path In_channel.input_all in
+            let words =
+              String.split_on_char ' '
+                (String.map (fun c -> if c = '\n' || c = '(' || c = ')' then ' ' else c) text)
+            in
+            List.iter
+              (fun layer -> if List.mem layer words then fail "%s lists %s" path layer)
+              [ "engine"; "store"; "database"; "incremental" ])
+        (dune_files root);
+      if not (List.mem "../../stage0/infer/dune" (dune_files root)) then fail "found no stage's dune file")
 
 let () = finish ()

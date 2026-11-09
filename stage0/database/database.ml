@@ -3,13 +3,17 @@
 
 (* Loading packages *)
 
-let load_package engine ~name ~dependencies (modules : (Path.module_ * string) list) =
+let load_package ?(usize_bits = 32) engine ~name ~dependencies
+    (modules : (Path.module_ * string) list) =
   List.iter (fun (module_, text) -> Engine.set engine Workspace.file_text module_ text) modules;
   Engine.set engine Workspace.packages name
-    { Workspace.name; dependencies; modules = List.map fst modules }
+    { Workspace.name; dependencies; modules = List.map fst modules; usize_bits }
 
+(* The standard library holds the code for each platform, and its bounds of
+   [USize] are its target's, so it is checked with the target's width. *)
 let load_standard engine =
-  load_package engine ~name:Standard_library.package ~dependencies:[] Standard_library.modules
+  load_package ~usize_bits:64 engine ~name:Standard_library.package ~dependencies:[]
+    Standard_library.modules
 
 let standard_layer ?log () =
   let layer = Engine.frozen_layer ?log () in
@@ -221,6 +225,29 @@ let apply session (files : (string * file_contents) list) =
               true)
       parsed
   in
+  (* A package that claims to run on every target cannot rely on one that
+     runs only on 64-bit targets. *)
+  List.iter
+    (fun (directory, (manifest : Type_checker.Manifest.t)) ->
+      if manifest.usize_bits = 32 then
+        List.iter
+          (fun (dependency : Workspace.dependency) ->
+            match
+              List.find_opt
+                (fun (_, (other : Type_checker.Manifest.t)) -> other.name = dependency.package)
+                packages
+            with
+            | Some (_, other) when other.usize_bits = 64 ->
+                problems :=
+                  Printf.sprintf
+                    "%s: %s runs only on 64-bit targets, so %s must say usize_bits = 64 to depend \
+                     on it."
+                    (if directory = "" then "truss.toml" else directory ^ "/truss.toml")
+                    other.name manifest.name
+                  :: !problems
+            | _ -> ())
+          manifest.dependencies)
+    packages;
   let directories = List.map fst packages in
   let modules =
     List.filter_map
@@ -282,7 +309,12 @@ let apply session (files : (string * file_contents) list) =
           modules
       in
       Engine.set engine Workspace.packages manifest.name
-        { Workspace.name = manifest.name; dependencies = manifest.dependencies; modules = own })
+        {
+          Workspace.name = manifest.name;
+          dependencies = manifest.dependencies;
+          modules = own;
+          usize_bits = manifest.usize_bits;
+        })
     packages;
   Engine.set engine layout ()
     {

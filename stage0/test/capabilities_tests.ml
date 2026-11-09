@@ -181,6 +181,7 @@ let () =
           name = "app";
           dependencies = [ { package = "clock_library"; capabilities = [] } ];
           modules = [ module_of "app::main" ];
+          usize_bits = 32;
         };
       match codes (check database (module_of "app::main")) with
       | [ "capabilities.not_granted" ] -> ()
@@ -194,6 +195,7 @@ let () =
         name = "app";
         dependencies = [ { package = "clock_library"; capabilities = granted } ];
         modules = [ module_of "app::main" ];
+        usize_bits = 32;
       };
     codes (check database (module_of "app::main"))
   in

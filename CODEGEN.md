@@ -1116,9 +1116,10 @@ machine may have caused. A sanitized run keeps nothing.
 
 ### Caching
 
-Lowering is a query, kept current by the code database as DATABASE.md
-describes. The steps after it are kept under exact keys, the hash of exactly
-the input each consumed:
+Lowering is meant to be a query, kept current by the code database as
+DATABASE.md describes; stage0 lowers each build's instances again, reading
+the type checker's results through queries. The steps after it are kept
+under exact keys, the hash of exactly the input each consumed:
 
 | Output | Kept by |
 |---|---|

@@ -1033,8 +1033,9 @@ comparisons over `&&`. Every other combination needs parentheses.
 - **Code is verified for every width `USize` can have.** `USize` and `ISize`
   have 32 or 64 bits, and the prover knows only that, so a proof holds on
   every target and its result needs no target in its key. A literal or
-  constant of either type must fit in 32 bits. Verus treats `usize` the same
-  way by default. A package that runs only on 64-bit targets says so in its
+  constant of either type must fit in 32 bits, except in the standard
+  library, which holds each platform's code and its bounds, such as
+  `USize.maximum`. Verus treats `usize` the same way by default. A package that runs only on 64-bit targets says so in its
   manifest with `usize_bits = 64`, and its code may then rely on 64 bits, as
   Verus allows with `global size_of usize == 8`. Building such a package for
   a 32-bit target is an error, and a package that does not say so cannot

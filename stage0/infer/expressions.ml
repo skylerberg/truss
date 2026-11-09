@@ -699,7 +699,7 @@ and check_literal_fits state (value : expression) number type_ =
       match resolve state type_ with
       | T.Literal _ | T.Variable _ -> false
       | resolved ->
-          (match builtin_range resolved with
+          (match builtin_range ~usize_bits:(usize_bits state) resolved with
           | Some (low, high) when Z.lt number low || Z.gt number high ->
               report state Literal_out_of_range value.span
                 (Printf.sprintf "`%s` does not fit in `%s`, which holds %s to %s."
@@ -707,7 +707,15 @@ and check_literal_fits state (value : expression) number type_ =
           | _ -> ());
           true)
 
-and builtin_range type_ =
+(* The width of [USize] and [ISize] the package's code must hold for: 32
+   bits unless its manifest says [usize_bits = 64], so that code checked
+   once holds on every target. See DESIGN.md, "Integers". *)
+and usize_bits state =
+  match Workspace.package state.database state.package with
+  | Some package -> package.usize_bits
+  | None -> 32
+
+and builtin_range ?(usize_bits = 64) type_ =
   let bits signed width =
     if signed then
       Some (Z.neg (Z.shift_left Z.one (width - 1)), Z.pred (Z.shift_left Z.one (width - 1)))
@@ -717,11 +725,13 @@ and builtin_range type_ =
   | Some Int8 -> bits true 8
   | Some Int16 -> bits true 16
   | Some Int32 -> bits true 32
-  | Some (Int64 | ISize) -> bits true 64
+  | Some Int64 -> bits true 64
+  | Some ISize -> bits true usize_bits
   | Some UInt8 -> bits false 8
   | Some UInt16 -> bits false 16
   | Some UInt32 -> bits false 32
-  | Some (UInt64 | USize) -> bits false 64
+  | Some UInt64 -> bits false 64
+  | Some USize -> bits false usize_bits
   | _ -> None
 
 (* Names *)
@@ -3803,7 +3813,7 @@ and literal_pattern state id (span : span) literal type_ =
         report state Mismatch span
           (Printf.sprintf "An integer pattern matches an integer, not `%s`." (T.show type_))
       else
-        match builtin_range type_ with
+        match builtin_range ~usize_bits:(usize_bits state) type_ with
         | Some (low, high) when Z.lt number low || Z.gt number high ->
             report state Literal_out_of_range span
               (Printf.sprintf "`%s` does not fit in `%s`." (Z.to_string number) (T.show type_))

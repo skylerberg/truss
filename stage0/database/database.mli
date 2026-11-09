@@ -45,12 +45,14 @@ val serve : unit -> unit
 (** {1 For tests and drivers} *)
 
 val load_package :
+  ?usize_bits:int ->
   Engine.t ->
   name:string ->
   dependencies:Workspace.dependency list ->
   (Path.module_ * string) list ->
   unit
-(** Sets a package's modules, with their text, and its manifest as inputs. *)
+(** Sets a package's modules, with their text, and its manifest as inputs. [usize_bits] is 32 unless
+    given. *)
 
 val load_standard : Engine.t -> unit
 (** Sets the [standard] package, built into the compiler. *)

@@ -130,9 +130,8 @@ The full design is in [TYPECHECKER.md](TYPECHECKER.md). In short:
   specification, since `digestif` provides BLAKE2 but not BLAKE3. It is
   tested against the official test vectors. Every hash carries a prefix
   naming the format version and algorithm, so this can change.
-- **Queries** are `stage0/query` for now: an in-memory engine that checks
-  a result's inputs by revision when the result is asked for, as Salsa does.
-  The code database replaces it.
+- **Queries** run on the code database's engine, in `stage0/incremental`,
+  which stages see through `stage0/query`.
 
 ### Code database
 
@@ -146,14 +145,16 @@ The full design is in [DATABASE.md](DATABASE.md). In short:
   database, and `Store` for bytes on disk. Stages never see the engine, the
   store, files, or sessions.
 - **One store per user, in `~/.cache/truss`,** shared by every project,
-  worktree, and compiler: values by content hash, results of expensive steps
-  by exact key, and each session's graph as an append-only journal. It uses
-  only ordinary file operations, so the compiler written in Truss can keep
-  the same store.
-- **One background process per user and compiler** serves every worktree,
-  the command line, and the language server. It watches files with FSEvents
-  on macOS and inotify on Linux, starts a new worktree from the nearest
-  session, and finds where two worktrees' changes overlap.
+  worktree, and compiler: values and results of expensive steps in
+  append-only segments with sorted indexes, and each session's graph as an
+  append-only journal. It uses only ordinary file operations, so the
+  compiler written in Truss can keep the same store. Saved results are OCaml's
+  marshaled values, since a journal belongs to the compiler that wrote it.
+- **One background process per user and compiler** serves every worktree and
+  command. It scans each worktree's file stamps before every request and each
+  second while idle, starts a new worktree from the nearest session, and finds
+  where two worktrees' changes overlap. `--no-server` answers a request in the
+  command's own process.
 
 ### Code generation through C
 

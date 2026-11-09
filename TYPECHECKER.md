@@ -8,10 +8,8 @@ described in [PARSER.md](PARSER.md), and produces what
 [CODEGEN.md](CODEGEN.md) expects. The prover is not designed yet, so this
 document states what it hands to it. Every stage described here is built,
 in [`stage0/`](stage0), and `truss-check` runs them over a package's
-directory. The queries run on `stage0/query`'s in-memory engine, which
-checks results when they are asked for. The code database that
-[DATABASE.md](DATABASE.md) designs, which pushes changes and saves checked
-forms in CBOR, is not built yet.
+directory. The queries run on the code database's engine, which
+[DATABASE.md](DATABASE.md) designs.
 
 ## What the type checker does
 
@@ -609,9 +607,9 @@ known:
 - **An integer literal must fit** its type, after negation: a `-` applied
   directly to a literal negates the value, so `-128` fits an `Int8`. Negating
   a literal of an unsigned type is an error. A `USize` or `ISize` literal
-  must fit in 32 bits unless the package says `usize_bits = 64`, as
-  DESIGN.md requires. Stage0 still checks these against 64 bits, since
-  manifests do not carry `usize_bits` yet.
+  must fit in 32 bits unless the package's manifest says
+  `usize_bits = 64`, as DESIGN.md requires. The standard library, which
+  holds the code for each platform, is checked with its target's width.
 - **A float literal is rounded once,** from its exact decimal value to its
   type, with ties to even. A literal that rounds to infinity is an error, as
   in Rust.
@@ -1210,9 +1208,9 @@ needs to work anything out from the syntax tree again:
   implementations implement
 - **obligations** that the type checker created, as described next
 
-It is saved in deterministic CBOR, as DATABASE.md describes, so that two
-checks of the same definition give the same bytes, and the same checked form
-in two worktrees is stored once. Stage0 keeps it in memory only, for now.
+It is canonical, so that two checks of the same definition give equal
+results, and the database saves it with the graph, as DATABASE.md
+describes.
 
 ### Obligations the type checker creates
 

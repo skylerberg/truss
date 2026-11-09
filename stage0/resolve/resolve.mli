@@ -2,8 +2,8 @@
 
     Resolution turns a definition's tree into its resolved form: tables, keyed by the tree's node
     ids, of what every name refers to and how each [name[...]] reads. The tree is unchanged. A
-    definition reads other definitions only through the queries of {!Names}, each recorded in its
-    trace. *)
+    definition reads other definitions only through the queries of {!Names}, so the database knows
+    every one it read. *)
 
 module Names = Names
 module Parts = Parts

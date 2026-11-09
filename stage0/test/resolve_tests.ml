@@ -37,7 +37,7 @@ let setup files =
   Hashtbl.iter
     (fun package modules ->
       Engine.set (Engine.of_context database) Workspace.packages package
-        { Workspace.name = package; dependencies = []; modules = List.rev modules })
+        { Workspace.name = package; dependencies = []; modules = List.rev modules; usize_bits = 32 })
     by_package;
   database
 

@@ -1432,6 +1432,7 @@ let standard_database =
          name = Standard_library.package;
          dependencies = [];
          modules = List.map fst Standard_library.modules;
+         usize_bits = 64;
        };
      database)
 
