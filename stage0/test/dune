@@ -14,7 +14,8 @@
   capabilities_tests
   package_checks_tests
   documents_tests
-  manifest_tests)
+  manifest_tests
+  prover_tests)
  (libraries
   harness
   source
@@ -38,6 +39,9 @@
   hash
   standard_library
   support
+  logic
+  solver
+  prover
   types
   intrinsic
   interface

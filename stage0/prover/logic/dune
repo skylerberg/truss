@@ -1,0 +1,3 @@
+(library
+ (name logic)
+ (libraries blake3 zarith))

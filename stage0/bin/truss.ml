@@ -1,12 +1,13 @@
 (* The [truss] command: [truss test DIRECTORY] builds a package's tests and
-   runs them, and [truss run DIRECTORY ARGUMENTS...] builds its program and
-   runs it. A package is a directory with a [truss.toml] manifest naming
+   runs them, [truss run DIRECTORY ARGUMENTS...] builds its program and
+   runs it, and [truss prove DIRECTORY] proves its obligations. A package is a directory with a [truss.toml] manifest naming
    it; each [.truss] file under the directory is one of its modules. *)
 
 let usage () =
   prerr_endline
     "usage: truss test [--sanitize] DIRECTORY\n\
-    \       truss run [--sanitize] DIRECTORY [ARGUMENTS...]";
+    \       truss run [--sanitize] DIRECTORY [ARGUMENTS...]\n\
+    \       truss prove DIRECTORY";
   exit 2
 
 let fail format =
@@ -135,4 +136,20 @@ let () =
               let status = Toolchain.run_attached output arguments in
               (try Sys.remove output with Sys_error _ -> ());
               exit status))
+  | _ :: "prove" :: [ directory ] -> (
+      let database, modules = load directory in
+      check database modules;
+      match Solver.find () with
+      | Error message -> fail "%s" message
+      | Ok solver ->
+          let found =
+            List.concat_map
+              (fun module_ ->
+                let source = (Query.demand database Workspace.file module_).source in
+                List.map (Diagnostic.render source)
+                  (Diagnostic.shown (Prover.diagnostics database solver module_)))
+              modules
+          in
+          List.iter prerr_string found;
+          if found <> [] then exit 1)
   | _ -> usage ()

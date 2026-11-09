@@ -4,7 +4,9 @@ This document designs stage0's prover: everything between the type checker's
 checked forms and the knowledge that every promise a program makes holds. It
 follows the decisions in [DESIGN.md](DESIGN.md) and [SYNTAX.md](SYNTAX.md),
 reads what [TYPECHECKER.md](TYPECHECKER.md) produces, and states what
-[CODEGEN.md](CODEGEN.md) relies on. Nothing is built yet.
+[CODEGEN.md](CODEGEN.md) relies on. It is being built in
+[`stage0/prover/`](stage0/prover); [What is built](#what-is-built) says how
+far it has come, and `truss prove DIRECTORY` runs it over a package.
 
 ## What the prover does
 
@@ -805,6 +807,46 @@ input and states one fact about the result, and there are no golden files.
   documents' examples and checks that every obligation the prover proves
   never fails its run-time check when the mutated program runs, and a
   benchmark of solving time over the standard library.
+
+## What is built
+
+The prover is built in three libraries: `logic`, the terms and their
+canonical text; `solver`, the pinned Z3; and `prover`, which holds the rest
+of the table in [Structure](#structure) as two modules for now, `Translate`,
+which does the work of `Encode`, `Paths`, `Obligations`, and `Vc`, and
+`Prover`, the entry point and its diagnostics. Proof programs are not a data
+structure of their own yet: `Translate` executes a checked body forward in
+the passive form `Vc` describes, guarding every fact by its path and giving
+each local a fresh symbol where paths join.
+
+It proves, with one canonical, numbered, hashed query per obligation:
+
+- overflow of `+`, `-`, `*`, `/`, `%`, and negation on built-in integers;
+  division by zero and the least value over `-1`; shift amounts; and
+  `unreachable`
+- every `requires` at a call to a function or theorem whose contract it
+  reads, and every `ensures` at each way a function returns, with `old`,
+  `result`, and `mut` arguments
+- `if`, blocks, `let` and `var` of a name, assignment and compound
+  assignment to a local, `return`, `parallel` blocks in order, and `proof`
+  blocks
+- `while` loops and `for` loops over ranges of integers, with invariants on
+  entry and after each iteration, and, in a function with a `time` clause,
+  termination by `decreases` or the one measure the prover tries itself
+- direct recursion that decreases its `decreases`, in functions with a
+  `time` clause and in theorems
+- `assert` in theorems and proofs, assumed in tests
+- quantifiers over ranges and over the integers, in specifications
+- the type checker's `Integer_fits` obligations
+
+A call to anything whose contract it does not read yet, such as a trait
+method, a capability, or a constructor, gives a value known only by its
+type's range, which is sound but proves little. A definition that uses
+anything else, such as a field, an index, `match`, a lambda, or a lending
+or yielding method, is reported as `prover.unsupported` with what stopped
+it, and none of its obligations count as proven. A cost bound, and a loop's
+`cost`, are reported as not proven yet, while the rest of the definition is
+proven as usual.
 
 ## Open questions
 

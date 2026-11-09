@@ -184,6 +184,19 @@ module Code : sig
     | Provide_mark
     | Not_an_implementation
 
+  type prover =
+    | Overflow
+    | Division
+    | Shift
+    | Fits
+    | Requires
+    | Ensures
+    | Invariant
+    | Termination
+    | Assertion
+    | Unreachable
+    | Unsupported
+
   type package =
     | Impl_location
     | Overlapping_impls
@@ -204,6 +217,7 @@ module Code : sig
     | Ownership of ownership
     | Capabilities of capabilities
     | Package of package
+    | Prover of prover
     | Too_many_diagnostics
 
   val name : t -> string

@@ -22,6 +22,11 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `truss.opam`. Install them with
   `opam install . --deps-only --with-test --with-dev-setup`. On macOS, Zarith
   also needs GMP and `pkgconf` from Homebrew.
+- **Z3 5.3.3** runs the prover's queries, and the prover refuses any other
+  version, since another could answer differently. Install it with
+  `brew install z3` on macOS, or from the release's archive, and put it on
+  the path or name it in `TRUSS_Z3`. CI downloads that release and checks
+  its hash.
 - **`dune build`** builds everything, **`dune test`** runs the tests, and
   **`dune fmt`** formats the code with the ocamlformat version that
   `.ocamlformat` pins.

@@ -18,6 +18,15 @@ jobs:
       - name: Install dependencies
         run: opam install . --deps-only --with-test --with-dev-setup --yes
 
+      # The prover is pinned to one Z3 release, since another could answer
+      # differently. See PROVER.md, "The solver".
+      - name: Install Z3 5.3.3
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/z3.zip" https://github.com/Z3Prover/z3/releases/download/z3-5.3.3/z3-5.3.3-x64-glibc-2.39.zip
+          echo "d56f60b06f432f33de5810f7f1a384a339131f361e2d54d08ea83eea14326880  $RUNNER_TEMP/z3.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/z3.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/z3-5.3.3-x64-glibc-2.39/bin" >> "$GITHUB_PATH"
+
       - name: Build
         run: opam exec -- dune build
 

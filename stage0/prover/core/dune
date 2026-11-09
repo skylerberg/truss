@@ -1,0 +1,16 @@
+(library
+ (name prover)
+ (libraries
+  logic
+  solver
+  query
+  path
+  types
+  checked
+  syntax
+  syntax_walk
+  resolve
+  interface
+  infer
+  diagnostic
+  zarith))
