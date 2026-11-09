@@ -36,4 +36,6 @@ val tests_calling : time_limit:int -> string list -> string
 (* A C [main] that installs the stack-overflow handler and calls [entry]
    with the program's arguments, the generated Truss side of startup, and
    exits with the status it returns. *)
+(* The startup of code run while compiling, which calls the evaluator. *)
+val evaluator_calling : string -> string
 val program_calling : string -> string

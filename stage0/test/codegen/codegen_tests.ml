@@ -2315,6 +2315,37 @@ test "recursion" {
   assert names[0] == "1"
 }
 |};
+  passes "a constant that needs its code run is worked out while compiling"
+    {|type Point(x: Int64, y: Int64)
+
+fn square(value: Int64) -> Int64 {
+  value * value
+}
+
+fn greeting(name: StringSlice) -> String {
+  "hello ${name}"
+}
+
+let area: Int64 = square(7)
+let corner: Point = Point(x: square(2), y: -3)
+let ages: Map[String, Int64] = ["grace": 85, "ada": 36]
+let colors: Set[String] = ["red", "green", "red"]
+let welcome: String = greeting("ada".slice())
+let maybe: Option[Int64] = Some(square(3))
+
+test "constants" {
+  assert area == 49
+  assert corner.x == 4 && corner.y == -3
+  assert ages.length() == 2
+  assert ages.contains("ada")
+  assert colors.length() == 2
+  assert colors.contains("green")
+  assert welcome == "hello ada"
+  assert maybe == Some(9)
+  let copied = welcome.copy()
+  assert copied == "hello ada"
+}
+|};
   passes "names an is test binds are used where it holds"
     {|fn describe(found: Option[String], limit: USize) -> String {
   if found is Some(text) && text.length() > limit {

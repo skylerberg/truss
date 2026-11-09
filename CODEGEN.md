@@ -996,6 +996,24 @@ runs in the test runner's workers.
 - **Results are cached** by the hash of the code that ran and its input, so
   a check runs again only when its literal or its code changes.
 
+**What stage0 does.** A constant whose value cannot be folded from its
+expression, such as one that calls a function or is a `Map` or a `Set`, has
+an `Evaluator` instance: it works the value out, writes its binary form with
+the generated `Encode` functions into the debug buffer, and writes that to
+standard output. The compiler builds it, with everything it reaches, into a
+program for the host, runs it, and reads the bytes back into static data by
+the type's shape. The binary form is:
+- a scalar's bytes
+- a record's fields in order
+- a sum's variant index as a `UInt32`, then its fields
+- an array's elements
+- storage's length as a `USize`, then its elements
+- a value of zero size writes nothing
+
+The value is worked out once in a compiler's run, and its program's objects
+are cached as any others are. Stage0 has no result cache yet, and does not
+run template checks.
+
 ## Tests
 
 ### The test program

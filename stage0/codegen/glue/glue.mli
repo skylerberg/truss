@@ -46,6 +46,16 @@ val drop : t -> Ground.ty -> Lir.t
 val copy : t -> Ground.ty -> Lir.t
 val copy_signature : t -> Ground.ty -> Lir.signature
 
+(* The function that writes a value of a type in its binary form to the
+   debug buffer: [Instance.Encode ty], taking a read-only pointer to the
+   value. See CODEGEN.md, "Code run while compiling". *)
+val encode : t -> Ground.ty -> Lir.t
+val encode_signature : t -> Ground.ty -> Lir.signature
+
+(* Writes, with the builder, a call to the encode function of the type on
+   the value at the place; nothing for a type of zero size. *)
+val encode_call : t -> Lir_builder.t -> Ground.ty -> Lir.place -> unit
+
 (* Writes, with the builder, a copy of the value at [source] to
    [destination], both of the type: a memory copy for a trivial type, and
    otherwise a call to its copy function. *)

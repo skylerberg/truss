@@ -19,6 +19,9 @@ type context = {
   bool : Ground.ty;
   cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
       (** The fields of a pulled method's cursor, which the driver gives from its pulled lowering *)
+  evaluate : (Path.t -> Ground.ty -> Lir.static_value) ref;
+      (** A constant's value, worked out by running its [Evaluator], which the driver builds and
+          runs, for a constant whose value is not folded while compiling *)
 }
 
 val context : Query.database -> Memory_layout.target -> context
@@ -29,8 +32,13 @@ val context : Query.database -> Memory_layout.target -> context
 val instance : context -> Instance.key -> Lir.t
 
 (* A constant's static data: its value worked out exactly from its
-   constant expression. *)
+   constant expression, or by running its [Evaluator] through the context's
+   [evaluate]. *)
 val constant : context -> Path.t -> Lir.data
+
+(* The [Evaluator] of a constant: its value worked out and written out in
+   its binary form. *)
+val evaluator : context -> Path.t -> Lir.t
 
 (* The pulled version of a yielding method, before drop elaboration: its
    body with each [yield] left in place for yield lowering, and the locals of

@@ -376,7 +376,7 @@ static _Thread_local t_usize t_debug_capacity;
 
 void t_runtime_debug_begin(void) { t_debug_used = 0; }
 
-void t_runtime_debug_text(const uint8_t *bytes, t_usize count) {
+void t_runtime_debug_text(const void *bytes, t_usize count) {
   if (t_debug_used + count > t_debug_capacity) {
     t_usize wanted = t_debug_capacity * 2;
     if (wanted < t_debug_used + count) wanted = t_debug_used + count;
@@ -807,6 +807,19 @@ let tests_calling ~time_limit tests =
     declarations
     (if tests = [] then "0" else table)
     (List.length tests) time_limit
+
+(* The startup of code run while compiling: it runs the evaluator, which
+   writes its result. *)
+let evaluator_calling entry =
+  Printf.sprintf
+    "void t_runtime_install(void);\n\
+     void %s(void);\n\
+     int main(void) {\n\
+    \  t_runtime_install();\n\
+    \  %s();\n\
+    \  return 0;\n\
+     }\n"
+    entry entry
 
 let program_calling entry =
   Printf.sprintf

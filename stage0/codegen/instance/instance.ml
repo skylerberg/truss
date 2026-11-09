@@ -4,6 +4,8 @@ type key =
   | Drop of Ground.ty
   | Copy of Ground.ty
   | Debug of Ground.ty
+  | Encode of Ground.ty
+  | Evaluator of Path.t
   | Cursor_next of Ground.yielding
   | Adapter of { function_ : key; ty : Ground.function_type }
   | Entry of key
@@ -35,6 +37,8 @@ let rank = function
   | Program_main _ -> 10
   | Any_entry _ -> 11
   | Any_table _ -> 12
+  | Encode _ -> 13
+  | Evaluator _ -> 14
 
 let ( >>= ) c next = if c <> 0 then c else next ()
 
@@ -44,7 +48,7 @@ let rec compare a b =
       Path.compare a.path b.path >>= fun () ->
       Ground.compare_arguments a.type_arguments b.type_arguments
   | Constant a, Constant b -> Path.compare a b
-  | Drop a, Drop b | Copy a, Copy b | Debug a, Debug b -> Ground.compare a b
+  | Drop a, Drop b | Copy a, Copy b | Debug a, Debug b | Encode a, Encode b -> Ground.compare a b
   | Cursor_next a, Cursor_next b -> Ground.compare (Cursor a) (Cursor b)
   | Adapter a, Adapter b ->
       compare a.function_ b.function_ >>= fun () -> Ground.compare (Function a.ty) (Function b.ty)
@@ -55,7 +59,8 @@ let rec compare a b =
   | Table a, Table b ->
       Path.compare a.impl b.impl >>= fun () ->
       Ground.compare_arguments a.type_arguments b.type_arguments
-  | Real_evidence a, Real_evidence b | Program_main a, Program_main b -> Path.compare a b
+  | Real_evidence a, Real_evidence b | Program_main a, Program_main b | Evaluator a, Evaluator b ->
+      Path.compare a b
   | _ -> Int.compare (rank a) (rank b)
 
 let equal a b = compare a b = 0
@@ -70,6 +75,8 @@ let rec encode ?(path = Ground.encode_path) key =
   | Drop t -> tagged 2 [ ty t ]
   | Copy t -> tagged 3 [ ty t ]
   | Debug t -> tagged 4 [ ty t ]
+  | Encode t -> tagged 13 [ ty t ]
+  | Evaluator p -> tagged 14 [ path p ]
   | Cursor_next yielding -> tagged 5 [ ty (Cursor yielding) ]
   | Adapter { function_; ty } ->
       tagged 6 [ encode ~path function_; Ground.encode ~path (Function ty) ]
@@ -166,6 +173,8 @@ let rec mangle = function
   | Drop ty -> marker "Drop" ^ mangle_ty ty
   | Copy ty -> marker "Copy" ^ mangle_ty ty
   | Debug ty -> marker "Debug" ^ mangle_ty ty
+  | Encode ty -> marker "Encode" ^ mangle_ty ty
+  | Evaluator p -> marker "Evaluator" ^ path p
   | Cursor_next yielding -> marker "Next" ^ mangle_yielding yielding
   | Adapter { function_; ty } ->
       marker "Adapter" ^ mangle function_ ^ marker "As" ^ mangle_ty (Function ty)
@@ -196,6 +205,8 @@ let rec to_string = function
   | Drop ty -> "drop " ^ Ground.to_string ty
   | Copy ty -> "copy " ^ Ground.to_string ty
   | Debug ty -> "debug " ^ Ground.to_string ty
+  | Encode ty -> "encode " ^ Ground.to_string ty
+  | Evaluator path -> "evaluator " ^ Path.show path
   | Cursor_next yielding -> "next " ^ Ground.to_string (Cursor yielding)
   | Adapter { function_; _ } -> "adapter " ^ to_string function_
   | Any_entry key -> "any entry " ^ to_string key

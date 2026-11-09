@@ -16,6 +16,9 @@ type context = {
   bool : Ground.ty;
   cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
       (** The fields of a pulled method's cursor, which the driver gives from its pulled lowering *)
+  evaluate : (Path.t -> Ground.ty -> Lir.static_value) ref;
+      (** A constant's value, worked out by running its [Evaluator], which the driver builds and
+          runs, for a constant whose value is not folded while compiling *)
 }
 
 let standard_text name : Ground.ty =
@@ -47,7 +50,12 @@ let context database target =
     types = { usize; isize = Monomorphic.builtin ISize; string_slice = standard_text "StringSlice" };
     bool = Monomorphic.builtin Bool;
     cursor_fields;
+    evaluate = ref (fun path _ -> bug "no driver works out %s" (Path.show path));
   }
+
+(* A constant expression whose value needs its code run: a call, a [Map] or
+   [Set], a tagged template. *)
+exception Needs_running
 
 let test_key path = Instance.Code { path; type_arguments = [] }
 
@@ -1988,6 +1996,13 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
                    variant = None;
                    fields = ("state", Constant (Integer (UInt32, Z.zero))) :: fields;
                  } ))
+    | Trait_method { name = "copy"; self_type; evidence = Built_in; _ } -> (
+        (* [copy()] from [Copyable], which the compiler implements: the
+           type's generated copy. *)
+        match in_order with
+        | (_, _, _, source) :: _ ->
+            Glue.copy_into st.context.glue st.b ~destination ~source (ground st self_type)
+        | [] -> bug "copy with no value")
     | Trait_method { name = "next"; self_type; evidence = Built_in; _ }
       when match ground st self_type with Cursor _ -> true | _ -> false -> (
         match (ground st self_type, in_order) with
@@ -2991,8 +3006,8 @@ let rec static_of st (e : S.expression) : Lir.static_value =
                     Static_storage
                       { element; elements = List.map (static_of st) elements; owned = true } );
                 ]
-          | _ -> bug "a list constant of %s" (Ground.to_string ty))
-      | _ -> bug "a collection constant of %s, which is not built yet" (Ground.to_string ty))
+          | _ -> raise Needs_running)
+      | _ -> raise Needs_running)
   | Name _ | Member _ -> (
       match st.frame.code.checked.meanings.(e.id) with
       | Some (Global { path; _ }) -> (constant_data st.context path).value
@@ -3013,11 +3028,11 @@ let rec static_of st (e : S.expression) : Lir.static_value =
               checked
           in
           match variant with Some v -> Static_variant (v, fields) | None -> Static_record fields)
-      | _ -> bug "a call in a constant: %s" (source st e.span))
+      | _ -> raise Needs_running)
   | Binary { operator; left; right; _ } ->
       fold st ty ~operator:(Some operator) [ static_of st left; static_of st right ]
   | Prefix (Negate, inner) -> fold st ty ~operator:None [ static_of st inner ]
-  | _ -> bug "this is not a constant expression: %s" (source st e.span)
+  | _ -> raise Needs_running
 
 and operand_constant st ty literal =
   match constant_of st ty literal with
@@ -3067,8 +3082,16 @@ and fold st ty ~operator values : Lir.static_value =
       | _ -> bug "an operation in a constant that is not folded")
   | _ -> bug "arithmetic in a constant on %s" (Ground.to_string ty)
 
-(* A constant's static data. *)
+(* A constant's static data: folded while compiling, or else worked out by
+   running its code. *)
 and constant_data context path : Lir.data =
+  let st, value, ty = constant_state context path in
+  let value = try static_of st value with Needs_running -> !(context.evaluate) path ty in
+  { data_key = Constant path; ty; value }
+
+(* The state to lower a constant's expression in, the expression, and its
+   type. *)
+and constant_state context path =
   let key = key_of context path in
   let value =
     match demand context Names.definition key with
@@ -3118,9 +3141,45 @@ and constant_data context path : Lir.data =
       pulling = false;
     }
   in
-  { data_key = Constant path; ty; value = static_of st value }
+  (st, value, ty)
 
 let constant context path = constant_data context path
+
+(* Code run while compiling: works out a constant's value and writes its
+   binary form to standard output. *)
+let evaluator context path : Lir.t =
+  let st, value, ty = constant_state context path in
+  let b = st.b in
+  start b (block b);
+  let call ?result intrinsic arguments =
+    emit b
+      (Call
+         {
+           target = Intrinsic intrinsic;
+           arguments;
+           result = (match result with Some r -> Lir.Returned r | None -> Discarded);
+         })
+  in
+  in_scope st (fun () ->
+      let place = new_local st ty in
+      into st value place;
+      if not (trivial st ty) then own_in_scope st place;
+      call Debug_begin [];
+      Glue.encode_call context.glue b ty place;
+      let bytes = local b (Raw (Pointer Opaque)) and length = new_local st context.types.usize in
+      call ~result:(at bytes) Debug_bytes [];
+      call ~result:length Debug_length [];
+      let written = new_local st context.types.isize in
+      call ~result:written System_write
+        [ Constant (Integer (Int32, Z.one)); Copy (at bytes); Copy length ]);
+  finish b (Return None);
+  {
+    key = Evaluator path;
+    main = Lir_builder.build b ~parameters:[] ~result:None;
+    nested =
+      Array.of_list
+        (List.map (function Some f -> f | None -> bug "a lambda left unfinished") !(st.nested));
+  }
 
 (* Derived implementations *)
 

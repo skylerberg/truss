@@ -12,6 +12,10 @@ type key =
   | Drop of Ground.ty
   | Copy of Ground.ty
   | Debug of Ground.ty  (** The built-in debug output *)
+  | Encode of Ground.ty
+      (** A value's binary form, which code run while compiling writes its result in *)
+  | Evaluator of Path.t
+      (** Code run while compiling: works out a constant's value and writes its binary form *)
   | Cursor_next of Ground.yielding
       (** The state machine of a pulled yielding method. Its drop is the [Drop] of its cursor type.
       *)

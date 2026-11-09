@@ -491,3 +491,88 @@ let debug t ty =
           start b after));
   finish b (Return None);
   instance (Debug ty) (build b ~parameters:(Option.to_list parameter) ~result:None)
+
+(* Encoding *)
+
+(* A value's binary form, which code run while compiling writes its result
+   in and the compiler reads back as static data: a scalar as its bytes, a
+   record's fields in order, a sum's variant index as a [UInt32] and then
+   its fields, an array's elements, and storage's length as a [USize] and
+   then its elements. A value of zero size writes nothing. Each part of
+   another type is written by that type's own function, so a recursive type
+   needs nothing more. *)
+let encode_signature t ty = debug_signature t ty
+
+let encode_call t b ty (place : Lir.place) =
+  if not (zero_size t ty) then
+    emit b
+      (Call
+         {
+           target = Direct { function_ = Instance (Encode ty); signature = encode_signature t ty };
+           arguments = [ Lir.Address { place; writable = false } ];
+           result = Discarded;
+         })
+
+let encode t ty =
+  let b = create () in
+  let parameter =
+    if zero_size t ty then None
+    else Some (local b ~name:"value" (Pointer { target = Value ty; writable = false }))
+  in
+  let value : Lir.place =
+    match parameter with Some p -> { root = Local p; projections = [ Deref ] } | None -> at 0
+  in
+  start b (block b);
+  let bytes (place : Lir.place) size =
+    emit b
+      (Call
+         {
+           target = Intrinsic Debug_text;
+           arguments = [ Address { place; writable = false }; usize size ];
+           result = Discarded;
+         })
+  in
+  let fields place variant (fields : (string * Memory_layout.member) list) =
+    List.iter
+      (fun (name, member) ->
+        match member with
+        | Memory_layout.Typed field_ty ->
+            encode_call t b field_ty
+              (match variant with
+              | None -> place / Field name
+              | Some variant -> place / Variant_field { variant; field = name })
+        | Raw _ -> bug "a raw field in a value written out")
+      fields
+  in
+  (if parameter <> None then
+     match t.kind_of ty with
+     | Handle -> bug "a handle cannot be worked out while compiling"
+     | Storage element ->
+         bytes (value / Field "length") (Memory_layout.of_type t.env t.usize).size;
+         loop t b
+           ~count:(Copy (value / Field "length"))
+           (fun index -> encode_call t b element (value / Field "buffer" / Index (Copy (at index))))
+     | Shape (Scalar _) -> bytes value (Memory_layout.of_type t.env ty).size
+     | Shape (Record members) -> fields value None members
+     | Shape (Array (element, count)) ->
+         loop t b ~count:(usize count) (fun index ->
+             encode_call t b element (value / Index (Copy (at index))))
+     | Shape (Sum variants) ->
+         let after = block b in
+         let cases =
+           List.mapi
+             (fun i (v : Memory_layout.variant_shape) ->
+               let case = block b in
+               aside b case (fun () ->
+                   let index = local b (Raw (Integer UInt32)) in
+                   emit b (Assign (at index, Use (Constant (Integer (UInt32, Z.of_int i)))));
+                   bytes (at index) 4;
+                   fields value (Some v.name) v.fields;
+                   finish b (Goto after));
+               (v.name, case))
+             variants
+         in
+         finish b (Switch_variant { place = value; cases; default = None });
+         start b after);
+  finish b (Return None);
+  instance (Encode ty) (build b ~parameters:(Option.to_list parameter) ~result:None)

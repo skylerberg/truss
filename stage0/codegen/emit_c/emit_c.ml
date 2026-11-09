@@ -80,7 +80,7 @@ let runtime_declarations (target : Memory_layout.target) =
       "int64_t t_runtime_clock_now(void);\n";
       "void t_runtime_random_fill(uint8_t *bytes, t_usize count);\n";
       "void t_runtime_debug_begin(void);\n";
-      "void t_runtime_debug_text(const uint8_t *bytes, t_usize count);\n";
+      "void t_runtime_debug_text(const void *bytes, t_usize count);\n";
       "void t_runtime_debug_signed(int64_t value);\n";
       "void t_runtime_debug_unsigned(uint64_t value);\n";
       "void t_runtime_debug_float32(float value);\n";
@@ -1117,13 +1117,15 @@ let rec initializer_c context ty (value : Lir.static_value) : string option =
   let block_c variant fields =
     let key = Block (ty, variant) in
     register context key;
-    let name = static_name context in
     let block_fields =
       match (Memory_layout.block context.env ty variant).form with Struct f -> f | _ -> []
     in
+    (* The parts first, which are static objects of their own, then this
+       one's name, so no two share one. *)
+    let block_value = fields_c block_fields fields "" in
+    let name = static_name context in
     context.statics <-
-      Printf.sprintf "static const %s %s = { %s };\n" (key_name key) name
-        (fields_c block_fields fields "")
+      Printf.sprintf "static const %s %s = { %s };\n" (key_name key) name block_value
       :: context.statics;
     Printf.sprintf "((%s *)&%s)" (key_name key) name
   in
@@ -1136,8 +1138,8 @@ let rec initializer_c context ty (value : Lir.static_value) : string option =
         if count = 0 || (Memory_layout.of_type context.env element).size = 0 then
           "((void *)" ^ bytes_name context "" ^ ")"
         else begin
-          let name = static_name context in
           let values = List.filter_map (initializer_c context element) elements in
+          let name = static_name context in
           context.statics <-
             Printf.sprintf "static const %s %s[%d] = { %s };\n" element_c name count
               (String.concat ", " values)

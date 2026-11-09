@@ -28,22 +28,6 @@ let pulled t yielding =
       t.pulled <- (yielding, made) :: t.pulled;
       made
 
-let create database target toolchain cache settings =
-  let t =
-    {
-      database;
-      context = Lower.context database target;
-      toolchain;
-      cache;
-      settings;
-      done_ = [];
-      pulled = [];
-    }
-  in
-  (t.context.cursor_fields :=
-     fun yielding -> Yields.cursor_fields t.context.env (fst (pulled t yielding)));
-  t
-
 let environment (instance : Lir.t) n = instance.nested.(n).environment
 
 let make t (key : Instance.key) : Lir.compiled =
@@ -82,6 +66,8 @@ let make t (key : Instance.key) : Lir.compiled =
   | Drop ty -> code (Glue.drop glue ty)
   | Copy ty -> code (Glue.copy glue ty)
   | Debug ty -> code (Glue.debug glue ty)
+  | Encode ty -> code (Glue.encode glue ty)
+  | Evaluator path -> code (Lower.evaluator t.context path)
   | Entry _ | Program_main _ | Any_entry _ | Adapter _ -> code (Lower.instance t.context key)
   | Any_table _ -> Table (Lower.any_table t.context key)
   | Table _ -> Table (Lower.table t.context key)
@@ -166,3 +152,114 @@ let run_program ?input t ~main ~arguments =
 let build_program t ~main ~output =
   let root = Instance.Program_main main in
   build t ~roots:[ root ] ~startup:(Startup.program_calling (Instance.symbol root)) ~output
+
+(* A value read back from its binary form, as [Glue.encode] writes it, as
+   static data. *)
+let decode t ty text : Lir.static_value =
+  let env = t.context.env in
+  let monomorphic = t.context.monomorphic in
+  let target = Memory_layout.target env in
+  let at = ref 0 in
+  let take n =
+    if !at + n > String.length text then
+      invalid_arg "Compile: a value written out while compiling ends early";
+    let part = String.sub text !at n in
+    at := !at + n;
+    part
+  in
+  let unsigned bytes =
+    let value = ref Z.zero in
+    for i = String.length bytes - 1 downto 0 do
+      value := Z.add (Z.shift_left !value 8) (Z.of_int (Char.code bytes.[i]))
+    done;
+    !value
+  in
+  let integer (kind : Memory_layout.integer) =
+    let size = Memory_layout.integer_size target kind in
+    let value = unsigned (take size) in
+    match kind with
+    | Int8 | Int16 | Int32 | Int64 | ISize ->
+        if Z.testbit value ((8 * size) - 1) then Z.sub value (Z.shift_left Z.one (8 * size))
+        else value
+    | _ -> value
+  in
+  let rec value ty : Lir.static_value =
+    if (Memory_layout.of_type env ty).size = 0 then empty ty
+    else
+      match Monomorphic.kind monomorphic ty with
+      | Handle -> invalid_arg "Compile: a handle worked out while compiling"
+      | Storage element ->
+          let count = Z.to_int (integer USize) in
+          Static_storage
+            { element; elements = List.init count (fun _ -> value element); owned = true }
+      | Shape (Scalar scalar) -> Static_scalar (scalar_value scalar)
+      | Shape (Record members) -> Static_record (fields members)
+      | Shape (Array (element, count)) -> Static_array (List.init count (fun _ -> value element))
+      | Shape (Sum variants) ->
+          let index = Z.to_int (unsigned (take 4)) in
+          let variant = List.nth variants index in
+          Static_variant (variant.name, fields variant.fields)
+  and fields members =
+    List.map
+      (fun (name, (member : Memory_layout.member)) ->
+        match member with
+        | Typed field_ty -> (name, value field_ty)
+        | Raw _ -> invalid_arg "Compile: a raw field worked out while compiling")
+      members
+  and scalar_value (scalar : Memory_layout.scalar) : Lir.constant =
+    match scalar with
+    | Integer kind -> Integer (kind, integer kind)
+    | Float32 -> Float32 (Z.to_int32_unsigned (unsigned (take 4)))
+    | Float64 -> Float64 (Z.to_int64_unsigned (unsigned (take 8)))
+    | Bool -> Bool (unsigned (take 1) <> Z.zero)
+    | Character -> Character (Z.to_int (unsigned (take 4)))
+    | _ -> invalid_arg "Compile: a pointer worked out while compiling"
+  (* A value of zero size, which is written as nothing. *)
+  and empty ty : Lir.static_value =
+    match Monomorphic.shape monomorphic ty with
+    | Record members -> Static_record (List.map (fun (name, m) -> (name, empty_member m)) members)
+    | Sum [ variant ] ->
+        Static_variant
+          (variant.name, List.map (fun (name, m) -> (name, empty_member m)) variant.fields)
+    | Array (element, count) -> Static_array (List.init count (fun _ -> empty element))
+    | _ -> invalid_arg ("Compile: " ^ Ground.to_string ty ^ " has no one value of zero size")
+  and empty_member : Memory_layout.member -> Lir.static_value = function
+    | Typed ty -> empty ty
+    | Raw _ -> invalid_arg "Compile: a raw field of zero size"
+  in
+  let result = value ty in
+  if !at <> String.length text then
+    invalid_arg "Compile: a value written out while compiling has bytes left over";
+  result
+
+(* Runs a constant's evaluator and reads back its value. *)
+let evaluate t path ty =
+  let root = Instance.Evaluator path in
+  match
+    build_and_run t ~roots:[ root ]
+      ~startup:(Startup.evaluator_calling (Instance.symbol root))
+      ~arguments:[]
+  with
+  | Error message -> invalid_arg message
+  | Ok (0, output, _) -> decode t ty output
+  | Ok (status, _, errors) ->
+      invalid_arg
+        (Printf.sprintf "Compile: working out %s ended with status %d: %s" (Path.show path) status
+           errors)
+
+let create database target toolchain cache settings =
+  let t =
+    {
+      database;
+      context = Lower.context database target;
+      toolchain;
+      cache;
+      settings;
+      done_ = [];
+      pulled = [];
+    }
+  in
+  (t.context.cursor_fields :=
+     fun yielding -> Yields.cursor_fields t.context.env (fst (pulled t yielding)));
+  (t.context.evaluate := fun path ty -> evaluate t path ty);
+  t
