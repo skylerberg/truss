@@ -1,3 +1,9 @@
 (executables
  (names truss_lex truss_parse)
+ (modules truss_lex truss_parse)
  (libraries source diagnostic token lexer syntax syntax_print parser))
+
+(executable
+ (name truss_check)
+ (modules truss_check)
+ (libraries query path workspace diagnostic type_checker))

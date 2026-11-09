@@ -171,6 +171,15 @@ module Code = struct
     | Provide_mark
     | Not_an_implementation
 
+  type package =
+    | Impl_location
+    | Overlapping_impls
+    | Method_name_clash
+    | Needs_indirect
+    | Growing_type
+    | Instantiation_cycle
+    | Duplicate_test
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
   type t =
     | Lexer of lexer
@@ -181,6 +190,7 @@ module Code = struct
     | Usage of usage
     | Ownership of ownership
     | Capabilities of capabilities
+    | Package of package
     | Too_many_diagnostics
 
   let lexer_name code =
@@ -366,6 +376,16 @@ module Code = struct
     | Provide_mark -> "provide_mark"
     | Not_an_implementation -> "not_an_implementation"
 
+  let package_name code =
+    match code with
+    | Impl_location -> "impl_location"
+    | Overlapping_impls -> "overlapping_impls"
+    | Method_name_clash -> "method_name_clash"
+    | Needs_indirect -> "needs_indirect"
+    | Growing_type -> "growing_type"
+    | Instantiation_cycle -> "instantiation_cycle"
+    | Duplicate_test -> "duplicate_test"
+
   let name = function
     | Lexer code -> "lexer." ^ lexer_name code
     | Parser code -> "parser." ^ parser_name code
@@ -375,6 +395,7 @@ module Code = struct
     | Usage code -> "usage." ^ usage_name code
     | Ownership code -> "ownership." ^ ownership_name code
     | Capabilities code -> "capabilities." ^ capabilities_name code
+    | Package code -> "package." ^ package_name code
     | Too_many_diagnostics -> "too_many_diagnostics"
 end
 
@@ -580,33 +601,33 @@ let json_span source span =
   Printf.sprintf {|{"start":%d,"stop":%d,"line":%d,"column":%d,"end_line":%d,"end_column":%d}|}
     span.start span.stop line column end_line end_column
 
-let to_json source diagnostics =
+let to_json_object source diagnostic =
   let path = json_string (Source.path source) in
-  let one diagnostic =
-    let notes =
-      List.map
-        (fun (span, message) ->
-          Printf.sprintf {|{"span":%s,"message":%s}|} (json_span source span) (json_string message))
-        diagnostic.notes
-    in
-    let fixes =
-      List.map
-        (fun fix ->
-          let edits =
-            List.map
-              (fun (edit : edit) ->
-                Printf.sprintf {|{"start":%d,"stop":%d,"replacement":%s}|} edit.span.start
-                  edit.span.stop (json_string edit.replacement))
-              fix.edits
-          in
-          Printf.sprintf {|{"title":%s,"edits":[%s]}|} (json_string fix.title)
-            (String.concat "," edits))
-        diagnostic.fixes
-    in
-    Printf.sprintf {|{"path":%s,"code":%s,"message":%s,"span":%s,"notes":[%s],"fixes":[%s]}|} path
-      (json_string (Code.name diagnostic.code))
-      (json_string diagnostic.message)
-      (json_span source diagnostic.span)
-      (String.concat "," notes) (String.concat "," fixes)
+  let notes =
+    List.map
+      (fun (span, message) ->
+        Printf.sprintf {|{"span":%s,"message":%s}|} (json_span source span) (json_string message))
+      diagnostic.notes
   in
-  "[" ^ String.concat ",\n" (List.map one diagnostics) ^ "]\n"
+  let fixes =
+    List.map
+      (fun fix ->
+        let edits =
+          List.map
+            (fun (edit : edit) ->
+              Printf.sprintf {|{"start":%d,"stop":%d,"replacement":%s}|} edit.span.start
+                edit.span.stop (json_string edit.replacement))
+            fix.edits
+        in
+        Printf.sprintf {|{"title":%s,"edits":[%s]}|} (json_string fix.title)
+          (String.concat "," edits))
+      diagnostic.fixes
+  in
+  Printf.sprintf {|{"path":%s,"code":%s,"message":%s,"span":%s,"notes":[%s],"fixes":[%s]}|} path
+    (json_string (Code.name diagnostic.code))
+    (json_string diagnostic.message)
+    (json_span source diagnostic.span)
+    (String.concat "," notes) (String.concat "," fixes)
+
+let to_json source diagnostics =
+  "[" ^ String.concat ",\n" (List.map (to_json_object source) diagnostics) ^ "]\n"

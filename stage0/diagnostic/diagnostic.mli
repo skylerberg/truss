@@ -179,6 +179,15 @@ module Code : sig
     | Provide_mark
     | Not_an_implementation
 
+  type package =
+    | Impl_location
+    | Overlapping_impls
+    | Method_name_clash
+    | Needs_indirect
+    | Growing_type
+    | Instantiation_cycle
+    | Duplicate_test
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
   type t =
     | Lexer of lexer
@@ -189,6 +198,7 @@ module Code : sig
     | Usage of usage
     | Ownership of ownership
     | Capabilities of capabilities
+    | Package of package
     | Too_many_diagnostics
 
   val name : t -> string
@@ -256,6 +266,9 @@ val to_json : Source.t -> t list -> string
 (** For tools: a JSON array. Spans carry byte offsets as well as lines and columns, and fixes are
     always byte ranges. The output is always valid UTF-8: a byte that is not valid UTF-8, which can
     only come from quoted source text, is written as U+FFFD. *)
+
+val to_json_object : Source.t -> t -> string
+(** One diagnostic as {!to_json} writes it, for a tool's output that gathers several files'. *)
 
 val quote : string -> string
 (** Text in double quotes, with quotes, backslashes, control characters, and bytes that are not

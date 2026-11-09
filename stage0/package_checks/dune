@@ -1,0 +1,14 @@
+(library
+ (name package_checks)
+ (libraries
+  query
+  path
+  types
+  checked
+  infer
+  interface
+  resolve
+  workspace
+  syntax
+  diagnostic
+  source))

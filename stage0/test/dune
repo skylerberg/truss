@@ -11,7 +11,9 @@
   patterns_tests
   usage_tests
   ownership_tests
-  capabilities_tests)
+  capabilities_tests
+  package_checks_tests
+  documents_tests)
  (libraries
   harness
   source
@@ -43,6 +45,8 @@
   patterns
   usage
   ownership
-  syntax_walk)
+  package_checks
+  syntax_walk
+  type_checker)
  (deps
   (glob_files %{workspace_root}/*.md)))

@@ -47,12 +47,25 @@ public capability Panic {
 }
 
 public type Instant(nanoseconds: Int64)
-  derives Equal
+  derives Equal, Hash, Ordered
 
 public let Instant.epoch: Instant = Instant(nanoseconds: 0)
 
+impl Display for Instant {
+  fn display(self, output: mut TextBuilder) {
+    self.nanoseconds.display(mut output)
+  }
+}
+
 public type Duration(nanoseconds: Int64)
-  derives Equal
+  derives Equal, Hash, Ordered
+
+impl Display for Duration {
+  fn display(self, output: mut TextBuilder) {
+    self.nanoseconds.display(mut output)
+    mut output.write("ns")
+  }
+}
 
 public opaque type Path(text: String)
   derives Copyable

@@ -1,0 +1,16 @@
+(library
+ (name type_checker)
+ (libraries
+  query
+  path
+  workspace
+  diagnostic
+  source
+  resolve
+  interface
+  infer
+  patterns
+  usage
+  ownership
+  package_checks
+  standard_library))
