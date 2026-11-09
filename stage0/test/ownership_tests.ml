@@ -367,4 +367,43 @@ let () =
       fine
         "fn make() -> List[Int64] { [1, 2, 3] }\n\nfn f() -> USize {\n  make()[1..2].length()\n}\n")
 
+(* Pulling views of places *)
+
+let () =
+  test "pulling a view of a String element is an error" (fun () ->
+      one_diagnostic
+        "fn f(names: List[String]) -> Option[String] {\n\
+        \  var each = names.each()\n\
+        \  mut each.next()\n\
+         }\n"
+        "ownership.not_pullable");
+  test "a for loop over a held cursor of String elements is an error too" (fun () ->
+      one_diagnostic
+        "fn f(names: List[String]) {\n\
+        \  var each = names.each()\n\
+        \  for name in mut each {\n\
+        \    let _ = name\n\
+        \  }\n\
+         }\n"
+        "ownership.not_pullable");
+  test "a method that yields owned values can be pulled whatever its element" (fun () ->
+      fine
+        "fn greetings() yields String {\n\
+        \  yield \"hello\"\n\
+        \  yield \"hi\"\n\
+         }\n\n\
+         fn f() -> Option[String] {\n\
+        \  var each = greetings()\n\
+        \  mut each.next()\n\
+         }\n");
+  test "looping over a method that yields views of String elements is fine" (fun () ->
+      fine
+        "fn f(names: List[String]) -> USize {\n\
+        \  var count: USize = 0\n\
+        \  for name in names {\n\
+        \    count = count + name.length()\n\
+        \  }\n\
+        \  count\n\
+         }\n")
+
 let () = finish ()

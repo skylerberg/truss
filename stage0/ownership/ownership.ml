@@ -108,24 +108,27 @@ let plain context type_ = Properties.plain context.database ~bounds:context.boun
 let copyable context type_ = Properties.copyable context.database ~bounds:context.bounds type_
 let is_view context type_ = Properties.is_view context.database ~bounds:context.bounds type_
 
-let rec place_of context (value : expression) : place option =
+(* The place an expression names, from a definition's resolved and checked
+   forms alone. *)
+let rec place_in (resolved : Resolve.resolved) (checked : C.t) (value : expression) : place option =
+  let place_of () = place_in resolved checked in
   match value.kind with
   | Name path -> (
-      match context.resolved.names.(path.last.id) with
+      match resolved.names.(path.last.id) with
       | Some (Local id) -> Some { root = Local id; steps = [] }
       | _ -> None)
   | Self_value -> Some { root = Self_root; steps = [] }
   | Member (base, member) -> (
-      match context.checked.meanings.(value.id) with
+      match checked.meanings.(value.id) with
       | Some (Field_read _) ->
           Option.map
             (fun place -> { place with steps = place.steps @ [ Field member.text ] })
-            (place_of context base)
+            (place_of () base)
       | _ -> None)
   | Bracket (base, [ Item key ])
-    when context.resolved.brackets.(value.id) = Some Index
+    when resolved.brackets.(value.id) = Some Index
          ||
-         match context.checked.calls.(value.id) with
+         match checked.calls.(value.id) with
          | Some { callee = Trait_method { name = "at"; _ }; _ } -> true
          | _ -> false -> (
       match key.kind with
@@ -133,9 +136,11 @@ let rec place_of context (value : expression) : place option =
       | _ ->
           Option.map
             (fun place -> { place with steps = place.steps @ [ Element key.id ] })
-            (place_of context base))
-  | Parenthesized inner -> place_of context inner
+            (place_of () base))
+  | Parenthesized inner -> place_of () inner
   | _ -> None
+
+let place_of context value = place_in context.resolved context.checked value
 
 let kind_of context = function
   | Local id -> Option.value ~default:Owned (Hashtbl.find_opt context.kinds id)
@@ -1122,9 +1127,18 @@ let yields_through =
           | None -> [])
       | _ -> [])
 
-(* A [yields] method in its own cycle of yielding through, as a tree's
-   [each] that loops over its subtrees, cannot be pulled: its cursor would
-   need a stack of its own. *)
+(* Whether a [yields] method can be pulled as a cursor, and if not, why. *)
+type pulling =
+  | Pullable
+  | Yields_mut  (** A cursor would store [mut] access between pulls. *)
+  | Recursive
+      (** In its own cycle of yielding through, as a tree's [each] that loops over its subtrees, so
+          its cursor would need a stack of its own. *)
+  | Yields_places
+      (** It yields read-only views of places, such as [self[index]], which a pull hands out as
+          owned values: only a [Plain] element can be pulled, since anything else would be copied
+          unasked. *)
+
 let pullable =
   Query.query ~name:"pullable" ~show:Path.show (fun database (path : Path.t) ->
       let rec reaches visited = function
@@ -1134,36 +1148,88 @@ let pullable =
             else if List.exists (Path.equal next) visited then reaches visited rest
             else reaches (next :: visited) (Query.demand database yields_through next @ rest)
       in
-      not (reaches [] (Query.demand database yields_through path)))
+      let yields_places () =
+        match Interface.Summary.definition database path with
+        | Some (key, { kind = Function { body; _ }; _ }) -> (
+            match
+              (Query.demand database Resolve.resolved key, Query.demand database Infer.checked key)
+            with
+            | Some resolved, Some result ->
+                let found = ref false in
+                let rec statement (written : statement) =
+                  (match written.kind with
+                  | Yield value when place_in resolved result.checked value <> None -> found := true
+                  | _ -> ());
+                  Syntax_walk.statement_parts ~expression ~statement written
+                and expression value = Syntax_walk.expression_parts ~expression ~statement value in
+                List.iter statement body.statements;
+                !found
+            | _ -> false)
+        | _ -> false
+      in
+      match Query.demand database Interface.Environment.signature path with
+      | Some { output = Yields (Mut, _); _ } -> Yields_mut
+      | _ -> (
+          if reaches [] (Query.demand database yields_through path) then Recursive
+          else
+            match Query.demand database Interface.Environment.signature path with
+            | Some { output = Yields (Read, _); _ } when yields_places () -> Yields_places
+            | _ -> Pullable))
 
-(* A pull, [next()] on a cursor, of a method that cannot be pulled. *)
+(* A pull of a method that cannot be pulled: [next()] on its cursor, or a
+   [for] loop over a cursor held in a variable. [element] is the type a
+   pull hands out. *)
+let check_pull context (span : span) method_ element =
+  let report_it message = report context Not_pullable span message in
+  match Query.demand context.database pullable method_ with
+  | Pullable -> ()
+  | Yields_mut ->
+      report_it
+        "A method that yields `mut` access cannot be pulled, since a cursor would store that \
+         access."
+  | Recursive ->
+      report_it
+        (Printf.sprintf
+           "`%s` yields through a recursive loop, so it can drive a `for` loop but cannot be \
+            pulled. A cursor over it is a type with its own stack."
+           (Path.show method_))
+  | Yields_places ->
+      if not (plain context element) then
+        report_it
+          (Printf.sprintf
+             "`%s` yields views of its elements, and pulling one would copy a `%s` unasked. Loop \
+              over it with `for`, or pull from a method that yields owned values."
+             (Path.show method_) (T.show element))
+
 let check_pulls context =
   Array.iteri
     (fun id call ->
       match call with
       | Some
-          { C.callee = Trait_method { name = "next"; self_type = T.Cursor { method_; _ }; _ }; _ }
-        ->
-          (match Query.demand context.database Interface.Environment.signature method_ with
-          | Some { output = Yields (Mut, _); _ } ->
-              Option.iter
-                (fun (value : expression) ->
-                  report context Not_pullable value.span
-                    "A method that yields `mut` access cannot be pulled, since a cursor would \
-                     store that access.")
-                (find_expression context id)
-          | _ -> ());
-          if not (Query.demand context.database pullable method_) then
-            Option.iter
-              (fun (value : expression) ->
-                report context Not_pullable value.span
-                  (Printf.sprintf
-                     "`%s` yields through a recursive loop, so it can drive a `for` loop but \
-                      cannot be pulled. A cursor over it is a type with its own stack."
-                     (Path.show method_)))
-              (find_expression context id)
+          {
+            C.callee = Trait_method { name = "next"; self_type = T.Cursor { method_; _ }; _ };
+            result;
+            _;
+          } ->
+          let element =
+            match result with
+            | T.Named { arguments = [ T.Type element ]; _ } -> element
+            | _ -> T.Error
+          in
+          Option.iter
+            (fun (value : expression) -> check_pull context value.span method_ element)
+            (find_expression context id)
       | _ -> ())
-    context.checked.calls
+    context.checked.calls;
+  let rec statement (written : statement) =
+    (match (written.kind, context.checked.loops.(written.id)) with
+    | For { iterable; pattern; _ }, Some (Pulled { cursor = T.Cursor { method_; _ } }) ->
+        check_pull context iterable.span method_
+          (Option.value ~default:T.Error context.checked.pattern_types.(pattern.id))
+    | _ -> ());
+    Syntax_walk.statement_parts ~expression ~statement written
+  and expression value = Syntax_walk.expression_parts ~expression ~statement value in
+  Syntax_walk.definition ~statement (fun _ -> ()) context.definition
 
 (* The check *)
 

@@ -978,10 +978,19 @@ with `copy()`, unless it is `Plain`. Otherwise the error offers both fixes.
   `for` loop's expression drives the loop. Calling it anywhere else makes a
   cursor, which is a view of the receiver when the method takes `self`, and
   owns it when the method takes `own self`. A method that yields `mut`
-  cannot be pulled, which is an error at the call that makes the cursor.
+  cannot be pulled, which is an error at the pull: a `next()` call, or a
+  `for` loop over a cursor held in a variable.
+- **A pull hands out an owned value.** `next()` returns `Option[Element]`,
+  so a method that yields read-only views of places, as `List.each` yields
+  `self[index]`, can be pulled only where its element is `Plain`, which is
+  copied implicitly anyway. Anything else would be copied unasked, which
+  DESIGN.md rules out, so pulling it is an error that suggests a `for` loop
+  or a method that yields owned values. A method that yields temporaries
+  yields owned values, which a pull moves.
 - **Pullability is worked out from the body,** as DESIGN.md says. A
   `yields` method whose yields reach a recursive call, through a `for` over
-  a method in its own call cycle, cannot be pulled. This is the one fact
+  a method in its own call cycle, cannot be pulled, and whether a method
+  yields views of places is read from the body too. This is the one fact
   callers read from a body. It is stored apart from the interface, and a
   caller's trace records it only when the caller pulls the method.
 
