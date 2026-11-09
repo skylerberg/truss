@@ -23,7 +23,13 @@ let prove database (key : Names.key) =
       try
         match definition.kind with
         | Function { signature; body } ->
-            Obligations (Translate.function_ database source ~path:key.path signature body)
+            let updating_helper =
+              definition.visibility = Private
+              && (match signature.name with Member_name _ -> true | Plain_name _ -> false)
+              && Translate.receiver_of signature.parameters = Mut
+            in
+            Obligations
+              (Translate.function_ ~updating_helper database source ~path:key.path signature body)
         | Test { body; _ } -> Obligations (Translate.test database source ~path:key.path body)
         | Theorem { parameters; clauses; body; _ } ->
             Obligations (Translate.theorem database source ~path:key.path ~parameters ~clauses body)
@@ -84,25 +90,19 @@ let truss_value members text =
     flush ();
     List.rev !found
   in
-  let display name =
-    match List.assoc_opt name members with
-    | Some internal -> (
-        (* [constructor.TYPE.VARIANT], or [.record] for a record. *)
-        match List.rev (String.split_on_char '.' internal) with
-        | "record" :: _ ->
-            (* The type's own name: after its module, before its arguments. *)
-            let type_ = String.sub internal 12 (String.length internal - 12 - 7) in
-            let unqualified =
-              match
-                List.rev (String.split_on_char ':' (List.hd (String.split_on_char '[' type_)))
-              with
-              | last :: _ -> last
-              | [] -> type_
-            in
-            unqualified
-        | variant :: _ -> variant
-        | [] -> internal)
-    | None -> name
+  (* The last part of a prover name: a variant's name, or a field's. *)
+  let last internal =
+    match List.rev (String.split_on_char '.' internal) with last :: _ -> last | [] -> internal
+  in
+  (* A constructor's name as Truss writes it: its variant, or for a record
+     its type's own name, after its module and before its arguments. *)
+  let constructor internal =
+    if last internal = "record" then
+      let type_ = String.sub internal 12 (String.length internal - 12 - 7) in
+      match List.rev (String.split_on_char ':' (List.hd (String.split_on_char '[' type_))) with
+      | last :: _ -> last
+      | [] -> type_
+    else last internal
   in
   let opaque atom =
     (* The solver's name for a value of a sort it knows nothing about. *)
@@ -112,7 +112,10 @@ let truss_value members text =
   in
   let rec one = function
     | `Atom atom :: rest when opaque atom -> ("a value the prover knows nothing more about", rest)
-    | `Atom atom :: rest -> (display atom, rest)
+    | `Atom atom :: rest -> (
+        match List.assoc_opt atom members with
+        | Some (internal, _) -> (constructor internal, rest)
+        | None -> (atom, rest))
     | `Open :: `Atom "-" :: `Atom number :: `Close :: rest -> ("-" ^ number, rest)
     | `Open :: `Atom head :: rest ->
         let rec arguments acc = function
@@ -123,7 +126,17 @@ let truss_value members text =
               arguments (argument :: acc) rest
         in
         let items, rest = arguments [] rest in
-        (display head ^ "(" ^ String.concat ", " items ^ ")", rest)
+        let shown =
+          match List.assoc_opt head members with
+          | Some (internal, fields) when List.length fields = List.length items ->
+              constructor internal ^ "("
+              ^ String.concat ", "
+                  (List.map2 (fun field item -> last field ^ ": " ^ item) fields items)
+              ^ ")"
+          | Some (internal, _) -> constructor internal ^ "(" ^ String.concat ", " items ^ ")"
+          | None -> head ^ "(" ^ String.concat ", " items ^ ")"
+        in
+        (shown, rest)
     | `Open :: rest -> one rest
     | `Close :: rest -> one rest
     | [] -> ("", [])

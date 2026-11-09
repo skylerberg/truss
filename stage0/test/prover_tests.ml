@@ -340,7 +340,8 @@ let () =
            \  }\n\
             }\n")
       in
-      if not (contains found "`shape` is Circle(9223372036854775807)") then fail "message %S" found);
+      if not (contains found "`shape` is Circle(radius: 9223372036854775807)") then
+        fail "message %S" found);
   test "a requires can match on a parameter" (fun () ->
       proven
         (shape
@@ -506,6 +507,58 @@ let () =
         \  point.x = 7\n\
         \  point.y\n\
          }\n")
+
+(* Type invariants *)
+
+let span = "type Span(low: Int64, high: Int64)\n  invariant low <= high\n\n"
+
+let () =
+  test "building a value must meet its invariant" (fun () ->
+      not_proven (span ^ "fn f(low: Int64) -> Span {\n  Span(low, high: 0)\n}\n") "prover.invariant");
+  test "building a value that meets its invariant" (fun () ->
+      proven (span ^ "fn f(low: Int64) -> Span\n  requires low <= 0\n{\n  Span(low, high: 0)\n}\n"));
+  test "a parameter meets its invariant" (fun () ->
+      proven (span ^ "fn f(range: Span)\n  ensures range.low <= range.high\n{\n}\n"));
+  test "a mut parameter must meet its invariant when the function returns" (fun () ->
+      not_proven
+        (span
+       ^ "fn f(range: mut Span)\n  requires range.low > 0\n{\n  range.high = range.low - 1\n}\n")
+        "prover.invariant");
+  test "a body may break an invariant between calls" (fun () ->
+      proven
+        (span
+       ^ "fn f(range: mut Span)\n\
+         \  requires range.high < 1000\n\
+          {\n\
+         \  range.low = range.high + 1\n\
+         \  range.low = range.high\n\
+          }\n"));
+  test "a value passed to a call must meet its invariant" (fun () ->
+      not_proven
+        (span
+       ^ "fn use_span(range: Span) {}\n\n\
+          fn f(range: mut Span)\n\
+         \  requires range.high < 1000\n\
+          {\n\
+         \  range.low = range.high + 1\n\
+         \  use_span(range)\n\
+         \  range.low = range.high\n\
+          }\n")
+        "prover.invariant");
+  test "a private method that takes mut self is a step of an update" (fun () ->
+      proven
+        (span
+       ^ "fn Span.restore(mut self)\n\
+         \  ensures self.low <= self.high\n\
+          {\n\
+         \  self.low = self.high\n\
+          }\n\n\
+          public fn Span.shift(mut self)\n\
+         \  requires self.high < 1000\n\
+          {\n\
+         \  self.low = self.high + 1\n\
+         \  mut self.restore()\n\
+          }\n"))
 
 (* What is not proven yet *)
 

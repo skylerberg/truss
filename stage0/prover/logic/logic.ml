@@ -315,13 +315,16 @@ let symbols query =
 let members query =
   let _, numbering = render query in
   Hashtbl.fold
-    (fun name (datatype, suffix) found ->
-      if String.length name > 3 && String.sub name 0 3 = "is?" then found
-      else
-        match Hashtbl.find_opt numbering.sort_names datatype with
-        | Some sort -> (sort ^ suffix, name) :: found
-        | None -> found)
-    numbering.member_of []
+    (fun datatype constructors found ->
+      match Hashtbl.find_opt numbering.sort_names datatype with
+      | Some sort ->
+          List.mapi
+            (fun index (constructor, fields) ->
+              (Printf.sprintf "%s_c%d" sort index, (constructor, List.map fst fields)))
+            constructors
+          @ found
+      | None -> found)
+    numbering.datatypes []
   |> List.sort compare
 
 let hash text = "smt1-blake3-" ^ Blake3.to_hex (Blake3.hash text)

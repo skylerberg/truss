@@ -72,7 +72,7 @@ val symbols : query -> (string * string) list
 (** Each declared symbol the canonical text mentions, with its canonical name, for reading a model
     back. *)
 
-val members : query -> (string * string) list
+val members : query -> (string * (string * string list)) list
 (** Each datatype constructor the canonical text names, with the prover's name for it, for reading a
     model back. *)
 

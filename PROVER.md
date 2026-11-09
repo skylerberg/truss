@@ -863,6 +863,14 @@ It proves, with one canonical, numbered, hashed query per obligation:
   callee's; a use of an `impl` that reaches back cannot, and is an error;
   and every call from such a function must reach something with a `time`
   clause. Structural recursion without a `decreases` is not proven yet.
+- type invariants, as [Type invariants](#type-invariants) describes: a
+  value's validity, its type's invariants with its fields' validity, is
+  assumed of parameters, call results, values left in `mut` arguments, and
+  a loop's elements; the type's own invariants are shown where a value is
+  built or updated with `with`, and its validity where it is passed to a
+  call, returned, or left in a `mut` parameter or `mut self`; a private
+  method that takes `mut self` neither assumes nor shows its `self`'s, and
+  neither does a call to one for its receiver
 - `assert` in theorems and proofs, assumed in tests
 - quantifiers over ranges and over the integers, in specifications
 - the type checker's `Integer_fits` obligations
