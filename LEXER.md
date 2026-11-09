@@ -19,16 +19,13 @@ The lexer:
   forbidden characters
 - splits it into tokens: names, keywords, numbers, strings with their
   interpolations already lexed, and punctuation
-- checks each name on its own: case rules, normalization, allowed characters,
-  and scripts
+- checks each name on its own: ASCII and the case rules
 - decides which line breaks are `NEWLINE` tokens, and matches brackets
 - recognizes habits from other languages and reports each with an exact fix
 
 It does not:
 
 - know the grammar, beyond brackets and strings
-- check names against each other. Confusable names are found by a later stage
-  that sees every name visible in a package.
 - decide what `name[...]` means, or what type a literal has
 - round float literals. The type checker does that once it knows the type.
 
@@ -268,25 +265,27 @@ and interpolation = { tokens : token array; span : span }
 
 ### Scanning
 
-- A name starts with an `XID_Start` character and continues with
-  `XID_Continue` characters. `_` is `XID_Continue` but not `XID_Start`.
+- A name is ASCII letters, digits, and `_`, starting with a letter. The
+  scanner reads a word as Unicode defines one, an `XID_Start` character and
+  then `XID_Continue` characters, so that `café` is one name with one error,
+  not the name `caf` followed by a stray character.
 - `_` on its own is `Underscore`. `_` followed by name characters is an
   error, since names cannot start with `_`. The fix removes the leading
   underscores.
-- A name made only of ASCII is looked up in the keyword table. Keywords are
-  ASCII, so other names skip the lookup.
+- A name is looked up in the keyword table.
 - A reserved word becomes a `Reserved` token, and the **parser** reports it.
   A good fix depends on the construct around it: `x as Int64` becomes
   `Int64.from(x)`, and `loop {` becomes `while true {`.
 
 ### Classification and checks
 
-A name that is not a keyword is an `Upper` name if its first character has the
-general category `Lu` or `Lt`, and a `Lower` name otherwise. It is then
-checked:
+A name that is not a keyword is an `Upper` name if its first letter is
+uppercase, and a `Lower` name otherwise. It is then checked:
 
-1. **Case rules.** An `Upper` name contains no `_`. A `Lower` name contains no
-   `Lu` or `Lt` character, does not start or end with `_`, and has no `__`.
+1. **ASCII.** A letter outside ASCII is an error that names it. There is no
+   fix, since no spelling can be chosen for the author.
+2. **Case rules.** An `Upper` name contains no `_`. A `Lower` name contains no
+   uppercase letter, does not start or end with `_`, and has no `__`.
    Each violation gets a fix that rewrites the name into the right form:
 
    | Written | Fix |
@@ -299,25 +298,9 @@ checked:
    Every use of a misspelled name gets the same fix, so applying every fix in a
    file renames the name consistently. Renaming a definition across files is
    the rename tool's job.
-2. **Normalization Form C.** If every character has `NFC_Quick_Check=Yes`, the
-   name is already in NFC. Otherwise the scanner normalizes it and compares.
-   The fix replaces the name with its NFC form.
-3. **Allowed characters.** Every character must have
-   `Identifier_Status=Allowed` under
-   [UTS #39](https://www.unicode.org/reports/tr39/). Since Unicode 15.1, ZWJ
-   and ZWNJ are `XID_Continue`, so a name takes them in, but they are not
-   `Allowed`. For them the error says that joiners are not supported in names
-   yet.
-4. **Scripts.** The name must meet UTS #39's Moderately Restrictive level,
-   worked out from `Script_Extensions` as section 5.2 describes. The message
-   names the scripts it found.
 
-A name that is all ASCII needs only the case rules, so the other checks cost
-nothing in ordinary code. Each check depends only on the name, which is why it
-belongs in the lexer and not in a later stage. The `Unicode` module also
-provides UTS #39's `skeleton` function, for the later check of names across a
-package. That check compares only pairs in which at least one name contains a
-character outside ASCII, so a package of ASCII names never runs it.
+Each check depends only on the name, so each spelling is checked once per
+file.
 
 ## Numbers
 
@@ -448,12 +431,14 @@ For a raw string opened with *q* quotes and *n* dollar signs:
    - The line breaks just after the opening delimiter and just before the
      closing line are not part of the value. Every other line break is a line
      feed.
-6. **An unterminated string** swallows the rest of the file unless the
-   scanner guesses where it ends. It ends the string before the first
-   non-blank line that is indented less than the line holding the opening
-   delimiter, or before the first line that starts with a definition keyword
-   in column 0. The error offers a fix that inserts the closing delimiter
-   there.
+6. **An unterminated string** runs to the end of the file, with one error at
+   its opening delimiter and no fix, as in Rust, Python, and Go. The scanner
+   does not guess where the string was meant to end and lex the rest as code:
+   errors in the code after it are reported once the string is closed. Like
+   Rust, which points at a likely terminator, the error has a note at the
+   line where the string seems to end: the first non-blank line indented less
+   than the line holding the opening delimiter, or the first line where a
+   definition starts in column 0.
 
 The span of a text piece covers its source, including indentation that the
 value leaves out.
@@ -596,6 +581,10 @@ brackets:
   definitions after it. The error points at the innermost unclosed opener, and
   its fix inserts the closer before that line. Only a broken file runs again,
   so valid code is never affected, however it is laid out.
+- **A file that ends inside an unterminated comment or raw string** has its
+  open brackets closed without another error. They are part of what the
+  comment or string swallowed, and closing it is the fix that matters. An
+  interpolation cut off by an error closes its brackets the same way.
 
 Inserted closers are zero-width, so the parser can tell them apart and avoid
 reporting the same mistake again.
@@ -652,8 +641,8 @@ type t = {
 - **One Unicode version, named by the language version.** All tables come
   from that version's data files. Stage0 starts from Unicode 18.0.0, the
   latest when the tables were first generated.
-- **A generator in `stage0/tools/unicode/`** downloads the UCD and UTS #39
-  data files of that version, checks each against a SHA-256 hash recorded in
+- **A generator in `stage0/tools/unicode/`** downloads the UCD data files of
+  that version, checks each against a SHA-256 hash recorded in
   `sources.txt`, and writes `stage0/unicode/unicode_tables.ml`.
   `regenerate.sh` runs the whole process. Only the generated module, the list of source
   URLs, and their hashes are checked in, which keeps the repository small and
@@ -661,29 +650,17 @@ type t = {
   only regenerating the tables does.
 - **Tables** are sorted arrays of code point ranges, searched by binary search,
   with a 128-entry table for ASCII.
-- **Properties used:** `XID_Start` and `XID_Continue`, `Default_Ignorable_Code_Point`
-  (`DerivedCoreProperties.txt`); `Bidi_Control` and `Variation_Selector`
-  (`PropList.txt`); the general categories `Lu`, `Lt`, and `Cc`
-  (`DerivedGeneralCategory.txt`); `NFC_Quick_Check` and
-  `Full_Composition_Exclusion` (`DerivedNormalizationProps.txt`); `Script` and
-  `Script_Extensions`, with script names from `PropertyValueAliases.txt`;
-  `Identifier_Status` (`IdentifierStatus.txt`) and `confusables.txt` from UTS
-  #39. The forbidden characters are combined into one table when the tables
-  are generated.
-- **Case mappings.** The fixes that rewrite a name's case, such as `userName`
-  to `user_name`, use the simple case mappings in `UnicodeData.txt`, so they
-  work for names in any script with case.
+- **Properties used:** `XID_Start` and `XID_Continue`, to find words, and
+  `Default_Ignorable_Code_Point` (`DerivedCoreProperties.txt`);
+  `Bidi_Control` and `Variation_Selector` (`PropList.txt`); and the general
+  category `Cc` (`DerivedGeneralCategory.txt`). The forbidden characters are
+  combined into one table when the tables are generated.
 - **Names of characters** in messages come from `UnicodeData.txt`, or from
   `NameAliases.txt` for control characters, which `UnicodeData.txt` calls
   `<control>`. Only the forbidden characters' names are kept.
-- **NFC is implemented directly** from the decompositions and combining
-  classes in `UnicodeData.txt` and `Full_Composition_Exclusion`, with Hangul
-  syllables worked out by arithmetic. It is about 150 lines.
-- **Conformance.** After writing the tables, `regenerate.sh` checks NFC and
-  NFD against every line of the UCD's `NormalizationTest.txt`, and each
-  property, case mapping, script, and confusable against the data file it came
-  from, for every code point. The data files are not checked in, so this runs
-  only when the tables change.
+- **Conformance.** After writing the tables, `regenerate.sh` checks each
+  property against the data file it came from, for every code point. The
+  data files are not checked in, so this runs only when the tables change.
 - The only library the lexer needs is Zarith.
 
 ## Interfaces to other stages
@@ -749,7 +726,8 @@ that it costs almost nothing; Truss does not lead the way on rules like these.
 - **Decimal literals have no leading zeros** (P3), as in Python 3 and
   JavaScript's strict mode.
 - **Names use only UTS #39's allowed characters, and two ASCII names are never
-  compared for confusability** (P4), as in Rust.
+  compared for confusability** (P4), as in Rust. Building the lexer replaced
+  this with ASCII-only names (see the next section).
 - **The line-break rule is Scala's** (P7): a `NEWLINE` comes exactly where the
   token before can end a statement and the token after can begin one.
 - **Raw-string whitespace is fully specified:** spaces after an opening `"""`
@@ -757,8 +735,7 @@ that it costs almost nothing; Truss does not lead the way on rules like these.
   indentation is empty.
 
 Considered and left out, because no other language does them and each has a
-cost: checking names for mixed numbering systems and for look-alikes of
-keywords; allowing ZWJ and ZWNJ in names, which was deferred; limiting where
+cost: limiting where
 joiners and variation selectors may appear in strings, forbidding U+2028 and
 U+2029, and requiring string literals in NFC (P5); rejecting `"$name"` (P6);
 and making `test`, `proof`, `law`, `theorem`, and `capability` contextual
@@ -769,9 +746,16 @@ keywords (P8).
 Building the lexer settled these points, which the sections above now
 describe:
 
-- **Unicode 18.0.0** is the pinned version. Since Unicode 15.1, ZWJ and ZWNJ
-  are `XID_Continue`, so names take them in and the Allowed check rejects
-  them, with the message that joiners are not supported in names yet.
+- **Unicode 18.0.0** is the pinned version.
+- **Names are ASCII.** Supporting every script safely took NFC, script
+  restriction levels, `Identifier_Status`, case mappings, and a check for
+  confusable names across a package, and all of it changes with each Unicode
+  version. ASCII names, as in Zig and Gleam, rule out look-alike names
+  instead.
+- **An unterminated raw string runs to the end of the file,** as in Rust,
+  Python, and Go, with a note at the line where it seems to end. Guessing the
+  end and lexing what follows as code took a second scan and interacted
+  badly with other recovery.
 - **Fixes are checked by construction.** `Lexer.lex` lexes the result of
   each fix again, only in the part of the file around it, and leaves out any
   fix that fails, instead of relying on each fix being built right. Fuzzing found fixes that went wrong only where
@@ -789,8 +773,4 @@ describe:
 - **Inside a multi-line raw string,** a run of more quotes than the delimiter
   after text on a line is an error and stays text. On a line of its own, it
   closes the string, also with an error.
-- **NFC uses `Full_Composition_Exclusion`** from
-  `DerivedNormalizationProps.txt`, which already includes
-  `CompositionExclusions.txt`, so that file is not needed. The simple case
-  mappings in `UnicodeData.txt` are added to the tables for the fixes that
-  rewrite a name's case.
+

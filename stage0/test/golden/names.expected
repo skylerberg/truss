@@ -47,7 +47,7 @@
 7:13+1 Upper O
 7:15+2 Lower x1
 7:18+7 Lower é_name
-7:25+6 Upper Ärger
+7:25+6 Lower Ärger
 7:31+6 Lower 名前
 7:33+1 Newline
 8:1+0 End_of_file [line break]
@@ -56,3 +56,12 @@
   |    ^^^^^^^^^^
   fix: Write `SelfCheck`
     replace "Self_check" with "SelfCheck" at ./names.truss:2:4
+./names.truss:7:18: error[lexer.name_not_ascii]: Names use only ASCII letters, digits, and `_`, and `é` (U+00E9) is not ASCII. Text in any language goes in strings.
+  | Point UInt8 O x1 é_name Ärger 名前
+  |                  ^^^^^^
+./names.truss:7:25: error[lexer.name_not_ascii]: Names use only ASCII letters, digits, and `_`, and `Ä` (U+00C4) is not ASCII. Text in any language goes in strings.
+  | Point UInt8 O x1 é_name Ärger 名前
+  |                         ^^^^^
+./names.truss:7:31: error[lexer.name_not_ascii]: Names use only ASCII letters, digits, and `_`, and `名` (U+540D) is not ASCII. Text in any language goes in strings.
+  | Point UInt8 O x1 é_name Ärger 名前
+  |                               ^^

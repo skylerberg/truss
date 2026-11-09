@@ -15,6 +15,9 @@ type t = Cursor.t
 
 let create = Cursor.create
 
+(* Whether the file ended inside an unterminated comment or raw string. *)
+let ended_inside_error cursor = cursor.ended_inside_error
+
 (* The punctuation that starts with [current], by longest match, or [None]
    if [current] starts none. *)
 let punctuation cursor current =
@@ -234,10 +237,7 @@ let rec next cursor =
   | Token { kind; start; ending = _ } ->
       (* At the top level, a line break is legal, so how a string ended does
          not matter here. *)
-      let raw = take_trivia cursor kind (span start cursor.position) in
-      cursor.first_line_break <- cursor.line_break_after_token;
-      cursor.line_break_after_token <- None;
-      raw
+      take_trivia cursor kind (span start cursor.position)
 
 and take_trivia cursor kind raw_span =
   let raw = { raw_kind = kind; raw_span; first_line_break = cursor.first_line_break; blank_line = cursor.blank_line } in

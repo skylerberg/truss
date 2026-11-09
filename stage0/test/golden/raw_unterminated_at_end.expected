@@ -4,8 +4,6 @@
 1:12+27 Raw(3 quotes, 0 dollars, multi-line) "never closed\nat all"
 3:9+0 Newline
 3:9+0 End_of_file
-./raw_unterminated_at_end.truss:1:12: error[lexer.unterminated_string]: This raw string is never closed. Close it with `"""` on a line of its own.
+./raw_unterminated_at_end.truss:1:12: error[lexer.unterminated_string]: This raw string is never closed, so it runs to the end of the file. Close it with `"""` on a line of its own.
   | let text = """
   |            ^^^
-  fix: Close the string with `"""`
-    insert "\n  \"\"\"" at ./raw_unterminated_at_end.truss:3:9

@@ -70,27 +70,21 @@ only as described in [Line breaks](#line-breaks).
 ### Names
 
 ```ebnf
-name_start    = ? a character with the Unicode property XID_Start ? ;
-name_continue = ? a character with the Unicode property XID_Continue ? ;
-raw_name      = name_start { name_continue } ;
+letter        = "a" ... "z" | "A" ... "Z" ;
+raw_name      = letter { letter | digit | "_" } ;
 ```
 
 A `raw_name` that is a reserved keyword is that keyword. Otherwise:
 
-- It is an `UPPER_NAME` if its first character has the Unicode general category
-  `Lu` or `Lt`. It must not contain `_`.
-- Otherwise it is a `LOWER_NAME`. It must contain no character of category
-  `Lu` or `Lt`, must not start or end with `_`, and must not contain `__`.
+- It is an `UPPER_NAME` if it starts with an uppercase letter. It must not
+  contain `_`.
+- Otherwise it is a `LOWER_NAME`. It must contain no uppercase letter, must
+  not end with `_`, and must not contain `__`.
 - `_` on its own is the token `"_"`.
 
-Every name must be in Unicode Normalization Form C, must contain only
-characters with `Identifier_Status=Allowed` in UTS #39, and must meet UTS
-#39's "Moderately Restrictive" level (Latin plus at most one other script, and
-never Latin with Cyrillic or Greek). The lexer checks these, since each
-depends only on the name. After lexing, a name
-containing a character outside ASCII must not be confusable with another name
-visible in the same package. Two names that are both entirely ASCII are never
-compared.
+Names are ASCII. A letter outside ASCII where a name is written is an error;
+the lexer reads the whole word, as Unicode's `XID_Start` and `XID_Continue`
+define one, as a single name and reports it once.
 
 ### Keywords
 

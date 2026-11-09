@@ -6,24 +6,11 @@
 2:3+3 Keyword let [line break]
 2:7+4 Lower text
 2:12+1 '='
-2:14+33 Raw(3 quotes, 0 dollars, multi-line) "  never closed\nlet x = 1"
-5:1+1 '}' [line break]
-5:2+1 Newline
-6:1+3 Keyword let [line break]
-6:5+5 Lower after
-6:11+1 '='
-6:13+1 Integer 2
-6:14+1 Newline
-8:1+2 Keyword fn [line break] [blank line]
-8:4+1 Lower g
-8:5+1 '('
-8:6+1 ')'
-8:8+1 '{'
-8:9+1 '}'
-8:10+1 Newline
-9:1+0 End_of_file [line break]
-./raw_unterminated.truss:2:14: error[lexer.unterminated_string]: This raw string is never closed. Close it with `"""` on a line of its own, before the line where it seems to end.
+2:14+60 Raw(3 quotes, 0 dollars, multi-line) "    never closed\n  let x = 1\n}\nlet after = 2\n\nfn g() {}"
+9:1+0 '}'
+9:1+0 Newline
+9:1+0 End_of_file
+./raw_unterminated.truss:2:14: error[lexer.unterminated_string]: This raw string is never closed, so it runs to the end of the file. Close it with `"""` on a line of its own.
   |   let text = """
   |              ^^^
-  fix: Close the string with `"""`
-    insert "  \"\"\"\n" at ./raw_unterminated.truss:5:1
+  note: ./raw_unterminated.truss:5:1: The string may have been meant to end with `"""` before this line.

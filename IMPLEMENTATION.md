@@ -28,9 +28,9 @@ The full design is in [LEXER.md](LEXER.md), and the lexer is built in
   raw tokens that record whether a line break came before them, and a layout
   stage pulls them one at a time, inserts `NEWLINE` tokens, and matches
   brackets.
-- **Unicode tables generated from one pinned Unicode version,** including
-  NFC, rather than taken from sedlex, `uucp`, and `uunf`, whose versions follow
-  their own releases.
+- **Unicode tables generated from one pinned Unicode version,** rather than
+  taken from sedlex or `uucp`, whose versions follow their own releases. Names
+  are ASCII, so the tables only find words and forbidden characters.
 - **Integer literals do not fit OCaml's `int`,** which has 63 bits. Store them
   with Zarith, which the prover's exact integer arithmetic needs anyway. Float
   literals are kept as exact decimals until the type checker rounds them.

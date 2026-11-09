@@ -32,7 +32,11 @@
 let with_recovery source =
   let diagnostics = Diagnostic.Collector.create () in
   let scanner = Scanner.create source diagnostics in
-  let tokens = Layout.file_with_recovery ~source ~diagnostics (fun () -> Scanner.next scanner) in
+  let tokens =
+    Layout.file_with_recovery ~source ~diagnostics
+      ~cut_off:(fun () -> Scanner.ended_inside_error scanner)
+      (fun () -> Scanner.next scanner)
+  in
   (tokens, Diagnostic.Collector.to_list diagnostics)
 
 (* The tokens and diagnostics, and whether the file needed bracket
@@ -40,7 +44,11 @@ let with_recovery source =
 let lex_unchecked source =
   let diagnostics = Diagnostic.Collector.create () in
   let scanner = Scanner.create source diagnostics in
-  match Layout.file ~source ~diagnostics (fun () -> Scanner.next scanner) with
+  match
+    Layout.file ~source ~diagnostics
+      ~cut_off:(fun () -> Scanner.ended_inside_error scanner)
+      (fun () -> Scanner.next scanner)
+  with
   | `Complete tokens -> (tokens, Diagnostic.Collector.to_list diagnostics, false)
   | `Unclosed_at_end ->
       let tokens, diagnostics = with_recovery source in

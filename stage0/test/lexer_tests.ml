@@ -400,8 +400,6 @@ let test_round_trips () =
   let names =
     [| ("count", Lower "count"); ("user_name", Lower "user_name"); ("x1", Lower "x1");
        ("Point", Upper "Point"); ("UInt8", Upper "UInt8"); ("O", Upper "O");
-       ("caf\xc3\xa9", Lower "caf\xc3\xa9"); ("\xe5\x90\x8d\xe5\x89\x8d", Lower "\xe5\x90\x8d\xe5\x89\x8d");
-       ("\xd0\xbf\xd1\x80\xd0\xb8\xd0\xb2\xd0\xb5\xd1\x82", Lower "\xd0\xbf\xd1\x80\xd0\xb8\xd0\xb2\xd0\xb5\xd1\x82");
        ("_", Underscore) |]
   in
   let non_brackets =
@@ -512,15 +510,16 @@ let test_round_trips () =
 
 let test_unicode () =
   check (Unicode.version = "18.0.0") "the pinned Unicode version";
-  check (Unicode.nfc "e\xcc\x81" = "\xc3\xa9") "NFC composes e and an acute accent";
-  check (Unicode.nfd "\xc3\xa9" = "e\xcc\x81") "NFD decomposes é";
-  check (Unicode.nfc "\xea\xb0\x80" = "\xea\xb0\x80" && Unicode.nfd "\xea\xb0\x80" = "\xe1\x84\x80\xe1\x85\xa1")
-    "Hangul syllables decompose by arithmetic";
-  check (Unicode.skeleton "p\xd0\xb0ypal" = Unicode.skeleton "paypal") "Cyrillic а is confusable with Latin a";
-  check (Unicode.is_moderately_restrictive "\xe5\x90\x8d\xe5\x89\x8dname") "Han with Latin is allowed";
-  check (Unicode.is_moderately_restrictive "\xe3\x81\xb2\xe3\x82\x89\xe6\xbc\xa2") "Hiragana with Han is allowed";
-  check (not (Unicode.is_moderately_restrictive "p\xd0\xb0ypal")) "Latin with Cyrillic is not allowed";
-  check (not (Unicode.is_moderately_restrictive "a\xce\xb1")) "Latin with Greek is not allowed";
+  (* Names are ASCII: a word with a letter outside ASCII is one name, with
+     one error. *)
+  List.iter
+    (fun word ->
+      let tokens, diagnostics = lex ("let " ^ word ^ " = 1\n") in
+      check
+        (List.map (fun (d : Diagnostic.t) -> d.code) diagnostics = [ Diagnostic.Code.Name_not_ascii ]
+        && Array.length tokens = 6)
+        "%S is one name with one error" word)
+    [ "caf\xc3\xa9"; "\xe5\x90\x8d\xe5\x89\x8d"; "p\xd0\xb0ypal"; "\xc3\x84rger" ];
   check (Unicode.is_forbidden 0x202E && Unicode.is_forbidden 0x200B && Unicode.is_forbidden 0xE0041)
     "Bidi controls, zero-width space, and tags are forbidden";
   check (not (Unicode.is_forbidden 0x200D || Unicode.is_forbidden 0xFE0F || Unicode.is_forbidden 0x09))

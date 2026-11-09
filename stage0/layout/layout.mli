@@ -15,13 +15,21 @@ val can_begin : Token.kind -> bool
 val file :
   source:Source.t ->
   diagnostics:Diagnostic.Collector.t ->
+  cut_off:(unit -> bool) ->
   (unit -> Token.raw) ->
   [ `Complete of Token.t array | `Unclosed_at_end ]
 (** A whole file. If brackets are still open at its end, it stops, so that
-    the lexer can run again with {!file_with_recovery}. *)
+    the lexer can run again with {!file_with_recovery}. [cut_off] says, at
+    the end, whether the file ended inside an unterminated comment or
+    string, which the scanner has reported; brackets left open are then
+    closed without another error. *)
 
 val file_with_recovery :
-  source:Source.t -> diagnostics:Diagnostic.Collector.t -> (unit -> Token.raw) -> Token.t array
+  source:Source.t ->
+  diagnostics:Diagnostic.Collector.t ->
+  cut_off:(unit -> bool) ->
+  (unit -> Token.raw) ->
+  Token.t array
 (** A whole file, where a definition starting in column 0 closes every open
     bracket. *)
 

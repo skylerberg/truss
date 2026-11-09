@@ -20,10 +20,7 @@ module Code : sig
     | Strict_equality
     | Character_literal
     | Name_case
-    | Name_not_normalized
-    | Name_character_not_allowed
-    | Name_joiner
-    | Name_mixed_scripts
+    | Name_not_ascii
     | Number_suffix
     | Number_uppercase_prefix
     | Number_uppercase_exponent
@@ -80,13 +77,6 @@ module Collector : sig
 
   val create : unit -> t
   val add : t -> diagnostic -> unit
-
-  type mark
-
-  val mark : t -> mark
-  val reset : t -> mark -> unit
-  (** Drops every diagnostic added since the mark, for a stage that tries
-      something and then backs off. *)
 
   val to_list : t -> diagnostic list
   (** In order of position. *)

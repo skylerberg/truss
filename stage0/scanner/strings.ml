@@ -348,51 +348,34 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
 
 (* A multi-line raw string's body is read line by line. Each line keeps its
    pieces, so that the indentation can be removed once the closing line is
-   found. If there is no closing line, the string is read again up to where
-   it seems to end, so that what follows lexes as code. *)
+   found. An unterminated one runs to the end of the file, as in Rust,
+   Python, and Go, with a note at the line where it seems to end. *)
 and scan_multi_line_raw cursor ~scan ~tag ~form ~literal_start ~dollars ~quotes ~after ~line_end =
-  let mark = Diagnostic.Collector.mark cursor.diagnostics in
-  match read_raw_lines cursor ~scan ~dollars ~quotes ~line_end ~limit:None with
+  match read_raw_lines cursor ~scan ~dollars ~quotes ~line_end with
   | `Closed (lines, closing) -> build_multi_line cursor ~tag ~form ~quotes ~after lines closing
-  | `Unterminated _ ->
-      Diagnostic.Collector.reset cursor.diagnostics mark;
-      let guess = guess_raw_string_end cursor ~literal_start ~line_end in
-      let lines =
-        match read_raw_lines cursor ~scan ~dollars ~quotes ~line_end ~limit:guess with
-        | `Closed (lines, _) | `Unterminated lines -> lines
-      in
-      let indentation = common_indentation lines in
+  | `Unterminated lines ->
+      cursor.ended_inside_error <- true;
       let delimiter = String.make quotes '"' in
-      let position = cursor.position in
-      let insertion =
-        if position = 0 || is_line_break (byte cursor (position - 1)) then indentation ^ delimiter ^ "\n"
-        else "\n" ^ indentation ^ delimiter
+      let notes =
+        match guess_raw_string_end cursor ~literal_start ~line_end with
+        | Some line_start ->
+            [ (Source.zero_width line_start, Printf.sprintf "The string may have been meant to end with `%s` before this line." delimiter) ]
+        | None -> []
       in
-      (* The string ends at the start of a line, so the token after it
-         starts a new line. *)
-      if guess <> None then begin
-        let line_break_start =
-          if position >= 2 && byte cursor (position - 2) = 0x0D && byte cursor (position - 1) = 0x0A then
-            position - 2
-          else position - 1
-        in
-        cursor.line_break_after_token <- Some (span line_break_start position)
-      end;
-      report cursor ~code:Unterminated_string
-        ~fixes:[ Diagnostic.fix ("Close the string with `" ^ delimiter ^ "`") [ Diagnostic.insert position insertion ] ]
-        (span literal_start after)
-        (Printf.sprintf "This raw string is never closed. Close it with `%s` on a line of its own%s." delimiter
-           (match guess with Some _ -> ", before the line where it seems to end" | None -> ""));
-      build_multi_line cursor ~tag ~form ~quotes ~after lines (`Unterminated position)
+      report cursor ~code:Unterminated_string ~notes (span literal_start after)
+        (Printf.sprintf
+           "This raw string is never closed, so it runs to the end of the file. Close it with `%s` on a \
+            line of its own."
+           delimiter);
+      build_multi_line cursor ~tag ~form ~quotes ~after lines (`Unterminated cursor.position)
 
-and read_raw_lines cursor ~scan ~dollars ~quotes ~line_end ~limit =
+and read_raw_lines cursor ~scan ~dollars ~quotes ~line_end =
   cursor.position <- line_end;
   if cursor.position < cursor.length then ignore (Source_text.consume_line_break cursor);
   let lines = ref [] in
   let rec line () =
     let line_start = cursor.position in
-    let past_limit = match limit with Some limit -> line_start >= limit | None -> false in
-    if past_limit || line_start >= cursor.length then `Unterminated (List.rev !lines)
+    if line_start >= cursor.length then `Unterminated (List.rev !lines)
     else
       let first = skip_spaces cursor line_start in
       if byte cursor first = quote && run_length cursor first quote >= quotes then begin
@@ -475,9 +458,10 @@ and common_indentation lines =
     None lines
   |> Option.value ~default:""
 
-(* Where an unterminated multi-line raw string probably ends: before the
-   first non-blank line indented less than the line holding the opening
-   delimiter, or before the first line where a definition starts. *)
+(* Where an unterminated multi-line raw string was probably meant to end,
+   for a note: before the first non-blank line indented less than the line
+   holding the opening delimiter, or before the first line where a
+   definition starts. *)
 and guess_raw_string_end cursor ~literal_start ~line_end =
   let opener_line = Source.line_start cursor.source literal_start in
   let opener_indentation = skip_spaces cursor opener_line - opener_line in

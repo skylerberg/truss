@@ -11,10 +11,7 @@ module Code = struct
     | Strict_equality
     | Character_literal
     | Name_case
-    | Name_not_normalized
-    | Name_character_not_allowed
-    | Name_joiner
-    | Name_mixed_scripts
+    | Name_not_ascii
     | Number_suffix
     | Number_uppercase_prefix
     | Number_uppercase_exponent
@@ -48,10 +45,7 @@ module Code = struct
     | Strict_equality -> "strict_equality"
     | Character_literal -> "character_literal"
     | Name_case -> "name_case"
-    | Name_not_normalized -> "name_not_normalized"
-    | Name_character_not_allowed -> "name_character_not_allowed"
-    | Name_joiner -> "name_joiner"
-    | Name_mixed_scripts -> "name_mixed_scripts"
+    | Name_not_ascii -> "name_not_ascii"
     | Number_suffix -> "number_suffix"
     | Number_uppercase_prefix -> "number_uppercase_prefix"
     | Number_uppercase_exponent -> "number_uppercase_exponent"
@@ -110,12 +104,9 @@ let limit = 200
 module Collector = struct
   type diagnostic = t
   type nonrec t = diagnostic Dynarray.t
-  type mark = int
 
   let create () = Dynarray.create ()
   let add collector diagnostic = Dynarray.add_last collector diagnostic
-  let mark collector = Dynarray.length collector
-  let reset collector mark = Dynarray.truncate collector mark
 
   let to_list collector =
     List.stable_sort

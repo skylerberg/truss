@@ -1728,42 +1728,29 @@ clause ends, which is the parser's job. Words that other languages use as keywor
 as `loop`, `async`, and `where`, are reserved now, so that adding one later
 breaks no code and borrowed code gets a clear error.
 
-**Names can use any script.** The whole-words rule asks for names a reader
-understands, and for many teams those are words in their own language. The
-danger is that a malicious change could add a name that looks like an
-existing one but is spelled with different characters, which matters for a
-language built for supply-chain safety. So the protections are errors, not
-warnings: names must be in Normalization Form C, a name cannot mix Latin with
-Cyrillic or Greek or with more than one other script, and two names in a
-package that Unicode lists as confusable cannot both be visible. Names use
-only the characters UTS #39's General Security Profile allows, which leaves
-out look-alike forms that normalization keeps, such as mathematical bold
-letters, fullwidth letters, and a fullwidth `＿` that would get around the
-case rules. Rust warns about the same characters; Python instead folds them
-into ordinary letters with NFKC, which gives one name several spellings.
-Two names that are entirely ASCII are never compared, because
-Unicode lists `m` as confusable with `rn`, which would forbid `modern` beside
-`modem`; look-alikes within ASCII are a matter of fonts, and an attack needs
-characters outside ASCII, as Rust's check for confusable names also assumes.
-Scripts
-without case count as lowercase, as in Go and Haskell, so the parser's rule
-that case tells a type from a value still holds. Keywords and the standard
-library stay ASCII so that every program can be read with them.
+**Names are ASCII,** as in Zig and Gleam. A name that looks like another but
+is spelled with different characters, such as a Cyrillic `а` in place of a
+Latin `a`, is a known way to slip a malicious change past review, and it
+matters for a language built for supply-chain safety. Allowing every script
+safely takes a large mechanism that still leaves gaps: normalization, rules
+about mixing scripts, Unicode's list of look-alike characters checked across
+every name in a package, and all of it changing with each Unicode version.
+ASCII names rule the attack out instead. Within ASCII, look-alikes such as
+`l` and `1` are a matter of fonts. The cost is that a team cannot name things
+in its own language. Text in any language still goes in strings, including
+test names and messages, and in documentation. Keywords and the standard
+library were ASCII already.
 
-**Each language version pins a Unicode version.** Which characters names can
-use, which characters are invisible, how scripts are assigned, and which names
-look alike all come from Unicode data, and the data changes every year, not
-only by adding characters: scripts are reassigned and the list of confusable
-characters is revised. If the compiler used whatever version its libraries
+**Each language version pins a Unicode version.** Which characters are
+invisible, and so forbidden in source files, comes from Unicode data, and the
+data changes every year. If the compiler used whatever version its libraries
 had, as Rust and Go do, whether a file compiles would depend on which build of
 the compiler checked it, and the first compiler in OCaml and the later one in
 Truss could disagree. Java names a Unicode version in each language
 specification, and Truss does the same. Moving to a new Unicode version comes
-with a new language version, like a change to the prelude, and can bring
-automatic fixes, such as renaming names that the new data finds confusable.
-The cost is that letters added to Unicode after the pinned version cannot be
-used in names until then. Strings are not limited: a string can hold any
-character that is not forbidden, including ones from later versions.
+with a new language version, like a change to the prelude. Strings are not
+limited: a string can hold any character that is not forbidden, including
+ones from later versions.
 
 **Constants are values, so they are `lower_snake_case`:** `math::pi`,
 `UInt8.maximum`, `Instant.epoch`. A separate case for constants, such as

@@ -11,10 +11,9 @@ type t = {
   mutable first_line_break : Source.span option;
   mutable blank_line : bool;
   mutable line_is_blank : bool;
-  (* Set by a token that ends at the start of a line, as an unterminated raw
-     string can: the line break before that point, which comes before the
-     next token. *)
-  mutable line_break_after_token : Source.span option;
+  (* Set when an unterminated comment or multi-line raw string runs to the
+     end of the file, an error already reported. *)
+  mutable ended_inside_error : bool;
   (* Each name spelling is checked once per file, and its tokens share one
      string. *)
   names : (string, Names.checked) Hashtbl.t;
@@ -30,7 +29,7 @@ let create source diagnostics =
     first_line_break = None;
     blank_line = false;
     line_is_blank = true;
-    line_break_after_token = None;
+    ended_inside_error = false;
     names = Hashtbl.create 256;
   }
 

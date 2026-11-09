@@ -49,11 +49,6 @@ let code_point_range text =
       let value = code_point text in
       (value, value)
 
-let code_points_of_sequence text =
-  String.split_on_char ' ' text
-  |> List.filter (fun part -> part <> "")
-  |> List.map code_point
-
 (* Ranges *)
 
 let merge ranges =
@@ -98,20 +93,6 @@ let subtract ranges removed =
   in
   merge (List.concat_map (fun range -> cut range removed) ranges)
 
-(* Valued ranges: consecutive code points with the same value are merged. *)
-let merge_valued entries =
-  let sorted = List.sort compare entries in
-  let rec loop merged = function
-    | [] -> List.rev merged
-    | (first, last, value) :: rest -> (
-        match merged with
-        | (merged_first, merged_last, merged_value) :: merged_rest
-          when merged_value = value && first = merged_last + 1 ->
-            loop ((merged_first, last, value) :: merged_rest) rest
-        | _ -> loop ((first, last, value) :: merged) rest)
-  in
-  loop [] sorted
-
 (* Output *)
 
 let output = Buffer.create (1 lsl 20)
@@ -129,60 +110,19 @@ let emit_ints name values =
 let emit_ranges name ranges =
   emit_ints name (List.concat_map (fun (first, last) -> [ first; last ]) ranges)
 
-let emit_valued_ranges name ranges =
-  emit_ints name
-    (List.concat_map (fun (first, last, value) -> [ first; last; value ]) ranges)
-
 let emit_strings name values =
   Buffer.add_string output (Printf.sprintf "let %s = [|" name);
   List.iter (fun value -> Buffer.add_string output (Printf.sprintf "\n  %S;" value)) values;
   line "\n|]\n"
 
-let emit_int_arrays name values =
-  Buffer.add_string output (Printf.sprintf "let %s = [|" name);
-  List.iter
-    (fun array ->
-      Buffer.add_string output
-        (Printf.sprintf "\n  [| %s |];"
-           (String.concat "; " (List.map (Printf.sprintf "0x%X") array))))
-    values;
-  line "\n|]\n"
-
-let utf8 code_points =
-  let buffer = Buffer.create 8 in
-  List.iter (fun value -> Buffer.add_utf_8_uchar buffer (Uchar.of_int value)) code_points;
-  Buffer.contents buffer
-
-(* UnicodeData.txt *)
-
-type character = {
-  value : int;
-  name : string;
-  combining_class : int;
-  decomposition : int list;  (* canonical only; empty when there is none *)
-  uppercase : int option;
-  lowercase : int option;
-}
+(* UnicodeData.txt: each character's code point and name. *)
 
 let characters =
   lazy
     (records "UnicodeData.txt"
-    |> List.map (fun fields ->
-           match fields with
-           | value :: name :: _category :: combining_class :: _bidi :: decomposition
-             :: _ :: _ :: _ :: _ :: _ :: _ :: uppercase :: lowercase :: _ ->
-               let optional text = if text = "" then None else Some (code_point text) in
-               {
-                 value = code_point value;
-                 name;
-                 combining_class = int_of_string combining_class;
-                 decomposition =
-                   (if decomposition = "" || decomposition.[0] = '<' then []
-                    else code_points_of_sequence decomposition);
-                 uppercase = optional uppercase;
-                 lowercase = optional lowercase;
-               }
-           | _ -> failwith "UnicodeData.txt: unexpected line"))
+    |> List.map (function
+         | value :: name :: _ -> (code_point value, name)
+         | _ -> failwith "UnicodeData.txt: unexpected line"))
 
 let unicode_version () =
   (* The first line of DerivedCoreProperties.txt is
@@ -194,36 +134,6 @@ let unicode_version () =
       String.sub first start (String.length first - start - String.length ".txt")
   | [] -> failwith "DerivedCoreProperties.txt is empty"
 
-(* Scripts *)
-
-(* The long names of the scripts, in the order of PropertyValueAliases.txt,
-   followed by the three sets that UTS #39 section 5.1 adds when it augments
-   a script set. A script's number is its index here. *)
-let script_aliases =
-  lazy
-    (records "PropertyValueAliases.txt"
-    |> List.filter_map (function
-         | "sc" :: short :: long :: _ -> Some (short, long)
-         | _ -> None))
-
-let augmented_scripts = [ ("Hanb", "Han_with_Bopomofo"); ("Jpan", "Japanese"); ("Kore", "Korean") ]
-
-let script_table = lazy (Lazy.force script_aliases @ augmented_scripts)
-
-let script_number_of_long long =
-  let rec find index = function
-    | [] -> failwith ("unknown script " ^ long)
-    | (_, name) :: rest -> if name = long then index else find (index + 1) rest
-  in
-  find 0 (Lazy.force script_table)
-
-let script_number_of_short short =
-  let rec find index = function
-    | [] -> failwith ("unknown script " ^ short)
-    | (name, _) :: rest -> if name = short then index else find (index + 1) rest
-  in
-  find 0 (Lazy.force script_table)
-
 let () =
   data_directory := Sys.argv.(1);
   let characters = Lazy.force characters in
@@ -233,10 +143,9 @@ let () =
   line "";
   line (Printf.sprintf "let unicode_version = %S\n" (unicode_version ()));
 
-  (* Names *)
+  (* Words, which the scanner reads as names *)
   emit_ranges "xid_start" (property_ranges "DerivedCoreProperties.txt" "XID_Start");
   emit_ranges "xid_continue" (property_ranges "DerivedCoreProperties.txt" "XID_Continue");
-  emit_ranges "uppercase_or_titlecase" (general_category_ranges [ "Lu"; "Lt" ]);
 
   (* Forbidden characters, as GRAMMAR.md lists them: Bidi_Control; Cc except
      tab, line feed, and carriage return, which the scanner handles itself;
@@ -273,138 +182,18 @@ let () =
   in
   let names =
     List.filter_map
-      (fun character ->
-        if not (contains forbidden character.value) then None
+      (fun (value, name) ->
+        if not (contains forbidden value) then None
         else
           let name =
-            match List.find_map (alias character.value) [ "correction"; "control"; "figment" ] with
+            match List.find_map (alias value) [ "correction"; "control"; "figment" ] with
             | Some name -> Some name
-            | None -> if character.name.[0] = '<' then None else Some character.name
+            | None -> if name.[0] = '<' then None else Some name
           in
-          Option.map (fun name -> (character.value, name)) name)
+          Option.map (fun name -> (value, name)) name)
       characters
   in
   emit_ints "forbidden_name_keys" (List.map fst names);
   emit_strings "forbidden_name_values" (List.map snd names);
-
-  (* Normalization *)
-  let normalization = records "DerivedNormalizationProps.txt" in
-  let normalization_ranges predicate =
-    normalization
-    |> List.filter_map (fun fields ->
-           if predicate fields then Some (code_point_range (List.hd fields)) else None)
-    |> merge
-  in
-  emit_ranges "nfc_quick_check_not_yes"
-    (normalization_ranges (function
-      | [ _; "NFC_QC"; ("N" | "M") ] -> true
-      | _ -> false));
-  let full_composition_exclusion =
-    normalization_ranges (function
-      | [ _; "Full_Composition_Exclusion" ] -> true
-      | _ -> false)
-  in
-  emit_valued_ranges "combining_class"
-    (characters
-    |> List.filter (fun character -> character.combining_class <> 0)
-    |> List.map (fun character ->
-           (character.value, character.value, character.combining_class))
-    |> merge_valued);
-  let decomposed = List.filter (fun character -> character.decomposition <> []) characters in
-  emit_ints "decomposition_keys" (List.map (fun character -> character.value) decomposed);
-  emit_int_arrays "decomposition_values"
-    (List.map (fun character -> character.decomposition) decomposed);
-  (* A primary composite is a canonical decomposition into two characters
-     that is not excluded from composition. Its key packs both characters
-     into one integer: first * 0x110000 + second. *)
-  let compositions =
-    decomposed
-    |> List.filter_map (fun character ->
-           match character.decomposition with
-           | [ first; second ] when not (contains full_composition_exclusion character.value) ->
-               Some ((first * 0x110000) + second, character.value)
-           | _ -> None)
-    |> List.sort compare
-  in
-  emit_ints "composition_keys" (List.map fst compositions);
-  emit_ints "composition_values" (List.map snd compositions);
-
-  (* Simple case mappings, for the fixes that rewrite a name's case. *)
-  let mapping select =
-    List.filter_map
-      (fun character -> Option.map (fun target -> (character.value, target)) (select character))
-      characters
-  in
-  let lowercase = mapping (fun character -> character.lowercase) in
-  let uppercase = mapping (fun character -> character.uppercase) in
-  emit_ints "lowercase_keys" (List.map fst lowercase);
-  emit_ints "lowercase_values" (List.map snd lowercase);
-  emit_ints "uppercase_keys" (List.map fst uppercase);
-  emit_ints "uppercase_values" (List.map snd uppercase);
-
-  (* Scripts *)
-  let scripts = Lazy.force script_table in
-  emit_strings "script_names"
-    (List.map (fun (_, long) -> String.map (function '_' -> ' ' | c -> c) long) scripts);
-  List.iter
-    (fun (constant, short) ->
-      line (Printf.sprintf "let script_%s = %d" constant (script_number_of_short short)))
-    [
-      ("common", "Zyyy"); ("inherited", "Zinh"); ("unknown", "Zzzz"); ("latin", "Latn");
-      ("cyrillic", "Cyrl"); ("greek", "Grek"); ("han", "Hani"); ("hiragana", "Hira");
-      ("katakana", "Kana"); ("hangul", "Hang"); ("bopomofo", "Bopo");
-      ("han_with_bopomofo", "Hanb"); ("japanese", "Jpan"); ("korean", "Kore");
-    ];
-  line "";
-  let script_ranges =
-    records "Scripts.txt"
-    |> List.map (function
-         | range :: script :: _ ->
-             let first, last = code_point_range range in
-             (first, last, script_number_of_long script)
-         | _ -> failwith "Scripts.txt: unexpected line")
-    |> merge_valued
-  in
-  emit_valued_ranges "script" script_ranges;
-  (* Script_Extensions lists only the characters whose extensions differ
-     from their Script. Each distinct set is stored once. *)
-  let extension_entries =
-    records "ScriptExtensions.txt"
-    |> List.map (function
-         | range :: scripts :: _ ->
-             let first, last = code_point_range range in
-             let set =
-               String.split_on_char ' ' scripts
-               |> List.filter (fun part -> part <> "")
-               |> List.map script_number_of_short
-               |> List.sort_uniq compare
-             in
-             (first, last, set)
-         | _ -> failwith "ScriptExtensions.txt: unexpected line")
-  in
-  let sets = List.sort_uniq compare (List.map (fun (_, _, set) -> set) extension_entries) in
-  let set_index set =
-    let rec find index = function
-      | [] -> assert false
-      | candidate :: rest -> if candidate = set then index else find (index + 1) rest
-    in
-    find 0 sets
-  in
-  emit_int_arrays "script_extension_sets" sets;
-  emit_valued_ranges "script_extensions"
-    (merge_valued
-       (List.map (fun (first, last, set) -> (first, last, set_index set)) extension_entries));
-
-  (* UTS #39 *)
-  emit_ranges "identifier_allowed" (property_ranges "IdentifierStatus.txt" "Allowed");
-  let confusables =
-    records "confusables.txt"
-    |> List.map (function
-         | source :: target :: _ -> (code_point source, utf8 (code_points_of_sequence target))
-         | _ -> failwith "confusables.txt: unexpected line")
-    |> List.sort compare
-  in
-  emit_ints "confusable_keys" (List.map fst confusables);
-  emit_strings "confusable_values" (List.map snd confusables);
 
   print_string (Buffer.contents output)
