@@ -90,8 +90,40 @@ module Code = struct
     | Not_a_generic_parameter
     | Null
 
+  type types =
+    | Implements_built_in
+    | Not_derivable
+    | Wrong_receiver
+    | Not_a_type
+    | Not_a_trait
+    | Not_a_capability
+    | Arity
+    | Unsatisfied_bound
+    | Private_in_public
+    | Method_outside_package
+    | Default_not_constant
+    | Main_signature
+    | Duplicate_field
+    | Cannot_derive
+    | Derives_inferred
+    | Redeclared_method
+    | Trait_cycle
+    | Missing_member
+    | Extra_member
+    | Signature_mismatch
+    | Missing_required_impl
+    | Implements_panic
+    | Impl_uses
+    | Unknown_associated_type
+    | Associated_type_not_fixed
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
-  type t = Lexer of lexer | Parser of parser | Resolve of resolve | Too_many_diagnostics
+  type t =
+    | Lexer of lexer
+    | Parser of parser
+    | Resolve of resolve
+    | Types of types
+    | Too_many_diagnostics
 
   let lexer_name code =
     match code with
@@ -185,10 +217,39 @@ module Code = struct
     | Not_a_generic_parameter -> "not_a_generic_parameter"
     | Null -> "null"
 
+  let types_name code =
+    match code with
+    | Implements_built_in -> "implements_built_in"
+    | Not_derivable -> "not_derivable"
+    | Wrong_receiver -> "wrong_receiver"
+    | Not_a_type -> "not_a_type"
+    | Not_a_trait -> "not_a_trait"
+    | Not_a_capability -> "not_a_capability"
+    | Arity -> "arity"
+    | Unsatisfied_bound -> "unsatisfied_bound"
+    | Private_in_public -> "private_in_public"
+    | Method_outside_package -> "method_outside_package"
+    | Default_not_constant -> "default_not_constant"
+    | Main_signature -> "main_signature"
+    | Duplicate_field -> "duplicate_field"
+    | Cannot_derive -> "cannot_derive"
+    | Derives_inferred -> "derives_inferred"
+    | Redeclared_method -> "redeclared_method"
+    | Trait_cycle -> "trait_cycle"
+    | Missing_member -> "missing_member"
+    | Extra_member -> "extra_member"
+    | Signature_mismatch -> "signature_mismatch"
+    | Missing_required_impl -> "missing_required_impl"
+    | Implements_panic -> "implements_panic"
+    | Impl_uses -> "impl_uses"
+    | Unknown_associated_type -> "unknown_associated_type"
+    | Associated_type_not_fixed -> "associated_type_not_fixed"
+
   let name = function
     | Lexer code -> "lexer." ^ lexer_name code
     | Parser code -> "parser." ^ parser_name code
     | Resolve code -> "resolve." ^ resolve_name code
+    | Types code -> "types." ^ types_name code
     | Too_many_diagnostics -> "too_many_diagnostics"
 end
 

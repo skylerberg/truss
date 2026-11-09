@@ -1,0 +1,55 @@
+public type Option[Value] =
+  | Some(value: Value)
+  | None
+  derives Equal, Hash, Ordered
+
+public fn Option[Value].is_some(self) -> Bool
+  cost time O(1)
+{
+  self is Some(_)
+}
+
+public fn Option[Value].is_none(self) -> Bool
+  cost time O(1)
+{
+  self is None
+}
+
+public fn Option[Value].unwrap_or(own self, default: own Value) -> Value {
+  match own self {
+    Some(value) => value
+    None => default
+  }
+}
+
+public fn Option[Value].map[Output](own self, transform: fn(own Value) -> Output) -> Option[Output] {
+  match own self {
+    Some(value) => Some(transform(own value))
+    None => None
+  }
+}
+
+public fn Option[Value].ok_or[Error](own self, error: own Error) -> Result[Value, Error] {
+  match own self {
+    Some(value) => Ok(own value)
+    None => Err(own error)
+  }
+}
+
+public fn Option[Value].unwrap(own self) -> Value
+  uses Panic
+{
+  match own self {
+    Some(value) => value
+    None => Panic.crash("unwrap of None")
+  }
+}
+
+public fn Option[Value].expect(own self, message: StringSlice) -> Value
+  uses Panic
+{
+  match own self {
+    Some(value) => value
+    None => Panic.crash(message)
+  }
+}

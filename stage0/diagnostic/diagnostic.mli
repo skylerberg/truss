@@ -98,8 +98,40 @@ module Code : sig
     | Not_a_generic_parameter
     | Null
 
+  type types =
+    | Implements_built_in
+    | Not_derivable
+    | Wrong_receiver
+    | Not_a_type
+    | Not_a_trait
+    | Not_a_capability
+    | Arity
+    | Unsatisfied_bound
+    | Private_in_public
+    | Method_outside_package
+    | Default_not_constant
+    | Main_signature
+    | Duplicate_field
+    | Cannot_derive
+    | Derives_inferred
+    | Redeclared_method
+    | Trait_cycle
+    | Missing_member
+    | Extra_member
+    | Signature_mismatch
+    | Missing_required_impl
+    | Implements_panic
+    | Impl_uses
+    | Unknown_associated_type
+    | Associated_type_not_fixed
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
-  type t = Lexer of lexer | Parser of parser | Resolve of resolve | Too_many_diagnostics
+  type t =
+    | Lexer of lexer
+    | Parser of parser
+    | Resolve of resolve
+    | Types of types
+    | Too_many_diagnostics
 
   val name : t -> string
 end
