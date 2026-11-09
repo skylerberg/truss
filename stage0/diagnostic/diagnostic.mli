@@ -160,6 +160,18 @@ module Code : sig
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
   type usage = Unused_variable | Unreachable_code
 
+  type ownership =
+    | Use_after_move
+    | Not_owned
+    | Field_not_restored
+    | Conflicting_loan
+    | Changed_while_viewed
+    | Returns_local_view
+    | Needs_owned
+    | Lends_count
+    | Not_pullable
+    | Parallel_conflict
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
   type t =
     | Lexer of lexer
@@ -168,6 +180,7 @@ module Code : sig
     | Types of types
     | Patterns of patterns
     | Usage of usage
+    | Ownership of ownership
     | Too_many_diagnostics
 
   val name : t -> string

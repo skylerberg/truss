@@ -287,7 +287,12 @@ let rec is_place state (value : expression) =
       | _ -> false)
   | Self_value -> true
   | Member (base, _) -> is_place state base
-  | Bracket (base, _) -> state.resolved.brackets.(value.id) = Some Index && is_place state base
+  | Bracket (base, _) -> (
+      match state.resolved.brackets.(value.id) with
+      | Some Index -> is_place state base
+      | Some Method_bracket -> (
+          match base.kind with Member _ -> is_place state base | _ -> false)
+      | _ -> false)
   | Parenthesized inner -> is_place state inner
   | _ -> false
 
@@ -902,11 +907,31 @@ and bracket state env ?expected (value : expression) (base : expression) items =
                   T.Error)
           | _ -> T.Error)
       | _ -> T.Error)
-  | Some Method_bracket ->
-      report state Not_a_value value.span
-        "A method with type arguments is called: write `(...)` after it.";
-      T.Error
+  | Some Method_bracket -> (
+      (* Resolution cannot tell a field from a method before the dot; a
+         field followed by brackets is indexed. *)
+      match base.kind with
+      | Member (inner, member)
+        when Option.is_none (static_ state inner) && is_field state env inner member ->
+          index state env ?expected value base items
+      | _ ->
+          report state Not_a_value value.span
+            "A method with type arguments is called: write `(...)` after it.";
+          T.Error)
   | Some Index | None -> index state env ?expected value base items
+
+and is_field state env (inner : expression) (member : name) =
+  let base_type =
+    match state.tables.types.(inner.id) with
+    | Some type_ -> type_
+    | None -> expression state env inner
+  in
+  match normalize state base_type with
+  | T.Named { path; arguments } -> (
+      match Members.fields state.database path arguments with
+      | Some fields -> List.exists (fun (field : T.field) -> field.field_name = member.text) fields
+      | None -> false)
+  | _ -> false
 
 and explicit_type_arguments state (value : expression) instance items =
   let given =
@@ -1767,6 +1792,20 @@ and method_call state env ?expected (value : expression) (base : expression) (me
          (shown wanted)
          (String.concat ", " (List.map (fun (receiver, _) -> shown receiver) versions)))
   in
+  (* A place that calls a method with only a [mut] or [own] version is
+     missing its mark, which the fix adds. *)
+  let missing_receiver_mark : 'a. (Path.receiver * 'a) list -> unit =
+   fun versions ->
+    let has receiver = List.exists (fun (found, _) -> found = receiver) versions in
+    if (not marked) && place && (has Path.Mut || has Path.Own) then begin
+      let mark = if has Path.Mut then "mut" else "own" in
+      report state Missing_mark base.span
+        ~fixes:[ fix (Printf.sprintf "Mark it `%s`." mark) [ insert base.span.start (mark ^ " ") ] ]
+        (Printf.sprintf "`%s` takes `%s self`, so the call marks its receiver `%s`." member.text
+           mark mark)
+    end
+    else wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) versions)
+  in
   match receiver_type with
   | T.Error | T.Hole ->
       List.iter
@@ -1789,7 +1828,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
               method_with_receiver state env ?expected ~type_arguments value ~receiver:base
                 ~receiver_type method_path arguments
           | None ->
-              wrong_receiver own;
+              missing_receiver_mark own;
               T.Error)
       | [] -> (
           match trait_candidates state receiver_type member.text with
@@ -1804,7 +1843,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                   trait_method_call state env value ~receiver:base ~receiver_type trait method_
                     ~type_arguments arguments
               | None ->
-                  wrong_receiver
+                  missing_receiver_mark
                     (List.map
                        (fun (method_ : T.trait_method) -> (method_.method_receiver, ()))
                        versions);

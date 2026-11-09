@@ -263,13 +263,41 @@ let rec missing context (types : T.ty list) (rows : row list) : space list optio
             Some (Constructed (constructor, fields) :: rest)
         | None -> None
       in
+      (* Only when the column's constructors are complete is each one
+         tried. Otherwise the rows that start with a wildcard decide, and
+         a value the column has no constructor for is the witness, which
+         keeps recursive types from being expanded without end. *)
+      let present = List.concat_map head_constructors column in
       match (type_, signature context type_ column) with
       | (T.Error | T.Hole | T.Never), _ -> None
-      | _, Some all -> List.find_map try_constructor all
-      | _, None -> (
+      | _, Some all
+        when all <> []
+             && List.for_all
+                  (fun constructor -> List.exists (fun found -> covers found constructor) present)
+                  all ->
+          List.find_map try_constructor all
+      | _, signature -> (
           match missing context rest_types (default_matrix rows) with
-          | Some witness -> Some (Wild :: witness)
-          | None -> None))
+          | None -> None
+          | Some witness -> (
+              let absent =
+                match signature with
+                | Some all ->
+                    List.find_opt
+                      (fun constructor ->
+                        not (List.exists (fun found -> covers found constructor) present))
+                      all
+                | None -> None
+              in
+              match absent with
+              | Some constructor when present <> [] ->
+                  let count =
+                    match constructor with
+                    | Interval _ | Boolean _ | Text _ | Opaque_constant _ -> 0
+                    | _ -> List.length (field_types constructor)
+                  in
+                  Some (Constructed (constructor, List.init count (fun _ -> Wild)) :: witness)
+              | _ -> Some (Wild :: witness))))
 
 (* Whether a row is useful after the rows before it: whether some value it
    matches matches none of them. *)

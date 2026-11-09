@@ -9,7 +9,8 @@
   interface_tests
   infer_tests
   patterns_tests
-  usage_tests)
+  usage_tests
+  ownership_tests)
  (libraries
   harness
   source
@@ -40,6 +41,7 @@
   infer
   patterns
   usage
+  ownership
   syntax_walk)
  (deps
   (glob_files %{workspace_root}/*.md)))

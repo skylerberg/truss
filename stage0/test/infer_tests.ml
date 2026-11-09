@@ -187,8 +187,11 @@ let () =
         ~fixed:"fn keep(count: own Int64) {}\n\nfn f(count: Int64) {\n  keep(count)\n}\n");
   test "a mut receiver chooses the method's mut version" (fun () ->
       fine "fn f() {\n  var items: List[Int64] = []\n  mut items.push(1)\n}\n");
-  test "a method without the version a receiver asks for is an error" (fun () ->
-      one_diagnostic "fn f(items: List[Int64]) {\n  items.push(1)\n}\n" "types.wrong_receiver")
+  test "a place calling a method that takes mut self needs the mark, with a fix that adds it"
+    (fun () ->
+      one_diagnostic "fn f() {\n  var items: List[Int64] = []\n  items.push(1)\n}\n"
+        "types.missing_mark"
+        ~fixed:"fn f() {\n  var items: List[Int64] = []\n  mut items.push(1)\n}\n")
 
 (* Statements *)
 

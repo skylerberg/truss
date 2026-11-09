@@ -152,6 +152,18 @@ module Code = struct
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
   type usage = Unused_variable | Unreachable_code
 
+  type ownership =
+    | Use_after_move
+    | Not_owned
+    | Field_not_restored
+    | Conflicting_loan
+    | Changed_while_viewed
+    | Returns_local_view
+    | Needs_owned
+    | Lends_count
+    | Not_pullable
+    | Parallel_conflict
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
   type t =
     | Lexer of lexer
@@ -160,6 +172,7 @@ module Code = struct
     | Types of types
     | Patterns of patterns
     | Usage of usage
+    | Ownership of ownership
     | Too_many_diagnostics
 
   let lexer_name code =
@@ -324,6 +337,19 @@ module Code = struct
   let usage_name code =
     match code with Unused_variable -> "unused_variable" | Unreachable_code -> "unreachable_code"
 
+  let ownership_name code =
+    match code with
+    | Use_after_move -> "use_after_move"
+    | Not_owned -> "not_owned"
+    | Field_not_restored -> "field_not_restored"
+    | Conflicting_loan -> "conflicting_loan"
+    | Changed_while_viewed -> "changed_while_viewed"
+    | Returns_local_view -> "returns_local_view"
+    | Needs_owned -> "needs_owned"
+    | Lends_count -> "lends_count"
+    | Not_pullable -> "not_pullable"
+    | Parallel_conflict -> "parallel_conflict"
+
   let name = function
     | Lexer code -> "lexer." ^ lexer_name code
     | Parser code -> "parser." ^ parser_name code
@@ -331,6 +357,7 @@ module Code = struct
     | Types code -> "types." ^ types_name code
     | Patterns code -> "patterns." ^ patterns_name code
     | Usage code -> "usage." ^ usage_name code
+    | Ownership code -> "ownership." ^ ownership_name code
     | Too_many_diagnostics -> "too_many_diagnostics"
 end
 

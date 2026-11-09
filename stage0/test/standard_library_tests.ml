@@ -33,6 +33,7 @@ let () =
             @ Infer.diagnostics database module_
             @ Patterns.file_diagnostics database module_
             @ Usage.file_diagnostics database module_
+            @ Ownership.file_diagnostics database module_
           in
           List.iter (fun diagnostic -> fail "%s" (show diagnostic file.source)) diagnostics))
     Standard_library.modules
