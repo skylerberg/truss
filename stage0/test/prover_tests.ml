@@ -234,13 +234,109 @@ let () =
       not_proven "theorem t(value: Int64)\n  ensures true\n{\n  assert value > 0\n}\n"
         "prover.assertion")
 
+(* Data *)
+
+let shape = "type Shape =\n  | Circle(radius: Int64)\n  | Square(side: Int64)\n  | Empty\n\n"
+let point = "type Point(x: Int64, y: Int64)\n  derives Equal\n\n"
+
+let () =
+  test "match binds a variant's fields" (fun () ->
+      proven
+        (shape
+       ^ "fn f(shape: Shape) -> Int64\n\
+         \  ensures result >= 0\n\
+          {\n\
+         \  match shape {\n\
+         \    Circle(radius) => if radius < 0 { 0 } else { radius }\n\
+         \    Square(side) => if side < 0 { 0 } else { side }\n\
+         \    Empty => 0\n\
+         \  }\n\
+          }\n"));
+  test "a variant's field is in its type's range, and no further" (fun () ->
+      not_proven
+        (shape
+       ^ "fn f(shape: Shape) -> Int64 {\n\
+         \  match shape {\n\
+         \    Circle(radius) => radius * radius\n\
+         \    _ => 0\n\
+         \  }\n\
+          }\n")
+        "prover.overflow");
+  test "a counterexample shows a variant by its name" (fun () ->
+      let found =
+        message
+          (shape
+         ^ "fn f(shape: Shape) -> Int64 {\n\
+           \  match shape {\n\
+           \    Circle(radius) => radius + 1\n\
+           \    _ => 0\n\
+           \  }\n\
+            }\n")
+      in
+      if not (contains found "`shape` is Circle(9223372036854775807)") then fail "message %S" found);
+  test "a requires can match on a parameter" (fun () ->
+      proven
+        (shape
+       ^ "fn f(shape: Shape) -> Int64\n\
+         \  requires match shape {\n\
+         \    Circle(radius) => radius < 100\n\
+         \    _ => true\n\
+         \  }\n\
+          {\n\
+         \  match shape {\n\
+         \    Circle(radius) => radius + 1\n\
+         \    _ => 0\n\
+         \  }\n\
+          }\n"));
+  test "with replaces one field and keeps the others" (fun () ->
+      proven
+        (point
+       ^ "fn f(point: Point) -> Point\n\
+         \  requires point.x < 100\n\
+         \  ensures result.x == point.x + 1\n\
+         \  ensures result.y == point.y\n\
+          {\n\
+         \  point with (x: point.x + 1)\n\
+          }\n"));
+  test "derived equality is the solver's equality" (fun () ->
+      proven
+        (point
+       ^ "fn f(point: Point) -> Bool\n\
+         \  ensures result\n\
+          {\n\
+         \  Point(x: point.x, y: point.y) == point\n\
+          }\n"));
+  test "is binds the parts it matches, where it is true" (fun () ->
+      proven
+        "fn f(value: Option[Int64]) -> Int64\n\
+        \  ensures result >= 0\n\
+         {\n\
+        \  if value is Some(inner) && inner > 0 { inner } else { 0 }\n\
+         }\n");
+  test "? goes on with what is inside" (fun () ->
+      not_proven
+        "fn f(value: Option[UInt8]) -> Option[UInt8] {\n\
+        \  let inner = value?\n\
+        \  Some(inner + 1)\n\
+         }\n"
+        "prover.overflow");
+  test "? returns an error unchanged" (fun () ->
+      proven
+        "fn f(value: Result[Int64, Bool]) -> Result[Int64, Bool]\n\
+        \  ensures match value {\n\
+        \    Err(error) => result == Err(error)\n\
+        \    Ok(_) => true\n\
+        \  }\n\
+         {\n\
+        \  let inner = value?\n\
+        \  Ok(inner)\n\
+         }\n")
+
 (* What is not proven yet *)
 
 let () =
   test "a construct the prover cannot read yet" (fun () ->
-      not_proven
-        "fn f(items: List[Int64]) -> Int64 {\n  match items.length() {\n    _ => 0\n  }\n}\n"
-        "prover.unsupported");
+      not_proven "fn f(items: List[Int64]) -> Int64 {\n  items[0]\n}\n" "prover.unsupported");
   test "a cost bound is reported as not proven yet" (fun () ->
       not_proven "fn f() -> Int64\n  cost time O(1)\n{\n  0\n}\n" "prover.unsupported")
 

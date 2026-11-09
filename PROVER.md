@@ -827,9 +827,17 @@ It proves, with one canonical, numbered, hashed query per obligation:
 - every `requires` at a call to a function or theorem whose contract it
   reads, and every `ensures` at each way a function returns, with `old`,
   `result`, and `mut` arguments
-- `if`, blocks, `let` and `var` of a name, assignment and compound
-  assignment to a local, `return`, `parallel` blocks in order, and `proof`
-  blocks
+- `if`, blocks, `let` and `var` with any pattern that cannot fail,
+  assignment and compound assignment to a local, `return`, `parallel`
+  blocks in order, and `proof` blocks
+- records and sum types whose fields the package sees, as algebraic
+  datatypes with their variants and fields sorted by name: building them,
+  with fields defaulted, reading fields, variants with no fields,
+  constants, `with`, `match` with guards and every pattern but strings and
+  alternatives that bind, `is`, `?` on a `Result` or an `Option`, and `==`
+  as the solver's equality for types with structural equality. Each field
+  read is in its type's range, and a counterexample shows a value by its
+  variant and fields.
 - `while` loops and `for` loops over ranges of integers, with invariants on
   entry and after each iteration, and, in a function with a `time` clause,
   termination by `decreases` or the one measure the prover tries itself
@@ -840,11 +848,13 @@ It proves, with one canonical, numbered, hashed query per obligation:
 - the type checker's `Integer_fits` obligations
 
 A call to anything whose contract it does not read yet, such as a trait
-method, a capability, or a constructor, gives a value known only by its
-type's range, which is sound but proves little. A definition that uses
-anything else, such as a field, an index, `match`, a lambda, or a lending
-or yielding method, is reported as `prover.unsupported` with what stopped
-it, and none of its obligations count as proven. A cost bound, and a loop's
+method or a capability, gives a value known only by its type's range, and
+so does building a type whose fields the package cannot see, and `==` on a
+type without structural equality: sound, but it proves little. A
+definition that uses anything else, such as an index, a lambda, a string,
+a float, or a lending or yielding method, is reported as
+`prover.unsupported` with what stopped it, and none of its obligations
+count as proven. A cost bound, and a loop's
 `cost`, are reported as not proven yet, while the rest of the definition is
 proven as usual.
 

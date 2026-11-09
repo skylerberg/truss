@@ -78,12 +78,16 @@ type context = {
   mutable returns : (frame * L.term option) list;
   mutable instantiating : Path.t list;  (** Contracts being assumed, to stop at recursion. *)
   fits : (int * T.ty) list;  (** The type checker's [Integer_fits] obligations, by expression. *)
+  mutable output : T.ty option;  (** What the function proven returns, for [?]. *)
 }
 
 (* Symbols and facts *)
 
 let declare context declaration =
-  let name = match declaration with L.Constant (name, _) | L.Function (name, _, _) -> name in
+  let name =
+    match declaration with
+    | L.Constant (name, _) | L.Function (name, _, _) | L.Datatype (name, _) -> name
+  in
   if not (Hashtbl.mem context.declared name) then begin
     Hashtbl.replace context.declared name ();
     context.declarations <- declaration :: context.declarations
@@ -162,8 +166,135 @@ let width (ty : T.ty) =
 let is_numeric (ty : T.ty) = match ty with T.Integer -> true | _ -> bounds ty <> None
 let is_bool ty = T.is_builtin Bool ty
 
-let sort_of (ty : T.ty) : L.sort =
-  if is_numeric ty then Int else if is_bool ty then Bool else Uninterpreted (T.show ty)
+(* A type's name in the logic, unique across modules, as [T.show] is not. *)
+let rec type_key (ty : T.ty) =
+  match ty with
+  | Named { path; arguments = [] } -> Path.show path
+  | Named { path; arguments } ->
+      Path.show path ^ "[" ^ String.concat ", " (List.map argument_key arguments) ^ "]"
+  | _ -> T.show ty
+
+and argument_key = function T.Type ty -> type_key ty | argument -> T.show_argument argument
+
+let constructor_name ty variant =
+  "constructor." ^ type_key ty ^ "." ^ Option.value variant ~default:"record"
+
+let selector_name ty variant field =
+  "field." ^ type_key ty ^ "." ^ Option.value variant ~default:"record" ^ "." ^ field
+
+let is_standard_equal (path : Path.t) =
+  match path with
+  | Top { module_ = { package = "standard"; _ }; name = "Equal" } -> true
+  | _ -> false
+
+(* A type's interface, when it is a type whose fields this package sees. *)
+let visible_type context (ty : T.ty) =
+  match ty with
+  | Named { path; arguments } when builtin ty = None -> (
+      match Query.demand context.database Interface.Environment.interface path with
+      | Some (Interface.Environment.Type_interface interface)
+        when (not interface.opaque) || Path.package path = Path.package context.current ->
+          let substitution =
+            try
+              List.combine
+                (List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics)
+                arguments
+            with Invalid_argument _ -> []
+          in
+          Some (interface, substitution)
+      | _ -> None)
+  | _ -> None
+
+(* A type's shape in the logic: its constructors, each with its variant's
+   name, [None] for a record, and its fields, sorted by name so that
+   reordering them changes no query. *)
+let constructors context ty =
+  match visible_type context ty with
+  | Some (interface, substitution) -> (
+      let fields (list : T.field list) =
+        List.sort compare
+          (List.map
+             (fun (field : T.field) ->
+               (field.field_name, T.substitute substitution field.field_type))
+             list)
+      in
+      match interface.shape with
+      | Record list -> Some [ (None, fields list) ]
+      | Sum variants ->
+          Some
+            (List.sort compare
+               (List.map
+                  (fun (variant : T.variant) ->
+                    ( Some variant.variant_name,
+                      match variant.fields with Some list -> fields list | None -> [] ))
+                  variants))
+      | Todo_type | Builtin_type _ | Error_shape -> None)
+  | None -> None
+
+(* The fields of one constructor, in the order they are declared, which is
+   how a call's arguments are numbered. *)
+let declared_fields context ty variant =
+  match visible_type context ty with
+  | Some (interface, substitution) -> (
+      let fields (list : T.field list) =
+        List.map
+          (fun (field : T.field) -> (field.field_name, T.substitute substitution field.field_type))
+          list
+      in
+      match (interface.shape, variant) with
+      | Record list, None -> Some (fields list)
+      | Sum variants, Some name -> (
+          match List.find_opt (fun (v : T.variant) -> v.variant_name = name) variants with
+          | Some { fields = Some list; _ } -> Some (fields list)
+          | Some { fields = None; _ } -> Some []
+          | None -> None)
+      | _ -> None)
+  | None -> None
+
+let rec sort_of context (ty : T.ty) : L.sort =
+  if is_numeric ty then Int
+  else if is_bool ty then Bool
+  else begin
+    let name = type_key ty in
+    (if not (Hashtbl.mem context.declared name) then
+       match constructors context ty with
+       | Some shape ->
+           (* Marked first, so a recursive type's fields find it declared. *)
+           Hashtbl.replace context.declared name ();
+           let declaration =
+             L.Datatype
+               ( name,
+                 List.map
+                   (fun (variant, fields) ->
+                     ( constructor_name ty variant,
+                       List.map
+                         (fun (field, field_type) ->
+                           (selector_name ty variant field, sort_of context field_type))
+                         fields ))
+                   shape )
+           in
+           context.declarations <- declaration :: context.declarations
+       | None -> ());
+    Uninterpreted name
+  end
+
+(* Whether [==] on a type is the solver's equality: built in with identity
+   semantics, or derived from fields that all are. See DESIGN.md,
+   "Equality, ordering, and deriving". *)
+let rec structural context ?(seen = []) (ty : T.ty) =
+  if is_numeric ty || is_bool ty || T.is_builtin Character ty then true
+  else if List.exists (T.equal ty) seen then true
+  else
+    match (visible_type context ty, constructors context ty) with
+    | Some (interface, _), Some shape ->
+        List.exists is_standard_equal interface.derives
+        && List.for_all
+             (fun (_, fields) ->
+               List.for_all
+                 (fun (_, field_type) -> structural context ~seen:(ty :: seen) field_type)
+                 fields)
+             shape
+    | _ -> false
 
 let in_range ty term =
   match bounds ty with
@@ -174,7 +305,7 @@ let in_range ty term =
 (* A value of a type that arrives from outside what is known: a parameter,
    a call's result, a loop's havocked local. *)
 let arrive context frame prefix ty =
-  let value = fresh context prefix (sort_of ty) in
+  let value = fresh context prefix (sort_of context ty) in
   assume context frame (in_range ty value);
   value
 
@@ -219,7 +350,7 @@ let join context ?value_type frames =
           (fun id term ->
             let sort =
               match first.source.checked.local_types.(id) with
-              | Some ty -> sort_of ty
+              | Some ty -> sort_of context ty
               | None -> ( match term with L.Boolean _ -> L.Bool | _ -> L.Int)
             in
             match define "joined" sort (fun frame _ -> Ids.find_opt id frame.locals) with
@@ -229,7 +360,7 @@ let join context ?value_type frames =
       in
       let value =
         match value_type with
-        | Some ty -> define "value" (sort_of ty) (fun _ value -> value)
+        | Some ty -> define "value" (sort_of context ty) (fun _ value -> value)
         | None -> None
       in
       Some ({ merged with locals }, value)
@@ -391,8 +522,8 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
   | Name path -> name context frame written path
   | Binary { operator = And; left; right; _ } ->
       let frame, left_value = value context frame left in
-      let _, right_value = pure_operand context (restrict frame left_value) right in
-      Some (frame, L.( &&& ) left_value right_value)
+      let after, right_value = pure_operand context (restrict frame left_value) right in
+      Some ({ after with condition = frame.condition }, L.( &&& ) left_value right_value)
   | Binary { operator = Or; left; right; _ } ->
       let frame, left_value = value context frame left in
       let _, right_value = pure_operand context (restrict frame (L.not_ left_value)) right in
@@ -450,12 +581,15 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
       quantified context frame written quantifier binder body
   | Call (callee, arguments) -> call context frame written callee arguments
   | Mode (_, inner) -> expression context frame inner
-  | Member _ -> unsupported written.span "reading a field"
+  | Member (base, _) -> member context frame written base
   | Bracket _ -> unsupported written.span "indexing"
-  | Is _ -> unsupported written.span "`is`"
-  | Match _ -> unsupported written.span "`match`"
-  | Try _ -> unsupported written.span "`?`"
-  | With _ -> unsupported written.span "`with`"
+  | Is { value = tested; pattern; _ } ->
+      let frame, term = value context frame tested in
+      let condition, frame = pattern_match context frame pattern term (type_of source tested) in
+      Some (frame, condition)
+  | Match { scrutinees; arms } -> match_ context frame written scrutinees arms
+  | Try inner -> try_ context frame written inner
+  | With (base, updates) -> with_ context frame written base updates
   | Lambda _ -> unsupported written.span "a lambda"
   | List _ | Map _ -> unsupported written.span "a collection literal"
   | String _ -> unsupported written.span "a string"
@@ -470,7 +604,8 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
    would then need joining. *)
 and pure_operand context frame written =
   let after, term = value context frame written in
-  if not (Ids.equal ( = ) after.locals frame.locals) then
+  (* It may bind names, as an [is] does, but not change a local. *)
+  if Ids.exists (fun id term -> Ids.find_opt id after.locals <> Some term) frame.locals then
     unsupported written.span "changing a variable on the right of `&&`, `||`, or `==>`";
   (after, term)
 
@@ -491,15 +626,17 @@ and name context frame (written : expression) (path : path) =
           let symbol = Printf.sprintf "generic.%s.%s" (Path.show parameter.owner) parameter.name in
           declare context (L.Constant (symbol, Int));
           Some (frame, L.Symbol symbol)
-      | Some (Global _) -> unsupported written.span "a constant or a function as a value"
-      | Some (Variant_value _) -> unsupported written.span "a variant"
+      | Some (Global { path = global; _ }) ->
+          Some (frame, constant_value context frame written global)
+      | Some (Variant_value { type_; variant }) ->
+          Some (frame, variant_value context written type_ variant)
       | _ -> unsupported written.span "this name")
 
 (* An operation the solver knows only by the range of its result. *)
 and opaque_operation context frame ty name arguments =
   let sorts = List.map (fun _ -> L.Int) arguments in
   let symbol = Printf.sprintf "operation.%s.%s" name (T.show ty) in
-  declare context (L.Function (symbol, sorts, sort_of ty));
+  declare context (L.Function (symbol, sorts, sort_of context ty));
   let term = L.Apply (symbol, arguments) in
   assume context frame (in_range ty term);
   term
@@ -512,7 +649,16 @@ and binary context frame (written : expression) operator left right =
     (is_numeric operand_type || is_bool operand_type || T.is_builtin Character operand_type)
     && (is_numeric result_type || is_bool result_type)
   in
-  if not primitive then begin
+  let structural_equality =
+    (operator = Equal || operator = Not_equal) && structural context operand_type
+  in
+  if structural_equality then begin
+    let frame, left_value = value context frame left in
+    let frame, right_value = value context frame right in
+    let equal = L.equal left_value right_value in
+    Some (frame, if operator = Equal then equal else L.not_ equal)
+  end
+  else if not primitive then begin
     (* An operator on another type is a call of its trait's method, known
        here only by its result's type. *)
     let frame, _ = value context frame left in
@@ -621,7 +767,7 @@ and quantified context frame (written : expression) quantifier binder body =
       match source.checked.local_types.(name_.id) with
       | Some ty when is_numeric ty || is_bool ty ->
           let inner, ty = with_bound name_.id ty in
-          make symbol (sort_of ty) (in_range ty (L.Symbol symbol)) inner
+          make symbol (sort_of context ty) (in_range ty (L.Symbol symbol)) inner
       | _ -> unsupported written.span "a quantifier over this type")
   | Binder_in
       ( { kind = Binding_or_constant name_; _ },
@@ -693,11 +839,369 @@ and resolved_call context frame (written : expression) (call_ : C.call) =
       | None ->
           let frame = havoc_mut frame in
           Some (frame, arrive context frame "result" result_type))
-  | Trait_method _ | Capability_method _ | Constructor _ | Function_value | Intrinsic _
-  | Built_in_operator ->
+  | Constructor { variant; _ } -> Some (construct context frame written call_ variant values)
+  | Trait_method _ | Capability_method _ | Function_value | Intrinsic _ | Built_in_operator ->
       let frame = havoc_mut frame in
       ignore source;
       Some (frame, arrive context frame "result" result_type)
+
+(* Data *)
+
+and member context frame (written : expression) base =
+  let source = frame.source in
+  match source.checked.meanings.(written.id) with
+  | Some (Field_read { type_; field }) ->
+      let frame, term = value context frame base in
+      if constructors context type_ = None then
+        unsupported written.span "a field of `%s`, whose fields the prover does not see"
+          (T.show type_);
+      ignore (sort_of context type_);
+      let field_type =
+        match declared_fields context type_ None with
+        | Some fields -> ( match List.assoc_opt field fields with Some ty -> ty | None -> T.Error)
+        | None -> T.Error
+      in
+      Some (frame, field_of context frame type_ None field field_type term)
+  | Some (Variant_value { type_; variant }) ->
+      Some (frame, variant_value context written type_ variant)
+  | Some (Global { path; _ }) -> Some (frame, constant_value context frame written path)
+  | _ -> unsupported written.span "this member"
+
+(* A field of a value, which is in its type's range like every value. *)
+and field_of context frame ty variant field field_type term =
+  let part = L.Apply (selector_name ty variant field, [ term ]) in
+  assume context frame (in_range field_type part);
+  part
+
+(* A variant with no fields, such as [None]. *)
+and variant_value context (written : expression) type_ variant =
+  match declared_fields context type_ (Some variant) with
+  | Some [] ->
+      ignore (sort_of context type_);
+      L.Apply (constructor_name type_ (Some variant), [])
+  | Some _ -> unsupported written.span "a variant used as a function"
+  | None -> unsupported written.span "a variant of `%s`" (T.show type_)
+
+(* A constant is its value, worked out from its definition, which is made
+   of literals, arithmetic, other constants, and values built from them. *)
+and constant_value context frame (written : expression) path =
+  match Interface.Summary.definition context.database path with
+  | Some (key, { kind = Constant { value = defined; _ }; _ }) -> (
+      match callee_source context.database key with
+      | Some constant_source ->
+          let empty =
+            {
+              frame with
+              source = constant_source;
+              locals = Ids.empty;
+              checking = false;
+              self = None;
+            }
+          in
+          snd (value context empty defined)
+      | None -> unsupported written.span "a constant with errors")
+  | _ -> unsupported written.span "a function used as a value"
+
+(* Building a record or a variant: its constructor, with each field given
+   or defaulted. *)
+and construct context frame (written : expression) (call_ : C.call) variant values =
+  let ty = call_.result in
+  match (constructors context ty, declared_fields context ty variant) with
+  | Some shape, Some declared ->
+      ignore (sort_of context ty);
+      let given =
+        List.map
+          (fun ((argument : C.argument), _, term) ->
+            (fst (List.nth declared argument.parameter), term))
+          values
+      in
+      let fields = match List.assoc_opt variant shape with Some fields -> fields | None -> [] in
+      let field_value (name_, _) =
+        match List.assoc_opt name_ given with
+        | Some term -> term
+        | None -> field_default context frame written ty variant name_
+      in
+      (frame, L.Apply (constructor_name ty variant, List.map field_value fields))
+  | _ ->
+      (* A type whose fields are not visible here is known by its range. *)
+      (frame, arrive context frame "built" ty)
+
+and field_default context frame (written : expression) ty variant field =
+  let path =
+    match ty with T.Named { path; _ } -> path | _ -> unsupported written.span "a default"
+  in
+  match Interface.Summary.definition context.database path with
+  | Some (key, { kind = Type_definition { body; _ }; _ }) -> (
+      let fields =
+        match (body, variant) with
+        | Fields fields, None -> fields
+        | Variants variants, Some name -> (
+            match List.find_opt (fun (v : variant) -> v.name.text = name) variants with
+            | Some { fields = Some fields; _ } -> fields
+            | _ -> [])
+        | _ -> []
+      in
+      match
+        List.find_map
+          (fun (written_field : field) ->
+            match written_field.kind with
+            | Field_declaration { name = name_; default = Some default; _ } when name_.text = field
+              ->
+                Some default
+            | _ -> None)
+          fields
+      with
+      | Some default -> (
+          match callee_source context.database key with
+          | Some type_source ->
+              snd
+                (value context
+                   { frame with source = type_source; locals = Ids.empty; checking = false }
+                   default)
+          | None -> unsupported written.span "a default of a type with errors")
+      | None -> unsupported written.span "a field left out without a default")
+  | _ -> unsupported written.span "a default"
+
+(* Whether a value matches a pattern, and the names it binds: the
+   condition, and the frame with the names bound. A name bound is the part
+   of the value it names, which means something only where the condition
+   holds, and is used only there. *)
+and pattern_match context frame (written : pattern) term ty : L.term * frame =
+  let source = frame.source in
+  match written.kind with
+  | Wildcard -> (L.Boolean true, frame)
+  | Binding_or_constant name_ -> (
+      match source.resolved.names.(name_.id) with
+      | Some Binding -> (L.Boolean true, { frame with locals = Ids.add name_.id term frame.locals })
+      | Some (Definition path) ->
+          ( L.equal term
+              (constant_value context frame
+                 { kind = True; span = written.span; id = written.id }
+                 path),
+            frame )
+      | _ -> unsupported written.span "this name in a pattern")
+  | Qualified_constant _ -> (
+      match source.checked.patterns.(written.id) with
+      | Some (Constant_pattern path) ->
+          ( L.equal term
+              (constant_value context frame
+                 { kind = True; span = written.span; id = written.id }
+                 path),
+            frame )
+      | _ -> unsupported written.span "this constant in a pattern")
+  | Literal literal -> (literal_condition written literal term, frame)
+  | Pattern_range { start; stop; inclusive } ->
+      let end_ (range_end : range_end) =
+        match range_end.kind with
+        | End_literal (Literal_integer value) -> L.Integer value
+        | _ -> unsupported range_end.span "a range pattern's end that is not a literal"
+      in
+      ( L.(
+          Apply ("<=", [ end_ start; term ])
+          &&& Apply ((if inclusive then "<=" else "<"), [ term; end_ stop ])),
+        frame )
+  | Variant { fields; _ } -> (
+      match source.checked.patterns.(written.id) with
+      | Some (Variant_pattern { type_; variant }) ->
+          ignore (sort_of context type_);
+          if constructors context type_ = None then
+            unsupported written.span "a variant of `%s`, which the prover does not see"
+              (T.show type_);
+          let test = L.Apply (L.tester (constructor_name type_ (Some variant)), [ term ]) in
+          let condition, frame =
+            fields_match context frame written type_ (Some variant) term
+              (Option.value fields ~default:[])
+          in
+          (L.( &&& ) test condition, frame)
+      | _ -> unsupported written.span "this variant pattern")
+  | Record fields -> (
+      match source.checked.patterns.(written.id) with
+      | Some (Record_pattern { type_ }) ->
+          ignore (sort_of context type_);
+          if constructors context type_ = None then
+            unsupported written.span "the fields of `%s`, which the prover does not see"
+              (T.show type_);
+          fields_match context frame written type_ None term fields
+      | _ -> unsupported written.span "this record pattern")
+  | Alternatives alternatives ->
+      let conditions =
+        List.map
+          (fun alternative ->
+            let condition, after = pattern_match context frame alternative term ty in
+            if not (Ids.equal ( = ) after.locals frame.locals) then
+              unsupported written.span "alternatives that bind names";
+            condition)
+          alternatives
+      in
+      (L.disjunction conditions, frame)
+  | Pattern_error -> unsupported written.span "this pattern"
+
+and literal_condition (written : pattern) literal term =
+  match literal with
+  | Literal_integer value -> L.equal term (L.Integer value)
+  | Literal_true -> term
+  | Literal_false -> L.not_ term
+  | Literal_string _ -> unsupported written.span "a string pattern"
+
+and fields_match context frame (written : pattern) type_ variant term fields =
+  let declared =
+    match declared_fields context type_ variant with Some declared -> declared | None -> []
+  in
+  List.fold_left
+    (fun (condition, frame) (field : pattern_field) ->
+      let named name_ subpattern =
+        match List.assoc_opt name_ declared with
+        | Some field_type ->
+            let part = field_of context frame type_ variant name_ field_type term in
+            let inner, frame = pattern_match context frame subpattern part field_type in
+            (L.( &&& ) condition inner, frame)
+        | None -> unsupported field.span "the field `%s`" name_
+      in
+      match field.kind with
+      | Rest -> (condition, frame)
+      | Named_field (name_, subpattern) -> named name_.text subpattern
+      | Field subpattern -> (
+          match (declared, subpattern.kind) with
+          | [ (only, _) ], _ -> named only subpattern
+          | _, Binding_or_constant name_ -> named name_.text subpattern
+          | _ -> unsupported written.span "a field pattern"))
+    (L.Boolean true, frame) fields
+
+and match_ context frame (written : expression) scrutinees arms =
+  let source = frame.source in
+  let frame, scrutinee_values =
+    List.fold_left
+      (fun (frame, values) scrutinee ->
+        let frame, term = value context frame scrutinee in
+        (frame, (term, type_of source scrutinee) :: values))
+      (frame, []) scrutinees
+  in
+  let scrutinee_values = List.rev scrutinee_values in
+  let result_type = type_of source written in
+  let carries_value = not (T.equal result_type T.unit || result_type = T.Never) in
+  let remaining = ref (L.Boolean true) in
+  let reached =
+    List.filter_map
+      (fun (arm_ : arm) ->
+        if List.length arm_.patterns <> List.length scrutinee_values then
+          unsupported arm_.span "an arm with a different number of patterns";
+        let condition, bound =
+          List.fold_left2
+            (fun (condition, frame) pattern (term, ty) ->
+              let inner, frame = pattern_match context frame pattern term ty in
+              (L.( &&& ) condition inner, frame))
+            (L.Boolean true, frame) arm_.patterns scrutinee_values
+        in
+        let entered = restrict bound (L.( &&& ) !remaining condition) in
+        let taken, entered =
+          match arm_.guard with
+          | Some guard ->
+              let after, test = pure_operand context entered guard in
+              (L.( &&& ) condition test, restrict after test)
+          | None -> (condition, entered)
+        in
+        remaining := L.( &&& ) !remaining (L.not_ taken);
+        match arm_.body.kind with
+        | Expression body -> expression context entered body
+        | _ ->
+            Option.map (fun after -> (after, L.Boolean true)) (statement context entered arm_.body))
+      arms
+  in
+  let scoped (joined : frame) =
+    { joined with locals = Ids.filter (fun id _ -> Ids.mem id frame.locals) joined.locals }
+  in
+  if carries_value then
+    match join context ~value_type:result_type (List.map (fun (f, t) -> (f, Some t)) reached) with
+    | Some (joined, Some term) -> Some (scoped joined, term)
+    | Some (joined, None) -> Some (scoped joined, L.Boolean true)
+    | None -> None
+  else
+    Option.map
+      (fun joined -> (scoped joined, L.Boolean true))
+      (join_frames context (List.map fst reached))
+
+(* [?]: the value inside an [Ok] or a [Some] goes on, and an [Err] or a
+   [None] returns, unchanged. *)
+and try_ context frame (written : expression) inner =
+  let source = frame.source in
+  let frame, term = value context frame inner in
+  let ty = type_of source inner in
+  let shape =
+    match constructors context ty with
+    | Some shape -> shape
+    | None -> unsupported written.span "`?` on `%s`" (T.show ty)
+  in
+  ignore (sort_of context ty);
+  let has variant = List.mem_assoc (Some variant) shape in
+  let success, failure =
+    if has "Ok" then ("Ok", "Err")
+    else if has "Some" then ("Some", "None")
+    else unsupported written.span "`?` on `%s`" (T.show ty)
+  in
+  let succeeded = L.Apply (L.tester (constructor_name ty (Some success)), [ term ]) in
+  let output =
+    match context.output with
+    | Some output -> output
+    | None -> unsupported written.span "`?` outside a function"
+  in
+  ignore (sort_of context output);
+  let returned =
+    match List.assoc_opt (Some failure) shape with
+    | Some [ (field, _) ] ->
+        L.Apply
+          ( constructor_name output (Some failure),
+            [ L.Apply (selector_name ty (Some failure) field, [ term ]) ] )
+    | Some [] -> L.Apply (constructor_name output (Some failure), [])
+    | _ -> unsupported written.span "`?` on `%s`" (T.show ty)
+  in
+  context.returns <- (restrict frame (L.not_ succeeded), Some returned) :: context.returns;
+  let payload =
+    match List.assoc_opt (Some success) shape with
+    | Some [ (field, field_type) ] -> field_of context frame ty (Some success) field field_type term
+    | _ -> unsupported written.span "`?` on `%s`" (T.show ty)
+  in
+  Some (restrict frame succeeded, payload)
+
+(* [with]: a record with some fields replaced, each update a path of
+   fields. *)
+and with_ context frame (written : expression) base updates =
+  let source = frame.source in
+  let frame, base_term = value context frame base in
+  let ty = type_of source written in
+  let rec replace ty term path replacement =
+    match (path, constructors context ty) with
+    | [], _ -> replacement
+    | field :: rest, Some [ (None, fields) ] ->
+        ignore (sort_of context ty);
+        L.Apply
+          ( constructor_name ty None,
+            List.map
+              (fun (name_, field_type) ->
+                let current = L.Apply (selector_name ty None name_, [ term ]) in
+                if name_ = field then replace field_type current rest replacement else current)
+              fields )
+    | _ -> unsupported written.span "`with` on `%s`" (T.show ty)
+  in
+  let frame, term =
+    List.fold_left
+      (fun (frame, term) (update_ : update) ->
+        match update_.kind with
+        | Update { field; path; value = updated } ->
+            let frame, replacement =
+              match updated with
+              | Some updated -> value context frame updated
+              | None -> (
+                  match source.resolved.names.(field.id) with
+                  | Some (Local id) -> (frame, Ids.find id frame.locals)
+                  | _ -> unsupported update_.span "this update")
+            in
+            ( frame,
+              replace ty term (field.text :: List.map (fun (n : name) -> n.text) path) replacement
+            )
+        | Update_error -> unsupported update_.span "this update")
+      (frame, base_term) updates
+  in
+  Some (frame, term)
 
 and find_expression (written : expression) id =
   let found = ref None in
@@ -829,9 +1333,9 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
            ( symbol,
              List.map
                (fun ((_ : C.argument), (expression_ : expression), _) ->
-                 sort_of (type_of caller expression_))
+                 sort_of context (type_of caller expression_))
                values,
-             sort_of call_.result ));
+             sort_of context call_.result ));
       let term = L.Apply (symbol, arguments) in
       assume context after (in_range call_.result term);
       term
@@ -899,12 +1403,10 @@ and statement context frame (written : statement) : frame option =
   | Let { pattern; value = initial; else_ = None; _ } -> (
       match expression context frame initial with
       | None -> None
-      | Some (frame, term) -> (
-          match pattern.kind with
-          | Binding_or_constant name_ when frame.source.resolved.names.(name_.id) = Some Binding ->
-              Some { frame with locals = Ids.add name_.id term frame.locals }
-          | Wildcard -> Some frame
-          | _ -> unsupported pattern.span "this pattern"))
+      | Some (frame, term) ->
+          (* A [let]'s pattern cannot fail, so only its names matter. *)
+          let _, frame = pattern_match context frame pattern term (type_of frame.source initial) in
+          Some frame)
   | Let { else_ = Some _; _ } -> unsupported written.span "`let ... else`"
   | Assignment { target; operator; value = assigned } ->
       assignment context frame written target operator assigned
@@ -1165,6 +1667,7 @@ let new_context database ~current ~terminates ~measures checked =
     values = [];
     returns = [];
     instantiating = [];
+    output = None;
     fits =
       List.filter_map
         (function C.Integer_fits { expression; type_ } -> Some (expression, type_) | _ -> None)
@@ -1216,6 +1719,9 @@ let function_ ?(proof = false) database (source : source) ~path (signature : sig
   in
   let context = new_context database ~current:path ~terminates ~measures source.checked in
   costs_unproven context signature.clauses;
+  (match Query.demand database Interface.Environment.signature path with
+  | Some { output = Returns ty; _ } -> context.output <- Some ty
+  | _ -> ());
   let start =
     {
       source;

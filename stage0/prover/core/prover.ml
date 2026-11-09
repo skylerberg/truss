@@ -58,19 +58,77 @@ let proof = Query.query ~name:"proof" ~show:Names.show_key prove
 
 (* Messages *)
 
-(* A value from the solver's model, written as Truss writes it. *)
-let truss_value text =
-  let length = String.length text in
-  if length > 4 && String.sub text 0 3 = "(- " && text.[length - 1] = ')' then
-    "-" ^ String.sub text 3 (length - 4)
-  else text
+(* A value from the solver's model, written as Truss writes it: a negative
+   number with its sign, and a datatype's value as its variant or record,
+   with its fields in parentheses. *)
+let truss_value members text =
+  let tokens =
+    let buffer = Buffer.create 16 and found = ref [] in
+    let flush () =
+      if Buffer.length buffer > 0 then begin
+        found := `Atom (Buffer.contents buffer) :: !found;
+        Buffer.clear buffer
+      end
+    in
+    String.iter
+      (function
+        | '(' ->
+            flush ();
+            found := `Open :: !found
+        | ')' ->
+            flush ();
+            found := `Close :: !found
+        | ' ' | '\n' | '\t' | '\r' -> flush ()
+        | c -> Buffer.add_char buffer c)
+      text;
+    flush ();
+    List.rev !found
+  in
+  let display name =
+    match List.assoc_opt name members with
+    | Some internal -> (
+        (* [constructor.TYPE.VARIANT], or [.record] for a record. *)
+        match List.rev (String.split_on_char '.' internal) with
+        | "record" :: _ ->
+            (* The type's own name: after its module, before its arguments. *)
+            let type_ = String.sub internal 12 (String.length internal - 12 - 7) in
+            let unqualified =
+              match
+                List.rev (String.split_on_char ':' (List.hd (String.split_on_char '[' type_)))
+              with
+              | last :: _ -> last
+              | [] -> type_
+            in
+            unqualified
+        | variant :: _ -> variant
+        | [] -> internal)
+    | None -> name
+  in
+  let rec one = function
+    | `Atom atom :: rest -> (display atom, rest)
+    | `Open :: `Atom "-" :: `Atom number :: `Close :: rest -> ("-" ^ number, rest)
+    | `Open :: `Atom head :: rest ->
+        let rec arguments acc = function
+          | `Close :: rest -> (List.rev acc, rest)
+          | [] -> (List.rev acc, [])
+          | tokens ->
+              let argument, rest = one tokens in
+              arguments (argument :: acc) rest
+        in
+        let items, rest = arguments [] rest in
+        (display head ^ "(" ^ String.concat ", " items ^ ")", rest)
+    | `Open :: rest -> one rest
+    | `Close :: rest -> one rest
+    | [] -> ("", [])
+  in
+  fst (one tokens)
 
-let counterexample (values : (string * string) list) answer_values =
+let counterexample members (values : (string * string) list) answer_values =
   let shown =
     List.filter_map
       (fun (symbol, name) ->
         Option.map
-          (fun value -> Printf.sprintf "`%s` is %s" name (truss_value value))
+          (fun value -> Printf.sprintf "`%s` is %s" name (truss_value members value))
           (List.assoc_opt symbol answer_values))
       (List.rev values)
   in
@@ -96,7 +154,8 @@ let definition_diagnostics database solver (key : Names.key) =
           | Counterexample values ->
               Some
                 (diagnostic obligation.code (source_span obligation.span)
-                   (obligation.message ^ counterexample obligation.values values))
+                   (obligation.message
+                   ^ counterexample (Logic.members obligation.query) obligation.values values))
           | Out_of_steps ->
               Some
                 (diagnostic obligation.code (source_span obligation.span)

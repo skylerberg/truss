@@ -20,7 +20,18 @@ type term =
   | Forall of (string * sort) list * term
   | Exists of (string * sort) list * term
 
-type declaration = Constant of string * sort | Function of string * sort list * sort
+type declaration =
+  | Constant of string * sort
+  | Function of string * sort list * sort
+  | Datatype of string * (string * (string * sort) list) list
+      (** An algebraic datatype, the sort [Uninterpreted name]: its constructors, each with its
+          fields' selectors and sorts. A constructor and a selector are applied by name, and
+          {!tester} names the test of which constructor built a value. Constructors and fields are
+          numbered in the order given, which the prover makes their names' order, so reordering a
+          type's fields or variants changes no query. *)
+
+val tester : string -> string
+(** The function that tests whether a value was built by a constructor. *)
 
 type query = {
   declarations : declaration list;
@@ -60,6 +71,10 @@ val text : query -> string
 val symbols : query -> (string * string) list
 (** Each declared symbol the canonical text mentions, with its canonical name, for reading a model
     back. *)
+
+val members : query -> (string * string) list
+(** Each datatype constructor the canonical text names, with the prover's name for it, for reading a
+    model back. *)
 
 val hash : string -> string
 (** The hash of a query's text, in hexadecimal, with a prefix naming the format and the algorithm.
