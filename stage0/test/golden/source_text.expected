@@ -68,11 +68,7 @@
   | let d = """â€‹x"""
   |            ^
 ./source_text.truss:5:10: error[lexer.invalid_utf8]: Source files must be UTF-8, and these bytes are not valid UTF-8.
-  | let e = "ÿþ ok"
-  |          ^^
 ./source_text.truss:6:9: error[lexer.invalid_utf8]: Source files must be UTF-8, and these bytes are not valid UTF-8.
-  | let f = À¯
-  |         ^
 ./source_text.truss:7:10: error[lexer.forbidden_character]: U+FEFF ZERO WIDTH NO-BREAK SPACE is not allowed in source files. Invisible characters can hide text from a reader. Write it as an escape, so that it can be seen.
   | let g = "ï»¿"
   |          ^

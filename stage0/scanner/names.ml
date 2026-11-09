@@ -12,7 +12,7 @@ type kind = Upper | Lower
 type checked = {
   kind : kind;
   name : string;  (* the corrected name when there is a fix *)
-  problem : (string * string) option;  (* code, message *)
+  problem : (Diagnostic.Code.t * string) option;  (* code, message *)
   fix : string option;
 }
 
@@ -22,11 +22,6 @@ let is_upper = Unicode.is_uppercase_or_titlecase
 
 (* A character that has an uppercase form, such as `a` or `é`. *)
 let is_lowercase_letter value = Unicode.to_uppercase value <> value
-
-let kind_of code_points =
-  match List.filter (fun value -> value <> underscore) code_points with
-  | first :: _ when is_upper first -> Upper
-  | _ -> Lower
 
 let rec drop_underscores = function
   | value :: rest when value = underscore -> drop_underscores rest
@@ -90,70 +85,90 @@ let correct_case code_points =
       else to_camel code_points
   | _ -> to_snake code_points
 
-let case_problem name code_points =
-  let has_double_underscore =
-    let rec loop = function
-      | first :: (second :: _ as rest) -> (first = underscore && second = underscore) || loop rest
-      | _ -> false
-    in
-    loop code_points
+(* Walking a name's characters without building a list, so that checking
+   the ASCII names that make up nearly all code allocates nothing. *)
+let fold_code_points name ~init f =
+  let rec loop index acc =
+    if index >= String.length name then acc
+    else
+      let byte = Char.code name.[index] in
+      if byte < 0x80 then loop (index + 1) (f acc byte)
+      else
+        let packed = Unicode.decode name index in
+        loop (index + Unicode.decoded_length packed) (f acc (Unicode.decoded_code_point packed))
   in
+  loop 0 init
+
+let exists_code_point name predicate = fold_code_points name ~init:false (fun found value -> found || predicate value)
+
+(* The first character other than `_`. *)
+let first_letter name =
+  fold_code_points name ~init:None (fun found value ->
+      match found with None when value <> underscore -> Some value | found -> found)
+
+let kind_of name = match first_letter name with Some first when is_upper first -> Upper | _ -> Lower
+
+let case_problem name =
+  let length = String.length name in
+  let has_underscore = String.contains name '_' in
   let message =
-    match code_points with
-    | first :: _ when first = underscore -> Some "Names cannot start with `_`."
-    | first :: _ when is_upper first ->
-        if not (List.mem underscore code_points) then None
-        else if not (List.exists is_lowercase_letter code_points) then
-          Some
-            (Printf.sprintf
-               "`%s` is written like a constant from another language. Constants are values, so \
-                their names are lower_snake_case."
-               name)
-        else Some "A name that starts with an uppercase letter is UpperCamelCase, with no `_`."
-    | _ ->
-        if List.exists is_upper code_points then
-          Some
-            "A name that starts with a lowercase letter is lower_snake_case, with no uppercase \
-             letters."
-        else if List.nth code_points (List.length code_points - 1) = underscore then
-          Some "Names cannot end with `_`."
-        else if has_double_underscore then Some "`_` appears only singly, between the parts of a name."
-        else None
+    if length > 0 && name.[0] = '_' then Some "Names cannot start with `_`."
+    else
+      match first_letter name with
+      | Some first when is_upper first ->
+          if not has_underscore then None
+          else if not (exists_code_point name is_lowercase_letter) then
+            Some
+              (Printf.sprintf
+                 "`%s` is written like a constant from another language. Constants are values, so \
+                  their names are lower_snake_case."
+                 name)
+          else Some "A name that starts with an uppercase letter is UpperCamelCase, with no `_`."
+      | _ ->
+          let rec has_double_underscore index =
+            index + 1 < length && ((name.[index] = '_' && name.[index + 1] = '_') || has_double_underscore (index + 1))
+          in
+          if exists_code_point name is_upper then
+            Some
+              "A name that starts with a lowercase letter is lower_snake_case, with no uppercase \
+               letters."
+          else if length > 0 && name.[length - 1] = '_' then Some "Names cannot end with `_`."
+          else if has_double_underscore 0 then Some "`_` appears only singly, between the parts of a name."
+          else None
   in
-  Option.map (fun message -> ("lexer.name_case", message)) message
+  Option.map (fun message -> (Diagnostic.Code.Name_case, message)) message
 
 let describe value =
   Printf.sprintf "`%s` (U+%04X)" (Unicode.of_code_points [ value ]) value
 
 (* The first problem with a name, checking in LEXER.md's order. *)
 let problem name =
-  let code_points = Unicode.code_points name in
-  match case_problem name code_points with
+  match case_problem name with
   | Some problem -> Some problem
   | None when is_ascii name -> None
   | None ->
       if not (Unicode.is_nfc name) then
         Some
-          ( "lexer.name_not_normalized",
+          ( Diagnostic.Code.Name_not_normalized,
             "This name is not in Unicode Normalization Form C, so the same-looking name could be \
              spelled another way." )
       else
-        match List.find_opt (fun value -> not (Unicode.is_identifier_allowed value)) code_points with
+        match List.find_opt (fun value -> not (Unicode.is_identifier_allowed value)) (Unicode.code_points name) with
         | Some (0x200C | 0x200D) ->
             (* Both are XID_Continue since Unicode 15.1, but not Allowed. *)
             Some
-              ( "lexer.name_joiner",
+              ( Diagnostic.Code.Name_joiner,
                 "The zero-width joiner and non-joiner are not supported in names yet." )
         | Some value ->
             Some
-              ( "lexer.name_character_not_allowed",
+              ( Diagnostic.Code.Name_character_not_allowed,
                 Printf.sprintf
                   "%s is not allowed in names. Names use only the characters Unicode recommends \
                    for identifiers (Identifier_Status=Allowed in UTS #39)."
                   (describe value) )
         | None when not (Unicode.is_moderately_restrictive name) ->
             Some
-              ( "lexer.name_mixed_scripts",
+              ( Diagnostic.Code.Name_mixed_scripts,
                 Printf.sprintf
                   "This name mixes the scripts %s. A name can mix Latin with at most one other \
                    script, and never Latin with Cyrillic or Greek."
@@ -164,7 +179,7 @@ let problem name =
 
 let check name =
   match problem name with
-  | None -> { kind = kind_of (Unicode.code_points name); name; problem = None; fix = None }
+  | None -> { kind = kind_of name; name; problem = None; fix = None }
   | Some found ->
       let corrected =
         Unicode.of_code_points (correct_case (Unicode.code_points (Unicode.nfc name)))
@@ -178,4 +193,4 @@ let check name =
         | _ -> None
       in
       let name = Option.value fix ~default:name in
-      { kind = kind_of (Unicode.code_points name); name; problem = Some found; fix }
+      { kind = kind_of name; name; problem = Some found; fix }

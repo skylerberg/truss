@@ -38,7 +38,7 @@ and describe_string literal =
     (fun index (text : Token.text) ->
       if index > 0 then Buffer.add_string parts " ${...} ";
       Buffer.add_string parts (Diagnostic.quote text.value))
-    literal.texts;
+    (Token.texts literal);
   Printf.sprintf "%s%s %s" tag form (Buffer.contents parts)
 
 let print_tokens source tokens =
@@ -57,7 +57,7 @@ let print_tokens source tokens =
         | String literal ->
             Array.iter
               (fun (interpolation : Token.interpolation) -> print (indent ^ "    ") interpolation.tokens)
-              literal.interpolations
+              (Token.interpolations literal)
         | _ -> ())
       tokens
   in
@@ -77,8 +77,9 @@ let () =
       let source = Source.read_file file in
       let tokens, diagnostics = Lexer.lex source in
       if !show_tokens then print_tokens source tokens;
-      if !json then print_string (Diagnostic.to_json source diagnostics)
-      else List.iter (fun diagnostic -> print_string (Diagnostic.render source diagnostic)) diagnostics;
+      let shown = Diagnostic.shown diagnostics in
+      if !json then print_string (Diagnostic.to_json source shown)
+      else List.iter (fun diagnostic -> print_string (Diagnostic.render source diagnostic)) shown;
       exit (if diagnostics = [] then 0 else 1)
   | _ ->
       prerr_endline "truss-lex: expected one file";

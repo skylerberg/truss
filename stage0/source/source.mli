@@ -3,8 +3,15 @@
     Every position in the compiler is a byte offset into a file's original
     bytes. Lines and columns are worked out only when a position is shown. *)
 
-type span = { start : int; stop : int }
-(** Byte offsets: [start] is included and [stop] is not. *)
+type span = private { start : int; stop : int }
+(** Byte offsets: [start] is included and [stop] is not. Spans are made only
+    with {!span}, so [0 <= start <= stop] always holds. *)
+
+val span : int -> int -> span
+(** [span start stop]. Raises [Invalid_argument] unless
+    [0 <= start <= stop]. *)
+
+val zero_width : int -> span
 
 type t
 

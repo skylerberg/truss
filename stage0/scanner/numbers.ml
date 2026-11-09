@@ -7,17 +7,15 @@
    leaves no error behind. A literal with a problem that has no exact fix,
    such as a digit its base does not allow, gets no fix. *)
 
-type value = Integer of Z.t | Float of { significand : Z.t; exponent : Z.t }
-
 type problem = {
-  code : string;
+  code : Diagnostic.Code.t;
   message : string;
   start : int;  (* offsets within the literal *)
   stop : int;
 }
 
 type checked = {
-  value : value;
+  value : Token.kind;  (* an Integer or a Float *)
   problem : problem option;
   fixes : (string * string) list;  (* title, replacement for the whole literal *)
 }
@@ -104,6 +102,8 @@ let clean_underscores group =
 
 let without_underscores group = String.concat "" (String.split_on_char '_' group)
 
+open Diagnostic.Code
+
 type issue = { problem : problem; fixable : bool }
 
 let issue ?(fixable = true) code message start stop =
@@ -133,7 +133,7 @@ let suffix_issue text ~at ~fixed =
         let default_type = if String.contains fixed '.' || String.contains fixed 'e' then "Float64" else "Int64" in
         Printf.sprintf "`let value: %s = %s`" default_type fixed
   in
-  issue "lexer.number_suffix"
+  issue Number_suffix
     (Printf.sprintf
        "Number literals have no type suffixes such as `%s`. A literal takes its type from its \
         context, as in %s."
@@ -141,7 +141,7 @@ let suffix_issue text ~at ~fixed =
     at (String.length text)
 
 let underscore_issue at =
-  issue "lexer.number_underscore" "`_` can only go between digits." at (at + 1)
+  issue Number_underscore "`_` can only go between digits." at (at + 1)
 
 (* Picks the problem to report: the leftmost one without an exact fix if
    there is one, and otherwise the leftmost one, with a fix for them all. *)
@@ -185,14 +185,14 @@ let check_radix text =
       [
         (if letter <> Char.lowercase_ascii letter then
            [
-             issue "lexer.number_uppercase_prefix"
+             issue Number_uppercase_prefix
                (Printf.sprintf "Number prefixes are lowercase: write `%s`." prefix)
                0 2;
            ]
          else []);
         (if digits = "" && (rest = "" || rest_is_suffix) then
            [
-             issue ~fixable:false "lexer.number_missing_digits"
+             issue ~fixable:false Number_missing_digits
                (Printf.sprintf "`%s` must be followed by %s digits." prefix (base_name base))
                0 digits_end;
            ]
@@ -205,7 +205,7 @@ let check_radix text =
              if digits = "" then [] else [ suffix_issue text ~at:digits_end ~fixed ]
            else
              [
-               issue ~fixable:false "lexer.number_invalid_digit"
+               issue ~fixable:false Number_invalid_digit
                  (Printf.sprintf "`%s` is not a %s digit." (character_at text digits_end)
                     (base_name base))
                  digits_end
@@ -214,156 +214,154 @@ let check_radix text =
          else []);
       ]
   in
-  let value = Integer (if digits = "" then Z.zero else Z.of_string_base base digits) in
+  let value = Token.Integer (if digits = "" then Z.zero else Z.of_string_base base digits) in
   decide value issues (fun () -> [ ("Write `" ^ fixed ^ "`", fixed) ])
 
-let check_decimal text =
+(* A run of digits and `_` in a literal, and where it starts in it. *)
+type group = { group : string; at : int }
+
+let digits group = without_underscores group.group
+let cleaned group = fst (clean_underscores group.group)
+let misplaced_underscore group = Option.map (fun offset -> group.at + offset) (snd (clean_underscores group.group))
+
+type exponent = { marker : char; marker_at : int; sign : string; exponent_digits : group }
+
+(* A decimal literal split into its parts. [rest] is whatever follows the
+   number, such as a type suffix. *)
+type decimal = { whole : group; fraction : group option; exponent : exponent option; rest_at : int }
+
+let parse_decimal text =
   let length = String.length text in
-  let digits_from start =
-    let rec loop index =
-      if index < length && (is_digit text.[index] || text.[index] = '_') then loop (index + 1)
-      else index
+  let group_from at =
+    let rec stop index =
+      if index < length && (is_digit text.[index] || text.[index] = '_') then stop (index + 1) else index
     in
-    loop start
+    { group = String.sub text at (stop at - at); at }
   in
-  let whole_end = digits_from 0 in
-  let whole = String.sub text 0 whole_end in
-  let fraction, position =
-    if whole_end < length && text.[whole_end] = '.' then
-      let stop = digits_from (whole_end + 1) in
-      (Some (String.sub text (whole_end + 1) (stop - whole_end - 1), whole_end + 1), stop)
-    else (None, whole_end)
+  let after group = group.at + String.length group.group in
+  let whole = group_from 0 in
+  let fraction =
+    if after whole < length && text.[after whole] = '.' then Some (group_from (after whole + 1)) else None
   in
-  (* The exponent: its marker, sign, digits, and where its digits start. *)
-  let exponent, rest_start =
+  let position = match fraction with Some fraction -> after fraction | None -> after whole in
+  let exponent =
     if position < length && (text.[position] = 'e' || text.[position] = 'E') then
-      let marker = text.[position] in
-      let after_sign =
-        if position + 1 < length && (text.[position + 1] = '+' || text.[position + 1] = '-') then
-          position + 2
+      let digits_at =
+        if position + 1 < length && (text.[position + 1] = '+' || text.[position + 1] = '-') then position + 2
         else position + 1
       in
-      let stop = digits_from after_sign in
-      let sign = String.sub text (position + 1) (after_sign - position - 1) in
-      if stop = after_sign && stop < length then (None, position)
-      else (Some (marker, sign, String.sub text after_sign (stop - after_sign), position, after_sign), stop)
-    else (None, position)
+      let exponent_digits = group_from digits_at in
+      (* `e` followed by a name character, as in `2em`, is not an exponent. *)
+      if exponent_digits.group = "" && digits_at < length then None
+      else
+        Some
+          {
+            marker = text.[position];
+            marker_at = position;
+            sign = String.sub text (position + 1) (digits_at - position - 1);
+            exponent_digits;
+          }
+    else None
   in
-  let rest = String.sub text rest_start (length - rest_start) in
-  let whole_cleaned, whole_bad = clean_underscores whole in
-  let whole_digits = without_underscores whole in
-  let fraction_cleaned =
-    Option.map (fun (group, start) -> (clean_underscores group, start)) fraction
-  in
-  let exponent_cleaned =
-    Option.map
-      (fun (marker, sign, group, at, digits_start) -> (marker, sign, clean_underscores group, group, at, digits_start))
-      exponent
-  in
-  let is_float = fraction <> None || exponent <> None in
+  let rest_at = match exponent with Some exponent -> after exponent.exponent_digits | None -> position in
+  { whole; fraction; exponent; rest_at }
+
+let check_decimal text =
+  let parts = parse_decimal text in
+  let rest = String.sub text parts.rest_at (String.length text - parts.rest_at) in
+  let is_float = parts.fraction <> None || parts.exponent <> None in
   let has_float_suffix = rest <> "" && is_float_suffix rest in
+  let whole_digits = digits parts.whole in
   (* The literal with every fixable problem corrected, given the whole part
      to use. *)
   let assemble whole_part =
-    let fraction_part =
-      match fraction_cleaned with Some ((cleaned, _), _) -> "." ^ cleaned | None -> ""
-    in
+    let fraction_part = match parts.fraction with Some fraction -> "." ^ cleaned fraction | None -> "" in
     let exponent_part =
-      match exponent_cleaned with
-      | Some (_, sign, (cleaned, _), _, _, _) -> "e" ^ sign ^ cleaned
-      | None -> ""
+      match parts.exponent with Some exponent -> "e" ^ exponent.sign ^ cleaned exponent.exponent_digits | None -> ""
     in
     let float_part = if has_float_suffix && not is_float then ".0" else "" in
     whole_part ^ fraction_part ^ exponent_part ^ float_part
   in
   let leading_zero = String.length whole_digits > 1 && whole_digits.[0] = '0' in
   let without_zeros =
+    let whole = cleaned parts.whole in
     let rec first_nonzero index =
-      if index >= String.length whole_cleaned then None
-      else if whole_cleaned.[index] <> '0' && whole_cleaned.[index] <> '_' then Some index
+      if index >= String.length whole then None
+      else if whole.[index] <> '0' && whole.[index] <> '_' then Some index
       else first_nonzero (index + 1)
     in
     match first_nonzero 0 with
-    | Some index -> String.sub whole_cleaned index (String.length whole_cleaned - index)
+    | Some index -> String.sub whole index (String.length whole - index)
     | None -> "0"
   in
   let octal_possible =
     leading_zero && (not is_float) && (not has_float_suffix)
     && String.for_all (fun c -> c >= '0' && c <= '7') whole_digits
   in
-  let fixed = assemble (if leading_zero then without_zeros else whole_cleaned) in
+  let fixed = assemble (if leading_zero then without_zeros else cleaned parts.whole) in
+  let underscore group = match misplaced_underscore group with Some at -> [ underscore_issue at ] | None -> [] in
   let issues =
     List.concat
       [
         (if leading_zero then
            [
-             issue "lexer.number_leading_zero"
+             issue Number_leading_zero
                (if octal_possible then
                   Printf.sprintf
                     "Decimal numbers do not start with `0`. In C and Go, `%s` would be octal: \
                      write `0o%s` for octal, or `%s` for decimal."
-                    whole without_zeros without_zeros
+                    parts.whole.group without_zeros without_zeros
                 else "Decimal numbers do not start with `0`.")
-               0 whole_end;
+               0 (String.length parts.whole.group);
            ]
          else []);
-        (match whole_bad with Some offset -> [ underscore_issue offset ] | None -> []);
-        (match fraction_cleaned with
-        | Some ((_, Some offset), start) -> [ underscore_issue (start + offset) ]
-        | _ -> []);
-        (match exponent_cleaned with
-        | Some (marker, _, (_, bad), group, at, digits_start) ->
+        underscore parts.whole;
+        (match parts.fraction with Some fraction -> underscore fraction | None -> []);
+        (match parts.exponent with
+        | Some exponent ->
             List.concat
               [
-                (if marker = 'E' then
-                   [ issue "lexer.number_uppercase_exponent" "The exponent is written with a lowercase `e`." at (at + 1) ]
-                 else []);
-                (if without_underscores group = "" then
+                (if exponent.marker = 'E' then
                    [
-                     issue ~fixable:false "lexer.number_missing_digits" "The exponent needs digits after `e`."
-                       at digits_start;
+                     issue Number_uppercase_exponent "The exponent is written with a lowercase `e`."
+                       exponent.marker_at (exponent.marker_at + 1);
                    ]
-                 else match bad with Some offset -> [ underscore_issue (digits_start + offset) ] | None -> []);
+                 else []);
+                (if digits exponent.exponent_digits = "" then
+                   [
+                     issue ~fixable:false Number_missing_digits "The exponent needs digits after `e`."
+                       exponent.marker_at exponent.exponent_digits.at;
+                   ]
+                 else underscore exponent.exponent_digits);
               ]
         | None -> []);
         (if rest = "" then []
-         else if suffix_type rest <> None then [ suffix_issue text ~at:rest_start ~fixed ]
+         else if suffix_type rest <> None then [ suffix_issue text ~at:parts.rest_at ~fixed ]
          else
            [
-             issue ~fixable:false "lexer.number_followed_by_name"
+             issue ~fixable:false Number_followed_by_name
                (Printf.sprintf "A number cannot be followed directly by a name character such as `%s`."
-                  (character_at text rest_start))
-               rest_start
-               (rest_start + character_length text rest_start);
+                  (character_at text parts.rest_at))
+               parts.rest_at
+               (parts.rest_at + character_length text parts.rest_at);
            ]);
       ]
   in
   let value =
-    if not is_float then Integer (Z.of_string whole_digits)
+    if not is_float then Token.Integer (Z.of_string whole_digits)
     else
-      let fraction_digits =
-        match fraction with Some (group, _) -> without_underscores group | None -> ""
-      in
+      let fraction_digits = match parts.fraction with Some fraction -> digits fraction | None -> "" in
       let written_exponent =
-        match exponent with
-        | Some (_, sign, group, _, _) when without_underscores group <> "" ->
-            let magnitude = Z.of_string (without_underscores group) in
-            if sign = "-" then Z.neg magnitude else magnitude
+        match parts.exponent with
+        | Some exponent when digits exponent.exponent_digits <> "" ->
+            let magnitude = Z.of_string (digits exponent.exponent_digits) in
+            if exponent.sign = "-" then Z.neg magnitude else magnitude
         | _ -> Z.zero
       in
-      let significand = Z.of_string (whole_digits ^ fraction_digits) in
-      let exponent = Z.sub written_exponent (Z.of_int (String.length fraction_digits)) in
-      (* Remove trailing zeros, so that equal values are stored the same way. *)
-      let ten = Z.of_int 10 in
-      let rec normalize significand exponent =
-        if Z.equal significand Z.zero then (Z.zero, Z.zero)
-        else
-          let quotient, remainder = Z.div_rem significand ten in
-          if Z.equal remainder Z.zero then normalize quotient (Z.succ exponent)
-          else (significand, exponent)
-      in
-      let significand, exponent = normalize significand exponent in
-      Float { significand; exponent }
+      Token.Float
+        (Token.Decimal.make
+           ~significand:(Z.of_string (whole_digits ^ fraction_digits))
+           ~exponent:(Z.sub written_exponent (Z.of_int (String.length fraction_digits))))
   in
   decide value issues (fun () ->
       if octal_possible then

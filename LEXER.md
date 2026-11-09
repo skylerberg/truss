@@ -86,8 +86,25 @@ lookahead across lines.
 
 Each module is its own dune library under `stage0/`, so the parser depends
 only on `Token` and `Lexer`, and the formatter and language server can reuse
-`Source` and `Diagnostic`. The scanner's library also holds `Names` and
-`Numbers`, which check a name or a number literal on its own. The dune
+`Source` and `Diagnostic`. The scanner's library holds:
+
+| Module | Job |
+|---|---|
+| `Cursor` | The scanner's state and byte-level helpers |
+| `Source_text` | UTF-8, forbidden characters, line breaks, and removing trivia |
+| `Trivia` | Comments, `;`, and characters Truss does not use |
+| `Strings` | Ordinary and raw strings, escapes, interpolations, and character literals |
+| `Names`, `Numbers` | The checks on one name or one number literal |
+| `Scanner` | The loop that finds the next token, and punctuation |
+
+The scanner's loop looks at each position once and decides there whether
+it holds trivia or the start of a token, so no second place has to agree
+with it. It stops at every line break: between tokens, the line break is
+trivia, and in an interpolation it is an error. Each scanner for a
+construct that must end on its line, such as an interpolation or an
+ordinary string, returns whether it was `Closed` or `Cut_off` by an error
+already reported, and an enclosing construct that must end on its line
+then ends too, without another error. The dune
 project is at the repository root, so that tests can read the documents.
 `stage0/bin/truss_lex.ml` builds `truss-lex`, which prints a file's
 diagnostics, as JSON with `--json`, and its tokens with `--tokens`.
@@ -177,7 +194,7 @@ language does and the rules would have to know every emoji and script.
 ## Tokens
 
 ```ocaml
-type span = { start : int; stop : int }
+type span = private { start : int; stop : int }   (* made only by Source.span *)
 
 type token = {
   kind : kind;
@@ -193,7 +210,7 @@ and kind =
   | Keyword of keyword
   | Reserved of reserved              (* as, async, loop, ... *)
   | Integer of Z.t
-  | Float of { significand : Z.t; exponent : Z.t }   (* significand × 10^exponent, exactly *)
+  | Float of Decimal.t                (* significand × 10^exponent, exactly *)
   | String of string_literal
   | Punctuation of punctuation
   | Foreign of foreign                (* ++, --, and others the parser reports *)
@@ -203,8 +220,8 @@ and kind =
 and string_literal = {
   tag : (string * span) option;
   form : form;
-  texts : text array;                 (* always one more than interpolations *)
-  interpolations : interpolation array;
+  first : text;
+  rest : (interpolation * text) array;
 }
 
 and form = Ordinary | Raw of { quotes : int; dollars : int; multi_line : bool }
@@ -224,10 +241,15 @@ and interpolation = { tokens : token array; span : span }
   decimal value, and the type checker rounds once, to the type it decides.
   The significand has its trailing zeros removed, so `1.50` and `1.5` have
   the same value.
-- **A string's texts and interpolations alternate.** `texts` always has one
-  more entry than `interpolations`, which is the shape of a `Template`:
-  `"a${x}b"` has the texts `"a"` and `"b"`, and `"${x}"` has two empty texts.
-  This holds for untagged strings too.
+- **A string's texts and interpolations alternate,** starting and ending
+  with a text, which is the shape of a `Template`: `"a${x}b"` has `first`
+  `"a"` and `rest` `[(x, "b")]`, and `"${x}"` has two empty texts. The type
+  allows no other shape. This holds for untagged strings too.
+- **Types rule out what must not happen.** A span is built only by
+  `Source.span`, which checks `start <= stop`. `Decimal.make` removes
+  trailing zeros, and is the only way to build a float's value. Brackets are
+  `Open` and `Close` of a `bracket`, so matching them is comparing two
+  values.
 - **An interpolation is a nested token array,** already laid out. The parser
   parses each one as an expression from its own array. This matches
   GRAMMAR.md's single `STRING` token, keeps the outer token stream flat, and
@@ -585,7 +607,7 @@ type edit = { span : span; replacement : string }
 type fix = { title : string; edits : edit list }
 
 type t = {
-  code : string;                  (* stable, such as "lexer.unterminated_string" *)
+  code : Code.t;                  (* one constructor per code; Code.name gives "lexer.unterminated_string" *)
   message : string;
   span : span;
   notes : (span * string) list;
@@ -605,11 +627,25 @@ type t = {
   lexes the result again, and leaves out a fix that fails. A fix is built from
   the text around one error, but whether it is right can depend on what it
   cannot see, such as where recovery from another error guesses a string
-  ends. Only a file with errors pays, one lexing per fix. A test checks that
-  no fix in the golden files fails, so ordinary mistakes keep their fixes and
-  only unusual combinations of errors lose them.
+  ends. A test checks that no fix in the golden files fails, so ordinary
+  mistakes keep their fixes and only unusual combinations of errors lose
+  them.
+- **Checking a fix lexes only the part of the file around it.** A token that
+  starts a line outside brackets begins with the lexer's state empty, so the
+  text between two such tokens, usually one top-level statement or
+  definition, lexes the same on its own as in the file, when it is lexed in
+  the same mode: bracket recovery is on for the whole file or not at all, so
+  a part is lexed with recovery exactly when the file needed it. A fix that leaves a
+  bracket, string, or comment open at the end of its part gets an error
+  there, so it fails the check instead of changing what follows unseen.
+  Only the fixes of the diagnostics that are shown are checked; the others
+  get theirs once earlier errors are fixed.
 - A file lists at most 200 diagnostics, then gives a count of the rest, so a
-  binary file opened by mistake gives a short report.
+  binary file opened by mistake gives a short report. The lexer keeps every
+  diagnostic, so that checks see them all, and `Diagnostic.shown` applies the
+  limit when they are listed.
+- Messages never copy bytes that are not valid UTF-8; they describe them,
+  as in "the byte 0xFF", and JSON output is always valid UTF-8.
 
 ## Unicode data
 
@@ -737,8 +773,8 @@ describe:
   are `XID_Continue`, so names take them in and the Allowed check rejects
   them, with the message that joiners are not supported in names yet.
 - **Fixes are checked by construction.** `Lexer.lex` lexes the result of
-  each fix again and leaves out any fix that fails, instead of relying on
-  each fix being built right. Fuzzing found fixes that went wrong only where
+  each fix again, only in the part of the file around it, and leaves out any
+  fix that fails, instead of relying on each fix being built right. Fuzzing found fixes that went wrong only where
   two recoveries met, such as a missing `}` and an unterminated raw string
   guessed to end on the same line.
 - **One function removes trivia,** so a fix for a comment, a `;`, or a
@@ -746,6 +782,10 @@ describe:
 - **Errors do not cascade out of an interpolation.** One cut off by a line
   break or a broken nested string closes its brackets silently.
 - **The foreign tokens `++` and `--`** can end and begin a statement.
+- **The diagnostic limit applies when listing,** not when collecting, so
+  that checking a fix compares complete lists.
+- **What must hold is in the types where it can be:** spans, string shapes,
+  normalized floats, brackets, and diagnostic codes.
 - **Inside a multi-line raw string,** a run of more quotes than the delimiter
   after text on a line is an error and stays text. On a line of its own, it
   closes the string, also with an error.

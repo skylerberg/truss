@@ -1,4 +1,10 @@
 type span = { start : int; stop : int }
+
+let span start stop =
+  if start < 0 || stop < start then invalid_arg (Printf.sprintf "Source.span %d %d" start stop);
+  { start; stop }
+
+let zero_width position = span position position
 type t = { path : string; text : string; line_starts : int array }
 
 let compute_line_starts text =

@@ -1,7 +1,7 @@
 (* The tokens the lexer produces. Each list below is the single place its
    items are spelled; a test checks the lists against GRAMMAR.md. *)
 
-type span = Source.span = { start : int; stop : int }
+type span = Source.span = private { start : int; stop : int }
 
 type keyword =
   | Any | Assert | Break | Capability | Continue | Cost | Decreases | Derives
@@ -19,20 +19,42 @@ type reserved =
   | As | Async | Await | Const | Defer | Extern | Loop | Macro | Static
   | Unsafe | Where
 
+type bracket = Paren | Square | Curly
+
 type punctuation =
-  | Left_paren | Right_paren | Left_bracket | Right_bracket | Left_brace
-  | Right_brace | Comma | Colon | Colon_colon | Dot | Dot_dot | Dot_dot_equal
+  | Open of bracket
+  | Close of bracket
+  | Comma | Colon | Colon_colon | Dot | Dot_dot | Dot_dot_equal
   | Arrow | Fat_arrow | Question | Bar
   | Equal | Plus_equal | Minus_equal | Star_equal | Slash_equal
   | Percent_equal | Ampersand_equal | Bar_equal | Caret_equal
   | Shift_left_equal | Shift_right_equal
   | Plus | Minus | Star | Slash | Percent | Equal_equal | Not_equal | Less
-  | Less_equal | Greater | Greater_equal | And_and | Or_or | Implies | Bang | Ampersand
-  | Caret | Tilde | Shift_left | Shift_right
+  | Less_equal | Greater | Greater_equal | And_and | Or_or | Implies | Bang
+  | Ampersand | Caret | Tilde | Shift_left | Shift_right
 
 (* Sequences from other languages whose fix depends on the expression around
    them. No grammar rule accepts them, and the parser reports them. *)
 type foreign = Plus_plus | Minus_minus
+
+(* An exact decimal, significand × 10^exponent, with the trailing zeros of
+   the significand removed, so that equal values are equal records. *)
+module Decimal : sig
+  type t = private { significand : Z.t; exponent : Z.t }
+
+  val make : significand:Z.t -> exponent:Z.t -> t
+end = struct
+  type t = { significand : Z.t; exponent : Z.t }
+
+  let ten = Z.of_int 10
+
+  let rec make ~significand ~exponent =
+    if Z.equal significand Z.zero then { significand = Z.zero; exponent = Z.zero }
+    else
+      let quotient, remainder = Z.div_rem significand ten in
+      if Z.equal remainder Z.zero then make ~significand:quotient ~exponent:(Z.succ exponent)
+      else { significand; exponent }
+end
 
 type t = {
   kind : kind;
@@ -48,28 +70,39 @@ and kind =
   | Keyword of keyword
   | Reserved of reserved
   | Integer of Z.t
-  | Float of { significand : Z.t; exponent : Z.t }  (* significand × 10^exponent, exactly *)
+  | Float of Decimal.t
   | String of string_literal
   | Punctuation of punctuation
   | Foreign of foreign
   | Newline
   | End_of_file
 
+(* A string's texts alternate with its interpolations, starting and ending
+   with a text, which is the shape of a Template: "a${x}b" has [first] "a"
+   and [rest] [(x, "b")]. *)
 and string_literal = {
   tag : (string * span) option;
   form : form;
-  texts : text array;  (* always one more than interpolations *)
-  interpolations : interpolation array;
+  first : text;
+  rest : (interpolation * text) array;
 }
 
 and form = Ordinary | Raw of { quotes : int; dollars : int; multi_line : bool }
 and text = { value : string; span : span }
 and interpolation = { tokens : t array; span : span }
 
-(* A token from the scanner, before layout. [first_line_break] is the first
-   line break between this token and the one before, if there is one, which
-   is where a NEWLINE token goes. *)
-type raw = { token : t; first_line_break : span option }
+let texts literal = Array.append [| literal.first |] (Array.map snd literal.rest)
+let interpolations literal = Array.map fst literal.rest
+
+(* A token from the scanner, before layout. Layout makes the token from it.
+   [first_line_break] is the first line break between this token and the
+   one before, if there is one, which is where a NEWLINE token goes. *)
+type raw = {
+  raw_kind : kind;
+  raw_span : span;
+  first_line_break : span option;
+  blank_line : bool;
+}
 
 let keywords =
   [
@@ -96,8 +129,8 @@ let reserved_words =
 
 let punctuation =
   [
-    ("(", Left_paren); (")", Right_paren); ("[", Left_bracket); ("]", Right_bracket);
-    ("{", Left_brace); ("}", Right_brace); (",", Comma); (":", Colon); ("::", Colon_colon);
+    ("(", Open Paren); (")", Close Paren); ("[", Open Square); ("]", Close Square);
+    ("{", Open Curly); ("}", Close Curly); (",", Comma); (":", Colon); ("::", Colon_colon);
     (".", Dot); ("..", Dot_dot); ("..=", Dot_dot_equal); ("->", Arrow); ("=>", Fat_arrow);
     ("?", Question); ("|", Bar);
     ("=", Equal); ("+=", Plus_equal); ("-=", Minus_equal); ("*=", Star_equal);
@@ -105,15 +138,14 @@ let punctuation =
     ("^=", Caret_equal); ("<<=", Shift_left_equal); (">>=", Shift_right_equal);
     ("+", Plus); ("-", Minus); ("*", Star); ("/", Slash); ("%", Percent);
     ("==", Equal_equal); ("!=", Not_equal); ("<", Less); ("<=", Less_equal);
-    (">", Greater); (">=", Greater_equal); ("&&", And_and); ("||", Or_or); ("==>", Implies); ("!", Bang);
-    ("&", Ampersand); ("^", Caret); ("~", Tilde); ("<<", Shift_left); (">>", Shift_right);
+    (">", Greater); (">=", Greater_equal); ("&&", And_and); ("||", Or_or); ("==>", Implies);
+    ("!", Bang); ("&", Ampersand); ("^", Caret); ("~", Tilde); ("<<", Shift_left);
+    (">>", Shift_right);
   ]
 
 let foreign_sequences = [ ("++", Plus_plus); ("--", Minus_minus) ]
 
-(* The keywords that start a top-level definition. A line that starts with one
-   in column 0 ends whatever came before it, when the lexer recovers from an
-   unclosed bracket or an unterminated raw string. *)
+(* The keywords that start a top-level definition. *)
 let definition_keywords =
   [ Fn; Type; Trait; Impl; Capability; Let; Test; Theorem; Proof; Use; Public; Internal ]
 
@@ -127,22 +159,29 @@ let words : (string, kind) Hashtbl.t =
 
 let word spelling = Hashtbl.find_opt words spelling
 
-let spelling_of list value =
-  fst (List.find (fun (_, candidate) -> candidate = value) list)
-
+let spelling_of list value = fst (List.find (fun (_, candidate) -> candidate = value) list)
 let keyword_spelling = spelling_of keywords
 let reserved_spelling = spelling_of reserved_words
 let punctuation_spelling = spelling_of punctuation
 let foreign_spelling = spelling_of foreign_sequences
 
-let closer_of = function
-  | Left_paren -> Some Right_paren
-  | Left_bracket -> Some Right_bracket
-  | Left_brace -> Some Right_brace
-  | _ -> None
+let is_ascii_name_byte c =
+  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c = '_'
 
-let opener_of = function
-  | Right_paren -> Some Left_paren
-  | Right_bracket -> Some Left_bracket
-  | Right_brace -> Some Left_brace
-  | _ -> None
+(* Whether a definition starts at [offset]: a definition keyword in column 0,
+   which `truss fmt` puts at the start of every definition. Bracket recovery
+   and the guess at where an unterminated raw string ends both use this one
+   rule. *)
+let starts_definition source offset =
+  Source.starts_line source offset
+  &&
+  let text = Source.text source in
+  let rec word_end index =
+    if index < String.length text && is_ascii_name_byte text.[index] then word_end (index + 1) else index
+  in
+  let stop = word_end offset in
+  stop > offset
+  &&
+  match word (String.sub text offset (stop - offset)) with
+  | Some (Keyword keyword) -> List.mem keyword definition_keywords
+  | _ -> false

@@ -163,7 +163,7 @@ let test_documents_agree () =
   List.iter
     (fun kind ->
       check (Layout.can_end kind && Layout.can_begin kind) "names and literals can end and begin statements")
-    [ Upper "Point"; Lower "x"; Integer Z.one; String { tag = None; form = Ordinary; texts = [||]; interpolations = [||] } ];
+    [ Upper "Point"; Lower "x"; Integer Z.one; String { tag = None; form = Ordinary; first = { value = ""; span = Source.zero_width 0 }; rest = [||] } ];
   (* That paragraph names `-` only to leave it out. *)
   let continuing =
     List.filter (fun kind -> kind <> Punctuation Minus) (listed continue_text)
@@ -237,6 +237,7 @@ let test_corpus corpus =
 (* Fixes work *)
 
 let codes diagnostics = List.sort compare (List.map (fun (d : Diagnostic.t) -> d.code) diagnostics)
+let code_names codes = String.concat ", " (List.map Diagnostic.Code.name codes)
 
 (* Whether [smaller] is a sub-multiset of [larger]; both sorted. *)
 let rec submultiset smaller larger =
@@ -254,8 +255,7 @@ let rec remove_one code = function
 
 let test_fixes name text =
   let _, diagnostics = lex text in
-  if List.length diagnostics < Diagnostic.limit then
-    List.iter
+  List.iter
       (fun (diagnostic : Diagnostic.t) ->
         List.iter
           (fun (fix : Diagnostic.fix) ->
@@ -264,8 +264,8 @@ let test_fixes name text =
             let allowed = remove_one diagnostic.code (codes diagnostics) in
             if not (submultiset (codes after) allowed) then
               fail "%s: the fix %S for %s leaves or adds %s, in:\n%s\nwhich becomes:\n%s" name fix.title
-                diagnostic.code
-                (String.concat ", " (codes after))
+                (Diagnostic.Code.name diagnostic.code)
+                (code_names (codes after))
                 (Diagnostic.quote text) (Diagnostic.quote fixed))
           diagnostic.fixes)
       diagnostics
@@ -281,7 +281,7 @@ let test_no_fix_dropped name text =
       List.iter
         (fun (fix : Diagnostic.fix) ->
           if not (List.mem fix after.fixes) then
-            fail "%s: the fix %S for %s fails its check, in:\n%s" name fix.title before.code
+            fail "%s: the fix %S for %s fails its check, in:\n%s" name fix.title (Diagnostic.Code.name before.code)
               (Diagnostic.quote text))
         before.fixes)
     unchecked checked
@@ -303,24 +303,17 @@ let rec check_tokens name text ~start ~stop (tokens : Token.t array) =
       check (token.span.start >= !previous) "%s: token at %d in order" name token.span.start;
       previous := token.span.start;
       (match token.kind with
-      | Punctuation punctuation -> (
-          match (Token.closer_of punctuation, Token.opener_of punctuation) with
-          | Some _, _ -> stack := punctuation :: !stack
-          | _, Some opener -> (
-              match !stack with
-              | top :: rest when top = opener -> stack := rest
-              | _ -> fail "%s: unbalanced closer at %d" name token.span.start)
-          | None, None -> ())
+      | Punctuation (Open bracket) -> stack := bracket :: !stack
+      | Punctuation (Close bracket) -> (
+          match !stack with
+          | top :: rest when top = bracket -> stack := rest
+          | _ -> fail "%s: unbalanced closer at %d" name token.span.start)
       | String literal ->
-          check
-            (Array.length literal.texts = Array.length literal.interpolations + 1)
-            "%s: a string has one more text than interpolations, at %d in:\n%s" name token.span.start
-            (Diagnostic.quote text);
           Array.iter
             (fun (interpolation : Token.interpolation) ->
               check_tokens name text ~start:interpolation.span.start ~stop:interpolation.span.stop
                 interpolation.tokens)
-            literal.interpolations
+            (Token.interpolations literal)
       | _ -> ()))
     tokens;
   check (!stack = []) "%s: brackets balanced" name
@@ -344,7 +337,7 @@ let check_output name text =
               | exception exception_ -> fail "%s: fix raised %s" name (Printexc.to_string exception_))
             diagnostic.fixes)
         diagnostics;
-      check (List.length diagnostics <= Diagnostic.limit + 1) "%s: diagnostics are capped" name
+      check (List.length (Diagnostic.shown diagnostics) <= Diagnostic.limit + 1) "%s: diagnostics shown are capped" name
 
 (* TRUSS_TEST_SEED picks other random inputs, for longer fuzzing runs. *)
 let seed default =
@@ -397,7 +390,7 @@ let test_robustness corpus =
   done;
   (* A binary file gives a short report. *)
   let binary = String.init 100_000 (fun index -> Char.chr ((index * 7919) land 0xFF)) in
-  check (List.length (snd (lex binary)) <= Diagnostic.limit + 1) "a binary file gives at most %d diagnostics" (Diagnostic.limit + 1)
+  check (List.length (Diagnostic.shown (snd (lex binary))) <= Diagnostic.limit + 1) "a binary file gives at most %d diagnostics" (Diagnostic.limit + 1)
 
 (* Round trips *)
 
@@ -414,7 +407,7 @@ let test_round_trips () =
   let non_brackets =
     Array.of_list
       (List.filter
-         (fun (_, punctuation) -> Token.closer_of punctuation = None && Token.opener_of punctuation = None)
+         (fun (_, punctuation) -> match punctuation with Open _ | Close _ -> false | _ -> true)
          Token.punctuation)
   in
   let integer () =
@@ -442,7 +435,7 @@ let test_round_trips () =
       else (significand, exponent)
     in
     let significand, exponent = normalize significand (Z.of_int (exponent - 3)) in
-    (spelling, Float { significand; exponent })
+    (spelling, `Float (significand, exponent))
   in
   let string () =
     let pieces = [| ("a", "a"); ("\\n", "\n"); ("\\\"", "\""); ("\\\\", "\\"); ("$", "$"); ("}", "}");
@@ -459,6 +452,7 @@ let test_round_trips () =
   let describe_expected = function
     | `Kind kind -> (match kind with Integer v -> "Integer " ^ Z.to_string v | _ -> "token")
     | `String value -> Printf.sprintf "String %S" value
+    | `Float (significand, exponent) -> Printf.sprintf "Float %se%s" (Z.to_string significand) (Z.to_string exponent)
   in
   for iteration = 1 to 2000 do
     let spellings = ref [] and expected = ref [] in
@@ -474,11 +468,12 @@ let test_round_trips () =
         | 2 -> let spelling, reserved = pick (Array.of_list Token.reserved_words) in add spelling (`Kind (Reserved reserved))
         | 3 -> let spelling, punctuation = pick non_brackets in add spelling (`Kind (Punctuation punctuation))
         | 4 -> let spelling, kind = integer () in add spelling (`Kind kind)
-        | 5 -> let spelling, kind = float () in add spelling (`Kind kind)
+        | 5 -> let spelling, value = float () in add spelling value
         | 6 -> let spelling, value, _ = string () in add spelling (`String value)
         | _ when depth < 4 ->
             let opener, closer =
-              pick [| (Left_paren, Right_paren); (Left_bracket, Right_bracket); (Left_brace, Right_brace) |]
+              let bracket = pick [| Paren; Square; Curly |] in
+              (Open bracket, Close bracket)
             in
             add (Token.punctuation_spelling opener) (`Kind (Punctuation opener));
             items (depth + 1) (Random.State.int random 4);
@@ -502,10 +497,10 @@ let test_round_trips () =
         (fun (token : Token.t) item ->
           let matches =
             match (item, token.kind) with
-            | `String value, String { texts = [| text |]; interpolations = [||]; _ } -> text.value = value
+            | `String value, String { first; rest = [||]; _ } -> first.value = value
             | `Kind (Integer expected), Integer actual -> Z.equal expected actual
-            | `Kind (Float expected), Float actual ->
-                Z.equal expected.significand actual.significand && Z.equal expected.exponent actual.exponent
+            | `Float (significand, exponent), Float actual ->
+                Z.equal significand actual.significand && Z.equal exponent actual.exponent
             | `Kind kind, actual -> kind = actual
             | _ -> false
           in
