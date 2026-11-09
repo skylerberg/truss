@@ -339,6 +339,14 @@ let moved_out state (flow : flow) (place : place) (value : expression) =
         context.moves <- value.id :: context.moves;
         Option.map (fun moved -> (place, value.span) :: moved) flow
 
+(* Names a pattern binds afresh, so whatever was moved out of them before,
+   as on an earlier time round a loop, is theirs again. *)
+let rebound (flow : flow) ids =
+  Option.map
+    (List.filter (fun ((moved : place), _) ->
+         match moved.root with Local id -> not (List.mem id ids) | Self_root -> true))
+    flow
+
 let assigned state (flow : flow) (place : place) (span : span) =
   (match flow with
   | Some moved -> (
@@ -533,6 +541,7 @@ and compound state flow (value : expression) : flow =
           let flow =
             match arm.guard with Some guard -> expression state flow guard | None -> flow
           in
+          let flow = rebound flow (List.concat_map bound_names arm.patterns) in
           join joined (statement state flow arm.body))
         None arms
   | Lambda { body; _ } ->
@@ -555,7 +564,8 @@ and compound state flow (value : expression) : flow =
       in
       block state flow body
   | Block written -> block state flow written
-  | Is { value = tested; _ } -> expression state flow tested
+  | Is { value = tested; pattern; _ } ->
+      rebound (expression state flow tested) (bound_names pattern)
   | Prefix (_, inner) | Any inner | Echo inner | Parenthesized inner | Mode (_, inner) ->
       expression state flow inner
   | Range { start; stop; _ } -> (
@@ -740,7 +750,7 @@ and statement state (flow : flow) (written : statement) : flow =
       if viewed_places <> [] then
         state.views <- List.map (fun id -> (id, viewed_places)) holders @ state.views;
       (match else_ with Some block_ -> ignore (block state flow block_) | None -> ());
-      flow
+      rebound flow holders
   | Assignment { target; operator; value } -> (
       let flow =
         match operator with
@@ -777,7 +787,7 @@ and statement state (flow : flow) (written : statement) : flow =
       let before = state.parallel_bodies in
       if parallel then state.parallel_bodies <- (body.span.start, bound_names pattern) :: before;
       let flow =
-        loop state flow body ~held:(Option.to_list held)
+        loop state flow body ~bound:(bound_names pattern) ~held:(Option.to_list held)
           ~held_mode:(match iterable.kind with Mode (Mut, _) -> T.Mut | _ -> T.Read)
           ()
       in
@@ -793,7 +803,7 @@ and statement state (flow : flow) (written : statement) : flow =
 
 (* A loop's body runs until the moved places stop changing. A loop over a
    place lends it for the whole loop. *)
-and loop state flow body ~held ~held_mode ?condition () =
+and loop state flow body ?(bound = []) ~held ~held_mode ?condition () =
   let frame = { breaks = None; continues = None } in
   state.loop_frames <- frame :: state.loop_frames;
   let views_before = state.views in
@@ -803,7 +813,7 @@ and loop state flow body ~held ~held_mode ?condition () =
   state.loans <- List.map (fun lent -> { lent; lent_mode = held_mode }) held @ loans_before;
   let rec iterate entry count =
     frame.continues <- None;
-    let after = block state entry body in
+    let after = block state (rebound entry bound) body in
     let after = join after frame.continues in
     let after =
       match condition with Some condition -> expression state after condition | None -> after
@@ -921,6 +931,17 @@ and parallel state flow (body : block) =
 
 let prepare context =
   let paths = context.paths and loops = context.loops in
+  (* What a pattern binds follows the matched value's mode, in a [match],
+     an [is], and a [let] alike: an owned value's parts are owned, a place's
+     are views of it, and a [mut] place's are [mut] access to it. A mark on
+     a method call's receiver, as in [mut file.read_line()], leaves the
+     call's result, which is owned. *)
+  let matched (value : expression) =
+    match value.kind with
+    | Mode (Mut, inner) when place_of context inner <> None -> Mut_access
+    | Mode (_, _) -> Owned
+    | _ -> if place_of context value <> None then Viewing else Owned
+  in
   let rec expression ~path ~loop_ids (value : expression) =
     Hashtbl.replace paths value.span.start path;
     Hashtbl.replace loops value.span.start loop_ids;
@@ -943,29 +964,19 @@ let prepare context =
           else_
     | Match { scrutinees; arms } ->
         List.iter (expression ~path ~loop_ids) scrutinees;
-        (* What a pattern binds follows the matched value's mode: an owned
-           value's parts are owned, a place's are views of it. *)
-        let kinds =
-          List.map
-            (fun (scrutinee : expression) ->
-              match scrutinee.kind with
-              | Mode (Own, _) -> Owned
-              | Mode (Mut, _) -> Mut_access
-              | _ -> if place_of context scrutinee <> None then Viewing else Owned)
-            scrutinees
-        in
+        let kinds = List.map matched scrutinees in
         List.iteri
           (fun index (arm : arm) ->
             let path = (value.id, index) :: path in
             if List.length arm.patterns = List.length kinds then
-              List.iter2 (fun kind written -> bind ~kind written) kinds arm.patterns
+              List.iter2 (fun kind written -> bind ~kind ~path ~loop_ids written) kinds arm.patterns
             else List.iter (pattern ~path ~loop_ids) arm.patterns;
             Option.iter (expression ~path ~loop_ids) arm.guard;
             statement ~path ~loop_ids arm.body)
           arms
     | Is { value = tested; pattern = written; _ } ->
         expression ~path ~loop_ids tested;
-        pattern ~path ~loop_ids written
+        bind ~kind:(matched tested) ~path ~loop_ids written
     | Lambda { parameters; body } ->
         List.iter (pattern ~path ~loop_ids) parameters;
         block ~path ~loop_ids body
@@ -979,14 +990,7 @@ let prepare context =
     | Let { mutable_; pattern = written_pattern; value; else_; _ } ->
         expression ~path ~loop_ids value;
         Option.iter (block ~path ~loop_ids) else_;
-        let kind =
-          if mutable_ then Owned
-          else
-            match value.kind with
-            | Mode (Own, _) -> Owned
-            | _ -> if place_of context value <> None then Viewing else Owned
-        in
-        bind ~kind written_pattern
+        bind ~kind:(if mutable_ then Owned else matched value) ~path ~loop_ids written_pattern
     | For { pattern = written_pattern; iterable; body; _ } ->
         expression ~path ~loop_ids iterable;
         let loop_ids = written.id :: loop_ids in
@@ -996,7 +1000,7 @@ let prepare context =
           | Mode (Own, _) -> Owned
           | _ -> Viewing
         in
-        bind ~kind written_pattern;
+        bind ~kind ~path ~loop_ids written_pattern;
         block ~path ~loop_ids body
     | While { condition; body; _ } ->
         let loop_ids = written.id :: loop_ids in
@@ -1007,8 +1011,12 @@ let prepare context =
           ~statement:(statement ~path ~loop_ids) written
   and block ~path ~loop_ids (written : block) =
     List.iter (statement ~path ~loop_ids) written.statements
-  and pattern ~path ~loop_ids written = bind ~kind:Viewing written
-  and bind ~kind (written : pattern) =
+  and pattern ~path ~loop_ids written = bind ~kind:Viewing ~path ~loop_ids written
+  (* A binding is declared where its pattern starts, in the branches and
+     loops around it, so a binding inside a loop is a new one each time. *)
+  and bind ~kind ~path ~loop_ids (written : pattern) =
+    Hashtbl.replace paths written.span.start path;
+    Hashtbl.replace loops written.span.start loop_ids;
     List.iter
       (fun id ->
         if not (Hashtbl.mem context.kinds id) then Hashtbl.replace context.kinds id kind;
