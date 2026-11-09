@@ -86,7 +86,10 @@ let merged_files ~directory left right =
    made with an index of its own so that the worktree, its index, and its
    branches are untouched. *)
 let snapshot ~directory =
+  (* The index must not exist yet: git reads an empty file as a broken
+     index, and makes a new one only where there is none. *)
   let index = Filename.temp_file "truss-index" "" in
+  (try Sys.remove index with Sys_error _ -> ());
   let environment = [ ("GIT_INDEX_FILE", index) ] in
   let result =
     match head ~directory with
