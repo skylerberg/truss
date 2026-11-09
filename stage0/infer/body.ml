@@ -49,8 +49,6 @@ let body state env (written : block) =
   in
   go written.statements
 
-let in_own_statement state env (span : span) f = in_statement state env span f
-
 let declare_parameters state (written : parameter list) (signature : T.signature) =
   List.iter
     (fun (parameter : parameter) ->
@@ -83,7 +81,7 @@ let check_clauses state env (clauses : clause list) =
   let env = { env with specification = true } in
   List.iter
     (fun ((value : expression), kind) ->
-      in_own_statement state env value.span (fun () ->
+      in_statement state env value.span (fun () ->
           match kind with
           | `Bool -> check state env value T.bool
           | `Measure -> ignore (expression state env value)))
@@ -100,7 +98,7 @@ let check_defaults state env (written : parameter list) (signature : T.signature
               signature.parameters
           with
           | Some info ->
-              in_own_statement state env value.span (fun () -> check state env value info.type_)
+              in_statement state env value.span (fun () -> check state env value info.type_)
           | None -> ())
       | _ -> ())
     written
@@ -141,10 +139,9 @@ let check_definition state (lowered : Environment.lowered) =
           (fun (clause : type_clause) ->
             match clause.kind with
             | Type_invariant value ->
-                in_own_statement state env value.span (fun () -> check state env value T.bool)
+                in_statement state env value.span (fun () -> check state env value T.bool)
             | Potential value ->
-                in_own_statement state env value.span (fun () ->
-                    ignore (expression state env value))
+                in_statement state env value.span (fun () -> ignore (expression state env value))
             | Derives _ -> ())
           clauses;
         let defaults (fields : field list) (lowered_fields : T.field list) =
@@ -158,7 +155,7 @@ let check_definition state (lowered : Environment.lowered) =
                       lowered_fields
                   with
                   | Some lowered ->
-                      in_own_statement state no_output value.span (fun () ->
+                      in_statement state no_output value.span (fun () ->
                           check state no_output value lowered.field_type)
                   | None -> ())
               | _ -> ())
@@ -213,7 +210,7 @@ let check_definition state (lowered : Environment.lowered) =
                     law.parameters;
                   List.iter
                     (fun (requirement : expression) ->
-                      in_own_statement state env requirement.span (fun () ->
+                      in_statement state env requirement.span (fun () ->
                           check state env requirement T.bool))
                     law.requires;
                   if not (broken (Member_body index)) then
@@ -244,7 +241,7 @@ let check_definition state (lowered : Environment.lowered) =
           members
     | Constant { value; _ }, Constant_interface constant ->
         if not (broken Body) then
-          in_own_statement state no_output value.span (fun () ->
+          in_statement state no_output value.span (fun () ->
               check state no_output value constant.constant_type)
     | Test { body = written; _ }, _ ->
         if not (broken Body) then
@@ -258,6 +255,96 @@ let check_definition state (lowered : Environment.lowered) =
         if not (broken Body) then
           body state { no_output with specification = true; output = Some (Returns T.unit) } written
     | _ -> ()
+
+(* The checked form holds no inference variable: every table entry is
+   given the statement's final substitution, normalized, and anything
+   still unsolved, which was reported, is [Error]. Entries recorded while a
+   statement was being checked, such as a call's type arguments, are
+   final only once it settled. *)
+let finalize (state : state) =
+  let final type_ =
+    T.map
+      (function T.Variable _ | T.Literal _ | T.Hole -> Some T.Error | _ -> None)
+      (Interface.Impls.normalize state.database ~bounds:(bounds state) (zonk state type_))
+  in
+  let argument = function
+    | T.Type type_ -> T.Type (final type_)
+    | T.Value value -> (
+        match Unify.resolve_value state.unifier value with
+        | T.Value_variable _ -> T.Type T.Error
+        | value -> T.Value value)
+    | T.Capabilities _ as capabilities -> capabilities
+  in
+  let trait (reference : T.trait_reference) =
+    {
+      reference with
+      trait_arguments = List.map argument reference.trait_arguments;
+      associated = List.map (fun (name, type_) -> (name, final type_)) reference.associated;
+    }
+  in
+  let evidence : C.evidence -> C.evidence = function
+    | Impl { impl; arguments } ->
+        Impl
+          {
+            impl;
+            arguments = List.map (fun (parameter, value) -> (parameter, argument value)) arguments;
+          }
+    | other -> other
+  in
+  let call (written : C.call) : C.call =
+    {
+      written with
+      callee =
+        (match written.callee with
+        | Function { path; type_arguments } ->
+            Function { path; type_arguments = List.map argument type_arguments }
+        | Trait_method method_ ->
+            Trait_method
+              {
+                method_ with
+                trait = trait method_.trait;
+                self_type = final method_.self_type;
+                type_arguments = List.map argument method_.type_arguments;
+                evidence = evidence method_.evidence;
+              }
+        | Constructor constructor ->
+            Constructor
+              { constructor with type_arguments = List.map argument constructor.type_arguments }
+        | Intrinsic intrinsic ->
+            Intrinsic { intrinsic with type_arguments = List.map argument intrinsic.type_arguments }
+        | other -> other);
+      capability_arguments = written.capability_arguments;
+      result = final written.result;
+    }
+  in
+  let tables = state.tables in
+  let update table f = Array.iteri (fun index entry -> table.(index) <- Option.map f entry) table in
+  update tables.types final;
+  update tables.local_types final;
+  update tables.pattern_types final;
+  update tables.calls call;
+  update tables.meanings (function
+    | C.Global { path; type_arguments } ->
+        C.Global { path; type_arguments = List.map argument type_arguments }
+    | Field_read { type_; field } -> Field_read { type_ = final type_; field }
+    | Variant_value { type_; variant } -> Variant_value { type_ = final type_; variant }
+    | Type_name type_ -> Type_name (final type_)
+    | other -> other);
+  update tables.loops (function
+    | C.Integer_range { element; inclusive } ->
+        C.Integer_range { element = final element; inclusive }
+    | Yielding { call = written; mode } -> Yielding { call = call written; mode }
+    | Pulled { cursor } -> Pulled { cursor = final cursor });
+  update tables.patterns (function
+    | C.Variant_pattern { type_; variant } -> C.Variant_pattern { type_ = final type_; variant }
+    | Record_pattern { type_ } -> Record_pattern { type_ = final type_ }
+    | other -> other);
+  update tables.templates (fun (template : C.template) ->
+      {
+        template with
+        from_template = Option.map call template.from_template;
+        part_conversions = List.map (Option.map call) template.part_conversions;
+      })
 
 (* The [Self] a body's annotations name: a method's type, a trait's
    [Self], or an [impl]'s type with its associated types. *)
@@ -290,9 +377,8 @@ let check database (key : Names.key) =
       Query.demand database Resolve.resolved key,
       Query.demand database Names.base key )
   with
-  | Some definition, Some resolved, Some (module_, base) ->
+  | Some definition, Some resolved, Some (module_, _) ->
       let lowered, context = Environment.lower_definition database key definition resolved in
-      ignore base;
       let text = Option.value ~default:"" (Query.demand database Names.text key) in
       let binding_spans = Hashtbl.create 64 in
       List.iter
@@ -316,9 +402,22 @@ let check database (key : Names.key) =
           references = [];
           receiver_modes = [];
           binding_spans;
+          lambdas = [];
         }
       in
+      (* What lowering reported for the interface is the interface's to
+         report; what it reports for the types written inside bodies, and
+         their bounds, are the body's. *)
+      let interface_diagnostics = List.length !(context.diagnostics) in
+      let interface_named = List.length !(context.named) in
       check_definition state lowered;
+      let since count list = List.filteri (fun index _ -> index < List.length list - count) list in
+      state.diagnostics <- since interface_diagnostics !(context.diagnostics) @ state.diagnostics;
+      List.iter
+        (fun (span, message) -> report state Unsatisfied_bound span message)
+        (Interface.Check.unmet_bounds database ~bounds:(bounds state)
+           (since interface_named !(context.named)));
+      finalize state;
       Some
         {
           checked = { state.tables with obligations = List.rev state.obligations };
