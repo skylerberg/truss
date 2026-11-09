@@ -134,9 +134,9 @@ let build_and_run ?input t ~roots ~startup ~arguments =
       (try Sys.remove output with Sys_error _ -> ());
       Ok result
 
-(* One test's part of the runner's report: its outcome, and the [message]
-   and [echo] blocks after its line, as the runner writes them. *)
-type record = { outcome : string; blocks : string }
+(* One test's part of the runner's report: its outcome, and its message
+   and its echo output, if any. *)
+type record = { outcome : string; message : string option; echo : string option }
 
 let parse_report text =
   let length = String.length text in
@@ -145,15 +145,22 @@ let parse_report text =
     | Some stop -> (String.sub text position (stop - position), stop + 1)
     | None -> invalid_arg "Compile: a test report that ends in a line"
   in
-  let rec blocks position acc =
-    if position >= length then (position, acc)
+  (* A block is its label and length on a line, then that many bytes and a
+     newline. *)
+  let rec blocks position record =
+    if position >= length then (position, record)
     else
       let line, after = line_at position in
       match String.split_on_char ' ' line with
-      | [ ("message" | "echo"); count ] ->
-          let stop = after + int_of_string count + 1 in
-          blocks stop (acc ^ String.sub text position (stop - position))
-      | _ -> (position, acc)
+      | [ (("message" | "echo") as label); count ] ->
+          let count = int_of_string count in
+          let content = String.sub text after count in
+          let record =
+            if label = "message" then { record with message = Some content }
+            else { record with echo = Some content }
+          in
+          blocks (after + count + 1) record
+      | _ -> (position, record)
   in
   let rec records position acc =
     if position >= length then List.rev acc
@@ -161,21 +168,28 @@ let parse_report text =
       let line, after = line_at position in
       match String.split_on_char ' ' line with
       | [ "test"; _; outcome ] ->
-          let position, blocks = blocks after "" in
-          records position ({ outcome; blocks } :: acc)
+          let position, record = blocks after { outcome; message = None; echo = None } in
+          records position (record :: acc)
       | _ -> invalid_arg ("Compile: a test report line " ^ line)
   in
   records 0 []
 
 let render_report records =
+  let block label = function
+    | Some content -> Printf.sprintf "%s %d\n%s\n" label (String.length content) content
+    | None -> ""
+  in
   String.concat ""
-    (List.mapi (fun i r -> Printf.sprintf "test %d %s\n%s" i r.outcome r.blocks) records)
+    (List.mapi
+       (fun i r ->
+         Printf.sprintf "test %d %s\n" i r.outcome ^ block "message" r.message ^ block "echo" r.echo)
+       records)
 
 (* The results that are kept: a pass with nothing to show. A failure's
    message and any echo give positions, which the key leaves out so that
    moving code keeps its results, and a time limit or a crash may come from
    the machine, so those tests run again. *)
-let keep record = record.outcome = "passed" && record.blocks = ""
+let keep record = record.outcome = "passed" && record.message = None && record.echo = None
 
 let rec ensure_directory directory =
   if not (Sys.file_exists directory) then begin
@@ -191,23 +205,16 @@ let file_name key =
 let stored directory key =
   let path = Filename.concat directory (file_name key) in
   if Sys.file_exists path then
-    let text = In_channel.with_open_bin path In_channel.input_all in
-    match String.index_opt text '\n' with
-    | Some stop ->
-        Some
-          {
-            outcome = String.sub text 0 stop;
-            blocks = String.sub text (stop + 1) (String.length text - stop - 1);
-          }
-    | None -> None
+    Some
+      { outcome = In_channel.with_open_bin path In_channel.input_all; message = None; echo = None }
   else None
 
+(* Writes a kept result, a pass with nothing to show, whole or not at all. *)
 let store directory key record =
   ensure_directory directory;
   let path = Filename.concat directory (file_name key) in
   let temporary = Printf.sprintf "%s.%d" path (Unix.getpid ()) in
-  Out_channel.with_open_bin temporary (fun channel ->
-      output_string channel (record.outcome ^ "\n" ^ record.blocks));
+  Out_channel.with_open_bin temporary (fun channel -> output_string channel record.outcome);
   Sys.rename temporary path
 
 let run_tests ?results t ~time_limit tests =

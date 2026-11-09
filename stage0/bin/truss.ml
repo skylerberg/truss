@@ -90,13 +90,25 @@ let () =
           prerr_endline message;
           exit 1
       | Ok (status, output) ->
-          let names = Array.of_list (List.map Path.show tests) in
-          String.split_on_char '\n' output
-          |> List.iter (fun line ->
-              match String.split_on_char ' ' line with
-              | [ "test"; index; outcome ] ->
-                  Printf.printf "%s: %s\n" names.(int_of_string index) outcome
-              | _ -> if line <> "" then print_endline line);
+          (* Each test's name and outcome, with its message and its echo
+             output indented under it, then a count of each outcome. *)
+          let indented text =
+            String.split_on_char '\n' text
+            |> List.filter (( <> ) "")
+            |> List.iter (fun line -> print_endline ("    " ^ line))
+          in
+          let records = Compile.parse_report output in
+          List.iter2
+            (fun test (record : Compile.record) ->
+              Printf.printf "%s: %s\n" (Path.show test) record.outcome;
+              Option.iter indented record.message;
+              Option.iter indented record.echo)
+            tests records;
+          let count outcome =
+            List.length (List.filter (fun (r : Compile.record) -> r.outcome = outcome) records)
+          in
+          let failed = List.length records - count "passed" in
+          Printf.printf "\n%d passed, %d did not pass\n" (count "passed") failed;
           exit status)
   | _ :: "run" :: directory :: arguments -> (
       let database, modules = load directory in

@@ -26,6 +26,13 @@ val compiled : t -> Instance.key -> Lir.compiled
 (* Builds a program that runs the tests, each named by its path, and runs
    it, returning its exit status and its output, as [Startup.tests_calling]
    describes it. *)
+(* One test's part of a test run's report: its outcome, as
+   [Startup.tests_calling] names it, and its message and echo output. *)
+type record = { outcome : string; message : string option; echo : string option }
+
+(* A test run's report, as [run_tests] returns it, one record a test. *)
+val parse_report : string -> record list
+
 (* With [results], a directory, each test that passes with nothing to show
    is kept there under the key of the code it can run, as CODEGEN.md's "Test
    results" says, and is not built or run again until that code changes;
