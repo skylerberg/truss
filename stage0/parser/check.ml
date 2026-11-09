@@ -20,7 +20,10 @@ type context = {
   specification : bool;
       (** [requires], [ensures], invariants, [decreases], [cost], laws, theorems, proofs *)
   assert_allowed : bool;  (** Tests, theorems, and proofs, outside lambdas *)
-  function_body : bool;  (** Where a [proof] block may appear *)
+  function_body : bool;
+      (** In a function's body, where a [proof] block may appear, and where [==>] and a quantifier
+          over a type are left to the type checker, which knows whether the function is for
+          specifications only *)
   yields : bool;  (** In a method whose signature [yields] or [lends], outside lambdas *)
   loop : loop;
   parallel : bool;
@@ -40,6 +43,12 @@ let plain =
 let specification context = { context with specification = true }
 let proof context = { context with specification = true; assert_allowed = true }
 
+(* Where [==>] and a quantifier over a type may appear as far as the parser
+   can tell. In a function's body, only the type checker knows whether the
+   function is for specifications only. *)
+let may_be_specification context = context.specification || context.function_body
+let quantifier_word = function Forall -> "forall" | Exists -> "exists"
+
 let report cursor code (span : span) message =
   Cursor.report cursor code (Cursor.absolute cursor span) message
 
@@ -48,15 +57,17 @@ let last_byte (span : span) = Syntax.Span.make (max span.start (span.stop - 1)) 
 
 let rec expression cursor context (value : expression) =
   (match value.kind with
-  | Quantified { quantifier; _ } when not context.specification ->
+  | Quantified { quantifier; binder = Binder_type _; _ } when not (may_be_specification context) ->
       report cursor Specification_only value.span
         (Printf.sprintf
-           "`%s` is only for specifications: `requires`, `ensures`, invariants, `decreases`, \
-            `cost`, laws, theorems, and proofs."
-           (match quantifier with Forall -> "forall" | Exists -> "exists"))
-  | Binary { operator = Implies; operator_span; _ } when not context.specification ->
+           "`%s` over a whole type cannot run, so it is only for specifications and the bodies of \
+            functions for specifications only. Quantify over a range or a collection, as in `%s i \
+            in 0..count => ...`."
+           (quantifier_word quantifier) (quantifier_word quantifier))
+  | Binary { operator = Implies; operator_span; _ } when not (may_be_specification context) ->
       report cursor Specification_only operator_span
-        "`==>` is only for specifications; in code, write `!a || b`."
+        "`==>` is only for specifications and the bodies of functions for specifications only; in \
+         code, write `!a || b`."
   | Echo _ when context.specification ->
       report cursor Echo_in_specification value.span
         "`echo` is not allowed in specifications, which never run."
@@ -152,7 +163,7 @@ and statement_parts cursor context written =
 
 (* Definitions *)
 
-let parameters cursor (parameters : parameter list) =
+let parameters ?(hands_out = false) cursor (parameters : parameter list) =
   List.iter
     (fun (parameter : parameter) ->
       match parameter.kind with
@@ -161,6 +172,14 @@ let parameters cursor (parameters : parameter list) =
             report cursor Reserved_name name.span
               "A parameter cannot be named `result`, which names the return value in `ensures` and \
                `cost`.";
+          if hands_out && (name.text = "yielded" || name.text = "finished") then
+            report cursor Reserved_name name.span
+              (Printf.sprintf
+                 "A parameter of a lending or yielding method cannot be named `%s`, which names %s \
+                  in its `ensures`."
+                 name.text
+                 (if name.text = "yielded" then "the parts handed out so far"
+                  else "whether the method ran to its end"));
           types cursor plain type_;
           Option.iter (expression cursor plain) default
       | Self_parameter _ | Parameter_error -> ())
@@ -175,7 +194,8 @@ let generic_parameters cursor generics =
 let signature cursor (signature : signature) =
   Syntax_walk.definition_name (expression cursor (specification plain)) signature.name;
   generic_parameters cursor signature.generics;
-  parameters cursor signature.parameters;
+  let hands_out = match signature.result with Some (Yields _ | Lends _) -> true | _ -> false in
+  parameters ~hands_out cursor signature.parameters;
   (match signature.result with
   | Some (Returns type_ | Yields (_, type_) | Lends (_, type_)) -> types cursor plain type_
   | None -> ());

@@ -774,10 +774,23 @@ let () =
 (* Checks on a whole definition *)
 
 let () =
-  test "forall outside a specification" (fun () ->
-      body_error "let x = forall i in s => i" ~code:Specification_only ~at:"forall");
-  test "==> outside a specification" (fun () ->
-      body_error "let x = a ==> b" ~code:Specification_only ~at:"==>");
+  test "a quantifier over a range is an expression in code" (fun () ->
+      statement "let x = forall i in s => i" "(let x (forall (in i s) i))");
+  test "a quantifier over a type in a test" (fun () ->
+      error "test \"a\" {\n  let x = forall value: Int64 => value == value\n}"
+        ~code:Specification_only ~at:"forall");
+  test "==> in a test" (fun () ->
+      error "test \"a\" {\n  let x = a ==> b\n}" ~code:Specification_only ~at:"==>");
+  test "==> in a constant" (fun () ->
+      error "let x: Bool = a ==> b" ~code:Specification_only ~at:"==>");
+  test "==> and a quantifier over a type in a function's body are left to the type checker"
+    (fun () ->
+      definition "fn f() -> Bool {\n  a ==> forall value: Int64 => value == value\n}"
+        "(fn f () -> Bool (block (==> a (forall value: Int64 (== value value)))))");
+  test "a yielding method's parameter cannot be named yielded or finished" (fun () ->
+      error "fn T.each(self, yielded: Int64) yields Int64 {\n  yield 1\n}" ~code:Reserved_name
+        ~at:"yielded";
+      definition "fn f(finished: Bool) {}" "(fn f ((finished: Bool)) (block))");
   test "specifications allow forall" (fun () ->
       definition "type S(items: List[Int64])\n  invariant forall i in items => i > 0"
         "(type S ((items: List[Int64])) (invariant (forall (in i items) (> i 0))))";

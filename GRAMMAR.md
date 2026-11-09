@@ -510,7 +510,10 @@ prefix     = ( "-" | "!" | "~" ) prefix
   `is`, and ranges do not chain.
 - `return` and `echo` take everything after them. A `{` right after
   `return`, on the same line, starts the value being returned.
-- `forall`, `exists`, and `==>` are allowed only in specifications.
+- A quantifier over a range or a collection, `forall pattern in expression`,
+  is allowed anywhere. `==>` and a quantifier over a type, `forall name: type`,
+  are allowed only in specifications and in function bodies, where the type
+  checker allows them only in functions for specifications only.
 - A quantifier's body runs to the end of the expression, so a quantifier can
   only be the last operand of `&&`, `||`, or `==>`. In
   `a && forall x in s => p || q`, the body is `p || q`.

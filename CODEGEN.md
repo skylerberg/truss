@@ -4,8 +4,8 @@ This document designs stage0's code generation: everything between the type
 checker's output and a program that runs. It follows the decisions in
 [DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and
 [IMPLEMENTATION.md](IMPLEMENTATION.md). It reads the checked form that
-[TYPECHECKER.md](TYPECHECKER.md) describes. The prover is not designed yet,
-so this document states what it expects from it. It is being built in
+[TYPECHECKER.md](TYPECHECKER.md) describes, and relies on the proofs that
+[PROVER.md](PROVER.md) describes. It is being built in
 [`stage0/codegen/`](stage0/codegen).
 
 ## What code generation does
@@ -35,9 +35,13 @@ It does not:
 
 - check anything about the program. Every error a user can see is reported
   by an earlier stage. A failure here is a compiler bug.
-- insert run-time checks. Indexes, overflow, division, shifts, and
-  `unreachable` have all been proven. The only checks in generated code are
-  the ones the program asks for, such as `checked_add` or `items.get(i)`.
+- insert run-time checks into a program. Indexes, overflow, division,
+  shifts, and `unreachable` have all been proven before a program is built.
+  The only checks in a program are the ones it asks for, such as
+  `checked_add` or `items.get(i)`. Test builds, and code run while
+  compiling, are different: they check every operation that could fail, so
+  that they can run before the prover has finished, as DESIGN.md's "Tests
+  do not wait for proofs" describes.
 - compile anything used only by proofs: theorems, laws, `proof` blocks,
   `requires`, `ensures`, invariants, `decreases`, cost clauses, and functions
   called only from those. Code generation starts from what can run, so they
@@ -139,11 +143,14 @@ defined would cost a test per division, so they are the one place where a
 prover bug could still reach undefined behavior. `--check-proofs` catches it
 (see [Testing](#testing)).
 
-**Stage0 checks instead of proving.** Stage0 has no prover, so it cannot
-refuse a program whose obligations are unproven, as DESIGN.md's builds do.
-It builds every program with the checks `--check-proofs` describes
-instead, which makes a broken contract a panic rather than a wrong answer
-or a memory error:
+**Test builds check instead of waiting for proofs.** A test build, and code
+run while compiling, is built with the checks below whether or not the
+prover has finished, so tests run alongside the prover, and a broken
+contract is a failed test rather than a wrong answer or a memory error.
+The checks do not depend on which proofs passed, so neither do the test
+build's LIR and the test results cached under it. A program is built
+without them, once its proofs are done. Stage0 has no prover yet, so it
+builds programs with the checks too:
 - Each `requires` clause that can run is tested on entry to its function,
   and to each inlined lending or yielding body, with the parameters bound.
   It panics with "requirement not met: requires ...". That is how an index
@@ -162,7 +169,8 @@ yielding method, such as the `List` index's, reports the call's position,
 and one of a function called reports the clause's own. Reporting the
 caller's position there too is left for later; Rust's `#[track_caller]`
 does it by passing the caller's location. `Compile.create ~checks:false` builds
-without the checks, for when the prover exists.
+without the checks, which is how programs are built once the prover
+exists.
 
 Other flags: `-std=c11 -fno-common -fvisibility=hidden -fno-exceptions
 -fno-asynchronous-unwind-tables`, since nothing unwinds, and
@@ -606,6 +614,10 @@ and its siblings. Full-width multiplication, used by hashing and
   the method. The tree is built deterministically from the arms in order.
 - **`?`** is a tag test and an early return, with the drops elaboration
   inserted.
+- **A quantifier in code** is a loop over its range or collection, through
+  the same `each` a `for` loop calls, that stops at the first element that
+  decides the answer: `forall` at the first false body, `exists` at the
+  first true one. Lowering it is not built yet.
 - **Conditions are lowered as jumps.** `if`, `while`, a guard, and a
   boolean built with `&&`, `||`, `!`, and `is` all go through one lowering
   that branches to a true block and a false one. `&&` and `||` short-circuit
@@ -1200,10 +1212,10 @@ fact about a small input, and there are no golden files.
     `truss run --sanitize` build this way, and `TRUSS_SANITIZE=1 dune test`
     builds every codegen test this way.
   - **`--check-proofs`.** A compiler flag, for testing the compiler only,
-    that emits a run-time check for every proven obligation: indexes,
-    overflow, division, shifts, and `unreachable`. A failed check reports a
-    prover bug with the obligation's position, which checks the prover
-    against real executions.
+    that builds a program with the checks a test build has. A failed check
+    in code whose obligations were all proven reports a prover bug with the
+    obligation's position, which checks the prover against real
+    executions.
   - **Development and release agree.** Run programs built both ways and
     compare their outputs. Later, the compiler written in Truss is checked
     against stage0 the same way.

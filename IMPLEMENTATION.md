@@ -188,10 +188,26 @@ The full design is in [CODEGEN.md](CODEGEN.md). In short:
 
 ### Proofs
 
+The full design is in [PROVER.md](PROVER.md). In short:
+
 - **A pinned SMT solver with step limits.** Z3's `rlimit` and cvc5's
   `--rlimit` count work rather than time, so a proof gives the same answer on
   every machine as long as the solver version and options are the same. Both
-  are part of the prover's version in cache keys.
+  are part of the prover's version in cache keys. Stage0 uses Z3, one process
+  per query, through SMT-LIB text.
+- **One query per obligation, cached by the hash of its text.** Each query
+  holds only the facts its obligation can use, and numbers its names, so an
+  edit re-solves only the queries whose text it changed, and a rename
+  re-solves none.
+- **No heap in the logic.** Mutable value semantics makes every value a
+  term, so the prover needs none of the permissions or prophecies that
+  verifiers for Rust use.
+- **Functional bodies are definitions,** and every other function is known
+  by its contract. Generic code is proven once, over uninterpreted sorts.
+- **Costs are counted** with ghost counters, in units that remove callees'
+  unknown constants, so an `O(...)` bound is proven with fixed constants.
+- **Tests do not wait for the prover.** Test builds check every operation
+  that could fail at run time, so only builds of programs need every proof.
 
 ### Running code while compiling
 

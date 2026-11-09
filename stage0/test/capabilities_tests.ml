@@ -79,7 +79,20 @@ let () =
               ()
           | _ -> fail "not recorded")
       | None -> fail "not checked");
-  test "a specification has only Panic" (fun () ->
+  test "a specification may not use Panic" (fun () ->
+      one_diagnostic
+        "fn checked() -> Bool\n\
+        \  uses Panic\n\
+        \  cost time finite\n\
+         {\n\
+        \  todo\n\
+         }\n\n\
+         fn f()\n\
+        \  requires checked()\n\
+         {\n\
+         }\n"
+        "capabilities.not_available");
+  test "a specification may not use what the function declares" (fun () ->
       one_diagnostic
         "fn stamp() -> Bool\n\
         \  uses Clock\n\

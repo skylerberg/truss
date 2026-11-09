@@ -468,6 +468,17 @@ the type.
   is safe because of mutable value semantics: nothing else can see the value
   while it is in the middle of a change. Panics end the program and capability
   calls always return, so no half-updated value can ever be observed.
+- **A private method that takes `mut self` is a step of an update.** The
+  invariant of its `self` is neither assumed when it is called nor required
+  when it returns, so `SortedList.insert` can call a private
+  `SortedList.sift_into_place(mut self, index: USize)` while the list is
+  half sorted. Whatever such a helper needs about `self` it states with
+  `requires`, and whatever it leaves it states with `ensures`. Every other
+  call, and every other parameter, needs the invariant as usual. This follows
+  Ada and SPARK, whose type invariants bind only the subprograms code outside
+  the package can call, and Eiffel, whose invariants bind only calls on
+  another object. Truss draws the line at the narrowest place: methods
+  private to a file, and only for the value they change.
 - **`with` is checked after all of its updates,** so several fields can change
   together.
 - **Values from outside the program come in through constructors** that check
@@ -699,6 +710,25 @@ Hylo also keep accessors apart from sequences, and Python's
   elements in a way that changing one would break, such as a sorted list or a
   cached total, offers read-only and owned loops, and changes single
   elements through a lending method.
+- **The contract says what is handed out.** In a lending or yielding
+  method's `ensures`, `result` names the part being handed out, so a clause
+  that mentions it holds at each `yield` and is what the caller's statement
+  or loop body may rely on: `List`'s `each` promises
+  `ensures result == self[yielded.length()]`, and a range's promises that
+  each value lies within it. Clauses that do not mention `result` hold
+  wherever the method ends. `yielded` names the parts handed out so far, as
+  a `Sequence`, each as the caller left it, and `finished` is `true` when the
+  method ran to its end rather than stopping at a `yield`. So
+  `ensures finished ==> yielded.length() == self.length()` is how a loop over
+  a list is known to run once per element, and a `lends mut` method states
+  how `self` takes back the part with `yielded[0]`. A `for` loop's
+  `invariant` may name `yielded` too, for the values of the iterations
+  before. Dafny's iterators work the same way, with clauses for each
+  `yield` and a ghost history of what was yielded, and Creusot calls the
+  history `produced`. Nothing about loops is special to the prover: the
+  facts of `for i in 0..count` and `for item in items` come from the
+  contracts of the range's and the list's `each`, so a user's collection
+  gets exactly the same facts as a `List`.
 - **Read-only and owned yields can be pulled.** Internal iteration alone, as
   in Ruby's `each`, cannot advance two sequences together, so it cannot
   write `zip`, merge, `peek`, or pause and resume. Pulling a yielding method
@@ -718,9 +748,10 @@ Hylo also keep accessors apart from sequences, and Python's
   allocate that room behind the scenes. Truss reports the `next()` call
   instead, and a cursor over such a structure is written as a type with an
   explicit stack, as in Rust and Swift, so its allocations are visible.
-  Whether a method can be pulled is worked out from its body. It is the one
-  fact callers take from a body rather than a signature, and the tools show
-  it with the signature. Early cutoff means a body edit that keeps the
+  Whether a method can be pulled is worked out from its body. It is one of
+  two facts callers take from a body rather than a signature; the other is
+  whether the prover reads a pure function's body as its definition (see
+  [Verification](#verification)). The tools show both with the signature. Early cutoff means a body edit that keeps the
   method pullable re-checks no callers.
 - **Cursor types have no name, as in Rust and Swift.** A cursor is a state
   machine the compiler makes from one method, so its type is described by the
@@ -889,17 +920,29 @@ choices below keep method calls predictable:
   agrees with `Equal`, and equal values must have equal hashes. A derived
   implementation satisfies these automatically when its fields do. A
   hand-written one proves them like any other law.
-- **Only derived equality lets the prover substitute.** A derived `Equal` is
-  true structural equality, so from `a == b` the prover may conclude
-  `f(a) == f(b)`. A hand-written `Equal` only promises an equivalence, so the
-  prover does not assume that. Switching a type from derived to hand-written
-  equality re-checks the proofs that relied on it.
+- **Only structural equality lets the prover substitute.** A type's equality
+  is *structural* when two equal values cannot be told apart by any
+  function, so from `a == b` the prover may conclude `f(a) == f(b)`. That
+  holds for the built-in integers, `Bool`, `Character`, `Unit`, and
+  `String`, for `Integer` and the other types of specifications, and for a
+  type that derives `Equal` when every one of its fields has structural
+  equality. A hand-written `Equal` only promises an equivalence, so the
+  prover does not substitute through it, and neither does a derived one with
+  a field that is not structural: a `Point` of floats derives a lawful
+  `Equal`, yet `Point(x: 0.0, y: 0.0) == Point(x: -0.0, y: 0.0)` while
+  `1.0 / x` tells them apart. Outside its package, an opaque type's
+  equality is never structural, since whether it is depends on fields other
+  packages cannot see. This is Rust's rule for constants in patterns, which
+  must be "structural-match": derived equality all the way down. Like
+  copying, it is worked out from the type's shape, so nothing is declared,
+  and a change to it re-checks the proofs that relied on it.
 - **Float equality is lawful.** IEEE's `NaN != NaN` breaks reflexivity, and
   Truss proves its laws rather than ignoring them as Swift does. So `==` on
   floats treats all NaNs as equal and otherwise follows IEEE, which keeps
   `-0.0 == 0.0`. NaN is ordered after every number. `ieee_equal` gives exact
-  IEEE behavior when numeric code needs it. Float equality is hand-written, so
-  the prover never substitutes through it, which matters because
+  IEEE behavior when numeric code needs it. Float equality is not
+  structural, so the prover never substitutes through it, which matters
+  because
   `-0.0 == 0.0` while `1.0 / -0.0 != 1.0 / 0.0`. The solver's floating-point
   theory, which distinguishes IEEE equality from identity in the same way,
   checks it directly. Lean instead gives floats no lawful equality, which
@@ -947,7 +990,20 @@ Rust and Swift.
   is mostly wanted for, without overlapping impls. Fast paths that depend
   only on how a type is stored, such as copying a list of plain data with one
   memory copy, need no language feature: the compiler knows which types copy
-  implicitly.
+  implicitly. A replaceable method is one the prover reads as a definition
+  (see [What a function means to the prover](#what-a-function-means-to-the-prover)),
+  and the replacement proves that its result equals the provided body's, so
+  the trait never repeats its body in an `ensures`.
+- **An `impl` can promise more than its trait.** An `impl`'s method may add
+  `ensures` and `cost` clauses of its own, which it proves, and may state a
+  `requires` that the trait's `requires` implies. A call the type checker
+  resolves to that `impl`, such as `grid[position]` on a `Grid`, is proven
+  against the `impl`'s contract; a call through a bound or through `any` is
+  proven against the trait's. This is behavioral subtyping, as Dafny allows
+  for a class's method that overrides a trait's: a weaker precondition and a
+  stronger postcondition. It is what lets a generic trait such as `Index`
+  say nothing about what is lent, while `List`'s `impl` says exactly which
+  element.
 - **Each type has at most one `impl` of each trait,** whatever its type
   arguments: `impl Display for List[Element: Display]` cannot sit beside
   `impl Display for List[String]`. Rust's long-stalled specialization feature
@@ -979,7 +1035,8 @@ Rust and Swift.
   on a trait's methods bind every `impl` and are proven for each one. The
   prover handles a call through `any` from the trait's signature alone, so
   `requires`, `ensures`, laws, costs, and capabilities all still hold. Adding a
-  new `impl` checks only that `impl`, never the callers.
+  new `impl` checks only that `impl`, never the callers. What an `impl`
+  promises beyond its trait helps only calls that know its type.
 - **No downcasting.** An `any Handler` cannot be tested for or converted back
   to its concrete type. Code that needs to know which type it has is dealing
   with a closed set, and a sum type expresses that better, with exhaustive
@@ -1075,6 +1132,23 @@ safe, it reports an error and suggests four fixes:
 
 `requires` clauses are always proven at compile time at every call site. They
 never become runtime checks.
+
+**Tests do not wait for proofs.** A program is built only once every
+obligation it can reach is proven, but a test build checks at run time
+every operation that could fail: each `requires` that can run, which covers
+every index, since indexing is a call whose `requires` bounds it, and each
+operation that could overflow, each division, shift, and `unreachable`.
+Generated code never has undefined behavior, even where a proof is still
+running or has failed, so tests run as soon as the code type-checks,
+alongside the prover rather than after it. A failed check ends the test and
+names the operation, which tells an agent at once whether a failed proof is
+a real bug or a prover that needs a hint. `ensures` clauses and invariants
+are not checked, since a specification need not be executable and they
+guard no operation. Because a test build checks every operation whether or
+not it was proven, its code and its cached results do not depend on the
+state of any proof. Rust and Swift check indexes and
+overflow at run time in every build; Truss does so only where a check is
+still useful, in tests, and proves them away in the programs it ships.
 
 `unreachable` has only the first fix: it must be proven unreachable, or the
 code does not compile. Code that says a point can't be reached must not
@@ -1361,8 +1435,11 @@ Cost clauses state proven bounds on what a function consumes.
   RAML), and Charguéraud and Pottier's verified amortized bounds. AARA needs
   values that are never shared, because two references to one structure
   could spend its potential twice. Mutable value semantics gives exactly
-  that, so amortized bounds compose soundly in Truss. Writing potentials is
-  mostly the standard library's job.
+  that, so amortized bounds compose soundly in Truss. A value's potential is
+  its own type's potential plus the potentials of its parts, so pushing onto
+  a list inside a list is paid for by the inner list's potential, as AARA's
+  types count the potential of every element. Writing potentials is mostly
+  the standard library's job.
 - **There are no expected-time bounds.** A hash map is O(1) only on average,
   assuming its hashes behave randomly, which no proof can promise against an
   input chosen by an attacker. Proving expected bounds needs probabilistic
@@ -1381,15 +1458,37 @@ Cost clauses state proven bounds on what a function consumes.
   promises termination without giving a bound.
 - **A function without a `time` clause might not terminate.** No separate
   marker is needed.
-- **Functions used in `requires`, `ensures`, laws, or proofs must have a `time`
-  clause.** Otherwise the proof system would not be sound.
+- **Functions used in `requires`, `ensures`, laws, or proofs must be pure
+  and have a `time` clause.** Otherwise the proof system would not be sound:
+  a function that might not return, or might stop the program, has no value
+  to reason about.
 - **Recursion over the parts of a value needs no annotation.** A recursive
-  call on a field taken out of a parameter by a pattern clearly ends, as Lean
-  accepts structural recursion automatically. Other recursion states a
-  `decreases` measure, as in Dafny, F*, and SPARK, compared in order when
-  there are several. Truss does not guess a measure when none is written, as
-  Dafny does: a structural check plus an explicit clause is more predictable
-  than a guess that may or may not work.
+  call on a part of a parameter clearly ends, as Lean accepts structural
+  recursion automatically. A part is a field taken out by a pattern, or an
+  element of a collection that is itself a part, as in
+  `for child in children { child.display(mut output) }` over a tree's
+  children. Dafny orders values the same way, with a sequence's elements
+  below the sequence. Other recursion states a `decreases` measure, as in
+  Dafny, F*, and SPARK, compared in order when there are several. Truss
+  does not guess a measure when none is written, as Dafny does: a
+  structural check plus an explicit clause is more predictable than a guess
+  that may or may not work.
+- **Recursion counts every way a function can reach itself.** Calls are not
+  the only way: a function can also name another as a value, or use an
+  `impl` where a bound needs one, and the code that receives it calls back.
+  So inside an `impl`'s methods, using that same `impl`, as in passing
+  `self` to a generic function bounded by the trait being implemented, is a
+  recursive call to every method of the `impl`. Without this, a package
+  could implement a trait with a method that calls a generic function from
+  another package that calls the method back, and each `time` clause would
+  be proven by assuming the other. Lean reads an instance that uses itself
+  the same way. Such a use passes no arguments the prover can compare, so
+  it cannot be shown to decrease, and the error says to write the
+  recursion as a direct call on a part. Derived implementations are proven
+  by the compiler's rule, and functions without a `time` clause need no
+  termination, so neither is affected. Truss has no mutable state outside
+  variables, so a function can reach itself only through what its code
+  names, and every such cycle is visible within one package.
 - A loop that runs until a capability says to stop, such as reading until the
   end of a stream, cannot be proven to terminate, because an implementation
   could keep supplying data forever. Such functions have no `time` clause.
@@ -1423,10 +1522,11 @@ every proof, so a reviewer only needs to read the signatures and contracts.
 Proof blocks are hashed separately from the code around them. Editing a proof
 re-checks proofs but does not rebuild the program or rerun tests.
 
-**Verification is modular.** The prover knows other functions only by their
-signatures, except for pure functions used in specifications, such as
-`is_sorted`, whose definitions are what they mean. Each proof therefore looks
-at a small amount of code, which keeps proofs stable and checking O(change).
+**Verification is modular.** The prover knows other functions by their
+signatures, and reads a body only where the body is a definition, as below.
+Each proof therefore looks at a small amount of code, which keeps proofs
+stable and checking O(change). The prover's design is in
+[PROVER.md](PROVER.md).
 
 **Proof checking is deterministic.** The solver runs within fixed limits
 measured in steps, never in wall-clock time, and its version is pinned as part
@@ -1442,13 +1542,79 @@ overflow would allow a failure the signature does not show. If a function
 claims something in its signature, the claim must be proven before it ships;
 a claim that is not ready can simply be left out.
 
+### What a function means to the prover
+
+A function is known to the prover in one of two ways: by its contract, or
+by its definition.
+
+```truss
+fn is_sorted[Element: Ordered](items: Slice[Element]) -> Bool
+  cost time O(items.length())
+{
+  forall i in 1..items.length() => items[i - 1] <= items[i]
+}
+```
+
+- **A functional body is the function's definition.** When a function is
+  pure, has a `time` clause, and its body is functional, the prover reads
+  the body as what the function means, so `is_sorted(items)` means exactly
+  the quantifier above. A functional body uses `let`, `if`, `match`, `is`,
+  calls, fields, building values, `with`, operators, and quantifiers. It has
+  no `var`, no assignment, no loop, and passes nothing `mut` or `own`. This
+  follows Dafny, whose `function`s are their bodies, and SPARK, whose
+  expression functions are visible to the prover without being asked.
+- **Every other function is known by its contract.** A body with a loop has
+  no meaning the solver could use without the invariant that says what the
+  loop computes, which is what the contract states anyway.
+- **No keyword marks either kind.** The body already says which it is, as a
+  signature that mentions `Integer` already says a function is for
+  specifications. Prusti's `#[pure]` and Liquid Haskell's `reflect` mark it
+  instead. Whether a body is read is a fact callers' proofs depend on, so
+  their traces record it, as they record whether a method can be pulled,
+  and the tools show it with the signature.
+- **A definition is read only where everything it reads is visible.** A
+  body that reads the fields of an opaque type is a definition inside that
+  type's package, and elsewhere the function is known by its contract, so
+  `opaque` keeps the representation private from proofs too. Verus makes
+  the same distinction with `open` and `closed` specification functions.
+- **Definitions must be well founded.** A definition is sound only for a
+  function that terminates, which the `time` clause and the rules of
+  [Termination](#termination) guarantee, and a function with a `requires`
+  is defined only where its `requires` holds.
+- **Quantifiers are expressions in code too.** `forall i in 0..count => p`
+  and `exists item in items => p` run as loops that stop at the first
+  answer, and cost what such a loop costs. Ada's quantified expressions and
+  Dafny's bounded quantifiers are executable in the same way. A quantifier
+  over a whole type, such as `forall value: Int64 => ...`, cannot run, and
+  stays in specifications. The binder carries its range, so the body may
+  rely on it: `items[i - 1]` above is in bounds because `i` is in
+  `1..items.length()`. A lambda passed to a method would know nothing about
+  its argument. So the standard library has no `all` or `any` methods, and
+  testing every element has one spelling.
+- **A function's body is a specification when its signature mentions a
+  type that exists only in specifications.** Its arithmetic is exact, it
+  may use `==>` and quantifiers over a whole type, and it is never compiled.
+
+### Specifications
+
+- **Specifications have no capabilities.** A function called in a
+  specification is pure, with no `uses` at all, not even `Panic`: a logical
+  function that might stop the program has no value to reason about. A
+  function that can fail on some inputs says so with `requires`, and every
+  specification is checked to be well defined, so each call in it meets its
+  callee's `requires` and each index is in bounds, as in Dafny.
+- **Specifications read from left to right.** In `&&`, `||`, `==>`, and
+  `if`, the right side may rely on the left, so
+  `index < items.length() && items[index] > 0` is well defined.
+
 **Specifications have implication, `a ==> b`,** as Dafny, Verus, Prusti,
 and ACSL write it. "If this holds, then that holds" is the most common shape
 of a specification, and writing it as `!a || b` hides what it says. It binds
 more loosely than `&&` and `||`, the reading every one of those languages
 shares, and it does not chain, like comparisons. It exists only in
-specifications, because code already has `if` and `!a || b`, and two
-spellings there would buy nothing. Laws take `requires` premises, as
+specifications, including the bodies of functions for specifications only,
+because code already has `if` and `!a || b`, and two spellings there would
+buy nothing. Laws take `requires` premises, as
 theorems and Dafny's lemmas do, so `transitive` reads as its definition. A
 quantifier can be the last operand of `&&`, `||`, or `==>`, as in Dafny,
 since its body runs to the end of the expression anyway.
@@ -1473,12 +1639,54 @@ specifications:
   only.** It can be called only from specifications and is never compiled,
   which is how a function such as `fn sum(items: Slice[Int64]) -> Integer`
   is written. Verus marks these with `spec fn`; Truss needs no keyword,
-  since the signature already says it.
+  since the signature already says it. The same holds for every type that
+  exists only in specifications, below.
 
 Float arithmetic in specifications follows IEEE 754, as in code. Exact real arithmetic would
 describe results the hardware does not produce, so such contracts could never
 be proven. The solver checks float contracts bit for bit, which is slow, so
 they are best kept rare.
+
+### Mathematical models
+
+A contract about a whole collection needs something to compare it with.
+`List.push` promises that the list afterward is the list before with one
+more element at the end, and `reverse_twice` that reversing twice gives the
+same list back. Saying that through `length()` and indexing alone takes a
+quantifier for every statement, and a hand-written `Equal` is not even
+structural. So the prelude has mathematical collections that exist only in
+specifications, as `Integer` does, and types give their values in terms of
+them:
+
+| Type | Values |
+|---|---|
+| `Sequence[Element]` | Finite sequences, compared element by element |
+| `FiniteSet[Element]` | Finite sets |
+| `FiniteMap[Key, Value]` | Finite maps from keys to values |
+| `Multiset[Element]` | Finite multisets, for statements such as "the same elements, in another order" |
+
+- **A type states its model through the prelude trait `Model`,** whose one
+  method, `model(self)`, gives the value in mathematical terms and exists
+  only in specifications. `List[Element]` and `Slice[Element]` are modeled by
+  a `Sequence[Element]`, `String` by the `Sequence[UInt8]` of its bytes,
+  `Map` by a `FiniteMap` together with the order of its keys, and `Set` by a
+  `FiniteSet` with its order. A user's type can have a model too, such as a
+  `Sequence` of its cells for a `Grid`.
+- **Contracts are written against models,** as in
+  `ensures self.model() == old(self.model()).append(item)`, and against
+  methods whose own contracts relate to the model, such as `length()` and
+  indexing. An opaque type's model is how other packages reason about it
+  without seeing its fields.
+- **The mathematical types have structural equality,** so the prover can
+  substitute through them even where the collection's own `Equal` is
+  hand-written.
+- **Collection literals take these types from context too,** so `[]` is an
+  empty `Sequence` where one is expected.
+
+Verus calls the same idea a `View`, Creusot a model, and SPARK functional
+containers; Dafny builds `seq`, `set`, `map`, and `multiset` into the
+language. Each converged on it because contracts about collections need a
+value that is not the collection's representation.
 
 ## Unfinished code
 
@@ -1536,6 +1744,13 @@ Loops give the prover facts for free, so most loops need no annotations:
 - A `for` over a collection or range runs exactly once per element. This is
   how a clause like `cost calls(visit) == items.length()` gets proven.
 - A `for` over a collection or range always terminates.
+
+None of these is a special case. Each comes from the contract of the `each`
+method the loop calls (see [Lending and yielding methods](#lending-and-yielding-methods)):
+a range's `each` promises that each value lies within the range, a list's
+that it yields each element once, in order, and both have a `time` clause,
+so the loop ends. A user's collection whose `each` makes the same promises
+gives its loops the same facts.
 
 `while true` is the infinite loop. A `while` whose condition is the literal
 `true`, and that no `break` leaves, has type `Never`, as Java and Kotlin
@@ -1876,7 +2091,8 @@ familiar name has been replaced by a local one.
 lexer tell a keyword from a name on its own, which keeps the grammar simple
 and lets the lexer alone decide whether a newline ends a statement. The
 exceptions are words that are both common names and needed only in one
-narrow place: `result` in `ensures`, `old` in specifications, and the words
+narrow place: `result` in `ensures`, `old` in specifications, `yielded` and
+`finished` in the contracts of lending and yielding methods, and the words
 of `cost` clauses, such as `time`, `calls`, `finite`, and `log`. Reserving
 those would ban names like `result` and `time` from all code to serve a few
 specifications. They are not contextual keywords in the lexer either: the
@@ -1930,10 +2146,11 @@ longer covers every case, which is an error too. The no-shadowing rule already
 means a name that is a constant cannot also be a binding, so reading it as the
 constant is the only reading consistent with that rule. Python's `match`
 instead lets only qualified names be constants, which would leave a file's own
-constants needing guards. A constant used in a pattern must have a type whose
-equality is built in or derived, so that matching it compares structure, as
-Rust requires. A hand-written `Equal` could disagree with what the pattern
-matches.
+constants needing guards. A constant used in a pattern must have a type with
+structural equality (see [Equality, ordering, and deriving](#equality-ordering-and-deriving)),
+so that matching it and comparing it with `==` agree, as Rust requires. A
+hand-written `Equal`, or a derived one over floats, could disagree with what
+the pattern matches.
 
 **Imports bring in modules, not individual names.** After
 `use standard::file_system`, code writes `file_system::read_text(path)`. Every
