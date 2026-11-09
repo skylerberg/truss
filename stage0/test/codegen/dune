@@ -1,0 +1,18 @@
+(test
+ (name codegen_tests)
+ (libraries
+  harness
+  zarith
+  path
+  ground
+  memory_layout
+  instance
+  lir
+  convention
+  emit_c
+  toolchain
+  startup
+  positions
+  drops
+  yields
+  glue))

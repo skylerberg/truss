@@ -1,5 +1,5 @@
 (tests
- (names lexer_tests parser_tests hashing_tests query_tests codegen_tests)
+ (names lexer_tests parser_tests hashing_tests query_tests resolve_tests)
  (libraries
   harness
   source
@@ -17,17 +17,10 @@
   cbor
   blake3
   query
-  ground
-  memory_layout
-  instance
-  lir
-  convention
-  emit_c
-  toolchain
-  startup
-  positions
-  drops
-  yields
-  glue)
+  path
+  workspace
+  resolve
+  hash
+  syntax_walk)
  (deps
   (glob_files %{workspace_root}/*.md)))

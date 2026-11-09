@@ -80,8 +80,26 @@ module Code : sig
     | Echo_in_specification
     | Reserved_name
 
+  type resolve =
+    | Unknown_name
+    | Unknown_module
+    | Not_visible
+    | Ambiguous_module
+    | Duplicate_import
+    | Unused_import
+    | Intrinsic_import
+    | Hides_name
+    | Duplicate_definition
+    | Not_a_place
+    | Not_generic
+    | Not_a_constant
+    | Alternative_bindings
+    | Misplaced_self_type
+    | Not_a_generic_parameter
+    | Null
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
-  type t = Lexer of lexer | Parser of parser | Too_many_diagnostics
+  type t = Lexer of lexer | Parser of parser | Resolve of resolve | Too_many_diagnostics
 
   val name : t -> string
 end
