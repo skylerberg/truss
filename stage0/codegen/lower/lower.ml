@@ -1827,22 +1827,6 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
         | _ -> bug "Panic.crash takes one message")
     | Capability_method { capability; name } ->
         let slot, signature = capability_method st.context capability name in
-        let in_order =
-          List.map
-            (fun (parameter, mode, ty, place) ->
-              match List.nth_opt signature.parameters parameter with
-              | Some info
-                when not (Ground.equal (Monomorphic.ground st.context.monomorphic [] info.type_) ty)
-                ->
-                  let place, ty =
-                    convert st
-                      { C.expression = 0; parameter; mode; conversion = Some Owned_to_view }
-                      place ty
-                  in
-                  (parameter, mode, ty, place)
-              | _ -> (parameter, mode, ty, place))
-            in_order
-        in
         let lir_signature, result = entry_signature st.context signature in
         let passed = List.filter_map (fun (_, mode, ty, place) -> pass st mode ty place) in_order in
         let evidence = evidence_of st capability in
