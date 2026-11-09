@@ -99,6 +99,7 @@ module Code : sig
     | Null
 
   type types =
+    | Bad_character
     | Mismatch
     | Cannot_infer
     | Missing_label

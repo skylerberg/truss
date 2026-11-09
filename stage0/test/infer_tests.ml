@@ -606,6 +606,58 @@ let () =
       | Some (Float_value rounded) ->
           if rounded <> Float.of_string "0x1.000002p+0" then fail "rounded to %h" rounded
       | _ -> fail "no value");
+  test "each end of a range pattern records its own value" (fun () ->
+      let value, checked =
+        expression_at "fn f(n: Int64) -> Int64 {\n  match n {\n    1..=5 => 1\n    _ => 2\n  }\n}\n"
+          "match" 1
+      in
+      match value.kind with
+      | Match
+          {
+            arms = { patterns = [ { kind = Pattern_range { start; stop; _ }; id; _ } ]; _ } :: _;
+            _;
+          } -> (
+          match
+            (checked.literals.(start.id), checked.literals.(stop.id), checked.literals.(id))
+          with
+          | Some (Integer_value low), Some (Integer_value high), None
+            when Z.equal low (Z.of_int 1) && Z.equal high (Z.of_int 5) ->
+              ()
+          | _ -> fail "the ends are not recorded each by its own id")
+      | _ -> fail "not a match on a range");
+  test "a range pattern on a type that is not an integer or Character is an error" (fun () ->
+      one_diagnostic
+        "fn f(ready: Bool) -> Int64 {\n  match ready {\n    true..=false => 1\n    _ => 2\n  }\n}\n"
+        "types.mismatch");
+  test "an integer range on a type that is not ordered is one error" (fun () ->
+      one_diagnostic
+        "fn f(ready: Bool) -> Int64 {\n  match ready {\n    1..=2 => 1\n    _ => 2\n  }\n}\n"
+        "types.mismatch");
+  test "a range pattern on Character is fine" (fun () ->
+      fine
+        "fn f(letter: Character) -> Int64 {\n\
+        \  match letter {\n\
+        \    Character\"a\"..=Character\"z\" => 1\n\
+        \    _ => 2\n\
+        \  }\n\
+         }\n");
+  test "a Character literal is a tagged string holding its scalar value" (fun () ->
+      has_type "fn f() -> Character {\n  Character\"é\"\n}\n" "Character\"é\"" "Character";
+      let value, checked =
+        expression_at "fn f() -> Character {\n  Character\"é\"\n}\n" "Character\"é\"" 1
+      in
+      match checked.literals.(value.id) with
+      | Some (Integer_value scalar) when Z.equal scalar (Z.of_int 0xE9) -> ()
+      | _ -> fail "no value");
+  test "a UInt8 literal holds its ASCII character's value" (fun () ->
+      let value, checked = expression_at "fn f() -> UInt8 {\n  UInt8\"\\n\"\n}\n" "UInt8" 2 in
+      match checked.literals.(value.id) with
+      | Some (Integer_value byte) when Z.equal byte (Z.of_int 10) -> ()
+      | _ -> fail "no value");
+  test "a Character literal of two scalar values is an error" (fun () ->
+      one_diagnostic "fn f() -> Character {\n  Character\"ab\"\n}\n" "types.bad_character");
+  test "a UInt8 literal of a character that is not ASCII is an error" (fun () ->
+      one_diagnostic "fn f() -> UInt8 {\n  UInt8\"é\"\n}\n" "types.bad_character");
   test "a negated literal of an unsigned type is one error" (fun () ->
       one_diagnostic "fn f() {\n  let value: UInt8 = -1\n}\n" "types.negated_unsigned");
   test "explicit type arguments give exactly the function's own" (fun () ->

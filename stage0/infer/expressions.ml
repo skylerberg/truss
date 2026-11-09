@@ -605,7 +605,10 @@ and expression_kind state env ?expected (value : expression) : T.ty =
                        (T.show resolved)));
               true);
       type_
-  | String literal -> string_literal state env ?expected literal
+  | String literal -> (
+      match character_tag state literal with
+      | Some builtin -> character_literal state value.id literal builtin
+      | None -> string_literal state env ?expected literal)
   | True | False -> T.bool
   | Todo -> ( match expected with Some expected -> expected | None -> T.Hole)
   | Unreachable | Break | Continue -> T.Never
@@ -3557,18 +3560,28 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
             mismatch state written.span ~expected:type_ ~found:(T.builtin USize)
       | _ -> ())
   | Qualified_constant constant -> qualified_constant state written.id written.span constant type_
-  | Literal literal -> literal_pattern state env written literal type_
-  | Pattern_range { start; stop; _ } ->
-      List.iter
-        (fun (end_ : range_end) ->
-          match end_.kind with
-          | End_literal literal -> literal_pattern state env written literal type_
-          | End_constant constant -> qualified_constant state end_.id end_.span constant type_
-          | End_name bound -> (
-              match target state bound with
-              | Some (Definition path) -> constant_pattern state end_.id end_.span path type_
-              | _ -> ()))
-        [ start; stop ]
+  | Literal literal -> literal_pattern state written.id written.span literal type_
+  | Pattern_range { start; stop; _ } -> (
+      (* Only integers and characters are ordered so that a range of them
+         can be matched; a range of anything else is one error, and its ends
+         are not checked against the type. *)
+      match resolve state type_ with
+      | (T.Named _ | T.Function _ | T.Any _ | T.Cursor _ | T.Parameter _) as resolved
+        when not (T.is_integer_type resolved || T.is_builtin Character resolved) ->
+          report state Mismatch written.span
+            (Printf.sprintf "A range pattern matches an integer or a `Character`, not `%s`."
+               (show state resolved))
+      | _ ->
+          List.iter
+            (fun (end_ : range_end) ->
+              match end_.kind with
+              | End_literal literal -> literal_pattern state end_.id end_.span literal type_
+              | End_constant constant -> qualified_constant state end_.id end_.span constant type_
+              | End_name bound -> (
+                  match target state bound with
+                  | Some (Definition path) -> constant_pattern state end_.id end_.span path type_
+                  | _ -> ()))
+            [ start; stop ])
   | Variant { name = variant_name; fields } -> (
       match type_ with
       | T.Named { path; arguments } -> (
@@ -3724,25 +3737,78 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
                    (List.length fields) names)))
     written_fields
 
-and literal_pattern state env (written : pattern) literal type_ =
-  ignore env;
+(* [Character"a"] and [UInt8"\n"]: a single character or byte is a tagged
+   string, of one Unicode scalar value or one ASCII character, without
+   [${...}]. See SYNTAX.md, "Characters and bytes". *)
+and character_tag state (literal : string_literal) =
+  match literal.tag with
+  | Some tag -> (
+      match target state tag.last with
+      | Some (Definition path) -> (
+          match Intrinsic.builtin_of_path path with
+          | Some ((Character | UInt8) as builtin) -> Some builtin
+          | _ -> None)
+      | _ -> None)
+  | None -> None
+
+(* The value of a character or byte literal, recorded by [id], or an error. *)
+and character_value state id (literal : string_literal) (builtin : Intrinsic.builtin) =
+  let text = literal.first.value in
+  let scalars =
+    let rec count index found =
+      if index >= String.length text then List.rev found
+      else
+        let decoded = String.get_utf_8_uchar text index in
+        count (index + Uchar.utf_decode_length decoded) (Uchar.utf_decode_uchar decoded :: found)
+    in
+    count 0 []
+  in
+  let value =
+    match (literal.rest, scalars, builtin) with
+    | [], [ scalar ], Character -> Some (Uchar.to_int scalar)
+    | [], [ scalar ], UInt8 when Uchar.to_int scalar < 128 -> Some (Uchar.to_int scalar)
+    | _ -> None
+  in
+  match value with
+  | Some value -> state.tables.literals.(id) <- Some (Integer_value (Z.of_int value))
+  | None ->
+      report state Bad_character literal.span
+        (match builtin with
+        | Character ->
+            "`Character\"...\"` holds exactly one Unicode scalar value, with no `${...}`."
+        | _ -> "`UInt8\"...\"` holds exactly one ASCII character, with no `${...}`.")
+
+and character_literal state id literal builtin =
+  character_value state id literal builtin;
+  T.builtin builtin
+
+(* A literal in a pattern, or a range's end: recorded by the node's id, and
+   of the matched type. *)
+and literal_pattern state id (span : span) literal type_ =
   match literal with
   | Literal_integer number -> (
-      state.tables.literals.(written.id) <- Some (Integer_value number);
+      state.tables.literals.(id) <- Some (Integer_value number);
       if not (T.is_integer_type type_ || type_ = T.Error || type_ = T.Hole) then
-        report state Mismatch written.span
+        report state Mismatch span
           (Printf.sprintf "An integer pattern matches an integer, not `%s`." (T.show type_))
       else
         match builtin_range type_ with
         | Some (low, high) when Z.lt number low || Z.gt number high ->
-            report state Literal_out_of_range written.span
+            report state Literal_out_of_range span
               (Printf.sprintf "`%s` does not fit in `%s`." (Z.to_string number) (T.show type_))
         | _ -> ())
   | Literal_true | Literal_false ->
-      if not (unify state type_ T.bool) then
-        mismatch state written.span ~expected:type_ ~found:T.bool
-  | Literal_string _ ->
-      if not (is_named string_path type_ || is_named string_slice_path type_ || type_ = T.Error)
-      then
-        report state Mismatch written.span
-          (Printf.sprintf "A string pattern matches a string, not `%s`." (T.show type_))
+      if not (unify state type_ T.bool) then mismatch state span ~expected:type_ ~found:T.bool
+  | Literal_string tagged -> (
+      match character_tag state tagged with
+      | Some builtin ->
+          character_value state id tagged builtin;
+          if not (unify state type_ (T.builtin builtin)) then
+            mismatch state span ~expected:type_ ~found:(T.builtin builtin)
+      | None -> string_pattern state span type_)
+
+(* A string literal in a pattern matches a string. *)
+and string_pattern state span type_ =
+  if not (is_named string_path type_ || is_named string_slice_path type_ || type_ = T.Error) then
+    report state Mismatch span
+      (Printf.sprintf "A string pattern matches a string, not `%s`." (T.show type_))
