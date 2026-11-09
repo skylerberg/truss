@@ -1,0 +1,10 @@
+fn first() {
+  let x = foo(1,
+  let y = 2
+
+fn second() {
+  ok()
+}
+
+fn third() {
+  [

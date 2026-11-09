@@ -1,0 +1,3 @@
+(library
+ (name scanner)
+ (libraries source diagnostic token layout unicode zarith))

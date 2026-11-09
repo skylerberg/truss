@@ -1,0 +1,81 @@
+1:1+3 Keyword let
+1:5+6 Lower quotes
+1:12+1 '='
+1:14+8 Raw(3 quotes, 0 dollars) "a"
+1:22+1 Newline
+2:1+3 Keyword let [line break]
+2:5+13 Lower unclosed_line
+2:19+1 '='
+2:21+6 Raw(3 quotes, 0 dollars) "abc"
+2:27+1 Newline
+3:1+3 Keyword let [line break]
+3:5+5 Lower mixed
+3:11+1 '='
+3:13+23 Raw(3 quotes, 0 dollars, multi-line) "spaces\n\ttab"
+6:6+1 Newline
+7:1+3 Keyword let [line break]
+7:5+5 Lower after
+7:11+1 '='
+7:13+13 Raw(3 quotes, 0 dollars, multi-line) "text"
+8:10+1 Newline
+9:1+3 Keyword let [line break]
+9:5+3 Lower run
+9:9+1 '='
+9:11+20 Raw(3 quotes, 0 dollars, multi-line) "a \"\"\"\" b"
+11:6+1 Newline
+12:1+3 Keyword let [line break]
+12:5+5 Lower alone
+12:11+1 '='
+12:13+10 Raw(3 quotes, 0 dollars, multi-line) ""
+13:7+1 Newline
+14:1+3 Keyword let [line break]
+14:5+11 Lower after_alone
+14:17+1 '='
+14:19+1 Integer 1
+14:20+1 Newline
+15:1+3 Keyword let [line break]
+15:5+12 Lower interpolated
+15:18+1 '='
+15:20+6 String "" ${...} ""
+    15:23+3 Raw(3 quotes, 0 dollars, multi-line) ""
+    15:26+0 End_of_file
+15:26+1 Newline
+16:3+5 Lower inner [line break]
+16:8+5 Raw(3 quotes, 0 dollars) "}\""
+16:13+1 Newline
+17:1+2 Keyword fn [line break]
+17:4+12 Lower after_string
+17:16+1 '('
+17:17+1 ')'
+17:19+1 '{'
+17:20+1 '}'
+17:21+1 Newline
+18:1+0 End_of_file [line break]
+./raw_string_errors.truss:1:18: error[lexer.raw_string_quotes]: A run of 4 `"`s is longer than this string's delimiter of 3. A one-line raw string cannot start or end with `"`; use the multi-line form, or a longer delimiter.
+  | let quotes = """a""""
+  |                  ^^^^
+./raw_string_errors.truss:2:21: error[lexer.unterminated_string]: This raw string is not closed on its line. A raw string with text after its opening `"""` is a one-line string. For several lines, start the text on the line after the opening `"""`.
+  | let unclosed_line = """abc
+  |                     ^^^^^^
+  fix: Close the string with `"""`
+    insert "\"\"\"" at ./raw_string_errors.truss:2:27
+./raw_string_errors.truss:5:1: error[lexer.raw_string_indentation]: Every line of a multi-line raw string starts with the indentation of its closing delimiter, which is 2 spaces. This line starts with 1 tab.
+  | 	tab
+  | ^
+./raw_string_errors.truss:8:7: error[lexer.raw_string_closing_not_alone]: The closing delimiter of a multi-line raw string goes on a line of its own.
+  |   text"""
+  |       ^^^
+  fix: Move the closing delimiter to its own line
+    insert "\n  " at ./raw_string_errors.truss:8:7
+./raw_string_errors.truss:10:5: error[lexer.raw_string_quotes]: A run of 4 `"`s is longer than this string's delimiter of 3. Open the string with a longer delimiter.
+  |   a """" b
+  |     ^^^^
+./raw_string_errors.truss:13:3: error[lexer.raw_string_quotes]: A run of 4 `"`s is longer than this string's delimiter of 3. Open the string with a longer delimiter.
+  |   """"
+  |   ^^^^
+./raw_string_errors.truss:15:23: error[lexer.line_break_in_interpolation]: An interpolation cannot contain a line break, so it cannot hold a multi-line string. Move the expression into a `let` before the string.
+  | let interpolated = "${"""
+  |                       ^^^
+./raw_string_errors.truss:16:8: error[lexer.unterminated_string]: This raw string is not closed on its line. A raw string with text after its opening `"""` is a one-line string. For several lines, start the text on the line after the opening `"""`.
+  |   inner"""}"
+  |        ^^^^^

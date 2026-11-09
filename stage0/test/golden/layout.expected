@@ -1,0 +1,149 @@
+1:1+3 Keyword let
+1:5+12 Lower active_names
+1:18+1 '='
+1:20+5 Lower users
+2:3+1 '.' [line break]
+2:4+6 Lower filter
+2:10+1 '('
+2:11+2 Keyword fn
+2:13+1 '('
+2:14+4 Lower user
+2:18+1 ')'
+2:20+1 '{'
+2:22+4 Lower user
+2:26+1 '.'
+2:27+9 Lower is_active
+2:37+1 '}'
+2:38+1 ')'
+3:3+1 '.' [line break]
+3:4+3 Lower map
+3:7+1 '('
+3:8+2 Keyword fn
+3:10+1 '('
+3:11+4 Lower user
+3:15+1 ')'
+3:17+1 '{'
+3:19+4 Lower user
+3:23+1 '.'
+3:24+4 Lower name
+3:28+1 '.'
+3:29+4 Lower copy
+3:33+1 '('
+3:34+1 ')'
+3:36+1 '}'
+3:37+1 ')'
+3:38+1 Newline
+5:1+3 Keyword let [line break] [blank line]
+5:5+5 Lower total
+5:11+1 '='
+5:13+8 Lower subtotal
+6:3+1 '+' [line break]
+6:5+8 Lower shipping
+7:3+1 '+' [line break]
+7:5+3 Lower tax
+7:8+1 Newline
+9:1+3 Keyword let [line break] [blank line]
+9:5+7 Lower balance
+9:13+1 '='
+9:15+8 Lower deposits
+9:23+1 Newline
+10:3+1 '-' [line break]
+10:5+11 Lower withdrawals
+10:16+1 Newline
+12:1+2 Keyword fn [line break] [blank line]
+12:4+13 Lower binary_search
+12:17+1 '('
+12:18+6 Lower sorted
+12:24+1 ':'
+12:26+5 Upper Slice
+12:31+1 '['
+12:32+5 Upper Int64
+12:37+1 ']'
+12:38+1 ','
+13:18+6 Lower target [line break]
+13:24+1 ':'
+13:26+5 Upper Int64
+13:31+1 ')'
+13:33+2 '->'
+13:36+6 Upper Option
+13:42+1 '['
+13:43+5 Upper USize
+13:48+1 ']'
+14:3+8 Keyword requires [line break]
+14:12+9 Lower is_sorted
+14:21+1 '('
+14:22+6 Lower sorted
+14:28+1 ')'
+15:3+4 Keyword cost [line break]
+15:8+4 Lower time
+15:13+1 Upper O
+15:14+1 '('
+15:15+3 Lower log
+15:18+1 '('
+15:19+6 Lower sorted
+15:25+1 '.'
+15:26+6 Lower length
+15:32+1 '('
+15:33+1 ')'
+15:34+1 ')'
+15:35+1 ')'
+15:36+1 Newline
+16:1+1 '{' [line break]
+17:3+4 Lower call [line break]
+17:7+1 '('
+17:8+1 Lower a
+17:9+1 ','
+18:5+1 Lower b [line break]
+18:6+1 ')'
+18:7+1 Newline
+19:3+2 Keyword if [line break]
+19:6+5 Lower ready
+19:12+1 '{'
+19:14+1 Lower a
+19:16+1 '}'
+19:18+4 Keyword else
+19:23+1 '{'
+19:25+1 Lower b
+19:27+1 '}'
+19:28+1 Newline
+20:3+2 Keyword if [line break]
+20:6+5 Lower ready
+20:12+1 '{'
+21:5+1 Lower a [line break]
+22:3+1 '}' [line break]
+23:3+4 Keyword else [line break]
+23:8+1 '{'
+24:5+1 Lower b [line break]
+25:3+1 '}' [line break]
+25:4+1 Newline
+26:3+6 Keyword return [line break]
+26:9+1 Newline
+27:3+5 Keyword match [line break]
+27:9+1 Lower x
+27:11+1 '{'
+28:5+1 Upper A [line break]
+28:7+2 '=>'
+28:10+1 Integer 1
+28:11+1 Newline
+29:5+1 Upper B [line break]
+29:7+2 '=>'
+30:7+1 Integer 2 [line break]
+31:3+1 '}' [line break]
+32:1+1 '}' [line break]
+32:2+1 Newline
+34:1+4 Keyword type [line break] [blank line]
+34:6+5 Upper Shape
+34:12+1 '='
+35:3+1 '|' [line break]
+35:5+6 Upper Circle
+35:11+1 '('
+35:12+6 Lower radius
+35:18+1 ':'
+35:20+7 Upper Float64
+35:27+1 ')'
+36:3+1 '|' [line break]
+36:5+5 Upper Empty
+37:3+7 Keyword derives [line break]
+37:11+5 Upper Equal
+37:16+1 Newline
+38:1+0 End_of_file [line break]

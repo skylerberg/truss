@@ -1,0 +1,3 @@
+(executable
+ (name truss_lex)
+ (libraries source diagnostic token lexer))

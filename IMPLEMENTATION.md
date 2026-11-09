@@ -21,11 +21,13 @@ These notes collect implementation consequences of the decisions in
 
 ### Lexer
 
-The full design is in [LEXER.md](LEXER.md). In short:
+The full design is in [LEXER.md](LEXER.md), and the lexer is built in
+[`stage0/`](stage0). In short:
 
-- **Hand-written, in two passes.** A scanner turns bytes into raw tokens that
-  record whether a line break came before them, and a layout pass inserts
-  `NEWLINE` tokens and matches brackets.
+- **Hand-written, as a pipeline of two stages.** A scanner turns bytes into
+  raw tokens that record whether a line break came before them, and a layout
+  stage pulls them one at a time, inserts `NEWLINE` tokens, and matches
+  brackets.
 - **Unicode tables generated from one pinned Unicode version,** including
   NFC, rather than taken from sedlex, `uucp`, and `uunf`, whose versions follow
   their own releases.

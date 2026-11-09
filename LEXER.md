@@ -4,7 +4,8 @@ This document designs the stage0 lexer. It implements the lexical grammar in
 [GRAMMAR.md](GRAMMAR.md), and the rules in [SYNTAX.md](SYNTAX.md) and
 [DESIGN.md](DESIGN.md) behind it. Where this design departs from those
 documents, it says so. The changes this design made to those documents are
-listed at the end. Nothing is built yet.
+listed at the end. The lexer is built, in [`stage0/`](stage0); the last
+section lists what building it settled.
 
 ## What the lexer does
 
@@ -83,9 +84,13 @@ lookahead across lines.
 | `Layout` | `NEWLINE` tokens and bracket matching |
 | `Lexer` | The entry point: `Lexer.lex : Source.t -> Token.t array * Diagnostic.t list` |
 
-Each module is its own dune library, so the parser depends only on `Token` and
-`Lexer`, and the formatter and language server can reuse `Source` and
-`Diagnostic`.
+Each module is its own dune library under `stage0/`, so the parser depends
+only on `Token` and `Lexer`, and the formatter and language server can reuse
+`Source` and `Diagnostic`. The scanner's library also holds `Names` and
+`Numbers`, which check a name or a number literal on its own. The dune
+project is at the repository root, so that tests can read the documents.
+`stage0/bin/truss_lex.ml` builds `truss-lex`, which prints a file's
+diagnostics, as JSON with `--json`, and its tokens with `--tokens`.
 
 ### Hand-written, not generated
 
@@ -277,9 +282,10 @@ checked:
    The fix replaces the name with its NFC form.
 3. **Allowed characters.** Every character must have
    `Identifier_Status=Allowed` under
-   [UTS #39](https://www.unicode.org/reports/tr39/). ZWJ and ZWNJ are not
-   `XID_Continue`, so a name stops before one, and the error says that joiners
-   are not supported in names yet.
+   [UTS #39](https://www.unicode.org/reports/tr39/). Since Unicode 15.1, ZWJ
+   and ZWNJ are `XID_Continue`, so a name takes them in, but they are not
+   `Allowed`. For them the error says that joiners are not supported in names
+   yet.
 4. **Scripts.** The name must meet UTS #39's Moderately Restrictive level,
    worked out from `Script_Extensions` as section 5.2 describes. The message
    names the scripts it found.
@@ -490,6 +496,16 @@ each sequence is already an error. Habits fall into two groups:
   the whitespace before it, to the end of the line. A line left empty is
   deleted entirely. The message says where the comment's content belongs: in a
   name, a contract, or a test.
+- **Removing trivia.** Comments, `;`, and forbidden characters in code all
+  lex as whitespace, and their fixes are built by one function. It removes the
+  text and the whitespace around it, or the whole line if nothing else is on
+  it. Between two tokens it leaves a space, or a line break with the line's
+  indentation where the removed text acted as one, so that the tokens stay
+  apart: removing a character from `""`, a character, and `"` must not make
+  `"""`.
+- **`'`.** A character literal from another language, `'a'` or `'\n'`,
+  becomes the tagged string `Character"a"`, with a fix. Any other `'` is an
+  error without a fix, and is skipped.
 - **Look-alike punctuation** (*Later*) is a small, hand-picked table: curly quotes
   `“ ” ‘ ’` become `"` and `'`; fullwidth `（ ） ［ ］ ｛ ｝ ， ： ； ＝` become
   their ASCII forms; no-break and other Unicode spaces become a space; `–` and
@@ -531,7 +547,12 @@ at the end: if the last token can end a statement, emit NEWLINE; then END_OF_FIL
   against GRAMMAR.md.
 - A closing `}` cannot begin a statement, so no `NEWLINE` comes before one.
   The parser still skips a `NEWLINE` before a `{` that must open a body.
-- Each interpolation's tokens are a separate array with their own stack.
+- Each interpolation's tokens are a separate array with their own stack. An
+  interpolation cut off by an error the scanner already reported, such as a
+  line break, closes its open brackets without another error.
+- GRAMMAR.md leaves out the foreign tokens `++` and `--`, which no rule
+  accepts. Layout treats them as able both to end and to begin a statement,
+  so that `i++` stays on a line of its own for the parser to report.
 
 ### Brackets
 
@@ -580,19 +601,25 @@ type t = {
   on message text.
 - A diagnostic may offer alternative fixes, as `0755` does.
 - Applying any fix must remove its diagnostic without adding another from the
-  lexer. A test applies every fix across the test corpus and lexes the result
-  again.
+  lexer. `Lexer.lex` makes this hold by construction: it applies each fix,
+  lexes the result again, and leaves out a fix that fails. A fix is built from
+  the text around one error, but whether it is right can depend on what it
+  cannot see, such as where recovery from another error guesses a string
+  ends. Only a file with errors pays, one lexing per fix. A test checks that
+  no fix in the golden files fails, so ordinary mistakes keep their fixes and
+  only unusual combinations of errors lose them.
 - A file lists at most 200 diagnostics, then gives a count of the rest, so a
   binary file opened by mistake gives a short report.
 
 ## Unicode data
 
 - **One Unicode version, named by the language version.** All tables come
-  from that version's data files. Stage0 starts from the latest Unicode
-  version at the time the tables are first generated.
-- **A generator in `tools/`** downloads the UCD and UTS #39 data files of that
-  version, checks each against a SHA-256 hash recorded in the repository, and
-  writes `unicode_tables.ml`. Only the generated module, the list of source
+  from that version's data files. Stage0 starts from Unicode 18.0.0, the
+  latest when the tables were first generated.
+- **A generator in `stage0/tools/unicode/`** downloads the UCD and UTS #39
+  data files of that version, checks each against a SHA-256 hash recorded in
+  `sources.txt`, and writes `stage0/unicode/unicode_tables.ml`.
+  `regenerate.sh` runs the whole process. Only the generated module, the list of source
   URLs, and their hashes are checked in, which keeps the repository small and
   the output reproducible. Building the compiler never downloads anything;
   only regenerating the tables does.
@@ -601,14 +628,26 @@ type t = {
 - **Properties used:** `XID_Start` and `XID_Continue`, `Default_Ignorable_Code_Point`
   (`DerivedCoreProperties.txt`); `Bidi_Control` and `Variation_Selector`
   (`PropList.txt`); the general categories `Lu`, `Lt`, and `Cc`
-  (`DerivedGeneralCategory.txt`); `NFC_Quick_Check`
-  (`DerivedNormalizationProps.txt`); `Script` and `Script_Extensions`;
+  (`DerivedGeneralCategory.txt`); `NFC_Quick_Check` and
+  `Full_Composition_Exclusion` (`DerivedNormalizationProps.txt`); `Script` and
+  `Script_Extensions`, with script names from `PropertyValueAliases.txt`;
   `Identifier_Status` (`IdentifierStatus.txt`) and `confusables.txt` from UTS
-  #39.
-- **NFC is implemented directly** from the decompositions, combining classes,
-  and composition exclusions in `UnicodeData.txt` and
-  `CompositionExclusions.txt`. It is a few hundred lines, and the UCD's own
-  `NormalizationTest.txt` serves as its conformance test.
+  #39. The forbidden characters are combined into one table when the tables
+  are generated.
+- **Case mappings.** The fixes that rewrite a name's case, such as `userName`
+  to `user_name`, use the simple case mappings in `UnicodeData.txt`, so they
+  work for names in any script with case.
+- **Names of characters** in messages come from `UnicodeData.txt`, or from
+  `NameAliases.txt` for control characters, which `UnicodeData.txt` calls
+  `<control>`. Only the forbidden characters' names are kept.
+- **NFC is implemented directly** from the decompositions and combining
+  classes in `UnicodeData.txt` and `Full_Composition_Exclusion`, with Hangul
+  syllables worked out by arithmetic. It is about 150 lines.
+- **Conformance.** After writing the tables, `regenerate.sh` checks NFC and
+  NFD against every line of the UCD's `NormalizationTest.txt`, and each
+  property, case mapping, script, and confusable against the data file it came
+  from, for every code point. The data files are not checked in, so this runs
+  only when the tables change.
 - The only library the lexer needs is Zarith.
 
 ## Interfaces to other stages
@@ -634,24 +673,29 @@ type t = {
 
 ## Testing
 
-- **Golden tests.** Small `.truss` files, each with the expected tokens and
-  diagnostics, compared using dune's `diff` actions. This needs no test
-  library.
+- **Golden tests.** Small `.truss` files in `stage0/test/golden/`, each with
+  the expected tokens and diagnostics from `truss-lex --tokens`, compared
+  using dune's `diff` actions. This needs no test library. To add one, add a
+  `.truss` file, run `dune build @runtest --auto-promote`, and review the new
+  `.expected` file.
 - **The documents as a corpus.** Every ` ```truss ` block in SYNTAX.md,
   DESIGN.md, and GRAMMAR.md must lex with no diagnostics. This keeps the
   examples honest.
 - **The documents agree with the code.** Tests read the keyword lists, the
   punctuation list, and the line-break sets from GRAMMAR.md and compare them
   with `Token` and `Layout`.
-- **Fixes work.** Every fix in the corpus is applied, and the result is lexed
-  again (see [Diagnostics](#diagnostics)).
+- **Fixes work.** Every fix for the golden files, the corpus, and mutated
+  corpus files is applied, and the result is lexed again (see
+  [Diagnostics](#diagnostics)). No fix for the golden files fails its check.
 - **Round trips.** Random sequences of valid tokens, printed with spaces in
   between, lex back to the same tokens.
 - **Robustness.** Random bytes, and corpus files with random mutations, never
   raise an exception, always finish, and always produce spans that are in
-  bounds and in order. A fuzzer such as AFL can drive this later.
-- **Unicode conformance.** `NormalizationTest.txt` for NFC, and spot checks of
-  each generated table against the data file it came from.
+  bounds and in order, and balanced brackets. `TRUSS_TEST_SEED` chooses other
+  random inputs for longer runs. A fuzzer such as AFL can drive this later.
+- **Unicode.** Spot checks run with the other tests, and the full
+  conformance checks run with `regenerate.sh` (see
+  [Unicode data](#unicode-data)).
 - **Both parsers.** Tokens from the corpus go to the Menhir reference as well as
   the hand-written parser, as IMPLEMENTATION.md plans.
 
@@ -683,3 +727,30 @@ joiners and variation selectors may appear in strings, forbidding U+2028 and
 U+2029, and requiring string literals in NFC (P5); rejecting `"$name"` (P6);
 and making `test`, `proof`, `law`, `theorem`, and `capability` contextual
 keywords (P8).
+
+## What building the lexer settled
+
+Building the lexer settled these points, which the sections above now
+describe:
+
+- **Unicode 18.0.0** is the pinned version. Since Unicode 15.1, ZWJ and ZWNJ
+  are `XID_Continue`, so names take them in and the Allowed check rejects
+  them, with the message that joiners are not supported in names yet.
+- **Fixes are checked by construction.** `Lexer.lex` lexes the result of
+  each fix again and leaves out any fix that fails, instead of relying on
+  each fix being built right. Fuzzing found fixes that went wrong only where
+  two recoveries met, such as a missing `}` and an unterminated raw string
+  guessed to end on the same line.
+- **One function removes trivia,** so a fix for a comment, a `;`, or a
+  forbidden character never joins the tokens around it.
+- **Errors do not cascade out of an interpolation.** One cut off by a line
+  break or a broken nested string closes its brackets silently.
+- **The foreign tokens `++` and `--`** can end and begin a statement.
+- **Inside a multi-line raw string,** a run of more quotes than the delimiter
+  after text on a line is an error and stays text. On a line of its own, it
+  closes the string, also with an error.
+- **NFC uses `Full_Composition_Exclusion`** from
+  `DerivedNormalizationProps.txt`, which already includes
+  `CompositionExclusions.txt`, so that file is not needed. The simple case
+  mappings in `UnicodeData.txt` are added to the tables for the fixes that
+  rewrite a name's case.

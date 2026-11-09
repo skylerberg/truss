@@ -1,0 +1,68 @@
+1:1+3 Keyword let
+1:5+5 Lower café
+1:10+1 '='
+1:12+1 Integer 1
+1:13+1 Newline
+2:1+3 Keyword let [line break]
+2:5+6 Lower café
+2:11+1 '='
+2:13+1 Integer 2
+2:14+1 Newline
+3:1+3 Keyword let [line break]
+3:5+6 Lower ｆile
+3:10+1 '='
+3:12+1 Integer 3
+3:13+1 Newline
+4:1+3 Keyword let [line break]
+4:5+5 Lower 𝐟x
+4:8+1 '='
+4:10+1 Integer 4
+4:11+1 Newline
+5:1+3 Keyword let [line break]
+5:5+7 Lower pаypal
+5:12+1 '='
+5:14+1 Integer 5
+5:15+1 Newline
+6:1+3 Keyword let [line break]
+6:5+12 Lower привет
+6:12+1 '='
+6:14+1 Integer 6
+6:15+1 Newline
+7:1+3 Keyword let [line break]
+7:5+10 Lower 名前name
+7:12+1 '='
+7:14+1 Integer 7
+7:15+1 Newline
+8:1+3 Keyword let [line break]
+8:5+18 Lower ひらがな漢字
+8:12+1 '='
+8:14+1 Integer 8
+8:15+1 Newline
+9:1+3 Keyword let [line break]
+9:5+7 Lower م‌س
+9:9+1 '='
+9:11+1 Integer 9
+9:12+1 Newline
+10:1+3 Keyword let [line break]
+10:5+6 Lower αβγ
+10:9+1 '='
+10:11+2 Integer 10
+10:13+1 Newline
+11:1+0 End_of_file [line break]
+./name_unicode.truss:2:5: error[lexer.name_not_normalized]: This name is not in Unicode Normalization Form C, so the same-looking name could be spelled another way.
+  | let café = 2
+  |     ^^^^^
+  fix: Write `café`
+    replace "café" with "café" at ./name_unicode.truss:2:5
+./name_unicode.truss:3:5: error[lexer.name_character_not_allowed]: `ｆ` (U+FF46) is not allowed in names. Names use only the characters Unicode recommends for identifiers (Identifier_Status=Allowed in UTS #39).
+  | let ｆile = 3
+  |     ^^^^
+./name_unicode.truss:4:5: error[lexer.name_character_not_allowed]: `𝐟` (U+1D41F) is not allowed in names. Names use only the characters Unicode recommends for identifiers (Identifier_Status=Allowed in UTS #39).
+  | let 𝐟x = 4
+  |     ^^
+./name_unicode.truss:5:5: error[lexer.name_mixed_scripts]: This name mixes the scripts Latin and Cyrillic. A name can mix Latin with at most one other script, and never Latin with Cyrillic or Greek.
+  | let pаypal = 5
+  |     ^^^^^^
+./name_unicode.truss:9:5: error[lexer.name_joiner]: The zero-width joiner and non-joiner are not supported in names yet.
+  | let م‌س = 9
+  |     ^^^

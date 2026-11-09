@@ -1,0 +1,51 @@
+1:1+2 Keyword fn
+1:4+1 Lower a
+1:5+1 '('
+1:6+1 ')'
+1:8+1 '{'
+2:3+3 Lower foo [line break]
+2:6+1 '('
+2:7+1 Integer 1
+2:8+1 ','
+2:10+1 '['
+2:11+1 Integer 2
+2:12+0 ']'
+2:12+1 ')'
+2:13+1 Newline
+3:3+3 Lower bar [line break]
+3:6+1 '('
+3:7+1 Integer 3
+4:1+0 ')'
+4:1+1 '}' [line break]
+5:2+1 Newline
+6:1+3 Keyword let [line break]
+6:5+1 Lower x
+6:7+1 '='
+6:9+1 '('
+6:10+1 Integer 1
+6:11+0 ')'
+6:11+1 Newline
+7:1+0 End_of_file [line break]
+./brackets.truss:2:10: error[lexer.unclosed_bracket]: This `[` is never closed.
+  |   foo(1, [2)
+  |          ^
+  note: ./brackets.truss:2:12: This `)` closes an earlier `(` first.
+  fix: Insert `]`
+    insert "]" at ./brackets.truss:2:12
+./brackets.truss:3:6: error[lexer.unclosed_bracket]: This `(` is never closed.
+  |   bar(3]
+  |      ^
+  note: ./brackets.truss:4:1: This `}` closes an earlier `{` first.
+  fix: Insert `)`
+    insert ")" at ./brackets.truss:4:1
+./brackets.truss:3:8: error[lexer.unmatched_closing_bracket]: This `]` has no `[` to close.
+  |   bar(3]
+  |        ^
+./brackets.truss:5:1: error[lexer.unmatched_closing_bracket]: This `}` has no `{` to close.
+  | }
+  | ^
+./brackets.truss:6:9: error[lexer.unclosed_bracket]: This `(` is never closed before the end of the file.
+  | let x = (1
+  |         ^
+  fix: Insert `)`
+    insert ")\n" at ./brackets.truss:7:1

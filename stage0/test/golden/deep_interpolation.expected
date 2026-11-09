@@ -1,0 +1,79 @@
+1:1+3 Keyword let
+1:5+1 Lower x
+1:7+1 '='
+1:9+171 String "" ${...} ""
+    1:12+168 String "" ${...} ""
+        1:15+165 String "" ${...} ""
+            1:18+162 String "" ${...} ""
+                1:21+159 String "" ${...} ""
+                    1:24+156 String "" ${...} ""
+                        1:27+153 String "" ${...} ""
+                            1:30+150 String "" ${...} ""
+                                1:33+147 String "" ${...} ""
+                                    1:36+144 String "" ${...} ""
+                                        1:39+141 String "" ${...} ""
+                                            1:42+138 String "" ${...} ""
+                                                1:45+135 String "" ${...} ""
+                                                    1:48+132 String "" ${...} ""
+                                                        1:51+129 String "" ${...} ""
+                                                            1:54+126 String "" ${...} ""
+                                                                1:57+123 String "" ${...} ""
+                                                                    1:60+120 String "" ${...} ""
+                                                                        1:63+117 String "" ${...} ""
+                                                                            1:66+114 String "" ${...} ""
+                                                                                1:69+111 String "" ${...} ""
+                                                                                    1:72+108 String "" ${...} ""
+                                                                                        1:75+105 String "" ${...} ""
+                                                                                            1:78+102 String "" ${...} ""
+                                                                                                1:81+99 String "" ${...} ""
+                                                                                                    1:84+96 String "" ${...} ""
+                                                                                                        1:87+93 String "" ${...} ""
+                                                                                                            1:90+90 String "" ${...} ""
+                                                                                                                1:93+87 String "" ${...} ""
+                                                                                                                    1:96+84 String "" ${...} ""
+                                                                                                                        1:99+81 String "" ${...} ""
+                                                                                                                            1:102+78 String "" ${...} ""
+                                                                                                                                1:105+75 String "" ${...} ""
+                                                                                                                                    1:180+0 End_of_file
+                                                                                                                                1:180+0 End_of_file
+                                                                                                                            1:180+0 End_of_file
+                                                                                                                        1:180+0 End_of_file
+                                                                                                                    1:180+0 End_of_file
+                                                                                                                1:180+0 End_of_file
+                                                                                                            1:180+0 End_of_file
+                                                                                                        1:180+0 End_of_file
+                                                                                                    1:180+0 End_of_file
+                                                                                                1:180+0 End_of_file
+                                                                                            1:180+0 End_of_file
+                                                                                        1:180+0 End_of_file
+                                                                                    1:180+0 End_of_file
+                                                                                1:180+0 End_of_file
+                                                                            1:180+0 End_of_file
+                                                                        1:180+0 End_of_file
+                                                                    1:180+0 End_of_file
+                                                                1:180+0 End_of_file
+                                                            1:180+0 End_of_file
+                                                        1:180+0 End_of_file
+                                                    1:180+0 End_of_file
+                                                1:180+0 End_of_file
+                                            1:180+0 End_of_file
+                                        1:180+0 End_of_file
+                                    1:180+0 End_of_file
+                                1:180+0 End_of_file
+                            1:180+0 End_of_file
+                        1:180+0 End_of_file
+                    1:180+0 End_of_file
+                1:180+0 End_of_file
+            1:180+0 End_of_file
+        1:180+0 End_of_file
+    1:180+0 End_of_file
+1:180+1 Newline
+2:1+3 Keyword let [line break]
+2:5+1 Lower y
+2:7+1 '='
+2:9+1 Integer 1
+2:10+1 Newline
+3:1+0 End_of_file [line break]
+./deep_interpolation.truss:1:106: error[lexer.interpolation_too_deep]: Interpolations can nest at most 32 deep.
+  | let x = "${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${"${x}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"
+  |                                                                                                          ^^

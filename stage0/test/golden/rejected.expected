@@ -1,0 +1,173 @@
+1:1+3 Keyword let
+1:5+1 Lower a
+1:7+1 '='
+1:9+1 Integer 1
+1:23+1 Newline
+3:1+3 Keyword let [line break]
+3:5+1 Lower b
+3:7+1 '='
+3:9+1 Integer 2
+3:24+1 '+'
+3:26+1 Integer 3
+3:27+1 Newline
+6:1+3 Keyword let [line break]
+6:5+1 Lower c
+6:7+1 '='
+6:34+1 Integer 4
+6:35+1 Newline
+8:1+3 Keyword let [line break]
+8:5+1 Lower d
+8:7+1 '='
+8:9+1 Integer 5
+8:11+1 Newline
+9:1+3 Keyword let [line break]
+9:5+1 Lower e
+9:7+1 '='
+9:9+1 Integer 6
+9:10+1 Newline
+9:12+3 Keyword let [line break]
+9:16+1 Lower f
+9:18+1 '='
+9:20+1 Integer 7
+9:21+1 Newline
+10:1+2 Keyword fn [line break]
+10:4+1 Lower g
+10:5+1 '('
+10:6+1 ')'
+10:8+2 '->'
+10:11+5 Upper Int64
+10:17+1 Newline
+11:1+3 Keyword let [line break]
+11:5+1 Lower h
+11:7+1 '='
+11:9+1 '{'
+11:11+1 Lower a
+11:14+1 '}'
+11:15+1 Newline
+12:1+3 Keyword let [line break]
+12:5+1 Lower i
+12:7+1 '='
+12:9+1 Lower a
+12:11+3 '=='
+12:15+1 Lower b
+12:16+1 Newline
+13:1+3 Keyword let [line break]
+13:5+1 Lower j
+13:7+1 '='
+13:9+1 Lower a
+13:11+3 '!='
+13:15+1 Lower b
+13:16+1 Newline
+14:2+9 Lower decorator [line break]
+14:11+1 Newline
+15:1+3 Keyword let [line break]
+15:5+1 Lower k
+15:7+1 '='
+15:10+1 Lower x
+15:12+1 Newline
+16:1+1 Lower i [line break]
+16:2+2 Foreign ++
+16:4+1 Newline
+17:1+1 Lower i [line break]
+17:2+2 Foreign --
+17:4+1 Newline
+18:1+2 Foreign -- [line break]
+18:3+1 Lower x
+18:4+1 Newline
+19:1+3 Keyword let [line break]
+19:5+1 Lower l
+19:7+1 '='
+19:9+1 Lower a
+19:13+1 Lower b
+19:14+1 Newline
+20:1+3 Keyword let [line break]
+20:5+1 Lower m
+20:7+1 '='
+20:10+1 Lower x
+20:11+1 Newline
+21:1+3 Keyword let [line break]
+21:5+1 Lower n
+21:7+1 '='
+21:9+1 Lower a
+21:26+1 Newline
+22:1+0 End_of_file [line break]
+./rejected.truss:1:11: error[lexer.comment]: Truss has no comments. Say this with a name, a contract, or a test instead.
+  | let a = 1 // a comment
+  |           ^^^^^^^^^^^^
+  fix: Remove the comment
+    delete " // a comment" at ./rejected.truss:1:10
+./rejected.truss:2:1: error[lexer.comment]: Truss has no comments. Say this with a name, a contract, or a test instead.
+  | // a whole line
+  | ^^^^^^^^^^^^^^^
+  fix: Remove the comment
+    delete "// a whole line\n" at ./rejected.truss:2:1
+./rejected.truss:3:11: error[lexer.comment]: Truss has no comments. Say this with a name, a contract, or a test instead.
+  | let b = 2 /* inline */ + 3
+  |           ^^^^^^^^^^^^
+  fix: Remove the comment
+    replace " /* inline */ " with " " at ./rejected.truss:3:10
+./rejected.truss:4:1: error[lexer.comment]: Truss has no comments. Say this with a name, a contract, or a test instead.
+  | /* a block
+  | ^^^^^^^^^^
+  fix: Remove the comment
+    delete "/* a block\n   comment */\n" at ./rejected.truss:4:1
+./rejected.truss:6:9: error[lexer.comment]: Truss has no comments. Say this with a name, a contract, or a test instead.
+  | let c = /* nested /* inner */ */ 4
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^
+  fix: Remove the comment
+    replace " /* nested /* inner */ */ " with " " at ./rejected.truss:6:8
+./rejected.truss:7:1: error[lexer.comment]: Truss has no comments. Say this with a name, a contract, or a test instead.
+  | # python comment
+  | ^^^^^^^^^^^^^^^^
+  fix: Remove the comment
+    delete "# python comment\n" at ./rejected.truss:7:1
+./rejected.truss:8:10: error[lexer.semicolon]: Statements end at a line break. Truss has no `;`.
+  | let d = 5;
+  |          ^
+  fix: Remove the `;`
+    delete ";" at ./rejected.truss:8:10
+./rejected.truss:9:10: error[lexer.semicolon]: Statements end at a line break. Truss has no `;`.
+  | let e = 6; let f = 7
+  |          ^
+  fix: Replace the `;` with a line break
+    replace "; " with "\n" at ./rejected.truss:9:10
+./rejected.truss:10:16: error[lexer.semicolon]: Statements end at a line break. Truss has no `;`.
+  | fn g() -> Int64;
+  |                ^
+  fix: Remove the `;`
+    delete ";" at ./rejected.truss:10:16
+./rejected.truss:11:12: error[lexer.semicolon]: Statements end at a line break. Truss has no `;`.
+  | let h = { a; }
+  |            ^
+  fix: Remove the `;`
+    replace "; " with " " at ./rejected.truss:11:12
+./rejected.truss:12:11: error[lexer.strict_equality]: Truss has no `===`. `==` already compares values of the same type.
+  | let i = a === b
+  |           ^^^
+  fix: Write `==`
+    replace "===" with "==" at ./rejected.truss:12:11
+./rejected.truss:13:11: error[lexer.strict_equality]: Truss has no `!==`. `!=` already compares values of the same type.
+  | let j = a !== b
+  |           ^^^
+  fix: Write `!=`
+    replace "!==" with "!=" at ./rejected.truss:13:11
+./rejected.truss:14:1: error[lexer.unexpected_character]: `@` is not used in Truss.
+  | @decorator
+  | ^
+./rejected.truss:15:9: error[lexer.unexpected_character]: The backtick is not used in Truss.
+  | let k = `x`
+  |         ^
+./rejected.truss:15:11: error[lexer.unexpected_character]: The backtick is not used in Truss.
+  | let k = `x`
+  |           ^
+./rejected.truss:19:11: error[lexer.unexpected_character]: `\` is not used in Truss.
+  | let l = a \ b
+  |           ^
+./rejected.truss:20:9: error[lexer.unexpected_character]: `$` is used only in strings: `${...}` inside a string interpolates, and `$`s before a raw string's `"""` choose how it interpolates.
+  | let m = $x
+  |         ^
+./rejected.truss:21:11: error[lexer.comment]: Truss has no comments. Say this with a name, a contract, or a test instead. This comment is never closed.
+  | let n = a /* never closed
+  |           ^^^^^^^^^^^^^^^
+  fix: Remove the comment
+    delete " /* never closed\n" at ./rejected.truss:21:10
