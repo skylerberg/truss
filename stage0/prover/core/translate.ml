@@ -2277,8 +2277,8 @@ let costs_unproven context (clauses : clause list) =
 (* A function, method, or theorem: its parameters arrive, its [requires]
    are assumed, its body runs, and its [ensures] are shown at each way it
    returns. *)
-let function_ ?(proof = false) ?(updating_helper = false) database (source : source) ~path
-    (signature : signature) (body : block) =
+let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (source : source)
+    ~path (signature : signature) (body : block) =
   reject_checker_obligations source;
   (match signature.result with
   | Some (Yields _ | Lends _) -> unsupported body.span "a lending or yielding method"
@@ -2345,16 +2345,85 @@ let function_ ?(proof = false) ?(updating_helper = false) database (source : sou
       start signature.parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
+  (* An [impl]'s method also keeps its trait's contract: the trait's
+     [requires] is what callers through a bound show, so it is assumed,
+     and implies the method's own; the trait's [ensures] is what they
+     assume, so it is shown. See DESIGN.md, "An [impl] can promise more
+     than its trait". *)
+  let own_terms =
+    (match start.self with Some self -> [ self ] | None -> [])
+    @ List.filter_map
+        (fun (parameter : parameter) ->
+          match parameter.kind with
+          | Named_parameter { name = name_; _ } -> Ids.find_opt name_.id start.locals
+          | _ -> None)
+        signature.parameters
+  in
+  let trait_frame (at : frame) ~result =
+    match inherited with
+    | Some ((part : part), substitution) ->
+        let locals, self, old_locals =
+          List.fold_left2
+            (fun (locals, self, old_locals) binding (entry, exit_) ->
+              match binding with
+              | Self_binding -> (locals, Some exit_, old_locals)
+              | Parameter_binding name_ ->
+                  (Ids.add name_.id exit_ locals, self, Ids.add name_.id entry old_locals))
+            (Ids.empty, None, Ids.empty) part.binding
+            (List.combine own_terms
+               ((match at.self with Some self -> [ self ] | None -> [])
+               @ List.filter_map
+                   (fun (parameter : parameter) ->
+                     match parameter.kind with
+                     | Named_parameter { name = name_; _ } -> Ids.find_opt name_.id at.locals
+                     | _ -> None)
+                   signature.parameters))
+        in
+        Some
+          ( part,
+            {
+              at with
+              source = part.callee;
+              locals;
+              old_locals;
+              self;
+              old_self = start.self;
+              result;
+              checking = false;
+              loop = None;
+              substitution;
+            } )
+    | None -> None
+  in
+  let own_requires =
+    List.filter_map
+      (fun (clause : clause) -> match clause.kind with Requires value_ -> Some value_ | _ -> None)
+      signature.clauses
+  in
   let start =
-    List.fold_left
-      (fun frame (clause : clause) ->
-        match clause.kind with
-        | Requires value_ ->
-            let frame, term = value context frame value_ in
+    match trait_frame start ~result:None with
+    | Some (part, inside) when List.length part.binding = List.length own_terms ->
+        List.iter
+          (fun (clause : expression) -> assume context start (snd (value context inside clause)))
+          part.requires;
+        List.fold_left
+          (fun frame (clause : expression) ->
+            let frame, term = value context frame clause in
+            oblige context frame Requires clause.span
+              (Printf.sprintf
+                 "`%s` may not follow from the trait's `requires`, which callers through the trait \
+                  show, and an `impl`'s `requires` must."
+                 (quote source clause.span))
+              term;
+            frame)
+          start own_requires
+    | _ ->
+        List.fold_left
+          (fun frame (clause : expression) ->
+            let frame, term = value context frame clause in
             assume context frame term;
-            frame
-        | _ -> frame)
-      start signature.clauses
+            frame)
+          start own_requires
   in
   let finished = block_value context start body in
   let returns =
@@ -2407,7 +2476,18 @@ let function_ ?(proof = false) ?(updating_helper = false) database (source : sou
                    (quote source ensured.span))
                 term
           | _ -> ())
-        signature.clauses)
+        signature.clauses;
+      match trait_frame frame ~result:returned with
+      | Some (part, inside) when List.length part.binding = List.length own_terms ->
+          List.iter
+            (fun (clause : expression) ->
+              let _, term = value context inside clause in
+              oblige context frame Ensures body.span
+                (Printf.sprintf "The trait's `%s` may not hold when this method returns."
+                   (quote part.callee clause.span))
+                term)
+            part.ensures
+      | _ -> ())
     returns;
   outcome context
 

@@ -701,6 +701,9 @@ let () =
         \  todo\n\
          }\n"
         "types.mismatch");
+  test "a trait method without a body has its clauses checked" (fun () ->
+      one_diagnostic "trait Measured {\n  fn measure(self) -> Int64\n    ensures result + true\n}\n"
+        "types.no_impl");
   test "a loop's cost bound is checked" (fun () ->
       one_diagnostic
         "fn f(count: USize) {\n\

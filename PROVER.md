@@ -831,6 +831,10 @@ It proves, with one canonical, numbered, hashed query per obligation:
   when it states any; a call through a bound reads the trait's. Each
   callee's clauses are read with the call's type arguments, and its
   `ensures` is assumed only where its `requires` holds.
+- an `impl`'s method keeps its trait's contract: the trait's `requires`
+  is assumed and must imply the method's own, and the trait's `ensures`
+  is shown at each way it returns, since calls through a bound rely on
+  them
 - indexing, through the `impl` of `Index` a call reaches, so every index
   into a `List` or a `Slice` is checked against `key < self.length()`; and
   assigning to an element, after which the collection is not known any

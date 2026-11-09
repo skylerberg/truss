@@ -17,6 +17,38 @@ let method_path (key : Names.key) (signature : signature) name =
   in
   Path.Method { owner = key.path; name; receiver }
 
+(* The trait's clauses an [impl]'s method keeps, with the [impl]'s type as
+   [Self] and its arguments for the trait's parameters. *)
+let inherited database impl (signature : signature) name =
+  match Query.demand database Interface.Environment.interface impl with
+  | Some (Interface.Environment.Impl_interface interface) -> (
+      match
+        Translate.trait_part database interface.implements.trait name
+          (Translate.receiver_of signature.parameters)
+      with
+      | Some (part, _) ->
+          let trait_generics =
+            match
+              Query.demand database Interface.Environment.interface interface.implements.trait
+            with
+            | Some (Interface.Environment.Trait_interface trait) ->
+                List.map (fun (generic : Types.generic) -> generic.generic) trait.trait_generics
+            | _ -> []
+          in
+          let rec pair parameters arguments =
+            match (parameters, arguments) with
+            | parameter :: parameters, argument :: arguments ->
+                (parameter, argument) :: pair parameters arguments
+            | _ -> []
+          in
+          Some
+            ( part,
+              ( { Types.owner = interface.implements.trait; name = "Self" },
+                Types.Type interface.for_type )
+              :: pair trait_generics interface.implements.trait_arguments )
+      | None -> None)
+  | _ -> None
+
 let prove database (key : Names.key) =
   match (Query.demand database Names.definition key, Translate.callee_source database key) with
   | Some definition, Some source -> (
@@ -43,9 +75,10 @@ let prove database (key : Names.key) =
                         match signature.name with
                         | Plain_name name | Member_name (_, name) -> name.text
                       in
+                      let inherited = inherited database key.path signature name in
                       Some
-                        (Translate.function_ database source ~path:(method_path key signature name)
-                           signature body)
+                        (Translate.function_ ?inherited database source
+                           ~path:(method_path key signature name) signature body)
                   | _ -> None)
                 members
             in

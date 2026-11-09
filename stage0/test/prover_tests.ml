@@ -469,14 +469,13 @@ let () =
          }\n\n\
          impl Next for Counter {\n\
         \  fn next(self) -> Int64\n\
-        \    requires self.count < 100\n\
-        \    ensures result == self.count + 1\n\
+        \    ensures result == self.count\n\
         \  {\n\
-        \    self.count + 1\n\
+        \    self.count\n\
         \  }\n\
          }\n\n\
          fn f() -> Int64\n\
-        \  ensures result == 6\n\
+        \  ensures result == 5\n\
          {\n\
         \  Counter(count: 5).next()\n\
          }\n");
@@ -507,6 +506,40 @@ let () =
         \  point.x = 7\n\
         \  point.y\n\
          }\n")
+
+let measured =
+  "type Box(size: Int64)\n\n\
+   trait Measured {\n\
+  \  fn measure(self) -> Int64\n\
+  \    requires true\n\
+  \    ensures result >= 0\n\
+   }\n\n"
+
+let () =
+  test "an impl's method must keep its trait's ensures" (fun () ->
+      not_proven
+        (measured
+       ^ "impl Measured for Box {\n  fn measure(self) -> Int64 {\n    self.size\n  }\n}\n")
+        "prover.ensures");
+  test "an impl's method that keeps its trait's ensures" (fun () ->
+      proven
+        (measured
+       ^ "impl Measured for Box {\n\
+         \  fn measure(self) -> Int64 {\n\
+         \    if self.size < 0 { 0 } else { self.size }\n\
+         \  }\n\
+          }\n"));
+  test "an impl's requires may not be stronger than its trait's" (fun () ->
+      not_proven
+        (measured
+       ^ "impl Measured for Box {\n\
+         \  fn measure(self) -> Int64\n\
+         \    requires self.size >= 0\n\
+         \  {\n\
+         \    self.size\n\
+         \  }\n\
+          }\n")
+        "prover.requires")
 
 (* Type invariants *)
 

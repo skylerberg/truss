@@ -215,7 +215,7 @@ let check_definition state (lowered : Environment.lowered) =
           (fun index (line : trait_member line) ->
             if not (broken (Member_header index)) then
               match line.kind with
-              | Trait_method { signature; body = Some written } -> (
+              | Trait_method { signature; body } -> (
                   let name =
                     match signature.name with Plain_name name | Member_name (_, name) -> name.text
                   in
@@ -227,8 +227,9 @@ let check_definition state (lowered : Environment.lowered) =
                       trait.methods
                   with
                   | Some method_ ->
-                      check_function state ~broken_body:(broken (Member_body index)) signature
-                        (Some written) method_.method_signature
+                      (* A method without a body still has clauses to check. *)
+                      check_function state ~broken_body:(broken (Member_body index)) signature body
+                        method_.method_signature
                   | None -> ())
               | Law law ->
                   let env : env = { no_output with specification = true; self = Some self } in
@@ -247,7 +248,7 @@ let check_definition state (lowered : Environment.lowered) =
                     law.requires;
                   if not (broken (Member_body index)) then
                     body state { env with output = Some (Returns T.bool) } law.body
-              | Trait_method { body = None; _ } | Associated_type _ | Trait_member_error -> ())
+              | Associated_type _ | Trait_member_error -> ())
           members
     | Impl { members; _ }, Impl_interface impl ->
         List.iteri
