@@ -77,7 +77,25 @@ checked definitions
 | `Compile` | The driver: what each instance compiles to, made once, with its drops elaborated; running constants' evaluators; building and running tests and programs; and keeping test results |
 
 Each is its own dune library, like the lexer's modules, under
-`stage0/codegen/`. `Memory_layout` is not called `Layout`, which is the
+`stage0/codegen/`. The larger ones are split into modules of their own,
+each building on the ones before it, and the library's main module lists
+them:
+- **`Lower`:**
+  - `Definitions` (the context, and finding an instance's code and signature)
+  - `Lowering` (one function's state and scopes)
+  - `Targets` (what a call reaches, and evidence)
+  - `Matching` (patterns)
+  - `Calls`, `Values`, `Expressions`, `Statements`
+  - `Constants`, `Derived`, `Generated` (the instances lowering makes)
+
+  The four mutually recursive parts call forward through `Forward`, which
+  `Lower` ties.
+- **`Emit_c`:** `C_runtime`, `C_types`, `C_values`, `C_code`, `C_data`.
+- **`Lir`:** `Ir`, the types and the canonical form; `Encoding`; and
+  `Printing`.
+
+The codegen tests are split the same way, by the part they test, and share
+`Codegen_support`. `Memory_layout` is not called `Layout`, which is the
 lexer's layout stage. Only `Emit_c` and
 `Toolchain` know about C.
 
