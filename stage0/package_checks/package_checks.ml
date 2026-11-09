@@ -493,29 +493,37 @@ let check =
                   (Query.demand database Interface.Impls.index name))
               (List.filter (fun name -> name <> package_name) (packages [] (standard @ direct)))
           in
+          (* Two impls can overlap only if they implement one trait for one
+             type, since an impl's type is always a named type: so each is
+             compared only with the impls before it in its trait and type's
+             group, here and in the packages depended on. *)
+          let groups = Hashtbl.create 64 in
+          let group (impl : T.impl_interface) =
+            (impl.implements.trait, Interface.Impls.head impl.for_type)
+          in
+          let add impl =
+            let key = group impl in
+            Hashtbl.replace groups key
+              (impl :: Option.value ~default:[] (Hashtbl.find_opt groups key))
+          in
+          List.iter add dependency_impls;
           let overlaps =
-            List.concat
-              (List.mapi
-                 (fun index
-                      ((declaration : Names.declaration), definition, (impl : T.impl_interface)) ->
-                   List.filter_map
-                     (fun (other : T.impl_interface) ->
-                       if
-                         Path.equal impl.implements.trait other.implements.trait
-                         && overlap impl other
-                       then
-                         at database (Names.key_of declaration) Overlapping_impls
-                           (header_span definition)
-                           (Printf.sprintf
-                              "This `impl` overlaps another `impl` of `%s` for `%s`: a type has at \
-                               most one `impl` of a trait for each set of its arguments."
-                              (T.show_trait other.implements) (T.show other.for_type))
-                       else None)
-                     (List.filteri
-                        (fun other _ -> other < index)
-                        (List.map (fun (_, _, impl) -> impl) placed)
-                     @ dependency_impls))
-                 placed)
+            List.concat_map
+              (fun ((declaration : Names.declaration), definition, (impl : T.impl_interface)) ->
+                let earlier = Option.value ~default:[] (Hashtbl.find_opt groups (group impl)) in
+                add impl;
+                List.filter_map
+                  (fun (other : T.impl_interface) ->
+                    if overlap impl other then
+                      at database (Names.key_of declaration) Overlapping_impls
+                        (header_span definition)
+                        (Printf.sprintf
+                           "This `impl` overlaps another `impl` of `%s` for `%s`: a type has at \
+                            most one `impl` of a trait for each set of its arguments."
+                           (T.show_trait other.implements) (T.show other.for_type))
+                    else None)
+                  (List.rev earlier))
+              placed
           in
           let recursion =
             List.filter_map

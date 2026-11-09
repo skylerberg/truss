@@ -61,10 +61,8 @@ let capability_impls (state : state) (type_ : T.ty) =
   match type_ with
   | T.Named { path; _ } ->
       List.filter_map
-        (fun ((trait, head), _) ->
-          if
-            Path.equal head path && Interface.Summary.kind_of state.database trait = Some Capability
-          then
+        (fun (trait, _) ->
+          if Interface.Summary.kind_of state.database trait = Some Capability then
             match implements state type_ (trait_reference trait) with
             | Some (Interface.Impls.From_impl { impl; substitution }) ->
                 Option.map
@@ -74,7 +72,7 @@ let capability_impls (state : state) (type_ : T.ty) =
             | _ -> None
           else None)
         (List.concat_map
-           (fun package -> Query.demand state.database Interface.Impls.index package)
+           (fun package -> Interface.Impls.impls_for state.database path package)
            (List.sort_uniq compare [ Path.package path; state.package; "standard" ]))
   | _ -> []
 
