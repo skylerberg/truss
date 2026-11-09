@@ -108,6 +108,17 @@ type intrinsic =
   | System_read  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
   | Clock_now  (** [() -> Int64], nanoseconds since the Unix epoch *)
   | Random_fill  (** [(bytes, count)] *)
+  | Debug_begin  (** Empties the debug output buffer *)
+  | Debug_text  (** [(bytes, count)]: appends text as it is *)
+  | Debug_signed  (** [(Int64)] *)
+  | Debug_unsigned  (** [(UInt64)] *)
+  | Debug_float32
+  | Debug_float64  (** The shortest decimal that reads back as the same float *)
+  | Debug_bool
+  | Debug_character  (** As [Character"x"] *)
+  | Debug_string  (** [(bytes, count)]: as a quoted string with escapes *)
+  | Debug_bytes  (** [() -> pointer] to the buffer's bytes *)
+  | Debug_length  (** [() -> USize] *)
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
@@ -529,6 +540,17 @@ let intrinsic_tag = function
   | System_read -> 26
   | Clock_now -> 27
   | Random_fill -> 28
+  | Debug_begin -> 29
+  | Debug_text -> 30
+  | Debug_signed -> 31
+  | Debug_unsigned -> 32
+  | Debug_float32 -> 33
+  | Debug_float64 -> 34
+  | Debug_bool -> 35
+  | Debug_character -> 36
+  | Debug_string -> 37
+  | Debug_bytes -> 38
+  | Debug_length -> 39
 
 let encode_rvalue instance rvalue =
   let operand = encode_operand instance in
@@ -749,6 +771,17 @@ let intrinsic_name = function
   | System_read -> "system_read"
   | Clock_now -> "clock_now"
   | Random_fill -> "random_fill"
+  | Debug_begin -> "debug_begin"
+  | Debug_text -> "debug_text"
+  | Debug_signed -> "debug_signed"
+  | Debug_unsigned -> "debug_unsigned"
+  | Debug_float32 -> "debug_float32"
+  | Debug_float64 -> "debug_float64"
+  | Debug_bool -> "debug_bool"
+  | Debug_character -> "debug_character"
+  | Debug_string -> "debug_string"
+  | Debug_bytes -> "debug_bytes"
+  | Debug_length -> "debug_length"
 
 let rvalue_to_string = function
   | Use operand -> operand_to_string operand

@@ -8,14 +8,18 @@ module Types = Map.Make (struct
   let compare = Ground.compare
 end)
 
+type debug_form = Structure | Text | Sequence
+
 type t = {
   env : Memory_layout.env;
   kind_of : Ground.ty -> kind;
   usize : Ground.ty;
+  debug_form : Ground.ty -> debug_form;
   mutable trivial_types : bool Types.t;
 }
 
-let create env ~kind_of ~usize = { env; kind_of; usize; trivial_types = Types.empty }
+let create env ~kind_of ~usize ?(debug_form = fun _ -> Structure) () =
+  { env; kind_of; usize; debug_form; trivial_types = Types.empty }
 
 let rec trivial t ty =
   match Types.find_opt ty t.trivial_types with
@@ -301,3 +305,148 @@ let copy t ty =
     (build b ~parameters
        ~result:
          (match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None))
+
+(* Debug output *)
+
+let zero_size t ty = (Memory_layout.of_type t.env ty).size = 0
+
+let debug_signature t ty : Lir.signature =
+  {
+    parameters =
+      (if zero_size t ty then [] else [ Pointer { target = Value ty; writable = false } ]);
+    result = None;
+    returns = true;
+  }
+
+let text b value =
+  if value <> "" then
+    emit b
+      (Call
+         {
+           target = Intrinsic Debug_text;
+           arguments = [ Constant (Bytes value); usize (String.length value) ];
+           result = None;
+         })
+
+let debug_call t b ty (place : Lir.place) =
+  let arguments = if zero_size t ty then [] else [ Lir.Address { place; writable = false } ] in
+  emit b
+    (Call
+       {
+         target = Direct { function_ = Instance (Debug ty); signature = debug_signature t ty };
+         arguments;
+         result = None;
+       })
+
+let scalar_debug t b (scalar : Memory_layout.scalar) (place : Lir.place) =
+  let call intrinsic operand =
+    emit b (Call { target = Intrinsic intrinsic; arguments = [ operand ]; result = None })
+  in
+  match scalar with
+  | Integer (Int8 | Int16 | Int32 | Int64 | ISize) ->
+      let wide = local b (Raw (Integer Int64)) in
+      emit b (Assign (at wide, Convert (Copy place, Integer Int64)));
+      call Debug_signed (Copy (at wide))
+  | Integer (UInt8 | UInt16 | UInt32 | UInt64 | USize) ->
+      let wide = local b (Raw (Integer UInt64)) in
+      emit b (Assign (at wide, Convert (Copy place, Integer UInt64)));
+      call Debug_unsigned (Copy (at wide))
+  | Float32 -> call Debug_float32 (Copy place)
+  | Float64 -> call Debug_float64 (Copy place)
+  | Bool -> call Debug_bool (Copy place)
+  | Character -> call Debug_character (Copy place)
+  | Pointer _ | Nullable_pointer _ -> text b "pointer"
+
+let debug t ty =
+  let b = create () in
+  let parameter =
+    if zero_size t ty then None
+    else Some (local b ~name:"value" (Pointer { target = Value ty; writable = false }))
+  in
+  let value : Lir.place =
+    match parameter with Some p -> { root = Local p; projections = [ Deref ] } | None -> at 0
+  in
+  start b (block b);
+  let rec list_of element ~element_at ~count =
+    text b "[";
+    loop t b ~count (fun index ->
+        let later = local b (Raw Bool) in
+        emit b (Assign (at later, Binary (Not_equal, Copy (at index), usize 0)));
+        when_ b (Copy (at later)) (fun () -> text b ", ");
+        debug_call t b element (element_at (Lir.Copy (at index))));
+    text b "]"
+  and storage_or_view field_ty (place : Lir.place) ~as_text =
+    let element, buffer =
+      match t.kind_of field_ty with
+      | Storage element -> (element, place / Field "buffer")
+      | Shape (Record [ ("elements", Raw (Pointer (Data element))); _ ]) ->
+          (element, place / Field "elements")
+      | _ -> bug "%s is not storage or a view" (Ground.to_string field_ty)
+    in
+    if as_text then
+      emit b
+        (Call
+           {
+             target = Intrinsic Debug_string;
+             arguments = [ Copy buffer; Copy (place / Field "length") ];
+             result = None;
+           })
+    else
+      list_of element ~element_at:(fun i -> buffer / Index i) ~count:(Copy (place / Field "length"))
+  and fields_debug name (fields : (string * Memory_layout.member) list) field_place =
+    text b name;
+    match fields with
+    | [] -> ()
+    | [ (field, Typed field_ty) ] ->
+        text b "(";
+        debug_call t b field_ty (field_place field);
+        text b ")"
+    | fields ->
+        text b "(";
+        List.iteri
+          (fun i (field, member) ->
+            match member with
+            | Memory_layout.Typed field_ty ->
+                text b ((if i > 0 then ", " else "") ^ field ^ ": ");
+                debug_call t b field_ty (field_place field)
+            | Raw _ -> ())
+          fields;
+        text b ")"
+  in
+  (match (t.debug_form ty, t.kind_of ty) with
+  | (Text | Sequence), Shape (Record [ (field, Typed field_ty) ]) ->
+      storage_or_view field_ty (value / Field field) ~as_text:(t.debug_form ty = Text)
+  | _, Storage element ->
+      list_of element
+        ~element_at:(fun i -> value / Field "buffer" / Index i)
+        ~count:(Copy (value / Field "length"))
+  | _, Shape shape -> (
+      match (ty, shape) with
+      | Never, _ -> ()
+      | Function _, _ -> text b "fn"
+      | Any _, _ -> text b "any"
+      | Cursor _, _ -> text b "cursor"
+      | _, Scalar scalar -> scalar_debug t b scalar value
+      | Named { path; _ }, Record [] ->
+          text b (if Ground.path_name path = "Unit" then "Unit" else Ground.path_name path ^ "()")
+      | Named { path; _ }, Record fields ->
+          fields_debug (Ground.path_name path) fields (fun field -> value / Field field)
+      | _, Array (element, count) ->
+          list_of element ~element_at:(fun i -> value / Index i) ~count:(usize count)
+      | _, Sum variants ->
+          let after = block b in
+          let cases =
+            List.map
+              (fun (v : Memory_layout.variant_shape) ->
+                let case = block b in
+                aside b case (fun () ->
+                    fields_debug v.name v.fields (fun field ->
+                        value / Variant_field { variant = v.name; field });
+                    finish b (Goto after));
+                (v.name, case))
+              variants
+          in
+          finish b (Switch_variant { place = value; cases; default = None });
+          start b after));
+  finish b (Return None);
+  instance (Debug ty) (build b ~parameters:(Option.to_list parameter) ~result:None)

@@ -501,7 +501,14 @@ so they are compiled once and shared:
   path DESIGN.md mentions; other elements are copied one by one.
 - **Debug output:** the built-in debug output every type has, used by
   `echo`, failed `assert`s, and the test runner, and to write out values
-  computed while compiling.
+  computed while compiling. A debug function takes a read-only pointer to
+  the value and appends its text to the runtime's debug buffer, one for
+  each thread, so it needs nothing from the standard library. The text is
+  Truss as it would build the value: `Point(x: 1.0, y: 2.0)`, `Some(3)`,
+  with a single field written bare, `None`, `[1, 2, 3]` for storage, views,
+  and the standard library's lists and slices, and quoted text with escapes
+  for its strings. Integers are decimal, and floats the shortest decimal
+  that reads back as the same value, always with a point or an exponent.
 - **Derived implementations:** `Equal`, `Hash`, `Ordered`, and `Default`, from
   the type's shape and the version of the rule that derives them.
 

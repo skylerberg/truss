@@ -68,6 +68,17 @@ let runtime_declarations (target : Memory_layout.target) =
       "t_isize t_runtime_read(int32_t descriptor, uint8_t *bytes, t_usize count);\n";
       "int64_t t_runtime_clock_now(void);\n";
       "void t_runtime_random_fill(uint8_t *bytes, t_usize count);\n";
+      "void t_runtime_debug_begin(void);\n";
+      "void t_runtime_debug_text(const uint8_t *bytes, t_usize count);\n";
+      "void t_runtime_debug_signed(int64_t value);\n";
+      "void t_runtime_debug_unsigned(uint64_t value);\n";
+      "void t_runtime_debug_float32(float value);\n";
+      "void t_runtime_debug_float64(double value);\n";
+      "void t_runtime_debug_bool(uint8_t value);\n";
+      "void t_runtime_debug_character(uint32_t value);\n";
+      "void t_runtime_debug_string(const uint8_t *bytes, t_usize count);\n";
+      "uint8_t *t_runtime_debug_bytes(void);\n";
+      "t_usize t_runtime_debug_length(void);\n";
     ]
 
 (* Small functions that generated code calls, each emitted only into the
@@ -800,6 +811,17 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
   | System_read -> "t_runtime_read(" ^ all ^ ")"
   | Clock_now -> "t_runtime_clock_now()"
   | Random_fill -> "t_runtime_random_fill(" ^ all ^ ")"
+  | Debug_begin -> "t_runtime_debug_begin(" ^ all ^ ")"
+  | Debug_text -> "t_runtime_debug_text(" ^ all ^ ")"
+  | Debug_signed -> "t_runtime_debug_signed(" ^ all ^ ")"
+  | Debug_unsigned -> "t_runtime_debug_unsigned(" ^ all ^ ")"
+  | Debug_float32 -> "t_runtime_debug_float32(" ^ all ^ ")"
+  | Debug_float64 -> "t_runtime_debug_float64(" ^ all ^ ")"
+  | Debug_bool -> "t_runtime_debug_bool(" ^ all ^ ")"
+  | Debug_character -> "t_runtime_debug_character(" ^ all ^ ")"
+  | Debug_string -> "t_runtime_debug_string(" ^ all ^ ")"
+  | Debug_bytes -> "t_runtime_debug_bytes(" ^ all ^ ")"
+  | Debug_length -> "t_runtime_debug_length(" ^ all ^ ")"
 
 let call_c context fc (target : Lir.target) arguments =
   let arguments = List.filter_map (operand_c context fc) arguments in

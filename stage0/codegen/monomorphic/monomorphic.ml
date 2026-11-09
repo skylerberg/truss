@@ -173,3 +173,24 @@ let kind context ty : Glue.kind =
     when Intrinsic.builtin_of_path path = Some Storage ->
       Storage element
   | _ -> Shape (shape context ty)
+
+let debug_form : Ground.ty -> Glue.debug_form = function
+  | Named
+      {
+        path =
+          Top
+            {
+              module_ = { package = "standard"; modules = [ "text" ] };
+              name = "String" | "StringSlice";
+            };
+        _;
+      } ->
+      Text
+  | Named
+      {
+        path =
+          Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" | "Slice" };
+        _;
+      } ->
+      Sequence
+  | _ -> Structure

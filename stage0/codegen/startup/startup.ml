@@ -8,6 +8,7 @@ let headers =
   {|#define _DEFAULT_SOURCE
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -260,6 +261,116 @@ int64_t t_runtime_clock_now(void) {
 void t_runtime_random_fill(uint8_t *bytes, t_usize count) {
   arc4random_buf(bytes, count);
 }
+
+/* Debug output: generated debug functions append a value's text here, and
+   echo, failed asserts, and the test runner read it. Each thread has its
+   own, since tasks run on threads. */
+static _Thread_local char *t_debug_buffer;
+static _Thread_local t_usize t_debug_used;
+static _Thread_local t_usize t_debug_capacity;
+
+void t_runtime_debug_begin(void) { t_debug_used = 0; }
+
+void t_runtime_debug_text(const uint8_t *bytes, t_usize count) {
+  if (t_debug_used + count > t_debug_capacity) {
+    t_usize wanted = t_debug_capacity * 2;
+    if (wanted < t_debug_used + count) wanted = t_debug_used + count;
+    if (wanted < 256) wanted = 256;
+    char *grown = realloc(t_debug_buffer, wanted);
+    if (grown == NULL) t_out_of_memory();
+    t_debug_buffer = grown;
+    t_debug_capacity = wanted;
+  }
+  memcpy(t_debug_buffer + t_debug_used, bytes, count);
+  t_debug_used += count;
+}
+
+static void t_debug_c(const char *text) { t_runtime_debug_text((const uint8_t *)text, strlen(text)); }
+
+void t_runtime_debug_signed(int64_t value) {
+  char digits[24];
+  snprintf(digits, sizeof digits, "%lld", (long long)value);
+  t_debug_c(digits);
+}
+
+void t_runtime_debug_unsigned(uint64_t value) {
+  char digits[24];
+  snprintf(digits, sizeof digits, "%llu", (unsigned long long)value);
+  t_debug_c(digits);
+}
+
+/* The shortest decimal that reads back as the same value, written so that
+   it reads as a float: with a point or an exponent. Both C libraries round
+   correctly, so this is the same text on every platform. */
+static void t_debug_real(double value, int float32) {
+  char text[40];
+  if (value != value) { t_debug_c("NaN"); return; }
+  if (value == 1.0 / 0.0) { t_debug_c("infinity"); return; }
+  if (value == -1.0 / 0.0) { t_debug_c("-infinity"); return; }
+  for (int digits = 1; digits <= 17; digits++) {
+    snprintf(text, sizeof text, "%.*g", digits, value);
+    if (float32 ? (float)strtod(text, NULL) == (float)value : strtod(text, NULL) == value) break;
+  }
+  t_debug_c(text);
+  if (strpbrk(text, ".e") == NULL) t_debug_c(".0");
+}
+
+void t_runtime_debug_float32(float value) { t_debug_real(value, 1); }
+void t_runtime_debug_float64(double value) { t_debug_real(value, 0); }
+void t_runtime_debug_bool(uint8_t value) { t_debug_c(value ? "true" : "false"); }
+
+/* A character as Truss writes it in a string, with the escapes of an
+   ordinary string for what it cannot show. */
+static void t_debug_escaped(uint32_t code, char quote) {
+  char text[16];
+  if (code == '\\') t_debug_c("\\\\");
+  else if (code == (uint32_t)quote) { text[0] = '\\'; text[1] = quote; text[2] = 0; t_debug_c(text); }
+  else if (code == '\n') t_debug_c("\\n");
+  else if (code == '\t') t_debug_c("\\t");
+  else if (code == '\r') t_debug_c("\\r");
+  else if (code == 0) t_debug_c("\\0");
+  else if (code == '$') t_debug_c("$");
+  else if (code < 0x20 || code == 0x7f) { snprintf(text, sizeof text, "\\u{%X}", code); t_debug_c(text); }
+  else {
+    uint8_t bytes[4];
+    t_usize count;
+    if (code < 0x80) { bytes[0] = (uint8_t)code; count = 1; }
+    else if (code < 0x800) { bytes[0] = (uint8_t)(0xc0 | (code >> 6)); bytes[1] = (uint8_t)(0x80 | (code & 0x3f)); count = 2; }
+    else if (code < 0x10000) {
+      bytes[0] = (uint8_t)(0xe0 | (code >> 12)); bytes[1] = (uint8_t)(0x80 | ((code >> 6) & 0x3f));
+      bytes[2] = (uint8_t)(0x80 | (code & 0x3f)); count = 3;
+    } else {
+      bytes[0] = (uint8_t)(0xf0 | (code >> 18)); bytes[1] = (uint8_t)(0x80 | ((code >> 12) & 0x3f));
+      bytes[2] = (uint8_t)(0x80 | ((code >> 6) & 0x3f)); bytes[3] = (uint8_t)(0x80 | (code & 0x3f)); count = 4;
+    }
+    t_runtime_debug_text(bytes, count);
+  }
+}
+
+void t_runtime_debug_character(uint32_t value) {
+  t_debug_c("Character\"");
+  t_debug_escaped(value, '"');
+  t_debug_c("\"");
+}
+
+/* A string's bytes are UTF-8, which the type checker guarantees. */
+void t_runtime_debug_string(const uint8_t *bytes, t_usize count) {
+  t_debug_c("\"");
+  t_usize i = 0;
+  while (i < count) {
+    uint32_t code = bytes[i];
+    t_usize length = code < 0x80 ? 1 : code < 0xe0 ? 2 : code < 0xf0 ? 3 : 4;
+    if (length > 1) code &= (uint32_t)(0x7f >> length);
+    for (t_usize k = 1; k < length && i + k < count; k++) code = (code << 6) | (bytes[i + k] & 0x3f);
+    if (code == '$' && i + 1 < count && bytes[i + 1] == '{') t_debug_c("\\$");
+    else t_debug_escaped(code, '"');
+    i += length;
+  }
+  t_debug_c("\"");
+}
+
+uint8_t *t_runtime_debug_bytes(void) { return (uint8_t *)(t_debug_buffer ? t_debug_buffer : (char *)""); }
+t_usize t_runtime_debug_length(void) { return t_debug_used; }
 |}
 
 let runner =

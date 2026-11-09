@@ -1093,7 +1093,7 @@ let kind_of extra (ty : Ground.ty) : Glue.kind =
   | Named { path = Top { name = "Storage"; _ }; arguments = [ Type element ] } -> Storage element
   | _ -> Shape (shapes extra ty)
 
-let glue ?(extra = []) () = Glue.create (shape_env ~extra ()) ~kind_of:(kind_of extra) ~usize
+let glue ?(extra = []) () = Glue.create (shape_env ~extra ()) ~kind_of:(kind_of extra) ~usize ()
 
 (* Statements that allocate a storage of [Int32]s holding [values] into
    local [target], using local [buffer]. *)
@@ -1145,7 +1145,7 @@ let () =
       if Glue.trivial glue (storage int32) then fail "Storage[Int32] is trivial");
   test "a record's drop drops only the fields that own something" (fun () ->
       let extra = [ ("Holder", Record [ field "items" (storage int32); field "count" int32 ]) ] in
-      let glue = Glue.create (shape_env ~extra ()) ~kind_of:(kind_of extra) ~usize in
+      let glue = Glue.create (shape_env ~extra ()) ~kind_of:(kind_of extra) ~usize () in
       expect_string ~expected:"fn(_0: *mut Holder)\nb0: drop *_0.items; return"
         (Lir.function_to_string (Lir.canonical (Glue.drop glue (named "Holder")).main)));
   test "a copy of storage of plain data is one allocation and one memory copy" (fun () ->
@@ -1432,7 +1432,7 @@ let () =
         Glue.create
           (create target_64 ~shape_of:(Monomorphic.shape standard_context))
           ~kind_of:(Monomorphic.kind standard_context)
-          ~usize:(Monomorphic.builtin USize)
+          ~usize:(Monomorphic.builtin USize) ()
       in
       if Glue.trivial glue (list int64) then fail "a List is trivial";
       if not (Glue.trivial glue (option int64)) then fail "an Option of an Int64 is not trivial")
@@ -1458,7 +1458,9 @@ let operate b ?destination ?(type_arguments = [ int32 ]) operation arguments =
 let () =
   test "storage grows as it is pushed, and inserts, removes, swaps, and pops in place" (fun () ->
       let open Lir_builder in
-      let storage_ty = Ground.Named { path = Intrinsic.builtin_path Storage; arguments = [ Type int32 ] } in
+      let storage_ty =
+        Ground.Named { path = Intrinsic.builtin_path Storage; arguments = [ Type int32 ] }
+      in
       expect_status 171
         [
           built_entry (fun b ->
@@ -1532,5 +1534,140 @@ let () =
               emit b (Assign (at first, Binary (Add, Copy (at first), Copy (at last))));
               first);
         ])
+
+(* Debug output *)
+
+let () =
+  test "values echo as Truss writes them" (fun () ->
+      let open Lir_builder in
+      let env = Memory_layout.create target_64 ~shape_of:(Monomorphic.shape standard_context) in
+      let glue =
+        Glue.create env
+          ~kind_of:(Monomorphic.kind standard_context)
+          ~usize:(Monomorphic.builtin USize) ~debug_form:Monomorphic.debug_form ()
+      in
+      let int64 = Monomorphic.builtin Int64
+      and bool = Monomorphic.builtin Bool
+      and float64 = Monomorphic.builtin Float64 in
+      let option value = standard "option" "Option" ~arguments:[ Type value ] () in
+      let list = standard "list" "List" ~arguments:[ Type int64 ] () in
+      let string = standard "text" "String" () in
+      let storage element =
+        Ground.Named { path = Intrinsic.builtin_path Storage; arguments = [ Type element ] }
+      in
+      let intrinsic_types : Intrinsics.types =
+        {
+          usize = Monomorphic.builtin USize;
+          isize = Monomorphic.builtin ISize;
+          string_slice = standard "text" "StringSlice" ();
+        }
+      in
+      let site : Lir.site = { definition = definition "entry"; line = 0; column = 1 } in
+      let echo b ty place =
+        emit b (Call { target = Intrinsic Debug_begin; arguments = []; result = None });
+        emit b
+          (Call
+             {
+               target =
+                 Direct
+                   { function_ = Instance (Debug ty); signature = Glue.debug_signature glue ty };
+               arguments = [ Address { place; writable = false } ];
+               result = None;
+             });
+        let bytes = local b (Raw (Pointer Opaque))
+        and length = local b (Value (Monomorphic.builtin USize)) in
+        emit b (Call { target = Intrinsic Debug_bytes; arguments = []; result = Some (at bytes) });
+        emit b (Call { target = Intrinsic Debug_length; arguments = []; result = Some (at length) });
+        emit b (Echo { text = Copy (at bytes); length = Copy (at length); site })
+      in
+      let main =
+        let b = Lir_builder.create () in
+        start b (block b);
+        let maybe = local b (value (option bool)) in
+        emit b
+          (Assign
+             ( at maybe,
+               Build
+                 {
+                   ty = option bool;
+                   variant = Some "Some";
+                   fields = [ ("value", Constant (Bool true)) ];
+                 } ));
+        echo b (option bool) (at maybe);
+        let real = local b (value (option float64)) in
+        emit b
+          (Assign
+             ( at real,
+               Build
+                 {
+                   ty = option float64;
+                   variant = Some "Some";
+                   fields = [ ("value", Constant (Float64 (Int64.bits_of_float 1.5))) ];
+                 } ));
+        echo b (option float64) (at real);
+        let items = local b (value list) in
+        ignore
+          (Intrinsics.lower env b intrinsic_types Storage_empty ~type_arguments:[ int64 ] []
+             ~destination:(Some (at items / Field "storage"))
+             ~site);
+        List.iter
+          (fun n ->
+            ignore
+              (Intrinsics.lower env b intrinsic_types Storage_push ~type_arguments:[ int64 ]
+                 [ Place (at items / Field "storage"); Value (constant_int64 n) ]
+                 ~destination:None ~site))
+          [ 1; 2; 3 ];
+        echo b list (at items);
+        let text = local b (value string) in
+        emit b
+          (Assign
+             ( at text / Field "storage",
+               Build
+                 {
+                   ty = storage (Monomorphic.builtin UInt8);
+                   variant = None;
+                   fields =
+                     [
+                       ("buffer", Constant (Bytes "hi\n"));
+                       ("length", usize 3);
+                       ("capacity", usize 0);
+                     ];
+                 } ));
+        echo b string (at text);
+        let status = local b (value (Monomorphic.builtin Int32)) in
+        emit b (Assign (at status, Use (constant_int32 0)));
+        finish b (Return (Some (Copy (at status))));
+        instance "entry" (build b ~parameters:[] ~result:(Some (value (Monomorphic.builtin Int32))))
+      in
+      let tys = [ option bool; bool; option float64; float64; list; int64; string ] in
+      let program =
+        (main :: List.map (Glue.debug glue) tys) @ [ Glue.debug glue (storage int64) ]
+      in
+      incr counter;
+      let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "debug%d" !counter) in
+      let sources =
+        [
+          ("main", Startup.main_calling (Instance.symbol (key "entry")));
+          ( "anchors",
+            Positions.anchors_file target_64
+              [ { definition = definition "entry"; path = "echo.truss"; first_line = 1 } ] );
+        ]
+      in
+      match
+        Build.program (Lazy.force compiler) (Lazy.force cache) env settings
+          ~files:[ List.map (fun i -> (i, Emit_c.External)) program ]
+          ~sources ~output
+      with
+      | Error message -> fail "%s" message
+      | Ok () ->
+          let status, _, errors = Toolchain.run output [] in
+          expect_int ~expected:0 status;
+          expect_string
+            ~expected:
+              "echo echo.truss:1:1: Some(true)\n\
+               echo echo.truss:1:1: Some(1.5)\n\
+               echo echo.truss:1:1: [1, 2, 3]\n\
+               echo echo.truss:1:1: \"hi\\n\"\n"
+            errors)
 
 let () = Harness.finish ()

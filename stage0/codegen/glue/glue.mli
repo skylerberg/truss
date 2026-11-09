@@ -10,10 +10,24 @@
 (* What a type is, for glue: made of fields, or the built-in storage of
    elements of a type. *)
 type kind = Shape of Memory_layout.shape | Storage of Ground.ty
+
+(* How a type's debug output is written: from its structure, as Truss would
+   build it, such as [Point(x: 1.0, y: 2.0)] or [Some(3)]; as quoted text,
+   for a record whose one field is storage or a view of bytes, such as
+   [String]; or as a list, for a record whose one field is storage or a view
+   of elements, such as [List]. *)
+type debug_form = Structure | Text | Sequence
 type t
 
-(* [usize] is the ground type [USize]. *)
-val create : Memory_layout.env -> kind_of:(Ground.ty -> kind) -> usize:Ground.ty -> t
+(* [usize] is the ground type [USize]. [debug_form] defaults to [Structure]
+   for every type. *)
+val create :
+  Memory_layout.env ->
+  kind_of:(Ground.ty -> kind) ->
+  usize:Ground.ty ->
+  ?debug_form:(Ground.ty -> debug_form) ->
+  unit ->
+  t
 
 (* Whether a type has nothing to drop and copies with a memory copy: it
    holds no storage and no [indirect] variant anywhere. Drops of such types
@@ -28,3 +42,9 @@ val drop : t -> Ground.ty -> Lir.t
    read-only parameter and returning the copy. *)
 val copy : t -> Ground.ty -> Lir.t
 val copy_signature : t -> Ground.ty -> Lir.signature
+
+(* The debug output function of a type: [Instance.Debug ty], which takes a
+   read-only pointer to the value, or nothing for a type of zero size, and
+   appends the value's text to the runtime's debug buffer. *)
+val debug : t -> Ground.ty -> Lir.t
+val debug_signature : t -> Ground.ty -> Lir.signature

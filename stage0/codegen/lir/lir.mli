@@ -118,6 +118,17 @@ type intrinsic =
   | System_read  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
   | Clock_now  (** [() -> Int64], nanoseconds since the Unix epoch *)
   | Random_fill  (** [(bytes, count)] *)
+  | Debug_begin  (** Empties the debug output buffer *)
+  | Debug_text  (** [(bytes, count)]: appends text as it is *)
+  | Debug_signed  (** [(Int64)] *)
+  | Debug_unsigned  (** [(UInt64)] *)
+  | Debug_float32
+  | Debug_float64  (** The shortest decimal that reads back as the same float *)
+  | Debug_bool
+  | Debug_character  (** As [Character"x"] *)
+  | Debug_string  (** [(bytes, count)]: as a quoted string with escapes *)
+  | Debug_bytes  (** [() -> pointer] to the buffer's bytes *)
+  | Debug_length  (** [() -> USize] *)
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
