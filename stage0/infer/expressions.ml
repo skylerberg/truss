@@ -35,6 +35,7 @@ type frame = {
   start : int;  (** The first inference variable the statement made. *)
   mutable nodes : int list;  (** Expressions whose types the statement recorded. *)
   mutable bindings : int list;  (** Locals it bound. *)
+  mutable patterns : int list;  (** Patterns whose matched types it recorded. *)
   mutable pending : (unit -> bool) list;
       (** Checks that wait for types the statement has not decided yet; each says whether it is
           done. *)
@@ -233,6 +234,7 @@ let in_statement state env (span : span) body =
       start = state.unifier.next + 1;
       nodes = [];
       bindings = [];
+      patterns = [];
       pending = [];
       frame_specification = env.specification;
       span;
@@ -2635,7 +2637,15 @@ and join state ~expected branches =
       target
 
 and match_ state env ?expected (value : expression) scrutinees arms =
-  ignore value;
+  (* When the guards cover everything, the [match] ends with
+     [_ => unreachable], which the prover shows is never reached. *)
+  (match List.rev arms with
+  | { patterns; guard = None; body = { kind = Expression { kind = Unreachable; _ }; _ }; _ }
+    :: earlier
+    when List.for_all (fun (written : pattern) -> written.kind = Wildcard) patterns
+         && List.exists (fun (arm : arm) -> Option.is_some arm.guard) earlier ->
+      state.obligations <- Guards_cover { match_ = value.id } :: state.obligations
+  | _ -> ());
   let types = List.map (fun scrutinee -> (scrutinee, expression state env scrutinee)) scrutinees in
   let mode_of (scrutinee : expression) =
     match scrutinee.kind with
@@ -3064,6 +3074,10 @@ and pattern state env written type_ ~mode =
 
 and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
   let type_ = normalize state type_ in
+  state.tables.pattern_types.(written.id) <- Some type_;
+  (match current_frame state with
+  | Some frame -> frame.patterns <- written.id :: frame.patterns
+  | None -> ());
   let recurse = pattern_with state env ~mutable_ ~mode in
   match written.kind with
   | Wildcard | Pattern_error -> ()

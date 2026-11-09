@@ -149,12 +149,17 @@ module Code = struct
     | Unknown_associated_type
     | Associated_type_not_fixed
 
+  type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
+  type usage = Unused_variable | Unreachable_code
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
   type t =
     | Lexer of lexer
     | Parser of parser
     | Resolve of resolve
     | Types of types
+    | Patterns of patterns
+    | Usage of usage
     | Too_many_diagnostics
 
   let lexer_name code =
@@ -309,11 +314,23 @@ module Code = struct
     | Unknown_associated_type -> "unknown_associated_type"
     | Associated_type_not_fixed -> "associated_type_not_fixed"
 
+  let patterns_name code =
+    match code with
+    | Not_covered -> "not_covered"
+    | Unreachable_arm -> "unreachable_arm"
+    | Unreachable_alternative -> "unreachable_alternative"
+    | Refutable -> "refutable"
+
+  let usage_name code =
+    match code with Unused_variable -> "unused_variable" | Unreachable_code -> "unreachable_code"
+
   let name = function
     | Lexer code -> "lexer." ^ lexer_name code
     | Parser code -> "parser." ^ parser_name code
     | Resolve code -> "resolve." ^ resolve_name code
     | Types code -> "types." ^ types_name code
+    | Patterns code -> "patterns." ^ patterns_name code
+    | Usage code -> "usage." ^ usage_name code
     | Too_many_diagnostics -> "too_many_diagnostics"
 end
 

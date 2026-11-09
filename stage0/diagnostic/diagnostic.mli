@@ -157,12 +157,17 @@ module Code : sig
     | Unknown_associated_type
     | Associated_type_not_fixed
 
+  type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
+  type usage = Unused_variable | Unreachable_code
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
   type t =
     | Lexer of lexer
     | Parser of parser
     | Resolve of resolve
     | Types of types
+    | Patterns of patterns
+    | Usage of usage
     | Too_many_diagnostics
 
   val name : t -> string

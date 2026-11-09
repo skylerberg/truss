@@ -31,6 +31,8 @@ let () =
             @ Resolve.diagnostics database module_
             @ Interface.diagnostics database module_
             @ Infer.diagnostics database module_
+            @ Patterns.file_diagnostics database module_
+            @ Usage.file_diagnostics database module_
           in
           List.iter (fun diagnostic -> fail "%s" (show diagnostic file.source)) diagnostics))
     Standard_library.modules

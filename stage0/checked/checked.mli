@@ -125,6 +125,8 @@ type t = {
       *)
   literals : literal option array;  (** By the id of each literal expression or pattern. *)
   patterns : pattern option array;  (** By the id of each pattern. *)
+  pattern_types : Types.ty option array;
+      (** The type of the value each pattern matches, by its id. *)
   loops : loop option array;  (** By the id of each [for] statement. *)
   templates : template option array;  (** By the id of each string literal. *)
   captures : local list option array;

@@ -82,6 +82,7 @@ type t = {
   calls : call option array;
   literals : literal option array;
   patterns : pattern option array;
+  pattern_types : Types.ty option array;
   loops : loop option array;
   templates : template option array;
   captures : local list option array;
@@ -97,6 +98,7 @@ let create size =
     calls = Array.make size None;
     literals = Array.make size None;
     patterns = Array.make size None;
+    pattern_types = Array.make size None;
     loops = Array.make size None;
     templates = Array.make size None;
     captures = Array.make size None;
