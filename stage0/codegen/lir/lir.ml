@@ -30,6 +30,9 @@ and operand =
   | Move of place  (** Leaves the place with nothing to drop *)
   | Constant of constant
   | Address of { place : place; writable : bool }
+  | Moved_address of place
+      (** The address of a place whose value the callee takes, for a large [own] argument: the place
+          holds nothing after the call *)
 
 and constant =
   | Integer of Memory_layout.integer * Z.t
@@ -349,6 +352,7 @@ and map_operand ~place ~block = function
   | Copy p -> Copy (map_place ~place ~block p)
   | Move p -> Move (map_place ~place ~block p)
   | Address { place = p; writable } -> Address { place = map_place ~place ~block p; writable }
+  | Moved_address p -> Moved_address (map_place ~place ~block p)
   | Constant _ as operand -> operand
 
 let map_rvalue ~place ~block rvalue =
@@ -468,7 +472,7 @@ let canonical (f : function_) =
   { f with parameters = List.map map_local f.parameters; locals; blocks }
 
 let canonical_instance t = { t with main = canonical t.main; nested = Array.map canonical t.nested }
-let version = 2
+let version = 3
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -536,6 +540,7 @@ and encode_operand instance = function
   | Move place -> tagged 1 [ encode_place instance place ]
   | Constant constant -> tagged 2 [ encode_constant constant ]
   | Address { place; writable } -> tagged 3 [ encode_place instance place; Bool writable ]
+  | Moved_address place -> tagged 4 [ encode_place instance place ]
 
 and encode_constant = function
   | Integer (integer, value) -> tagged 0 [ Cbor.int (integer_tag integer); Integer value ]
@@ -833,6 +838,7 @@ and operand_to_string = function
   | Move place -> "move " ^ place_to_string place
   | Constant constant -> constant_to_string constant
   | Address { place; writable } -> (if writable then "&mut " else "&") ^ place_to_string place
+  | Moved_address place -> "&own " ^ place_to_string place
 
 let unary_name = function Negate -> "-" | Not -> "!" | Complement -> "~"
 

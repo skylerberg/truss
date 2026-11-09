@@ -42,7 +42,7 @@ let within ~outer inner = outer.local = inner.local && is_prefix outer.steps inn
 (* The places an operand moves out of, in order. *)
 let rec operand_moves (operand : Lir.operand) =
   match operand with
-  | Move place -> place_index_moves place @ [ place ]
+  | Move place | Moved_address place -> place_index_moves place @ [ place ]
   | Copy place | Address { place; _ } -> place_index_moves place
   | Constant _ -> []
 

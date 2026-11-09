@@ -479,12 +479,15 @@ let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
   in
   if erased context (snd root) then None else walk root place.projections
 
+and address_c context fc place ~writable =
+  match place_c context fc place with
+  | Some (text, ty) -> Some ("(&" ^ text ^ ")", Lir.Pointer { target = ty; writable })
+  | None -> bug "the address of a place of zero size"
+
 and operand_c context fc : Lir.operand -> (string * Lir.ty) option = function
   | Copy place | Move place -> place_c context fc place
-  | Address { place; writable } -> (
-      match place_c context fc place with
-      | Some (text, ty) -> Some ("(&" ^ text ^ ")", Lir.Pointer { target = ty; writable })
-      | None -> bug "the address of a place of zero size")
+  | Address { place; writable } -> address_c context fc place ~writable
+  | Moved_address place -> address_c context fc place ~writable:true
   | Constant constant -> Some (constant_c context constant)
 
 and operand_c_exn context fc operand =

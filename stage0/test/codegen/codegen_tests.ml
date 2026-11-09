@@ -1707,33 +1707,31 @@ let () =
 
 let example : Path.module_ = { package = "example"; modules = [ "main" ] }
 
+(* A module of Truss source with the standard library, which must check
+   cleanly, ready to compile. *)
+let load text =
+  let database = Query.create () in
+  Type_checker.load_standard database;
+  Type_checker.load_package database ~name:"example" ~dependencies:[] [ (example, text) ];
+  let source = (Query.demand database Workspace.file example).source in
+  (match Type_checker.diagnostics database example with
+  | [] -> ()
+  | diagnostics ->
+      fail "the source has diagnostics:\n%s"
+        (String.concat "" (List.map (Diagnostic.render source) diagnostics)));
+  (database, Compile.create database target_64 (Lazy.force compiler) (Lazy.force cache) settings)
+
+(* The paths of a module's tests, in order. *)
+let tests_of database =
+  List.filter_map
+    (fun (d : Resolve.Names.declaration) -> match d.path with Test _ -> Some d.path | _ -> None)
+    (Query.demand database Resolve.Names.declarations example)
+
 (* Compiles a module of Truss source with the standard library, runs its
    tests, and returns the runner's output. *)
 let run_source text =
-  let database = Query.create () in
-  List.iter
-    (fun (module_, text) -> Query.set database Workspace.file_text module_ text)
-    Standard_library.modules;
-  Query.set database Workspace.file_text example text;
-  Query.set database Workspace.packages Standard_library.package
-    {
-      name = Standard_library.package;
-      dependencies = [];
-      modules = List.map fst Standard_library.modules;
-    };
-  Query.set database Workspace.packages "example"
-    { name = "example"; dependencies = []; modules = [ example ] };
-  let diagnostics = Infer.diagnostics database example in
-  List.iter (fun (d : Diagnostic.t) -> fail "the source has a diagnostic: %s" d.message) diagnostics;
-  let tests =
-    List.filter_map
-      (fun (d : Resolve.Names.declaration) -> match d.path with Test _ -> Some d.path | _ -> None)
-      (Query.demand database Resolve.Names.declarations example)
-  in
-  let compile =
-    Compile.create database target_64 (Lazy.force compiler) (Lazy.force cache) settings
-  in
-  match Compile.run_tests compile ~time_limit:2000 tests with
+  let database, compile = load text in
+  match Compile.run_tests compile ~time_limit:2000 (tests_of database) with
   | Ok (_, output) -> output
   | Error message -> failwith message
 
@@ -2037,15 +2035,34 @@ test "cursors" {
 }
 |};
   passes "a cursor dropped before it ends drops what it holds"
-    {|fn words(prefix: String) yields String {
+    {|fn words(prefix: own String) yields String {
   yield "${prefix} one"
   yield "${prefix} two"
 }
 
 test "dropped early" {
-  var each = words("a")
-  assert mut each.next() == Some("a one")
-  var never = words("b")
+  var each = words("a${1}")
+  assert mut each.next() == Some("a1 one")
+  let _ = words("b${2}")
+}
+|};
+  passes "sets and maps keep one of each key, in order"
+    {|test "collections" {
+  var colors: Set[String] = ["red", "green", "red"]
+  assert colors.length() == 2
+  assert colors.contains("green")
+  assert !colors.contains("blue")
+  mut colors.insert("blue")
+  mut colors.insert("${1}")
+  assert colors.length() == 4
+  var ages: Map[String, Int64] = ["ada": 36, "alan": 41, "ada": 37]
+  assert ages.length() == 2
+  assert ages.contains("ada")
+  mut ages.insert("grace", value: 85)
+  mut ages.insert("alan", value: 42)
+  assert ages.length() == 3
+  let empty: Map[Int64, Int64] = [:]
+  assert empty.length() == 0
 }
 |};
   passes "names an is test binds are used where it holds"
@@ -2112,26 +2129,7 @@ test "once" {
 
 (* Compiles a module with a [main] and runs it with the arguments. *)
 let run_main ?(arguments = []) text =
-  let database = Query.create () in
-  List.iter
-    (fun (module_, text) -> Query.set database Workspace.file_text module_ text)
-    Standard_library.modules;
-  Query.set database Workspace.file_text example text;
-  Query.set database Workspace.packages Standard_library.package
-    {
-      name = Standard_library.package;
-      dependencies = [];
-      modules = List.map fst Standard_library.modules;
-    };
-  Query.set database Workspace.packages "example"
-    { name = "example"; dependencies = []; modules = [ example ] };
-  List.iter
-    (fun (d : Diagnostic.t) -> fail "the source has a diagnostic: %s" d.message)
-    (Infer.diagnostics database example
-    @ Infer.diagnostics database { package = "standard"; modules = [ "capabilities" ] });
-  let compile =
-    Compile.create database target_64 (Lazy.force compiler) (Lazy.force cache) settings
-  in
+  let _, compile = load text in
   match Compile.run_program compile ~main:(Top { module_ = example; name = "main" }) ~arguments with
   | Ok result -> result
   | Error message -> failwith message
@@ -2151,5 +2149,43 @@ let () =
       in
       expect_int ~expected:3 status;
       expect_string ~expected:"hello\n3 arguments, then one\n" output)
+
+(* The documents' examples: in every block that checks cleanly, each
+   function that is not generic lowers, and each test passes or reaches a
+   [todo]. Most blocks are excerpts, which do not check alone. *)
+let () =
+  let root = "../../.." in
+  Sys.readdir root |> Array.to_list
+  |> List.filter (fun name -> Filename.check_suffix name ".md")
+  |> List.sort compare
+  |> List.iter (fun name ->
+      List.iteri
+        (fun index text ->
+          let database = Query.create () in
+          Type_checker.load_standard database;
+          Type_checker.load_package database ~name:"example" ~dependencies:[] [ (example, text) ];
+          if Type_checker.diagnostics database example = [] then
+            test
+              (Printf.sprintf "%s block %d lowers, and its tests pass" name (index + 1))
+              (fun () ->
+                let database, compile = load text in
+                List.iter
+                  (fun (d : Resolve.Names.declaration) ->
+                    match
+                      (d.path, Query.demand database Interface.Environment.signature d.path)
+                    with
+                    | Top _, Some { generics = []; _ } ->
+                        ignore
+                          (Compile.compiled compile (Code { path = d.path; type_arguments = [] }))
+                    | _ -> ())
+                  (Query.demand database Resolve.Names.declarations example);
+                if tests_of database <> [] then
+                  String.split_on_char '\n' (run_source text)
+                  |> List.iter (fun line ->
+                      match String.split_on_char ' ' line with
+                      | [ "test"; _; ("passed" | "incomplete") ] | [ "test"; _ ] -> ()
+                      | [ "test"; _; outcome ] -> fail "a test %s" outcome
+                      | _ -> ())))
+        (Documents.truss_blocks (Documents.read (Filename.concat root name))))
 
 let () = Harness.finish ()

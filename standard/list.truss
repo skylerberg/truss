@@ -32,6 +32,29 @@ public fn List[Element].pop(mut self) -> Option[Element] {
   if self.length() == 0 { None } else { Some(intrinsic::storage_pop(mut self.storage)) }
 }
 
+public fn List[Element].insert_at(mut self, position: USize, item: own Element)
+  requires position <= self.length()
+  cost time O(self.length())
+{
+  intrinsic::storage_insert(mut self.storage, index: position, value: own item)
+}
+
+public fn List[Element].partition_point(self, before: fn(Element) -> Bool) -> USize
+  cost time O(log(self.length()))
+{
+  var low: USize = 0
+  var high = self.length()
+  while low < high {
+    let middle = low + (high - low) / 2
+    if before(self[middle]) {
+      low = middle + 1
+    } else {
+      high = middle
+    }
+  }
+  low
+}
+
 public fn List[Element].slice(self) -> Slice[Element]
   cost time O(1)
 {

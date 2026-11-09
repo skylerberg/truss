@@ -31,4 +31,8 @@
   resolve
   diagnostic
   lower
-  compile))
+  compile
+  type_checker
+  documents)
+ (deps
+  (glob_files %{workspace_root}/*.md)))

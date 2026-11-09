@@ -8,7 +8,7 @@ let rec place_keys (place : Lir.place) keys =
 
 and operand_keys (operand : Lir.operand) keys =
   match operand with
-  | Copy place | Move place | Address { place; _ } -> place_keys place keys
+  | Copy place | Move place | Address { place; _ } | Moved_address place -> place_keys place keys
   | Constant (Symbol_address key) -> add key keys
   | Constant _ -> keys
 

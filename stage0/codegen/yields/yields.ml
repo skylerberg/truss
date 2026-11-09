@@ -60,7 +60,7 @@ let rec place_reads (place : Lir.place) =
   match place.root with Local local -> local :: indexes | Static _ -> indexes
 
 and operand_reads = function
-  | Lir.Copy place | Move place | Address { place; _ } -> place_reads place
+  | Lir.Copy place | Move place | Address { place; _ } | Moved_address place -> place_reads place
   | Constant _ -> []
 
 let rvalue_reads (rvalue : Lir.rvalue) =

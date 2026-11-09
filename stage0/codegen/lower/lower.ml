@@ -578,11 +578,27 @@ let trait_method_key st ~(trait : T.trait_reference) ~name ~receiver ~self_type 
 
 (* An argument as it is passed: by value, by address, or as an owned
    value. *)
-let pass st (mode : T.mode) ty (place : Lir.place) : Lir.operand option =
-  match Convention.parameter st.context.env (Monomorphic.mode mode) ty with
+(* The operand that gives a place to a parameter that takes it as
+   [lir_ty]. *)
+let operand_as st (mode : T.mode) ty (place : Lir.place) (lir_ty : Lir.ty option) =
+  match lir_ty with
   | None -> None
-  | Some (Pointer { writable; _ }) -> Some (Address { place; writable })
+  | Some (Pointer _) when mode = T.Own -> Some (Lir.Moved_address place)
+  | Some (Pointer { writable; _ }) -> Some (Lir.Address { place; writable })
   | Some _ -> ( match mode with Own -> Some (owned st place ty) | Read | Mut -> Some (Copy place))
+
+let pass st (mode : T.mode) ty place =
+  operand_as st mode ty place (Convention.parameter st.context.env (Monomorphic.mode mode) ty)
+
+(* How a cursor holds an argument for its method's parameter: an [own]
+   argument as a value of its own, since the cursor owns it and may outlive
+   the caller's statement, and any other as the parameter takes it. *)
+let held context (mode : T.mode) ty =
+  match mode with
+  | Own -> if (Memory_layout.of_type context.env ty).size = 0 then None else Some (Lir.Value ty)
+  | Read | Mut -> Convention.parameter context.env (Monomorphic.mode mode) ty
+
+let hold st mode ty place = operand_as st mode ty place (held st.context mode ty)
 
 (* Calls a function instance with arguments that are places of their
    parameter types, writing the result to [destination]. *)
@@ -1130,7 +1146,13 @@ and into st (e : S.expression) (destination : Lir.place) =
       | Some place -> assign (Use (owned st place (ty ())))
       | None -> bug "an index with no meaning")
   | Any inner -> any_value st e inner destination
-  | Range _ | Quantified _ | Map _ | Provide _ ->
+  | Map entries ->
+      collection_into st (ty ()) destination ~span:e.span
+        (List.map
+           (fun ((key : S.expression), (value : S.expression)) ->
+             [ (key, type_of st key.id); (value, type_of st value.id) ])
+           entries)
+  | Range _ | Quantified _ | Provide _ ->
       bug "this expression is not lowered yet: %s" (source st e.span)
   | Self_type_value -> bug "Self as a value"
   | Expression_error -> bug "an expression that did not parse"
@@ -1145,27 +1167,71 @@ and negated_literal st ty (inner : S.expression) =
 (* A [[...]] literal: an [Array], filled in place, or a [List], with storage
    of exactly its length, which costs the one allocation DESIGN.md counts. *)
 and list_into st ty (elements : S.expression list) destination ~span =
-  match Monomorphic.shape st.context.monomorphic ty with
-  | Array _ ->
-      List.iteri (fun i (e : S.expression) -> into st e (destination / Index (usize i))) elements
-  | Record [ (field, Typed storage) ] -> (
-      match Monomorphic.kind st.context.monomorphic storage with
-      | Storage element ->
-          let storage_place = destination / Field field in
-          let lower operation arguments destination =
-            ignore
-              (Intrinsics.lower st.context.env st.b st.context.types operation
-                 ~type_arguments:[ element ] arguments ~destination ~site:(site st span))
-          in
-          lower Storage_with_capacity [ Value (usize (List.length elements)) ] (Some storage_place);
-          List.iter
-            (fun (e : S.expression) ->
-              let value = new_local st element in
-              into st e value;
-              lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
+  match ty with
+  | Named
+      { path = Top { module_ = { package = "standard"; modules = [ "set" ] }; name = "Set" }; _ } ->
+      collection_into st ty destination ~span
+        (List.map (fun (e : S.expression) -> [ (e, type_of st e.id) ]) elements)
+  | _ -> (
+      match Monomorphic.shape st.context.monomorphic ty with
+      | Array _ ->
+          List.iteri
+            (fun i (e : S.expression) -> into st e (destination / Index (usize i)))
             elements
-      | _ -> bug "a list literal of %s" (Ground.to_string ty))
-  | _ -> bug "a list literal of %s, which is not lowered yet" (Ground.to_string ty)
+      | Record [ (field, Typed storage) ] -> (
+          match Monomorphic.kind st.context.monomorphic storage with
+          | Storage element ->
+              let storage_place = destination / Field field in
+              let lower operation arguments destination =
+                ignore
+                  (Intrinsics.lower st.context.env st.b st.context.types operation
+                     ~type_arguments:[ element ] arguments ~destination ~site:(site st span))
+              in
+              lower Storage_with_capacity
+                [ Value (usize (List.length elements)) ]
+                (Some storage_place);
+              List.iter
+                (fun (e : S.expression) ->
+                  let value = new_local st element in
+                  into st e value;
+                  lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
+                elements
+          | _ -> bug "a list literal of %s" (Ground.to_string ty))
+      | _ -> bug "a list literal of %s, which is not lowered yet" (Ground.to_string ty))
+
+(* A [Set] or [Map] literal: the collection made empty, then each item
+   inserted with the type's own [insert], which keeps it in order and keeps
+   the last of equal keys. Each item is the arguments [insert] takes after
+   the collection. *)
+and collection_into st ty destination ~span items =
+  let path, arguments =
+    match ty with
+    | Named { path; arguments } -> (path, arguments)
+    | _ -> bug "a collection literal of %s" (Ground.to_string ty)
+  in
+  (match Monomorphic.shape st.context.monomorphic ty with
+  | Record [ (field, Typed list) ] -> list_into st list [] (destination / Field field) ~span
+  | _ -> bug "%s is not a record of a list" (Ground.to_string ty));
+  let insert = Path.Method { owner = path; name = "insert"; receiver = Mut } in
+  let signature = signature_of st.context insert in
+  let substitution = bind signature.generics arguments in
+  List.iter
+    (fun parts ->
+      let values =
+        List.map
+          (fun ((e : S.expression), part_ty) ->
+            let value = new_local st part_ty in
+            into st e value;
+            (T.Own, part_ty, value))
+          parts
+      in
+      call_instance st
+        (Code { path = insert; type_arguments = arguments })
+        ~signature ~substitution
+        ~arguments:((T.Mut, ty, destination) :: values)
+        ~mask:0
+        ~destination:(new_local st (Monomorphic.builtin Unit)))
+    items
 
 (* [?]: the error, or [None], returned at once, as the function's own
    result type; otherwise the value inside. *)
@@ -1718,7 +1784,7 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
         let signature = signature_of st.context path in
         let substitution = bind signature.generics type_arguments in
         let arguments = with_placeholders st signature substitution in_order in
-        let passed = List.filter_map (fun (mode, ty, place) -> pass st mode ty place) arguments in
+        let passed = List.filter_map (fun (mode, ty, place) -> hold st mode ty place) arguments in
         let evidence = List.map (evidence_of st) (evidence_for substitution signature.uses) in
         let fields =
           List.mapi (fun i operand -> (Printf.sprintf "local%d" i, operand)) (passed @ evidence)
@@ -1827,7 +1893,7 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
         with
         | Some lent -> emit st.b (Assign (destination, Use (Copy lent)))
         | None -> ())
-    | Function_value -> bug "calls through function values are not lowered yet"
+    | Function_value -> bug "a call through a function value, which [call] lowers"
     | Capability_method { capability; _ } when Path.equal capability panic_path -> (
         (* [Panic.crash] has no evidence: it ends the process at once. *)
         match in_order with
@@ -3510,7 +3576,7 @@ let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list
       (fun (mode, ty, (parameter : S.parameter)) ->
         let ty = Monomorphic.ground context.monomorphic code.substitution ty in
         let place, local =
-          match Convention.parameter context.env (Monomorphic.mode mode) ty with
+          match held context mode ty with
           | None -> (new_local st ty, None)
           | Some (Pointer _ as pointer) ->
               let local = local b pointer in

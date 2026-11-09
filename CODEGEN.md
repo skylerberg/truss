@@ -232,7 +232,7 @@ parameter. The emitter only prints.
 
 | Rvalue | Meaning |
 |---|---|
-| an operand | `copy place`, only for types that copy implicitly; `move place`, which leaves the place without a value; a constant; or the address of a place |
+| an operand | `copy place`, only for types that copy implicitly; `move place`, which leaves the place without a value; a constant; the address of a place; or the moved address of a place, for a large `own` argument, which the callee takes, so the place holds nothing after the call |
 | `unary`, `binary` | A primitive operation on built-in types (see [Primitive operations](#primitive-operations)) |
 | `convert` | A conversion between built-in numbers that keeps the value |
 | `build(type, variant, fields)` | Construct a record or variant. Building an `indirect` variant allocates its block. |
@@ -384,7 +384,10 @@ capture nothing, so storing one never stores a pointer into a stack.
 A cursor is the state machine of one pulled yielding method (see
 [Cursors](#cursors-1)). Its layout is a state number, the method's
 parameters, and the locals that are live across a `yield`, with the states
-of any cursors it pulls from inside it. The type has no name in Truss, and
+of any cursors it pulls from inside it. An `own` argument is held as a
+value the cursor owns and drops, whatever its size, since the cursor may
+outlive the statement that made it. Other arguments are held as their
+parameters take them, a view or a pointer to the caller's place. The type has no name in Truss, and
 its layout depends on the method's body. That dependency is recorded in the
 trace of every instance that holds one, as Rust records it for
 `impl Iterator`.
@@ -626,6 +629,10 @@ and its siblings. Full-width multiplication, used by hashing and
   fills it, which is the one allocation DESIGN.md counts. A literal whose
   parts are all constant, and which is only read, can be static data
   instead.
+- **A `Set` or `Map` literal** makes the collection empty and inserts each
+  element or entry with the type's own `insert`, so a literal keeps the
+  collection's order and, of equal keys, the last, exactly as inserting by
+  hand would.
 
 ### Code that does not ship
 

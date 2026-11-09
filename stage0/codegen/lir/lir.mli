@@ -40,6 +40,9 @@ and operand =
   | Move of place  (** Leaves the place with nothing to drop *)
   | Constant of constant
   | Address of { place : place; writable : bool }
+  | Moved_address of place
+      (** The address of a place whose value the callee takes, for a large [own] argument: the place
+          holds nothing after the call *)
 
 and constant =
   | Integer of Memory_layout.integer * Z.t
