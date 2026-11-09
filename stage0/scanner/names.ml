@@ -12,7 +12,7 @@ type kind = Upper | Lower
 type checked = {
   kind : kind;
   name : string;  (* the corrected name when there is a fix *)
-  problem : (Diagnostic.Code.t * string) option;  (* code, message *)
+  problem : (Diagnostic.Code.lexer * string) option;  (* code, message *)
   fix : string option;
 }
 

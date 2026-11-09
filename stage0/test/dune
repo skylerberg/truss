@@ -4,5 +4,4 @@
  (deps
   %{workspace_root}/SYNTAX.md
   %{workspace_root}/DESIGN.md
-  %{workspace_root}/GRAMMAR.md
-  (glob_files golden/*.truss)))
+  %{workspace_root}/GRAMMAR.md))

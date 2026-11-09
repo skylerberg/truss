@@ -1,30 +1,424 @@
-(* The lexer's tests other than the golden files (LEXER.md, "Testing"):
+(* The lexer's tests. Each test gives an input and states exactly what the
+   lexer must do with it: the tokens, or the one diagnostic with its code,
+   position, and fix. See IMPLEMENTATION.md, "Testing".
 
-   - the keyword, punctuation, and line-break lists in GRAMMAR.md agree with
-     Token and Layout;
-   - every ```truss block in the documents lexes with no diagnostics;
-   - every fix removes its diagnostic without adding another;
-   - random sequences of valid tokens lex back to the same tokens;
-   - random bytes and mutated documents never raise, and always give spans
-     that are in bounds, in order, and balanced;
-   - spot checks of the Unicode module.
-
-   The documents are read from the repository root, two directories up from
-   where dune runs the test. *)
+   Fuzzing and benchmarks are tools in stage0/tools, not tests. *)
 
 open Token
 
+(* Running tests *)
+
 let failures = ref 0
+let count = ref 0
+let current_test = ref ""
 
 let fail format =
   Printf.ksprintf
     (fun message ->
       incr failures;
-      if !failures <= 100 then print_endline ("FAIL: " ^ message))
+      Printf.printf "FAIL %s: %s\n" !current_test message)
     format
 
-let check condition format =
-  Printf.ksprintf (fun message -> if not condition then fail "%s" message) format
+let test name body =
+  incr count;
+  current_test := name;
+  match body () with () -> () | exception exception_ -> fail "raised %s" (Printexc.to_string exception_)
+
+let equal_lists show name expected actual =
+  if expected <> actual then
+    fail "%s: expected [%s], got [%s]" name
+      (String.concat "; " (List.map show expected))
+      (String.concat "; " (List.map show actual))
+
+(* Lexing *)
+
+let lex text = Lexer.lex (Source.create ~path:"test.truss" text)
+let codes text = List.map (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code) (snd (lex text))
+
+(* A token, shown compactly: names and literals as written, punctuation and
+   keywords by spelling, NEWLINE as "NL", and a zero-width closer that layout
+   inserted with a "+" in front. A string shows its texts, with "${}" for
+   each interpolation. *)
+let show (token : Token.t) =
+  match token.kind with
+  | Upper name | Lower name -> name
+  | Underscore -> "_"
+  | Keyword keyword -> keyword_spelling keyword
+  | Reserved reserved -> "reserved " ^ reserved_spelling reserved
+  | Integer value -> Z.to_string value
+  | Float { significand; exponent } -> Printf.sprintf "%se%s" (Z.to_string significand) (Z.to_string exponent)
+  | String literal ->
+      let tag = match literal.tag with Some (tag, _) -> tag | None -> "" in
+      tag
+      ^ Diagnostic.quote
+          (String.concat "${}" (List.map (fun (text : text) -> text.value) (Array.to_list (texts literal))))
+  | Punctuation punctuation -> (if token.span.start = token.span.stop then "+" else "") ^ punctuation_spelling punctuation
+  | Foreign foreign -> foreign_spelling foreign
+  | Newline -> "NL"
+  | End_of_file -> "EOF"
+
+let shown tokens =
+  Array.to_list tokens |> List.filter (fun (token : Token.t) -> token.kind <> End_of_file) |> List.map show
+
+let tokens_of text = shown (fst (lex text))
+
+(* Asserts that [text] lexes with no diagnostics into [expected]. *)
+let tokens text expected =
+  List.iter (fun code -> fail "unexpected %s" code) (codes text);
+  equal_lists Fun.id "tokens" expected (tokens_of text)
+
+(* The tokens of the [index]th interpolation of the first string in [text]. *)
+let interpolation_tokens text index =
+  let first_string =
+    Array.to_list (fst (lex text))
+    |> List.find_map (fun (token : Token.t) -> match token.kind with String literal -> Some literal | _ -> None)
+  in
+  match first_string with Some literal -> shown (interpolations literal).(index).tokens | None -> []
+
+let find text part ~occurrence =
+  let rec search index seen =
+    if index + String.length part > String.length text then -1
+    else if String.sub text index (String.length part) = part then
+      if seen + 1 = occurrence then index else search (index + 1) (seen + 1)
+    else search (index + 1) seen
+  in
+  search 0 0
+
+(* Asserts that [text] gives exactly one diagnostic, with [code], starting at
+   the [occurrence]th occurrence of [at]. With [fixed], its fixes must turn
+   [text] into [fixed] and then [alternatives], each of which must lex with
+   no diagnostics. Without [fixed], it must have no fix. *)
+let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
+  match snd (lex text) with
+  | [ diagnostic ] -> (
+      if diagnostic.code <> Lexer code then
+        fail "expected %s, got %s" (Diagnostic.Code.name (Lexer code)) (Diagnostic.Code.name diagnostic.code);
+      let expected = find text at ~occurrence in
+      if diagnostic.span.start <> expected then
+        fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
+      let results = List.map (Diagnostic.apply_fix text) diagnostic.fixes in
+      match (fixed, results) with
+      | None, [] -> ()
+      | None, result :: _ -> fail "expected no fix, got one giving %S" result
+      | Some _, [] -> fail "expected a fix, got none"
+      | Some fixed, results ->
+          equal_lists (Printf.sprintf "%S") "fixed text" (fixed :: alternatives) results;
+          List.iter (fun result -> List.iter (fail "the fixed text %S has %s" result) (codes result)) results)
+  | diagnostics ->
+      fail "expected one diagnostic, got [%s]"
+        (String.concat "; " (List.map (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code) diagnostics))
+
+(* Source text *)
+
+let () =
+  test "a byte order mark at the start is skipped" (fun () -> tokens "\xEF\xBB\xBFx" [ "x"; "NL" ]);
+  test "a byte order mark elsewhere is forbidden" (fun () ->
+      error "a \xEF\xBB\xBF b" ~code:Forbidden_character ~at:"\xEF" ~fixed:"a b");
+  test "a carriage return and line feed is one line break" (fun () -> tokens "a\r\nb\r\n" [ "a"; "NL"; "b"; "NL" ]);
+  test "a carriage return on its own is an error and a line break" (fun () ->
+      error "a\rb" ~code:Carriage_return ~at:"\r" ~fixed:"a\nb";
+      equal_lists Fun.id "tokens" [ "a"; "NL"; "b"; "NL" ] (tokens_of "a\rb"));
+  test "a forbidden character in code is deleted" (fun () ->
+      error "let b\xE2\x80\x8B = 1" ~code:Forbidden_character ~at:"\xE2" ~fixed:"let b = 1");
+  test "a forbidden character between names becomes a space" (fun () ->
+      error "a\x01b" ~code:Forbidden_character ~at:"\x01" ~fixed:"a b");
+  test "a forbidden character in a string becomes an escape" (fun () ->
+      error "\"\xE2\x80\xAE\"" ~code:Forbidden_character ~at:"\xE2" ~fixed:"\"\\u{202E}\"");
+  test "a forbidden character in a raw string has no fix" (fun () ->
+      error "\"\"\"\xE2\x80\x8Bx\"\"\"" ~code:Forbidden_character ~at:"\xE2");
+  test "joiners and variation selectors are allowed in strings" (fun () ->
+      tokens "\"\xE2\x80\x8D\xEF\xB8\x8F\"" [ "\"\xE2\x80\x8D\xEF\xB8\x8F\""; "NL" ]);
+  test "bytes that are not UTF-8 are one error" (fun () -> error "a \xFF\xFE b" ~code:Invalid_utf8 ~at:"\xFF");
+  test "JSON output is valid UTF-8 when a message is about a bad byte" (fun () ->
+      let source = Source.create ~path:"test.truss" "\"\\\xFF\"" in
+      let json = Diagnostic.to_json source (snd (Lexer.lex source)) in
+      let rec valid index =
+        index >= String.length json
+        ||
+        let packed = Unicode.decode json index in
+        packed >= 0 && valid (index + Unicode.decoded_length packed)
+      in
+      if not (valid 0) then fail "the JSON is not valid UTF-8: %S" json)
+
+(* Names *)
+
+let () =
+  test "keywords, reserved words, and contextual words" (fun () ->
+      tokens "fn Self self loop result time O _"
+        [ "fn"; "Self"; "self"; "reserved loop"; "result"; "time"; "O"; "_"; "NL" ]);
+  test "userName is lower_snake_case" (fun () -> error "userName" ~code:Name_case ~at:"userName" ~fixed:"user_name");
+  test "an acronym in a name" (fun () ->
+      error "parseHTTPResponse" ~code:Name_case ~at:"parse" ~fixed:"parse_http_response");
+  test "MAX_SIZE is a constant from another language" (fun () ->
+      error "MAX_SIZE" ~code:Name_case ~at:"MAX" ~fixed:"max_size");
+  test "Http_Client is UpperCamelCase" (fun () -> error "Http_Client" ~code:Name_case ~at:"Http" ~fixed:"HttpClient");
+  test "underscores at the ends and doubled" (fun () ->
+      error "count_" ~code:Name_case ~at:"count" ~fixed:"count";
+      error "user__name" ~code:Name_case ~at:"user" ~fixed:"user_name";
+      error "_unused" ~code:Name_case ~at:"_" ~fixed:"unused");
+  test "no fix that would make a keyword" (fun () -> error "_type" ~code:Name_case ~at:"_");
+  test "a name with a letter outside ASCII is one name with one error" (fun () ->
+      error "let caf\xC3\xA9 = 1" ~code:Name_not_ascii ~at:"caf";
+      equal_lists Fun.id "tokens" [ "let"; "caf\xC3\xA9"; "="; "1"; "NL" ] (tokens_of "let caf\xC3\xA9 = 1"));
+  test "every use of a misspelled name gets the same fix" (fun () ->
+      let replacements =
+        List.concat_map
+          (fun (d : Diagnostic.t) ->
+            List.concat_map (fun (fix : Diagnostic.fix) -> List.map (fun (e : Diagnostic.edit) -> e.replacement) fix.edits) d.fixes)
+          (snd (lex "userName(userName)"))
+      in
+      equal_lists Fun.id "replacements" [ "user_name"; "user_name" ] replacements)
+
+(* Numbers *)
+
+let () =
+  test "integer literals" (fun () ->
+      tokens "42 1_000_000 0xFF 0xdead_beef 0b1010 0o755 99999999999999999999999"
+        [ "42"; "1000000"; "255"; "3735928559"; "10"; "493"; "99999999999999999999999"; "NL" ]);
+  test "float literals are exact, with trailing zeros removed" (fun () ->
+      tokens "0.5 1.50 6.02e23 1.0e-09 100e-2 0.0" [ "5e-1"; "15e-1"; "602e21"; "1e-9"; "1e0"; "0e0"; "NL" ]);
+  test "a dot after a number" (fun () ->
+      tokens "1..2" [ "1"; ".."; "2"; "NL" ];
+      tokens "1.max" [ "1"; "."; "max"; "NL" ];
+      tokens "1.0.max" [ "1e0"; "."; "max"; "NL" ]);
+  test "type suffixes" (fun () ->
+      error "3u8" ~code:Number_suffix ~at:"u8" ~fixed:"3";
+      error "1.5f" ~code:Number_suffix ~at:"f" ~fixed:"1.5";
+      error "3f" ~code:Number_suffix ~at:"f" ~fixed:"3.0");
+  test "prefixes and exponents are lowercase" (fun () ->
+      error "0X1F" ~code:Number_uppercase_prefix ~at:"0X" ~fixed:"0x1F";
+      error "1E9" ~code:Number_uppercase_exponent ~at:"E" ~fixed:"1e9");
+  test "underscores go between digits" (fun () ->
+      error "1__000" ~code:Number_underscore ~at:"_" ~fixed:"1_000";
+      error "0x_FF" ~code:Number_underscore ~at:"_" ~fixed:"0xFF");
+  test "one fix corrects every problem in a literal" (fun () ->
+      error "1_u8" ~code:Number_underscore ~at:"_" ~fixed:"1");
+  test "a leading zero" (fun () ->
+      error "0755" ~code:Number_leading_zero ~at:"0755" ~fixed:"0o755" ~alternatives:[ "755" ];
+      error "09" ~code:Number_leading_zero ~at:"09" ~fixed:"9";
+      error "00.5" ~code:Number_leading_zero ~at:"00" ~fixed:"0.5");
+  test "errors without a fix" (fun () ->
+      error "0b102" ~code:Number_invalid_digit ~at:"2";
+      error "0o8" ~code:Number_invalid_digit ~at:"8";
+      error "0x" ~code:Number_missing_digits ~at:"0x";
+      error "1e" ~code:Number_missing_digits ~at:"e";
+      error "1abc" ~code:Number_followed_by_name ~at:"a")
+
+(* Strings *)
+
+let () =
+  test "escapes" (fun () ->
+      tokens {|"\n\t\r\0\\\"\${ \u{1F600} $ { }"|} [ Diagnostic.quote "\n\t\r\000\\\"${ \xF0\x9F\x98\x80 $ { }"; "NL" ]);
+  test "an interpolation holds the tokens of an expression" (fun () ->
+      tokens {|"Hello, ${name}!"|} [ {|"Hello, ${}!"|}; "NL" ];
+      equal_lists Fun.id "interpolation" [ "name" ] (interpolation_tokens {|"Hello, ${name}!"|} 0));
+  test "a string inside an interpolation" (fun () ->
+      equal_lists Fun.id "interpolation"
+        [ "names"; "."; "join"; "("; {|", "|}; ")" ]
+        (interpolation_tokens {|"${names.join(", ")}"|} 0));
+  test "braces inside an interpolation" (fun () ->
+      equal_lists Fun.id "interpolation" [ "{"; "a"; "}" ] (interpolation_tokens {|"${ {a} }"|} 0));
+  test "a tag touches its string" (fun () ->
+      tokens {|Regex"[a-z]+"|} [ {|Regex"[a-z]+"|}; "NL" ];
+      tokens {|Regex "x"|} [ "Regex"; {|"x"|}; "NL" ];
+      tokens {|return"x"|} [ "return"; {|"x"|}; "NL" ]);
+  test "an unterminated string closes at the end of its line" (fun () ->
+      error "\"never closed\nx" ~code:Unterminated_string ~at:"\"" ~fixed:"\"never closed\"\nx");
+  test "escapes that do not exist" (fun () ->
+      error {|"\q"|} ~code:Invalid_escape ~at:"\\";
+      error {|"\u{D800}"|} ~code:Invalid_escape ~at:"\\");
+  test "an empty interpolation" (fun () -> error {|"a${}b"|} ~code:Empty_interpolation ~at:"$" ~fixed:{|"ab"|});
+  test "a line break ends an interpolation and its string" (fun () ->
+      error "\"${a\nlet b = 1" ~code:Line_break_in_interpolation ~at:"$";
+      equal_lists Fun.id "tokens" [ {|"${}"|}; "NL"; "let"; "b"; "="; "1"; "NL" ] (tokens_of "\"${a\nlet b = 1"));
+  test "interpolations nest at most 32 deep" (fun () ->
+      let rec nested depth = if depth = 0 then "x" else "\"${" ^ nested (depth - 1) ^ "}\"" in
+      equal_lists Fun.id "codes" [] (codes (nested 32));
+      equal_lists Fun.id "codes" [ "lexer.interpolation_too_deep" ] (codes (nested 33)));
+  test "a character literal becomes a tagged string" (fun () ->
+      error "'a'" ~code:Character_literal ~at:"'" ~fixed:{|Character"a"|};
+      error {|'\n'|} ~code:Character_literal ~at:"'" ~fixed:{|Character"\n"|};
+      error {|'"'|} ~code:Character_literal ~at:"'" ~fixed:{|Character"\""|});
+  test "quotes touching a name are not a character literal" (fun () ->
+      equal_lists Fun.id "codes" [ "lexer.unexpected_character"; "lexer.unexpected_character" ] (codes "value's'debug"))
+
+(* Raw strings *)
+
+let lines = String.concat "\n"
+
+let () =
+  test "a one-line raw string has no escapes" (fun () -> tokens {|"""\d{3}"""|} [ {|"\\d{3}"|}; "NL" ]);
+  test "dollar signs before an interpolation" (fun () ->
+      tokens {|"""Total: $${price}"""|} [ {|"Total: $${}"|}; "NL" ];
+      tokens {|$$"""${HOME} $${folder}"""|} [ {|"${HOME} ${}"|}; "NL" ]);
+  test "a longer delimiter" (fun () -> tokens {|""""a """ b""""|} [ {|"a \"\"\" b"|}; "NL" ]);
+  test "the closing delimiter's indentation is removed" (fun () ->
+      tokens
+        (lines [ {|x = """|}; "  select"; "    where"; ""; "  end"; {|  """|} ])
+        [ "x"; "="; Diagnostic.quote "select\n  where\n\nend"; "NL" ]);
+  test "spaces after the opening delimiter are ignored" (fun () ->
+      tokens (lines [ {|"""   |}; "  text"; {|  """|} ]) [ {|"text"|}; "NL" ]);
+  test "line endings in a raw string are line feeds" (fun () ->
+      tokens "\"\"\"\r\n  a\r\n  b\r\n  \"\"\"" [ {|"a\nb"|}; "NL" ]);
+  test "a run of more quotes than the delimiter" (fun () -> error {|"""a""""|} ~code:Raw_string_quotes ~at:{|""""|});
+  test "a closing delimiter after text moves to its own line" (fun () ->
+      error
+        (lines [ {|"""|}; {|  text"""|} ])
+        ~code:Raw_string_closing_not_alone ~at:{|"""|} ~occurrence:2
+        ~fixed:(lines [ {|"""|}; "  text"; {|  """|} ]));
+  test "a line that does not start with the indentation" (fun () ->
+      error (lines [ {|"""|}; "  spaces"; "\ttab"; {|  """|} ]) ~code:Raw_string_indentation ~at:"\ttab");
+  test "an unterminated one-line raw string closes at the end of its line" (fun () ->
+      error "\"\"\"abc\nx" ~code:Unterminated_string ~at:"\"" ~fixed:"\"\"\"abc\"\"\"\nx");
+  test "an unterminated multi-line raw string runs to the end of the file" (fun () ->
+      let text = lines [ "fn f() {"; {|  let s = """|}; "    text"; "}"; "fn g() {}" ] in
+      error text ~code:Unterminated_string ~at:{|"""|};
+      match snd (lex text) with
+      | [ { notes = [ (span, _) ]; _ } ] when span.start = find text "}" ~occurrence:1 -> ()
+      | _ -> fail "expected a note at the line where the string seems to end")
+
+(* Rejected sequences *)
+
+let () =
+  test "a comment at the end of a line" (fun () ->
+      error "let a = 1 // one" ~code:Comment ~at:"//" ~fixed:"let a = 1");
+  test "a comment on its own line" (fun () ->
+      error "a\n// note\nb" ~code:Comment ~at:"//" ~fixed:"a\nb";
+      error "a\n# note\nb" ~code:Comment ~at:"#" ~fixed:"a\nb");
+  test "a block comment between tokens" (fun () ->
+      error "a /* x */ + b" ~code:Comment ~at:"/*" ~fixed:"a + b";
+      error "a /* x /* y */ */ b" ~code:Comment ~at:"/*" ~fixed:"a b");
+  test "an unterminated block comment has no fix" (fun () -> error "a /* never closed\nb" ~code:Comment ~at:"/*");
+  test "a block comment across lines separates statements" (fun () ->
+      equal_lists Fun.id "tokens" [ "a"; "NL"; "b"; "NL" ] (tokens_of "a /* x\n */ b"));
+  test "a semicolon" (fun () ->
+      error "let a = 1;" ~code:Semicolon ~at:";" ~fixed:"let a = 1";
+      error "  a; b" ~code:Semicolon ~at:";" ~fixed:"  a\n  b";
+      error "{ a; }" ~code:Semicolon ~at:";" ~fixed:"{ a }");
+  test "a semicolon mid-line separates statements" (fun () ->
+      equal_lists Fun.id "tokens" [ "a"; "NL"; "b"; "NL" ] (tokens_of "a; b"));
+  test "strict equality" (fun () ->
+      error "a === b" ~code:Strict_equality ~at:"===" ~fixed:"a == b";
+      error "a !== b" ~code:Strict_equality ~at:"!==" ~fixed:"a != b");
+  test "a longer run of = is not strict equality" (fun () -> tokens "a ==== b" [ "a"; "=="; "=="; "b"; "NL" ]);
+  test "characters Truss does not use" (fun () ->
+      error "@a" ~code:Unexpected_character ~at:"@";
+      error "a ` b" ~code:Unexpected_character ~at:"`";
+      error "a $ b" ~code:Unexpected_character ~at:"$");
+  test "increment and decrement are left for the parser" (fun () ->
+      tokens "i++\ni--\n--x" [ "i"; "++"; "NL"; "i"; "--"; "NL"; "--"; "x"; "NL" ])
+
+(* Punctuation *)
+
+let () =
+  test "every punctuation lexes as itself" (fun () ->
+      List.iter
+        (fun (spelling, punctuation) ->
+          match punctuation with
+          | Open _ | Close _ -> ()
+          | _ -> tokens ("a " ^ spelling ^ " b") [ "a"; spelling; "b"; "NL" ])
+        Token.punctuation);
+  test "the longest match" (fun () ->
+      tokens "a<<=b" [ "a"; "<<="; "b"; "NL" ];
+      tokens "a...b" [ "a"; ".."; "."; "b"; "NL" ];
+      tokens "a==>b" [ "a"; "==>"; "b"; "NL" ];
+      tokens "a::b" [ "a"; "::"; "b"; "NL" ])
+
+(* Layout *)
+
+let () =
+  test "a line break ends a statement" (fun () -> tokens "a\nb" [ "a"; "NL"; "b"; "NL" ]);
+  test "a line that starts with an operator continues" (fun () ->
+      tokens "a\n  .b()\n  + c" [ "a"; "."; "b"; "("; ")"; "+"; "c"; "NL" ]);
+  test "a line that starts with - is a new statement" (fun () -> tokens "a\n- b" [ "a"; "NL"; "-"; "b"; "NL" ]);
+  test "line breaks inside parentheses are ignored" (fun () ->
+      tokens "f(a,\n  b)" [ "f"; "("; "a"; ","; "b"; ")"; "NL" ]);
+  test "line breaks inside braces count again" (fun () ->
+      tokens "f({\n  a\n  b\n})" [ "f"; "("; "{"; "a"; "NL"; "b"; "}"; ")"; "NL" ]);
+  test "clauses and else continue the line" (fun () ->
+      tokens "fn f()\n  requires a\n{\n}\nelse {}"
+        [ "fn"; "f"; "("; ")"; "requires"; "a"; "NL"; "{"; "}"; "else"; "{"; "}"; "NL" ]);
+  test "several line breaks give one NEWLINE, and a blank line is noted" (fun () ->
+      let tokens, _ = lex "a\n\n\nb" in
+      equal_lists Fun.id "tokens" [ "a"; "NL"; "b"; "NL" ] (shown tokens);
+      if not tokens.(2).blank_line_before then fail "b has a blank line before it");
+  test "a comment line is not a blank line" (fun () ->
+      let tokens, _ = lex "a\n// c\nb" in
+      if tokens.(2).blank_line_before then fail "b has no blank line before it")
+
+(* Brackets *)
+
+let () =
+  test "an unclosed bracket inside another" (fun () ->
+      error "f(1, [2)" ~code:Unclosed_bracket ~at:"[" ~fixed:"f(1, [2])";
+      equal_lists Fun.id "tokens" [ "f"; "("; "1"; ","; "["; "2"; "+]"; ")"; "NL" ] (tokens_of "f(1, [2)"));
+  test "a closer that matches nothing is dropped" (fun () ->
+      error "a }" ~code:Unmatched_closing_bracket ~at:"}";
+      equal_lists Fun.id "tokens" [ "a"; "NL" ] (tokens_of "a }"));
+  test "a bracket still open at the end of the file" (fun () ->
+      error "let x = (1\n" ~code:Unclosed_bracket ~at:"(" ~fixed:"let x = (1\n)\n");
+  test "a definition in column 0 closes open brackets" (fun () ->
+      let text = "fn a() {\n  f(1,\nfn b() {}\n" in
+      error text ~code:Unclosed_bracket ~at:"(" ~occurrence:2 ~fixed:"fn a() {\n  f(1,\n)}\nfn b() {}\n";
+      equal_lists Fun.id "tokens"
+        [ "fn"; "a"; "("; ")"; "{"; "f"; "("; "1"; ","; "+)"; "+}"; "NL"; "fn"; "b"; "("; ")"; "{"; "}"; "NL" ]
+        (tokens_of text));
+  test "brackets swallowed by an unterminated comment are not reported" (fun () ->
+      equal_lists Fun.id "codes" [ "lexer.comment" ] (codes "f( /* never closed"))
+
+(* Diagnostics *)
+
+let () =
+  test "at most 200 diagnostics are shown, then a count" (fun () ->
+      let diagnostic offset = Diagnostic.make ~code:(Lexer Semicolon) (Source.span offset (offset + 1)) "x" in
+      let shown = Diagnostic.shown (List.init 250 diagnostic) in
+      if List.length shown <> Diagnostic.limit + 1 then fail "%d shown" (List.length shown);
+      match List.rev shown with
+      | last :: _ when last.code = Too_many_diagnostics -> ()
+      | _ -> fail "the last one counts the rest");
+  test "diagnostics past the limit do not cost the shown ones their fixes" (fun () ->
+      let text = String.concat "" (List.init 250 (Printf.sprintf "a%d;\n")) in
+      List.iteri
+        (fun index (d : Diagnostic.t) -> if index < Diagnostic.limit && d.fixes = [] then fail "diagnostic %d has no fix" index)
+        (snd (lex text)));
+  test "overlapping edits are refused" (fun () ->
+      let fix = Diagnostic.fix "x" [ Diagnostic.delete (Source.span 0 2); Diagnostic.delete (Source.span 1 3) ] in
+      match Diagnostic.apply_fix "abc" fix with
+      | _ -> fail "expected Invalid_argument"
+      | exception Invalid_argument _ -> ())
+
+(* Checking fixes *)
+
+let semicolon_fixes (_, diagnostics) =
+  List.concat_map (fun (d : Diagnostic.t) -> if d.code = Lexer Semicolon then d.fixes else []) diagnostics
+
+let () =
+  test "a fix that would change how another part of the file lexes is left out" (fun () ->
+      (* Replacing the `;` with a line break puts `fn` in column 0, where
+         bracket recovery, which the open `{` of g turns on, closes the
+         parenthesis around it. *)
+      let source = Source.create ~path:"test.truss" "let p = s.filter(;fn(x) { x })\nfn g() {\n" in
+      if semicolon_fixes (Lexer.lex ~check_fixes:false source) = [] then fail "the fix is built";
+      if semicolon_fixes (Lexer.lex source) <> [] then fail "the checked fix is left out");
+  test "the fixes for errors in two definitions each remove only their own error" (fun () ->
+      let text = "fn a() {\n  let userName = 1;\n  f(1,\n}\nfn b() {\n  let x = 0755 // note\n}\n" in
+      let before = List.sort compare (codes text) in
+      List.iter
+        (fun (d : Diagnostic.t) ->
+          List.iter
+            (fun fix ->
+              let expected =
+                let rec remove_one = function
+                  | [] -> []
+                  | code :: rest -> if code = Diagnostic.Code.name d.code then rest else code :: remove_one rest
+                in
+                remove_one before
+              in
+              equal_lists Fun.id "codes after the fix" expected (List.sort compare (codes (Diagnostic.apply_fix text fix))))
+            d.fixes)
+        (snd (lex text)))
+
+(* The documents *)
 
 let read path =
   let channel = open_in_bin path in
@@ -33,521 +427,106 @@ let read path =
   text
 
 let document name = read (Filename.concat "../.." name)
-let lex text = Lexer.lex (Source.create ~path:"test.truss" text)
-let lines text = String.split_on_char '\n' text
+let contains text part = find text part ~occurrence:1 >= 0
 
-let starts_with ~prefix text = String.starts_with ~prefix text
-
-let contains text part =
-  let rec search index =
-    index + String.length part <= String.length text
-    && (String.sub text index (String.length part) = part || search (index + 1))
-  in
-  search 0
-
-(* The contents of the first fenced block after the first line containing
+(* The lines of the first fenced block after the first line containing
    [marker]. *)
 let block_after document marker =
-  let rec skip_to_marker = function
-    | [] -> failwith ("marker not found: " ^ marker)
-    | line :: rest ->
-        if contains line marker then rest else skip_to_marker rest
+  let rec after_marker = function [] -> [] | line :: rest -> if contains line marker then rest else after_marker rest in
+  let rec after_fence = function
+    | [] -> []
+    | line :: rest -> if String.starts_with ~prefix:"```" line then rest else after_fence rest
   in
-  let rec skip_to_fence = function
-    | [] -> failwith ("no block after " ^ marker)
-    | line :: rest -> if starts_with ~prefix:"```" line then rest else skip_to_fence rest
+  let rec until_fence lines = function
+    | [] -> List.rev lines
+    | line :: rest -> if String.starts_with ~prefix:"```" line then List.rev lines else until_fence (line :: lines) rest
   in
-  let rec take acc = function
-    | [] -> List.rev acc
-    | line :: rest -> if starts_with ~prefix:"```" line then List.rev acc else take (line :: acc) rest
-  in
-  take [] (skip_to_fence (skip_to_marker (lines document)))
+  until_fence [] (after_fence (after_marker (String.split_on_char '\n' document)))
 
-let words block =
-  List.concat_map (String.split_on_char ' ') block |> List.filter (fun word -> word <> "")
+let words lines = List.sort_uniq compare (List.filter (( <> ) "") (List.concat_map (String.split_on_char ' ') lines))
 
-(* The text between two markers. *)
+(* The prose between two markers, with line breaks made spaces. *)
 let between document first second =
-  let index_of text start marker =
-    let rec search index =
-      if index + String.length marker > String.length text then failwith ("missing " ^ marker)
-      else if String.sub text index (String.length marker) = marker then index
-      else search (index + 1)
-    in
-    search start
-  in
-  let start = index_of document 0 first + String.length first in
-  (* Lines wrap anywhere in prose, so runs of whitespace become one space. *)
-  String.sub document start (index_of document start second - start)
-  |> String.split_on_char '\n'
-  |> List.map String.trim
-  |> String.concat " "
+  let start = find document first ~occurrence:1 + String.length first in
+  let rest = String.sub document start (String.length document - start) in
+  String.sub rest 0 (find rest second ~occurrence:1)
+  |> String.split_on_char '\n' |> List.map String.trim |> String.concat " "
 
-(* Every `...` in a piece of Markdown. *)
 let backticked text =
-  let rec loop index acc =
-    match String.index_from_opt text index '`' with
-    | None -> List.rev acc
-    | Some opening -> (
-        match String.index_from_opt text (opening + 1) '`' with
-        | None -> List.rev acc
-        | Some closing ->
-            loop (closing + 1) (String.sub text (opening + 1) (closing - opening - 1) :: acc))
-  in
-  loop 0 []
+  match String.split_on_char '`' text with [] -> [] | _ :: rest -> List.filteri (fun index _ -> index mod 2 = 0) rest
 
-let sorted list = List.sort_uniq compare list
-
-(* The documents agree with the code *)
-
-let kind_of_spelling spelling =
-  match Token.word spelling with
-  | Some kind -> Some kind
-  | None -> (
-      if spelling = "_" then Some Underscore
-      else
-        match List.assoc_opt spelling Token.punctuation with
-        | Some punctuation -> Some (Punctuation punctuation)
-        | None -> None)
-
-let test_documents_agree () =
-  let grammar = document "GRAMMAR.md" in
-  let spellings list = sorted (List.map fst list) in
-  check
-    (sorted (words (block_after grammar "Reserved everywhere:")) = spellings Token.keywords)
-    "GRAMMAR.md's keywords match Token.keywords";
-  check
-    (sorted (words (block_after grammar "Reserved for later use")) = spellings Token.reserved_words)
-    "GRAMMAR.md's reserved words match Token.reserved_words";
-  check
-    (sorted (words (block_after grammar "### Punctuation")) = spellings Token.punctuation)
-    "GRAMMAR.md's punctuation matches Token.punctuation";
-  (* The contextual words are names to the lexer. *)
-  List.iter
-    (fun word ->
-      match (fst (lex word)).(0).kind with
-      | Upper name | Lower name when name = word -> ()
-      | _ -> fail "the contextual word %s lexes as a name" word)
-    (words (block_after grammar "The lexer has no contextual keywords"));
-  (* Each rejected sequence is an error, or a foreign token for the parser. *)
-  List.iter
-    (fun sequence ->
-      let tokens, diagnostics = lex ("x " ^ sequence ^ " y\n") in
-      let foreign = Array.exists (fun token -> match token.kind with Foreign _ -> true | _ -> false) tokens in
-      check (diagnostics <> [] || foreign) "the rejected sequence %s is reported" sequence)
-    (words (block_after grammar "### Rejected sequences"));
-  (* The line-break sets. Names, `_`, and literals are named in prose, and
-     the rest are in backticks. *)
-  let can_end_text = between grammar "**can end a statement**:" "- the first token after it" in
-  let can_begin_text = between grammar "**can begin a statement**:" "3. Several line feeds" in
-  let continue_text = between grammar "Every other token continues the line before it:" "So no `NEWLINE`" in
-  List.iter
-    (fun (text, phrase) -> check (contains text phrase) "GRAMMAR.md says %S" phrase)
-    [ (can_end_text, "a name"); (can_end_text, "a number or string literal");
-      (can_begin_text, "a name"); (can_begin_text, "a number or string literal");
-      (can_begin_text, "a reserved word") ];
-  let universe =
-    List.map (fun (spelling, keyword) -> (spelling, Keyword keyword)) Token.keywords
-    @ List.map (fun (spelling, reserved) -> (spelling, Reserved reserved)) Token.reserved_words
-    @ List.map (fun (spelling, punctuation) -> (spelling, Punctuation punctuation)) Token.punctuation
-    @ [ ("_", Underscore) ]
-  in
-  let listed text = List.filter_map kind_of_spelling (backticked text) in
-  let can_end_listed = listed can_end_text and can_begin_listed = listed can_begin_text in
-  List.iter
-    (fun (spelling, kind) ->
-      check (Layout.can_end kind = List.mem kind can_end_listed) "can_end %s agrees with GRAMMAR.md" spelling;
-      let begins = List.mem kind can_begin_listed || (match kind with Reserved _ -> true | _ -> false) in
-      check (Layout.can_begin kind = begins) "can_begin %s agrees with GRAMMAR.md" spelling)
-    universe;
-  List.iter
-    (fun kind ->
-      check (Layout.can_end kind && Layout.can_begin kind) "names and literals can end and begin statements")
-    [ Upper "Point"; Lower "x"; Integer Z.one; String { tag = None; form = Ordinary; first = { value = ""; span = Source.zero_width 0 }; rest = [||] } ];
-  (* That paragraph names `-` only to leave it out. *)
-  let continuing =
-    List.filter (fun kind -> kind <> Punctuation Minus) (listed continue_text)
-  in
-  check (contains continue_text "binary operators other than `-`") "GRAMMAR.md leaves `-` out of the continuing tokens";
-  List.iter
-    (fun kind ->
-      check (not (Layout.can_begin kind)) "%s, which GRAMMAR.md says continues a line, cannot begin one"
-        (match kind with
-        | Keyword keyword -> Token.keyword_spelling keyword
-        | Punctuation punctuation -> Token.punctuation_spelling punctuation
-        | _ -> "a token"))
-    continuing;
-  (* Every keyword is in one list or the other. *)
-  List.iter
-    (fun (spelling, keyword) ->
-      check
-        (List.mem (Keyword keyword) can_begin_listed || List.mem (Keyword keyword) (listed continue_text))
-        "GRAMMAR.md says whether %s begins a statement" spelling)
-    Token.keywords
-
-(* The documents as a corpus *)
-
+(* The ```truss blocks of a document, with the indentation of blocks inside
+   list items removed. *)
 let truss_blocks name =
   let rec loop inside current blocks = function
     | [] -> List.rev blocks
     | line :: rest ->
         let trimmed = String.trim line in
         if inside then
-          if starts_with ~prefix:"```" trimmed then
-            loop false [] (String.concat "\n" (List.rev current) :: blocks) rest
+          if String.starts_with ~prefix:"```" trimmed then loop false [] (List.rev current :: blocks) rest
           else loop true (line :: current) blocks rest
-        else if trimmed = "```truss" then loop true [] blocks rest
-        else loop false [] blocks rest
+        else loop (trimmed = "```truss") [] blocks rest
   in
-  (* Blocks inside list items are indented; remove the indentation of their
-     first line from every line. *)
   let dedent block =
-    let block_lines = lines block in
+    let leading line =
+      let rec count index = if index < String.length line && line.[index] = ' ' then count (index + 1) else index in
+      count 0
+    in
     let indentation =
-      match List.find_opt (fun line -> String.trim line <> "") block_lines with
-      | Some line ->
-          let rec count index = if index < String.length line && line.[index] = ' ' then count (index + 1) else index in
-          count 0
-      | None -> 0
+      match List.find_opt (fun line -> String.trim line <> "") block with Some line -> leading line | None -> 0
     in
     String.concat "\n"
       (List.map
          (fun line ->
-           if String.length line >= indentation then String.sub line indentation (String.length line - indentation)
-           else String.trim line)
-         block_lines)
-    ^ "\n"
+           if String.length line >= indentation then String.sub line indentation (String.length line - indentation) else "")
+         block)
   in
-  List.map dedent (loop false [] [] (lines (document name)))
-
-let corpus () =
-  List.concat_map
-    (fun name -> List.mapi (fun index block -> (Printf.sprintf "%s block %d" name (index + 1), block)) (truss_blocks name))
-    [ "SYNTAX.md"; "DESIGN.md"; "GRAMMAR.md" ]
-
-let test_corpus corpus =
-  check (List.length corpus > 50) "the documents hold more than 50 truss blocks";
-  List.iter
-    (fun (name, text) ->
-      let source = Source.create ~path:name text in
-      let _, diagnostics = Lexer.lex source in
-      List.iter (fun diagnostic -> fail "%s:\n%s" name (Diagnostic.render source diagnostic)) diagnostics)
-    corpus
-
-(* Fixes work *)
-
-let codes diagnostics = List.sort compare (List.map (fun (d : Diagnostic.t) -> d.code) diagnostics)
-let code_names codes = String.concat ", " (List.map Diagnostic.Code.name codes)
-
-(* Whether [smaller] is a sub-multiset of [larger]; both sorted. *)
-let rec submultiset smaller larger =
-  match (smaller, larger) with
-  | [], _ -> true
-  | _ :: _, [] -> false
-  | first :: rest, candidate :: larger_rest ->
-      if first = candidate then submultiset rest larger_rest
-      else if first > candidate then submultiset smaller larger_rest
-      else false
-
-let rec remove_one code = function
-  | [] -> []
-  | first :: rest -> if first = code then rest else first :: remove_one code rest
-
-let test_fixes name text =
-  let _, diagnostics = lex text in
-  List.iter
-      (fun (diagnostic : Diagnostic.t) ->
-        List.iter
-          (fun (fix : Diagnostic.fix) ->
-            let fixed = Diagnostic.apply_fix text fix in
-            let _, after = lex fixed in
-            let allowed = remove_one diagnostic.code (codes diagnostics) in
-            if not (submultiset (codes after) allowed) then
-              fail "%s: the fix %S for %s leaves or adds %s, in:\n%s\nwhich becomes:\n%s" name fix.title
-                (Diagnostic.Code.name diagnostic.code)
-                (code_names (codes after))
-                (Diagnostic.quote text) (Diagnostic.quote fixed))
-          diagnostic.fixes)
-      diagnostics
-
-(* The fixes for ordinary mistakes are right as built, so checking them
-   removes none. *)
-let test_no_fix_dropped name text =
-  let source = Source.create ~path:name text in
-  let _, unchecked = Lexer.lex ~check_fixes:false source in
-  let _, checked = Lexer.lex source in
-  List.iter2
-    (fun (before : Diagnostic.t) (after : Diagnostic.t) ->
-      List.iter
-        (fun (fix : Diagnostic.fix) ->
-          if not (List.mem fix after.fixes) then
-            fail "%s: the fix %S for %s fails its check, in:\n%s" name fix.title (Diagnostic.Code.name before.code)
-              (Diagnostic.quote text))
-        before.fixes)
-    unchecked checked
-
-(* Well-formed output *)
-
-let rec check_tokens name text ~start ~stop (tokens : Token.t array) =
-  let text_length = String.length text in
-  let length = Array.length tokens in
-  check (length > 0 && tokens.(length - 1).kind = End_of_file) "%s: the tokens end with End_of_file" name;
-  let stack = ref [] in
-  let previous = ref start in
-  Array.iter
-    (fun (token : Token.t) ->
-      check
-        (token.span.start >= start && token.span.start <= token.span.stop && token.span.stop <= stop
-       && token.span.stop <= text_length)
-        "%s: span %d-%d in bounds" name token.span.start token.span.stop;
-      check (token.span.start >= !previous) "%s: token at %d in order" name token.span.start;
-      previous := token.span.start;
-      (match token.kind with
-      | Punctuation (Open bracket) -> stack := bracket :: !stack
-      | Punctuation (Close bracket) -> (
-          match !stack with
-          | top :: rest when top = bracket -> stack := rest
-          | _ -> fail "%s: unbalanced closer at %d" name token.span.start)
-      | String literal ->
-          Array.iter
-            (fun (interpolation : Token.interpolation) ->
-              check_tokens name text ~start:interpolation.span.start ~stop:interpolation.span.stop
-                interpolation.tokens)
-            (Token.interpolations literal)
-      | _ -> ()))
-    tokens;
-  check (!stack = []) "%s: brackets balanced" name
-
-let check_output name text =
-  match lex text with
-  | exception exception_ -> fail "%s: raised %s" name (Printexc.to_string exception_)
-  | tokens, diagnostics ->
-      let length = String.length text in
-      check_tokens name text ~start:0 ~stop:length tokens;
-      List.iter
-        (fun (diagnostic : Diagnostic.t) ->
-          check
-            (diagnostic.span.start >= 0 && diagnostic.span.start <= diagnostic.span.stop
-           && diagnostic.span.stop <= length)
-            "%s: diagnostic span in bounds" name;
-          List.iter
-            (fun (fix : Diagnostic.fix) ->
-              match Diagnostic.apply_fix text fix with
-              | _ -> ()
-              | exception exception_ -> fail "%s: fix raised %s" name (Printexc.to_string exception_))
-            diagnostic.fixes)
-        diagnostics;
-      check (List.length (Diagnostic.shown diagnostics) <= Diagnostic.limit + 1) "%s: diagnostics shown are capped" name
-
-(* TRUSS_TEST_SEED picks other random inputs, for longer fuzzing runs. *)
-let seed default =
-  match Sys.getenv_opt "TRUSS_TEST_SEED" with
-  | Some value -> [| default; int_of_string value |]
-  | None -> [| default |]
-
-let test_robustness corpus =
-  let random = Random.State.make (seed 2026) in
-  let pick list = List.nth list (Random.State.int random (List.length list)) in
-  (* Bytes that matter to the lexer, and some that do not. *)
-  let interesting =
-    [ "\""; "\"\"\""; "$"; "${"; "}"; "{"; "("; ")"; "["; "]"; "\n"; "\r"; "\r\n"; "\\"; "'"; "/*"; "*/";
-      "//"; "#"; ";"; "0x"; "1e"; "_"; "\xe2\x80\xae"; "\xe2\x80\x8b"; "\xff"; "\xc3"; "\xe2\x80\x8d";
-      "\xd0\xb0"; "fn"; "\t"; " "; "\"\"\"\n"; "$$\"\"\"" ]
-  in
-  for iteration = 1 to 10_000 do
-    let length = Random.State.int random 120 in
-    let text =
-      String.init length (fun _ ->
-          if Random.State.bool random then Char.chr (Random.State.int random 256)
-          else "\"${}()[]{}\n\\$ \t'_a0x.e"
-               .[Random.State.int random 22])
-    in
-    check_output (Printf.sprintf "random bytes %d" iteration) text
-  done;
-  let corpus = Array.of_list corpus in
-  for iteration = 1 to 20_000 do
-    let _, original = corpus.(Random.State.int random (Array.length corpus)) in
-    let buffer = Buffer.create (String.length original + 16) in
-    let position = ref 0 in
-    let mutations = 1 + Random.State.int random 4 in
-    let cuts = List.sort compare (List.init mutations (fun _ -> Random.State.int random (String.length original + 1))) in
-    List.iter
-      (fun cut ->
-        let cut = max cut !position in
-        Buffer.add_substring buffer original !position (cut - !position);
-        (match Random.State.int random 3 with
-        | 0 -> Buffer.add_string buffer (pick interesting)
-        | 1 -> Buffer.add_char buffer (Char.chr (Random.State.int random 256))
-        | _ -> ());
-        position := min (String.length original) (cut + Random.State.int random 3))
-      cuts;
-    if !position < String.length original then
-      Buffer.add_substring buffer original !position (String.length original - !position);
-    let text = Buffer.contents buffer in
-    let name = Printf.sprintf "mutation %d" iteration in
-    check_output name text;
-    if iteration mod 5 = 0 then test_fixes name text
-  done;
-  (* A binary file gives a short report. *)
-  let binary = String.init 100_000 (fun index -> Char.chr ((index * 7919) land 0xFF)) in
-  check (List.length (Diagnostic.shown (snd (lex binary))) <= Diagnostic.limit + 1) "a binary file gives at most %d diagnostics" (Diagnostic.limit + 1)
-
-(* Round trips *)
-
-let test_round_trips () =
-  let random = Random.State.make (seed 18) in
-  let pick array = array.(Random.State.int random (Array.length array)) in
-  let names =
-    [| ("count", Lower "count"); ("user_name", Lower "user_name"); ("x1", Lower "x1");
-       ("Point", Upper "Point"); ("UInt8", Upper "UInt8"); ("O", Upper "O");
-       ("_", Underscore) |]
-  in
-  let non_brackets =
-    Array.of_list
-      (List.filter
-         (fun (_, punctuation) -> match punctuation with Open _ | Close _ -> false | _ -> true)
-         Token.punctuation)
-  in
-  let integer () =
-    let value = Z.of_int64 (Random.State.int64 random Int64.max_int) in
-    let value = if Random.State.bool random then Z.mul value (Z.pow (Z.of_int 10) 20) else value in
-    let spelling =
-      match Random.State.int random 4 with
-      | 0 -> Z.to_string value
-      | 1 -> "0x" ^ Z.format "%x" value
-      | 2 -> "0b" ^ Z.format "%b" value
-      | _ -> "0o" ^ Z.format "%o" value
-    in
-    (spelling, Integer value)
-  in
-  let float () =
-    let whole = Random.State.int random 1000 in
-    let fraction = Random.State.int random 1000 in
-    let exponent = Random.State.int random 40 - 20 in
-    let spelling = Printf.sprintf "%d.%03de%d" whole fraction exponent in
-    let significand = Z.of_int ((whole * 1000) + fraction) in
-    let rec normalize significand exponent =
-      if Z.equal significand Z.zero then (Z.zero, Z.zero)
-      else if Z.equal (Z.rem significand (Z.of_int 10)) Z.zero then
-        normalize (Z.div significand (Z.of_int 10)) (Z.succ exponent)
-      else (significand, exponent)
-    in
-    let significand, exponent = normalize significand (Z.of_int (exponent - 3)) in
-    (spelling, `Float (significand, exponent))
-  in
-  let string () =
-    let pieces = [| ("a", "a"); ("\\n", "\n"); ("\\\"", "\""); ("\\\\", "\\"); ("$", "$"); ("}", "}");
-                    ("\\${", "${"); ("\\u{1F600}", "\xf0\x9f\x98\x80"); ("\xc3\xa9", "\xc3\xa9"); (" ", " ") |] in
-    let count = Random.State.int random 6 in
-    let parts = List.init count (fun _ -> pick pieces) in
-    let spelling = "\"" ^ String.concat "" (List.map fst parts) ^ "\"" in
-    let value = String.concat "" (List.map snd parts) in
-    let raw = Random.State.int random 3 = 0 && value <> "" && not (String.contains value '"') in
-    if raw && not (String.contains value '\n' || String.contains value '\\' || String.contains value '$') then
-      ("\"\"\"" ^ value ^ "\"\"\"", value, true)
-    else (spelling, value, false)
-  in
-  let describe_expected = function
-    | `Kind kind -> (match kind with Integer v -> "Integer " ^ Z.to_string v | _ -> "token")
-    | `String value -> Printf.sprintf "String %S" value
-    | `Float (significand, exponent) -> Printf.sprintf "Float %se%s" (Z.to_string significand) (Z.to_string exponent)
-  in
-  for iteration = 1 to 2000 do
-    let spellings = ref [] and expected = ref [] in
-    let add spelling item =
-      spellings := spelling :: !spellings;
-      expected := item :: !expected
-    in
-    let rec items depth count =
-      for _ = 1 to count do
-        match Random.State.int random 9 with
-        | 0 -> let spelling, kind = pick names in add spelling (`Kind kind)
-        | 1 -> let spelling, keyword = pick (Array.of_list Token.keywords) in add spelling (`Kind (Keyword keyword))
-        | 2 -> let spelling, reserved = pick (Array.of_list Token.reserved_words) in add spelling (`Kind (Reserved reserved))
-        | 3 -> let spelling, punctuation = pick non_brackets in add spelling (`Kind (Punctuation punctuation))
-        | 4 -> let spelling, kind = integer () in add spelling (`Kind kind)
-        | 5 -> let spelling, value = float () in add spelling value
-        | 6 -> let spelling, value, _ = string () in add spelling (`String value)
-        | _ when depth < 4 ->
-            let opener, closer =
-              let bracket = pick [| Paren; Square; Curly |] in
-              (Open bracket, Close bracket)
-            in
-            add (Token.punctuation_spelling opener) (`Kind (Punctuation opener));
-            items (depth + 1) (Random.State.int random 4);
-            add (Token.punctuation_spelling closer) (`Kind (Punctuation closer))
-        | _ -> ()
-      done
-    in
-    items 0 (1 + Random.State.int random 20);
-    let text = String.concat " " (List.rev !spellings) in
-    let tokens, diagnostics = lex text in
-    check (diagnostics = []) "round trip %d: %S lexes without diagnostics" iteration text;
-    let actual =
-      Array.to_list tokens
-      |> List.filter (fun (token : Token.t) -> match token.kind with Newline | End_of_file -> false | _ -> true)
-    in
-    let expected = List.rev !expected in
-    if List.length actual <> List.length expected then
-      fail "round trip %d: %S gives %d tokens, expected %d" iteration text (List.length actual) (List.length expected)
-    else
-      List.iter2
-        (fun (token : Token.t) item ->
-          let matches =
-            match (item, token.kind) with
-            | `String value, String { first; rest = [||]; _ } -> first.value = value
-            | `Kind (Integer expected), Integer actual -> Z.equal expected actual
-            | `Float (significand, exponent), Float actual ->
-                Z.equal significand actual.significand && Z.equal exponent actual.exponent
-            | `Kind kind, actual -> kind = actual
-            | _ -> false
-          in
-          check matches "round trip %d: %S: expected %s" iteration text (describe_expected item))
-        actual expected
-  done
-
-(* Unicode spot checks *)
-
-let test_unicode () =
-  check (Unicode.version = "18.0.0") "the pinned Unicode version";
-  (* Names are ASCII: a word with a letter outside ASCII is one name, with
-     one error. *)
-  List.iter
-    (fun word ->
-      let tokens, diagnostics = lex ("let " ^ word ^ " = 1\n") in
-      check
-        (List.map (fun (d : Diagnostic.t) -> d.code) diagnostics = [ Diagnostic.Code.Name_not_ascii ]
-        && Array.length tokens = 6)
-        "%S is one name with one error" word)
-    [ "caf\xc3\xa9"; "\xe5\x90\x8d\xe5\x89\x8d"; "p\xd0\xb0ypal"; "\xc3\x84rger" ];
-  check (Unicode.is_forbidden 0x202E && Unicode.is_forbidden 0x200B && Unicode.is_forbidden 0xE0041)
-    "Bidi controls, zero-width space, and tags are forbidden";
-  check (not (Unicode.is_forbidden 0x200D || Unicode.is_forbidden 0xFE0F || Unicode.is_forbidden 0x09))
-    "joiners, variation selectors, and tab are allowed";
-  check (Unicode.forbidden_name 0x202E = Some "RIGHT-TO-LEFT OVERRIDE") "names of forbidden characters";
-  check (Unicode.decode "\xc0\xaf" 0 < 0 && Unicode.decode "\xed\xa0\x80" 0 < 0 && Unicode.decode "\xf4\x90\x80\x80" 0 < 0)
-    "overlong forms, surrogates, and values above U+10FFFF are invalid UTF-8"
+  List.map dedent (loop false [] [] (String.split_on_char '\n' (document name)))
 
 let () =
-  let corpus = corpus () in
-  test_unicode ();
-  test_documents_agree ();
-  test_corpus corpus;
-  List.iter (fun (name, text) -> test_fixes name text) corpus;
-  Array.iter
-    (fun file ->
-      if Filename.check_suffix file ".truss" then
-        let text = read (Filename.concat "golden" file) in
-        test_fixes file text;
-        test_no_fix_dropped file text)
-    (Sys.readdir "golden");
-  test_round_trips ();
-  test_robustness corpus;
+  let grammar = document "GRAMMAR.md" in
+  let spellings list = List.sort_uniq compare (List.map fst list) in
+  test "GRAMMAR.md lists the keywords" (fun () ->
+      equal_lists Fun.id "keywords" (spellings Token.keywords) (words (block_after grammar "Reserved everywhere:")));
+  test "GRAMMAR.md lists the reserved words" (fun () ->
+      equal_lists Fun.id "reserved" (spellings Token.reserved_words) (words (block_after grammar "Reserved for later use")));
+  test "GRAMMAR.md lists the punctuation" (fun () ->
+      equal_lists Fun.id "punctuation" (spellings Token.punctuation) (words (block_after grammar "### Punctuation")));
+  test "GRAMMAR.md's line-break lists match Layout" (fun () ->
+      let kind_of spelling =
+        match Token.word spelling with
+        | Some kind -> Some kind
+        | None ->
+            if spelling = "_" then Some Underscore
+            else Option.map (fun p -> Punctuation p) (List.assoc_opt spelling Token.punctuation)
+      in
+      let listed first second = List.filter_map kind_of (backticked (between grammar first second)) in
+      let can_end = listed "**can end a statement**:" "- the first token after it" in
+      let can_begin = listed "**can begin a statement**:" "3. Several line feeds" in
+      let spelling = function
+        | Keyword keyword -> keyword_spelling keyword
+        | Punctuation punctuation -> punctuation_spelling punctuation
+        | _ -> "_"
+      in
+      List.iter
+        (fun kind ->
+          if Layout.can_end kind <> List.mem kind can_end then fail "can_end %s" (spelling kind);
+          if Layout.can_begin kind <> List.mem kind can_begin then fail "can_begin %s" (spelling kind))
+        (List.map (fun (_, keyword) -> Keyword keyword) Token.keywords
+        @ List.map (fun (_, punctuation) -> Punctuation punctuation) Token.punctuation
+        @ [ Underscore ]));
+  List.iter
+    (fun name ->
+      List.iteri
+        (fun index text ->
+          test (Printf.sprintf "%s block %d lexes cleanly" name (index + 1)) (fun () ->
+              equal_lists Fun.id "codes" [] (codes text)))
+        (truss_blocks name))
+    [ "SYNTAX.md"; "DESIGN.md"; "GRAMMAR.md" ]
+
+let () =
   if !failures > 0 then begin
-    Printf.printf "%d failures\n" !failures;
+    Printf.printf "%d failures in %d tests\n" !failures !count;
     exit 1
   end
-  else
-    Printf.printf
-      "%d document blocks lex cleanly; fixes, 2000 round trips, and 30000 random inputs pass\n"
-      (List.length corpus)
+  else Printf.printf "%d tests pass\n" !count

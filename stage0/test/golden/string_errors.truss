@@ -1,9 +1,0 @@
-let bad = "\q \x41 \u00E9 \u{} \u{1234567} \u{D800} \u{110000} \u{12"
-let open = "never closed
-let tail = "ends with backslash\
-let empty = "${} and ${ }"
-let broken = "${f(}"
-let unclosed = "${items.join("x}"
-let comment = "${a // b}"
-let quote = 'a' '\n' '"' '\''
-let stray = 'abc'

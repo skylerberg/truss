@@ -15,9 +15,6 @@ type t = Cursor.t
 
 let create = Cursor.create
 
-(* Whether the file ended inside an unterminated comment or raw string. *)
-let ended_inside_error cursor = cursor.ended_inside_error
-
 (* The punctuation that starts with [current], by longest match, or [None]
    if [current] starts none. *)
 let punctuation cursor current =
@@ -63,7 +60,9 @@ let punctuation cursor current =
   | '^' -> first_of [ ('=', Caret_equal, 2) ] Caret
   | '&' -> first_of [ ('&', And_and, 2); ('=', Ampersand_equal, 2) ] Ampersand
   | '|' -> first_of [ ('|', Or_or, 2); ('=', Bar_equal, 2) ] Bar
-  | ('=' | '!') when is 1 '=' && is 2 '=' ->
+  (* JavaScript's `===` and `!==`, as a whole: a longer run of `=` is not
+     that habit, and lexes as `==`s for the parser to report. *)
+  | ('=' | '!') when is 1 '=' && is 2 '=' && not (is 3 '=') ->
       let written, replacement, kind = if current = '=' then ("===", "==", Equal_equal) else ("!==", "!=", Not_equal) in
       report cursor ~code:Strict_equality
         ~fixes:[ Diagnostic.fix ("Write `" ^ replacement ^ "`") [ Diagnostic.replace (span start (start + 3)) replacement ] ]
@@ -233,15 +232,19 @@ let rec next cursor =
   | Line_end ->
       Source_text.note_line_break cursor (Source_text.consume_line_break cursor);
       next cursor
-  | End -> take_trivia cursor End_of_file (Source.zero_width cursor.length)
+  | End ->
+      Layout.End
+        {
+          position = cursor.length;
+          first_line_break = cursor.first_line_break;
+          blank_line = cursor.blank_line;
+          cut_off = cursor.ended_inside_error;
+        }
   | Token { kind; start; ending = _ } ->
       (* At the top level, a line break is legal, so how a string ended does
          not matter here. *)
-      take_trivia cursor kind (span start cursor.position)
-
-and take_trivia cursor kind raw_span =
-  let raw = { raw_kind = kind; raw_span; first_line_break = cursor.first_line_break; blank_line = cursor.blank_line } in
-  cursor.first_line_break <- None;
-  cursor.blank_line <- false;
-  cursor.line_is_blank <- false;
-  raw
+      let first_line_break = cursor.first_line_break and blank_line = cursor.blank_line in
+      cursor.first_line_break <- None;
+      cursor.blank_line <- false;
+      cursor.line_is_blank <- false;
+      Layout.Next { kind; span = span start cursor.position; first_line_break; blank_line }

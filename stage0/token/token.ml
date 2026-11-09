@@ -94,16 +94,6 @@ and interpolation = { tokens : t array; span : span }
 let texts literal = Array.append [| literal.first |] (Array.map snd literal.rest)
 let interpolations literal = Array.map fst literal.rest
 
-(* A token from the scanner, before layout. Layout makes the token from it.
-   [first_line_break] is the first line break between this token and the
-   one before, if there is one, which is where a NEWLINE token goes. *)
-type raw = {
-  raw_kind : kind;
-  raw_span : span;
-  first_line_break : span option;
-  blank_line : bool;
-}
-
 let keywords =
   [
     ("any", Any); ("assert", Assert); ("break", Break); ("capability", Capability);

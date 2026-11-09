@@ -106,6 +106,10 @@ project is at the repository root, so that tests can read the documents.
 `stage0/bin/truss_lex.ml` builds `truss-lex`, which prints a file's
 diagnostics, as JSON with `--json`, and its tokens with `--tokens`.
 
+The scanner uses Layout too: it lays out each interpolation's tokens as it
+reads them, as [Interpolation](#interpolation) asks, so `Layout` defines the
+input both of its uses take.
+
 ### Hand-written, not generated
 
 IMPLEMENTATION.md suggested sedlex. A hand-written scanner fits better:
@@ -485,10 +489,10 @@ each sequence is already an error. Habits fall into two groups:
 | Written | Group | What the lexer emits | Fix |
 |---|---|---|---|
 | `// ...`, `/// ...`, `# ...` | local | Nothing, up to the end of the line | Remove the comment |
-| `/* ... */`, nested | local | Nothing. If the comment spans lines, the next token counts as starting a new line. | Remove the comment |
+| `/* ... */`, nested | local | Nothing. If the comment spans lines, the next token counts as starting a new line. | Remove the comment. An unterminated one runs to the end of the file and has no fix. |
 | `#[derive(...)]`, `#![...]` *Later* | local | Nothing, up to the end of the line | "Truss has no attributes", pointing to `derives` |
 | `;` | local | At the end of a line, nothing. Mid-line, the next token counts as starting a new line. | Remove the `;`, or replace it with a line break |
-| `===`, `!==` | local | `==`, `!=` | `==`, `!=` |
+| `===`, `!==` | local | `==`, `!=` | `==`, `!=`. A longer run, such as `====`, is not this habit, and lexes as `==`s. |
 | `<>` *Later* | local | `!=` | `!=` |
 | `...` *Later* | local | `..=` between two operands, otherwise `todo` | `..=`, or `todo` for a placeholder body |
 | `..<` *Later* | local | `..` | `..` |
@@ -596,7 +600,8 @@ type edit = { span : span; replacement : string }
 type fix = { title : string; edits : edit list }
 
 type t = {
-  code : Code.t;                  (* one constructor per code; Code.name gives "lexer.unterminated_string" *)
+  code : Code.t;                  (* Lexer of lexer, and a group for each later stage;
+                                     Code.name gives "lexer.unterminated_string" *)
   message : string;
   span : span;
   notes : (span * string) list;
@@ -616,9 +621,9 @@ type t = {
   lexes the result again, and leaves out a fix that fails. A fix is built from
   the text around one error, but whether it is right can depend on what it
   cannot see, such as where recovery from another error guesses a string
-  ends. A test checks that no fix in the golden files fails, so ordinary
-  mistakes keep their fixes and only unusual combinations of errors lose
-  them.
+  ends. The fuzzer checks that fixes for single mistakes never fail the
+  check, so ordinary mistakes keep their fixes and only unusual combinations
+  of errors lose them.
 - **Checking a fix lexes only the part of the file around it.** A token that
   starts a line outside brackets begins with the lexer's state empty, so the
   text between two such tokens, usually one top-level statement or
@@ -686,28 +691,26 @@ type t = {
 
 ## Testing
 
-- **Golden tests.** Small `.truss` files in `stage0/test/golden/`, each with
-  the expected tokens and diagnostics from `truss-lex --tokens`, compared
-  using dune's `diff` actions. This needs no test library. To add one, add a
-  `.truss` file, run `dune build @runtest --auto-promote`, and review the new
-  `.expected` file.
-- **The documents as a corpus.** Every ` ```truss ` block in SYNTAX.md,
-  DESIGN.md, and GRAMMAR.md must lex with no diagnostics. This keeps the
-  examples honest.
+The tests follow IMPLEMENTATION.md's rules for testing: each states one
+fact about a small input.
+
+- **Focused tests** in `stage0/test/lexer_tests.ml`, grouped by section of
+  this document. A test gives an input and asserts its tokens, shown
+  compactly, or its one diagnostic: the code, where it starts, and the exact
+  text each fix produces, which must lex cleanly.
 - **The documents agree with the code.** Tests read the keyword lists, the
   punctuation list, and the line-break sets from GRAMMAR.md and compare them
   with `Token` and `Layout`.
-- **Fixes work.** Every fix for the golden files, the corpus, and mutated
-  corpus files is applied, and the result is lexed again (see
-  [Diagnostics](#diagnostics)). No fix for the golden files fails its check.
-- **Round trips.** Random sequences of valid tokens, printed with spaces in
-  between, lex back to the same tokens.
-- **Robustness.** Random bytes, and corpus files with random mutations, never
-  raise an exception, always finish, and always produce spans that are in
-  bounds and in order, and balanced brackets. `TRUSS_TEST_SEED` chooses other
-  random inputs for longer runs. A fuzzer such as AFL can drive this later.
-- **Unicode.** Spot checks run with the other tests, and the full
-  conformance checks run with `regenerate.sh` (see
+- **The documents' examples lex cleanly.** Each ` ```truss ` block in
+  SYNTAX.md, DESIGN.md, and GRAMMAR.md is a test of its own.
+- **The fuzzer**, `stage0/tools/fuzz`, is run by hand. It checks that no
+  input raises or gives spans out of bounds or out of order, that one
+  mistake inserted into a document example never loses its fix to the fix
+  check, and that valid tokens round-trip. Each problem it finds becomes a
+  focused test.
+- **The benchmark**, `stage0/tools/benchmark`, measures throughput on given
+  files.
+- **Unicode conformance** runs with `regenerate.sh` (see
   [Unicode data](#unicode-data)).
 - **Both parsers.** Tokens from the corpus go to the Menhir reference as well as
   the hand-written parser, as IMPLEMENTATION.md plans.

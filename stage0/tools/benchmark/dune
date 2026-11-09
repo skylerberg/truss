@@ -1,0 +1,3 @@
+(executable
+ (name benchmark)
+ (libraries source lexer unix))

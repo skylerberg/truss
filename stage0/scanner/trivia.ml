@@ -39,14 +39,20 @@ let block_comment cursor =
   (match !first_line_break with
   | Some line_break when cursor.first_line_break = None -> cursor.first_line_break <- Some line_break
   | _ -> ());
-  report cursor ~code:Comment
-    ~fixes:
+  (* An unterminated comment runs to the end of the file. Removing it would
+     remove the rest of the file, and where its `*/` was meant to go cannot
+     be known, so it has no fix. *)
+  let fixes =
+    if closed then
       [
         Diagnostic.fix "Remove the comment"
           [ Source_text.remove_trivia cursor ~start ~stop ~line_break:(!first_line_break <> None) ];
       ]
-    (span start stop)
-    (if closed then comment_message else comment_message ^ " This comment is never closed.")
+    else []
+  in
+  report cursor ~code:Comment ~fixes (span start stop)
+    (if closed then comment_message
+     else comment_message ^ " This comment is never closed, so it runs to the end of the file.")
 
 let semicolon cursor =
   let start = cursor.position in
@@ -78,8 +84,16 @@ let reject ?(code = Diagnostic.Code.Unexpected_character) cursor ~length message
   report cursor ~code (span start (start + length)) message
 
 (* The end of a character literal from another language, such as `'a'` or
-   `'\n'`, that starts at [start], or [None] if there is none there. *)
+   `'\n'`, that starts at [start], or [None] if there is none there. The
+   habit is a literal standing on its own, so quotes touching a name, as in
+   `value's'debug`, are not one: they are stray `'`s. *)
 let character_literal_end cursor start =
+  let touches_name index =
+    let current = byte cursor index in
+    is_ascii_name_byte current || current >= 0x80
+  in
+  if start > 0 && touches_name (start - 1) then None
+  else
   let content = start + 1 in
   let current = byte cursor content in
   let close =
@@ -97,7 +111,9 @@ let character_literal_end cursor start =
       if packed < 0 || Unicode.is_forbidden (Unicode.decoded_code_point packed) then None
       else Some (content + Unicode.decoded_length packed)
   in
-  match close with Some close when byte cursor close = Char.code '\'' -> Some (close + 1) | _ -> None
+  match close with
+  | Some close when byte cursor close = Char.code '\'' && not (touches_name (close + 1)) -> Some (close + 1)
+  | _ -> None
 
 (* Whether a run of `$` at [index] opens a raw string. *)
 let opens_raw_string cursor index =

@@ -6,11 +6,12 @@
 
 type span = Source.span = private { start : int; stop : int }
 
-(** The codes, one constructor each, so that a misspelled code cannot
-    compile. {!Code.name} gives the stable name tools see, such as
-    ["lexer.unterminated_string"]. *)
+(** The codes, one constructor each and grouped by the stage that reports
+    them, so that a misspelled code cannot compile and every stable code is
+    listed in one place. {!Code.name} gives the name tools see, such as
+    ["lexer.unterminated_string"]: the stage, then the code. *)
 module Code : sig
-  type t =
+  type lexer =
     | Invalid_utf8
     | Carriage_return
     | Forbidden_character
@@ -39,7 +40,9 @@ module Code : sig
     | Raw_string_indentation
     | Unclosed_bracket
     | Unmatched_closing_bracket
-    | Too_many_diagnostics
+
+  (* Each stage adds its own group; its codes are named "stage.code". *)
+  type t = Lexer of lexer | Too_many_diagnostics
 
   val name : t -> string
 end

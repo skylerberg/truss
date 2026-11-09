@@ -36,11 +36,16 @@ let can_begin = function
       false
   | Punctuation _ | Newline | End_of_file -> false
 
-(* [cut_off] says, at the end, whether the input ended at an error already
-   reported: an interpolation cut off by a line break, or a file that ends
-   inside an unterminated comment or string. Brackets left open then are
-   closed without another error. *)
-type mode = File of { recovery : bool; cut_off : unit -> bool } | Interpolation of { cut_off : unit -> bool }
+(* What the scanner gives layout: the next token with the line breaks
+   before it, or the end of the input. [cut_off] says whether the input
+   ended at an error already reported: an interpolation cut off by a line
+   break, or a file that ends inside an unterminated comment or string.
+   Brackets left open then are closed without another error. *)
+type input =
+  | Next of { kind : Token.kind; span : span; first_line_break : span option; blank_line : bool }
+  | End of { position : int; first_line_break : span option; blank_line : bool; cut_off : bool }
+
+type mode = File of { recovery : bool } | Interpolation
 
 let token kind span = { kind; span; line_break_before = false; blank_line_before = false }
 let spelling punctuation = punctuation_spelling punctuation
@@ -89,7 +94,7 @@ let run ~source ~diagnostics ~mode pull =
             outer
         in
         report
-          (Diagnostic.make ~code:Unclosed_bracket ~notes
+          (Diagnostic.make ~code:(Lexer Unclosed_bracket) ~notes
              ~fixes:
                [
                  Diagnostic.fix
@@ -104,7 +109,7 @@ let run ~source ~diagnostics ~mode pull =
     let span = current.span in
     if not (List.exists (fun (candidate, _) -> candidate = bracket) !stack) then
       report
-        (Diagnostic.make ~code:Unmatched_closing_bracket span
+        (Diagnostic.make ~code:(Lexer Unmatched_closing_bracket) span
            (Printf.sprintf "This `%s` has no `%s` to close." (closer_spelling bracket)
               (opener_spelling bracket)))
     else begin
@@ -115,7 +120,7 @@ let run ~source ~diagnostics ~mode pull =
         | (unclosed, unclosed_span) :: _ ->
             let missing = closer_spelling unclosed in
             report
-              (Diagnostic.make ~code:Unclosed_bracket
+              (Diagnostic.make ~code:(Lexer Unclosed_bracket)
                  ~notes:
                    [
                      ( span,
@@ -138,75 +143,62 @@ let run ~source ~diagnostics ~mode pull =
       emit current
     end
   in
-  let finish (end_of_file : raw) =
-    let position = end_of_file.raw_span.start in
+  let finish ~position ~first_line_break ~blank_line ~cut_off =
     let text = Source.text source in
     (match (mode, !stack) with
     | _, [] -> ()
-    | File { cut_off; _ }, _ :: _ when cut_off () ->
-        close_silently (closer_position end_of_file.first_line_break position)
-    | Interpolation { cut_off }, _ :: _ when cut_off () -> close_silently position
+    | File _, _ :: _ when cut_off -> close_silently (closer_position first_line_break position)
+    | Interpolation, _ :: _ when cut_off -> close_silently position
     | File _, _ :: _ ->
         let ends_with_line_break = position > 0 && (text.[position - 1] = '\n' || text.[position - 1] = '\r') in
         close_all
-          ~position:(closer_position end_of_file.first_line_break position)
+          ~position:(closer_position first_line_break position)
           ~fix_position:position
           ~before:(if ends_with_line_break || position = 0 then "" else "\n")
           ~after:(if ends_with_line_break then "\n" else "")
           ~reason:" before the end of the file"
-    | Interpolation _, _ :: _ ->
+    | Interpolation, _ :: _ ->
         close_all ~position ~fix_position:position ~before:"" ~after:"" ~reason:" before the end of the interpolation");
     (match (mode, !previous) with
     | File _, Some previous_kind when can_end previous_kind ->
         emit
           (token Newline
-             (match end_of_file.first_line_break with
+             (match first_line_break with
              | Some span -> span
              | None -> Source.zero_width position))
     | _ -> ());
     emit
       {
         kind = End_of_file;
-        span = end_of_file.raw_span;
-        line_break_before = end_of_file.first_line_break <> None;
-        blank_line_before = end_of_file.blank_line;
+        span = Source.zero_width position;
+        line_break_before = first_line_break <> None;
+        blank_line_before = blank_line;
       };
     Dynarray.to_array output
   in
   let rec loop () =
-    let raw = pull () in
-    match raw.raw_kind with
-    | End_of_file -> (
+    match pull () with
+    | End { position; first_line_break; blank_line; cut_off } -> (
         match (mode, !stack) with
-        | File { recovery = false; _ }, _ :: _ -> None
-        | _ -> Some (finish raw))
-    | kind ->
-        let start = raw.raw_span.start in
+        | File { recovery = false }, _ :: _ -> None
+        | _ -> Some (finish ~position ~first_line_break ~blank_line ~cut_off))
+    | Next { kind; span; first_line_break; blank_line } ->
         (match mode with
-        | File { recovery = true; _ } when !stack <> [] && Token.starts_definition source start ->
+        | File { recovery = true } when !stack <> [] && Token.starts_definition source span.start ->
             close_all
-              ~position:(closer_position raw.first_line_break start)
-              ~fix_position:start ~before:"" ~after:"\n" ~reason:" before the next definition"
+              ~position:(closer_position first_line_break span.start)
+              ~fix_position:span.start ~before:"" ~after:"\n" ~reason:" before the next definition"
         | _ -> ());
-        let inside_parentheses =
-          match !stack with ((Paren | Square), _) :: _ -> true | _ -> false
-        in
-        (match (raw.first_line_break, !previous) with
+        let inside_parentheses = match !stack with ((Paren | Square), _) :: _ -> true | _ -> false in
+        (match (first_line_break, !previous) with
         | Some line_break, Some previous_kind
           when (not inside_parentheses) && can_end previous_kind && can_begin kind ->
             emit (token Newline line_break)
         | _ -> ());
-        let current =
-          {
-            kind;
-            span = raw.raw_span;
-            line_break_before = raw.first_line_break <> None;
-            blank_line_before = raw.blank_line;
-          }
-        in
+        let current = { kind; span; line_break_before = first_line_break <> None; blank_line_before = blank_line } in
         (match kind with
         | Punctuation (Open bracket) ->
-            stack := (bracket, raw.raw_span) :: !stack;
+            stack := (bracket, span) :: !stack;
             emit current
         | Punctuation (Close bracket) -> close_bracket current bracket
         | _ -> emit current);
@@ -214,15 +206,14 @@ let run ~source ~diagnostics ~mode pull =
   in
   loop ()
 
-let file ~source ~diagnostics ~cut_off pull =
-  match run ~source ~diagnostics ~mode:(File { recovery = false; cut_off }) pull with
+let file ~source ~diagnostics pull =
+  match run ~source ~diagnostics ~mode:(File { recovery = false }) pull with
   | Some tokens -> `Complete tokens
   | None -> `Unclosed_at_end
 
 (* With recovery and in interpolations, open brackets are always closed, so
    [run] always returns tokens. *)
-let file_with_recovery ~source ~diagnostics ~cut_off pull =
-  Option.get (run ~source ~diagnostics ~mode:(File { recovery = true; cut_off }) pull)
+let file_with_recovery ~source ~diagnostics pull =
+  Option.get (run ~source ~diagnostics ~mode:(File { recovery = true }) pull)
 
-let interpolation ~source ~diagnostics ~cut_off pull =
-  Option.get (run ~source ~diagnostics ~mode:(Interpolation { cut_off }) pull)
+let interpolation ~source ~diagnostics pull = Option.get (run ~source ~diagnostics ~mode:Interpolation pull)

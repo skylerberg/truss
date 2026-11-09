@@ -48,8 +48,7 @@ let literal ~tag ~form builder stop =
 let ordinary_special byte = byte = quote || byte = Char.code '\\' || byte = dollar
 let raw_special byte = byte = quote || byte = dollar
 
-let raw_token kind start stop =
-  { raw_kind = kind; raw_span = span start stop; first_line_break = None; blank_line = false }
+let next kind start stop = Layout.Next { kind; span = span start stop; first_line_break = None; blank_line = false }
 
 (* An interpolation, at its delimiter: `${`, or the `$`s and `{` of a raw
    string opened with `$`s. *)
@@ -71,7 +70,9 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
     cursor.position <- start + delimiter_length;
     let braces = ref 0 and count = ref 0 in
     let finished = ref false and closed = ref false and ending = ref Closed in
-    let end_of_input position = raw_token End_of_file position position in
+    let end_of_input position =
+      Layout.End { position; first_line_break = None; blank_line = false; cut_off = !ending = Cut_off }
+    in
     let pull () =
       if !finished then end_of_input cursor.position
       else
@@ -97,12 +98,10 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
               finished := true;
               ending := Cut_off
             end;
-            raw_token kind token_start cursor.position
+            next kind token_start cursor.position
     in
     let tokens =
-      Layout.interpolation ~source:cursor.source ~diagnostics:cursor.diagnostics
-        ~cut_off:(fun () -> !ending = Cut_off)
-        pull
+      Layout.interpolation ~source:cursor.source ~diagnostics:cursor.diagnostics pull
     in
     let interpolation_span = span start cursor.position in
     if !closed && !count = 0 then

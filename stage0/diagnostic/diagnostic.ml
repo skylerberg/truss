@@ -1,7 +1,7 @@
 type span = Source.span = private { start : int; stop : int }
 
 module Code = struct
-  type t =
+  type lexer =
     | Invalid_utf8
     | Carriage_return
     | Forbidden_character
@@ -30,11 +30,11 @@ module Code = struct
     | Raw_string_indentation
     | Unclosed_bracket
     | Unmatched_closing_bracket
-    | Too_many_diagnostics
 
-  let name code =
-    "lexer."
-    ^
+  (* Each stage adds its own group; its codes are named "stage.code". *)
+  type t = Lexer of lexer | Too_many_diagnostics
+
+  let lexer_name code =
     match code with
     | Invalid_utf8 -> "invalid_utf8"
     | Carriage_return -> "carriage_return"
@@ -64,6 +64,9 @@ module Code = struct
     | Raw_string_indentation -> "raw_string_indentation"
     | Unclosed_bracket -> "unclosed_bracket"
     | Unmatched_closing_bracket -> "unmatched_closing_bracket"
+
+  let name = function
+    | Lexer code -> "lexer." ^ lexer_name code
     | Too_many_diagnostics -> "too_many_diagnostics"
 end
 
@@ -114,18 +117,19 @@ module Collector = struct
       (Dynarray.to_list collector)
 end
 
+(* The first [limit], then a count of the rest, placed after the last one
+   shown. *)
 let shown diagnostics =
-  let rec take count = function
+  let rec take count last = function
     | [] -> []
     | rest when count = limit ->
-        let last = (List.nth diagnostics (limit - 1)).span.stop in
         [
           make ~code:Too_many_diagnostics (Source.zero_width last)
             (Printf.sprintf "%d more errors are not shown." (List.length rest));
         ]
-    | first :: rest -> first :: take (count + 1) rest
+    | (first : t) :: rest -> first :: take (count + 1) first.span.stop rest
   in
-  take 0 diagnostics
+  take 0 0 diagnostics
 
 (* Rendering *)
 
@@ -133,8 +137,6 @@ let location source offset =
   let line, column = Source.position source offset in
   Printf.sprintf "%s:%d:%d" (Source.path source) line column
 
-(* A string in double quotes, with only quotes, backslashes, and control
-   characters escaped, so that text in any script stays readable. *)
 (* Calls [valid] with each valid UTF-8 sequence of [text] and [invalid] with
    each byte that does not start one. *)
 let iter_utf8 text ~valid ~invalid =

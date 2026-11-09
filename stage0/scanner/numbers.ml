@@ -8,7 +8,7 @@
    such as a digit its base does not allow, gets no fix. *)
 
 type problem = {
-  code : Diagnostic.Code.t;
+  code : Diagnostic.Code.lexer;
   message : string;
   start : int;  (* offsets within the literal *)
   stop : int;

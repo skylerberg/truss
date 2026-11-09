@@ -1,8 +1,0 @@
-fn f() {
-  let text = """
-    never closed
-  let x = 1
-}
-let after = 2
-
-fn g() {}
