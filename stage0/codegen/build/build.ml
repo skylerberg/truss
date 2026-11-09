@@ -99,4 +99,4 @@ let program toolchain cache env settings ~files ~sources ~output =
   let runtime = ("the runtime", Startup.runtime target) in
   match objects toolchain cache settings ((runtime :: emitted) @ sources) with
   | Error message -> Error message
-  | Ok objects -> Toolchain.link toolchain ~objects ~output
+  | Ok objects -> Toolchain.link toolchain ~extra:settings.extra ~objects ~output ()

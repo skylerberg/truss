@@ -30,8 +30,11 @@ val compile :
   unit ->
   (unit, string) result
 
-(* Links object files into a program against the platform's libc. *)
-val link : t -> objects:string list -> output:string -> (unit, string) result
+(* Links object files into a program against the platform's libc, with
+   [extra] flags, such as a sanitizer's, which the objects were compiled
+   with too. *)
+val link :
+  t -> ?extra:string list -> objects:string list -> output:string -> unit -> (unit, string) result
 
 (* Runs a program and returns its exit status, its standard output, and its
    standard error. A program ended by a signal has status [128 + signal].

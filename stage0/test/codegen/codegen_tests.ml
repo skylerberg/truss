@@ -252,7 +252,17 @@ let strict =
 
 let counter = ref 0
 let cache = lazy (Build.cache (Filename.concat (Lazy.force scratch) "objects"))
-let settings : Build.settings = { build = Development; optimization = O1; extra = strict }
+
+(* [TRUSS_SANITIZE=1] builds every test's C with AddressSanitizer and
+   UndefinedBehaviorSanitizer, as [truss --sanitize] does; a report is a
+   compiler bug. *)
+let sanitizers =
+  if Sys.getenv_opt "TRUSS_SANITIZE" = Some "1" then
+    [ "-fsanitize=address,undefined"; "-fno-sanitize-recover=undefined"; "-fno-omit-frame-pointer" ]
+  else []
+
+let settings : Build.settings =
+  { build = Development; optimization = O1; extra = strict @ sanitizers }
 
 (* Compiles the instances into a program whose [main] calls [entry], runs
    it, and returns its status, output, and errors. *)

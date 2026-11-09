@@ -1175,7 +1175,9 @@ fact about a small input, and there are no golden files.
   - **Sanitizers.** Build programs with AddressSanitizer and
     UndefinedBehaviorSanitizer. A memory error in Truss code can only come
     from a bug in the compiler or the prover, so any report is one. Being
-    able to do this is one benefit of emitting C.
+    able to do this is one benefit of emitting C. `truss test --sanitize` and
+    `truss run --sanitize` build this way, and `TRUSS_SANITIZE=1 dune test`
+    builds every codegen test this way.
   - **`--check-proofs`.** A compiler flag, for testing the compiler only,
     that emits a run-time check for every proven obligation: indexes,
     overflow, division, shifts, and `unreachable`. A failed check reports a

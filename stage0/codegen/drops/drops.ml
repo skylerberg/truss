@@ -227,13 +227,26 @@ let rec promote a s path =
       | _ -> ())
   | _ -> ()
 
+(* Giving a place a value gives one to what is inside it, but not to what a
+   pointer in it points at. *)
 let set_init a s place =
   let place = before_index place in
+  let reached =
+    match path_of_place place with
+    | Some outer ->
+        List.filter
+          (fun i ->
+            let inner = a.paths.(i) in
+            not
+              (List.mem Deref (List.filteri (fun k _ -> k >= List.length outer.steps) inner.steps)))
+          (affected a place)
+    | None -> []
+  in
   List.iter
     (fun i ->
       s.maybe_init.(i) <- true;
       s.maybe_uninit.(i) <- false)
-    (affected a place);
+    reached;
   Option.iter (promote a s) (path_of_place place)
 
 let apply a s statement =

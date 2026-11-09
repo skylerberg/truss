@@ -4,7 +4,9 @@
    it; each [.truss] file under the directory is one of its modules. *)
 
 let usage () =
-  prerr_endline "usage: truss test DIRECTORY\n       truss run DIRECTORY [ARGUMENTS...]";
+  prerr_endline
+    "usage: truss test [--sanitize] DIRECTORY\n\
+    \       truss run [--sanitize] DIRECTORY [ARGUMENTS...]";
   exit 2
 
 let fail format =
@@ -44,6 +46,17 @@ let check database modules =
   List.iter prerr_string found;
   if found <> [] then exit 1
 
+(* [--sanitize], right after the command, builds with AddressSanitizer and
+   UndefinedBehaviorSanitizer, for testing the compiler: a report from
+   either is a bug in it. *)
+let sanitize, arguments =
+  match Array.to_list Sys.argv with
+  | program :: command :: "--sanitize" :: rest -> (true, program :: command :: rest)
+  | all -> (false, all)
+
+let sanitizers =
+  [ "-fsanitize=address,undefined"; "-fno-sanitize-recover=undefined"; "-fno-omit-frame-pointer" ]
+
 let compiler database =
   match Toolchain.find () with
   | Error message -> fail "%s" message
@@ -51,10 +64,10 @@ let compiler database =
       let home = Option.value (Sys.getenv_opt "HOME") ~default:(Filename.get_temp_dir_name ()) in
       let cache = Build.cache (Filename.concat home ".cache/truss/objects") in
       Compile.create database Memory_layout.target_64 toolchain cache
-        { build = Development; optimization = O1; extra = [] }
+        { build = Development; optimization = O1; extra = (if sanitize then sanitizers else []) }
 
 let () =
-  match Array.to_list Sys.argv with
+  match arguments with
   | _ :: "test" :: [ directory ] -> (
       let database, modules = load directory in
       check database modules;

@@ -118,10 +118,10 @@ let compile t ~optimization ?(extra = []) ~source ~output () =
   in
   match run t.compiler arguments with 0, _, _ -> Ok () | _, out, err -> Error (out ^ err)
 
-let link t ~objects ~output =
+let link t ?(extra = []) ~objects ~output () =
   (* [fma] can be a call into libm where the processor has no instruction
      for it, as on baseline x86-64. macOS accepts [-lm] as part of its libc. *)
-  match run t.compiler (objects @ [ "-o"; output; "-lm" ]) with
+  match run t.compiler (extra @ objects @ [ "-o"; output; "-lm" ]) with
   | 0, _, _ -> Ok ()
   | _, out, err -> Error (out ^ err)
 
