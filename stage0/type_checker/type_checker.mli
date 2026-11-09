@@ -17,7 +17,3 @@ val load_package :
 
 val load_standard : Query.database -> unit
 (** Sets the [standard] package, built into the compiler. *)
-
-val read_directory : package:string -> string -> (Path.module_ * string) list
-(** The modules of a package's directory: each [.truss] file under it, named by its path there, in
-    order. *)

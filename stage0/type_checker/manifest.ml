@@ -6,9 +6,14 @@
      version = "0.3.0"
 
      [dependencies]
-     http = { version = "4.0", capabilities = ["NetworkClient", "Clock"] } *)
+     http = { version = "4.0", capabilities = ["NetworkClient", "Clock"] }
 
-type t = { name : string; dependencies : Workspace.dependency list }
+     [test]
+     time_limit = 10 *)
+
+type t = { name : string; dependencies : Workspace.dependency list; time_limit : int }
+
+let default_time_limit = 10
 
 exception Malformed of int * string
 
@@ -77,6 +82,7 @@ let without_comment line =
 
 let parse text =
   let section = ref "" and name = ref None and dependencies = ref [] in
+  let time_limit = ref default_time_limit in
   List.iteri
     (fun index raw ->
       let line = index + 1 in
@@ -99,9 +105,13 @@ let parse text =
                   | None -> []
                 in
                 dependencies := { Workspace.package = key; capabilities } :: !dependencies
+            | "[test]" when key = "time_limit" -> (
+                match int_of_string_opt (trim value) with
+                | Some seconds when seconds > 0 -> time_limit := seconds
+                | _ -> raise (Malformed (line, "a whole number of seconds, more than 0")))
             (* Other sections, such as a build profile, are read past. *)
             | _ -> ()))
     (String.split_on_char '\n' text);
   match !name with
-  | Some name -> { name; dependencies = List.rev !dependencies }
+  | Some name -> { name; dependencies = List.rev !dependencies; time_limit = !time_limit }
   | None -> raise (Malformed (1, "a [package] section with a name"))

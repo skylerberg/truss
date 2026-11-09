@@ -29,27 +29,3 @@ let load_package database ~name ~dependencies (modules : (Path.module_ * string)
 
 let load_standard database =
   load_package database ~name:Standard_library.package ~dependencies:[] Standard_library.modules
-
-(* The modules of a package's directory: each [.truss] file, named by its
-   path under the directory. *)
-let read_directory ~package directory =
-  let rec walk relative =
-    let absolute =
-      if relative = [] then directory
-      else Filename.concat directory (String.concat Filename.dir_sep relative)
-    in
-    Array.to_list (Sys.readdir absolute)
-    |> List.sort compare
-    |> List.concat_map (fun entry ->
-        let path = Filename.concat absolute entry in
-        if Sys.is_directory path then walk (relative @ [ entry ])
-        else if Filename.check_suffix entry ".truss" then
-          let text = Source.text (Source.read_file path) in
-          [
-            ( ({ package; modules = relative @ [ Filename.chop_suffix entry ".truss" ] }
-                : Path.module_),
-              text );
-          ]
-        else [])
-  in
-  walk []

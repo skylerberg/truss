@@ -81,18 +81,24 @@ let compiled_references env : Lir.compiled -> Instance.key list = function
   | Table t -> List.map fst t.entries
   | Evidence e -> e.table :: e.outer
 
-let reachable env ~lookup roots =
+let reached env ~lookup roots =
   (* Breadth-first, so an instance's number depends only on the shape of
-     the walk up to it. *)
+     the walk up to it. Each key in the queue carries the way it was
+     reached, nearest first. *)
   let rec walk seen found = function
     | [] -> List.rev found
-    | key :: queue ->
+    | (key, way) :: queue ->
         if List.exists (Instance.equal key) seen then walk seen found queue
         else
           let compiled = lookup key in
-          walk (key :: seen) (compiled :: found) (queue @ compiled_references env compiled)
+          let way = key :: way in
+          walk (key :: seen)
+            ((compiled, List.rev way) :: found)
+            (queue @ List.map (fun next -> (next, way)) (compiled_references env compiled))
   in
-  walk [] [] roots
+  walk [] [] (List.map (fun root -> (root, [])) roots)
+
+let reachable env ~lookup roots = List.map fst (reached env ~lookup roots)
 
 let test_key env ~lookup root =
   let instances = reachable env ~lookup [ root ] in

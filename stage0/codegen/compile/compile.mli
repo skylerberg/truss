@@ -8,9 +8,12 @@ type t
 (* With [checks], the default, the program checks at run time what the
    prover would prove: [requires] clauses that can run, integer overflow,
    and division. Stage0 has no prover, so its builds check, as CODEGEN.md's
-   [--check-proofs] does. *)
+   [--check-proofs] does. [file_name] names the file of each position the
+   program reports, by its module, and is [Workspace.file_path] unless a
+   driver shows files another way. *)
 val create :
   ?checks:bool ->
+  ?file_name:(Path.module_ -> string) ->
   Query.database ->
   Memory_layout.target ->
   Toolchain.t ->
@@ -23,22 +26,82 @@ val create :
    is made once. *)
 val compiled : t -> Instance.key -> Lir.compiled
 
-(* Builds a program that runs the tests, each named by its path, and runs
-   it, returning its exit status and its output, as [Startup.tests_calling]
-   describes it. *)
-(* One test's part of a test run's report: its outcome, as
-   [Startup.tests_calling] names it, and its message and echo output. *)
-type record = { outcome : string; message : string option; echo : string option }
+(* How a test ended, as [Startup.tests_calling] names it. *)
+type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed
 
-(* A test run's report, as [run_tests] returns it, one record a test. *)
+(* As the runner names it: ["passed"], ["timed_out"], and so on. *)
+val show_outcome : outcome -> string
+
+(* One test's result: its outcome, its message and echo output, if any, how
+   many microseconds it ran in its worker, and whether it came from the
+   kept results, in which case the duration is that of the run that kept
+   it. *)
+type record = {
+  outcome : outcome;
+  message : string option;
+  echo : string option;
+  microseconds : int;
+  cached : bool;
+}
+
+(* A test program's whole report, as [Startup.tests_calling] describes it,
+   one record a test, in the order of the tests however they ended. *)
 val parse_report : string -> record list
 
-(* With [results], a directory, each test that passes with nothing to show
-   is kept there under the key of the code it can run, as CODEGEN.md's "Test
-   results" says, and is not built or run again until that code changes;
-   the report is the same either way. *)
+(* How a test run is getting on: lowering what the tests reach, compiling
+   the C files that are not cached, out of how many, running the tests that
+   have no kept result, and each test's start and end, by its place in the
+   list given. A test with a kept result is reported as ended before any
+   test runs. *)
+type progress =
+  | Lowering
+  | Compiling of { compiled : int; total : int }
+  | Running of { tests : int }
+  | Started of { test : int }
+  | Ended of { test : int; record : record }
+
+(* Builds a program that runs the tests, each named by its path, runs it,
+   and returns each test's record in the order given. With [results], a
+   directory, each test that passes with nothing to show is kept there
+   under the key of the code it can run, as CODEGEN.md's "Test results"
+   says, and is not built or run again until that code changes; with
+   [rerun], every test runs, and passes are kept again. [progress] is told
+   of each step as it happens. *)
 val run_tests :
-  ?results:string -> t -> time_limit:int -> Path.t list -> (int * string, string) result
+  ?results:string ->
+  ?rerun:bool ->
+  ?progress:(progress -> unit) ->
+  t ->
+  time_limit:int ->
+  Path.t list ->
+  (record list, string) result
+
+(* The definitions whose code a root can run: a test's, as [test_root]
+   gives it, or a program's, as [main_root] gives it, each once, sorted.
+   Lowering only, so nothing is compiled. Raises [Invalid_argument] for code
+   that cannot be lowered, which only code with errors is. *)
+val reached_definitions : t -> Instance.key -> Path.t list
+val test_root : Path.t -> Instance.key
+
+(* Whether a test's result is kept in [results] for the code it can run
+   now. Raises [Invalid_argument] as [reached_definitions] does. *)
+val kept_result : t -> results:string -> Path.t -> bool
+val main_root : Path.t -> Instance.key
+
+(* A [todo], or an [echo], that a program can reach, which a build that
+   ships refuses: its file and position, as the program would report them,
+   and the definitions on the way from [main] to the one that holds it. *)
+type unshippable = {
+  failure : [ `Todo | `Echo ];
+  file : string;
+  line : int;
+  column : int;
+  way : Path.t list;
+}
+
+(* Every [todo] the program whose [main] is at that path can reach, and with
+   [echo], every [echo], once each, in order of position. *)
+val unshippable : t -> main:Path.t -> echo:bool -> (unshippable list, string) result
 
 (* Builds the program whose [main] is at that path, and runs it with the
    arguments, and [input] as its standard input if given, returning its exit

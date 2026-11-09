@@ -17,6 +17,8 @@
    (>= 3.24))
   (zarith
    (>= 1.14))
+  (cmdliner
+   (>= 2.1.1))
   (menhir
    (and
     :with-test

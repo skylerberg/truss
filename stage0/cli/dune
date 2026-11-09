@@ -1,0 +1,34 @@
+; The truss command line's commands, apart from parsing arguments, so that
+; tests can drive them. See CLI.md.
+
+(library
+ (name cli)
+ (libraries
+  unix
+  zarith
+  source
+  diagnostic
+  token
+  lexer
+  syntax
+  syntax_walk
+  syntax_print
+  parser
+  path
+  query
+  workspace
+  resolve
+  hash
+  types
+  checked
+  infer
+  interface
+  type_checker
+  memory_layout
+  toolchain
+  build
+  instance
+  lir
+  reachable
+  lower
+  compile))

@@ -17,6 +17,7 @@ let () =
            { package = "json"; capabilities = [] };
            { package = "http"; capabilities = [ "NetworkClient"; "Clock" ] };
          ];
+       time_limit = 10;
       } ->
           ()
       | _ -> fail "read differently");

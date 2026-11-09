@@ -5,20 +5,19 @@ on Truss code: checking, testing, running, building, formatting, and the
 tools that let an agent see what a change touches. It follows
 [GOALS.md](GOALS.md) and the decisions in [DESIGN.md](DESIGN.md), and drives
 the stages that [TYPECHECKER.md](TYPECHECKER.md) and
-[CODEGEN.md](CODEGEN.md) describe. `truss test` and `truss run` are built,
-in [`stage0/bin/truss.ml`](stage0/bin/truss.ml), and take a package's
-directory as their first argument; everything else here is designed but not
-built yet. The prover and the formatter are not built either, so the
-commands that use them say what they will do.
+[CODEGEN.md](CODEGEN.md) describe. It is built in
+[`stage0/cli/`](stage0/cli), with the arguments parsed in
+[`stage0/bin/truss.ml`](stage0/bin/truss.ml), except `truss fmt`, `truss
+lsp`, and the background process, which wait for the formatter, the
+language server, and file watching. The prover is not built either, so what
+the commands will do with proofs is stated where it matters.
 
 ## Principles
 
 - **One program.** Every tool is a subcommand of `truss`, as with `go` and
   `cargo`, so there is one thing to install, one version to report, and one
-  place to load a package. `truss-check` is replaced by `truss check`, and
-  `truss-lex` and `truss-parse`, which exist for working on the compiler,
-  become `truss debug tokens` and `truss debug tree`, left out of
-  `truss --help`.
+  place to load a package. The tools for working on the compiler are
+  `truss debug tokens` and `truss debug tree`, left out of `truss --help`.
 - **Every command is O(change).** Each command asks the same query database
   for what it needs, so running the whole package's checks and tests after a
   small edit does a small amount of work. Commands therefore act on the whole
@@ -49,32 +48,31 @@ commands that use them say what they will do.
 | `truss test` | Checks the package, then runs the tests whose results are not cached |
 | `truss run` | Checks the package, builds its program for development, and runs it |
 | `truss build` | Checks the package and builds its program for release, refusing any `todo` or `echo` `main` can reach |
-| `truss fmt` | Formats the package's files |
+| `truss fmt` | Formats the package's files (not built yet) |
 | `truss holes` | Lists every `todo`, with its type, the names in scope, and what it blocks |
 | `truss show` | Prints the signatures of a module, type, or definition |
 | `truss impact` | Lists what changed since a revision, or what depends on a definition |
-| `truss rename` | Renames a definition or module, and every reference to it in the package |
+| `truss rename` | Renames a definition, method, or module, and every reference to it in the package |
 | `truss new` | Makes a new package |
-| `truss lsp` | Runs the language server on standard input and output |
+| `truss lsp` | Runs the language server on standard input and output (not built yet) |
 | `truss clean` | Deletes the cache |
 
-`truss --version` prints the toolchain's version and each stage's version:
-the hash format, the parser, the type checker, the prover with its solver,
-and code generation. Those are the versions in cache keys, so a report of a
-stale result can say which stage it came from.
+`truss --version` prints the version of each stage that has one: the hash
+format, code generation, and the Unicode tables. Those are the versions in
+cache keys, so a report of a stale result can say which stage it came from.
+The parser, the type checker, and the prover, with its solver, are to have
+their own as DESIGN.md's "Incremental builds" asks.
 
 ### Finding the package
 
 A command finds its package the way Cargo and Go do: it looks for
 `truss.toml` in the current directory and then in each directory above it,
 and uses the first one found. `-C DIRECTORY`, as in `git` and `make`, runs
-as if from that directory. A positional package directory, which `truss test`
-and `truss run` take today, is dropped, so that the positional arguments are
-free for what each command acts on.
+as if from that directory, written before the command or after it. The
+positional arguments are free for what each command acts on.
 
 The package's modules are the `.truss` files under its directory, as
-SYNTAX.md says, with two exceptions, which `Type_checker.read_directory`
-does not make yet:
+SYNTAX.md says, with two exceptions:
 
 - **A directory with its own `truss.toml` is another package,** and none of
   its files are modules of this one, as with Cargo's and Go's nested
@@ -86,16 +84,25 @@ does not make yet:
 
 - **`--json`** writes one JSON document to standard output in place of the
   report for people, for every command except `run`, `fmt`, `new`, `lsp`,
-  and `clean`, whose output is a program's, a list of files, or nothing. Its fields are listed with each command. Every document has
+  and `clean`, whose output is a program's, a list of files, or nothing.
+  Its fields are listed with each command. Every document has
   `"format": 1`, which changes only when a field is removed or changes
   meaning, and `"diagnostics"`, an array of diagnostics as
   `Diagnostic.to_json_object` writes them, with each one's file. A command
   that stops at diagnostics still writes its document.
 - **`-C DIRECTORY`**, above.
 
-There is no `--quiet` or `--verbose` beyond what a command lists, and no
-color option: reports for people use color only when the stream is a
-terminal and `NO_COLOR` is not set.
+There is no `--quiet` or `--verbose` beyond what a command lists. Reports
+for people are plain text. Color, when it comes, belongs only on a
+terminal, and never when `NO_COLOR` is set, so it needs no option either.
+
+Every position a command shows names its file as the current directory
+reaches it, such as `forecast.truss` or `../weather/forecast.truss`, so a
+terminal or an editor can open it. A development build's program reports
+its own positions the same way, so a failed test's message matches the
+diagnostics. A release build names files from the package's root, as
+`weather/forecast.truss`, so the program is the same wherever it was
+built.
 
 ### Output streams and exit status
 
@@ -111,9 +118,9 @@ terminal and `NO_COLOR` is not set.
   |---|---|
   | 0 | The command did what was asked, and the code had no problem |
   | 1 | The code has a problem: a diagnostic, a failed test, a build refused for a `todo` |
-  | 2 | The command could not do its job: a bad argument, no `truss.toml`, no C compiler, a compiler bug |
+  | 2 | The command could not do its job: a bad argument, a path that names nothing, no `truss.toml`, no C compiler, a compiler bug |
 
-  `truss-check` already uses these. `truss run` exits with its program's
+  `truss run` exits with its program's
   status once the program starts, as `go run` and `cargo run` do; before
   that, it exits as above.
 
@@ -133,12 +140,15 @@ and cached, so this costs O(change) like the rest. Code generation reports
 nothing, so `check` never builds.
 
 It prints each diagnostic as `Diagnostic.render` does, at most
-`Diagnostic.limit` of them, and then a count. The JSON document is
-`{"format", "diagnostics"}`.
+`Diagnostic.limit` of them in each file, and then a count. The JSON document
+is `{"format", "diagnostics"}`.
 
 **`--fix`** applies every fix that is the only fix its diagnostic offers,
 writes the files, checks again, and repeats until no such fix is left, then
-reports what remains. A diagnostic with several fixes, such as an addition
+reports what remains. Two fixes whose edits overlap are not applied in the
+same round, since applying both could give what neither meant; the second
+waits for the next round, after the file is checked again. Rounds stop
+after 32, so fixes that undo each other cannot run forever. A diagnostic with several fixes, such as an addition
 that may overflow, which offers four, is a choice for the person or agent,
 so it is reported and left alone. An agent that has chosen applies the
 fix's edits from the JSON itself. This follows `ruff check --fix` and
@@ -165,16 +175,17 @@ whose result is kept is not built or run again. External tests, those with
   is no way to skip external tests: DESIGN.md has them run every time the
   suite runs.
 - **Progress.** While the tests build and run, a status line on standard
-  error, redrawn as each test ends, shows how far the run has got, what has
-  not passed so far, and the test that has been running longest, as Bazel's
-  and nextest's do:
+  error, redrawn as each test starts and ends, shows how far the run has
+  got, how many have not passed so far, how long the tests have been
+  running, and the test that has been running longest, as Bazel's and
+  nextest's do:
 
   ```text
-  [ 97/143] 1 failed · 0.6s · running weather::parse "reads hourly rows" (0.4s)
+  [ 97/143] 1 not passed · 0.6s · running weather::parse "reads hourly rows" (0.4s)
   ```
 
-  Before the tests run it shows the build instead, as instances compiled out
-  of those to compile. The line is drawn only when standard error is a
+  Before the tests run it shows the build instead: lowering, then the C
+  files compiled out of those that were not cached. The line is drawn only when standard error is a
   terminal and is erased when the run ends, so logs and CI output hold only
   the report. It is never on standard output, and never with `--json`.
 - **The report** lists every test that did not pass, with its outcome, its
@@ -202,9 +213,9 @@ whose result is kept is not built or run again. External tests, those with
   says what the whole suite costs and not only what ran this time:
 
   ```text
-   2.31s  weather::forecast "a year of hourly data"
-   0.42s  weather::parse "reads hourly rows"
-   0.08s  weather::render "renders an empty report"  cached
+  2.31s  weather::forecast "a year of hourly data"
+  420ms  weather::parse "reads hourly rows"
+   87µs  weather::render "renders an empty report"  cached
   ```
 
   A duration is the test's time in its worker, from being handed the test to
@@ -222,13 +233,13 @@ whose result is kept is not built or run again. External tests, those with
   timing every test on this machine now.
 - **The time limit** for each test is the project's, set in the manifest as
   `[test] time_limit = 10`, in seconds, with 10 as the default. It is not a
-  flag, so that every machine and CI run uses the same limit. The manifest
-  reader does not read it yet, and the limit is fixed at 10 seconds.
+  flag, so that every machine and CI run uses the same limit.
 - **The JSON document** is `{"format", "diagnostics", "tests", "timings"}`,
   where each test is `{"module", "name", "file", "line", "outcome",
-  "cached", "milliseconds", "message", "echo"}`, for every selected test,
-  passing or not, and `"timings"` gives the milliseconds of the check, the
-  build, the tests, and the whole run.
+  "cached", "microseconds", "message", "echo"}`, for every selected test,
+  passing or not, and `"timings"` gives the microseconds of the check, the
+  build, the tests, and the whole run. When the package has diagnostics,
+  each test has only its name and place.
 
 ## Running and building
 
@@ -238,7 +249,9 @@ truss build [--output PATH] [--json]
 ```
 
 A package has at most one `main`, and its program is built from it, as
-IMPLEMENTATION.md has a package compile to a single program or library.
+IMPLEMENTATION.md has a package compile to a single program or library. A
+package with no `main` has no program, so `run` and `build` stop with 2; one
+with several has a problem in its code, so they stop with 1.
 
 **`truss run`** builds a development program, as CODEGEN.md's "C files and
 optimization" describes, and runs it on the terminal with the arguments, so
@@ -248,17 +261,27 @@ refused, as in `build`: DESIGN.md rules out a `todo` that panics when
 reached, since that would be a failure the signature does not show, and that
 holds for a development run too. The first argument that is not an option
 starts the program's arguments, and `--` marks the start when the first one
-begins with `-`. **`--release`** builds as `truss build` does, for timing
-the program.
+begins with `-`. **`--release`** builds as `truss build` does, refusing an
+`echo` as it does, for timing the program.
 
-**`truss build`** builds a release program: each module's instances in one C
-file at `-O2`, linked with ThinLTO. It refuses a program whose `main` can
-reach a `todo` or an `echo`, in code or in a proof, and lists each one with
-the path from `main` to it. The program is written to `--output`, or else
+**`truss build`** builds a release program, as CODEGEN.md's "C files and
+optimization" describes: at `-O2`, optimized across every file as they are
+linked, with ThinLTO where the C compiler is clang. It refuses a program
+whose `main` can reach a `todo` or an `echo`, in code or, once the prover
+exists, in a proof, and lists each one with the definitions on the way from
+`main` to it:
+
+```text
+render.truss:12:14: `todo` can be reached from `main`, so the program cannot be built.
+    weather::main::main -> weather::render::render
+``` The program is written to `--output`, or else
 to a file named after the package in the current directory, as `go build`
 does. Truss keeps every intermediate file in its cache, so there is no build
 directory in the package, and nothing to add to `.gitignore` but the
-program. The JSON document is `{"format", "diagnostics", "output"}`.
+program. The JSON document is `{"format", "diagnostics", "output"}`, or
+`{"format", "diagnostics", "unshippable"}` when it refuses, each with its
+kind, `todo` or `echo`, its file, line, and column, and its way from
+`main`.
 
 Building for another target, which CODEGEN.md allows through the target's
 `USize`, would add `--target` to `build`. Stage0 builds for the host only.
@@ -269,7 +292,8 @@ Building for another target, which CODEGEN.md allows through the target's
 truss fmt [--check] [FILE...]
 ```
 
-`truss fmt` rewrites the package's files, or the named ones, into the one
+`truss fmt` is not built yet; it waits for the formatter. It rewrites the
+package's files, or the named ones, into the one
 layout SYNTAX.md describes, and prints the names of the files it changed.
 It has no options for style. **`--check`** changes nothing and exits with 1,
 listing the files that are not formatted, for CI, as `gofmt -l` and
@@ -290,19 +314,26 @@ truss holes [--json] [FILE_OR_DIRECTORY...]
 
 Lists every `todo` in the package, or in the named files, as DESIGN.md's
 "Unfinished code" asks: its position, the type it must have, the names in
-scope with their types, and what it blocks, which is each test that can
-reach it, each proof that depends on it, and `main`, if `main` can reach
-it. Each hole is a task a person or agent can take on its own. A type
-defined as `todo` is listed with the definitions that need its contents.
+scope with their types, and what it blocks, which is `main`, if `main` can
+reach it, and each test that can, and once the prover exists, each proof
+that depends on it. Each hole is a task a person or agent can take on its
+own. A type defined as `todo` is listed too.
 
 ```text
-weather/render.truss:12:14: hole of type String
-    in scope: report: Report, header: String
+render.truss:12:14: hole of type String
+    in scope: header: String, report: Report
     blocks: main; test weather::render "renders an empty report"
 ```
 
-The JSON document is `{"format", "diagnostics", "holes"}`. Listing holes is
-not a failure, so the exit status is 0 unless the package has diagnostics.
+A `todo` whose type nothing fixes, such as one inside an interpolation, is
+listed as "not decided yet". Name resolution records the names in scope at
+each `todo`, and the checked form gives their types. What a hole blocks
+comes from lowering the code that `main` and each test can run, so it is
+listed only for a package without diagnostics. The JSON document is
+`{"format", "diagnostics", "holes"}`, each with its definition, file, line,
+and column, its kind, `value` or `type`, its type, its names in scope with
+their types, and what it blocks. Listing holes is not a failure, so the
+exit status is 0 unless the package has diagnostics.
 
 ### `truss show`
 
@@ -310,7 +341,9 @@ not a failure, so the exit status is 0 unless the package has diagnostics.
 truss show [--body] [--json] PATH...
 ```
 
-Prints the signatures at each path, formatted as `truss fmt` writes them:
+Prints the signatures at each path, each after its file and line. A
+signature is the definition's text with every body left out; once the
+formatter exists, it is printed as `truss fmt` writes it.
 
 - for a definition, such as `weather::forecast::parse`, its signature with
   every clause: generic parameters, parameters with their defaults, the
@@ -322,8 +355,9 @@ Prints the signatures at each path, formatted as `truss fmt` writes them:
 - for a module, `weather::forecast`, every definition's signature, and for
   a package, `weather`, every public one
 
-A module of another package shows only what is visible from this one, so an
-opaque type's fields stay hidden. `--body` prints whole definitions. Truss
+A module of another package, such as `standard::list`, shows only what is
+visible from this one, so an opaque type's fields stay hidden. A path that
+names nothing visible is a bad argument, so the exit status is 2. `--body` prints whole definitions. Truss
 has no comments, so a signature is the whole of a definition's
 documentation, which makes this Truss's `go doc`. GOALS.md asks for tools
 that give an agent the signatures it needs without whole files, and this is
@@ -346,10 +380,14 @@ contract, a default, or its body. Then it lists what the change reaches:
 - **For an interface or a contract,** the old and new signature, since those
   are what a reviewer must read closely, and every definition whose check
   read it, which are the callers to review.
-- **For a body,** the tests that can reach it.
-- **For every change,** the proofs and tests that must be checked or run
-  again, with how many are already in the cache, so an agent knows the cost
-  of its change before running anything.
+- **For every change,** the tests that can reach it, which must run again,
+  with how many already have a kept result for the code as it is now, so an
+  agent knows the cost of its change before running anything. Once the
+  prover exists, the proofs to check again are listed the same way.
+
+A definition is matched with its earlier self by its path, so a renamed
+definition is listed as removed and added, and one moved within its file is
+not listed at all, since its hashes do not change.
 
 `--since main` shows everything a branch changes. Two agents on the same
 package can each run it and compare the definitions they reach, which is
@@ -358,14 +396,19 @@ is read with `git show`, so this form needs the package to be in a git
 repository.
 
 **With paths,** it lists what depends on each definition now: every
-definition whose check read its signature, and every test that can reach
-it, which serves as finding references.
+definition whose code names it, and every test that can reach it, which
+serves as finding references.
 
-Both come from the traces that queries already record. A trace points from
-a result to what it read, so finding what read a definition means looking
-through traces; the background process keeps the reverse index, and a cold
-run builds it. The JSON document is `{"format", "diagnostics", "changes",
-"dependents"}`.
+What reads a definition comes from what resolution and type checking
+decided each name in the package's code means; which tests reach a
+definition comes from lowering the code each test can run, so tests are
+listed only for a package without diagnostics. Both look through the whole
+package, which costs O(package); the background process is to keep the
+reverse index of the traces queries record, which makes it O(change). The
+JSON document is `{"format", "diagnostics", "changes", "tests"}` without
+paths, where each change has its path, `added`, `removed`, or `changed`,
+the parts that changed, its signature before and after, and what reads it,
+and `{"format", "diagnostics", "dependents", "not_found"}` with paths.
 
 ### `truss rename`
 
@@ -373,20 +416,27 @@ run builds it. The JSON document is `{"format", "diagnostics", "changes",
 truss rename [--json] FROM TO
 ```
 
-Renames a definition, a method, a field, a variant, or a module, and
-rewrites every reference to it in the package. Renaming a module, as in
-`truss rename weather::forecast weather::outlook`, moves its file, and every
-`use` of it changes. The rename is refused, changing nothing, if the new
-name is taken, breaks a naming rule, or would hide a name, which are the
-diagnostics a hand-made rename would cause. References in other packages
+Renames a definition, every version of a method, or a module, and rewrites
+every reference to it in the package. `TO` is a new name, as in `truss
+rename weather::forecast::parse read`, or a full path that keeps the
+definition in its module and a method with its type. Renaming a module, as
+in `truss rename weather::forecast weather::outlook`, moves its file, and
+every `use` of it and every full path to it changes. Renaming a field or a
+variant is not built yet. The rename is made in memory and the package
+checked first; it is refused, changing nothing, if it would cause any
+diagnostic, such as for a name that is taken, breaks a naming rule, or
+would hide another, which are the diagnostics a hand-made rename would
+cause. A package that already has diagnostics is refused too, since its
+references are found through checked code. References in other packages
 cannot be changed, so renaming a public definition changes the package's
 public interface, which `truss impact` reports like any other changed
-interface. Each edit replaces the name's tokens
-alone, so the files need no formatting afterward. Renaming changes callers'
+interface. Each edit replaces the name's tokens alone, so the files need no
+formatting afterward. Renaming changes callers'
 hashes but not their proofs or test results, since those are keyed with
 names replaced by numbers, so a rename re-proves and re-runs nothing.
 Renaming a local variable is left to the language server, which has the
-cursor's position.
+cursor's position. The JSON document is `{"format", "diagnostics", "edits",
+"moved"}`, with each edit's file, byte range, and replacement.
 
 ## Making a package
 
@@ -446,15 +496,16 @@ left for later.
 These are left out of `truss --help` and listed by `truss debug --help`:
 
 - **`truss debug tokens FILE`** and **`truss debug tree FILE`** print a
-  file's tokens and syntax trees, as `truss-lex --tokens` and
-  `truss-parse --tree` do now, with `--json` for their diagnostics.
+  file's tokens, one a line, and each definition's syntax tree as an
+  S-expression, with its diagnostics on standard error, or with `--json`,
+  only the diagnostics, on standard output.
 - **`--sanitize`,** on `test` and `run`, builds with AddressSanitizer and
   UndefinedBehaviorSanitizer and keeps no test results, as CODEGEN.md's
-  "Testing" describes.
-- **`--check-proofs`,** on `test`, `run`, and `build`, emits a run-time
-  check for every proven obligation. Stage0 has no prover, so its builds
-  always check what a prover would prove, and the flag will mean something
-  once the prover exists.
+  "Testing" describes. It is left out of each command's help.
+- **`--check-proofs`,** on `test`, `run`, and `build`, is to emit a run-time
+  check for every proven obligation once the prover exists. Stage0 has no
+  prover, so all its builds check what a prover would prove, and the flag
+  comes with the prover.
 
 ## Left out
 
@@ -476,24 +527,26 @@ These are left out of `truss --help` and listed by `truss debug --help`:
 ## Implementation in stage0
 
 - **Arguments are parsed with Cmdliner,** the usual OCaml library, which
-  gives every command `--help` and a manual page from the same definitions,
-  and shell completion.
-- **One library loads a package for every command:** finding `truss.toml`,
-  reading the manifest and the modules, and loading the standard library,
-  which `truss.ml` and `truss_check.ml` each do on their own now. Another
-  writes diagnostics for people or as JSON, with each one's file.
-- **The test program reports each test as it ends,** with its duration, as
-  CODEGEN.md's "The test program" describes, and `Compile.run_tests` reads
-  those records while the program runs rather than its whole output at the
-  end, handing each one to `truss test` for the status line. The program
-  and the parser of its report change together, and kept results gain the
-  duration.
-- **Each command is its own module** in `stage0/bin`, built into the one
-  `truss` executable, and `truss_check.ml`, `truss_lex.ml`, and
-  `truss_parse.ml` are removed.
-- **The order of building** follows what exists: `check`, `test`, `run`,
-  and `build` drive stages that are built; `show` and `holes` read checked
-  forms; `impact` needs a reverse index of traces and a second database
-  loaded from a git revision; `rename` needs resolution's references; and
-  `fmt`, `lsp`, and the background process wait for the formatter, the
-  language server, and file watching.
+  gives every command `--help` and a manual page from the same
+  definitions. Before parsing, `Cli.Arguments` moves a leading `-C
+  DIRECTORY` after the command and marks where `run`'s program arguments
+  start, which Cmdliner's own rules would read differently.
+- **The commands are the `cli` library,** apart from parsing arguments, so
+  tests drive them directly. `Project` finds and loads a package and shows
+  paths, `Report` writes diagnostics for people or as JSON, and each command
+  has a module of its own. `References`, which finds every place a
+  definition or module is named from resolution's names and the checked
+  form's calls and members, serves `rename` and `impact`; `Signatures`,
+  which cuts the bodies out of a definition's text, serves `show` and
+  `impact`.
+- **The test program reports each test as it starts and ends,** with its
+  duration, as CODEGEN.md's "The test program" describes, and
+  `Compile.run_tests` reads those records while the program runs, handing
+  each to `truss test` for the status line.
+- **What code reaches comes from lowering,** with `Compile.reached_definitions`
+  and `Compile.unshippable`, which walk the instances a root reaches as a
+  build would and never compile them, so `holes` and `impact` need no C
+  compiler.
+- **The tests** are in [`stage0/test/cli/`](stage0/test/cli): each makes a
+  small package in a temporary directory and states one fact about what a
+  command does with it.

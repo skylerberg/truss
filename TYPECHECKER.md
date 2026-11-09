@@ -7,7 +7,7 @@ generation read. It follows the decisions in [DESIGN.md](DESIGN.md),
 described in [PARSER.md](PARSER.md), and produces what
 [CODEGEN.md](CODEGEN.md) expects. The prover is not designed yet, so this
 document states what it hands to it. Every stage described here is built,
-in [`stage0/`](stage0), and `truss-check` runs them over a package's
+in [`stage0/`](stage0), and `truss check` runs them over a package's
 directory. Storing checked forms in CBOR is not built yet.
 
 ## What the type checker does
@@ -93,12 +93,13 @@ definitions and finding an `impl` needs their interfaces, and `Infer` holds
 finishes. Each stage gives its diagnostics for a file as
 `diagnostics database module_`.
 
-`stage0/bin/truss_check.ml` builds `truss-check`, which reads a package's
-directory and its `truss.toml`, checks every module against the standard
-library, and prints every diagnostic, as JSON with `--json`. It exits with 1
-when there are diagnostics and 2 when it cannot check. It does not load the
-manifest's other dependencies yet, since there is no package registry to
-find them in. `Types` and
+`truss check`, as [CLI.md](CLI.md) describes, finds a package's
+`truss.toml`, checks every module against the standard library, and prints
+every diagnostic, as JSON with `--json`. It exits with 1 when there are
+diagnostics and 2 when it cannot check. It does not load the manifest's
+other dependencies yet, since there is no package registry to find them in.
+Resolution also records the names in scope at each `todo`, which `truss
+holes` lists with their types from the checked form. `Types` and
 `Checked` are separate from the rest, so that the prover and code
 generation depend on the checked form without depending on the checker.
 
@@ -1063,7 +1064,7 @@ capabilities, which is at the signatures of its code, never its bodies:
   signatures, so nothing it does can exceed what its signatures declare.
 - **Grants nest:** a dependency's manifest may grant its own dependencies
   only what it was granted, which is a check on manifests. It is not built
-  yet, since `truss-check` loads no dependencies' manifests.
+  yet, since `truss check` loads no dependencies' manifests.
 
 The error names the dependency's function and the capability that was not
 granted, as DESIGN.md asks. A dependency that offers both a client and a

@@ -6,6 +6,7 @@ type t = {
   toolchain : Toolchain.t;
   cache : Build.cache;
   settings : Build.settings;
+  file_name : Path.module_ -> string;  (** The file a position names, which the program reports *)
   mutable done_ : (Instance.key * Lir.compiled) list;
   mutable pulled : (Ground.yielding * (Lir.function_ * Lir.local list)) list;
       (** Each pulled method, with its drops elaborated *)
@@ -103,11 +104,11 @@ let anchor t (path : Path.t) : Positions.anchor option =
       | Some (module_, base) ->
           let file = Query.demand t.database Workspace.file module_ in
           let line, _ = Source.position file.source base in
-          Some { definition = path; path = Source.path file.source; first_line = line })
+          Some { definition = path; path = t.file_name module_; first_line = line })
 
 (* Builds what the roots reach into a program at [output], with the given
    startup code. *)
-let build t ~roots ~startup ~output =
+let build ?progress t ~roots ~startup ~output =
   match Reachable.reachable t.context.env ~lookup:(compiled t) roots with
   | exception Invalid_argument message -> Error message
   | units ->
@@ -116,7 +117,7 @@ let build t ~roots ~startup ~output =
       let anchors = List.filter_map (anchor t) paths in
       let target = Memory_layout.target t.context.env in
       let sources = [ ("startup", startup); ("anchors", Positions.anchors_file target anchors) ] in
-      Build.program t.toolchain t.cache t.context.env t.settings
+      Build.program ?progress t.toolchain t.cache t.context.env t.settings
         ~files:(List.map (fun unit -> [ unit ]) units)
         ~sources ~output
 
@@ -134,62 +135,116 @@ let build_and_run ?input t ~roots ~startup ~arguments =
       (try Sys.remove output with Sys_error _ -> ());
       Ok result
 
-(* One test's part of the runner's report: its outcome, and its message
-   and its echo output, if any. *)
-type record = { outcome : string; message : string option; echo : string option }
+type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed
 
-let parse_report text =
-  let length = String.length text in
-  let line_at position =
-    match String.index_from_opt text position '\n' with
-    | Some stop -> (String.sub text position (stop - position), stop + 1)
-    | None -> invalid_arg "Compile: a test report that ends in a line"
-  in
-  (* A block is its label and length on a line, then that many bytes and a
-     newline. *)
-  let rec blocks position record =
-    if position >= length then (position, record)
-    else
-      let line, after = line_at position in
+let outcomes =
+  [
+    ("passed", Passed);
+    ("failed", Failed);
+    ("panicked", Panicked);
+    ("incomplete", Incomplete);
+    ("timed_out", Timed_out);
+    ("crashed", Crashed);
+  ]
+
+let show_outcome outcome = fst (List.find (fun (_, o) -> o = outcome) outcomes)
+
+(* One test's result: its outcome, its message and echo output, if any, how
+   long it ran, and whether it came from the kept results. *)
+type record = {
+  outcome : outcome;
+  message : string option;
+  echo : string option;
+  microseconds : int;
+  cached : bool;
+}
+
+(* Reads the runner's report as it arrives. Each record's blocks come
+   before the line that names its test, so a record is whole when its line
+   arrives, and is handed to [on_record] with the test's number then. *)
+type reader = {
+  pending : Buffer.t;  (** Text not yet read as whole lines and blocks *)
+  mutable message : string option;
+  mutable echo : string option;
+  on_start : int -> unit;
+  on_record : int -> record -> unit;
+}
+
+let reader ?(on_start = ignore) on_record =
+  { pending = Buffer.create 1024; message = None; echo = None; on_start; on_record }
+
+let malformed text = invalid_arg ("Compile: a test report that cannot be read: " ^ text)
+
+(* Takes every whole record out of the pending text. *)
+let rec drain reader =
+  let text = Buffer.contents reader.pending in
+  match String.index_opt text '\n' with
+  | None -> ()
+  | Some stop -> (
+      let line = String.sub text 0 stop in
+      let consume count =
+        Buffer.clear reader.pending;
+        Buffer.add_string reader.pending (String.sub text count (String.length text - count))
+      in
       match String.split_on_char ' ' line with
       | [ (("message" | "echo") as label); count ] ->
-          let count = int_of_string count in
-          let content = String.sub text after count in
-          let record =
-            if label = "message" then { record with message = Some content }
-            else { record with echo = Some content }
-          in
-          blocks (after + count + 1) record
-      | _ -> (position, record)
-  in
-  let rec records position acc =
-    if position >= length then List.rev acc
-    else
-      let line, after = line_at position in
-      match String.split_on_char ' ' line with
-      | [ "test"; _; outcome ] ->
-          let position, record = blocks after { outcome; message = None; echo = None } in
-          records position (record :: acc)
-      | _ -> invalid_arg ("Compile: a test report line " ^ line)
-  in
-  records 0 []
+          let count = match int_of_string_opt count with Some n -> n | None -> malformed line in
+          (* The block is its bytes and a newline after the line. *)
+          if String.length text >= stop + 1 + count + 1 then begin
+            let content = String.sub text (stop + 1) count in
+            if label = "message" then reader.message <- Some content
+            else reader.echo <- Some content;
+            consume (stop + 1 + count + 1);
+            drain reader
+          end
+      | [ "start"; number ] -> (
+          match int_of_string_opt number with
+          | Some number ->
+              consume (stop + 1);
+              reader.on_start number;
+              drain reader
+          | None -> malformed line)
+      | [ "test"; number; outcome; microseconds ] -> (
+          match
+            ( int_of_string_opt number,
+              List.assoc_opt outcome outcomes,
+              int_of_string_opt microseconds )
+          with
+          | Some number, Some outcome, Some microseconds ->
+              let record =
+                {
+                  outcome;
+                  message = reader.message;
+                  echo = reader.echo;
+                  microseconds;
+                  cached = false;
+                }
+              in
+              reader.message <- None;
+              reader.echo <- None;
+              consume (stop + 1);
+              reader.on_record number record;
+              drain reader
+          | _ -> malformed line)
+      | _ -> malformed line)
 
-let render_report records =
-  let block label = function
-    | Some content -> Printf.sprintf "%s %d\n%s\n" label (String.length content) content
-    | None -> ""
-  in
-  String.concat ""
-    (List.mapi
-       (fun i r ->
-         Printf.sprintf "test %d %s\n" i r.outcome ^ block "message" r.message ^ block "echo" r.echo)
-       records)
+let feed reader text =
+  Buffer.add_string reader.pending text;
+  drain reader
+
+let parse_report text =
+  let found = ref [] in
+  let reader = reader (fun number record -> found := (number, record) :: !found) in
+  feed reader text;
+  if Buffer.length reader.pending > 0 || reader.message <> None || reader.echo <> None then
+    malformed "it ends partway through a record";
+  List.map snd (List.sort (fun (a, _) (b, _) -> compare a b) !found)
 
 (* The results that are kept: a pass with nothing to show. A failure's
    message and any echo give positions, which the key leaves out so that
    moving code keeps its results, and a time limit or a crash may come from
    the machine, so those tests run again. *)
-let keep record = record.outcome = "passed" && record.message = None && record.echo = None
+let keep record = record.outcome = Passed && record.message = None && record.echo = None
 
 let rec ensure_directory directory =
   if not (Sys.file_exists directory) then begin
@@ -202,83 +257,234 @@ let file_name key =
   String.concat ""
     (List.map (Printf.sprintf "%02x") (List.map Char.code (List.of_seq (String.to_seq key))))
 
+(* A kept result is a file holding [passed] and the microseconds of the run
+   that kept it. A file in any other form, such as one an earlier version
+   wrote, counts as no result, so its test runs again and replaces it. *)
 let stored directory key =
   let path = Filename.concat directory (file_name key) in
-  if Sys.file_exists path then
-    Some
-      { outcome = In_channel.with_open_bin path In_channel.input_all; message = None; echo = None }
-  else None
+  if not (Sys.file_exists path) then None
+  else
+    match String.split_on_char ' ' (In_channel.with_open_bin path In_channel.input_all) with
+    | [ "passed"; microseconds ] ->
+        Option.map
+          (fun microseconds ->
+            { outcome = Passed; message = None; echo = None; microseconds; cached = true })
+          (int_of_string_opt microseconds)
+    | _ -> None
 
-(* Writes a kept result, a pass with nothing to show, whole or not at all. *)
+(* Writes a kept result whole or not at all. *)
 let store directory key record =
   ensure_directory directory;
   let path = Filename.concat directory (file_name key) in
   let temporary = Printf.sprintf "%s.%d" path (Unix.getpid ()) in
-  Out_channel.with_open_bin temporary (fun channel -> output_string channel record.outcome);
+  Out_channel.with_open_bin temporary (fun channel ->
+      Printf.fprintf channel "passed %d" record.microseconds);
   Sys.rename temporary path
 
-let run_tests ?results t ~time_limit tests =
+type progress =
+  | Lowering
+  | Compiling of { compiled : int; total : int }
+  | Running of { tests : int }
+  | Started of { test : int }
+  | Ended of { test : int; record : record }
+
+(* Whether a test is external: it declares [uses], so it gets the real
+   implementations of those capabilities, and its result depends on the
+   world, so it is never kept and runs every time. *)
+let external_test t test =
+  match Query.demand t.database Interface.Environment.interface test with
+  | Some (Test_interface (_ :: _)) -> true
+  | _ -> false
+
+let run_tests ?results ?(rerun = false) ?(progress = ignore) t ~time_limit tests =
   let roots = List.map Lower.test_key tests in
-  let run roots =
-    match
-      build_and_run t ~roots
-        ~startup:(Startup.tests_calling ~time_limit (List.map Instance.symbol roots))
-        ~arguments:[]
-    with
-    | Error message -> Error message
-    | Ok (status, out, _) -> Ok (status, out)
-  in
-  match results with
-  | None -> run roots
-  | Some directory -> (
-      (* Each test's result is kept under its key, which changes with any
-         code it can run, and a test is run again only when it changes. *)
-      match
-        List.map
-          (fun root -> (root, Reachable.test_key t.context.env ~lookup:(compiled t) root))
-          roots
-      with
-      | exception Invalid_argument message -> Error message
-      | keyed -> (
-          let known = List.map (fun (root, key) -> (root, key, stored directory key)) keyed in
-          let missing =
-            List.filter_map
-              (fun (root, key, r) -> if r = None then Some (root, key) else None)
-              known
+  progress Lowering;
+  match
+    List.map2
+      (fun test root ->
+        match results with
+        | Some _ when not (external_test t test) ->
+            (root, Some (Reachable.test_key t.context.env ~lookup:(compiled t) root))
+        | _ -> (root, None))
+      tests roots
+  with
+  | exception Invalid_argument message -> Error message
+  | keyed -> (
+      let known =
+        List.mapi
+          (fun index (root, key) ->
+            let kept =
+              match (results, key) with
+              | Some directory, Some key when not rerun -> stored directory key
+              | _ -> None
+            in
+            (index, root, key, kept))
+          keyed
+      in
+      (* Kept results are reported first, as ended, so progress counts
+         them, and then each test that runs as it ends. *)
+      List.iter
+        (fun (index, _, _, kept) ->
+          Option.iter (fun record -> progress (Ended { test = index; record })) kept)
+        known;
+      let missing = List.filter (fun (_, _, _, kept) -> kept = None) known in
+      let fresh = Array.make (List.length missing) None in
+      let ran =
+        if missing = [] then Ok ()
+        else
+          let missing = Array.of_list missing in
+          let roots = Array.to_list (Array.map (fun (_, root, _, _) -> root) missing) in
+          let output =
+            Filename.concat (Filename.get_temp_dir_name ())
+              (Printf.sprintf "truss-tests-%d" (Unix.getpid ()))
           in
-          let fresh =
-            if missing = [] then Ok []
-            else
-              match run (List.map fst missing) with
-              | Error message -> Error message
-              | Ok (_, out) -> (
-                  match parse_report out with
-                  | records when List.length records = List.length missing ->
-                      List.iter2
-                        (fun (_, key) record -> if keep record then store directory key record)
-                        missing records;
-                      Ok records
-                  | _ -> Error ("Compile: a test report that is not one record a test:\n" ^ out))
+          let built =
+            build t ~roots
+              ~startup:(Startup.tests_calling ~time_limit (List.map Instance.symbol roots))
+              ~output
+              ~progress:(fun compiled total -> progress (Compiling { compiled; total }))
           in
-          match fresh with
+          match built with
           | Error message -> Error message
-          | Ok fresh ->
-              let rest = ref fresh in
-              let records =
-                List.map
-                  (fun (_, _, record) ->
-                    match record with
-                    | Some r -> r
-                    | None -> (
-                        match !rest with
-                        | r :: more ->
-                            rest := more;
-                            r
-                        | [] -> invalid_arg "Compile: fewer results than tests"))
-                  known
+          | Ok () -> (
+              progress (Running { tests = Array.length missing });
+              let index_of number =
+                if number < 0 || number >= Array.length missing then
+                  malformed (Printf.sprintf "a test numbered %d" number);
+                let index, _, _, _ = missing.(number) in
+                index
               in
-              let status = if List.for_all (fun r -> r.outcome = "passed") records then 0 else 1 in
-              Ok (status, render_report records)))
+              let reader =
+                reader
+                  ~on_start:(fun number -> progress (Started { test = index_of number }))
+                  (fun number record ->
+                    ignore (index_of number);
+                    let index, _, key, _ = missing.(number) in
+                    fresh.(number) <- Some record;
+                    (match (results, key) with
+                    | Some directory, Some key when keep record -> store directory key record
+                    | _ -> ());
+                    progress (Ended { test = index; record }))
+              in
+              match Toolchain.run ~on_output:(feed reader) output [] with
+              | exception Invalid_argument message ->
+                  (try Sys.remove output with Sys_error _ -> ());
+                  Error message
+              | _, report, errors ->
+                  (try Sys.remove output with Sys_error _ -> ());
+                  if Array.exists Option.is_none fresh then
+                    Error
+                      ("Compile: the test program ended before reporting every test:\n" ^ report
+                     ^ errors)
+                  else Ok ())
+      in
+      match ran with
+      | Error message -> Error message
+      | Ok () ->
+          let fresh = ref (List.map Option.get (Array.to_list fresh)) in
+          Ok
+            (List.map
+               (fun (_, _, _, kept) ->
+                 match kept with
+                 | Some record -> record
+                 | None -> (
+                     match !fresh with
+                     | record :: rest ->
+                         fresh := rest;
+                         record
+                     | [] -> invalid_arg "Compile: fewer results than tests"))
+               known))
+
+let reached_definitions t root =
+  Reachable.reachable t.context.env ~lookup:(compiled t) [ root ]
+  |> List.filter_map (function Lir.Code { key = Code { path; _ }; _ } -> Some path | _ -> None)
+  |> List.sort_uniq Path.compare
+
+let test_root = Lower.test_key
+
+let kept_result t ~results test =
+  (not (external_test t test))
+  && stored results (Reachable.test_key t.context.env ~lookup:(compiled t) (Lower.test_key test))
+     <> None
+
+let main_root main = Instance.Program_main main
+
+(* Code that cannot ship: a [todo] or an [echo] a program can reach. *)
+type unshippable = {
+  failure : [ `Todo | `Echo ];
+  file : string;
+  line : int;
+  column : int;
+  way : Path.t list;  (** The definitions from [main] to the one that holds it *)
+}
+
+let unshippable t ~main ~echo =
+  let root = Instance.Program_main main in
+  match Reachable.reached t.context.env ~lookup:(compiled t) [ root ] with
+  | exception Invalid_argument message -> Error message
+  | reached ->
+      let definitions keys =
+        List.fold_left
+          (fun acc (key : Instance.key) ->
+            match key with
+            | Code { path; _ } -> (
+                match acc with last :: _ when Path.equal last path -> acc | _ -> path :: acc)
+            | _ -> acc)
+          [ main ] keys
+        |> List.rev
+      in
+      let found =
+        List.concat_map
+          (fun (compiled, keys) ->
+            match compiled with
+            | Lir.Code instance ->
+                let sites =
+                  List.concat_map
+                    (fun (f : Lir.function_) ->
+                      Array.to_list f.blocks
+                      |> List.concat_map (fun (b : Lir.basic_block) ->
+                          (if echo then
+                             List.filter_map
+                               (function Lir.Echo { site; _ } -> Some (`Echo, site) | _ -> None)
+                               b.statements
+                           else [])
+                          @
+                          match b.terminator with
+                          | Fail { failure = Todo; site; _ } -> [ (`Todo, site) ]
+                          | _ -> []))
+                    (instance.main :: Array.to_list instance.nested)
+                in
+                List.filter_map
+                  (fun (failure, (site : Lir.site)) ->
+                    match anchor t site.definition with
+                    | None -> None
+                    | Some anchor ->
+                        Some
+                          {
+                            failure;
+                            file = anchor.path;
+                            line = anchor.first_line + site.line;
+                            column = site.column;
+                            way = definitions keys;
+                          })
+                  sites
+            | _ -> [])
+          reached
+      in
+      (* One report for each place, however many instances hold it. *)
+      Ok
+        (List.sort_uniq
+           (fun a b ->
+             compare (a.file, a.line, a.column, a.failure) (b.file, b.line, b.column, b.failure))
+           found
+        |> List.fold_left
+             (fun acc u ->
+               match acc with
+               | last :: _ when (last.file, last.line, last.column) = (u.file, u.line, u.column) ->
+                   acc
+               | _ -> u :: acc)
+             []
+        |> List.rev)
 
 let run_program ?input t ~main ~arguments =
   let root = Instance.Program_main main in
@@ -384,10 +590,12 @@ let evaluate t path ty =
         (Printf.sprintf "Compile: working out %s ended with status %d: %s" (Path.show path) status
            errors)
 
-let create ?(checks = true) database target toolchain cache settings =
+let create ?(checks = true) ?(file_name = Workspace.file_path) database target toolchain cache
+    settings =
   let t =
     {
       database;
+      file_name;
       context = Lower.context ~checks database target;
       toolchain;
       cache;

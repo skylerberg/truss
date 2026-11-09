@@ -29,11 +29,20 @@ type bracket = Walk.bracket =
   | Type_arguments
   | Method_bracket  (** After a method's name, which type checking decides. *)
 
+(** A value a name in scope means. *)
+type value =
+  | Value_local of Syntax.id  (** A local or parameter, by the id of the name that binds it. *)
+  | Value_generic of Syntax.id  (** A [USize] generic parameter, by the id of its name. *)
+  | Value_field of string  (** A field, in a record's invariant or potential. *)
+
 type resolved = {
   names : target option array;
       (** By the id of each [Syntax.name]: what the name refers to, or [None] for a name resolution
           leaves to type checking, such as a field, a label, or a variant in a pattern. *)
   brackets : bracket option array;  (** By the id of each [Bracket] expression. *)
+  holes : (Syntax.id * (string * value) list) list;
+      (** Each [todo], by its id, in the order of the walk, with the values in scope there, by name
+          in order, as SYNTAX.md's "Unfinished code" lists them for a hole. *)
   diagnostics : Diagnostic.t list;  (** Relative to the definition. *)
 }
 

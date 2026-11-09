@@ -1,0 +1,12 @@
+(test
+ (name cli_tests)
+ (libraries
+  harness
+  unix
+  cli
+  path
+  source
+  diagnostic
+  query
+  type_checker
+  compile))

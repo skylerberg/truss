@@ -16,6 +16,21 @@ let contains text part =
 let expect_int ~expected actual =
   if expected <> actual then fail "expected %d, got %d" expected actual
 
+(* Test records as text, each test's line with its number and outcome, then
+   its message and echo blocks, leaving out durations, which differ from run
+   to run. *)
+let render_records records =
+  let block label = function
+    | Some content -> Printf.sprintf "%s %d\n%s\n" label (String.length content) content
+    | None -> ""
+  in
+  String.concat ""
+    (List.mapi
+       (fun i (r : Compile.record) ->
+         Printf.sprintf "test %d %s\n" i (Compile.show_outcome r.outcome)
+         ^ block "message" r.message ^ block "echo" r.echo)
+       records)
+
 (* Types for the tests: a few prelude types and types defined by each test,
    with their shapes. *)
 
@@ -1416,7 +1431,7 @@ let () =
                    "test 5 incomplete\nmessage 40\nhole of type Int64\n  at suite.truss:12:3\n";
                    "test 6 panicked\nmessage 45\ncompiler bug: the test left 1 block allocated\n";
                  ])
-            out)
+            (render_records (Compile.parse_report out)))
 
 (* Ground types and shapes from the standard library *)
 
@@ -1743,7 +1758,7 @@ let tests_of database =
 let run_source text =
   let database, compile = load text in
   match Compile.run_tests compile ~time_limit:2000 (tests_of database) with
-  | Ok (_, output) -> output
+  | Ok records -> render_records records
   | Error message -> failwith message
 
 let expect_output text expected = expect_string ~expected (run_source text)
@@ -2592,7 +2607,9 @@ let () =
       let run text =
         let database, compile = load text in
         match Compile.run_tests ~results compile ~time_limit:2000 (tests_of database) with
-        | Ok (status, output) -> (status, output)
+        | Ok records ->
+            ( (if List.for_all (fun (r : Compile.record) -> r.outcome = Passed) records then 0 else 1),
+              render_records records )
         | Error message -> failwith message
       in
       let kept () = Array.length (Sys.readdir results) in
@@ -2616,6 +2633,31 @@ test "fails" {
 }
 |} in
       expect_int ~expected:2 (kept ()))
+
+let () =
+  test "an external test gets the real capabilities it uses, and its result is never kept"
+    (fun () ->
+      incr counter;
+      let results = Filename.concat (Lazy.force scratch) (Printf.sprintf "results%d" !counter) in
+      let database, compile =
+        load {|test "reads the clock"
+  uses Clock
+{
+  let _ = Clock.now()
+}
+|}
+      in
+      let run () =
+        match Compile.run_tests ~results compile ~time_limit:2000 (tests_of database) with
+        | Ok records -> records
+        | Error message -> failwith message
+      in
+      ignore (run ());
+      match run () with
+      | [ { outcome = Passed; cached = false; _ } ] ->
+          if Sys.file_exists results && Array.length (Sys.readdir results) > 0 then
+            fail "kept a result"
+      | _ -> fail "did not pass, or came from the kept results")
 
 (* Checks a build makes in place of proofs *)
 

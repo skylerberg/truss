@@ -155,6 +155,7 @@ The full design is in [CLI.md](CLI.md). In short:
 - **One `truss` program** with a subcommand for each tool: `check`, `test`,
   `run`, `build`, `fmt`, and the agents' tools `holes`, `show`, `impact`,
   and `rename`. It finds its package by looking upward for `truss.toml`.
+  The commands are the `cli` library, and Cmdliner parses the arguments.
 - **Whole-package by default,** since every command is O(change) through the
   query database and the caches, so there are few flags for choosing what to
   look at.
