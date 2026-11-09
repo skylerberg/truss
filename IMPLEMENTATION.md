@@ -95,6 +95,29 @@ The full design is in [PARSER.md](PARSER.md). In short:
 - **Diagnostics in a structured format,** with exact text replacements for
   fixes, shared with the lexer.
 
+### Type checker
+
+The full design is in [TYPECHECKER.md](TYPECHECKER.md). In short:
+
+- **Name resolution, hashing, and type checking are one stage,** built as
+  demand-driven queries, each stored with a trace of the queries it made, as
+  in rustc and Salsa. Signatures depend only on other signatures and type
+  shapes, so a body edit re-checks no caller.
+- **Hashes are split by what reads them:** a function's interface, its
+  contract, each default, and its body, so changing an `ensures` re-checks no
+  caller's types.
+- **Bidirectional checking, one statement at a time.** Unification never
+  spans more than one statement, and literals follow Go's rule for untyped
+  constants, so no `impl` lookup ever decides a literal's type.
+- **Moves, loans, and views are checked over a control-flow graph** of each
+  body, with liveness as in Rust's non-lexical lifetimes, and no
+  annotations: a call's result views what its arguments view.
+- **Maranget's usefulness algorithm** decides exhaustiveness and
+  reachability, for one value or several.
+- **The checked form** records every type, resolution, conversion, and move,
+  and the few proof obligations the checker creates itself, such as
+  disjoint indexes. The prover finds every other obligation in it.
+
 ### Hashing and caching
 
 - **Deterministic CBOR** (RFC 8949, section 4.2) is small enough to write

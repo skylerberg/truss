@@ -20,7 +20,11 @@ see [SYNTAX.md](SYNTAX.md). For the goals behind these decisions, see
 - **A function's signature and body are hashed separately.** Type checking and
   proofs in callers depend only on the signature. Changing a body without
   changing its signature, such as filling in a `todo`, re-checks no callers.
-  Only code generation and the affected tests run again.
+  Only code generation and the affected tests run again. The signature is
+  hashed in two parts: its interface, which callers' types depend on, and its
+  contract, the `requires`, `ensures`, `decreases`, and `cost` clauses, which
+  only callers' proofs depend on. Strengthening an `ensures` re-proves
+  callers but type-checks none of them again.
 - **The order of a type's fields does not affect its hash.** Reordering fields
   rebuilds nothing, except code that uses a derived `Ordered`, which compares
   fields in declaration order. The compiler chooses memory layout, and a record
@@ -66,9 +70,10 @@ use them.
   constants named `not_found` in a file. When a definition is added, removed,
   or renamed, only the lookups with its scope and name are made again. Swift's
   incremental builds keyed such lookups by name alone, and rebuilt far too
-  much. Truss's rules keep each lookup to one or two places: methods live with
-  their type, an `impl` lives with its trait or its type, and an unqualified
-  constant can only come from the same file.
+  much. Truss's rules keep each lookup to a few places: methods live with
+  their type, an `impl` lives with its trait, its type, or a type its trait's
+  arguments name, and an unqualified constant can only come from the same
+  file.
 - **Work stops as soon as an output comes out the same.** When a re-checked
   definition's signature is unchanged, its callers are not checked again;
   when generated code is unchanged, tests are not run again. This *early
@@ -273,6 +278,15 @@ a design input rather than user error:
   `f[X]` must say which reading applied.
 - **Bodies are inferred.** Local variables need no type annotations, and
   lambdas never have them.
+- **Each statement settles its own types.** A local's type comes from its
+  own `let` or `var`, its annotation and its initializer, and is fixed from
+  then on, as in Swift, Kotlin, Scala, and C#. Rust, OCaml, and Haskell
+  instead infer across a whole body, so a variable's type can come from a use
+  many lines later, and an error can show up far from its cause. In Truss, a
+  variable's type is what its own line says, which is what a reader, an LLM,
+  and the language server see, and checking stays local and fast. The cost is
+  an annotation where a statement alone cannot decide, as in
+  `var names: List[String] = []`.
 - **Generic code is compiled once for each set of type arguments,** as in
   Rust, C++, and Go, so generics cost nothing at run time. This rules out
   polymorphic recursion: a generic function cannot call itself, or another
@@ -482,22 +496,29 @@ two variables never refer to the same changeable data.
   implementations create such handles, since there is no foreign code, and a
   test's fake implementation hands out plain values. Types cannot define
   destructors.
-- **What can fail is explicit, and only losing data is checked.** Closing a
-  file that was only read, or a socket, loses nothing, so it happens
-  silently. Flushing a buffered writer can fail and losing its data would go
-  unnoticed, which is how Rust's `BufWriter` loses writes when it is dropped.
-  So a writer that may hold unwritten data must be finished with `finish()`,
-  which returns a `Result`, and dropping an unfinished one is a compile
-  error. This one check uses the idea of linear types from Austral and Vale
-  without making every handle linear. Closing a connection that a pure
-  function dropped is visible to the other end, as when a process exits, but
-  never to the program.
+- **What can fail is explicit, and buffered data is never lost silently.**
+  Closing a file that was only read, or a socket, loses nothing, so it
+  happens silently. Flushing a buffered writer can fail, and losing its data
+  would go unnoticed, which is how Rust's `BufWriter` loses writes when it is
+  dropped. So a buffered writer is only ever lent, inside a scope:
+  `FileWrite.write_with(path, fn(writer) { ... })` lends the writer `mut` to
+  the function, then finishes it, and returns the first error from the
+  function or from finishing. This is Python's `with`, Kotlin's `use`,
+  Java's try-with-resources, and Ruby's `File.open` with a block. User code
+  never owns a writer, so it can never drop an unfinished one, and `?` inside
+  the function needs no cleanup. Linear types, as in Austral and Vale, could
+  instead let a writer be owned and stored, but every `?` while one is open
+  would drop it, and generic code would need to say which of its type
+  parameters it never drops. A wrapper such as a compressing writer takes
+  the output `mut` on each call, or lends a writer of its own the same way.
+  Closing a connection that a pure function dropped is visible to the other
+  end, as when a process exits, but never to the program.
 - **There is no mutable global state.** Values defined at the top level are
   constants. Anything that changes lives in a variable, a parameter, or a
   capability implementation, so all state a function can touch is visible in
   its signature. This is also why many tests can safely share one process.
 - There are no lifetime annotations. The only references are read-only views,
-  and they cannot be stored (see below).
+  and they never outlive the function that made them (see below).
 - A function can modify a caller's value only through a `mut` parameter. An
   `own` parameter takes ownership of the argument. The call site repeats the
   keyword (`sort(mut scores)`), so the effect on each argument is visible
@@ -536,7 +557,32 @@ two variables never refer to the same changeable data.
   memory copy. Every other type, such as `List`, `String`, or anything that
   contains them, needs an explicit `copy()`, so the cost of copying shows in
   the code. The compiler works out which types copy implicitly from their
-  fields; there is nothing to declare.
+  fields; there is nothing to declare, except on opaque types (below).
+- **Some types cannot be copied at all.** Copying an open file, a connection,
+  or a process would duplicate an operating-system handle, which can fail,
+  and `copy()` cannot fail. So `copy()` exists for every type except the
+  standard library's handles and the types that hold one. A connection pool,
+  `List[Connection]`, is still an ordinary list; it just has no `copy()`.
+- **Generic code says what it copies.** Two prelude traits, which the
+  compiler implements and no `impl` can, state these facts: `Copyable`, which
+  gives `copy()`, and `Plain`, which copies implicitly and requires
+  `Copyable`. Generic code copies only when a bound says it may, as in
+  `fn repeat[Element: Copyable](value: Element, count: USize)`, so a plain
+  `[Element]` accepts every type, handles included. Rust's `Clone` and `Copy`
+  bounds work the same way. The names avoid Rust's, because Rust's `Copy`
+  means implicit while Truss's `copy()` is explicit; Mojo, which also has a
+  `copy()` method, names its trait `Copyable`. A generic type has them under
+  the same conditions as its parts: `List[Element]` is `Copyable` when
+  `Element` is, and `any Trait` is `Copyable` only when `Trait` requires it.
+- **Opaque types declare whether they copy.** Inferring it from an opaque
+  type's fields would let other packages depend on fields they cannot see:
+  adding a `String` field to an opaque type would break a package that
+  relied on it copying implicitly. So an opaque type is `Copyable` or `Plain`
+  only when it says so, with `derives Copyable` or `derives Plain`, which the
+  compiler checks against its fields. Swift requires public types to declare
+  `BitwiseCopyable` for the same reason. Other types show their fields, so
+  changing those is visibly a change to the API already, and their copying
+  stays inferred.
 - To keep a value while passing it to an `own` parameter, pass `value.copy()`.
 - Record updates (`own config with (server.port: 443)`) follow the same
   rules. An owned base is reused in place, so the update costs one write per
@@ -552,11 +598,31 @@ views are *second-class*, as in Hylo:
 - **The original is frozen while a view is in use.** It cannot be changed or
   moved until the view's last use. Since the name is read-only either way,
   this changes whether a copy happens, never what the code means.
-- **Views cannot be stored or returned,** so they never outlive the function
-  that made them. The one exception is a method returning a view of `self`.
-  There is only one possible source, so the caller knows what the result
-  depends on without any annotation. This is Rust's lifetime elision rule for
-  `&self`, made the only rule. A record holding views is itself a view.
+- **Being a view is a property of a type.** `Slice`, `StringSlice`, a cursor
+  over a collection it does not own, and a lambda that captures locals are
+  views, and so is any type that holds one anywhere: in a field, a variant,
+  an element, or a type argument. `Option[Slice[Int64]]` is a view, and so is
+  the record `split_at` returns. The compiler works this out from the type,
+  as it does for implicit copies, so nothing is declared. Swift's
+  nonescapable types (`~Escapable`) are the same idea.
+- **Views never outlive the function that made them.** A value of a view
+  type can be bound, held in local records and collections, and passed as an
+  argument, but it cannot be returned except as below, and cannot go where
+  an owned value that may be stored is required. Putting a view into a
+  record or a list makes the record or list a view, so a view can never be
+  stored past its function.
+- **A call's result views what its arguments view.** A function may return a
+  view only of what reached it through its parameters, never of its own
+  locals. The caller then treats the result as viewing everything its
+  read-only and view-typed arguments view, so it needs no annotation.
+  `text.trim()` views `text`, and `found.unwrap_or(default: backup[..])`
+  views both `found` and `backup`. Rust instead names which input a result
+  borrows from with lifetimes, and Swift with lifetime-dependence
+  annotations. Truss's rule is coarser but needs neither, and arguments of
+  plain data, such as indexes, lend nothing, so it rarely holds more than it
+  must. A rule that only views of `self` can be returned would not be
+  enough: generic code such as `Option.unwrap_or` returns a value of its
+  parameter's type, which is a view whenever `Option` holds one.
 - **A `var` can hold a view that never leaves its function.** A view still
   cannot outlive what it refers to, which is the reason for the rule against
   storing views. A cursor over a collection needs a `var`, because pulling a
@@ -564,8 +630,9 @@ views are *second-class*, as in Hylo:
 - **`mut` access is never stored.** It is named only by a `mut` parameter, a
   `mut` loop's variable, or a lambda's `mut` parameter, and lasts only for
   that call, iteration, or `provide mut` block, so there is no mutable
-  reference to track across statements. Disjoint parts of one collection can still be passed `mut` side
-  by side, because the prover shows the ranges do not overlap.
+  reference to track across statements. Disjoint parts of one collection
+  can still be passed `mut` side by side, because the prover shows the
+  ranges do not overlap.
 - **The compiler checks each function on its own.** The rules involve only
   one function body plus the signatures it calls, which keeps checking fast
   and incremental.
@@ -591,20 +658,38 @@ checks for static memory and might allocate. No `cost allocations == 0`
 promise could then be proven for code that changes a collection it was
 given.
 
-### Yielding methods
+### Lending and yielding methods
 
-A method that yields lends a part of `self` to its caller and then continues,
-as Hylo's subscripts do and as Swift's `_modify` accessors do inside its
-standard library. This is how a user's collection gives out access to its
-elements without returning a stored reference, which would need lifetimes.
+A method can give its caller parts of `self` without returning a stored
+reference, which would need lifetimes. It does so in one of two ways, and its
+signature says which:
+
+- **`lends` gives out one part, exactly once,** and then continues, as
+  Hylo's subscripts and Swift's `_read` and `_modify` accessors do. This is
+  how `items[i]` and `mut grid[position].visit()` work.
+- **`yields` gives out any number of parts,** one after another, as C#'s and
+  Python's generators do. This is how `for` loops and cursors work.
+
+The two behave differently for the caller, so the signature must say which.
+A lending method is proven on the promise that it always continues after its
+`yield`, while a loop may stop at any `yield` and never continue. A call to a
+lending method in an expression is the part, while a call to a yielding
+method outside a `for` loop is a cursor. If the body decided which, as by
+counting its `yield`s, a body edit could change what callers mean, and
+callers could break a lending method's proof by looping over it. Swift and
+Hylo also keep accessors apart from sequences, and Python's
+`@contextmanager` marks a generator that yields once.
 
 - **User collections are not second-class.** `[]` and `for` work through the
   `Index` trait and `each`, so a user's `Grid` supports
   `mut grid[position].visit()` and `for cell in mut grid` exactly as a `List`
   does, with the same proof rules.
-- **A single `yield` always continues afterward,** even if the caller's
-  statement leaves early, so a type can update what depends on the part,
-  such as a cached total.
+- **A lending method yields exactly once on every path, and always
+  continues afterward,** even if the caller's statement leaves early, so a
+  type can update what depends on the part, such as a cached total. The
+  compiler checks that there is exactly one `yield` on every path, as Swift
+  does for its accessors. A lending method cannot drive a `for` loop or be
+  pulled.
 - **A loop can stop at any `yield`, and the method does not continue.** Python
   generators run `finally` blocks when a loop stops early; Truss has no
   `finally`, and continuing to the next `yield` would do unasked-for work,
@@ -613,7 +698,7 @@ elements without returning a stored reference, which would need lifetimes.
   requires invariants to hold there. A type whose invariant depends on its
   elements in a way that changing one would break, such as a sorted list or a
   cached total, offers read-only and owned loops, and changes single
-  elements through a single `yield`.
+  elements through a lending method.
 - **Read-only and owned yields can be pulled.** Internal iteration alone, as
   in Ruby's `each`, cannot advance two sequences together, so it cannot
   write `zip`, merge, `peek`, or pause and resume. Pulling a yielding method
@@ -641,7 +726,7 @@ elements without returning a stored reference, which would need lifetimes.
   allocating would need opaque result types, Rust's `impl Trait` and Swift's
   `some`. They can be added later without breaking code if they are needed;
   most of what they are used for is a yielding method in Truss.
-- **Compilation needs no coroutines at run time.** A loop or a single `yield`
+- **Compilation needs no coroutines at run time.** A loop or a lending call
   compiles to a call that receives the caller's code as a function, which
   inlining makes as cheap as a written-out loop, as in Swift and Hylo. A
   pulled cursor compiles to a state machine, as C# and Kotlin compile their
@@ -722,14 +807,18 @@ choices below keep method calls predictable:
   a reviewer cannot tell which `process` runs in `process(item)` without
   knowing the type of `item`. Traits with type parameters avoid these:
   - **Argument types are settled first.** The types of the arguments are
-    worked out without looking at which `impl`s exist, with literals at their
-    default types, and only then is the one matching `impl` found. Adding an
-    `impl` never changes an existing call.
+    worked out without looking at which `impl`s exist, and only then is the
+    one matching `impl` found. A literal takes the type of the other operand
+    of an operator when it can, and otherwise its default type (see
+    [Integers](#integers)), so `count + 1` adds two `UInt8`s while
+    `duration * 2` multiplies by an `Int64`. Adding an `impl` never changes
+    an existing call.
   - **Nothing is chosen from the expected result.** Truss has no `into()`,
     whose target Rust infers from context and which is a common source of
     inference failures. The target is always named.
-  - **The candidates are fixed.** An `impl` lives with its trait or its
-    type, so no third package can add one that changes a call.
+  - **The candidates are fixed.** An `impl` lives with its trait, its
+    type, or a type its trait's arguments name, so no third package can add
+    one that changes a call.
 - **Mixed-type arithmetic goes through these traits.** Times, geometry,
   physics, and money need `instant + duration` and `vector * 2.0`, so the
   arithmetic operators use `Add[Right]` and similar traits, with the result
@@ -764,8 +853,19 @@ choices below keep method calls predictable:
   break a call only with an error that names both sides, never by changing
   what it does. Adding a public method to a type can break another package's
   `impl`, so tools that check versions treat it as possibly breaking.
-- **Each type has at most one implementation of a trait.** An `impl` must live
-  in the package of the trait or of the type.
+- **Each type has at most one implementation of a trait,** for each set of
+  the trait's arguments.
+- **An `impl` lives with its trait or with a type it names.** It must be in
+  the package of the trait, of the implementing type, or of the outermost
+  type of one of the trait's arguments. So `impl Multiply[Vector] for
+  Float64` can live with `Vector`, which is what `2.0 * velocity` needs, and
+  `impl From[UserId] for Int64` with `UserId`, which is what
+  `Int64.from(user_id)` needs. This is Rust's orphan rule, simplified.
+  Packages cannot depend on each other in a cycle, so for any pairing of
+  types only one package can name them all, and there is never more than one
+  place an `impl` could be. Only the outermost type counts, so
+  `From[List[UserId]]` cannot be implemented for `Int64` in `UserId`'s
+  package, as in Rust.
 - **Constructors follow one convention.** `Type.new(...)` is the main
   constructor. Other constructors have descriptive names, since overloading
   `new` by parameter types is not allowed.
@@ -863,6 +963,9 @@ Rust and Swift.
   allocates once. An implicit conversion would hide an allocation.
 - **An `any` value is an ordinary value.** It owns its contents and copies only
   with `copy()`. If its contents hold a view, it is a view too.
+- **An `any` type fixes every associated type** of its trait, as in
+  `any Cursor[Element = Int64]`, as Rust requires of `dyn`. A method that
+  mentions an associated type could not otherwise be called.
 - **Limits apply to calls, not traits.** Methods that need the concrete type,
   such as `Equal.equal(self, other: Self)` or a constructor, cannot be called
   through `any`. The compiler reports this at the call, so a trait never
@@ -922,6 +1025,15 @@ comparisons over `&&`. Every other combination needs parentheses.
   needs no `3u8`. When nothing decides the type, it defaults to `Int64` or
   `Float64`, which keeps simple local variables free of annotations. An
   integer literal is never a float, so `1` and `1.0` always look different.
+- **A literal in an operator takes the other operand's type,** as Go's
+  untyped constants do. In `count + 1`, `index == 0`, and `0..count`, the
+  literal has the type of the other side, when it can be that type. When it
+  cannot, as in `duration * 2`, it has its default type. An expression made
+  only of literals waits for the same decision, so `count + (60 * 60)` works,
+  and a literal shift amount is a `USize`, as Go's is a `uint`. The rule
+  never looks at which `impl`s exist, so adding one never changes which a
+  call uses. Rust instead lets `impl` search decide a literal's type, so an
+  `impl` added later can make an existing call ambiguous.
 - **A leading zero is an error, not octal and not ignored.** `0755` is octal
   in C, Go, and shell, and the obvious use is file permissions. Reading it as
   decimal 755, as Rust and Swift do, would silently give the wrong
@@ -1051,7 +1163,17 @@ error, where Rust and Swift only warn. Go makes unused variables errors for
 the same reason: such code is almost always a mistake, often a typo. These two
 rules are also what make constants safe to use by name in patterns.
 Parameters are exempt, because a trait implementation may not need every
-parameter the trait declares.
+parameter the trait declares. For the same reason an unused import is an
+error, as in Go.
+
+**Unreachable code is an error,** as in Java, where Rust, Swift, C#, and
+Kotlin only warn. A statement after a `return`, a `break`, a `continue`, an
+`unreachable`, a call that returns `Never`, or a `while true` that is never
+left can never run, and is almost always a line left behind by an edit. The
+check uses types alone: after an expression of type `Never`, the rest of the
+block is unreachable. It never reasons about values, so `if false { ... }` is
+not reported. `todo` is the exception: code after a `todo` is unfinished, not
+dead, and is still checked as far as it can be.
 
 `?` never converts the error. It only works when the error type matches the
 function's, and any conversion is written at the call with `map_error`, as in
@@ -1182,6 +1304,12 @@ along. So the package manifest grants each dependency its capabilities:
 - **Exceeding a grant fails the build.** The error names the dependency's
   function and the capability it used. Giving a package more power is always a
   visible change to the manifest.
+- **Grants are checked at signatures.** A call to a dependency's function, or
+  a `provide` of its type, is checked against the dependency's grant, from
+  the callee's `uses`. The dependency's bodies are already checked against
+  its own signatures, so nothing it does can go further. A dependency that
+  offers both a client and a server needs only the grants for what the
+  program calls.
 - **Grants nest.** A dependency can only grant its own dependencies a subset of
   what it was granted.
 - **Passing through does not count.** Running a caller's callback with the
@@ -1323,8 +1451,27 @@ since its body runs to the end of the expression anyway.
 
 **Specifications use exact integer arithmetic.** In `requires`, `ensures`,
 invariants, laws, and cost clauses, integer arithmetic never overflows, so a
-specification cannot itself have an overflow bug. Float arithmetic in
-specifications follows IEEE 754, as in code. Exact real arithmetic would
+specification cannot itself have an overflow bug. This follows Dafny, through
+the prelude type `Integer`, the mathematical integers, which exists only in
+specifications:
+
+- **Every built-in integer type is a subset of `Integer`.** Arithmetic on
+  built-in integers in a specification gives an `Integer`, so in
+  `ensures result == a + b` the sum cannot overflow, and in
+  `decreases high - low` the measure can be negative, which is exactly what
+  the prover must rule out. Comparisons may mix integer types, as in
+  `requires count <= items.length()`, since nothing can overflow.
+- **An `Integer` can stand where a built-in integer is expected,** as in
+  `items[i + 1]`, with a proof obligation that it fits. Specifications need
+  no casts. Verus asks for an explicit `as` there, which adds only noise,
+  since the obligation is proven either way.
+- **A function whose signature mentions `Integer` is for specifications
+  only.** It can be called only from specifications and is never compiled,
+  which is how a function such as `fn sum(items: Slice[Int64]) -> Integer`
+  is written. Verus marks these with `spec fn`; Truss needs no keyword,
+  since the signature already says it.
+
+Float arithmetic in specifications follows IEEE 754, as in code. Exact real arithmetic would
 describe results the hardware does not produce, so such contracts could never
 be proven. The solver checks float contracts bit for bit, which is slow, so
 they are best kept rare.
@@ -1385,6 +1532,10 @@ Loops give the prover facts for free, so most loops need no annotations:
 - A `for` over a collection or range runs exactly once per element. This is
   how a clause like `cost calls(visit) == items.length()` gets proven.
 - A `for` over a collection or range always terminates.
+
+`while true` is the infinite loop. A `while` whose condition is the literal
+`true`, and that no `break` leaves, has type `Never`, as Java and Kotlin
+treat it, so a server whose main loop runs forever can return `Never`.
 
 A `while` loop in a function with a `time` clause must be proven to terminate.
 The compiler handles simple cases itself. Otherwise the loop states a
@@ -1580,6 +1731,10 @@ file of every project.
 
 Defaulting to private makes keeping code modular the easiest option.
 
+A public signature cannot mention a private or `internal` type, and neither
+can a public type's visible fields, as in Rust and Swift. Code in other
+packages could never name such a type.
+
 A `public opaque type` exposes its name but not its contents. Only code in its
 package can read, build, update, or match on it. Visibility is set for the type
 as a whole, never per field. Truss uses opaque types for three things:
@@ -1771,7 +1926,10 @@ longer covers every case, which is an error too. The no-shadowing rule already
 means a name that is a constant cannot also be a binding, so reading it as the
 constant is the only reading consistent with that rule. Python's `match`
 instead lets only qualified names be constants, which would leave a file's own
-constants needing guards.
+constants needing guards. A constant used in a pattern must have a type whose
+equality is built in or derived, so that matching it compares structure, as
+Rust requires. A hand-written `Equal` could disagree with what the pattern
+matches.
 
 **Imports bring in modules, not individual names.** After
 `use standard::file_system`, code writes `file_system::read_text(path)`. Every

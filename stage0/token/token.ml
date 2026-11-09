@@ -28,6 +28,7 @@ type keyword =
   | Invariant
   | Is
   | Law
+  | Lends
   | Let
   | Match
   | Mut
@@ -205,6 +206,7 @@ let keywords =
     ("invariant", Invariant);
     ("is", Is);
     ("law", Law);
+    ("lends", Lends);
     ("let", Let);
     ("match", Match);
     ("mut", Mut);

@@ -92,8 +92,8 @@ Reserved everywhere:
 
 ```text
 any assert break capability continue cost decreases derives echo else ensures
-exists false fn for forall if impl in indirect internal invariant is law let match mut
-opaque own parallel proof provide public requires return self Self test
+exists false fn for forall if impl in indirect internal invariant is law lends let
+match mut opaque own parallel proof provide public requires return self Self test
 theorem todo trait true type unreachable use uses var while with yield yields
 ```
 
@@ -253,10 +253,10 @@ so it needs no entry.
 Every other token continues the line before it: `.`, `,`, `:`, `::`, `)`,
 `]`, `}`, `?`, `|`, `=>`, `->`, `=` and the compound assignments, the binary
 operators other than `-`, `..`, `..=`, and the keywords `cost`, `decreases`,
-`derives`, `else`, `ensures`, `in`, `indirect`, `invariant`, `is`, `opaque`, `requires`,
-`uses`, `with`, and `yields`. So no `NEWLINE` ever comes before a closing `}`,
-and statements, `match` arms, and members are separated by `NEWLINE`s, not
-ended by them.
+`derives`, `else`, `ensures`, `in`, `indirect`, `invariant`, `is`, `lends`,
+`opaque`, `requires`, `uses`, `with`, and `yields`. So no `NEWLINE` ever
+comes before a closing `}`, and statements, `match` arms, and members are
+separated by `NEWLINE`s, not ended by them.
 
 The parser skips a `NEWLINE` immediately before a `{` that must open a body.
 
@@ -290,9 +290,13 @@ parameter     = [ mode ] "self"
               | LOWER_NAME ":" [ mode ] type [ "=" expression ] ;
 mode          = "mut" | "own" ;
 
-result        = "->" type | "yields" [ mode ] type ;
+result        = "->" type | "yields" [ mode ] type | "lends" [ mode ] type ;
 body          = block ;
 ```
+
+- `yields` makes a method that yields any number of times, which drives a
+  `for` loop or makes a cursor. `lends` makes a method that yields exactly
+  once, lending a part of `self` for the rest of the caller's statement.
 
 - In a `type_head`, the generic parameters are the type's own, with any
   bounds the method needs: `fn List[Element: Ordered].sort(mut self)`.
@@ -451,7 +455,8 @@ loop_clause = "invariant" expression | "decreases" expression { "," expression }
   allowed only in function bodies.
 - `parallel` and `parallel for` are statements; each statement directly inside
   a `parallel` block is a branch.
-- `yield mut part` is `yield` followed by the expression `mut part`, whose
+- `yield` is allowed only in a method whose signature `yields` or `lends`.
+  `yield mut part` is `yield` followed by the expression `mut part`, whose
   `mut` marks the place being lent.
 
 ### Expressions
@@ -620,12 +625,12 @@ things. These are decided afterward, without changing the tree's shape:
 
 | Construct | Decided by | How |
 |---|---|---|
-| `name[...]` | Name resolution | Type arguments if `name` is a generic function; otherwise an index. For a method, type checking decides. |
+| `name[...]` | Name resolution | Type arguments if `name` is a generic function, a type, or a trait; otherwise an index. For a method, type checking decides. |
 | A bare `LOWER_NAME` in a pattern | Name resolution | The constant if one with that name is in scope; otherwise a new binding. |
-| A bare argument after the first | Name resolution | Must name a parameter or field; otherwise an error. |
-| Whether an expression after `mut` or `own` starts with a place | Name resolution | It must start with a variable or `self`, followed by fields and indexes. |
+| A bare argument after the first | Type checking | Must name a parameter or field of the callee; otherwise an error. |
+| Whether an expression after `mut` or `own` starts with a place | Name resolution | It must start with a variable, a parameter, `self`, or a constant, followed by fields and indexes. |
 | A variant in a pattern | Type checking | Looked up in the type of the matched value. |
 | A method call or field | Type checking | Looked up in the type of the receiver. |
-| An `impl` for a trait with type parameters | Type checking | Chosen by the argument types, worked out first. |
+| An `impl` for a trait with type parameters | Type checking | Chosen by the argument types, worked out first, with a literal operand taking the type of the other operand. |
 | The cost words, `log`, `power`, `result`, `old` | The parser and name resolution | Names to the lexer. The parser checks their spelling where a `cost` clause expects them, and name resolution gives `log`, `power`, `time(...)`, `calls(...)`, `result`, and `old` their meaning in specifications. |
 | The expected type of `[...]` | Type checking | `List` unless an `Array` or `Set` is expected. |

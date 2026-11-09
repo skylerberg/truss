@@ -3,10 +3,9 @@
 This document designs stage0's code generation: everything between the type
 checker's output and a program that runs. It follows the decisions in
 [DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and
-[IMPLEMENTATION.md](IMPLEMENTATION.md). The type checker and prover are not
-designed yet, so this document states what it expects from them. The changes
-this design made to the other documents are listed at the end. Nothing is
-built yet.
+[IMPLEMENTATION.md](IMPLEMENTATION.md). It reads the checked form that
+[TYPECHECKER.md](TYPECHECKER.md) describes. The prover is not designed yet,
+so this document states what it expects from it. Nothing is built yet.
 
 ## What code generation does
 
@@ -289,7 +288,8 @@ nothing that drops or changes a value needs to check for static memory.
 vtable for that type and trait. A vtable holds:
 
 - the value's size and alignment
-- its drop function, and its copy function if it has one
+- its drop function, and its copy function when the trait requires
+  `Copyable`
 - one entry for each method that can be called through `any`, after the
   receiver and its evidence
 
@@ -395,8 +395,9 @@ so they are compiled once and shared:
   removed. An `indirect` variant drops its fields and frees its block. A
   standard-library handle frees its operating-system resource (see
   [Handles](#handles)).
-- **Copy:** `copy()` follows the structure of the value. Plain data is a
-  memory copy. A `List` of plain data is one allocation and one memory copy,
+- **Copy:** `copy()` follows the structure of the value, for each type that
+  is `Copyable`; handles and the types that hold one have none. Plain data
+  is a memory copy. A `List` of plain data is one allocation and one memory copy,
   the fast path DESIGN.md mentions. A static `String` is shared, not copied.
 - **Debug output:** the built-in debug output every type has, used by
   `echo`, failed `assert`s, and the test runner, and to write out values
@@ -454,7 +455,7 @@ and its siblings. Full-width multiplication, used by hashing and
   only live on the true branch.
 - **`while` and `for`** become blocks and gotos. A `for` over anything but a
   range of built-in integers calls `each` (see
-  [Yielding methods](#yielding-methods)).
+  [Lending and yielding methods](#lending-and-yielding-methods)).
 
 ### Strings and templates
 
@@ -508,13 +509,13 @@ and its siblings. Full-width multiplication, used by hashing and
 - **`any` calls** load the method from the vtable and call it with the
   value's pointer.
 
-## Yielding methods
+## Lending and yielding methods
 
-### Loops and single yields
+### Loops and lending calls
 
-A yielding method takes the caller's code as a function: the loop body, or
-the rest of the statement for a single `yield`. That function returns
-whether to go on. Pulling is a separate compilation of the same method (see
+A lending or yielding method takes the caller's code as a function: the rest
+of the caller's statement for a lending method, or the loop body for a
+yielding one. That function returns whether to go on. Pulling is a separate compilation of the same method (see
 [Cursors](#cursors-1)), made only when some code pulls it.
 
 The standard library's `List.each` is ordinary Truss:
@@ -556,10 +557,10 @@ loop ended:
   frame, and return `t_stop`. After the method returns, the caller checks
   the slot and returns too.
 
-A method that yields once always continues after its `yield`, as DESIGN.md
-promises, even if the caller's statement leaves early. So for a single
-`yield`, the body's early exits are recorded the same way, but the method
-runs to its end before the caller acts on them.
+A lending method always continues after its `yield`, as DESIGN.md promises,
+even if the caller's statement leaves early. So for a lending call, the
+statement's early exits are recorded the same way, but the method runs to its
+end before the caller acts on them.
 
 In release builds, and in development builds when the method is in the
 standard library or a dependency, `List.each` and the body are in the same C
@@ -651,8 +652,8 @@ which needs no threads or locks at all.
 ## Parallelism
 
 Stage0 runs `parallel` blocks and `parallel for` loops one branch after
-another, which DESIGN.md allows. The type checker has already proven the
-branches disjoint. A later compiler can hand branches to a thread pool with
+another, which DESIGN.md allows. The type checker and the prover have
+already shown the branches disjoint. A later compiler can hand branches to a thread pool with
 no change to the LIR above the statement that starts them.
 
 ## The system interface
@@ -865,9 +866,6 @@ fact about a small input, and there are no golden files.
   `std::env::args` panics on such an argument, Python substitutes escapes,
   and some programs replace bad sequences with U+FFFD. The language should
   decide. Until then, stage0 replaces bad sequences with U+FFFD.
-- **Which types `copy()` applies to.** Copying a handle, such as an open
-  file, would duplicate it. The type checker should reject `copy()` on
-  handles and on types containing them, and the docs should say so.
 - **Static or dynamic libc on Linux.** Stage0 links dynamically on both
   platforms. A static program with musl would match IMPLEMENTATION.md's
   "single binary" more closely.

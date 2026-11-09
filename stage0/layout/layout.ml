@@ -30,8 +30,8 @@ let can_begin = function
       | Use | Var | While | Yield ) ->
       true
   | Keyword
-      ( Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Opaque
-      | Requires | Uses | With | Yields ) ->
+      ( Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends
+      | Opaque | Requires | Uses | With | Yields ) ->
       false
   | Punctuation _ | Newline | End_of_file -> false
 
