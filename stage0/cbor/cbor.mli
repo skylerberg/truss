@@ -10,7 +10,7 @@ type t =
   | Integer of Z.t
       (** Any integer. One beyond 64 bits is a bignum, tag 2 or 3, with no leading zero bytes. *)
   | Bytes of string
-  | Text of string  (** UTF-8 text. *)
+  | Text of string  (** Text, which the caller must give as valid UTF-8. *)
   | Array of t list
   | Map of (t * t) list  (** Encoded in sorted order, whatever order it is given in. *)
   | Tag of int * t
@@ -24,4 +24,4 @@ val int : int -> t
 
 val encode : t -> string
 (** Raises [Invalid_argument] if a map has two entries whose keys encode the same, since a map with
-    a repeated key has no deterministic form. *)
+    a repeated key has no deterministic form, or if a tag is negative. *)

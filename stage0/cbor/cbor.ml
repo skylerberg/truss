@@ -127,6 +127,7 @@ let rec write buffer = function
           Buffer.add_string buffer key;
           write buffer value)
         sorted
+  | Tag (tag, _) when tag < 0 -> invalid_arg "Cbor.encode: a negative tag"
   | Tag (tag, value) ->
       head_int buffer 6 tag;
       write buffer value

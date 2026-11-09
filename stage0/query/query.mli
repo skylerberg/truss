@@ -15,7 +15,9 @@
 
 type database
 
-val create : unit -> database
+val create : ?log:bool -> unit -> database
+(** A database with no inputs set. With [~log:true] it keeps the log of {!executed}, which tests
+    read; otherwise it keeps none, since a long-running process would grow it forever. *)
 
 type ('key, 'value) input
 
@@ -30,7 +32,8 @@ val input :
 
 val set : database -> ('key, 'value) input -> 'key -> 'value -> unit
 (** Sets an input. If the value differs from what it was, the database moves to a new revision, and
-    every result that read it is checked again when next asked for. *)
+    every result that read it is checked again when next asked for. Raises [Invalid_argument] while
+    a query is running, since a result built while an input changed under it would look current. *)
 
 val remove : database -> ('key, 'value) input -> 'key -> unit
 (** Removes an input, as a change: a later {!get} of it raises [Not_found]. *)
@@ -56,8 +59,10 @@ val query :
     hold functions unless [equal] is given. *)
 
 val demand : database -> ('key, 'value) query -> 'key -> 'value
-(** The query's result for the key: stored, checked against its trace, or computed. Raises {!Cycle}
-    if the query is already running for that key. *)
+(** The query's result for the key: stored, checked against its trace, or computed. A query that
+    raised is stored like one that returned, with the trace of what it read, and [demand] raises the
+    same exception again until that trace changes. Raises {!Cycle} if the query is already running,
+    or having its trace checked, for that key. *)
 
 exception Cycle of string list
 (** A query asked, directly or through others, for its own result. The list names the queries on the
@@ -68,7 +73,7 @@ exception Cycle of string list
     For tests of incremental behavior, which assert exactly which queries ran again. *)
 
 val executed : database -> string list
-(** The queries that ran since the log was last cleared, as ["name(key)"], in the order they
-    started. *)
+(** In a database created with [~log:true], the queries that ran since the log was last cleared, as
+    ["name(key)"], in the order they started. *)
 
 val clear_log : database -> unit

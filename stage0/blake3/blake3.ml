@@ -2,6 +2,8 @@
    32 bits, held in OCaml's native integers and masked after each
    operation. *)
 
+(* Words are held in native integers, which need more than 32 bits. *)
+let () = assert (Sys.int_size >= 63)
 let mask = 0xffffffff
 let add a b = (a + b) land mask
 let rotate_right value count = (value lsr count) lor (value lsl (32 - count)) land mask

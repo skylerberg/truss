@@ -41,6 +41,16 @@ let () =
   encodes "1.5 is a half float" (Cbor.Float 1.5) "f93e00";
   encodes "65504.0 is the largest half float" (Cbor.Float 65504.0) "f97bff";
   encodes "the smallest half subnormal" (Cbor.Float 5.960464477539063e-8) "f90001";
+  encodes "the smallest normal half float" (Cbor.Float (Float.ldexp 1.0 (-14))) "f90400";
+  encodes "the largest half subnormal" (Cbor.Float (Float.ldexp 1023.0 (-24))) "f903ff";
+  encodes "2^-25 is below every half float, so a single"
+    (Cbor.Float (Float.ldexp 1.0 (-25)))
+    "fa33000000";
+  encodes "65520.0 rounds to infinity as a half, so a single" (Cbor.Float 65520.0) "fa477ff000";
+  encodes "the smallest single subnormal" (Cbor.Float (Float.ldexp 1.0 (-149))) "fa00000001";
+  encodes "2^-150 is below every single float, so a double"
+    (Cbor.Float (Float.ldexp 1.0 (-150)))
+    "fb3690000000000000";
   encodes "100000.0 is a single float" (Cbor.Float 100000.0) "fa47c35000";
   encodes "1.1 needs a double" (Cbor.Float 1.1) "fb3ff199999999999a";
   encodes "infinity is a half float" (Cbor.Float Float.infinity) "f97c00";
@@ -57,6 +67,10 @@ let () =
     (Cbor.Map
        [ (Cbor.Text "b", Cbor.int 2); (Cbor.int 10, Cbor.int 1); (Cbor.Text "a", Cbor.int 3) ])
     "a30a01616103616202";
+  test "a negative tag has no encoding" (fun () ->
+      match Cbor.encode (Cbor.Tag (-1, Cbor.Null)) with
+      | _ -> fail "encoded"
+      | exception Invalid_argument _ -> ());
   test "a map that repeats a key has no encoding" (fun () ->
       match Cbor.encode (Cbor.Map [ (Cbor.int 1, Cbor.Null); (Cbor.int 1, Cbor.Null) ]) with
       | _ -> fail "encoded"
