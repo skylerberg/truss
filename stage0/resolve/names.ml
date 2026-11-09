@@ -158,35 +158,36 @@ let top module_ name : Path.t = Top { module_; name }
 
 (* The plain names a file defines, before any type head is resolved, so
    that resolving a method's head can read them. *)
-type entry = { name : string; kind : kind; visibility : visibility; generic : bool; index : int }
+(* An entry carries nothing about where in the file its definition is, so
+   that moving a definition changes no lookup of it. *)
+type entry = { name : string; kind : kind; visibility : visibility; generic : bool }
 
 let plain_items (definitions : definition Syntax.item list) =
-  List.concat
-    (List.mapi
-       (fun index (item : definition Syntax.item) ->
-         let definition = item.value in
-         let plain name kind generic =
-           [ { name; kind; visibility = definition.visibility; generic; index } ]
-         in
-         match definition.kind with
-         | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
-             plain name.text Function (generics <> [])
-         | Type_definition { name; generics; _ } -> plain name.text Type (generics <> [])
-         | Trait { name; generics; _ } -> plain name.text Trait (generics <> [])
-         | Capability { name; _ } -> plain name.text Capability false
-         | Constant { name = Plain_name name; _ } -> plain name.text Constant false
-         | Theorem { name; generics; _ } -> plain name.text Theorem (generics <> [])
-         | Definition_error { name = Some (Plain_name name); keyword } -> (
-             match keyword with
-             | Some Fn -> plain name.text Function false
-             | Some Type -> plain name.text Type false
-             | Some Trait -> plain name.text Trait false
-             | Some Capability -> plain name.text Capability false
-             | Some Let -> plain name.text Constant false
-             | Some Theorem -> plain name.text Theorem false
-             | _ -> [])
-         | Function _ | Constant _ | Impl _ | Test _ | Law_proof _ | Definition_error _ -> [])
-       definitions)
+  List.concat_map
+    (fun (item : definition Syntax.item) ->
+      let definition = item.value in
+      let plain name kind generic =
+        [ { name; kind; visibility = definition.visibility; generic } ]
+      in
+      match definition.kind with
+      | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
+          plain name.text Function (generics <> [])
+      | Type_definition { name; generics; _ } -> plain name.text Type (generics <> [])
+      | Trait { name; generics; _ } -> plain name.text Trait (generics <> [])
+      | Capability { name; _ } -> plain name.text Capability false
+      | Constant { name = Plain_name name; _ } -> plain name.text Constant false
+      | Theorem { name; generics; _ } -> plain name.text Theorem (generics <> [])
+      | Definition_error { name = Some (Plain_name name); keyword } -> (
+          match keyword with
+          | Some Fn -> plain name.text Function false
+          | Some Type -> plain name.text Type false
+          | Some Trait -> plain name.text Trait false
+          | Some Capability -> plain name.text Capability false
+          | Some Let -> plain name.text Constant false
+          | Some Theorem -> plain name.text Theorem false
+          | _ -> [])
+      | Function _ | Constant _ | Impl _ | Test _ | Law_proof _ | Definition_error _ -> [])
+    definitions
 
 let builtin_items () =
   List.map
@@ -196,12 +197,11 @@ let builtin_items () =
         kind = Type;
         visibility = Public;
         generic = (match builtin with Array | Storage | View -> true | _ -> false);
-        index = -1;
       })
     Intrinsic.builtins
   @ List.map
       (fun operation ->
-        { name = Intrinsic.operation_name operation; kind = Function; visibility = Public; generic = true; index = -1 })
+        { name = Intrinsic.operation_name operation; kind = Function; visibility = Public; generic = true })
       Intrinsic.operations
 
 let entries =
@@ -378,7 +378,9 @@ let declarations =
            file.definitions))
 
 (* The methods and constants written under a type, with one name, from
-   every file of the type's package, where they must be. *)
+   every file of the type's package, where they must be. Their keys carry
+   nothing about where in a file they are, so moving one changes nothing
+   that looked it up. *)
 let members =
   Query.query ~name:"members"
     ~show:(fun (owner, name) -> Path.show owner ^ "." ^ name)
@@ -389,15 +391,18 @@ let members =
       | Some package ->
           List.concat_map
             (fun module_ ->
-              List.filter
+              List.filter_map
                 (fun (declaration : declaration) ->
-                  declaration.ordinal = 0
-                  &&
-                  match declaration.path with
-                  | Method { owner = method_owner; name = method_name; _ }
-                  | Member_constant { owner = method_owner; name = method_name } ->
-                      Path.equal method_owner owner && method_name = name
-                  | _ -> false)
+                  let matches =
+                    declaration.ordinal = 0
+                    &&
+                    match declaration.path with
+                    | Method { owner = method_owner; name = method_name; _ }
+                    | Member_constant { owner = method_owner; name = method_name } ->
+                        Path.equal method_owner owner && method_name = name
+                    | _ -> false
+                  in
+                  if matches then Some (key_of declaration) else None)
                 (Query.demand database declarations module_))
             package.modules)
 

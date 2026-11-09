@@ -479,7 +479,11 @@ let () =
 let parts_of text name =
   let database = setup [ ("app::main", text) ] in
   let key : Resolve.Names.key =
-    { module_ = module_of "app::main"; path = Top { module_ = module_of "app::main"; name }; ordinal = 0 }
+    {
+      module_ = module_of "app::main";
+      path = Top { module_ = module_of "app::main"; name };
+      ordinal = 0;
+    }
   in
   match Query.demand database Hash.parts key with
   | Some parts -> List.map (fun (part, digest) -> (Hash.show_part part, Hash.show digest)) parts
@@ -540,7 +544,11 @@ let () =
       let hash text =
         let database = database text in
         let key : Resolve.Names.key =
-          { module_ = module_of "app::main"; path = Top { module_ = module_of "app::main"; name = "T" }; ordinal = 0 }
+          {
+            module_ = module_of "app::main";
+            path = Top { module_ = module_of "app::main"; name = "T" };
+            ordinal = 0;
+          }
         in
         Option.get (Query.demand database Hash.parts key)
       in
@@ -548,5 +556,114 @@ let () =
         hash "type T(a: Int64, b: Int64)\n  derives Ordered\n"
         = hash "type T(b: Int64, a: Int64)\n  derives Ordered\n"
       then fail "same hash")
+
+(* What the review of resolution found *)
+
+let () =
+  test "a method in another file of its type's package is resolved, and its import counts"
+    (fun () ->
+      let database =
+        setup
+          [
+            ("app::main", "public type Counter(count: Int64)\n");
+            ("app::extra", "use app::main\n\nfn main::Counter.get(self) -> Int64 {\n  missing\n}\n");
+          ]
+      in
+      match codes (diagnostics database "app::extra") with
+      | [ "resolve.unknown_name" ] -> ()
+      | found -> fail "found [%s]" (String.concat "; " found));
+  test "a definition added above another resolves nothing else again" (fun () ->
+      let database =
+        setup [ ("app::main", "fn a() -> Int64 { 1 }\n\nfn f() -> Int64 { a() }\n") ]
+      in
+      let module_ = module_of "app::main" in
+      ignore (Resolve.diagnostics database module_);
+      Query.set database Workspace.file_text module_
+        "fn z() {}\n\nfn a() -> Int64 { 1 }\n\nfn f() -> Int64 { a() }\n";
+      Query.clear_log database;
+      ignore (Resolve.diagnostics database module_);
+      let resolved =
+        List.filter
+          (fun label -> String.length label > 9 && String.sub label 0 9 = "resolved(")
+          (Query.executed database)
+      in
+      if resolved <> [ "resolved(app::main::z)" ] then
+        fail "resolved again: %s" (String.concat "; " resolved));
+  test "an import used only in a part the parser could not read is not unused" (fun () ->
+      let database =
+        setup
+          [
+            ("app::shapes", "public fn area() -> Int64 { 0 }\n");
+            ("app::main", "use app::shapes\n\nfn f() -> Int64 {\n  let = shapes::area()\n}\n");
+          ]
+      in
+      match Resolve.diagnostics database (module_of "app::main") with
+      | [] -> ()
+      | found -> fail "found [%s]" (String.concat "; " (codes found)));
+  test "an element of a field is a place" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "type Box(items: List[Int64])\n\n\
+             fn g(item: mut Int64) {}\n\n\
+             fn f(box: mut Box) {\n\
+            \  g(mut box.items[0])\n\
+             }\n" );
+        ]);
+  test "two parallel branches cannot bind one name" (fun () ->
+      one_diagnostic "fn f() -> Int64 {\n  parallel {\n    let a = 1\n    let a = 2\n  }\n  a\n}\n"
+        "resolve.hides_name");
+  test "a definition cannot take a prelude name" (fun () ->
+      one_diagnostic "type List(count: Int64)\n" "resolve.hides_name");
+  test "a generic parameter cannot take a prelude variant's name" (fun () ->
+      one_diagnostic "fn f[Some](value: Some) {}\n" "resolve.hides_name");
+  test "a trait whose header did not parse is not resolved" (fun () ->
+      let database =
+        setup [ ("app::main", "trait T[Element: ] {\n  fn f(self) -> Element\n}\n") ]
+      in
+      match Resolve.diagnostics database (module_of "app::main") with
+      | [] -> ()
+      | found -> fail "found [%s]" (String.concat "; " (codes found)));
+  test "a value generic parameter can end a range pattern" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "fn f[top: USize](value: USize) -> Bool {\n\
+            \  match value {\n\
+            \    0..=top => true\n\
+            \    _ => false\n\
+            \  }\n\
+             }\n" );
+        ])
+
+let () =
+  test "methods of one name and different receivers are hashed apart" (fun () ->
+      let text = "trait Box {\n  fn get(self) -> Int64\n  fn get(mut self) -> Int64\n}\n" in
+      let parts = List.map fst (parts_of text "Box") in
+      if List.length parts <> List.length (List.sort_uniq compare parts) then
+        fail "repeated parts [%s]" (String.concat "; " parts));
+  test "a field's default is its own part" (fun () ->
+      let actual = changed "type T(a: Int64 = 1)\n" "type T(a: Int64 = 2)\n" "T" in
+      if actual <> [ "default a" ] then fail "changed [%s]" (String.concat "; " actual));
+  test "a result that reads one part is not run again when another changes" (fun () ->
+      let text body = "fn f() -> Int64 { " ^ body ^ " }\n" in
+      let database = setup [ ("app::main", text "1") ] in
+      let key : Resolve.Names.key =
+        {
+          module_ = module_of "app::main";
+          path = Top { module_ = module_of "app::main"; name = "f" };
+          ordinal = 0;
+        }
+      in
+      let reader =
+        Query.query ~name:"reader"
+          ~show:(fun () -> "")
+          (fun database () -> Query.demand database Hash.part (key, Interface))
+      in
+      ignore (Query.demand database reader ());
+      Query.set database Workspace.file_text (module_of "app::main") (text "2");
+      Query.clear_log database;
+      ignore (Query.demand database reader ());
+      if List.mem "reader()" (Query.executed database) then fail "ran again")
 
 let () = finish ()

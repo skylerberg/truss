@@ -20,7 +20,7 @@ type part =
   | Invariant of int
   | Potential
   | Value
-  | Member of string * part
+  | Member of string * Path.receiver * part
   | Law of string
 
 let rec show_part = function
@@ -33,7 +33,15 @@ let rec show_part = function
   | Invariant index -> Printf.sprintf "invariant %d" index
   | Potential -> "potential"
   | Value -> "value"
-  | Member (name, part) -> Printf.sprintf "%s: %s" name (show_part part)
+  | Member (name, receiver, part) ->
+      let receiver =
+        match receiver with
+        | Static -> ""
+        | Read -> "(self)"
+        | Mut -> "(mut self)"
+        | Own -> "(own self)"
+      in
+      Printf.sprintf "%s%s: %s" name receiver (show_part part)
   | Law name -> "law " ^ name
 
 (* The encoding *)
@@ -512,8 +520,8 @@ let field_shape context ~ordered (fields : field list) =
         | Field_declaration { name = bound; type_ = written; default } ->
             Some
               ( bound.text,
-                Cbor.Array
-                  [ text bound.text; type_ context written; option (expression context) default ] )
+                Cbor.Array [ text bound.text; type_ context written; bool (Option.is_some default) ]
+              )
         | Field_error -> None)
       fields
   in
@@ -545,7 +553,7 @@ let definition_parts context (definition : definition) =
   | Function { signature; body } -> signature_parts context ~visible signature ~body:(Some body)
   | Type_definition { generics; body; clauses; _ } ->
       let ordered = derives_ordered context clauses in
-      let body =
+      let encoded_body =
         match body with
         | Fields fields -> node "record" [ field_shape context ~ordered fields ]
         | Variants variants ->
@@ -569,6 +577,27 @@ let definition_parts context (definition : definition) =
             match clause.kind with Derives traits -> traits | _ -> [])
           clauses
       in
+      let field_defaults (fields : field list) =
+        List.filter_map
+          (fun (field : field) ->
+            match field.kind with
+            | Field_declaration { name = bound; default = Some value; _ } -> Some (bound.text, value)
+            | _ -> None)
+          fields
+      in
+      let defaults =
+        match body with
+        | Fields fields ->
+            List.map (fun (name, value) -> (Default name, value)) (field_defaults fields)
+        | Variants variants ->
+            List.concat_map
+              (fun (variant : variant) ->
+                List.map
+                  (fun (name, value) -> (Default (variant.name.text ^ "." ^ name), value))
+                  (field_defaults (Option.value ~default:[] variant.fields)))
+              variants
+        | Type_todo -> []
+      in
       let invariants =
         List.filter_map
           (fun (clause : type_clause) ->
@@ -583,8 +612,11 @@ let definition_parts context (definition : definition) =
       in
       ( Shape,
         node "shape"
-          [ visible; list (generic context) generics; body; list (path_type context) derives ] )
-      :: List.mapi (fun index value -> (Invariant index, expression context value)) invariants
+          [
+            visible; list (generic context) generics; encoded_body; list (path_type context) derives;
+          ] )
+      :: List.map (fun (part, value) -> (part, expression context value)) defaults
+      @ List.mapi (fun index value -> (Invariant index, expression context value)) invariants
       @ List.map (fun value -> (Potential, expression context value)) potentials
   | Trait { generics; requires; members; _ } ->
       let member_parts =
@@ -596,12 +628,13 @@ let definition_parts context (definition : definition) =
                   match signature.name with
                   | Plain_name bound | Member_name (_, bound) -> bound.text
                 in
+                let receiver = Resolve.Names.receiver signature.parameters in
                 List.map
-                  (fun (part, value) -> (Member (member, part), value))
+                  (fun (part, value) -> (Member (member, receiver, part), value))
                   (signature_parts context ~visible:Cbor.Null signature ~body)
             | Associated_type (bound, bounds) ->
                 [
-                  ( Member (bound.text, Interface),
+                  ( Member (bound.text, Static, Interface),
                     node "associated" [ list (path_type context) bounds ] );
                 ]
             | Law law ->
@@ -620,7 +653,9 @@ let definition_parts context (definition : definition) =
       let interfaces =
         List.filter_map
           (function
-            | Member (name, Interface), value -> Some (Cbor.Array [ text name; value ]) | _ -> None)
+            | (Member (_, _, Interface) as part), value ->
+                Some (Cbor.Array [ text (show_part part); value ])
+            | _ -> None)
           member_parts
       in
       ( Interface,
@@ -631,7 +666,7 @@ let definition_parts context (definition : definition) =
             list (path_type context) requires;
             Cbor.Array interfaces;
           ] )
-      :: List.filter (function Member (_, Interface), _ -> false | _ -> true) member_parts
+      :: List.filter (function Member (_, _, Interface), _ -> false | _ -> true) member_parts
   | Impl { trait_; type_ = head_; uses; members } ->
       let associated =
         List.filter_map
@@ -651,8 +686,9 @@ let definition_parts context (definition : definition) =
                   match signature.name with
                   | Plain_name bound | Member_name (_, bound) -> bound.text
                 in
+                let receiver = Resolve.Names.receiver signature.parameters in
                 List.map
-                  (fun (part, value) -> (Member (member, part), value))
+                  (fun (part, value) -> (Member (member, receiver, part), value))
                   (signature_parts context ~visible:Cbor.Null signature ~body:(Some body))
             | _ -> [])
           members
@@ -741,3 +777,11 @@ let parts =
                  (part, digest (Cbor.Array [ text kind; text (show_part part); value ])))
                (definition_parts context definition))
       | _ -> None)
+
+let part =
+  Query.query ~name:"hash_part"
+    ~show:(fun (key, part) -> Resolve.Names.show_key key ^ " " ^ show_part part)
+    (fun database (key, wanted) ->
+      match Query.demand database parts key with
+      | Some parts -> List.assoc_opt wanted parts
+      | None -> None)

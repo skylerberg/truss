@@ -34,7 +34,6 @@ type resolved = {
       (** By the id of each [Syntax.name]: what the name refers to, or [None] for a name resolution
           leaves to type checking, such as a field, a label, or a variant in a pattern. *)
   brackets : bracket option array;  (** By the id of each [Bracket] expression. *)
-  imports_used : string list;  (** The imported modules the definition names, by last name. *)
   diagnostics : Diagnostic.t list;  (** Relative to the definition. *)
 }
 

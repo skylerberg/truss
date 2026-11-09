@@ -17,17 +17,23 @@ val show : digest -> string
 type part =
   | Interface  (** A function's or method's interface; a trait's or [impl]'s interface. *)
   | Contract  (** [requires], [ensures], [decreases], and [cost]. *)
-  | Default of string  (** The default of the named parameter. *)
+  | Default of string  (** The default of the named parameter or field. *)
   | Body
   | Proof of int  (** The [proof] blocks of a body, in order. *)
   | Shape  (** A type's generic parameters, fields or variants, marks, and [derives]. *)
   | Invariant of int
   | Potential
   | Value  (** A constant's value. *)
-  | Member of string * part  (** A part of a trait's or [impl]'s member, by name. *)
+  | Member of string * Path.receiver * part
+      (** A part of a trait's, an [impl]'s, or a capability's method, by name and receiver, or of an
+          associated type. *)
   | Law of string
 
 val show_part : part -> string
 
 val parts : (Resolve.Names.key, (part * digest) list option) Query.query
 (** The parts of a definition and their hashes, or [None] if there is no such definition. *)
+
+val part : (Resolve.Names.key * part, digest option) Query.query
+(** One part's hash. A result that reads one part reads it through this, so that it depends on that
+    part alone, and a change to another part changes nothing it read. *)

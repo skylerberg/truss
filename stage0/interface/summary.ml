@@ -24,9 +24,8 @@ let key =
           if module_ = Intrinsic.module_ || not (Names.module_exists database module_) then None
           else find module_
       | Method { owner; name; _ } | Member_constant { owner; name } ->
-          List.find_map
-            (fun (declaration : Names.declaration) ->
-              if Path.equal declaration.path path then Some (Names.key_of declaration) else None)
+          List.find_opt
+            (fun (key : Names.key) -> Path.equal key.path path)
             (Query.demand database Names.members (owner, name))
       | Derived _ -> None)
 
