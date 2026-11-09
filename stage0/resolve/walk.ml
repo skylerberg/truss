@@ -52,7 +52,6 @@ type state = {
   names : target option array;
   brackets : bracket option array;
   mutable diagnostics : Diagnostic.t list;
-  mutable imports_used : string list;
 }
 
 let report state ?fixes code (span : span) message =
@@ -121,7 +120,7 @@ let unknown state (name : name) ~what candidates =
     | None -> []
   in
   report state ~fixes Unknown_name name.span
-    (Printf.sprintf "Nothing named `%s` is %s here." name.text what)
+    (Printf.sprintf "Nothing named `%s` is %s." name.text what)
 
 (* The file's own definitions *)
 
@@ -138,13 +137,12 @@ let module_of_names state (modules : name list) =
           (List.map (fun (name : Syntax.name) -> name.text) modules)
       with
       | Found_module (module_, how) ->
-          (match how with
-          | `Import last -> state.imports_used <- last :: state.imports_used
-          | `Package -> ());
           set state first (Module module_);
+          (* Through an import, the [use] line already has the error. *)
           if module_ = Intrinsic.module_ && state.module_.package <> Prelude.standard then begin
-            report state Intrinsic_import first.span
-              "Only the `standard` package can use `standard::intrinsic`.";
+            if how = `Package then
+              report state Intrinsic_import first.span
+                "Only the `standard` package can use `standard::intrinsic`.";
             None
           end
           else Some module_
@@ -175,10 +173,10 @@ let in_module state module_ (name : name) ~types =
       else begin
         set state name Unknown;
         report state Not_visible name.span
-          (Printf.sprintf "`%s::%s` is %s here." (Path.show_module module_) name.text
+          (Printf.sprintf "`%s::%s` is %s." (Path.show_module module_) name.text
              (match item.visibility with
-             | Private -> "private to its file, so it cannot be used"
-             | _ -> "internal to its package, so it cannot be used"));
+             | Private -> "private to its file, so it cannot be used here"
+             | _ -> "internal to its package, so it cannot be used here"));
         None
       end
   | _ ->
@@ -425,9 +423,16 @@ and check_place state (marked : expression) (inner : expression) =
   let rec head (value : expression) =
     match value.kind with
     | Member (base, _) -> head base
+    | Parenthesized inner -> head inner
+    (* An index, or type arguments after a method's name, which reads the
+       same place. *)
     | Bracket (base, _) -> (
-        match state.brackets.(value.id) with Some Index -> head base | _ -> `Not_a_place value)
-    | Call ({ kind = Member (base, _); _ }, _) -> head base
+        match state.brackets.(value.id) with
+        | Some (Index | Method_bracket) -> head base
+        | _ -> `Not_a_place value)
+    | Call ({ kind = Member (base, _); _ }, _)
+    | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) ->
+        head base
     | Self_value -> `Place
     | Name path -> (
         match target_of state path.last with
@@ -667,8 +672,9 @@ and range_end state scope (end_ : range_end) =
   | End_literal literal -> literal_pattern state scope literal
   | End_constant constant_ -> qualified_constant state scope constant_
   | End_name name -> (
-      match file_item state name.text with
-      | Some item when item.kind = Constant ->
+      match (String_map.find_opt name.text scope.values, file_item state name.text) with
+      | Some (Value_generic id, _), _ -> set state name (Generic id)
+      | _, Some item when item.kind = Constant ->
           set state name (Definition (Top { module_ = state.module_; name = name.text }))
       | _ ->
           set state name Unknown;
@@ -723,6 +729,15 @@ and statement state scope (statement_ : statement) =
               (fun key _ -> not (String_map.mem key scope.values))
               branch_scope.values
           in
+          String_map.iter
+            (fun key _ ->
+              if String_map.mem key after.values then
+                report state Hides_name branch.span
+                  (Printf.sprintf
+                     "Another branch of this `parallel` block already binds `%s`, and a name \
+                      cannot hide another. Choose another name."
+                     key))
+            bound;
           { after with values = String_map.union (fun _ left _ -> Some left) after.values bound })
         scope body.statements
   | Proof body ->
@@ -752,7 +767,7 @@ let declare_type state scope (name : name) =
      match file_item state name.text with
      | Some item when Names.is_type_kind item.kind ->
          hides (Names.kind_name item.kind ^ " in this file")
-     | _ -> if Option.is_some (Prelude.find_type name.text) then hides "a name in the prelude");
+     | _ -> if List.mem name.text Prelude.names then hides "a name in the prelude");
   set state name Binding;
   { scope with types = String_map.add name.text name.id scope.types }
 
@@ -882,26 +897,28 @@ let definition state (definition_ : definition) =
           clauses
       end
   | Trait { generics = generics_; requires; members; _ } ->
-      let scope = { (generics state scope generics_) with self_type = true } in
-      if not header_broken then List.iter (path_type state scope) requires;
-      List.iteri
-        (fun index (line : trait_member line) ->
-          if not (broken (Member_header index)) then
-            match line.kind with
-            | Trait_method { signature = signature_; body } -> (
-                match signature state scope ~broken:false signature_ with
-                | Some inner ->
-                    if not (broken (Member_body index)) then Option.iter (block state inner) body
-                | None -> ())
-            | Associated_type (_, bounds) -> List.iter (path_type state scope) bounds
-            | Law { parameters = parameters_; requires; body; _ } ->
-                let inner =
-                  parameters state { scope with specification = in_specification } parameters_
-                in
-                List.iter (expression state inner) requires;
-                if not (broken (Member_body index)) then block state inner body
-            | Trait_member_error -> ())
-        members
+      if not header_broken then begin
+        let scope = { (generics state scope generics_) with self_type = true } in
+        List.iter (path_type state scope) requires;
+        List.iteri
+          (fun index (line : trait_member line) ->
+            if not (broken (Member_header index)) then
+              match line.kind with
+              | Trait_method { signature = signature_; body } -> (
+                  match signature state scope ~broken:false signature_ with
+                  | Some inner ->
+                      if not (broken (Member_body index)) then Option.iter (block state inner) body
+                  | None -> ())
+              | Associated_type (_, bounds) -> List.iter (path_type state scope) bounds
+              | Law { parameters = parameters_; requires; body; _ } ->
+                  let inner =
+                    parameters state { scope with specification = in_specification } parameters_
+                  in
+                  List.iter (expression state inner) requires;
+                  if not (broken (Member_body index)) then block state inner body
+              | Trait_member_error -> ())
+          members
+      end
   | Impl { trait_; type_; uses; members } ->
       if not header_broken then begin
         type_name state scope type_.path;

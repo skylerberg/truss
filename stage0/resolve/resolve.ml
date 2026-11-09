@@ -22,7 +22,6 @@ type bracket = Walk.bracket = Index | Type_arguments | Method_bracket
 type resolved = {
   names : target option array;
   brackets : bracket option array;
-  imports_used : string list;
   diagnostics : Diagnostic.t list;
 }
 
@@ -41,10 +40,9 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
 
 let resolved =
   Query.query ~name:"resolved" ~show:Names.show_key (fun database (key : Names.key) ->
-      match
-        (Query.demand database Names.definition key, Query.demand database Names.locate key)
-      with
-      | Some definition, Some (module_, _) ->
+      match Query.demand database Names.definition key with
+      | Some definition ->
+          let module_ = key.module_ in
           let size = definition.id + 1 in
           let state : Walk.state =
             {
@@ -53,10 +51,27 @@ let resolved =
               names = Array.make size None;
               brackets = Array.make size None;
               diagnostics = [];
-              imports_used = [];
             }
           in
           Walk.definition state definition;
+          (* The prelude is the same everywhere, so no definition outside the
+             module that defines a prelude name may take it. *)
+          (match key.path with
+          | Top { name; _ } when List.mem name Prelude.names -> (
+              let defines_it =
+                match Prelude.find_type name with
+                | Some prelude_module -> prelude_module = module_
+                | None -> false
+              in
+              match declared_name definition with
+              | Some declared when not defines_it ->
+                  Walk.report state Hides_name declared.span
+                    (Printf.sprintf
+                       "`%s` is a name in the prelude, and a name cannot hide another. Choose \
+                        another name."
+                       name)
+              | _ -> ())
+          | _ -> ());
           if key.ordinal > 0 then begin
             let span =
               match declared_name definition with
@@ -72,28 +87,45 @@ let resolved =
             {
               names = state.names;
               brackets = state.brackets;
-              imports_used = List.sort_uniq compare state.imports_used;
               diagnostics =
                 List.sort
                   (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span right.span)
                   state.diagnostics;
             }
-      | _ -> None)
+      | None -> None)
 
 let file_diagnostics =
   Query.query ~name:"file_diagnostics" ~show:Path.show_module (fun database module_ ->
       let file = Query.demand database Workspace.file module_ in
-      let used =
-        List.concat_map
-          (fun (declaration : Names.declaration) ->
-            match
-              Query.demand database resolved
-                { path = declaration.path; ordinal = declaration.ordinal }
-            with
-            | Some resolved -> resolved.imports_used
-            | None -> [])
-          (Query.demand database Names.declarations module_)
+      (* An import is used when a name followed by [::] spells it anywhere
+         outside the [use] lines, read from the tokens, so a use inside a part
+         the parser could not read counts too, as does one in an
+         interpolation. *)
+      let in_use_line (span : Source.span) =
+        List.exists
+          (fun (item : Syntax.path Syntax.item) ->
+            item.base <= span.start && span.start < item.base + String.length item.text)
+          file.uses
       in
+      let rec module_names (tokens : Token.t array) =
+        List.concat
+          (List.mapi
+             (fun index (token : Token.t) ->
+               match token.kind with
+               | Lower name
+                 when index + 1 < Array.length tokens
+                      && tokens.(index + 1).kind = Punctuation Colon_colon
+                      && not (in_use_line token.span) ->
+                   [ name ]
+               | String literal ->
+                   List.concat_map
+                     (fun (interpolation : Token.interpolation) ->
+                       module_names interpolation.tokens)
+                     (Array.to_list (Token.interpolations literal))
+               | _ -> [])
+             (Array.to_list tokens))
+      in
+      let used = module_names file.tokens in
       let text = Source.text file.source in
       let diagnostics = ref [] in
       let report ?fixes code span message =
@@ -138,7 +170,7 @@ let diagnostics database module_ =
   let definitions =
     List.concat_map
       (fun (declaration : Names.declaration) ->
-        let key : Names.key = { path = declaration.path; ordinal = declaration.ordinal } in
+        let key = Names.key_of declaration in
         match (Query.demand database resolved key, Query.demand database Names.base key) with
         | Some resolved, Some (_, base) -> List.map (Diagnostic.move base) resolved.diagnostics
         | _ -> [])

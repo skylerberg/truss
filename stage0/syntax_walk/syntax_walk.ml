@@ -245,12 +245,9 @@ let definition f (definition : definition) =
       block f body
   | Definition_error _ -> ()
 
-(* Every name in a definition, in source order: references and the names
-   that bind, in expressions, patterns, types, clauses, and heads. Tools use
-   it to find the name at a position, and checks to find every binding. *)
-let names (definition_ : definition) =
-  let found = ref [] in
-  let add (name : name) = found := name :: !found in
+(* Visits every name in a definition, references and the names that bind,
+   in expressions, patterns, types, clauses, and heads. *)
+let walk_names ~on_name:add (definition_ : definition) =
   let path (written : path) =
     List.iter add written.modules;
     add written.last
@@ -455,7 +452,7 @@ let names (definition_ : definition) =
         | Field_error -> ())
       written
   in
-  (match definition_.kind with
+  match definition_.kind with
   | Function { signature = written; body } ->
       signature_ written;
       block_ body
@@ -539,7 +536,13 @@ let names (definition_ : definition) =
       add law;
       type_ written;
       block_ body
-  | Definition_error { name; _ } -> Option.iter definition_name name);
+  | Definition_error { name; _ } -> Option.iter definition_name name
+
+(* Every name in a definition, in source order. Tools use it to find the
+   name at a position, and checks to find every binding. *)
+let names definition_ =
+  let found = ref [] in
+  walk_names ~on_name:(fun name -> found := name :: !found) definition_;
   List.stable_sort
     (fun (left : name) (right : name) -> compare left.span.start right.span.start)
     !found

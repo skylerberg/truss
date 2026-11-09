@@ -29,9 +29,10 @@ type t =
   | Test of { module_ : module_; name : string }
   | Law_proof of { module_ : module_; name : string }  (** ["Monoid.associative for Int64"] *)
 
-val module_of : t -> module_
-(** The module a definition is written in. A method or member constant is in its owner's module only
-    when it is written there, so this is the module of the outermost path, for a [Top]. *)
+val package : t -> string
+(** The package a definition is in. A method or member constant is in its type's package, as every
+    method must be, though it may be written in any file of it, so a path does not say which module
+    holds a method. *)
 
 val show : t -> string
 (** As in messages: [standard::list::List.push], with [(mut self)] after a method's name for a
