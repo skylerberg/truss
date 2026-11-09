@@ -793,6 +793,40 @@ let () =
          \  Item.empty().combine(value) == value\n\
           }\n"))
 
+let doubling =
+  "trait Doubling {\n\
+  \  fn value(self) -> Int64\n\
+  \    cost time finite\n\n\
+  \  fn doubled(self) -> Bool\n\
+  \    cost time finite\n\
+  \  {\n\
+  \    self.value() > 0\n\
+  \  }\n\
+   }\n\n\
+   type Amount(cents: Int64)\n\n"
+
+let amount_impl replacement =
+  Printf.sprintf
+    "impl Doubling for Amount {\n\
+    \  fn value(self) -> Int64\n\
+    \    cost time finite\n\
+    \  {\n\
+    \    self.cents\n\
+    \  }\n\n\
+    \  fn doubled(self) -> Bool\n\
+    \    cost time finite\n\
+    \  {\n\
+    \    %s\n\
+    \  }\n\
+     }\n"
+    replacement
+
+let () =
+  test "a replacement that gives the provided body's result" (fun () ->
+      proven (doubling ^ amount_impl "self.cents > 0"));
+  test "a replacement that gives another result" (fun () ->
+      not_proven (doubling ^ amount_impl "self.cents >= 0") "prover.ensures")
+
 (* Type invariants *)
 
 let span = "type Span(low: Int64, high: Int64)\n  invariant low <= high\n\n"

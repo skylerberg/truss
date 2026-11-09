@@ -532,9 +532,12 @@ let make_contract database path ~own ~others ~(result : result option) ~body =
   let pure =
     match Query.demand database Interface.Environment.signature path with
     | Some (signature : T.signature) -> (
-        signature.uses = [] && signature.terminates
-        && List.for_all (fun (info : T.parameter_info) -> info.mode = T.Read) signature.parameters
-        && match signature.receiver with Some ((Mut | Own), _) -> false | _ -> true)
+        (* A function of its arguments: it may take them [own], but
+           changes none of the caller's. *)
+        signature.uses = []
+        && signature.terminates
+        && List.for_all (fun (info : T.parameter_info) -> info.mode <> T.Mut) signature.parameters
+        && match signature.receiver with Some (Mut, _) -> false | _ -> true)
     | None -> false
   in
   let result_kind =
@@ -580,6 +583,20 @@ let trait_part database (trait : Path.t) name receiver =
               | _ -> None)
             members
       | None -> None)
+  | _ -> None
+
+(* A trait method's body, when it provides one. *)
+let provided_body database (trait : Path.t) name receiver =
+  match Interface.Summary.definition database trait with
+  | Some (_, { kind = Trait { members; _ }; _ }) ->
+      List.find_map
+        (fun (member : trait_member line) ->
+          match member.kind with
+          | Trait_method { signature; body = Some body }
+            when name_of signature = name && receiver_of signature.parameters = receiver ->
+              Some body
+          | _ -> None)
+        members
   | _ -> None
 
 (* A trait method's contract: the [impl]'s own clauses with the trait's,
@@ -3143,7 +3160,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
   in
   let trait_frame (at : frame) ~result =
     match inherited with
-    | Some ((part : part), substitution) ->
+    | Some ((part : part), substitution, _) ->
         let locals, self, old_locals =
           List.fold_left2
             (fun (locals, self, old_locals) binding (entry, exit_) ->
@@ -3290,7 +3307,27 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
                 (Printf.sprintf "The trait's `%s` may not hold when this method returns."
                    (quote part.callee clause.span))
                 term)
-            part.ensures
+            part.ensures;
+          (* A method that replaces a provided one gives the result the
+             provided body gives, which is its definition. *)
+          begin match (inherited, returned) with
+          | Some (_, _, Some provided), Some returned ->
+              if functional_block provided then
+                begin match block_value context inside provided with
+                | Some (_, defined) ->
+                    oblige context frame Ensures body.span
+                      "This method replaces one its trait provides, so it must give the result the \
+                       provided body gives, and it may not."
+                      (L.equal returned defined)
+                | None -> ()
+                end
+              else
+                oblige context frame Ensures body.span
+                  "This method replaces one its trait provides, whose body is not functional, so \
+                   it is no definition this one could be shown to agree with."
+                  (L.Boolean false)
+          | _ -> ()
+          end
       | _ -> ())
     returns;
   outcome context

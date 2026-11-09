@@ -910,6 +910,8 @@ It proves, with one canonical, numbered, hashed query per obligation:
   type's `impl`. `==` and the orderings on a type without structural
   equality are functions of their operands, which is what their laws are
   about, and operators on other types are calls of their traits' methods.
+- a method that replaces one its trait provides shows that its result is
+  the provided body's, which must be functional
 - `assert` in theorems and proofs, assumed in tests
 - quantifiers over ranges and over the integers, in specifications
 - models: `Model.model()` and the operations of `standard::specification`

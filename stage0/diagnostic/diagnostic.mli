@@ -134,6 +134,8 @@ module Code : sig
     | Wrong_yield
     | Specification_only
     | Not_in_specification
+    | Not_structural
+    | Not_replaceable
     | Wrong_receiver
     | Not_indexable
     | Implements_built_in

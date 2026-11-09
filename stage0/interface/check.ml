@@ -628,6 +628,21 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
                     with
                     | None -> ()
                     | Some (_, _, given) ->
+                        let replaceable (signature : T.signature) =
+                          signature.uses = [] && signature.terminates
+                          && List.for_all
+                               (fun (info : T.parameter_info) -> info.mode <> T.Mut)
+                               signature.parameters
+                          && match signature.receiver with Some (Mut, _) -> false | _ -> true
+                        in
+                        if declared.provided && not (replaceable declared.method_signature) then
+                          report state Not_replaceable name.span
+                            (Printf.sprintf
+                               "`%s` gives `%s` a body, which an `impl` can replace only by a \
+                                version proven to give the same result, and so only when the \
+                                provided one is pure, has a `time` clause, and changes none of its \
+                                arguments, so that its body is what it means."
+                               shown_trait name.text);
                         if trait.is_capability && not (receiver = Read || receiver = Mut) then
                           report state Wrong_receiver name.span
                             "A capability's implementation takes `self`, or `mut self` if it \

@@ -8,11 +8,7 @@ described in [PARSER.md](PARSER.md), and produces what
 [CODEGEN.md](CODEGEN.md) expects, and what the prover in
 [PROVER.md](PROVER.md) reads. Every stage described here is built, in
 [`stage0/`](stage0), and `truss-check` runs them over a package's
-directory. Not built yet: storing checked forms in CBOR, and these rules
-that came with the prover's design: structural equality for constants in
-patterns, the error for `==>` or a quantifier
-over a type in a compiled body, and the condition on replacing a provided
-method.
+directory. Storing checked forms in CBOR is not built yet.
 
 ## What the type checker does
 
@@ -552,9 +548,10 @@ the definition's interface: the types of its parameters and result, its
   `uses` clause; a trait `impl`'s methods can use only what the trait's
   methods declare. Implementing `Panic` is an error.
 - **Methods that replace a provided method** must have its exact signature,
-  and the provided method must be pure and have a `time` clause and a
-  functional body, which is what lets the prover read it as a definition.
-  That the replacement gives the same result is the prover's job.
+  and the provided method must be pure, have a `time` clause, and change
+  none of its arguments, which is what lets its body be its definition.
+  That the body is functional, and that the replacement gives the same
+  result, is the prover's job.
 
 ### Recursive types
 

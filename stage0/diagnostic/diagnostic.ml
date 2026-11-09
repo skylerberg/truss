@@ -126,6 +126,8 @@ module Code = struct
     | Wrong_yield
     | Specification_only
     | Not_in_specification
+    | Not_structural
+    | Not_replaceable
     | Wrong_receiver
     | Not_indexable
     | Implements_built_in
@@ -340,6 +342,8 @@ module Code = struct
     | Not_a_record -> "not_a_record"
     | Unknown_variant -> "unknown_variant"
     | Wrong_yield -> "wrong_yield"
+    | Not_structural -> "not_structural"
+    | Not_replaceable -> "not_replaceable"
     | Specification_only -> "specification_only"
     | Not_in_specification -> "not_in_specification"
     | Wrong_receiver -> "wrong_receiver"

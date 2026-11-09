@@ -304,6 +304,10 @@ and binary state env ?expected (value : expression) operator (left : expression)
     (right : expression) =
   match operator with
   | And | Or | Implies ->
+      if operator = Implies && not env.specification then
+        report state Specification_only value.span
+          "`==>` is only for specifications and the bodies of functions for specifications only; \
+           in code, write `!a || b`.";
       check state env left T.bool;
       check state env right T.bool;
       built_in_operator state value [ left; right ] T.bool;

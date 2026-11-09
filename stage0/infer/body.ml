@@ -143,7 +143,9 @@ let check_function state ~broken_body (written : signature) (body_block : block 
   let env : env =
     {
       output = Some signature.output;
-      specification = false;
+      (* A function for specifications only has a specification for a
+         body: exact arithmetic, and [==>] and quantifiers over types. *)
+      specification = signature.specification_only;
       self = Option.map snd signature.receiver;
       self_mode = self_mode signature;
       loop_element = None;

@@ -45,7 +45,9 @@ let inherited database impl (signature : signature) name =
             ( part,
               ( { Types.owner = interface.implements.trait; name = "Self" },
                 Types.Type interface.for_type )
-              :: pair trait_generics interface.implements.trait_arguments )
+              :: pair trait_generics interface.implements.trait_arguments,
+              Translate.provided_body database interface.implements.trait name
+                (Translate.receiver_of signature.parameters) )
       | None -> None)
   | _ -> None
 

@@ -127,6 +127,10 @@ and expression_kind state env ?expected (value : expression) : T.ty =
           let element = element_of_collection state env collection in
           pattern state env written element ~mode:T.Read
       | Binder_type (bound, written) ->
+          if not env.specification then
+            report state Specification_only value.span
+              "A quantifier over a whole type cannot run, so it is only for specifications and the \
+               bodies of functions for specifications only. Quantify over a range or a collection.";
           declare state bound (Lower.type_ state.context written) ~mutable_:false ~mode:T.Read);
       check state env body T.bool;
       T.bool

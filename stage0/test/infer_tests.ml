@@ -704,6 +704,53 @@ let () =
   test "a trait method without a body has its clauses checked" (fun () ->
       one_diagnostic "trait Measured {\n  fn measure(self) -> Int64\n    ensures result + true\n}\n"
         "types.no_impl");
+  test "==> in a compiled body" (fun () ->
+      one_diagnostic "fn f(a: Bool, b: Bool) -> Bool {\n  a ==> b\n}\n" "types.specification_only");
+  test "a quantifier over a type in a compiled body" (fun () ->
+      one_diagnostic "fn f() -> Bool {\n  forall value: Int64 => value == value\n}\n"
+        "types.specification_only");
+  test "a function for specifications only has a specification for a body" (fun () ->
+      fine
+        "fn holds(limit: Integer) -> Bool {\n\
+        \  forall value: Int64 => value > 0 ==> value + limit > limit\n\
+         }\n");
+  test "a constant in a pattern needs structural equality" (fun () ->
+      one_diagnostic
+        "type Point(x: Float64)\n\
+        \  derives Equal\n\n\
+         let origin: Point = Point(x: 0.0)\n\n\
+         fn f(point: Point) -> Bool {\n\
+        \  match point {\n\
+        \    origin => true\n\
+        \    _ => false\n\
+        \  }\n\
+         }\n"
+        "types.not_structural");
+  test "a constant of a derived type of integers in a pattern" (fun () ->
+      fine
+        "type Point(x: Int64)\n\
+        \  derives Equal\n\n\
+         let origin: Point = Point(x: 0)\n\n\
+         fn f(point: Point) -> Bool {\n\
+        \  match point {\n\
+        \    origin => true\n\
+        \    _ => false\n\
+        \  }\n\
+         }\n");
+  test "a provided method without a time clause cannot be replaced" (fun () ->
+      Support.one_diagnostic ~check:Type_checker.diagnostics
+        "trait Doubling {\n\
+        \  fn doubled(self) -> Bool {\n\
+        \    true\n\
+        \  }\n\
+         }\n\n\
+         type Amount(cents: Int64)\n\n\
+         impl Doubling for Amount {\n\
+        \  fn doubled(self) -> Bool {\n\
+        \    false\n\
+        \  }\n\
+         }\n"
+        "types.not_replaceable");
   test "a loop's cost bound is checked" (fun () ->
       one_diagnostic
         "fn f(count: USize) {\n\
