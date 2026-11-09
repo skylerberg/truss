@@ -1225,10 +1225,8 @@ let overlaps ~base mine theirs =
     @ reads_other mine_changed theirs_labels "this"
     @ reads_other theirs_changed mine_labels "the other")
 
-let commit_of_worktree root =
-  match Git.snapshot ~directory:root with
-  | Some commit -> Some commit
-  | None -> Git.head ~directory:root
+(* A commit of a worktree's files as they are, for merging. *)
+let commit_of_worktree root = Git.snapshot ~directory:root
 
 let other_worktrees state session =
   let root = root_of_session session in
