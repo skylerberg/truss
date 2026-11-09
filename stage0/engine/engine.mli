@@ -46,6 +46,13 @@ val readers : node -> node list
 val counterpart : node -> t -> node option
 val same_outcome : node -> node -> bool
 
+val current_in : node -> t -> node option
+(** The same query and key in another engine, brought up to date there. *)
+
+val bring_up_to_date : node -> unit
+val is_input : node -> bool
+val is_frozen : node -> bool
+
 (** {1 Saving and loading}
 
     A session's graph is saved as a journal: a base holding every saved node, and a record of the

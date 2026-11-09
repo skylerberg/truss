@@ -212,4 +212,37 @@ let () =
           if Engine.get engine doubled () <> 8 then fail "another result";
           if not (List.mem "saved_doubled()" (Engine.executed engine)) then fail "not computed")
 
+let layer_value = Query.input ~name:"layer_input" ~show:(fun () -> "") ()
+let own_value = Query.input ~name:"own_input" ~show:(fun () -> "") ()
+
+let layer_unsaved =
+  unit_query "layer_unsaved" (fun database () -> Query.get database layer_value () + 1)
+
+let reads_layer =
+  unit_query "reads_layer" ~saved:true (fun database () ->
+      Query.demand database layer_unsaved () + Query.get database own_value ())
+
+let reads_reader =
+  unit_query "reads_reader" ~saved:true (fun database () ->
+      10 * Query.demand database reads_layer ())
+
+let () =
+  test "a saved result that read an unsaved frozen result still sees changes after loading"
+    (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let journal = Store.journal store "session" in
+      let layer = Engine.frozen_layer () in
+      Engine.set layer layer_value () 1;
+      let engine = Engine.create ~shared:layer () in
+      Engine.attach engine store;
+      Engine.set engine own_value () 5;
+      ignore (Engine.get engine reads_reader ());
+      Engine.save engine journal;
+      match Engine.load ~shared:layer store journal with
+      | None -> fail "nothing loaded"
+      | Some loaded ->
+          Engine.set loaded own_value () 6;
+          let value = Engine.get loaded reads_reader () in
+          if value <> 80 then fail "result %d after the change" value)
+
 let () = finish ()

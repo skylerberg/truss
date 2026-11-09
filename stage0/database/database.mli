@@ -66,5 +66,8 @@ val reset : unit -> unit
 (** Saves and closes every session and the store, so that the next request starts as a new process
     would. *)
 
+val logging : bool ref
+(** Whether new sessions keep a log of the queries they compute, for tests. *)
+
 val session_engine : string -> Engine.t option
 (** The engine of the open session for a directory, for tests. *)

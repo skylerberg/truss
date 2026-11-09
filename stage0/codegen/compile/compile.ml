@@ -261,6 +261,14 @@ let run_tests ?results t ~time_limit tests =
               let status = if List.for_all (fun r -> r.outcome = "passed") records then 0 else 1 in
               Ok (status, render_report records)))
 
+let test_keys t tests =
+  List.filter_map
+    (fun path ->
+      match Reachable.test_key t.context.env ~lookup:(compiled t) (Lower.test_key path) with
+      | key -> Some (path, key)
+      | exception Invalid_argument _ -> None)
+    tests
+
 let run_program ?input t ~main ~arguments =
   let root = Instance.Program_main main in
   build_and_run ?input t ~roots:[ root ]

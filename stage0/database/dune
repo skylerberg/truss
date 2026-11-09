@@ -13,6 +13,8 @@
   standard_library
   type_checker
   resolve
+  infer
+  inspect
   memory_layout
   toolchain
   build

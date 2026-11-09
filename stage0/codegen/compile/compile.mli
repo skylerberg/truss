@@ -44,6 +44,11 @@ type results = { find : string -> string option; add : string -> string -> unit 
 val run_tests :
   ?results:results -> t -> time_limit:int -> Path.t list -> (int * string, string) result
 
+(* Each test's key: the hash of the code it can run, as "Test results"
+   says, which changes exactly when the test's outcome may. A test that
+   cannot be lowered has none. *)
+val test_keys : t -> Path.t list -> (Path.t * string) list
+
 (* Builds the program whose [main] is at that path, and runs it with the
    arguments, and [input] as its standard input if given, returning its exit
    status, its output, and its errors. *)

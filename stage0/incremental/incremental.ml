@@ -70,6 +70,7 @@ and ops = {
   same : node -> bool;
   move_to : t -> unit;
   copy : t -> node;  (** The same node, with its result, made in another engine *)
+  current_in : t -> node option;  (** The same node in another engine, brought up to date *)
 }
 
 and frame = {
@@ -127,6 +128,7 @@ let no_ops =
     same = (fun _ -> false);
     move_to = ignore;
     copy = (fun _ -> invalid_arg "Incremental: a node that cannot be copied");
+    current_in = (fun _ -> None);
   }
 
 let new_node (engine : t) ~name ~label ~is_input ~saved =
@@ -351,6 +353,7 @@ let rec make_input_cell :
               | None, None -> true
               | _ -> false)
           | _ -> false);
+      current_in = (fun other -> Option.map (fun c -> c.input_node) (find_input other input key));
       copy =
         (fun target ->
           let copied = make_input_cell target input key in
@@ -555,6 +558,13 @@ let rec make_cell : 'key 'value. t -> ('key, 'value) query -> 'key -> ('key, 'va
           Hashtbl.replace layer.all node.id node;
           if node.saved then Hashtbl.replace layer.unsaved node.id node;
           Hashtbl.replace (table query.cells layer) key cell);
+      current_in =
+        (fun other ->
+          let theirs =
+            match find_cell other query key with Some c -> c | None -> make_cell other query key
+          in
+          (try ensure query theirs with Cycle _ -> ());
+          Some theirs.node);
       copy =
         (fun target ->
           let copied = make_cell target query key in
@@ -773,6 +783,11 @@ let journal_id (engine : t) (node : node) =
   end;
   node.journal_id
 
+(* A read of a frozen layer never changes, so it matters only for questions
+   about dependencies, and only a saved one can be found again. *)
+let frozen_reference (read : node) =
+  if read.saved || read.is_input then [ Frozen (read.name, read.ops.key_bytes ()) ] else []
+
 let saved_reads engine memo (node : node) =
   let rec through (node : node) =
     match Hashtbl.find_opt memo node.id with
@@ -781,7 +796,7 @@ let saved_reads engine memo (node : node) =
         let references =
           List.concat_map
             (fun (read : node) ->
-              if is_frozen read then [ Frozen (read.name, read.ops.key_bytes ()) ]
+              if is_frozen read then frozen_reference read
               else if read.saved then [ Own (journal_id engine read) ]
               else through read)
             node.reads
@@ -793,7 +808,7 @@ let saved_reads engine memo (node : node) =
   List.sort_uniq compare
     (List.concat_map
        (fun (read : node) ->
-         if is_frozen read then [ Frozen (read.name, read.ops.key_bytes ()) ]
+         if is_frozen read then frozen_reference read
          else if read.saved then [ Own (journal_id engine read) ]
          else through read)
        node.reads)
@@ -843,66 +858,67 @@ let restore (engine : t) (saved : saved_node list) =
       | None -> ())
     saved;
   let find = function
-    | Own id -> Option.map fst (Hashtbl.find_opt made id)
+    | Own id -> Some (Option.map fst (Hashtbl.find_opt made id))
     | Frozen (name, key) -> (
+        (* A frozen node that cannot be found is left out of the reads: it
+           can never change, so no result depends on finding it. *)
         match (engine.shared, Hashtbl.find_opt restorers name) with
-        | Some layer, Some restorer -> ( try restorer.find layer ~key with _ -> None)
+        | Some layer, Some restorer -> (
+            match restorer.find layer ~key with
+            | Some node -> Some (Some node)
+            | None -> None
+            | exception _ -> None)
         | _ -> None)
   in
-  (* A node that reads something missing is left out, with what reads it,
-     since its result could not be checked. *)
+  (* A node that reads an own node that is missing is left out, and so is
+     everything that reads it, since its result could not be checked. *)
+  let reads_of = Hashtbl.create (Hashtbl.length made) in
   let broken = Hashtbl.create 8 in
-  let rec resolve id =
-    match Hashtbl.find_opt made id with
-    | None -> None
-    | Some (node, s) ->
-        if Hashtbl.mem broken id then None
-        else
-          let reads = List.map find s.reads in
-          if List.for_all Option.is_some reads then Some (node, List.filter_map Fun.id reads)
-          else begin
-            Hashtbl.replace broken id ();
-            None
-          end
-  in
-  let resolved = Hashtbl.fold (fun id _ acc -> id :: acc) made [] |> List.sort compare in
-  List.iter
-    (fun id ->
-      match resolve id with
-      | Some (node, reads) ->
-          node.reads <- reads;
-          List.iter
-            (fun (read : node) ->
-              if not (is_frozen read) then Hashtbl.replace read.readers node.id node)
-            reads;
-          node.kept <- (snd (Hashtbl.find made id)).kept;
-          node.was_saved <- true
-      | None -> ())
-    resolved;
-  (* Leaving out a node leaves out its readers. *)
-  let rec remove_broken () =
-    let more = ref false in
-    Hashtbl.iter
-      (fun id (node, _) ->
-        if node.alive && not (Hashtbl.mem broken id) then
-          if List.exists (fun (read : node) -> (not (is_frozen read)) && not read.alive) node.reads
-          then begin
-            Hashtbl.replace broken id ();
-            more := true
-          end)
-      made;
-    Hashtbl.iter
-      (fun id (node, _) ->
-        if Hashtbl.mem broken id && node.alive then begin
-          node.alive <- false;
-          node.ops.forget ();
-          Hashtbl.remove engine.all node.id;
-          List.iter (fun (read : node) -> Hashtbl.remove read.readers node.id) node.reads
+  Hashtbl.iter
+    (fun id (_, (s : saved_node)) ->
+      let found = List.filter_map find s.reads in
+      if List.exists Option.is_none found then Hashtbl.replace broken id ()
+      else Hashtbl.replace reads_of id (List.filter_map Fun.id found))
+    made;
+  let readers_of = Hashtbl.create (Hashtbl.length made) in
+  Hashtbl.iter
+    (fun id (_, (s : saved_node)) ->
+      List.iter
+        (function
+          | Own read ->
+              Hashtbl.replace readers_of read
+                (id :: Option.value (Hashtbl.find_opt readers_of read) ~default:[])
+          | Frozen _ -> ())
+        s.reads)
+    made;
+  let rec spread id =
+    List.iter
+      (fun reader ->
+        if not (Hashtbl.mem broken reader) then begin
+          Hashtbl.replace broken reader ();
+          spread reader
         end)
-      made;
-    if !more then remove_broken ()
+      (Option.value (Hashtbl.find_opt readers_of id) ~default:[])
   in
-  remove_broken ();
+  List.iter spread (Hashtbl.fold (fun id () acc -> id :: acc) broken []);
+  Hashtbl.iter
+    (fun id (node, (s : saved_node)) ->
+      if Hashtbl.mem broken id then begin
+        node.alive <- false;
+        node.ops.forget ();
+        Hashtbl.remove engine.all node.id
+      end
+      else begin
+        let reads = Hashtbl.find reads_of id in
+        node.reads <- reads;
+        List.iter
+          (fun (read : node) ->
+            if not (is_frozen read) then Hashtbl.replace read.readers node.id node)
+          reads;
+        node.kept <- s.kept;
+        node.was_saved <- true
+      end)
+    made;
   let rec height (node : node) =
     if node.height > 0 || node.reads = [] then node.height
     else begin
@@ -950,3 +966,7 @@ let fork (engine : t) =
       if twin.saved then Hashtbl.replace copy.unsaved twin.id twin)
     originals;
   copy
+
+let current_in (node : node) other = node.ops.current_in other
+let bring_up_to_date (node : node) = node.ops.ensure ()
+let is_input (node : node) = node.is_input

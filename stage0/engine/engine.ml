@@ -25,6 +25,10 @@ let reads = Incremental.reads
 let readers = Incremental.readers
 let counterpart = Incremental.counterpart
 let same_outcome = Incremental.same_outcome
+let current_in = Incremental.current_in
+let bring_up_to_date = Incremental.bring_up_to_date
+let is_input = Incremental.is_input
+let is_frozen = Incremental.is_frozen
 
 (* Saving and loading *)
 

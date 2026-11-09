@@ -1,9 +1,11 @@
 (* Reading commits from git, for sessions opened for a commit rather than a
    directory. See DATABASE.md, "Sessions for commits". *)
 
-let run ~directory arguments =
+let run ?(environment = []) ~directory arguments =
   let command =
-    String.concat " " (List.map Filename.quote ("git" :: "-C" :: directory :: arguments))
+    String.concat " "
+      (List.map (fun (k, v) -> k ^ "=" ^ Filename.quote v) environment
+      @ List.map Filename.quote ("git" :: "-C" :: directory :: arguments))
   in
   let input = Unix.open_process_in (command ^ " 2>/dev/null") in
   let output = In_channel.input_all input in
@@ -79,3 +81,26 @@ let merged_files ~directory left right =
       | tree :: _ when tree <> "" -> files ~directory tree
       | _ -> None)
   | None -> None
+
+(* A commit holding a worktree's files as they are now, tracked or not,
+   made with an index of its own so that the worktree, its index, and its
+   branches are untouched. *)
+let snapshot ~directory =
+  let index = Filename.temp_file "truss-index" "" in
+  let environment = [ ("GIT_INDEX_FILE", index) ] in
+  let result =
+    match head ~directory with
+    | None -> None
+    | Some head -> (
+        match
+          ( run ~environment ~directory [ "read-tree"; head ],
+            run ~environment ~directory [ "add"; "-A" ],
+            run ~environment ~directory [ "write-tree" ] )
+        with
+        | Some _, Some _, Some tree ->
+            Option.map trim
+              (run ~directory [ "commit-tree"; trim tree; "-p"; head; "-m"; "truss snapshot" ])
+        | _ -> None)
+  in
+  (try Sys.remove index with Sys_error _ -> ());
+  result

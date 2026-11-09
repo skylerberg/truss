@@ -152,3 +152,10 @@ val engine_of : context -> t
 val fork : t -> t
 (** A copy of an engine that shares every result with it and diverges from here on, for a new
     worktree or a commit started from another session's state. *)
+
+val current_in : node -> t -> node option
+(** The node with the same query and key in another engine, computed or brought up to date there;
+    for an input, the same input if it is set there. *)
+
+val bring_up_to_date : node -> unit
+val is_input : node -> bool

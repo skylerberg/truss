@@ -291,4 +291,24 @@ let () =
       | () -> fail "the input changed"
       | exception Invalid_argument _ -> ())
 
+(* Forking *)
+
+let () =
+  test "a fork diverges from the engine it was made from" (fun () ->
+      let engine, files, total = setup () in
+      ignore (Engine.get engine total ());
+      let fork = Engine.fork engine in
+      Engine.set fork files "b" "four";
+      if Engine.get fork total () <> 1 then fail "the fork's total is stale";
+      if Engine.get engine total () <> 2 then fail "the original changed");
+  test "a fork of a saved engine diverges too" (fun () ->
+      let engine, files, total = setup () in
+      ignore (Engine.get engine total ());
+      ignore (Engine.stabilize engine);
+      let fork = Engine.fork engine in
+      ignore (Engine.stabilize fork);
+      Engine.set fork files "a" "four";
+      ignore (Engine.stabilize fork);
+      if Engine.get fork total () <> 1 then fail "the fork's total is stale")
+
 let () = finish ()
