@@ -884,6 +884,51 @@ let () =
          \  mut self.restore()\n\
           }\n"))
 
+(* What a loop changes *)
+
+let () =
+  test "a loop forgets a list it changes through a method" (fun () ->
+      not_proven
+        "fn f(count: UInt32) -> USize {\n\
+        \  var items: List[UInt32] = List.with_capacity(0)\n\
+        \  for index in 0..count {\n\
+        \    mut items.push(index)\n\
+        \  }\n\
+        \  proof {\n\
+        \    assert items.length() == 0\n\
+        \  }\n\
+        \  items.length()\n\
+         }\n"
+        "prover.assertion");
+  test "a loop forgets a record whose field it assigns" (fun () ->
+      not_proven
+        "type Box(value: Int64)\n\n\
+         fn f(count: UInt32) -> Int64 {\n\
+        \  var box = Box(value: 0)\n\
+        \  for _ in 0..count {\n\
+        \    box.value = 1\n\
+        \  }\n\
+        \  proof {\n\
+        \    assert box.value == 0\n\
+        \  }\n\
+        \  box.value\n\
+         }\n"
+        "prover.assertion");
+  test "a loop forgets self when it changes it" (fun () ->
+      not_proven
+        "type Box(value: Int64)\n\n\
+         fn Box.fill(mut self, count: UInt32)\n\
+        \  requires self.value == 0\n\
+         {\n\
+        \  for _ in 0..count {\n\
+        \    self.value = 1\n\
+        \  }\n\
+        \  proof {\n\
+        \    assert self.value == 0\n\
+        \  }\n\
+         }\n"
+        "prover.assertion")
+
 (* Costs *)
 
 let constant_step = "fn step(value: UInt32) -> UInt32\n  cost time O(1)\n{\n  value\n}\n\n"
@@ -1356,6 +1401,85 @@ let () =
         \  }\n\
          }\n"
         "prover.cost")
+
+(* Amortized costs *)
+
+let meter =
+  "type Meter(credit: UInt32)\n\
+  \  cost potential credit\n\n\
+   fn work(size: UInt32)\n\
+  \  cost time O(size)\n\
+   {\n\
+  \  for _ in 0..size {\n\
+  \  }\n\
+   }\n\n\
+   fn Meter.save(mut self)\n\
+  \  requires self.credit < 1000\n\
+  \  cost amortized time O(1)\n\
+   {\n\
+  \  self.credit = self.credit + 1\n\
+   }\n\n\
+   fn Meter.spend(mut self)\n\
+  \  cost amortized time O(1)\n\
+   {\n\
+  \  work(self.credit)\n\
+  \  self.credit = 0\n\
+   }\n\n"
+
+let () =
+  test "saving and spending potential are amortized O(1)" (fun () -> proven meter);
+  test "spending potential is not O(1) without it" (fun () ->
+      not_proven
+        "type Meter(credit: UInt32)\n\
+        \  cost potential credit\n\n\
+         fn work(size: UInt32)\n\
+        \  cost time O(size)\n\
+         {\n\
+        \  for _ in 0..size {\n\
+        \  }\n\
+         }\n\n\
+         fn Meter.spend(mut self)\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  work(self.credit)\n\
+        \  self.credit = 0\n\
+         }\n"
+        "prover.cost");
+  test "a plain bound pays for the potential it is given" (fun () ->
+      proven
+        (meter
+       ^ "fn f(meter: mut Meter)\n  cost time O(1 + meter.credit)\n{\n  mut meter.spend()\n}\n"));
+  test "a plain bound that does not pay for the potential it uses" (fun () ->
+      not_proven
+        (meter ^ "fn f(meter: mut Meter)\n  cost time O(1)\n{\n  mut meter.spend()\n}\n")
+        "prover.cost");
+  test "a loop that spends potential telescopes" (fun () ->
+      proven
+        (meter
+       ^ "fn f(meter: mut Meter, count: UInt32)\n\
+         \  cost time O(count + meter.credit)\n\
+          {\n\
+         \  for _ in 0..count {\n\
+         \    mut meter.spend()\n\
+         \  }\n\
+          }\n"));
+  test "a loop that spends potential it was given is not linear in its count" (fun () ->
+      let found =
+        codes
+          (meter
+         ^ "fn f(meter: mut Meter, count: UInt32)\n\
+           \  cost time O(count)\n\
+            {\n\
+           \  for _ in 0..count {\n\
+           \    mut meter.spend()\n\
+           \  }\n\
+            }\n")
+      in
+      if found <> [ "prover.cost" ] then fail "%s" (String.concat ", " found));
+  test "a potential below zero" (fun () ->
+      not_proven "type Debt(owed: Int64)\n  cost potential owed\n" "prover.cost");
+  test "a potential its invariant keeps at or above zero" (fun () ->
+      proven "type Debt(owed: Int64)\n  invariant owed >= 0\n  cost potential owed\n")
 
 (* What is not proven yet *)
 

@@ -707,20 +707,33 @@ plus what happens before and after:
 
 - **A value's potential** is its type's `cost potential` plus the
   potentials of its parts, as DESIGN.md defines it, through the model of a
-  standard collection for its elements.
+  standard collection for its elements. In the logic it is a function of
+  the value, whose definition is unfolded once for each value it is asked
+  of, so a recursive type's potential is never unfolded forever.
 - **Potential is counted in a unit of its type's own,** one unknown constant
   for each type with a potential, the same for every method of the type, so
-  that potential saved by one method pays for another's work.
+  that potential saved by one method pays for another's work. Since every
+  method of the type counts in that one unit, a query adds potential and
+  counted work as they are, with no factor between them.
 - **A method with `cost amortized time O(f)`** proves that its counted cost,
   plus the potential of what it returns and of each `mut` parameter
-  afterward, minus the potential of each parameter on entry, is within the
-  bound.
+  afterward, minus the potential on entry of each parameter it changes or
+  takes `own`, is within the bound. A parameter it only reads keeps its
+  potential, so the method cannot spend it.
 - **A call to one** adds its bound to the caller's counter and subtracts the
   change in potential of what it changed, so a caller with a plain bound
   pays for the potential it consumed from what it was given: a function
   that pushes `count` times can promise `O(count + items.length())`.
+- **A loop that spends or saves potential** is bounded by what it has spent
+  plus the potential the values it changes hold, which is what telescopes:
+  each iteration's bound is on what it spends plus the growth of that
+  potential, so potential saved by one iteration pays for the next one's
+  work, and where the loop is left, what was spent is within the bound
+  plus the potential on entry, less what is left.
 - **Potentials never go below zero,** which is proven for each type with
-  one, from its invariants.
+  one, from its invariants, and is a fact about every value that meets its
+  type's invariants. A type parameter may hold potential, which is not
+  known.
 
 ### Lambdas and function values
 
@@ -991,8 +1004,10 @@ It proves, with one canonical, numbered, hashed query per obligation:
   definition and the first pair alone in a cycle of calls; recursive calls
   by the induction hypothesis; `log`, `power`, and `time(f)`; loops by their
   `cost` clauses, or by their iterations times a bound on one; lambdas by
-  their types' clauses; and quantifiers in code, by their range times what
-  their body spends. Amortized bounds and potentials are not built yet.
+  their types' clauses; quantifiers in code, by their range times what
+  their body spends; and amortized bounds, with potentials and each type's
+  proof that its potential is never below zero. The potential of a
+  standard collection's elements is not read yet.
 
 A call to anything whose contract it does not read yet, such as a trait
 method or a capability, gives a value known only by its type's range, and

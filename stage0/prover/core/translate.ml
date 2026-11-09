@@ -115,6 +115,7 @@ type context = {
       (** A lambda's bound on the time of one call, and the obligations that show it, made only once
           the bound is used. *)
   mutable lambda_captures : (L.term * C.local list) list;  (** What each lambda captures. *)
+  mutable potentials : L.term list;  (** Each value's potential whose definition is a fact. *)
   mutable call_targets : (L.term * C.local) list;
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
 }
@@ -521,6 +522,24 @@ type contract = {
   pure : bool;  (** Pure and terminating, so a function in the logic. *)
   result_kind : [ `Returns | `Lends | `Yields ];
   definition : (part * block) option;  (** A functional body, which is the callee's definition. *)
+}
+
+(* What a loop's body may change. *)
+type changed = { changed_locals : C.local list; changes_self : bool }
+
+(* How a loop bounds a counter: by its [cost] clause about it, or by its
+   iterations times a bound on one, and, where the values it changes hold
+   potential, also with that potential, from what it held on entry. *)
+type loop_rule =
+  | Clause_bound of loop_clause * cost * Costs.constants option
+  | Per_iteration of { per : L.term; per_held : (L.term * L.term) option }
+
+type loop_cost = {
+  counter : Costs.counter;
+  key : string;
+  entry : L.term;  (** The counter on entry to the loop. *)
+  rule : loop_rule;
+  held : (frame -> L.term) option;  (** The potential of what the loop changes. *)
 }
 
 let callee_source database (key : Names.key) =
@@ -2434,6 +2453,16 @@ and check_valid context frame span ty term ~deep ~when_ =
 and check_built context frame (written : expression) ty term =
   check_valid context frame written.span ty term ~deep:false ~when_:"for the value built here"
 
+and find_expression_opt (written : expression) id =
+  let found = ref None in
+  let rec visit (expression_ : expression) =
+    if expression_.id = id then found := Some expression_
+    else if !found = None then
+      Syntax_walk.expression_parts ~expression:visit ~statement:(fun _ -> ()) expression_
+  in
+  visit written;
+  !found
+
 and find_expression (written : expression) id =
   let found = ref None in
   let rec visit (expression_ : expression) =
@@ -2708,12 +2737,33 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
   end;
   (* What the call spends, by the callee's cost clauses, read with the
      arguments as passed and [result]. *)
+  (* How much the potential of what the call changed grew: what it returns
+     and leaves in [mut] arguments, less what it was given to change or to
+     keep. *)
+  let change () =
+    List.fold_left
+      (fun total ((argument : C.argument), (expression_ : expression), before) ->
+        let ty = type_of frame expression_ in
+        match argument.mode with
+        | T.Mut -> (
+            match List.assoc_opt argument.parameter changed with
+            | Some later ->
+                Costs.plus total
+                  (Costs.minus
+                     (potential context after ty later)
+                     (potential context frame ty before))
+            | None -> total)
+        | T.Own -> Costs.minus total (potential context frame ty before)
+        | T.Read -> total)
+      (potential context after (substituted frame call_.result) result)
+      values
+  in
   let after =
     spend context after
       (callee_amount context after ~path ~parts:contract.parts
          ~bound_frame:(fun part ->
            { (entry_frame part) with result = Some result; condition = after.condition })
-         ~call_ ~values)
+         ~call_ ~values ~change:(Some change))
   in
   (after, result)
 
@@ -2846,21 +2896,27 @@ and target_in (source : source) locals (written : call_target) : Costs.target op
 
 (* What a clause promises of a counter, in the counter's way of counting:
    [assumed] is the bound to assume for a call back into the definition
-   proven, which is the induction hypothesis. *)
+   proven, which is the induction hypothesis, and [change] is how much the
+   potential of what an amortized clause's call changed grew, which it
+   paid for out of its bound. *)
 and promised_amount context frame (counter : Costs.counter) (bound : bound) ~evaluate ~assumed
-    ~exact_target =
+    ~exact_target ~change =
   match (bound, counter.counting) with
-  | Big_o g, Units -> (
+  | Big_o g, Units ->
       let g = evaluate g in
-      match assumed with
-      | Some constants ->
-          let hypothesis = Costs.at_least_zero (Costs.bound constants g) in
-          if counter.resource = Time then Costs.plus hypothesis (L.int 1) else hypothesis
-      | None -> Costs.units g)
-  | (At_most g | Exactly g), Units -> Costs.at_least_zero (evaluate g)
-  | At_most g, (At_most | Exactly) -> bounded_amount context frame (evaluate g)
+      let amount =
+        match assumed with
+        | Some constants ->
+            let hypothesis = Costs.at_least_zero (Costs.bound constants g) in
+            if counter.resource = Time then Costs.plus hypothesis (L.int 1) else hypothesis
+        | None -> Costs.units g
+      in
+      Costs.minus amount change
+  | (At_most g | Exactly g), Units -> Costs.at_least_zero (Costs.minus (evaluate g) change)
+  | At_most g, (At_most | Exactly) -> bounded_amount context frame (Costs.minus (evaluate g) change)
   | Exactly g, (At_most | Exactly) ->
-      if exact_target then evaluate g else bounded_amount context frame (evaluate g)
+      let g = Costs.minus (evaluate g) change in
+      if exact_target then g else bounded_amount context frame g
   | (Big_o _ | Finite), _ -> unknown_amount context frame counter
 
 (* What a call to a callee whose clauses are read spends of a counter: its
@@ -2870,7 +2926,7 @@ and promised_amount context frame (counter : Costs.counter) (bound : bound) ~eva
    cycle is then proven with the first pair, so that each assumes of the
    others what they show. *)
 and callee_amount context after ~path ~(parts : part list) ~(bound_frame : part -> frame)
-    ~(call_ : C.call) ~values (counter : Costs.counter) =
+    ~(call_ : C.call) ~values ~change (counter : Costs.counter) =
   let assumed =
     if
       counter.counting = Units
@@ -2897,9 +2953,14 @@ and callee_amount context after ~path ~(parts : part list) ~(bound_frame : part 
       | Calls (Call_capability _), Calls (Capability_method _) -> false
       | _ -> true
     in
-    promised_amount context after counter cost.bound
-      ~evaluate:(fun g -> snd (value context frame g))
-      ~assumed ~exact_target
+    match (cost.amortized, change) with
+    | true, None -> unknown_amount context after counter
+    | _ ->
+        promised_amount context after counter cost.bound
+          ~evaluate:(fun g -> snd (value context frame g))
+          ~assumed ~exact_target
+          ~change:
+            (match (cost.amortized, change) with true, Some change -> change () | _ -> Costs.zero)
   in
   let first_clauses () =
     List.find_map (fun part -> match clauses_of part with [] -> None | found -> Some found) parts
@@ -3080,7 +3141,7 @@ and step_amount context frame (call_ : C.call) values (counter : Costs.counter) 
                 ~path:(Path.Method { owner = capability; name; receiver = Static })
                 ~parts:[ part ]
                 ~bound_frame:(fun _ -> inside)
-                ~call_ ~values counter
+                ~call_ ~values ~change:None counter
           | None -> unknown_amount context frame counter))
   | Function _ | Trait_method _ | Function_value -> (
       (* A call whose contract is not read. *)
@@ -3165,8 +3226,17 @@ and power_of context frame base exponent =
    the clause, as a call with that bound would. Any other counter is
    bounded by the loop's iterations so far times a bound on one iteration,
    [per], which is worked out from what the body spends and then shown of
-   each iteration. *)
-and loop_costs context frame (clauses : loop_clause list) =
+   each iteration.
+
+   Where the values a loop changes hold potential, which amortized callees
+   spend and save, a second bound, [per_held], is about what the loop has
+   spent plus the potential it holds, which is what telescopes when each
+   iteration spends potential earlier ones saved. Both are assumed at the
+   head, and are sound to assume even unbounded, since each run of the loop
+   has a largest iteration; only the one that what an iteration spends
+   calls for is worked out and shown. [held] is the potential of the values
+   the loop changes, in a frame. *)
+and loop_costs context frame (clauses : loop_clause list) ~held =
   List.map
     (fun (counter : Costs.counter) ->
       let key = Costs.key counter in
@@ -3197,10 +3267,15 @@ and loop_costs context frame (clauses : loop_clause list) =
                   Some constants
               | At_most | Exactly -> None
             in
-            `Clause (clause, cost, constants)
-        | None -> `Per (fresh context "per" L.Int)
+            Clause_bound (clause, cost, constants)
+        | None ->
+            Per_iteration
+              {
+                per = fresh context "per" L.Int;
+                per_held = Option.map (fun held -> (fresh context "per" L.Int, held frame)) held;
+              }
       in
-      (counter, key, entry, rule))
+      { counter; key; entry; rule; held })
     context.counters
 
 and counting_of (cost : cost) : Costs.counting =
@@ -3219,63 +3294,101 @@ and loop_clause_holds context (at : frame) (counter : Costs.counter) (cost : cos
   | Exactly, _ -> L.equal since g
   | _ -> Costs.at_most since g
 
+and spent_at (frame : frame) key =
+  match List.assoc_opt key frame.spent with Some t -> t | None -> Costs.zero
+
+(* What a counter is bounded by at the head and where the loop is left:
+   its value, plus the potential the loop holds there, for [per_held]. *)
+and counted_with ~(counter : Costs.counter) ~at ~bound =
+  if counter.counting = Exactly then L.equal at bound else Costs.at_most at bound
+
 (* The head of a loop: each counter takes a fresh value, within its
-   clause, or within its iterations so far times its bound on one. *)
+   clause, or within its iterations so far times its bounds on one. *)
 and loop_head context head costs ~iterations =
   let iterations = Option.value iterations ~default:Costs.zero in
-  let spent = List.map (fun (_, key, _, _) -> (key, fresh context "spent" L.Int)) costs in
-  let head = { head with spent } in
+  let head =
+    { head with spent = List.map (fun cost -> (cost.key, fresh context "spent" L.Int)) costs }
+  in
   List.iter
-    (fun ((counter : Costs.counter), key, entry, rule) ->
-      let at_head = List.assoc key spent in
-      match rule with
-      | `Clause (_, cost, constants) ->
+    (fun cost ->
+      let at_head = spent_at head cost.key in
+      match cost.rule with
+      | Clause_bound (_, written, constants) ->
           assume context head
-            (loop_clause_holds context head counter cost constants
-               ~since:(Costs.minus at_head entry))
-      | `Per per ->
-          let most = Costs.plus entry (Costs.times iterations per) in
+            (loop_clause_holds context head cost.counter written constants
+               ~since:(Costs.minus at_head cost.entry))
+      | Per_iteration { per; per_held } -> (
           assume context head
-            (if counter.counting = Exactly then L.equal at_head most else Costs.at_most at_head most))
+            (counted_with ~counter:cost.counter ~at:at_head
+               ~bound:(Costs.plus cost.entry (Costs.times iterations per)));
+          match (per_held, cost.held) with
+          | Some (per_held, on_entry), Some held ->
+              assume context head
+                (counted_with ~counter:cost.counter
+                   ~at:(Costs.plus at_head (held head))
+                   ~bound:
+                     (Costs.plus (Costs.plus cost.entry on_entry) (Costs.times iterations per_held)))
+          | _ -> ()))
     costs;
   head
 
 (* Each [cost] clause on entry to the loop, when nothing is spent yet. *)
 and loop_entry context frame costs =
   List.iter
-    (fun ((counter : Costs.counter), _, _, rule) ->
-      match rule with
-      | `Clause ((clause : loop_clause), cost, constants) ->
+    (fun cost ->
+      match cost.rule with
+      | Clause_bound ((clause : loop_clause), written, constants) ->
           oblige context frame Cost clause.span
             (Printf.sprintf "The loop's `%s` may not hold on entry to the loop."
                (quote frame.source clause.span))
-            (loop_clause_holds context frame counter cost constants ~since:Costs.zero)
-      | `Per _ -> ())
+            (loop_clause_holds context frame cost.counter written constants ~since:Costs.zero)
+      | Per_iteration _ -> ())
     costs
+
+(* Whether a term mentions what a value's potential is. *)
+and mentions_potential term =
+  let rec walk = function
+    | L.Apply (name, arguments) ->
+        String.starts_with ~prefix:"potential." name || List.exists walk arguments
+    | L.Forall (_, body) | L.Exists (_, body) -> walk body
+    | L.Symbol _ | L.Integer _ | L.Boolean _ -> false
+  in
+  walk term
 
 (* After the body: each bound on one iteration is worked out from what the
    iterations that ended spent, and every iteration, ended or left by
-   [break], is shown to be within its counter's bound. *)
+   [break], is shown to be within its counter's bound. An iteration that
+   spends or saves potential is bounded with the potential the loop
+   holds. *)
 and loop_iterations context (written : statement) head costs ~mark ~facts ~ends ~breaks =
-  let at (frame : frame) key =
-    match List.assoc_opt key frame.spent with Some t -> t | None -> Costs.zero
-  in
   List.iter
-    (fun ((counter : Costs.counter), key, entry, rule) ->
-      let spent_in (frame : frame) = Costs.since ~start:(at head key) (at frame key) in
-      match rule with
-      | `Clause ((clause : loop_clause), cost, constants) ->
+    (fun cost ->
+      match cost.rule with
+      | Clause_bound ((clause : loop_clause), written_cost, constants) ->
           List.iter
             (fun (frame, when_) ->
               oblige context frame Cost clause.span
                 (Printf.sprintf "The loop's `%s` may not hold %s." (quote frame.source clause.span)
                    when_)
-                (loop_clause_holds context frame counter cost constants
-                   ~since:(Costs.minus (at frame key) entry)))
+                (loop_clause_holds context frame cost.counter written_cost constants
+                   ~since:(Costs.minus (spent_at frame cost.key) cost.entry)))
             (List.map (fun f -> (f, "after an iteration")) ends
             @ List.map (fun f -> (f, "where the loop is left")) breaks)
-      | `Per per -> (
+      | Per_iteration { per; per_held } -> (
           let frames = ends @ breaks in
+          let plain (frame : frame) =
+            Costs.since ~start:(spent_at head cost.key) (spent_at frame cost.key)
+          in
+          let per, spent_in =
+            match (per_held, cost.held) with
+            | Some (per_held, _), Some held
+              when List.exists (fun f -> mentions_potential (plain f)) frames ->
+                ( per_held,
+                  fun (frame : frame) ->
+                    Costs.normalize
+                      (Costs.plus (plain frame) (Costs.minus (held frame) (held head))) )
+            | _ -> (per, plain)
+          in
           let spent = List.map spent_in frames in
           let most =
             match spent with
@@ -3292,8 +3405,7 @@ and loop_iterations context (written : statement) head costs ~mark ~facts ~ends 
                     "The prover cannot show that this iteration of the loop spends no more than \
                      the bound it found for every iteration from what the loop does not change: \
                      give the loop a `cost` clause."
-                    (if counter.counting = Exactly then L.equal spent per
-                     else Costs.at_most spent per))
+                    (counted_with ~counter:cost.counter ~at:spent ~bound:per))
                 frames spent
           | None ->
               oblige context head Cost written.span
@@ -3308,44 +3420,214 @@ and loop_iterations context (written : statement) head costs ~mark ~facts ~ends 
    bound [most] on them, which is arithmetic, so assumed. *)
 and loop_exit context (exit_ : frame) costs ~iterations ~most =
   let iterations = Option.value iterations ~default:Costs.zero in
-  let at key = match List.assoc_opt key exit_.spent with Some t -> t | None -> Costs.zero in
   let spent =
     List.map
-      (fun ((counter : Costs.counter), key, entry, rule) ->
-        match rule with
-        | `Clause (_, (cost : cost), _) ->
+      (fun cost ->
+        let at = spent_at exit_ cost.key in
+        match cost.rule with
+        | Clause_bound (_, (written : cost), _) ->
             let g =
-              match cost.bound with
+              match written.bound with
               | Big_o g | At_most g | Exactly g ->
                   snd (value context { exit_ with checking = false } g)
               | Finite -> Costs.zero
             in
             let counted =
-              match counter.counting with
+              match cost.counter.counting with
               | Units -> Costs.units g
               | At_most -> bounded_amount context exit_ g
               | Exactly -> g
             in
-            (key, Costs.plus entry counted)
-        | `Per per ->
-            if counter.counting <> Exactly then
-              List.iter
-                (fun most ->
-                  fact context exit_
-                    L.(
-                      conjunction
-                        [
-                          Costs.at_most (at key) (Costs.plus entry (Costs.times iterations per));
-                          Apply ("<=", [ int 0; iterations ]);
-                          Apply ("<=", [ iterations; most ]);
-                          Apply ("<=", [ int 0; per ]);
-                        ]
-                      ==> Costs.at_most (at key) (Costs.plus entry (Costs.times most per))))
-                most;
-            (key, at key))
+            (cost.key, Costs.plus cost.entry counted)
+        | Per_iteration { per; per_held } ->
+            let bounded ~at ~start per =
+              if cost.counter.counting <> Exactly then
+                List.iter
+                  (fun most ->
+                    fact context exit_
+                      L.(
+                        conjunction
+                          [
+                            Costs.at_most at (Costs.plus start (Costs.times iterations per));
+                            Apply ("<=", [ int 0; iterations ]);
+                            Apply ("<=", [ iterations; most ]);
+                            Apply ("<=", [ int 0; per ]);
+                          ]
+                        ==> Costs.at_most at (Costs.plus start (Costs.times most per))))
+                  most
+            in
+            bounded ~at ~start:cost.entry per;
+            (match (per_held, cost.held) with
+            | Some (per_held, on_entry), Some held ->
+                bounded
+                  ~at:(Costs.plus at (held exit_))
+                  ~start:(Costs.plus cost.entry on_entry) per_held
+            | _ -> ());
+            (cost.key, at))
       costs
   in
   { exit_ with spent }
+
+(* The potential held by the values of some locals, in a frame, or nothing
+   when none of their types can hold any. *)
+and held_by context (frame : frame) (changed : changed) =
+  let typed =
+    List.filter_map
+      (fun id -> Option.map (fun ty -> (`Local id, ty)) (local_type frame id))
+      changed.changed_locals
+    @
+    match (changed.changes_self, frame.self_type) with
+    | true, Some ty -> [ (`Self, ty) ]
+    | _ -> []
+  in
+  if not (List.exists (fun (_, ty) -> has_potential context ty) typed) then None
+  else
+    Some
+      (fun (frame : frame) ->
+        List.fold_left
+          (fun total (place, ty) ->
+            match (place, frame.self) with
+            | `Local id, _ -> (
+                match Ids.find_opt id frame.locals with
+                | Some term -> Costs.plus total (potential context frame ty term)
+                | None -> total)
+            | `Self, Some self -> Costs.plus total (potential context frame ty self)
+            | `Self, None -> total)
+          Costs.zero typed)
+
+(* Potentials. See PROVER.md, "Amortized bounds". *)
+
+(* A type's own [cost potential], from its definition. *)
+and potential_clause context (ty : T.ty) =
+  match ty with
+  | Named { path; _ } -> (
+      match Interface.Summary.definition context.database path with
+      | Some (key, { kind = Type_definition { clauses; _ }; _ }) -> (
+          match
+            List.find_map
+              (fun (clause : type_clause) ->
+                match clause.kind with Potential value -> Some value | _ -> None)
+              clauses
+          with
+          | Some value ->
+              Option.map (fun source -> (source, value)) (callee_source context.database key)
+          | None -> None)
+      | _ -> None)
+  | _ -> None
+
+(* Whether a value of a type can hold potential: its type declares one, or
+   a part of it can, whether or not this package sees its fields. A type
+   parameter may stand for such a type. The elements of a built-in
+   collection holding potential is not read yet. *)
+and has_potential context ?(seen = []) (ty : T.ty) =
+  if List.exists (T.equal ty) seen then false
+  else
+    match ty with
+    | Parameter _ -> true
+    | Named { path; arguments } when builtin ty = None -> (
+        potential_clause context ty <> None
+        ||
+        match Query.demand context.database Interface.Environment.interface path with
+        | Some (Interface.Environment.Type_interface interface) ->
+            let substitution =
+              try
+                List.combine
+                  (List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics)
+                  arguments
+              with Invalid_argument _ -> []
+            in
+            let fields =
+              match interface.shape with
+              | Record fields -> fields
+              | Sum variants ->
+                  List.concat_map
+                    (fun (variant : T.variant) -> Option.value variant.fields ~default:[])
+                    variants
+              | Todo_type | Builtin_type _ | Error_shape -> []
+            in
+            List.exists
+              (fun (field : T.field) ->
+                has_potential context ~seen:(ty :: seen)
+                  (T.substitute substitution field.field_type))
+              fields
+        | _ -> false)
+    | Named { arguments; _ } ->
+        if
+          List.exists
+            (function
+              | T.Type element -> has_potential context ~seen:(ty :: seen) element | _ -> false)
+            arguments
+        then raise (Foreign_unsupported "the potential of a collection's elements")
+        else false
+    | _ -> false
+
+(* The potential a value holds: a function of it in the logic, at least
+   zero for a valid value, as each type with a potential shows, and its
+   type's own potential plus its parts', unfolded once for each value it is
+   asked of. *)
+and potential context frame (ty : T.ty) term =
+  if not (has_potential context ty) then Costs.zero
+  else begin
+    let held = held_symbol context ty term in
+    if (not (List.mem held context.potentials)) && not (L.mentions frame.bound term) then begin
+      context.potentials <- held :: context.potentials;
+      fact context frame
+        L.(validity context frame ~assuming:true ty term ==> Apply ("<=", [ int 0; held ]));
+      match (potential_clause context ty, constructors context ty) with
+      | Some (source, written), Some shape -> (
+          let substitution = match visible_type context ty with Some (_, s) -> s | None -> [] in
+          let inner =
+            {
+              frame with
+              source;
+              locals = Ids.empty;
+              old_locals = Ids.empty;
+              self = Some term;
+              old_self = Some term;
+              self_type = Some ty;
+              result = None;
+              checking = false;
+              loop = None;
+              substitution;
+            }
+          in
+          try
+            let own = snd (value context inner written) in
+            let parts (variant, fields) =
+              List.fold_left
+                (fun total (field, field_type) ->
+                  if has_potential context field_type then
+                    Costs.plus total
+                      (held_symbol context field_type
+                         (L.Apply (selector_name ty variant field, [ term ])))
+                  else total)
+                Costs.zero fields
+            in
+            let parts =
+              match shape with
+              | [ (None, fields) ] -> parts (None, fields)
+              | variants -> (
+                  match List.rev variants with
+                  | last :: earlier ->
+                      List.fold_left
+                        (fun otherwise ((variant, _) as one) ->
+                          L.ite
+                            (L.Apply (L.tester (constructor_name ty variant), [ term ]))
+                            (parts one) otherwise)
+                        (parts last) earlier
+                  | [] -> Costs.zero)
+            in
+            fact context frame (L.equal held (Costs.plus own parts))
+          with Unsupported _ | Foreign_unsupported _ -> ())
+      | _ -> ()
+    end;
+    held
+  end
+
+and held_symbol context ty term =
+  let symbol = "potential." ^ type_key ty in
+  declare context (L.Function (symbol, [ sort_of context ty ], L.Int));
+  L.Apply (symbol, [ term ])
 
 (* The facts since a mark in the list, which is kept reversed. *)
 and facts_since context count =
@@ -3459,6 +3741,12 @@ and handing_out context frame (written : statement) handed =
       Some frame
   | _ -> unsupported written.span "`yield` outside a lending or yielding method's body"
 
+(* The local or [self] a place is part of. *)
+and root_of (place : expression) =
+  match place.kind with
+  | Mode (_, inner) | Parenthesized inner | Member (inner, _) | Bracket (inner, _) -> root_of inner
+  | _ -> place
+
 and is_self (expression_ : expression) =
   match expression_.kind with
   | Mode (_, inner) | Parenthesized inner -> is_self inner
@@ -3567,31 +3855,62 @@ and assignment context frame (written : statement) target operator assigned =
      call. *)
   Some (store context frame target new_value)
 
-(* The locals a loop's body may change, which are havocked at its head. *)
-and changed_locals frame (body : block) =
-  let changed = ref [] in
+(* What a loop's body may change, which is havocked at its head: the local
+   or [self] that each place it assigns to, passes [mut], or loops over
+   [mut] is part of. A call passes a place [mut] however it is written,
+   [f(mut items)] or [mut items.push(value)], as the type checker recorded
+   its arguments. *)
+and changed_places frame (body : block) : changed =
+  let locals = ref [] and self = ref false in
+  let source = frame.source in
+  let note (place : expression) =
+    let root = root_of place in
+    match root.kind with
+    | Self_value -> self := true
+    | _ -> (
+        match place_local frame root with Some (id, _) -> locals := id :: !locals | None -> ())
+  in
   let rec visit_statement (statement_ : statement) =
     (match statement_.kind with
-    | Assignment { target; _ } -> (
-        match place_local frame target with Some (id, _) -> changed := id :: !changed | None -> ())
+    | Assignment { target; _ } -> note target
+    | For { iterable; _ } -> (
+        match source.checked.loops.(statement_.id) with
+        | Some (Yielding { mode = T.Mut; _ }) -> note iterable
+        | _ -> ())
     | _ -> ());
     Syntax_walk.statement_parts ~expression:visit_expression ~statement:visit_statement statement_
   and visit_expression (expression_ : expression) =
-    (match expression_.kind with
-    | Mode (Mut, inner) -> (
-        match place_local frame inner with Some (id, _) -> changed := id :: !changed | None -> ())
-    | _ -> ());
+    (match expression_.kind with Mode (Mut, inner) -> note inner | _ -> ());
+    (match source.checked.calls.(expression_.id) with
+    | Some call_ ->
+        List.iter
+          (fun (argument : C.argument) ->
+            if argument.mode = T.Mut then
+              match find_expression_opt expression_ argument.expression with
+              | Some passed -> note passed
+              | None -> ())
+          call_.arguments
+    | None -> ());
     Syntax_walk.expression_parts ~expression:visit_expression ~statement:visit_statement expression_
   in
   List.iter visit_statement body.statements;
-  List.sort_uniq compare (List.filter (fun id -> Ids.mem id frame.locals) !changed)
+  {
+    changed_locals =
+      List.sort_uniq compare (List.filter (fun id -> Ids.mem id frame.locals) !locals);
+    changes_self = !self && frame.self <> None;
+  }
 
-and havoc context frame ids =
-  List.fold_left
-    (fun frame id ->
-      let ty = match local_type frame id with Some ty -> ty | None -> T.Integer in
-      { frame with locals = Ids.add id (arrive context frame "loop" ty) frame.locals })
-    frame ids
+and havoc context frame (changed : changed) =
+  let frame =
+    List.fold_left
+      (fun frame id ->
+        let ty = match local_type frame id with Some ty -> ty | None -> T.Integer in
+        { frame with locals = Ids.add id (arrive context frame "loop" ty) frame.locals })
+      frame changed.changed_locals
+  in
+  match (changed.changes_self, frame.self_type) with
+  | true, Some ty -> { frame with self = Some (arrive context frame "loop" ty) }
+  | _ -> frame
 
 and invariants (clauses : loop_clause list) =
   List.filter_map
@@ -3619,10 +3938,10 @@ and assume_invariants context frame clauses =
 
 and while_ context frame (written : statement) condition clauses body =
   check_invariants context frame clauses ~when_:"on entry to the loop";
-  let costs = loop_costs context frame clauses in
+  let changed = changed_places frame body in
+  let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
   loop_entry context frame costs;
   let mark = context.fresh and facts_mark = List.length context.facts in
-  let changed = changed_locals frame body in
   let head = havoc context frame changed in
   let head =
     if contains_yield body then { head with handed_out = havoc_parts context head } else head
@@ -3737,7 +4056,10 @@ and while_ context frame (written : statement) condition clauses body =
    cost by them. *)
 and iterations_so_far context head costs =
   if
-    List.exists (fun (_, _, _, rule) -> match rule with `Per _ -> true | `Clause _ -> false) costs
+    List.exists
+      (fun (cost : loop_cost) ->
+        match cost.rule with Per_iteration _ -> true | Clause_bound _ -> false)
+      costs
   then begin
     let iterations = fresh context "iterations" L.Int in
     assume context head (L.Apply ("<=", [ L.int 0; iterations ]));
@@ -3756,10 +4078,10 @@ and for_ context frame (written : statement) pattern iterable clauses body =
       let frame, low = value context frame start in
       let frame, high = value context frame stop in
       check_invariants context frame clauses ~when_:"on entry to the loop";
-      let costs = loop_costs context frame clauses in
+      let changed = changed_places frame body in
+      let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
       loop_entry context frame costs;
       let mark = context.fresh and facts_mark = List.length context.facts in
-      let changed = changed_locals frame body in
       let head = havoc context frame changed in
       let head =
         if contains_yield body then { head with handed_out = havoc_parts context head } else head
@@ -3924,17 +4246,27 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
         spend context frame
           (callee_amount context frame ~path ~parts:contract.parts
              ~bound_frame:(fun part -> method_frame frame part)
-             ~call_:driven ~values)
+             ~call_:driven ~values ~change:None)
     | _ -> spend context frame (unknown_amount context frame)
   in
   let entry = { frame with yielded = Some (empty_parts context frame element_type) } in
   check_invariants context entry clauses ~when_:"on entry to the loop";
-  let costs = loop_costs context frame clauses in
+  (* A loop over a collection [mut] changes the collection too. *)
+  let changed =
+    let in_body = changed_places frame body in
+    if mode = T.Mut then
+      let root = root_of iterable in
+      match (root.kind, place_local frame root) with
+      | Self_value, _ -> { in_body with changes_self = frame.self <> None }
+      | _, Some (id, _) ->
+          { in_body with changed_locals = List.sort_uniq compare (id :: in_body.changed_locals) }
+      | _, None -> unsupported iterable.span "looping over this place `mut`"
+    else in_body
+  in
+  let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
   loop_entry context entry costs;
   let mark = context.fresh and facts_mark = List.length context.facts in
-  let changed = changed_locals frame body in
   let head = havoc context frame changed in
-  let head = if mode = T.Mut then havoc_root context head iterable else head in
   let head =
     if contains_yield body then { head with handed_out = havoc_parts context head } else head
   in
@@ -4044,6 +4376,7 @@ let new_context database ~home ~current ~terminates ~measures checked =
     powers = [];
     lambda_times = [];
     lambda_captures = [];
+    potentials = [];
     call_targets = [];
     fits =
       List.filter_map
@@ -4122,12 +4455,15 @@ let promises context (source : source) locals (clauses : clause list) ~inherited
 
 (* A promise shown where its definition returns: what was spent within
    its bound, read with the parameters as they were on entry. *)
-let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span =
+let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span ~change =
   let spent =
     match List.assoc_opt (Costs.key promise.counter) frame.spent with
     | Some term -> term
     | None -> Costs.zero
   in
+  (* An amortized bound is on what is spent plus the growth of the
+     potential of what the definition returns and changes. *)
+  let spent = if promise.clause.amortized then Costs.plus spent (change ()) else spent in
   let g =
     match promise.clause.bound with
     | Big_o g | At_most g | Exactly g -> snd (value context { at with checking = false } g)
@@ -4417,6 +4753,44 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
                     term
               | _ -> ())
             signature.clauses);
+      (* How much the potential of what the definition returns and changes
+         grew, less what it was given to keep, for an amortized bound. *)
+      let change () =
+        let given =
+          List.fold_left
+            (fun total (parameter : parameter) ->
+              match parameter.kind with
+              | Named_parameter { name = name_; mode = Some ((Mut | Own) as mode); _ } -> (
+                  match
+                    ( Ids.find_opt name_.id start.locals,
+                      Ids.find_opt name_.id frame.locals,
+                      local_type frame name_.id )
+                  with
+                  | Some entry, later, Some ty ->
+                      let kept =
+                        match (mode, later) with
+                        | Mut, Some later -> potential context frame ty later
+                        | _ -> Costs.zero
+                      in
+                      Costs.plus total (Costs.minus kept (potential context frame ty entry))
+                  | _ -> total)
+              | Self_parameter (Some ((Mut | Own) as mode)) -> (
+                  match (start.self, frame.self, frame.self_type) with
+                  | Some entry, later, Some ty ->
+                      let kept =
+                        match (mode, later) with
+                        | Mut, Some later -> potential context frame ty later
+                        | _ -> Costs.zero
+                      in
+                      Costs.plus total (Costs.minus kept (potential context frame ty entry))
+                  | _ -> total)
+              | _ -> total)
+            Costs.zero signature.parameters
+        in
+        match (returned, context.output) with
+        | Some term, Some output -> Costs.plus given (potential context frame output term)
+        | _ -> given
+      in
       List.iter
         (fun promise ->
           if promise.inherited then
@@ -4424,12 +4798,12 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
             | Some (_, inside) ->
                 keep_promise context frame promise
                   ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
-                  ~span:body.span
+                  ~span:body.span ~change
             | None -> ()
           else
             keep_promise context frame promise
               ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
-              ~span:promise.span)
+              ~span:promise.span ~change)
         promised;
       match trait_frame frame ~result:returned with
       | Some (part, inside) when List.length part.binding = List.length own_terms ->
@@ -4534,6 +4908,51 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
       end)
     (let context0 = context in
      laws_of context0 trait);
+  outcome context
+
+(* A type's [cost potential] is never below zero for a value that meets
+   its invariants, which is what makes each potential a fact about every
+   valid value. See PROVER.md, "Amortized bounds". *)
+let type_potential database (source : source) ~path ~(written : expression) =
+  let context =
+    new_context database ~home:source.key ~current:path ~terminates:false ~measures:[]
+      source.checked
+  in
+  let ty =
+    match Query.demand database Interface.Environment.interface path with
+    | Some (Interface.Environment.Type_interface interface) ->
+        T.Named
+          { path; arguments = Interface.Environment.generic_arguments interface.type_generics }
+    | _ -> T.Named { path; arguments = [] }
+  in
+  let start =
+    {
+      source;
+      locals = Ids.empty;
+      old_locals = Ids.empty;
+      self = None;
+      old_self = None;
+      result = None;
+      condition = L.Boolean true;
+      checking = true;
+      bound = [];
+      loop = None;
+      substitution = [];
+      self_type = Some ty;
+      yielded = None;
+      finished = None;
+      handed_out = None;
+      spent = [];
+    }
+  in
+  let value_ = arrive context start "value" ty in
+  assume_valid context start ty value_;
+  let at = { start with self = Some value_; old_self = Some value_ } in
+  let _, own = value context { at with checking = false } written in
+  oblige context at Cost written.span
+    (Printf.sprintf "The potential of `%s` may be below zero for a value that meets its invariants."
+       (T.show ty))
+    (L.Apply ("<=", [ L.int 0; own ]));
   outcome context
 
 let test database (source : source) ~path (body : block) =

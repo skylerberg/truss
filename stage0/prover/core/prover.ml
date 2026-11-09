@@ -144,6 +144,16 @@ let prove database (key : Names.key) =
                 obligations =
                   List.concat_map (fun (o : Translate.outcome) -> o.obligations) outcomes;
               }
+        | Type_definition { clauses; _ } -> (
+            match
+              List.find_map
+                (fun (clause : type_clause) ->
+                  match clause.kind with Potential written -> Some written | _ -> None)
+                clauses
+            with
+            | Some written ->
+                Obligations (Translate.type_potential database source ~path:key.path ~written)
+            | None -> Not_proven_here)
         | _ -> Not_proven_here
       with
       | Translate.Unsupported (span, message) -> Unsupported (span, message)
