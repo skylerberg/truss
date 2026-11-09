@@ -1667,4 +1667,48 @@ let () =
                echo echo.truss:1:1: \"hi\\n\"\n"
             errors)
 
+(* Programs from source *)
+
+let example : Path.module_ = { package = "example"; modules = [ "main" ] }
+
+(* Compiles a module of Truss source with the standard library, runs its
+   tests, and returns the runner's output. *)
+let run_source text =
+  let database = Query.create () in
+  List.iter (fun (module_, text) -> Query.set database Workspace.file_text module_ text) Standard_library.modules;
+  Query.set database Workspace.file_text example text;
+  Query.set database Workspace.packages Standard_library.package
+    { name = Standard_library.package; dependencies = []; modules = List.map fst Standard_library.modules };
+  Query.set database Workspace.packages "example" { name = "example"; dependencies = []; modules = [ example ] };
+  let diagnostics = Infer.diagnostics database example in
+  List.iter (fun (d : Diagnostic.t) -> fail "the source has a diagnostic: %s" d.message) diagnostics;
+  let tests =
+    List.filter_map
+      (fun (d : Resolve.Names.declaration) -> match d.path with Test _ -> Some d.path | _ -> None)
+      (Query.demand database Resolve.Names.declarations example)
+  in
+  let compile = Compile.create database target_64 (Lazy.force compiler) (Lazy.force cache) settings in
+  match Compile.run_tests compile ~time_limit:2000 tests with
+  | Ok (_, output) -> output
+  | Error message -> failwith message
+
+let expect_output text expected = expect_string ~expected (run_source text)
+
+let () =
+  test "a test calls a function that uses the standard library's arithmetic" (fun () ->
+      expect_output
+        {|fn square(value: Int64) -> Int64 {
+  value * value
+}
+
+test "squares" {
+  assert square(3) == 9
+}
+
+test "squares wrongly" {
+  assert square(3) == 10
+}
+|}
+        "test 0 passed\ntest 1 failed\nmessage 36\nassert square(3) == 10\n  at example/main.truss:10:3\n")
+
 let () = Harness.finish ()

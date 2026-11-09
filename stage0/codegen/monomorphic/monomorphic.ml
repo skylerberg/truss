@@ -29,7 +29,7 @@ let rec ground context substitution (ty : Types.ty) : Ground.ty =
       bug "the generic parameter %s of %s is not substituted" p.name (Path.show p.owner)
   | Projection { name; _ } -> bug "the associated type %s is not normalized" name
   | Integer -> bug "Integer exists only in specifications"
-  | Variable _ | Literal _ | Hole -> bug "a type the checker left undecided"
+  | (Variable _ | Literal _ | Hole) as ty -> bug "a type the checker left undecided: %s" (Types.show ty)
   | Error -> bug "a type with an error, which no build reaches"
 
 and ground_argument context substitution (argument : Types.argument) : Ground.argument =

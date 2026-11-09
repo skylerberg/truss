@@ -1,0 +1,23 @@
+(library
+ (name compile)
+ (libraries
+  path
+  query
+  resolve
+  interface
+  workspace
+  source
+  ground
+  instance
+  memory_layout
+  lir
+  glue
+  drops
+  lower
+  reachable
+  emit_c
+  toolchain
+  startup
+  positions
+  build
+  unix))

@@ -26,4 +26,9 @@
   intrinsic
   monomorphic
   lir_builder
-  intrinsics))
+  intrinsics
+  infer
+  resolve
+  diagnostic
+  lower
+  compile))
