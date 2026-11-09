@@ -131,7 +131,9 @@ type t = {
       (** By the id of each [Name], [Member], or [Bracket] expression. *)
   calls : call option array;
       (** By the id of each call: a [Call], an operator, an index, and a compound assignment. *)
-  literals : literal option array;  (** By the id of each literal expression or pattern. *)
+  literals : literal option array;
+      (** By the id of each literal expression, literal pattern, and literal end of a range pattern.
+      *)
   patterns : pattern option array;  (** By the id of each pattern. *)
   pattern_types : Types.ty option array;
       (** The type of the value each pattern matches, by its id. *)

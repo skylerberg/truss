@@ -610,6 +610,14 @@ known:
 - **An integer literal is never a float.** `let ratio: Float64 = 1` is an
   error, with a fix that writes `1.0`.
 
+**A character or byte is a tagged string,** `Character"a"` or `UInt8"\n"`,
+of type `Character` or `UInt8`. It must hold exactly one Unicode scalar
+value, or one ASCII character, with no `${...}`, and the checked form records
+the value it stands for, as for an integer literal. In a pattern it matches
+that value, and a range of them, `Character"a"..=Character"z"`, matches the
+values between. A range pattern's type must be an integer type or
+`Character`.
+
 ### Operators
 
 Each operator becomes a call, so the checked form needs no operator rules of

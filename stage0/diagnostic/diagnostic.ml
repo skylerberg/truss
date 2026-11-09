@@ -91,6 +91,7 @@ module Code = struct
     | Null
 
   type types =
+    | Bad_character
     | Mismatch
     | Cannot_infer
     | Missing_label
@@ -288,6 +289,7 @@ module Code = struct
 
   let types_name code =
     match code with
+    | Bad_character -> "bad_character"
     | Mismatch -> "mismatch"
     | Cannot_infer -> "cannot_infer"
     | Missing_label -> "missing_label"
