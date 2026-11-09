@@ -1,14 +1,12 @@
 (* Instances: one copy of a definition's code, for one set of type arguments
    and capability sets. See CODEGEN.md, "Instances". *)
 
-type capabilities = Path.t list list
-(** The capability set bound to each capability parameter, in order, each sorted *)
-
 type key =
-  | Code of { path : Path.t; type_arguments : Ground.argument list; capabilities : capabilities }
+  | Code of { path : Path.t; type_arguments : Ground.argument list }
       (** A function, a method, or a method of an [impl], whether written, derived, or provided by
-          the trait, which the checked form says. A method's type arguments are its type's, then its
-          own; an [impl] method's are the [impl]'s, then the method's own. *)
+          the trait, which the checked form says. Its generic arguments, capability sets included,
+          are in the order of its generic parameters: a method's are its type's, then its own, and
+          an [impl] method's are the [impl]'s, then the method's own. *)
   | Constant of Path.t  (** A constant's static data *)
   | Drop of Ground.ty
   | Copy of Ground.ty

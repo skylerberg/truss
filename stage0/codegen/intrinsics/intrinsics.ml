@@ -93,6 +93,41 @@ let lower env b types operation ~type_arguments arguments ~destination ~site =
             [ value 0; value 1; Address { place = at ignored; writable = true } ]
       | Equal -> binary Equal
       | Less -> binary Less
+      | Ieee_equal -> binary Ieee_equal
+      | Ieee_less -> binary Ieee_less
+      | Leading_zeros -> into Leading_zeros
+      | Trailing_zeros -> into Trailing_zeros
+      | Count_ones -> into Count_ones
+      | Swap_bytes -> into Swap_bytes
+      | Rotate_left -> into Rotate_left
+      | Rotate_right -> into Rotate_right
+      | Multiply_high -> into Multiply_high
+      | Compare_bytes ->
+          (* The bytes both views have, then the lengths. *)
+          let left = place (argument 0) and right = place (argument 1) in
+          let shorter = local b (Raw Bool) in
+          let count = usize_local "count" in
+          emit b (Assign (at shorter, Binary (Less, length left, length right)));
+          emit b (Assign (at count, Use (length right)));
+          when_ b (Copy (at shorter)) (fun () -> emit b (Assign (at count, Use (length left))));
+          let order = local b (Raw (Integer Int32)) in
+          call ~result:(at order) Compare_bytes
+            [ Copy (left / Field "elements"); Copy (right / Field "elements"); Copy (at count) ];
+          let same = local b (Raw Bool) in
+          emit b
+            (Assign (at same, Binary (Equal, Copy (at order), Constant (Integer (Int32, Z.zero)))));
+          when_ b
+            (Copy (at same))
+            (fun () ->
+              let longer = local b (Raw Bool) and shorter = local b (Raw Bool) in
+              emit b (Assign (at longer, Binary (Greater, length left, length right)));
+              emit b (Assign (at shorter, Binary (Less, length left, length right)));
+              let first = local b (Raw (Integer Int32))
+              and second = local b (Raw (Integer Int32)) in
+              emit b (Assign (at first, Convert (Copy (at longer), Integer Int32)));
+              emit b (Assign (at second, Convert (Copy (at shorter), Integer Int32)));
+              emit b (Assign (at order, Binary (Subtract, Copy (at first), Copy (at second)))));
+          set (Convert (Copy (at order), Integer Int8))
       | Bit_and -> binary Bit_and
       | Bit_or -> binary Bit_or
       | Bit_xor -> binary Bit_xor

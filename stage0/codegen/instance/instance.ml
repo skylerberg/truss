@@ -1,7 +1,5 @@
-type capabilities = Path.t list list
-
 type key =
-  | Code of { path : Path.t; type_arguments : Ground.argument list; capabilities : capabilities }
+  | Code of { path : Path.t; type_arguments : Ground.argument list }
   | Constant of Path.t
   | Drop of Ground.ty
   | Copy of Ground.ty
@@ -19,14 +17,12 @@ let rank = function
   | Adapter _ -> 6
 
 let ( >>= ) c next = if c <> 0 then c else next ()
-let compare_capabilities = List.compare (List.compare Path.compare)
 
 let rec compare a b =
   match (a, b) with
   | Code a, Code b ->
       Path.compare a.path b.path >>= fun () ->
-      Ground.compare_arguments a.type_arguments b.type_arguments >>= fun () ->
-      compare_capabilities a.capabilities b.capabilities
+      Ground.compare_arguments a.type_arguments b.type_arguments
   | Constant a, Constant b -> Path.compare a b
   | Drop a, Drop b | Copy a, Copy b | Debug a, Debug b -> Ground.compare a b
   | Cursor_next a, Cursor_next b -> Ground.compare (Cursor a) (Cursor b)
@@ -39,10 +35,8 @@ let tagged n items = Cbor.Array (Cbor.int n :: items)
 let rec encode ?(path = Ground.encode_path) key =
   let ty = Ground.encode ~path in
   let arguments arguments = Cbor.Array (List.map (Ground.encode_argument ~path) arguments) in
-  let capabilities sets = Cbor.Array (List.map (fun set -> Cbor.Array (List.map path set)) sets) in
   match key with
-  | Code { path = p; type_arguments; capabilities = c } ->
-      tagged 0 [ path p; arguments type_arguments; capabilities c ]
+  | Code { path = p; type_arguments } -> tagged 0 [ path p; arguments type_arguments ]
   | Constant p -> tagged 1 [ path p ]
   | Drop t -> tagged 2 [ ty t ]
   | Copy t -> tagged 3 [ ty t ]
@@ -119,29 +113,19 @@ let rec mangle_ty (ty : Ground.ty) =
 and mangle_argument = function
   | Ground.Type ty -> mangle_ty ty
   | Value value -> marker "Value" ^ Z.to_string value
+  | Capabilities set ->
+      marker "Granted" ^ String.concat (marker "And") (List.map path set) ^ marker "End"
 
 and mangle_arguments = function
   | [] -> ""
   | arguments ->
       marker "Of" ^ String.concat (marker "And") (List.map mangle_argument arguments) ^ marker "End"
 
-and mangle_capabilities = function
-  | [] -> ""
-  | sets ->
-      String.concat ""
-        (List.map
-           (fun set ->
-             marker "Granted" ^ String.concat (marker "And") (List.map path set) ^ marker "End")
-           sets)
-
 and mangle_yielding (yielding : Ground.yielding) =
-  path yielding.method_
-  ^ mangle_arguments yielding.type_arguments
-  ^ mangle_capabilities yielding.capabilities
+  path yielding.method_ ^ mangle_arguments yielding.type_arguments
 
 let rec mangle = function
-  | Code { path = p; type_arguments; capabilities } ->
-      path p ^ mangle_arguments type_arguments ^ mangle_capabilities capabilities
+  | Code { path = p; type_arguments } -> path p ^ mangle_arguments type_arguments
   | Constant p -> marker "Constant" ^ path p
   | Drop ty -> marker "Drop" ^ mangle_ty ty
   | Copy ty -> marker "Copy" ^ mangle_ty ty
@@ -173,10 +157,4 @@ let rec to_string = function
 
 and arguments_to_string = function
   | [] -> ""
-  | arguments ->
-      "["
-      ^ String.concat ", "
-          (List.map
-             (function Ground.Type ty -> Ground.to_string ty | Value v -> Z.to_string v)
-             arguments)
-      ^ "]"
+  | arguments -> "[" ^ String.concat ", " (List.map Ground.argument_to_string arguments) ^ "]"

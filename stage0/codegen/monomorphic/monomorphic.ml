@@ -23,12 +23,7 @@ let rec ground context substitution (ty : Types.ty) : Ground.ty =
           associated = List.map (fun (name, ty) -> (name, ground context [] ty)) associated;
         }
   | Cursor { method_; arguments } ->
-      Cursor
-        {
-          method_;
-          type_arguments = List.map (ground_argument context []) arguments;
-          capabilities = [];
-        }
+      Cursor { method_; type_arguments = List.map (ground_argument context []) arguments }
   | Never -> Never
   | Parameter p ->
       bug "the generic parameter %s of %s is not substituted" p.name (Path.show p.owner)
@@ -43,6 +38,14 @@ and ground_argument context substitution (argument : Types.argument) : Ground.ar
   | Value (Known value) -> Value value
   | Value (Value_parameter p) -> bug "the value parameter %s is not substituted" p.name
   | Value (Value_variable _) -> bug "a value the checker left undecided"
+  | Capabilities set ->
+      Capabilities
+        (List.sort_uniq Path.compare
+           (List.concat_map
+              (function
+                | Types.Capability path -> [ path ]
+                | Capability_parameter p -> context.capabilities p)
+              set))
 
 and ground_function context substitution (f : Types.function_type) : Ground.function_type =
   let f = Types.substitute_function substitution f in
@@ -95,11 +98,12 @@ let substitution (generics : Types.generic list) arguments =
                 trait_arguments = List.map back_argument arguments;
                 associated = List.map (fun (name, ty) -> (name, back ty)) associated;
               }
-        | Cursor { method_; type_arguments; _ } ->
+        | Cursor { method_; type_arguments } ->
             Cursor { method_; arguments = List.map back_argument type_arguments }
       and back_argument : Ground.argument -> Types.argument = function
         | Type ty -> Type (back ty)
         | Value v -> Value (Known v)
+        | Capabilities set -> Capabilities (List.map (fun path -> Types.Capability path) set)
       in
       (generic.generic, back_argument argument))
     generics arguments

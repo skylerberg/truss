@@ -7,10 +7,10 @@ type ty =
   | Cursor of yielding
   | Never
 
-and argument = Type of ty | Value of Z.t
+and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
 and function_type = { parameters : (mode * ty) list; result : result; uses : Path.t list }
 and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
-and yielding = { method_ : Path.t; type_arguments : argument list; capabilities : Path.t list list }
+and yielding = { method_ : Path.t; type_arguments : argument list }
 
 let ( >>= ) c next = if c <> 0 then c else next ()
 
@@ -37,8 +37,10 @@ and compare_argument a b =
   match (a, b) with
   | Type a, Type b -> compare a b
   | Value a, Value b -> Z.compare a b
-  | Type _, Value _ -> -1
-  | Value _, Type _ -> 1
+  | Capabilities a, Capabilities b -> List.compare Path.compare a b
+  | _ ->
+      let rank = function Type _ -> 0 | Value _ -> 1 | Capabilities _ -> 2 in
+      Int.compare (rank a) (rank b)
 
 and compare_arguments a b = List.compare compare_argument a b
 
@@ -59,9 +61,7 @@ and compare_result a b =
       Int.compare (rank a) (rank b)
 
 and compare_yielding a b =
-  Path.compare a.method_ b.method_ >>= fun () ->
-  compare_arguments a.type_arguments b.type_arguments >>= fun () ->
-  List.compare (List.compare Path.compare) a.capabilities b.capabilities
+  Path.compare a.method_ b.method_ >>= fun () -> compare_arguments a.type_arguments b.type_arguments
 
 let equal a b = compare a b = 0
 
@@ -96,7 +96,10 @@ let rec to_string = function
   | Cursor y -> "cursor of " ^ path_name y.method_
   | Never -> "Never"
 
-and argument_to_string = function Type ty -> to_string ty | Value v -> Z.to_string v
+and argument_to_string = function
+  | Type ty -> to_string ty
+  | Value v -> Z.to_string v
+  | Capabilities set -> "{" ^ String.concat ", " (List.map path_name set) ^ "}"
 
 and arguments_to_string arguments =
   "[" ^ String.concat ", " (List.map argument_to_string arguments) ^ "]"
@@ -144,6 +147,7 @@ let rec encode ?(path = encode_path) ty =
 and encode_argument ?(path = encode_path) = function
   | Type ty -> tagged 0 [ encode ~path ty ]
   | Value v -> tagged 1 [ Cbor.Integer v ]
+  | Capabilities set -> tagged 2 [ Cbor.Array (List.map path set) ]
 
 and encode_function ~path f =
   Cbor.Array
@@ -158,9 +162,4 @@ and encode_function ~path f =
     ]
 
 and encode_yielding ~path y =
-  Cbor.Array
-    [
-      path y.method_;
-      Cbor.Array (List.map (encode_argument ~path) y.type_arguments);
-      Cbor.Array (List.map (fun set -> Cbor.Array (List.map path set)) y.capabilities);
-    ]
+  Cbor.Array [ path y.method_; Cbor.Array (List.map (encode_argument ~path) y.type_arguments) ]

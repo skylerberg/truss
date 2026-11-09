@@ -214,7 +214,7 @@ let function_ ?(parameters = []) ?result ?(returns = true) ?(environment = []) l
     environment;
   }
 
-let key name = Instance.Code { path = definition name; type_arguments = []; capabilities = [] }
+let key name = Instance.Code { path = definition name; type_arguments = [] }
 
 let instance ?(nested = []) name main : Lir.t =
   { key = key name; main; nested = Array.of_list nested }
@@ -700,7 +700,6 @@ let () =
                   receiver = Read;
                 };
             type_arguments = [ Type int64 ];
-            capabilities = [];
           }
       in
       expect_string ~expected:"t_standard__list__List_each_Of_test__Int64_End_"
@@ -994,9 +993,7 @@ let () =
       expect_status 10 (loop_program (fun _ -> Use (Constant (Bool true)))));
   test "a loop body that stops ends the method at that yield" (fun () ->
       expect_status 6 (loop_program (fun item -> Binary (Not_equal, item, constant_int32 3))));
-  let yielding : Ground.yielding =
-    { method_ = definition "count_to"; type_arguments = []; capabilities = [] }
-  in
+  let yielding : Ground.yielding = { method_ = definition "count_to"; type_arguments = [] } in
   let cursor = Ground.Cursor yielding in
   test "a cursor keeps the parameters and the locals live across a yield" (fun () ->
       let fields = List.map fst (Yields.cursor_fields (shape_env ()) count_to) in
