@@ -266,9 +266,12 @@ node for a habit, or consumed a closer the lexer inserted. A part is broken
 when one of its definition's recovered spans lies in the part's span: a
 signature runs from the definition's or member's start to its body's start,
 a body is its block, a member is its line, and a type is its definition.
-Spans are half-open, so a zero-width recovered span at the boundary between
-two parts, such as a missing body at the end of a signature, lies in the part
-that starts there. A parser
+A recovered span with width lies in every part it overlaps. A zero-width
+one at position `p` lies in the part that starts at `p`, if there is one, even
+when that part is itself zero-width, and otherwise in the part with
+`start <= p < stop`. So a missing body, recorded as a zero-width span at the
+end of the signature, where its kept `Error` body also starts, breaks the
+body and not the signature, and the function keeps its interface. A parser
 diagnostic that only enforces a rule on code it read exactly as written,
 such as a misplaced `assert`, `yield`, `break`, or `echo`, `forall` outside a
 specification, a parameter named `result`, `lends own`, a repeated clause,
