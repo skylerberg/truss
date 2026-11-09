@@ -38,3 +38,7 @@ val link : t -> objects:string list -> output:string -> (unit, string) result
    With [input], the program reads that as its standard input; without, it
    reads this process's. *)
 val run : ?input:string -> string -> string list -> int * string * string
+
+(* Runs a program on this process's standard input, output, and error, and
+   returns its exit status, as [run] gives it. *)
+val run_attached : string -> string list -> int

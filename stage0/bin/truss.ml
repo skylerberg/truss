@@ -95,12 +95,14 @@ let () =
       match main with
       | None -> fail "%s: the package has no main." directory
       | Some main -> (
-          match Compile.run_program (compiler database) ~main ~arguments with
+          (* The program runs on this terminal, so it can prompt and read. *)
+          let output = Filename.temp_file "truss-run-" "" in
+          match Compile.build_program (compiler database) ~main ~output with
           | Error message ->
               prerr_endline message;
               exit 1
-          | Ok (status, output, errors) ->
-              print_string output;
-              prerr_string errors;
+          | Ok () ->
+              let status = Toolchain.run_attached output arguments in
+              (try Sys.remove output with Sys_error _ -> ());
               exit status))
   | _ -> usage ()

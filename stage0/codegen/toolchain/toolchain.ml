@@ -11,6 +11,27 @@ let read_all channel =
 
 (* Runs a program with arguments, with no shell, and returns its status and
    what it wrote to standard output and standard error. *)
+(* A process's status as a shell reports it: its exit code, or [128 +
+   signal] for a process a signal ended. *)
+let exit_code (status : Unix.process_status) =
+  match status with
+  | WEXITED code -> code
+  | WSIGNALED signal | WSTOPPED signal ->
+      (* OCaml numbers signals its own way; report the system's number. *)
+      let system =
+        List.assoc_opt signal
+          [
+            (Sys.sigabrt, 6);
+            (Sys.sigsegv, 11);
+            (Sys.sigkill, 9);
+            (Sys.sigbus, 10);
+            (Sys.sigfpe, 8);
+            (Sys.sigill, 4);
+            (Sys.sigterm, 15);
+          ]
+      in
+      128 + Option.value system ~default:signal
+
 let run ?input program arguments =
   let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
   let stderr_read, stderr_write = Unix.pipe ~cloexec:true () in
@@ -53,26 +74,7 @@ let run ?input program arguments =
   Unix.close stdout_read;
   Unix.close stderr_read;
   let _, status = Unix.waitpid [] pid in
-  let code =
-    match status with
-    | Unix.WEXITED code -> code
-    | WSIGNALED signal | WSTOPPED signal ->
-        (* OCaml numbers signals its own way; report the system's number. *)
-        let system =
-          List.assoc_opt signal
-            [
-              (Sys.sigabrt, 6);
-              (Sys.sigsegv, 11);
-              (Sys.sigkill, 9);
-              (Sys.sigbus, 10);
-              (Sys.sigfpe, 8);
-              (Sys.sigill, 4);
-              (Sys.sigterm, 15);
-            ]
-        in
-        128 + Option.value system ~default:signal
-  in
-  (code, output, errors)
+  (exit_code status, output, errors)
 
 let identify compiler =
   match run compiler [ "--version" ] with
@@ -122,3 +124,12 @@ let link t ~objects ~output =
   match run t.compiler (objects @ [ "-o"; output; "-lm" ]) with
   | 0, _, _ -> Ok ()
   | _, out, err -> Error (out ^ err)
+
+let run_attached program arguments =
+  let pid =
+    Unix.create_process program
+      (Array.of_list (program :: arguments))
+      Unix.stdin Unix.stdout Unix.stderr
+  in
+  let _, status = Unix.waitpid [] pid in
+  exit_code status

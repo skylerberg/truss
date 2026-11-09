@@ -1079,7 +1079,8 @@ affects only build speed.
 `truss test DIRECTORY` checks a package, reporting every diagnostic, then
 builds its tests into one test program and runs it. `truss run DIRECTORY
 ARGUMENTS` builds the package's program from its `main` and runs it with
-the arguments. A package is a directory with a `truss.toml` naming it, and
+the arguments, on the terminal's own input and output, so it can prompt and
+read, and exits with its status. A package is a directory with a `truss.toml` naming it, and
 each `.truss` file under it is one of its modules. Object files are cached
 in `~/.cache/truss/objects`.
 

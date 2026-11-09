@@ -21,6 +21,10 @@ val run_tests : t -> time_limit:int -> Path.t list -> (int * string, string) res
 (* Builds the program whose [main] is at that path, and runs it with the
    arguments, and [input] as its standard input if given, returning its exit
    status, its output, and its errors. *)
+(* Builds the program whose [main] is at that path into an executable at
+   [output]. *)
+val build_program : t -> main:Path.t -> output:string -> (unit, string) result
+
 val run_program :
   ?input:string ->
   t ->

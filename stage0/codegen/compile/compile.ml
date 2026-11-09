@@ -118,31 +118,34 @@ let anchor t (path : Path.t) : Positions.anchor option =
           let line, _ = Source.position file.source base in
           Some { definition = path; path = Source.path file.source; first_line = line })
 
-(* Builds what the roots reach into a program with the given startup code,
-   and runs it with [arguments]. *)
-let build_and_run ?input t ~roots ~startup ~arguments =
+(* Builds what the roots reach into a program at [output], with the given
+   startup code. *)
+let build t ~roots ~startup ~output =
   match Reachable.reachable t.context.env ~lookup:(compiled t) roots with
   | exception Invalid_argument message -> Error message
-  | units -> (
+  | units ->
       let code = List.filter_map (function Lir.Code i -> Some i | _ -> None) units in
       let paths = List.sort_uniq Path.compare (List.concat_map anchored code) in
       let anchors = List.filter_map (anchor t) paths in
       let target = Memory_layout.target t.context.env in
       let sources = [ ("startup", startup); ("anchors", Positions.anchors_file target anchors) ] in
-      let output =
-        Filename.concat (Filename.get_temp_dir_name ())
-          (Printf.sprintf "truss-%d-%d" (Unix.getpid ()) (Hashtbl.hash roots))
-      in
-      match
-        Build.program t.toolchain t.cache t.context.env t.settings
-          ~files:(List.map (fun unit -> [ unit ]) units)
-          ~sources ~output
-      with
-      | Error message -> Error message
-      | Ok () ->
-          let result = Toolchain.run ?input output arguments in
-          (try Sys.remove output with Sys_error _ -> ());
-          Ok result)
+      Build.program t.toolchain t.cache t.context.env t.settings
+        ~files:(List.map (fun unit -> [ unit ]) units)
+        ~sources ~output
+
+(* Builds what the roots reach into a temporary program and runs it with
+   [arguments], then removes it. *)
+let build_and_run ?input t ~roots ~startup ~arguments =
+  let output =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "truss-%d-%d" (Unix.getpid ()) (Hashtbl.hash roots))
+  in
+  match build t ~roots ~startup ~output with
+  | Error message -> Error message
+  | Ok () ->
+      let result = Toolchain.run ?input output arguments in
+      (try Sys.remove output with Sys_error _ -> ());
+      Ok result
 
 let run_tests t ~time_limit tests =
   let roots = List.map Lower.test_key tests in
@@ -159,3 +162,7 @@ let run_program ?input t ~main ~arguments =
   build_and_run ?input t ~roots:[ root ]
     ~startup:(Startup.program_calling (Instance.symbol root))
     ~arguments
+
+let build_program t ~main ~output =
+  let root = Instance.Program_main main in
+  build t ~roots:[ root ] ~startup:(Startup.program_calling (Instance.symbol root)) ~output
