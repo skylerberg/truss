@@ -91,7 +91,7 @@ let () =
   test "a negated literal is checked after the negation" (fun () ->
       fine "fn f() {\n  let small: Int8 = -128\n}\n");
   test "an integer literal where a float is expected is an error with a fix" (fun () ->
-      one_diagnostic "fn f() {\n  let ratio: Float64 = 1\n}\n" "types.mismatch"
+      one_diagnostic "fn f() {\n  let ratio: Float64 = 1\n}\n" "types.integer_for_float"
         ~fixed:"fn f() {\n  let ratio: Float64 = 1.0\n}\n");
   test "a literal shift amount is a USize" (fun () ->
       has_type "fn f(flags: UInt32) -> UInt32 {\n  flags << 3\n}\n" "3" ~occurrence:3 "USize")
@@ -437,5 +437,145 @@ let () =
               | None -> ())
             (Query.demand database Resolve.Names.declarations module_))
         Standard_library.modules)
+
+(* What the review of body checking found *)
+
+let point = "type Point(x: Int64)\n\n"
+
+let () =
+  test "a call's type arguments must meet their bounds" (fun () ->
+      one_diagnostic
+        (point
+       ^ "fn need[Value: Ordered](value: Value) {}\n\nfn f(point: Point) {\n  need(point)\n}\n")
+        "types.unsatisfied_bound");
+  test "a type written in a body must meet its bounds" (fun () ->
+      let database =
+        setup [ ("app::main", point ^ "fn f() {\n  let points: Set[Point] = []\n}\n") ]
+      in
+      match codes (check database (module_of "app::main")) with
+      | [ "types.unsatisfied_bound"; "types.unsatisfied_bound" ] -> ()
+      | found -> fail "found [%s]" (String.concat "; " found));
+  test "a type written in a body that is not a type is an error" (fun () ->
+      one_diagnostic "fn f() {\n  let value: Display = 3\n}\n" "types.not_a_type");
+  test "an operator's result must be the type expected of it" (fun () ->
+      one_diagnostic
+        "type Span2(length: Int64)\n\n\
+         impl Multiply[Int64] for Span2 {\n\
+        \  type Output = Span2\n\
+        \  fn multiply(self, right: Int64) -> Span2 { todo }\n\
+         }\n\n\
+         fn f(span: Span2) -> Int64 {\n\
+        \  span * 3\n\
+         }\n"
+        "types.mismatch");
+  test "an array length nothing decides is an error" (fun () ->
+      one_diagnostic
+        "fn zeros[count: USize]() -> Array[Int64, count] { todo }\n\n\
+         fn f() {\n\
+        \  let _ = zeros()\n\
+         }\n"
+        "types.cannot_infer");
+  test "a qualified constant in a pattern must have the matched type" (fun () ->
+      one_diagnostic
+        "fn f(count: Int64) -> Int64 {\n\
+        \  match count {\n\
+        \    ExitCode.success => 1\n\
+        \    _ => 0\n\
+        \  }\n\
+         }\n"
+        "types.mismatch");
+  test "the alternatives of a pattern bind each name with one type" (fun () ->
+      one_diagnostic
+        "type Either2 =\n\
+        \  | Number(value: Int64)\n\
+        \  | Text(value: String)\n\n\
+         fn f(either: Either2) -> Int64 {\n\
+        \  match either {\n\
+        \    Number(value) | Text(value) => 1\n\
+        \  }\n\
+         }\n"
+        "types.mismatch");
+  test "a pattern must match every field or write .." (fun () ->
+      one_diagnostic
+        "type Pair2(first: Int64, second: Int64)\n\n\
+         fn f(pair: Pair2) -> Int64 {\n\
+        \  let (first) = pair\n\
+        \  first\n\
+         }\n"
+        "types.missing_argument");
+  test "an opaque type cannot be matched outside its package" (fun () ->
+      one_diagnostic "fn f(items: List[Int64]) {\n  let (storage) = items\n}\n"
+        "types.private_field");
+  test "a bitwise compound assignment works on integers only" (fun () ->
+      one_diagnostic "fn f() {\n  var text = \"a\"\n  text ^= \"b\"\n}\n" "types.no_impl");
+  test "a method written in full takes its receiver's mark" (fun () ->
+      one_diagnostic "fn f() {\n  var items: List[Int64] = []\n  List.push(items, item: 1)\n}\n"
+        "types.wrong_receiver");
+  test "an associated type of an argument is normalized" (fun () ->
+      fine
+        "fn has_key[Collection: Index](collection: Collection, key: Collection.Key) {}\n\n\
+         fn f(items: List[Int64]) {\n\
+        \  has_key(items, key: 0)\n\
+         }\n");
+  test "a literal receiver has its default type" (fun () ->
+      has_type "fn f() -> Int64 {\n  5.wrapping_add(3)\n}\n" "5.wrapping_add(3)" "Int64");
+  test "a for loop over characters counts" (fun () ->
+      fine
+        "fn f(first: Character, last: Character) {\n\
+        \  for letter in first..last {\n\
+        \    let _ = letter\n\
+        \  }\n\
+         }\n");
+  test "an operation on a hole is a hole" (fun () ->
+      fine "fn f() {\n  let body = todo\n  let _ = body + 1\n}\n");
+  test "a loop variable's type comes from the loop's header" (fun () ->
+      one_diagnostic "fn f() {\n  for i in 0..10 {\n    let small: UInt8 = i\n  }\n}\n"
+        "types.mismatch");
+  test "a mistake is not reported again as a type that cannot be worked out" (fun () ->
+      let database =
+        setup
+          [ ("app::main", "fn f(items: List[Int64]) {\n  let _ = items.map(undefined_thing)\n}\n") ]
+      in
+      if List.mem "types.cannot_infer" (codes (check database (module_of "app::main"))) then
+        fail "cascaded");
+  test "a Float32 literal too large is an error" (fun () ->
+      one_diagnostic "fn f() {\n  let large: Float32 = 3.5e38\n}\n" "types.literal_out_of_range");
+  test "a Float32 literal is rounded once, from its decimal" (fun () ->
+      let value, checked =
+        expression_at "fn f() {\n  let value: Float32 = 1.0000000596046447754\n}\n"
+          "1.0000000596046447754" 1
+      in
+      match checked.literals.(value.id) with
+      | Some (Float_value rounded) ->
+          if rounded <> Float.of_string "0x1.000002p+0" then fail "rounded to %h" rounded
+      | _ -> fail "no value");
+  test "a negated literal of an unsigned type is one error" (fun () ->
+      one_diagnostic "fn f() {\n  let value: UInt8 = -1\n}\n" "types.negated_unsigned");
+  test "explicit type arguments give exactly the function's own" (fun () ->
+      one_diagnostic
+        "fn pick[First, Second](first: First) -> Second { todo }\n\n\
+         fn f() -> Int64 {\n\
+        \  pick[Int64](3)\n\
+         }\n"
+        "types.arity");
+  test "a missing label has no fix when which one is meant is not known" (fun () ->
+      let database =
+        setup
+          [ ("app::main", "fn g(a: Int64, b: Int64, c: Int64) {}\n\nfn f() {\n  g(1, 2, 3)\n}\n") ]
+      in
+      List.iter
+        (fun (diagnostic : Diagnostic.t) -> if diagnostic.fixes <> [] then fail "offered a fix")
+        (check database (module_of "app::main")));
+  test "the string + fix keeps escapes" (fun () ->
+      one_diagnostic "fn f(name: String) -> String {\n  \"a\\\"b\" + name\n}\n"
+        "types.string_addition" ~fixed:"fn f(name: String) -> String {\n  \"a\\\"b${name}\"\n}\n");
+  test "a lambda cannot change what it captures" (fun () ->
+      one_diagnostic
+        "fn f(items: List[Int64]) {\n\
+        \  var count = 0\n\
+        \  let _ = items.map(fn(item) { count = item })\n\
+        \  let _ = count\n\
+         }\n"
+        "types.not_assignable")
 
 let () = finish ()

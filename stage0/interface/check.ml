@@ -30,35 +30,47 @@ let implements state type_ trait =
 
 (* Bounds a type's arguments must meet *)
 
-let check_bounds state =
-  List.iter
+(* The bounds each written type's arguments must meet, as [(span, message)]
+   for each that does not hold. Bodies check the types their annotations
+   write the same way. *)
+let unmet_bounds database ~bounds named =
+  List.concat_map
     (fun ((span : span), (type_ : T.ty)) ->
       match type_ with
       | Named { path; arguments } -> (
-          match Query.demand state.database Environment.type_interface path with
+          match Query.demand database Environment.type_interface path with
           | Some interface when List.length interface.type_generics = List.length arguments ->
               let substitution =
                 List.combine
                   (List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics)
                   arguments
               in
-              List.iter2
-                (fun (generic : T.generic) argument ->
-                  match (generic.kind, argument) with
-                  | Type_generic generic_bounds, T.Type argument ->
-                      List.iter
-                        (fun bound ->
-                          let bound = T.substitute_trait substitution bound in
-                          if Option.is_none (implements state argument bound) then
-                            report state Unsatisfied_bound span
-                              (Printf.sprintf "`%s` needs `%s: %s`, which does not hold here."
-                                 (T.show type_) (T.show argument) (T.show_trait bound)))
-                        generic_bounds
-                  | _ -> ())
-                interface.type_generics arguments
-          | _ -> ())
-      | _ -> ())
-    state.lowered.named
+              List.concat
+                (List.map2
+                   (fun (generic : T.generic) argument ->
+                     match (generic.kind, argument) with
+                     | Type_generic generic_bounds, T.Type argument ->
+                         List.filter_map
+                           (fun bound ->
+                             let bound = T.substitute_trait substitution bound in
+                             if Option.is_none (Impls.implements database ~bounds argument bound)
+                             then
+                               Some
+                                 ( span,
+                                   Printf.sprintf "`%s` needs `%s: %s`, which does not hold here."
+                                     (T.show type_) (T.show argument) (T.show_trait bound) )
+                             else None)
+                           generic_bounds
+                     | _ -> [])
+                   interface.type_generics arguments)
+          | _ -> [])
+      | _ -> [])
+    named
+
+let check_bounds state =
+  List.iter
+    (fun (span, message) -> report state Unsatisfied_bound span message)
+    (unmet_bounds state.database ~bounds:(bounds state) state.lowered.named)
 
 (* Visibility *)
 

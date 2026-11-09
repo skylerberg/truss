@@ -97,9 +97,10 @@ type pattern =
   | Other_pattern
 
 type template = {
-  from_template : call;  (** The call of the tag's [from_template], or of [String]'s building. *)
+  from_template : call option;  (** The tag's [from_template]; [None] for a plain string. *)
   part_conversions : call option list;
-      (** Each interpolated value's [From] conversion to the tag's [Part]. *)
+      (** For each interpolated value: its [From] conversion to the tag's [Part], or for a plain
+          string, its [Display]. *)
   interpolated : bool;
 }
 

@@ -106,12 +106,64 @@ let bind unifier index type_ =
     true
   end
 
+type unknown =
+  | Unknown_type of int
+  | Unknown_literal of T.literal_kind * int
+  | Unknown_value of int
+
+(* Every unknown a type still holds, at any depth: type variables,
+   undecided literals, and unknown [USize] values. The one walk that
+   settling a statement uses, so every part of a type is seen alike. *)
+let unknowns unifier (type_ : T.ty) =
+  let found = ref [] in
+  let rec go (type_ : T.ty) =
+    match resolve unifier type_ with
+    | Variable index -> found := Unknown_type index :: !found
+    | Literal (kind, index) -> found := Unknown_literal (kind, index) :: !found
+    | Named { arguments; _ } | Cursor { arguments; _ } -> List.iter argument arguments
+    | Projection { base; trait = reference; _ } ->
+        go base;
+        trait reference
+    | Function { inputs; output; _ } -> (
+        List.iter (fun (_, type_) -> go type_) inputs;
+        match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> go type_)
+    | Any reference -> trait reference
+    | Parameter _ | Never | Integer | Hole | Error -> ()
+  and argument = function
+    | T.Type type_ -> go type_
+    | T.Value value -> (
+        match resolve_value unifier value with
+        | Value_variable index -> found := Unknown_value index :: !found
+        | _ -> ())
+    | T.Capabilities _ -> ()
+  and trait (reference : T.trait_reference) =
+    List.iter argument reference.trait_arguments;
+    List.iter (fun (_, type_) -> go type_) reference.associated
+  in
+  go type_;
+  List.sort_uniq compare !found
+
 (* Unifies two types, solving variables in either. Errors and holes agree
    with anything, so one mistake is reported once. *)
 let rec unify unifier (left : T.ty) (right : T.ty) =
   let left = resolve unifier left and right = resolve unifier right in
   match (left, right) with
-  | T.Error, _ | _, T.Error | T.Hole, _ | _, T.Hole -> true
+  (* An error, or a hole, solves a variable it meets, so that one mistake is
+     not reported again as a type that cannot be worked out. *)
+  | (T.Variable index | T.Literal (_, index)), (T.Error | T.Hole)
+  | (T.Error | T.Hole), (T.Variable index | T.Literal (_, index)) ->
+      Hashtbl.replace unifier.types index T.Error;
+      true
+  | (T.Error | T.Hole), other | other, (T.Error | T.Hole) ->
+      (* Every variable inside what an error meets is solved as an error
+         too, so nothing it held is reported as unknown. *)
+      List.iter
+        (function
+          | Unknown_type index | Unknown_literal (_, index) ->
+              Hashtbl.replace unifier.types index T.Error
+          | Unknown_value _ -> ())
+        (unknowns unifier other);
+      true
   | Variable left_index, Variable right_index when left_index = right_index -> true
   | Variable index, other | other, Variable index -> bind unifier index other
   | Literal (left_kind, left_index), Literal (right_kind, right_index) ->
@@ -177,23 +229,3 @@ and unify_trait unifier (left : T.trait_reference) (right : T.trait_reference) =
        (fun (left_name, left) (right_name, right) ->
          left_name = right_name && unify unifier left right)
        left.associated right.associated
-
-(* Gives each literal that nothing decided its default type: [Int64] and
-   [Float64], or [Integer] in a specification. *)
-let rec default_literals unifier ~specification (type_ : T.ty) =
-  match resolve unifier type_ with
-  | Literal (Integer_literal, index) ->
-      Hashtbl.replace unifier.types index (if specification then T.Integer else T.builtin Int64)
-  | Literal (Float_literal, index) -> Hashtbl.replace unifier.types index (T.builtin Float64)
-  | Named { arguments; _ } | Cursor { arguments; _ } ->
-      List.iter
-        (function
-          | T.Type type_ -> default_literals unifier ~specification type_
-          | T.Value _ | T.Capabilities _ -> ())
-        arguments
-  | Function { inputs; output; _ } -> (
-      List.iter (fun (_, type_) -> default_literals unifier ~specification type_) inputs;
-      match output with
-      | Returns type_ | Yields (_, type_) | Lends (_, type_) ->
-          default_literals unifier ~specification type_)
-  | _ -> ()
