@@ -1238,13 +1238,13 @@ A yielding method gives out parts one after another:
   var first_cursor = first.each()
   var second_cursor = second.each()
   var differences = 0
-  while first_cursor.next() is Some(left) && second_cursor.next() is Some(right) {
+  while mut first_cursor.next() is Some(left) && mut second_cursor.next() is Some(right) {
     if left != right { differences += 1 }
   }
   ```
 
   `next()` runs the method to its next `yield` and returns `Some` of what it
-  yields, or `None` when the method ends. A cursor that is never pulled
+  yields, and since pulling changes the cursor, the call is marked `mut`, or `None` when the method ends. A cursor that is never pulled
   again is simply dropped, which ends the method at its last `yield`, as
   `break` does. A cursor from an `own self` method owns what it iterates
   over. A cursor from a `self` method is a view. Cursors are how `zip`,
@@ -1391,7 +1391,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 {
   let text = FileRead.read_text(file).map_error(ConfigError.Unreadable)?
   let config = toml::parse(text).map_error(ConfigError.Malformed)?
-  Ok(config)
+  Ok(own config)
 }
 ```
 
@@ -1728,7 +1728,7 @@ fn first_line(path: Path) -> Result[String, FileError]
 {
   var file = FileRead.open(path)?
   let line = mut file.read_line()?
-  Ok(line)
+  Ok(own line)
 }
 ```
 
@@ -2075,7 +2075,7 @@ so `text.graphemes()` gives those as `StringSlice`s.
 ## Traits and laws
 
 ```truss
-trait Monoid {
+trait Monoid: Equal {
   fn empty() -> Self
   fn combine(self, other: Self) -> Self
 

@@ -6,10 +6,9 @@ generation read. It follows the decisions in [DESIGN.md](DESIGN.md),
 [SYNTAX.md](SYNTAX.md), and [GRAMMAR.md](GRAMMAR.md), reads the trees
 described in [PARSER.md](PARSER.md), and produces what
 [CODEGEN.md](CODEGEN.md) expects. The prover is not designed yet, so this
-document states what it hands to it. Name resolution, hashing, checking
-interfaces, and checking bodies are built, in [`stage0/`](stage0); exhaustiveness,
-ownership, capabilities, the rules on use, and the package checks are not
-built yet.
+document states what it hands to it. Every stage described here is built,
+in [`stage0/`](stage0), and `truss-check` runs them over a package's
+directory. Storing checked forms in CBOR is not built yet.
 
 ## What the type checker does
 
@@ -65,7 +64,7 @@ syntax tree ──▶ Resolve ──▶ Hash ──▶ Interface ──▶ Body 
                Package checks ───────────┘   (impls, cycles, instantiation)
 ```
 
-| OCaml module | Job |
+| Library | Job |
 |---|---|
 | `Path` | What definitions are named by, in every stage: package, module, and name, and a method's receiver |
 | `Workspace` | The inputs of a build: packages, their manifests and modules, and each module's text, which it lexes and parses as queries |
@@ -73,25 +72,15 @@ syntax tree ──▶ Resolve ──▶ Hash ──▶ Interface ──▶ Body 
 | `Resolve` | Names to definitions, locals, and modules; the scope rules; unused imports; what each file declares, and the prelude |
 | `Hash` | The parts of a definition's hash, in deterministic CBOR |
 | `Types` | The type representation, substitution, and equality, and the interfaces of definitions |
-| `Properties` | Whether a type is `Copyable`, `Plain`, or a view, from its shape |
-| `Summary` | What a definition's syntax alone says: where it is, its generic parameters, and a trait's associated types, which lowering reads so a recursive type makes no cycle of queries |
-| `Lower` | Written types to `Types`, from a definition's resolved form |
-| `Constants` | The exact values of integer constants that types use |
-| `Interface` | Checking signatures, type definitions, traits, `impl`s, and capabilities |
-| `Environment` | Every query a definition makes about others, each recorded in its trace |
-| `Infer` | Bidirectional checking of bodies, one statement at a time: `Unify` for a statement's inference variables, `Members` for lookups after a dot, `Expressions` for expressions, statements, patterns, and calls, and `Body` for each definition's bodies |
+| `Interface` | Checking signatures, type definitions, traits, `impl`s, and capabilities: `Summary` for what a definition's syntax alone says, so a recursive type makes no cycle of queries; `Lower` for written types; `Constants` for the integer constants types use; `Environment` for every query a definition makes about others; `Properties` for `Copyable`, `Plain`, and views; `Impls` for finding an `impl` and normalizing associated types; and `Check` |
+| `Checked` | The checked form's types |
+| `Infer` | Bidirectional checking of bodies, one statement at a time: `Unify` for a statement's inference variables, `Members` for lookups after a dot, `Literals` for literals' values and float rounding, `Expressions` for expressions, statements, patterns, and calls, `Capabilities` for what may be called at each point, `provide`, and dependency grants, and `Body` for each definition's bodies |
 | `Intrinsic_signatures` | The signatures of `standard::intrinsic`'s operations, which code generation reads too |
-| `Literals` | The types of literals, defaults, range checks, and float rounding |
-| `Members` | Method, field, and variant lookup, and choosing among receiver modes |
-| `Impls` | Finding the `impl` for a trait and types, and normalizing associated types |
-| `Calls` | Matching arguments to parameters: labels, bare names, defaults, modes |
-| `Patterns` | Typing patterns, exhaustiveness, reachability, and irrefutability |
-| `Ownership` | Moves, loans, and views over a control-flow graph of the body |
-| `Capabilities` | What may be called at each point, `provide`, and dependency grants |
-| `Usage` | Unused values, variables, and imports, and unreachable code |
-| `Package_checks` | Coherence, `indirect` cycles, instantiation cycles, and pullability |
-| `Checked` | The checked form's types, and printing and hashing it canonically |
-| `Type_checker` | The entry point, as queries over the definitions of a build |
+| `Patterns` | Exhaustiveness, reachability, and irrefutability |
+| `Usage` | Unused variables and unreachable code |
+| `Ownership` | Moves, loans, and views, and which `yields` methods can be pulled |
+| `Package_checks` | Where an `impl` may live, overlap, method names, `indirect`, growing types, instantiation cycles, and test names |
+| `Type_checker` | The entry point: loading packages, reading `truss.toml`, and every stage's diagnostics for a file |
 | `Standard_library` | The `standard` package's source, built into the compiler |
 
 Each stage is its own dune library, as in the lexer and code generation, and
@@ -99,7 +88,17 @@ the libraries link together into one program; no stage reads another's
 output from text. Modules that need each other's queries share a library:
 `Interface` holds `Lower`, `Constants`, `Environment`, `Properties`,
 `Impls`, and `Check`, since checking a bound needs the `impl`s of other
-definitions and finding an `impl` needs their interfaces. `Types` and
+definitions and finding an `impl` needs their interfaces, and `Infer` holds
+`Capabilities`, which runs over each body's checked form as body checking
+finishes. Each stage gives its diagnostics for a file as
+`diagnostics database module_`.
+
+`stage0/bin/truss_check.ml` builds `truss-check`, which reads a package's
+directory and its `truss.toml`, checks every module against the standard
+library, and prints every diagnostic, as JSON with `--json`. It exits with 1
+when there are diagnostics and 2 when it cannot check. It does not load the
+manifest's other dependencies yet, since there is no package registry to
+find them in. `Types` and
 `Checked` are separate from the rest, so that the prover and code
 generation depend on the checked form without depending on the checker.
 
@@ -930,6 +929,14 @@ annotations:
   parameters and of what they view, never of its own locals. A method
   returning `self.items[1..4]` and `Option.unwrap_or` both meet this.
 
+- **A binding may not view a temporary.** A temporary lives until the end
+  of its statement, so a `let` or `var` whose view, or whose cursor, views
+  an owned temporary passed read-only to the call that made it is an error
+  that asks to bind the temporary to a name first, as Rust's E0716 does. A
+  cursor views what its call's read-only arguments view, as a view would.
+  A string literal without interpolation is in static memory, so viewing
+  one is fine.
+
 A value of a view type may be bound by `let` or `var`, held in local records
 and collections, and passed as an argument. It cannot be returned except by
 the rule above, and cannot be placed where an owned, storable value is
@@ -1031,7 +1038,8 @@ capabilities, which is at the signatures of its code, never its bodies:
 - **Inside the dependency,** its own bodies are checked against its own
   signatures, so nothing it does can exceed what its signatures declare.
 - **Grants nest:** a dependency's manifest may grant its own dependencies
-  only what it was granted, which is a check on manifests.
+  only what it was granted, which is a check on manifests. It is not built
+  yet, since `truss-check` loads no dependencies' manifests.
 
 The error names the dependency's function and the capability that was not
 granted, as DESIGN.md asks. A dependency that offers both a client and a
@@ -1163,14 +1171,16 @@ needs to work anything out from the syntax tree again:
   [No subtyping](#no-subtyping) table
 - **each literal's type and value,** with floats already rounded
 - **each pattern's variants and fields,** and the order of arms
-- **every move,** whole and partial, and every implicit copy
+- **every move,** whole and partial, which `Ownership`'s result for the
+  definition holds beside the checked form, since it is found after it
 - **the capability set** at each call, the capability parameters solved, and
   the evidence each `provide` builds, for each capability its
   implementations implement
 - **obligations** that the type checker created, as described next
 
-It is stored in deterministic CBOR, as other stored forms are, so that two
-checks of the same definition give the same bytes.
+It is to be stored in deterministic CBOR, as other stored forms are, so that
+two checks of the same definition give the same bytes. For now it lives
+only in the query database.
 
 ### Obligations the type checker creates
 
@@ -1352,8 +1362,11 @@ input and states one fact about the result, and there are no golden files.
   definitions that looked up its name.
 - **Output is deterministic.** A test checks the same definitions twice and
   asserts that the checked forms are byte-identical.
-- **The documents' examples type-check.** Once the prelude exists, every
-  complete example in the documents type-checks, each as a test of its own.
+- **The documents' examples type-check.** Every example in the documents
+  that parses as a file is checked through every stage, each as a test of
+  its own. One that uses a name defined elsewhere, shows a definition of the
+  standard library's, or redefines a prelude name is an excerpt and is
+  skipped; every other one must check with no diagnostic.
 
 ## Open questions
 

@@ -35,6 +35,7 @@ type frame = {
   start : int;  (** The first inference variable the statement made. *)
   mutable nodes : int list;  (** Expressions whose types the statement recorded. *)
   mutable bindings : int list;  (** Locals it bound. *)
+  mutable patterns : int list;  (** Patterns whose matched types it recorded. *)
   mutable pending : (unit -> bool) list;
       (** Checks that wait for types the statement has not decided yet; each says whether it is
           done. *)
@@ -222,6 +223,7 @@ let in_statement state env (span : span) body =
       start = state.unifier.next + 1;
       nodes = [];
       bindings = [];
+      patterns = [];
       pending = [];
       frame_specification = env.specification;
       span;
@@ -274,7 +276,12 @@ let rec is_place state (value : expression) =
       | _ -> false)
   | Self_value -> true
   | Member (base, _) -> is_place state base
-  | Bracket (base, _) -> state.resolved.brackets.(value.id) = Some Index && is_place state base
+  | Bracket (base, _) -> (
+      match state.resolved.brackets.(value.id) with
+      | Some Index -> is_place state base
+      | Some Method_bracket -> (
+          match base.kind with Member _ -> is_place state base | _ -> false)
+      | _ -> false)
   | Parenthesized inner -> is_place state inner
   | _ -> false
 
@@ -934,11 +941,31 @@ and bracket state env ?expected (value : expression) (base : expression) items =
                   T.Error)
           | _ -> T.Error)
       | _ -> T.Error)
-  | Some Method_bracket ->
-      report state Not_a_value value.span
-        "A method with type arguments is called: write `(...)` after it.";
-      T.Error
+  | Some Method_bracket -> (
+      (* Resolution cannot tell a field from a method before the dot; a
+         field followed by brackets is indexed. *)
+      match base.kind with
+      | Member (inner, member)
+        when Option.is_none (static_ state inner) && is_field state env inner member ->
+          index state env ?expected value base items
+      | _ ->
+          report state Not_a_value value.span
+            "A method with type arguments is called: write `(...)` after it.";
+          T.Error)
   | Some Index | None -> index state env ?expected value base items
+
+and is_field state env (inner : expression) (member : name) =
+  let base_type =
+    match state.tables.types.(inner.id) with
+    | Some type_ -> type_
+    | None -> expression state env inner
+  in
+  match normalize state base_type with
+  | T.Named { path; arguments } -> (
+      match Members.fields state.database path arguments with
+      | Some fields -> List.exists (fun (field : T.field) -> field.field_name = member.text) fields
+      | None -> false)
+  | _ -> false
 
 (* Explicit type arguments give the function's own generic parameters, in
    order, after those of a method's type head: exactly one for each, of its
@@ -1905,6 +1932,20 @@ and method_call state env ?expected (value : expression) (base : expression) (me
          (shown wanted)
          (String.concat ", " (List.map (fun (receiver, _) -> shown receiver) versions)))
   in
+  (* A place that calls a method with only a [mut] or [own] version is
+     missing its mark, which the fix adds. *)
+  let missing_receiver_mark : 'a. (Path.receiver * 'a) list -> unit =
+   fun versions ->
+    let has receiver = List.exists (fun (found, _) -> found = receiver) versions in
+    if (not marked) && place && (has Path.Mut || has Path.Own) then begin
+      let mark = if has Path.Mut then "mut" else "own" in
+      report state Missing_mark base.span
+        ~fixes:[ fix (Printf.sprintf "Mark it `%s`." mark) [ insert base.span.start (mark ^ " ") ] ]
+        (Printf.sprintf "`%s` takes `%s self`, so the call marks its receiver `%s`." member.text
+           mark mark)
+    end
+    else wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) versions)
+  in
   match receiver_type with
   | T.Error | T.Hole ->
       List.iter
@@ -1927,7 +1968,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
               method_with_receiver state env ?expected ~type_arguments value ~receiver:base
                 ~receiver_type method_path arguments
           | None ->
-              wrong_receiver own;
+              missing_receiver_mark own;
               T.Error)
       | [] -> (
           match trait_candidates state receiver_type member.text with
@@ -1942,7 +1983,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                   trait_method_call state env value ~receiver:base ~receiver_type trait method_
                     ~type_arguments arguments
               | None ->
-                  wrong_receiver
+                  missing_receiver_mark
                     (List.map
                        (fun (method_ : T.trait_method) -> (method_.method_receiver, ()))
                        versions);
@@ -2707,6 +2748,30 @@ and any_ state env ?expected (value : expression) (inner : expression) =
 
 (* Strings and templates *)
 
+(* A constant in a pattern, or a range's end: recorded by the node's id, and
+   of the matched type. *)
+and constant_pattern state id span path type_ =
+  state.tables.patterns.(id) <- Some (Constant_pattern path);
+  match Query.demand state.database Environment.constant_type path with
+  | Some constant_type ->
+      if not (unify state constant_type type_) then
+        mismatch state span ~expected:type_ ~found:constant_type
+  | None -> ()
+
+and qualified_constant state id span constant type_ =
+  let path =
+    match constant with
+    | Module_constant written_path -> (
+        match target state written_path.last with Some (Definition path) -> Some path | _ -> None)
+    | Type_constant (written_path, member) -> (
+        match target state written_path.last with
+        | Some (Definition owner) -> Members.own_constant state.database owner member.text
+        | _ -> None)
+  in
+  match path with
+  | Some path -> constant_pattern state id span path type_
+  | None -> report state Unknown_member span "This names no constant."
+
 and string_literal state env ?expected (literal : string_literal) =
   let parts = List.map (fun (part, _) -> (part, expression state env part)) literal.rest in
   let template : C.template =
@@ -2965,7 +3030,15 @@ and join state ~expected branches =
       target
 
 and match_ state env ?expected (value : expression) scrutinees arms =
-  ignore value;
+  (* When the guards cover everything, the [match] ends with
+     [_ => unreachable], which the prover shows is never reached. *)
+  (match List.rev arms with
+  | { patterns; guard = None; body = { kind = Expression { kind = Unreachable; _ }; _ }; _ }
+    :: earlier
+    when List.for_all (fun (written : pattern) -> written.kind = Wildcard) patterns
+         && List.exists (fun (arm : arm) -> Option.is_some arm.guard) earlier ->
+      state.obligations <- Guards_cover { match_ = value.id } :: state.obligations
+  | _ -> ());
   (* The values a [match] matches settle before its arms, as a header. *)
   let types =
     List.map
@@ -3456,6 +3529,10 @@ and pattern state env written type_ ~mode =
 
 and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
   let type_ = normalize state type_ in
+  state.tables.pattern_types.(written.id) <- Some type_;
+  (match current_frame state with
+  | Some frame -> frame.patterns <- written.id :: frame.patterns
+  | None -> ());
   let recurse = pattern_with state env ~mutable_ ~mode in
   match written.kind with
   | Wildcard | Pattern_error -> ()
@@ -3474,53 +3551,22 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                       binds it with one type."
                      bound.text (show state local.type_) (show state type_))
           | None -> ())
-      | Some (Definition path) -> (
-          state.tables.patterns.(written.id) <- Some (Constant_pattern path);
-          match Query.demand state.database Environment.constant_type path with
-          | Some constant_type ->
-              if not (unify state constant_type type_) then
-                mismatch state written.span ~expected:type_ ~found:constant_type
-          | None -> ())
+      | Some (Definition path) -> constant_pattern state written.id written.span path type_
       | Some (Generic _) ->
           if not (unify state (T.builtin USize) type_) then
             mismatch state written.span ~expected:type_ ~found:(T.builtin USize)
       | _ -> ())
-  | Qualified_constant constant -> (
-      let path =
-        match constant with
-        | Module_constant written_path -> (
-            match target state written_path.last with
-            | Some (Definition path) -> Some path
-            | _ -> None)
-        | Type_constant (written_path, member) -> (
-            match target state written_path.last with
-            | Some (Definition owner) -> Members.own_constant state.database owner member.text
-            | _ -> None)
-      in
-      match path with
-      | Some path -> (
-          state.tables.patterns.(written.id) <- Some (Constant_pattern path);
-          match Query.demand state.database Environment.constant_type path with
-          | Some constant_type ->
-              if not (unify state constant_type type_) then
-                mismatch state written.span ~expected:type_ ~found:constant_type
-          | None -> ())
-      | None -> report state Unknown_member written.span "This names no constant.")
+  | Qualified_constant constant -> qualified_constant state written.id written.span constant type_
   | Literal literal -> literal_pattern state env written literal type_
   | Pattern_range { start; stop; _ } ->
       List.iter
         (fun (end_ : range_end) ->
           match end_.kind with
           | End_literal literal -> literal_pattern state env written literal type_
-          | End_constant _ -> ()
+          | End_constant constant -> qualified_constant state end_.id end_.span constant type_
           | End_name bound -> (
               match target state bound with
-              | Some (Definition path) -> (
-                  match Query.demand state.database Environment.constant_type path with
-                  | Some constant_type ->
-                      if not (unify state constant_type type_) then
-                        mismatch state end_.span ~expected:type_ ~found:constant_type
-                  | None -> ())
+              | Some (Definition path) -> constant_pattern state end_.id end_.span path type_
               | _ -> ()))
         [ start; stop ]
   | Variant { name = variant_name; fields } -> (

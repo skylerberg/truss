@@ -79,6 +79,9 @@ type obligation =
     }
   | Guards_cover of { match_ : Syntax.id }
 
+type provided = { capability : Path.t; impl : Path.t; arguments : Types.substitution }
+type provide = { implementations : (Syntax.id * provided list) list }
+
 type t = {
   types : Types.ty option array;
   local_types : Types.ty option array;
@@ -86,10 +89,12 @@ type t = {
   calls : call option array;
   literals : literal option array;
   patterns : pattern option array;
+  pattern_types : Types.ty option array;
   loops : loop option array;
   templates : template option array;
   captures : local list option array;
   own_operator : bool array;
+  provides : provide option array;
   obligations : obligation list;
 }
 
@@ -101,10 +106,12 @@ let create size =
     calls = Array.make size None;
     literals = Array.make size None;
     patterns = Array.make size None;
+    pattern_types = Array.make size None;
     loops = Array.make size None;
     templates = Array.make size None;
     captures = Array.make size None;
     own_operator = Array.make size false;
+    provides = Array.make size None;
     obligations = [];
   }
 

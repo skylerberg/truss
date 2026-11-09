@@ -148,7 +148,8 @@ let verdict : Diagnostic.Code.t -> verdict = function
       | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Finite_not_time
       | Specification_only | Misplaced_assert | Misplaced_proof | Misplaced_yield
       | Misplaced_loop_exit | Leaves_parallel | Echo_in_specification | Reserved_name )
-  | Lexer _ | Resolve _ | Types _ | Too_many_diagnostics ->
+  | Lexer _ | Resolve _ | Package _ | Capabilities _ | Ownership _ | Usage _ | Patterns _ | Types _
+  | Too_many_diagnostics ->
       Grammar_accepts
 
 (* Each piece of an example, as the parser split it, is rejected by the

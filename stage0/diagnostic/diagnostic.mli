@@ -157,12 +157,49 @@ module Code : sig
     | Unknown_associated_type
     | Associated_type_not_fixed
 
+  type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
+  type usage = Unused_variable | Unreachable_code
+
+  type ownership =
+    | Views_temporary
+    | Use_after_move
+    | Not_owned
+    | Field_not_restored
+    | Conflicting_loan
+    | Changed_while_viewed
+    | Returns_local_view
+    | Needs_owned
+    | Lends_count
+    | Not_pullable
+    | Parallel_conflict
+
+  type capabilities =
+    | Not_available
+    | Lambda_uses
+    | Not_granted
+    | Provide_mark
+    | Not_an_implementation
+
+  type package =
+    | Impl_location
+    | Overlapping_impls
+    | Method_name_clash
+    | Needs_indirect
+    | Growing_type
+    | Instantiation_cycle
+    | Duplicate_test
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
   type t =
     | Lexer of lexer
     | Parser of parser
     | Resolve of resolve
     | Types of types
+    | Patterns of patterns
+    | Usage of usage
+    | Ownership of ownership
+    | Capabilities of capabilities
+    | Package of package
     | Too_many_diagnostics
 
   val name : t -> string
@@ -230,6 +267,9 @@ val to_json : Source.t -> t list -> string
 (** For tools: a JSON array. Spans carry byte offsets as well as lines and columns, and fixes are
     always byte ranges. The output is always valid UTF-8: a byte that is not valid UTF-8, which can
     only come from quoted source text, is written as U+FFFD. *)
+
+val to_json_object : Source.t -> t -> string
+(** One diagnostic as {!to_json} writes it, for a tool's output that gathers several files'. *)
 
 val quote : string -> string
 (** Text in double quotes, with quotes, backslashes, control characters, and bytes that are not

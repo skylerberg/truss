@@ -360,7 +360,23 @@ let () =
         ~fixed:"fn make() -> List[Int64] { todo }\n\nfn f() {\n  make().push(1)\n}\n");
   test "mut before a local's field and method call is a place" (fun () ->
       no_diagnostics
-        [ ("app::main", "fn f() {\n  var items: List[Int64] = []\n  mut items.push(1)\n}\n") ])
+        [ ("app::main", "fn f() {\n  var items: List[Int64] = []\n  mut items.push(1)\n}\n") ]);
+  test "a ? after the marked call works on its result" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "fn f(items: mut List[Option[Int64]]) -> Option[Int64] {\n\
+            \  let last = mut items.pop()?\n\
+            \  last\n\
+             }\n" );
+        ]);
+  test "a ? before any method call does not make a place" (fun () ->
+      one_diagnostic
+        "fn make() -> Option[List[Int64]] { todo }\n\n\
+         fn f() -> Option[Int64] {\n\
+        \  mut make()?.pop()\n\
+         }\n"
+        "resolve.not_a_place")
 
 (* Specifications *)
 

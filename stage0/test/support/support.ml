@@ -7,23 +7,13 @@ let module_of text : Path.module_ =
 
 let setup files =
   let database = Query.create ~log:true () in
-  let all =
-    List.map (fun ((module_ : Path.module_), text) -> (module_, text)) Standard_library.modules
-  in
-  let all = all @ List.map (fun (name, text) -> (module_of name, text)) files in
-  let packages = Hashtbl.create 4 in
-  List.iter
-    (fun ((module_ : Path.module_), text) ->
-      Query.set database Workspace.file_text module_ text;
-      Hashtbl.replace packages module_.package
-        (module_ :: Option.value ~default:[] (Hashtbl.find_opt packages module_.package)))
-    all;
+  Type_checker.load_standard database;
+  let files = List.map (fun (name, text) -> (module_of name, text)) files in
   List.iter
     (fun package ->
-      let modules = List.rev (Hashtbl.find packages package) in
-      Query.set database Workspace.packages package
-        { Workspace.name = package; dependencies = []; modules })
-    (List.sort_uniq compare (Hashtbl.fold (fun package _ acc -> package :: acc) packages []));
+      Type_checker.load_package database ~name:package ~dependencies:[]
+        (List.filter (fun ((module_ : Path.module_), _) -> module_.package = package) files))
+    (List.sort_uniq compare (List.map (fun ((module_ : Path.module_), _) -> module_.package) files));
   database
 
 let parse_errors database module_ =

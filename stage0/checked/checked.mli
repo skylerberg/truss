@@ -116,6 +116,14 @@ type obligation =
     }
   | Guards_cover of { match_ : Syntax.id }
 
+type provided = { capability : Path.t; impl : Path.t; arguments : Types.substitution }
+(** One capability an implementation provides: the [impl] that provides it, with the [impl]'s
+    generic arguments. *)
+
+type provide = { implementations : (Syntax.id * provided list) list }
+(** What a [provide] builds: for each implementation, by its expression's id, the capabilities its
+    type provides. *)
+
 type t = {
   types : Types.ty option array;  (** The type of every expression, by its id. *)
   local_types : Types.ty option array;  (** The type of every binding, by the id of its name. *)
@@ -125,6 +133,8 @@ type t = {
       (** By the id of each call: a [Call], an operator, an index, and a compound assignment. *)
   literals : literal option array;  (** By the id of each literal expression or pattern. *)
   patterns : pattern option array;  (** By the id of each pattern. *)
+  pattern_types : Types.ty option array;
+      (** The type of the value each pattern matches, by its id. *)
   loops : loop option array;  (** By the id of each [for] statement. *)
   templates : template option array;  (** By the id of each string literal. *)
   captures : local list option array;
@@ -132,6 +142,7 @@ type t = {
           definition's own id. *)
   own_operator : bool array;
       (** By the id of each compound assignment: whether [own self]'s version was chosen. *)
+  provides : provide option array;  (** By the id of each [provide]. *)
   obligations : obligation list;
 }
 

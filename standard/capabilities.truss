@@ -7,11 +7,16 @@ public capability Console {
 public capability FileRead {
   fn read(file: Path) -> Result[Bytes, FileError]
   fn read_text(file: Path) -> Result[String, FileError]
+  fn open(file: Path) -> Result[FileReader, FileError]
 }
 
 public capability FileWrite {
   fn write(file: Path, contents: Bytes) -> Result[Unit, FileError]
   fn write_text(file: Path, contents: StringSlice) -> Result[Unit, FileError]
+  fn write_with(
+    file: Path,
+    write: (fn(mut FileWriter) -> Result[Unit, FileError] uses FileWrite),
+  ) -> Result[Unit, FileError]
 }
 
 public capability NetworkClient {
@@ -47,12 +52,25 @@ public capability Panic {
 }
 
 public type Instant(nanoseconds: Int64)
-  derives Equal
+  derives Equal, Hash, Ordered
 
 public let Instant.epoch: Instant = Instant(nanoseconds: 0)
 
+impl Display for Instant {
+  fn display(self, output: mut TextBuilder) {
+    self.nanoseconds.display(mut output)
+  }
+}
+
 public type Duration(nanoseconds: Int64)
-  derives Equal
+  derives Equal, Hash, Ordered
+
+impl Display for Duration {
+  fn display(self, output: mut TextBuilder) {
+    self.nanoseconds.display(mut output)
+    mut output.write("ns")
+  }
+}
 
 public opaque type Path(text: String)
   derives Copyable
@@ -62,6 +80,22 @@ public fn Path.new(text: StringSlice) -> Path {
 }
 
 public type Bytes(data: List[UInt8])
+
+public opaque type FileReader(descriptor: Int64)
+
+public fn FileReader.read_line(mut self) -> Result[String, FileError]
+  uses FileRead
+{
+  todo
+}
+
+public opaque type FileWriter(descriptor: Int64)
+
+public fn FileWriter.write(mut self, text: StringSlice) -> Result[Unit, FileError]
+  uses FileWrite
+{
+  todo
+}
 
 public type FileError =
   | NotFound

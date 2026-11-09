@@ -1,0 +1,15 @@
+(library
+ (name patterns)
+ (libraries
+  query
+  path
+  types
+  checked
+  infer
+  interface
+  resolve
+  syntax
+  syntax_walk
+  diagnostic
+  source
+  zarith))
