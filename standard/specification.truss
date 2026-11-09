@@ -71,6 +71,7 @@ public opaque type FiniteSet[Element] = todo
 
 public fn FiniteSet[Element].empty() -> FiniteSet[Element]
   ensures result.size() == 0
+  ensures forall value: Element => !result.contains(value)
   cost time finite
 {
   todo
@@ -91,6 +92,17 @@ public fn FiniteSet[Element].contains(self, value: Element) -> Bool
 
 public fn FiniteSet[Element].insert(self, value: Element) -> FiniteSet[Element]
   ensures result.contains(value)
+  ensures forall other: Element => identical(other, value) || result.contains(other) == self.contains(other)
+  ensures result.size() == (if self.contains(value) { self.size() } else { self.size() + 1 })
+  cost time finite
+{
+  todo
+}
+
+public fn FiniteSet[Element].remove(self, value: Element) -> FiniteSet[Element]
+  ensures !result.contains(value)
+  ensures forall other: Element => identical(other, value) || result.contains(other) == self.contains(other)
+  ensures result.size() == (if self.contains(value) { self.size() - 1 } else { self.size() })
   cost time finite
 {
   todo
@@ -99,6 +111,15 @@ public fn FiniteSet[Element].insert(self, value: Element) -> FiniteSet[Element]
 public opaque type FiniteMap[Key, Value] = todo
 
 public fn FiniteMap[Key, Value].empty() -> FiniteMap[Key, Value]
+  ensures result.size() == 0
+  ensures forall key: Key => !result.contains_key(key)
+  cost time finite
+{
+  todo
+}
+
+public fn FiniteMap[Key, Value].size(self) -> Integer
+  ensures result >= 0
   cost time finite
 {
   todo
@@ -110,7 +131,27 @@ public fn FiniteMap[Key, Value].contains_key(self, key: Key) -> Bool
   todo
 }
 
+public fn FiniteMap[Key, Value].get(self, key: Key) -> Value
+  requires self.contains_key(key)
+  cost time finite
+{
+  todo
+}
+
+public fn FiniteMap[Key, Value].insert(self, key: Key, value: Value) -> FiniteMap[Key, Value]
+  ensures result.contains_key(key)
+  ensures identical(result.get(key), value)
+  ensures forall other: Key => identical(other, key) || result.contains_key(other) == self.contains_key(other)
+  ensures forall other: Key => identical(other, key) || !self.contains_key(other) || identical(result.get(other), self.get(other))
+  ensures result.size() == (if self.contains_key(key) { self.size() } else { self.size() + 1 })
+  cost time finite
+{
+  todo
+}
+
 public fn FiniteMap[Key, Value].keys(self) -> FiniteSet[Key]
+  ensures forall key: Key => result.contains(key) == self.contains_key(key)
+  ensures result.size() == self.size()
   cost time finite
 {
   todo

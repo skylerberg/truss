@@ -1018,6 +1018,50 @@ let () =
          }\n"
         "prover.ensures")
 
+(* Sets and maps *)
+
+let () =
+  test "a set contains what was inserted" (fun () ->
+      proven
+        "fn f(items: mut Set[Int64]) -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  mut items.insert(5)\n\
+        \  items.contains(5)\n\
+         }\n");
+  test "inserting what a set contains leaves it as it was" (fun () ->
+      proven
+        "fn f(items: mut Set[Int64])\n\
+        \  requires items.model().contains(5)\n\
+        \  ensures identical(items.model(), old(items.model()))\n\
+         {\n\
+        \  mut items.insert(5)\n\
+         }\n");
+  test "inserting into a set may change it" (fun () ->
+      not_proven
+        "fn f(items: mut Set[Int64])\n\
+        \  ensures identical(items.model(), old(items.model()))\n\
+         {\n\
+        \  mut items.insert(5)\n\
+         }\n"
+        "prover.ensures");
+  test "a map holds what was inserted under its key" (fun () ->
+      proven
+        "fn f(table: mut Map[Int64, Int64])\n\
+        \  ensures table.model().contains_key(1) && table.model().get(1) == 2\n\
+         {\n\
+        \  mut table.insert(1, value: 2)\n\
+         }\n");
+  test "a map keeps its other keys' values" (fun () ->
+      proven
+        "fn f(table: mut Map[Int64, Int64])\n\
+        \  requires table.model().contains_key(3)\n\
+        \  ensures table.model().contains_key(3)\n\
+        \  ensures table.model().get(3) == old(table.model().get(3))\n\
+         {\n\
+        \  mut table.insert(1, value: 2)\n\
+         }\n")
+
 (* Places lent together *)
 
 let swap =

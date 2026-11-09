@@ -224,14 +224,16 @@ unstable proofs.
 
 - **A `Sequence`** has a length, indexing, `append`, `concatenate`,
   `update`, and `contains`.
-- **A `FiniteSet`, `FiniteMap`, and `Multiset`** have membership, a size,
-  and a few operations so far.
+- **A `FiniteSet` and a `FiniteMap`** have membership, a size, inserting,
+  and, for a map, the value under each key and its keys; a set can also
+  remove. A `Multiset` has a count of each value so far.
 - **Extensionality,** that two sequences with the same length and
   elements are identical, is the one fact contracts cannot state, since a
-  contract describes a result, so it is an axiom of the prover's. It is
-  stated for each two sequences that `identical` compares, rather than
-  for every two, which would have the solver compare every pair it
-  knows.
+  contract describes a result, so it is an axiom of the prover's, and so
+  are its kin for a set, by what it contains, and a map, by its keys and
+  their values. Each is stated for each two values that `identical`
+  compares, rather than for every two, which would have the solver
+  compare every pair it knows.
 - **A literal** of a `List` or a `Sequence` is a value whose sequence, the
   list's model or the sequence itself, has the literal's length and
   elements.
@@ -1006,14 +1008,17 @@ It proves, with one canonical, numbered, hashed query per obligation:
 - a method that replaces one its trait provides shows that its result is
   the provided body's, which must be functional
 - `assert` in theorems and proofs, assumed in tests
-- quantifiers over ranges and over the integers, in specifications
+- quantifiers over ranges, in specifications and in code
 - models: `Model.model()` and the operations of `standard::specification`
   are functions in the logic, known by their contracts, and `identical` is
   the solver's equality, so the contracts of `List` and `Slice`, stated
   through their models, prove facts such as a pushed element's index and
-  value; sequences are extensional; and literals of `List` and `Sequence`
-  have their elements. The contracts of `Map`, `Set`, and `String`, and
-  their literals, are not built yet.
+  value; `Set` and `Map`, by their `FiniteSet` and `FiniteMap` models;
+  sequences, sets, and maps are extensional; and literals of `List` and
+  `Sequence` have their elements. The contracts of `String`, and literals
+  of maps and sets, are not built yet.
+- quantifiers over every value of a type, each in its range and meeting
+  its type's invariants
 - the type checker's `Integer_fits` obligations, and its `Guards_cover`,
   which the `_ => unreachable` arm it is about shows
 - the ownership check's `Disjoint` obligations, under `prover.disjoint`:

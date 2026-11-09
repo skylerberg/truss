@@ -1233,11 +1233,16 @@ and quantified context frame (written : expression) quantifier binder body =
   in
   match binder with
   | Binder_type (name_, _) -> (
+      (* Over every value of a type: each in its range, and meeting its
+         type's invariants. *)
       match local_type frame name_.id with
-      | Some ty when is_numeric ty || is_bool ty ->
+      | Some ty ->
           let inner, ty = with_bound name_.id ty in
-          make symbol (sort_of context ty) (in_range ty (L.Symbol symbol)) inner
-      | _ -> unsupported written.span "a quantifier over this type")
+          let each = L.Symbol symbol in
+          make symbol (sort_of context ty)
+            (L.( &&& ) (in_range ty each) (validity context inner ~assuming:true ty each))
+            inner
+      | None -> unsupported written.span "a quantifier over a value without a type")
   | Binder_in
       ( { kind = Binding_or_constant name_; _ },
         { kind = Range { start = Some start; stop = Some stop; inclusive; _ }; _ } ) ->
@@ -2006,7 +2011,54 @@ and extensional context frame (ty : T.ty) a b =
                       ==> equal at_a at_b )
               ==> equal a b)
       | _ -> ())
+  | Named { path; arguments }
+    when Path.equal path finite_set_path || Path.equal path finite_map_path -> (
+      (* A set by what it contains, and a map by its keys and their values. *)
+      let finite_map = Path.equal path finite_map_path in
+      match arguments with
+      | T.Type key :: rest ->
+          context.fresh <- context.fresh + 1;
+          let each = Printf.sprintf "key.%d" context.fresh in
+          let type_arguments = arguments in
+          let function_ name output inputs =
+            let symbol =
+              "function."
+              ^ Path.show (Path.Method { owner = path; name; receiver = Read })
+              ^ "["
+              ^ String.concat ", " (List.map argument_key type_arguments)
+              ^ "]"
+            in
+            declare context (L.Function (symbol, sort_of context ty :: List.map snd inputs, output));
+            fun term -> L.Apply (symbol, term :: List.map fst inputs)
+          in
+          let key_sort = sort_of context key in
+          let has =
+            function_
+              (if finite_map then "contains_key" else "contains")
+              L.Bool
+              [ (L.Symbol each, key_sort) ]
+          in
+          let same =
+            if finite_map then
+              match rest with
+              | [ T.Type value_type ] ->
+                  let get =
+                    function_ "get" (sort_of context value_type) [ (L.Symbol each, key_sort) ]
+                  in
+                  L.(equal (has a) (has b) &&& (has a ==> equal (get a) (get b)))
+              | _ -> L.equal (has a) (has b)
+            else L.equal (has a) (has b)
+          in
+          fact context frame
+            L.(Forall ([ (each, key_sort) ], in_range key (Symbol each) ==> same) ==> equal a b)
+      | _ -> ())
   | _ -> ()
+
+and finite_set_path : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "specification" ] }; name = "FiniteSet" }
+
+and finite_map_path : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "specification" ] }; name = "FiniteMap" }
 
 (* A [List] or a [Sequence] written out: a value whose sequence, the list's
    model or the sequence itself, has the elements in order. A non-empty
