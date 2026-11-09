@@ -61,12 +61,26 @@ let list line text =
     (fun item -> if trim item = "" then None else Some (unquote line item))
     (String.split_on_char ',' (String.sub text 1 (length - 2)))
 
+(* A line without its [#] comment, which a [#] inside quotes does not
+   start. *)
+let without_comment line =
+  let quoted = ref false and stop = ref (String.length line) in
+  String.iteri
+    (fun index character ->
+      if !stop = String.length line then
+        match character with
+        | '"' -> quoted := not !quoted
+        | '#' when not !quoted -> stop := index
+        | _ -> ())
+    line;
+  String.sub line 0 !stop
+
 let parse text =
   let section = ref "" and name = ref None and dependencies = ref [] in
   List.iteri
     (fun index raw ->
       let line = index + 1 in
-      let text = trim raw in
+      let text = trim (without_comment raw) in
       if text = "" then ()
       else if text.[0] = '[' then section := text
       else
@@ -85,7 +99,8 @@ let parse text =
                   | None -> []
                 in
                 dependencies := { Workspace.package = key; capabilities } :: !dependencies
-            | _ -> raise (Malformed (line, "a [package] or [dependencies] section"))))
+            (* Other sections, such as a build profile, are read past. *)
+            | _ -> ()))
     (String.split_on_char '\n' text);
   match !name with
   | Some name -> { name; dependencies = List.rev !dependencies }

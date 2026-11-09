@@ -74,6 +74,7 @@ type context = {
   bounds : T.parameter -> T.trait_reference list;
   kinds : (id, kind) Hashtbl.t;
   names : (id, string) Hashtbl.t;
+  nodes : (id, expression) Hashtbl.t;  (** Every expression of the definition, by its id. *)
   mutable parameters : id list;  (** The body's parameters, which a returned view may come from. *)
   mutable mutable_parameters : id list;
   mutable self_kind : kind option;
@@ -186,7 +187,31 @@ let join (left : flow) (right : flow) : flow =
    it holds them on. *)
 type views = (id * place list) list
 type loop_frame = { mutable breaks : flow; mutable continues : flow }
-type state = { context : context; mutable views : views; mutable loop_frames : loop_frame list }
+
+(* A place lent for a stretch of code, by a loop over it: read-only, so the
+   code may not change it, or [mut], so the code may not use it at all. *)
+type loan = { lent : place; lent_mode : T.mode }
+
+(* What a stretch of code changes and reads, gathered for [parallel]. *)
+type effects = { mutable changes : (place * span) list; mutable reads : place list }
+
+type state = {
+  context : context;
+  mutable views : views;
+  mutable loop_frames : loop_frame list;
+  mutable loans : loan list;
+  mutable parallel_bodies : (int * id list) list;
+      (** The [parallel for] bodies the code is in: where each starts, and the locals its pattern
+          binds, which each iteration has its own of. *)
+  mutable effects : effects option;
+}
+
+let new_state context =
+  { context; views = []; loop_frames = []; loans = []; parallel_bodies = []; effects = None }
+
+let lent_mut_message context place =
+  Printf.sprintf "`%s` is lent `mut` to the loop, so its body cannot use it."
+    (show_place context.names place)
 
 (* The edits that copy where a place was moved: [.copy()] after it, and
    its [own] mark removed. *)
@@ -200,6 +225,12 @@ let copy_at context (moved : span) =
   | None -> [ Diagnostic.insert moved.stop ".copy()" ]
 
 let used state (flow : flow) (place : place) (span : span) =
+  Option.iter (fun effects -> effects.reads <- place :: effects.reads) state.effects;
+  List.iter
+    (fun loan ->
+      if loan.lent_mode = T.Mut && overlap loan.lent place <> No_overlap then
+        report state.context Conflicting_loan span (lent_mut_message state.context loan.lent))
+    state.loans;
   match flow with
   | None -> ()
   | Some moved -> (
@@ -226,6 +257,33 @@ let used state (flow : flow) (place : place) (span : span) =
 
 (* A change to a place while a view of an overlapping place is live. *)
 let changed state (place : place) (span : span) ~what =
+  let context = state.context in
+  Option.iter (fun effects -> effects.changes <- (place, span) :: effects.changes) state.effects;
+  List.iter
+    (fun loan ->
+      if overlap loan.lent place <> No_overlap then
+        if loan.lent_mode = T.Mut then
+          report context Conflicting_loan span (lent_mut_message context loan.lent)
+        else
+          report context Changed_while_viewed span
+            (Printf.sprintf "`%s` cannot %s while the loop goes over it."
+               (show_place context.names place) what))
+    state.loans;
+  (* Each iteration of a [parallel for] runs at once with the others, so it
+     may change only what is its own: its element and its locals. *)
+  List.iter
+    (fun (start, own) ->
+      let outside =
+        match place.root with
+        | Self_root -> true
+        | Local id ->
+            (not (List.mem id own))
+            && Option.value ~default:0 (Hashtbl.find_opt context.declared id) < start
+      in
+      if outside then
+        report context Parallel_conflict span
+          "A `parallel for` may change only its own element and its own locals.")
+    state.parallel_bodies;
   List.iter
     (fun (holder, lent) ->
       if
@@ -314,26 +372,52 @@ let rec viewed state (value : expression) : place list =
       | None -> (
           match context.checked.calls.(value.id) with
           | Some call ->
-              let arguments = match value.kind with Call (_, arguments) -> arguments | _ -> [] in
-              ignore arguments;
               List.concat_map
                 (fun (argument : C.argument) ->
                   match find_expression context argument.expression with
                   | Some expression
-                    when argument.mode = T.Read || is_view context (type_of context expression) ->
+                    when (argument.mode = T.Read && not (plain context (type_of context expression)))
+                         || is_view context (type_of context expression) ->
                       viewed state expression
                   | _ -> [])
                 call.arguments
           | None -> []))
 
-and find_expression context id =
-  let found = ref None in
-  let rec visit (value : expression) =
-    if value.id = id then found := Some value
-    else if !found = None then Syntax_walk.children visit value
-  in
-  Syntax_walk.definition visit context.definition;
-  !found
+(* The temporaries a value of a view type views: owned values that only
+   the statement holds, passed read-only to the call that made it. A string
+   literal without interpolation is in static memory, so it lives forever. *)
+and viewed_temporaries state (value : expression) : expression list =
+  let context = state.context in
+  match value.kind with
+  | Parenthesized inner | Echo inner -> viewed_temporaries state inner
+  | Bracket (base, [ Item { kind = Range _; _ } ]) -> owned_temporary state base
+  | _ when place_of context value <> None -> []
+  | _ -> (
+      match context.checked.calls.(value.id) with
+      | Some call ->
+          List.concat_map
+            (fun (argument : C.argument) ->
+              match find_expression context argument.expression with
+              | Some expression when argument.mode = T.Read -> owned_temporary state expression
+              | Some expression when is_view context (type_of context expression) ->
+                  viewed_temporaries state expression
+              | _ -> [])
+            call.arguments
+      | None -> [])
+
+and owned_temporary state (value : expression) =
+  let context = state.context in
+  let type_ = type_of context value in
+  match value.kind with
+  | Parenthesized inner -> owned_temporary state inner
+  | String { rest = []; tag = None; _ } -> []
+  | Lambda _ -> []
+  | _ when place_of context value <> None -> []
+  | _ when plain context type_ -> []
+  | _ when is_view context type_ -> viewed_temporaries state value
+  | _ -> [ value ]
+
+and find_expression context id = Hashtbl.find_opt context.nodes id
 
 (* Walking *)
 
@@ -437,12 +521,7 @@ and compound state flow (value : expression) : flow =
       | Some (Else_if other) -> join after_then (expression state flow other))
   | Match { scrutinees; arms } ->
       let flow =
-        List.fold_left
-          (fun flow (scrutinee : expression) ->
-            match scrutinee.kind with
-            | Mode (Own, _) -> expression state flow scrutinee
-            | _ -> expression state flow scrutinee)
-          flow scrutinees
+        List.fold_left (fun flow scrutinee -> expression state flow scrutinee) flow scrutinees
       in
       List.fold_left
         (fun joined (arm : arm) ->
@@ -565,17 +644,10 @@ and call state flow (value : expression) (callee : expression) =
             flow arguments
       | _ -> flow)
   | Some checked_call ->
+      (* A function value is read to be called; anything else's receiver is
+         among the arguments. *)
       let flow =
-        match (checked_call.callee, callee.kind) with
-        | Function_value, _ -> expression state flow callee
-        | _, Member (base, _)
-          when not
-                 (List.exists
-                    (fun (argument : C.argument) -> argument.parameter = 0)
-                    checked_call.arguments) ->
-            ignore base;
-            flow
-        | _ -> flow
+        match checked_call.callee with Function_value -> expression state flow callee | _ -> flow
       in
       let arguments =
         List.filter_map
@@ -597,30 +669,38 @@ and call state flow (value : expression) (callee : expression) =
             expression state flow ~position written)
           flow arguments
       in
-      (* Two arguments may not overlap when one is lent [mut]. *)
+      (* Two arguments may not overlap when one is lent [mut] or moved: a
+         [Plain] place passed [own] is copied, so it lends nothing. *)
       let places =
         List.filter_map
           (fun ((argument : C.argument), (written : expression)) ->
             let inner = match written.kind with Mode (_, inner) -> inner | _ -> written in
-            Option.map (fun place -> (argument.mode, place, written)) (place_of context inner))
+            let mode =
+              if argument.mode = T.Own && plain context (type_of context inner) then T.Read
+              else argument.mode
+            in
+            Option.map (fun place -> (mode, place, written)) (place_of context inner))
           arguments
       in
+      let given = function T.Mut -> "lent `mut`" | _ -> "moved" in
       List.iteri
-        (fun index (mode, place, (written : expression)) ->
+        (fun index (mode, place, _) ->
           List.iteri
             (fun other (other_mode, other_place, (other_written : expression)) ->
-              if other > index && (mode = T.Mut || other_mode = T.Mut) then
+              if other > index && (mode <> T.Read || other_mode <> T.Read) then
+                let (exclusive_mode, exclusive), (_, also) =
+                  if mode <> T.Read then ((mode, place), (other_mode, other_place))
+                  else ((other_mode, other_place), (mode, place))
+                in
                 match overlap place other_place with
                 | Overlap ->
                     report context Conflicting_loan other_written.span
-                      (Printf.sprintf
-                         "`%s` is lent `mut` to this call, so the call cannot use `%s` too."
-                         (show_place context.names (if mode = T.Mut then place else other_place))
-                         (show_place context.names (if mode = T.Mut then other_place else place)))
+                      (Printf.sprintf "`%s` is %s to this call, so the call cannot use `%s` too."
+                         (show_place context.names exclusive)
+                         (given exclusive_mode) (show_place context.names also))
                 | Maybe_disjoint (first, second) ->
                     context.obligations <- Disjoint { first; second } :: context.obligations
-                | No_overlap -> ()
-              else ignore written)
+                | No_overlap -> ())
             places)
         places;
       flow
@@ -630,22 +710,28 @@ and statement state (flow : flow) (written : statement) : flow =
   match written.kind with
   | Expression value -> expression state flow value
   | Let { mutable_; pattern; value; else_; _ } ->
-      let flow =
-        if mutable_ then owned_value state flow value
-        else
-          match value.kind with
-          | Mode (Own, _) -> expression state flow value
-          | _ -> expression state flow value
-      in
-      (* What a binding views, for as long as it is in use. *)
+      let flow = if mutable_ then owned_value state flow value else expression state flow value in
+      (* What a binding views, for as long as it is in use. A cursor views
+         what its call's read-only arguments view, as a view would. *)
       let holders = bound_names pattern in
+      let holds_views =
+        is_view context (type_of context value)
+        || match type_of context value with T.Cursor _ -> true | _ -> false
+      in
       let viewed_places =
         if mutable_ && place_of context value <> None then []
         else if place_of context value <> None && not (plain context (type_of context value)) then
           viewed state value
-        else if is_view context (type_of context value) then viewed state value
+        else if holds_views then viewed state value
         else []
       in
+      if holds_views then
+        List.iter
+          (fun (temporary : expression) ->
+            report context Views_temporary temporary.span
+              "This value is dropped at the end of the statement, but what the statement binds \
+               still views it. Bind it to a name first, so it lives as long as the view.")
+          (viewed_temporaries state value);
       if viewed_places <> [] then
         state.views <- List.map (fun id -> (id, viewed_places)) holders @ state.views;
       (match else_ with Some block_ -> ignore (block state flow block_) | None -> ());
@@ -662,7 +748,7 @@ and statement state (flow : flow) (written : statement) : flow =
           if operator <> Assign then used state flow place target.span;
           assigned state flow place target.span
       | None -> expression state flow target)
-  | For { iterable; body; parallel; _ } ->
+  | For { iterable; body; parallel; pattern; _ } ->
       let flow =
         match iterable.kind with
         | Mode (Own, inner) -> (
@@ -683,18 +769,19 @@ and statement state (flow : flow) (written : statement) : flow =
         | Mode (_, inner) -> place_of context inner
         | _ -> place_of context iterable
       in
-      if parallel then check_parallel_for state body;
-      loop state flow body ~held:(Option.to_list held)
-        ~held_mode:(match iterable.kind with Mode (Mut, _) -> T.Mut | _ -> T.Read)
-        ()
+      let before = state.parallel_bodies in
+      if parallel then state.parallel_bodies <- (body.span.start, bound_names pattern) :: before;
+      let flow =
+        loop state flow body ~held:(Option.to_list held)
+          ~held_mode:(match iterable.kind with Mode (Mut, _) -> T.Mut | _ -> T.Read)
+          ()
+      in
+      state.parallel_bodies <- before;
+      flow
   | While { condition; body; _ } ->
       let flow = expression state flow condition in
       loop state flow body ~held:[] ~held_mode:T.Read ~condition ()
-  | Parallel body ->
-      check_parallel state body;
-      List.fold_left
-        (fun flow (branch : statement) -> statement state flow branch)
-        flow body.statements
+  | Parallel body -> parallel state flow body
   | Proof _ -> flow
   | Assert value | Yield value -> expression state flow value
   | Statement_error -> flow
@@ -702,42 +789,13 @@ and statement state (flow : flow) (written : statement) : flow =
 (* A loop's body runs until the moved places stop changing. A loop over a
    place lends it for the whole loop. *)
 and loop state flow body ~held ~held_mode ?condition () =
-  let context = state.context in
   let frame = { breaks = None; continues = None } in
   state.loop_frames <- frame :: state.loop_frames;
   let views_before = state.views in
   (* The collection a loop goes over is lent for the loop: nothing in the
      body may change it, and with [mut], nothing may use it at all. *)
-  let check_body_against_loan () =
-    List.iter
-      (fun place ->
-        let rec visit (value : expression) =
-          (match place_of context value with
-          | Some used_place when overlap used_place place = Overlap ->
-              if held_mode = T.Mut then
-                report context Conflicting_loan value.span
-                  (Printf.sprintf "`%s` is lent `mut` to the loop, so its body cannot use it."
-                     (show_place context.names place))
-          | _ -> ());
-          Syntax_walk.children visit value
-        in
-        Syntax_walk.block visit body;
-        let rec statement_visit (written : statement) =
-          (match written.kind with
-          | Assignment { target; _ } -> (
-              match place_of context target with
-              | Some target_place when overlap target_place place = Overlap ->
-                  report context Changed_while_viewed target.span
-                    (Printf.sprintf "`%s` cannot change while the loop goes over it."
-                       (show_place context.names place))
-              | _ -> ())
-          | _ -> ());
-          Syntax_walk.statement_parts ~expression:(fun _ -> ()) ~statement:statement_visit written
-        in
-        List.iter statement_visit body.statements)
-      held
-  in
-  if held_mode = T.Mut || held <> [] then check_body_against_loan ();
+  let loans_before = state.loans in
+  state.loans <- List.map (fun lent -> { lent; lent_mode = held_mode }) held @ loans_before;
   let rec iterate entry count =
     frame.continues <- None;
     let after = block state entry body in
@@ -749,6 +807,7 @@ and loop state flow body ~held ~held_mode ?condition () =
     if next = entry || count > 8 then next else iterate next (count + 1)
   in
   let result = iterate flow 0 in
+  state.loans <- loans_before;
   state.loop_frames <- List.tl state.loop_frames;
   state.views <- views_before;
   join result frame.breaks
@@ -806,67 +865,52 @@ and bound_names (written : pattern) =
   !found
 
 (* [parallel]: a place one branch changes cannot overlap a place another
-   uses. *)
-and check_parallel state (body : block) =
+   uses. Each branch is walked as ordinary code, gathering what it changes
+   and reads. *)
+and parallel state flow (body : block) =
   let context = state.context in
-  let effects (written : statement) =
-    let changed = ref [] and read = ref [] in
-    let rec visit (value : expression) =
-      (match value.kind with
-      | Mode (_, inner) ->
-          Option.iter
-            (fun place -> changed := (place, inner.span) :: !changed)
-            (place_of context inner)
-      | _ -> Option.iter (fun place -> read := place :: !read) (place_of context value));
-      Syntax_walk.children visit value
-    and visit_statement (written : statement) =
-      (match written.kind with
-      | Assignment { target; _ } ->
-          Option.iter
-            (fun place -> changed := (place, target.span) :: !changed)
-            (place_of context target)
-      | _ -> ());
-      Syntax_walk.statement_parts ~expression:visit ~statement:visit_statement written
-    in
-    visit_statement written;
-    (!changed, !read)
+  let outer = state.effects in
+  let flow, branches =
+    List.fold_left
+      (fun (flow, branches) (branch : statement) ->
+        let effects = { changes = []; reads = [] } in
+        state.effects <- Some effects;
+        let flow = statement state flow branch in
+        (flow, branches @ [ effects ]))
+      (flow, []) body.statements
   in
-  let branches = List.map effects body.statements in
+  state.effects <- outer;
+  (* What the branches do, the block does, for a [parallel] around it. *)
+  Option.iter
+    (fun outer ->
+      List.iter
+        (fun effects ->
+          outer.changes <- effects.changes @ outer.changes;
+          outer.reads <- effects.reads @ outer.reads)
+        branches)
+    outer;
   List.iteri
-    (fun index (changes, _) ->
+    (fun index effects ->
       List.iteri
-        (fun other (_, reads) ->
+        (fun other others ->
           if other <> index then
             List.iter
               (fun (place, span) ->
-                if List.exists (fun read -> overlap read place = Overlap) reads then
+                if
+                  List.exists (fun read -> overlap read place = Overlap) others.reads
+                  || List.exists
+                       (fun (changed, _) -> overlap changed place = Overlap)
+                       others.changes
+                then
                   report context Parallel_conflict span
                     (Printf.sprintf
                        "One branch of this `parallel` block changes `%s`, which another branch \
                         uses."
                        (show_place context.names place)))
-              changes)
+              effects.changes)
         branches)
-    branches
-
-and check_parallel_for state (body : block) =
-  let context = state.context in
-  let rec visit_statement (written : statement) =
-    (match written.kind with
-    | Assignment { target; _ } -> (
-        match place_of context target with
-        | Some { root = Local id; _ }
-          when Hashtbl.find_opt context.kinds id <> Some Mut_access
-               && not
-                    (Hashtbl.mem context.declared id
-                    && Hashtbl.find context.declared id > body.span.start) ->
-            report context Parallel_conflict target.span
-              "A `parallel for` may change only its own element and its own locals."
-        | _ -> ())
-    | _ -> ());
-    Syntax_walk.statement_parts ~expression:(fun _ -> ()) ~statement:visit_statement written
-  in
-  List.iter visit_statement body.statements
+    branches;
+  flow
 
 (* Preparing: what each local is, and where each is used *)
 
@@ -909,7 +953,7 @@ let prepare context =
           (fun index (arm : arm) ->
             let path = (value.id, index) :: path in
             if List.length arm.patterns = List.length kinds then
-              List.iter2 (fun kind written -> bind ~kind ~path ~loop_ids written) kinds arm.patterns
+              List.iter2 (fun kind written -> bind ~kind written) kinds arm.patterns
             else List.iter (pattern ~path ~loop_ids) arm.patterns;
             Option.iter (expression ~path ~loop_ids) arm.guard;
             statement ~path ~loop_ids arm.body)
@@ -927,10 +971,9 @@ let prepare context =
     Hashtbl.replace paths written.span.start path;
     Hashtbl.replace loops written.span.start loop_ids;
     match written.kind with
-    | Let { mutable_; pattern = written_pattern; value; else_; annotation } ->
+    | Let { mutable_; pattern = written_pattern; value; else_; _ } ->
         expression ~path ~loop_ids value;
         Option.iter (block ~path ~loop_ids) else_;
-        ignore annotation;
         let kind =
           if mutable_ then Owned
           else
@@ -938,10 +981,9 @@ let prepare context =
             | Mode (Own, _) -> Owned
             | _ -> if place_of context value <> None then Viewing else Owned
         in
-        bind ~kind ~path ~loop_ids written_pattern
-    | For { pattern = written_pattern; iterable; body; clauses; _ } ->
+        bind ~kind written_pattern
+    | For { pattern = written_pattern; iterable; body; _ } ->
         expression ~path ~loop_ids iterable;
-        ignore clauses;
         let loop_ids = written.id :: loop_ids in
         let kind =
           match iterable.kind with
@@ -949,7 +991,7 @@ let prepare context =
           | Mode (Own, _) -> Owned
           | _ -> Viewing
         in
-        bind ~kind ~path ~loop_ids written_pattern;
+        bind ~kind written_pattern;
         block ~path ~loop_ids body
     | While { condition; body; _ } ->
         let loop_ids = written.id :: loop_ids in
@@ -960,10 +1002,8 @@ let prepare context =
           ~statement:(statement ~path ~loop_ids) written
   and block ~path ~loop_ids (written : block) =
     List.iter (statement ~path ~loop_ids) written.statements
-  and pattern ~path ~loop_ids written = bind ~kind:Viewing ~path ~loop_ids written
-  and bind ~kind ~path ~loop_ids (written : pattern) =
-    ignore path;
-    ignore loop_ids;
+  and pattern ~path ~loop_ids written = bind ~kind:Viewing written
+  and bind ~kind (written : pattern) =
     List.iter
       (fun id ->
         if not (Hashtbl.mem context.kinds id) then Hashtbl.replace context.kinds id kind;
@@ -1002,8 +1042,8 @@ let lends_count context (body : block) ~report_span =
     | Yield _ -> List.map (fun count -> add count One) counts
     (* A path that reaches [todo] is unfinished, not wrong. *)
     | Expression { kind = Todo; _ } -> List.map (fun _ -> One) counts
-    | Expression value -> expression counts value
-    | Let { value; _ } -> expression counts value
+    | Expression value -> diverges value (expression counts value)
+    | Let { value; _ } -> diverges value (expression counts value)
     | For { body; _ } | While { body; _ } ->
         if block [ Zero ] body <> [ Zero ] then
           List.concat_map (fun count -> [ count; add count Many ]) counts
@@ -1027,6 +1067,10 @@ let lends_count context (body : block) ~report_span =
         []
     | Block written -> block counts written
     | _ -> counts
+  (* A path through code of type [Never], such as [unreachable] or a call to
+     [crash], never reaches the end, so it yields nothing there. *)
+  and diverges (value : expression) counts =
+    match context.checked.types.(value.id) with Some T.Never -> [] | _ -> counts
   in
   let ends = block [ Zero ] body @ !finished in
   if List.mem Zero ends then
@@ -1039,51 +1083,58 @@ let lends_count context (body : block) ~report_span =
 
 (* Pullability, the one fact callers read from a body *)
 
-(* A [yields] method whose yields go through a recursive call, as a tree's
-   [each] that loops over its subtrees, cannot be pulled. *)
-let pullable =
-  Query.query ~name:"pullable" ~show:Path.show (fun database (path : Path.t) ->
+(* The [yields] methods a method yields through: those a [for] loop in its
+   body drives with a [yield] somewhere inside the loop. *)
+let yields_through =
+  Query.query ~name:"yields_through" ~show:Path.show (fun database (path : Path.t) ->
       match Interface.Summary.definition database path with
-      | Some (key, definition) -> (
-          match (definition.kind, Query.demand database Infer.checked key) with
-          | Function { body; _ }, Some result ->
-              let recursive = ref false in
+      | Some (key, { kind = Function { body; _ }; _ }) -> (
+          match Query.demand database Infer.checked key with
+          | Some result ->
+              let contains_yield (loop_body : block) =
+                let found = ref false in
+                let rec statement (written : statement) =
+                  (match written.kind with Yield _ -> found := true | _ -> ());
+                  Syntax_walk.statement_parts ~expression ~statement written
+                and expression value = Syntax_walk.expression_parts ~expression ~statement value in
+                List.iter statement loop_body.statements;
+                !found
+              in
+              let through = ref [] in
               let rec statement (written : statement) =
                 (match written.kind with
-                | For { iterable; body = loop_body; _ } -> (
-                    let rec yields (block : block) =
-                      List.exists
-                        (fun (written : statement) ->
-                          match written.kind with
-                          | Yield _ -> true
-                          | For { body; _ } | While { body; _ } -> yields body
-                          | _ -> false)
-                        block.statements
-                    in
-                    let iterable_path =
-                      match result.checked.calls.(iterable.id) with
-                      | Some { callee = Function { path; _ }; _ } -> Some path
+                | For { iterable; body = loop_body; _ } when contains_yield loop_body -> (
+                    let driven =
+                      match result.checked.loops.(written.id) with
+                      | Some (Yielding { call = { callee = Function { path; _ }; _ }; _ }) ->
+                          Some path
                       | _ -> (
-                          match result.checked.loops.(written.id) with
-                          | Some (Yielding { call = { callee = Function { path; _ }; _ }; _ }) ->
-                              Some path
+                          match result.checked.calls.(iterable.id) with
+                          | Some { callee = Function { path; _ }; _ } -> Some path
                           | _ -> None)
                     in
-                    match iterable_path with
-                    | Some (Method { owner; name; _ }) when yields loop_body -> (
-                        match path with
-                        | Method { owner = self_owner; name = self_name; _ } ->
-                            if Path.equal owner self_owner && name = self_name then
-                              recursive := true
-                        | _ -> ())
-                    | _ -> ())
+                    match driven with Some driven -> through := driven :: !through | None -> ())
                 | _ -> ());
                 Syntax_walk.statement_parts ~expression ~statement written
               and expression value = Syntax_walk.expression_parts ~expression ~statement value in
               List.iter statement body.statements;
-              not !recursive
-          | _ -> true)
-      | None -> true)
+              List.sort_uniq Path.compare !through
+          | None -> [])
+      | _ -> [])
+
+(* A [yields] method in its own cycle of yielding through, as a tree's
+   [each] that loops over its subtrees, cannot be pulled: its cursor would
+   need a stack of its own. *)
+let pullable =
+  Query.query ~name:"pullable" ~show:Path.show (fun database (path : Path.t) ->
+      let rec reaches visited = function
+        | [] -> false
+        | next :: rest ->
+            if Path.equal next path then true
+            else if List.exists (Path.equal next) visited then reaches visited rest
+            else reaches (next :: visited) (Query.demand database yields_through next @ rest)
+      in
+      not (reaches [] (Query.demand database yields_through path)))
 
 (* A pull, [next()] on a cursor, of a method that cannot be pulled. *)
 let check_pulls context =
@@ -1180,6 +1231,12 @@ let check database (key : Resolve.Names.key) =
       List.iter
         (fun (name : name) -> Hashtbl.replace names name.id name.text)
         (Syntax_walk.names definition);
+      let nodes = Hashtbl.create 64 in
+      let rec visit (value : expression) =
+        Hashtbl.replace nodes value.id value;
+        Syntax_walk.children visit value
+      in
+      Syntax_walk.definition visit definition;
       let context =
         {
           database;
@@ -1190,6 +1247,7 @@ let check database (key : Resolve.Names.key) =
             (fun parameter -> Option.value ~default:[] (List.assoc_opt parameter lowered.bounds));
           kinds = Hashtbl.create 32;
           names;
+          nodes;
           parameters = [];
           mutable_parameters = [];
           self_kind = None;
@@ -1208,7 +1266,7 @@ let check database (key : Resolve.Names.key) =
          with the signature its parameters' modes come from. *)
       let method_body (written : signature) lowered (body : block) =
         enter context written lowered;
-        let state = { context; views = []; loop_frames = [] } in
+        let state = new_state context in
         let flow = function_body state body in
         check_restored state flow body.span;
         match written.result with
@@ -1229,7 +1287,7 @@ let check database (key : Resolve.Names.key) =
             method_body written (Some signature) body
         | Function { body; signature = written }, _ -> method_body written None body
         | (Test { body; _ } | Theorem { body; _ } | Law_proof { body; _ }), _ ->
-            ignore (block { context; views = []; loop_frames = [] } (Some []) body)
+            ignore (block (new_state context) (Some []) body)
         | Impl { members; _ }, interface ->
             let methods =
               match interface with Impl_interface impl -> impl.impl_methods | _ -> []

@@ -153,6 +153,7 @@ module Code = struct
   type usage = Unused_variable | Unreachable_code
 
   type ownership =
+    | Views_temporary
     | Use_after_move
     | Not_owned
     | Field_not_restored
@@ -357,6 +358,7 @@ module Code = struct
 
   let ownership_name code =
     match code with
+    | Views_temporary -> "views_temporary"
     | Use_after_move -> "use_after_move"
     | Not_owned -> "not_owned"
     | Field_not_restored -> "field_not_restored"

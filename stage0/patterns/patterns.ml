@@ -540,10 +540,7 @@ let has_error context type_ =
   go [] type_
 
 let indentation text (position : int) =
-  let rec start index =
-    if index > 0 && text.[index - 1] <> '\n' then start (index - 1) else index
-  in
-  let line_start = start position in
+  let line_start = Source.line_start (Source.create ~path:"" text) position in
   let rec spaces index =
     if index < String.length text && (text.[index] = ' ' || text.[index] = '\t') then
       spaces (index + 1)

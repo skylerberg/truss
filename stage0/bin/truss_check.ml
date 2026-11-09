@@ -3,12 +3,6 @@
    exits 0 when there are none, 1 when there are, and 2 when it could not
    check. *)
 
-let read path =
-  let channel = open_in_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_in channel)
-    (fun () -> really_input_string channel (in_channel_length channel))
-
 let fail format =
   Printf.ksprintf
     (fun message ->
@@ -26,7 +20,7 @@ let () =
   let manifest_path = Filename.concat directory "truss.toml" in
   if not (Sys.file_exists manifest_path) then fail "%s: no truss.toml." directory;
   let manifest =
-    try Type_checker.Manifest.parse (read manifest_path)
+    try Type_checker.Manifest.parse (Source.text (Source.read_file manifest_path))
     with Type_checker.Manifest.Malformed (line, expected) ->
       fail "%s:%d: expected %s." manifest_path line expected
   in

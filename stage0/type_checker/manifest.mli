@@ -7,5 +7,6 @@ exception Malformed of int * string
 (** The line, counting from 1, and what was expected there. *)
 
 val parse : string -> t
-(** Raises {!Malformed}. Keys of [[package]] other than [name], such as [version], and keys of a
-    dependency other than [capabilities] are read past. *)
+(** Raises {!Malformed}. Comments, sections other than [[package]] and [[dependencies]], keys of
+    [[package]] other than [name], such as [version], and keys of a dependency other than
+    [capabilities] are read past. *)

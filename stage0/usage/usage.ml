@@ -159,9 +159,7 @@ let statement_never context (written : statement) =
       not (breaks body)
   | _ -> false
 
-let line_start text position =
-  let rec back index = if index > 0 && text.[index - 1] <> '\n' then back (index - 1) else index in
-  back position
+let line_start text position = Source.line_start (Source.create ~path:"" text) position
 
 let check_block context (written : block) =
   let rec go = function
