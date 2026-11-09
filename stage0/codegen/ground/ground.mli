@@ -42,6 +42,7 @@ and yielding = {
 
 val compare_definition : definition -> definition -> int
 val compare : ty -> ty -> int
+val compare_arguments : argument list -> argument list -> int
 val equal : ty -> ty -> bool
 
 (* [standard::list::List], as Truss writes it. *)

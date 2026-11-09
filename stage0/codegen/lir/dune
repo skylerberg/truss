@@ -1,0 +1,3 @@
+(library
+ (name lir)
+ (libraries ground instance memory_layout zarith))

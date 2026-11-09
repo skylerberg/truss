@@ -14,6 +14,13 @@
   parser
   reference
   ground
-  memory_layout)
+  memory_layout
+  instance
+  lir
+  convention
+  emit_c
+  toolchain
+  startup
+  positions)
  (deps
   (glob_files %{workspace_root}/*.md)))

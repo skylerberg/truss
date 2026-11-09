@@ -1,7 +1,7 @@
-type target = { pointer_bytes : int }
+type target = { pointer_bytes : int; usize_bytes : int }
 
-let target_64 = { pointer_bytes = 8 }
-let target_32 = { pointer_bytes = 4 }
+let target_64 = { pointer_bytes = 8; usize_bytes = 8 }
+let target_32 = { pointer_bytes = 4; usize_bytes = 4 }
 
 type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
 
@@ -36,14 +36,15 @@ and form =
   | Zero_size
   | Scalar of scalar
   | Struct of field list
-  | Array of { element : t; count : int }
+  | Array of { element : Ground.ty; element_layout : t; count : int }
   | Tag_only of { tag : integer; variants : string list }
   | Tagged of { tag : integer; payload_offset : int; variants : variant list }
   | Niche_encoded of { dataful : variant; others : (string * Z.t) list; encoding : niche option }
 
 and field = { name : string; member : member; layout : t; offset : int }
 and variant = { name : string; index : int; payload : t }
-and niche = { path : string list; scalar : scalar; start : Z.t; count : Z.t }
+and niche = { path : step list; scalar : scalar; start : Z.t; count : Z.t }
+and step = Field of string | Tag
 
 module Types = Map.Make (struct
   type t = Ground.ty
@@ -66,7 +67,7 @@ let integer_size target = function
   | Int16 | UInt16 -> 2
   | Int32 | UInt32 -> 4
   | Int64 | UInt64 -> 8
-  | USize | ISize -> target.pointer_bytes
+  | USize | ISize -> target.usize_bytes
 
 let scalar_size target = function
   | Integer integer -> integer_size target integer
@@ -100,7 +101,7 @@ let tag_niche target tag count path =
   let start = Z.of_int count in
   { path; scalar = Integer tag; start; count = Z.sub (bits (integer_size target tag)) start }
 
-let under name niche = { niche with path = name :: niche.path }
+let under name niche = { niche with path = Field name :: niche.path }
 
 (* The niche with the most spare values among [fields], the first in
    placement order on a tie, so the choice never depends on anything but
@@ -169,13 +170,13 @@ and of_shape env ty (shape : shape) =
   | Record fields' -> fields env fields'
   | Array (_, 0) -> zero_size
   | Array (element, count) ->
-      let element = of_type env element in
-      if element.size = 0 then zero_size
+      let element_layout = of_type env element in
+      if element_layout.size = 0 then zero_size
       else
         {
-          size = element.size * count;
-          alignment = element.alignment;
-          form = Array { element; count };
+          size = element_layout.size * count;
+          alignment = element_layout.alignment;
+          form = Array { element; element_layout; count };
           niche = None;
         }
   | Sum variants -> of_sum env ty variants
@@ -247,7 +248,7 @@ and of_sum env ty shapes =
         size = round_up (payload_offset + union_size) alignment;
         alignment;
         form = Tagged { tag; payload_offset; variants };
-        niche = Some (tag_niche env.target tag count [ "tag" ]);
+        niche = Some (tag_niche env.target tag count [ Tag ]);
       }
 
 let block env ty name =
@@ -300,10 +301,13 @@ let scalar_to_string = function
   | Pointer _ -> "pointer"
   | Nullable_pointer _ -> "nullable pointer"
 
+let path_to_string = function
+  | [] -> "."
+  | path -> String.concat "." (List.map (function Field name -> name | Tag -> "tag") path)
+
 let niche_to_string niche =
-  Printf.sprintf "niche %s %s+%s"
-    (if niche.path = [] then "." else String.concat "." niche.path)
-    (Z.to_string niche.start) (Z.to_string niche.count)
+  Printf.sprintf "niche %s %s+%s" (path_to_string niche.path) (Z.to_string niche.start)
+    (Z.to_string niche.count)
 
 let rec to_string layout =
   let form =
@@ -317,7 +321,8 @@ let rec to_string layout =
                (fun (field : field) -> Printf.sprintf "%s@%d" field.name field.offset)
                fields)
         ^ ")"
-    | Array { element; count } -> Printf.sprintf "array(%d x %s)" count (to_string element)
+    | Array { element_layout; count; _ } ->
+        Printf.sprintf "array(%d x %s)" count (to_string element_layout)
     | Tag_only { tag; variants } ->
         Printf.sprintf "tag(%s: %s)" (integer_to_string tag) (String.concat " " variants)
     | Tagged { tag; payload_offset; variants } ->
@@ -327,10 +332,7 @@ let rec to_string layout =
         Printf.sprintf "niche-encoded(%s; %s at %s)" dataful.name
           (String.concat " "
              (List.map (fun (name, value) -> name ^ "=" ^ Z.to_string value) others))
-          (match encoding with
-          | None -> "nothing"
-          | Some { path = []; _ } -> "."
-          | Some { path; _ } -> String.concat "." path)
+          (match encoding with None -> "nothing" | Some { path; _ } -> path_to_string path)
   in
   Printf.sprintf "%d/%d %s%s" layout.size layout.alignment form
     (match layout.niche with None -> "" | Some niche -> " " ^ niche_to_string niche)

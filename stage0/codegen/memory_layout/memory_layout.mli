@@ -8,10 +8,12 @@
    their variants; and niches that remove the tag where a field has spare
    values. *)
 
-(* The width of the target's pointers, and so of [USize] and [ISize]. Code
-   built to run while compiling uses the target's width on any host, so a
-   layout is always for one target. *)
-type target = { pointer_bytes : int }
+(* The width of the pointers of the machine the code runs on, and of [USize]
+   and [ISize]. They differ only for code built to run while compiling for
+   a target whose [USize] is narrower than the host's pointers: such code
+   runs on the host, with the target's [USize], so that it computes what the
+   target would. *)
+type target = { pointer_bytes : int; usize_bytes : int }
 
 val target_64 : target
 val target_32 : target
@@ -59,7 +61,7 @@ and form =
   | Scalar of scalar
   | Struct of field list
       (** A record, or a variant's fields: every field that has a size, in placement order *)
-  | Array of { element : t; count : int }
+  | Array of { element : Ground.ty; element_layout : t; count : int }
   | Tag_only of { tag : integer; variants : string list }
       (** A sum type with no fields, numbered in order *)
   | Tagged of { tag : integer; payload_offset : int; variants : variant list }
@@ -75,9 +77,10 @@ and field = { name : string; member : member; layout : t; offset : int }
 and variant = { name : string; index : int; payload : t }
 
 (* Spare values: [count] values starting at [start], as unsigned values of
-   the scalar at [path], a list of field names from the start of the value
-   ([[]] is the value itself, and ["tag"] a tagged sum's tag). *)
-and niche = { path : string list; scalar : scalar; start : Z.t; count : Z.t }
+   the scalar at [path], the steps from the start of the value to it: a
+   field, or a tagged sum's tag. [[]] is the value itself. *)
+and niche = { path : step list; scalar : scalar; start : Z.t; count : Z.t }
+and step = Field of string | Tag
 
 (* Computes layouts, each once, from the shapes [shape_of] gives. *)
 type env
