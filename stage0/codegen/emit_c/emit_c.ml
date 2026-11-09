@@ -59,6 +59,12 @@ let runtime_declarations (target : Memory_layout.target) =
       "void t_runtime_echo(const uint8_t *text, t_usize length, const struct t_anchor *anchor, \
        uint32_t line, uint32_t column);\n";
       "_Noreturn void t_runtime_compiler_bug(void);\n";
+      "uint8_t *t_runtime_program_argument(void *arguments, int32_t index, t_usize *length);\n";
+      "struct t_evidence {\n\
+      \  void *implementation;\n\
+      \  const void *const *table;\n\
+      \  const struct t_evidence *const *outer;\n\
+       };\n";
       "void *t_runtime_allocate(t_usize size, t_usize alignment);\n";
       "void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usize alignment);\n";
       "void t_runtime_free(void *pointer);\n";
@@ -494,6 +500,11 @@ and constant_c context : Lir.constant -> string * Lir.ty = function
   | Character code -> (Printf.sprintf "((uint32_t)0x%xU)" code, Raw Character)
   | Bytes text -> ("((void *)" ^ bytes_name context text ^ ")", Raw (Pointer Opaque))
   | Null -> ("((void *)0)", Raw (Nullable_pointer Opaque))
+  | Symbol_address key ->
+      let symbol = Instance.symbol key in
+      declare_prototype context symbol
+        (Printf.sprintf "extern const struct t_evidence %s;\n" symbol);
+      ("((void *)&" ^ symbol ^ ")", Raw (Pointer Opaque))
 
 (* The scalar a value of a type is, for operators. *)
 let scalar_of context : Lir.ty -> Memory_layout.scalar = function
@@ -824,6 +835,12 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
   | Debug_string -> "t_runtime_debug_string(" ^ all ^ ")"
   | Debug_bytes -> "t_runtime_debug_bytes(" ^ all ^ ")"
   | Debug_length -> "t_runtime_debug_length(" ^ all ^ ")"
+  | Evidence_implementation ->
+      Printf.sprintf "((const struct t_evidence *)%s)->implementation" (argument 0)
+  | Program_argument -> "t_runtime_program_argument(" ^ all ^ ")"
+  | Evidence_outer ->
+      Printf.sprintf "((void *)((const struct t_evidence *)%s)->outer[%s])" (argument 0)
+        (argument 1)
 
 let call_c context fc (target : Lir.target) arguments =
   let arguments = List.filter_map (operand_c context fc) arguments in
@@ -844,6 +861,18 @@ let call_c context fc (target : Lir.target) arguments =
       Printf.sprintf "%s.f_code(%s)" value
         (String.concat ", " ((value ^ ".f_environment") :: List.map fst arguments))
   | Intrinsic intrinsic -> intrinsic_c context intrinsic arguments
+  | Evidence_call { evidence; slot; signature } ->
+      let evidence =
+        match operand_c context fc evidence with
+        | Some (text, _) -> text
+        | None -> bug "evidence of zero size"
+      in
+      let result =
+        match signature.result with None -> "void" | Some ty -> c_ty context fc.symbol ty
+      in
+      Printf.sprintf "((%s (*)(%s))((const struct t_evidence *)%s)->table[%d])(%s)" result
+        (signature_parameters context fc.symbol signature.parameters None)
+        evidence slot texts
 
 let anchor_c context definition =
   let symbol = anchor_symbol definition in
@@ -1112,13 +1141,56 @@ let rec initializer_c context ty (value : Lir.static_value) : string option =
         end
   | _ -> bug "static data that does not fit %s" (Ground.to_string ty)
 
+let table_c context (table : Lir.table) =
+  let entries =
+    List.map
+      (fun (key, signature) ->
+        let symbol = Instance.symbol key in
+        declare_prototype context symbol
+          (prototype context "" symbol ~linkage:External signature ^ ";\n");
+        Printf.sprintf "(const void *)&%s" symbol)
+      table.entries
+  in
+  Printf.sprintf "const void *const %s[%d] = { %s };\n" (Instance.symbol table.table_key)
+    (max 1 (List.length entries))
+    (if entries = [] then "0" else String.concat ", " entries)
+
+let evidence_c context (evidence : Lir.evidence) =
+  let declare key kind =
+    let symbol = Instance.symbol key in
+    declare_prototype context symbol
+      (Printf.sprintf "extern const %s %s%s;\n" kind symbol
+         (if kind = "void *const" then "[]" else ""));
+    symbol
+  in
+  let table = declare evidence.table "void *const" in
+  let table = "(const void *const *)" ^ table in
+  let outer =
+    match evidence.outer with
+    | [] -> "0"
+    | keys ->
+        let name = static_name context in
+        let symbols = List.map (fun key -> "&" ^ declare key "struct t_evidence") keys in
+        context.statics <-
+          Printf.sprintf "static const struct t_evidence *const %s[%d] = { %s };\n" name
+            (List.length keys) (String.concat ", " symbols)
+          :: context.statics;
+        name
+  in
+  (* A real implementation has zero size, so the evidence points at nothing
+     that is ever read. *)
+  Printf.sprintf "const struct t_evidence %s = { (void *)%s, %s, %s };\n"
+    (Instance.symbol evidence.evidence_key)
+    (bytes_name context "") table outer
+
 let data_c context (data : Lir.data) =
   let symbol = Instance.symbol data.data_key in
   match initializer_c context data.ty data.value with
   | None -> ""
   | Some value -> Printf.sprintf "const %s %s = %s;\n" (value_c context data.ty) symbol value
 
-let file env build ?(data = []) (instances : (Lir.t * linkage) list) =
+let file env build ?(data = []) ?(tables = []) ?(evidence = []) (instances : (Lir.t * linkage) list)
+    =
   let context =
     {
       env;
@@ -1161,7 +1233,11 @@ let file env build ?(data = []) (instances : (Lir.t * linkage) list) =
         nested @ [ function_c context instance.key symbol ~linkage instance.main ])
       instances
   in
-  let data_definitions = List.map (data_c context) data in
+  let data_definitions =
+    List.map (data_c context) data
+    @ List.map (table_c context) tables
+    @ List.map (evidence_c context) evidence
+  in
   (* Define every type the code names, and every type those definitions
      name, until nothing new is named. *)
   let definitions = ref Keys.empty in

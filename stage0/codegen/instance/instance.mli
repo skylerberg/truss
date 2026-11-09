@@ -1,6 +1,7 @@
 (* Instances: one copy of a definition's code, for one set of type arguments
    and capability sets. See CODEGEN.md, "Instances". *)
 
+(** A named function used as a function value: it takes the environment and ignores it *)
 type key =
   | Code of { path : Path.t; type_arguments : Ground.argument list }
       (** A function, a method, or a method of an [impl], whether written, derived, or provided by
@@ -15,7 +16,15 @@ type key =
       (** The state machine of a pulled yielding method. Its drop is the [Drop] of its cursor type.
       *)
   | Adapter of key
-      (** A named function used as a function value: it takes the environment and ignores it *)
+  | Entry of key
+      (** The entry for an [impl]'s method of a capability: takes the evidence, then calls the
+          method on its implementation with the evidence that implementation captured *)
+  | Table of { impl : Path.t; type_arguments : Ground.argument list }
+      (** A capability [impl]'s table of entries, one for each of the capability's methods *)
+  | Real_evidence of Path.t
+      (** The evidence for the real implementation of a standard capability, which a program's
+          [main] is given *)
+  | Program_main of Path.t  (** The C [main]'s Truss side: it calls the program's [main] *)
 
 val compare : key -> key -> int
 val equal : key -> key -> bool

@@ -39,6 +39,7 @@ and constant =
   | Character of int
   | Bytes of string  (** The address of static bytes, such as a string literal's *)
   | Null
+  | Symbol_address of Instance.key  (** The address of static evidence or a table *)
 
 and function_ref =
   | Instance of Instance.key
@@ -119,12 +120,19 @@ type intrinsic =
   | Debug_string  (** [(bytes, count)]: as a quoted string with escapes *)
   | Debug_bytes  (** [() -> pointer] to the buffer's bytes *)
   | Debug_length  (** [() -> USize] *)
+  | Evidence_implementation  (** [(evidence) -> pointer] to the value that implements it *)
+  | Evidence_outer  (** [(evidence, index) -> evidence] the implementation captured *)
+  | Program_argument
+      (** [(arguments, index, length pointer) -> bytes]: a program argument as UTF-8, with bad
+          sequences replaced by U+FFFD *)
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
   | Indirect of { value : operand; signature : signature }
       (** A call through a function value: its code with its environment first *)
   | Intrinsic of intrinsic
+  | Evidence_call of { evidence : operand; slot : int; signature : signature }
+      (** A capability's method: entry [slot] of the evidence's table, given the evidence first *)
 
 type rvalue =
   | Use of operand
@@ -199,7 +207,14 @@ type static_value =
 type data = { data_key : Instance.key; ty : Ground.ty; value : static_value }
 
 (* What an instance compiles to: code, or static data. *)
-type compiled = Code of t | Data of data
+(* A capability [impl]'s table: its entries, in the order of the
+   capability's methods. *)
+type table = { table_key : Instance.key; entries : (Instance.key * signature) list }
+
+(* Static evidence: its implementation, a value of zero size here, its
+   table, and the evidence the implementation captured. *)
+type evidence = { evidence_key : Instance.key; table : Instance.key; outer : Instance.key list }
+type compiled = Code of t | Data of data | Table of table | Evidence of evidence
 
 let signature (f : function_) =
   {
@@ -334,6 +349,8 @@ let map_rvalue ~place ~block rvalue =
 
 let map_target ~place ~block = function
   | Indirect { value; signature } -> Indirect { value = map_operand ~place ~block value; signature }
+  | Evidence_call { evidence; slot; signature } ->
+      Evidence_call { evidence = map_operand ~place ~block evidence; slot; signature }
   | (Direct _ | Intrinsic _) as target -> target
 
 let map_statement ~place ~block = function
@@ -498,6 +515,7 @@ and encode_constant = function
   | Character code -> tagged 4 [ Cbor.int code ]
   | Bytes text -> tagged 5 [ Bytes text ]
   | Null -> tagged 6 []
+  | Symbol_address key -> tagged 7 [ Instance.encode key ]
 
 let encode_signature instance (s : signature) =
   Cbor.Array
@@ -567,6 +585,9 @@ let intrinsic_tag = function
   | Debug_string -> 37
   | Debug_bytes -> 38
   | Debug_length -> 39
+  | Evidence_implementation -> 40
+  | Evidence_outer -> 41
+  | Program_argument -> 42
 
 let encode_rvalue instance rvalue =
   let operand = encode_operand instance in
@@ -592,6 +613,9 @@ let encode_target instance = function
   | Indirect { value; signature } ->
       tagged 1 [ encode_operand instance value; encode_signature instance signature ]
   | Intrinsic intrinsic -> tagged 2 [ Cbor.int (intrinsic_tag intrinsic) ]
+  | Evidence_call { evidence; slot; signature } ->
+      tagged 3
+        [ encode_operand instance evidence; Cbor.int slot; encode_signature instance signature ]
 
 let encode_statement instance = function
   | Assign (place, rvalue) ->
@@ -687,6 +711,22 @@ let encode_data ?(path = Ground.encode_path) ?instance data =
   let instance = match instance with Some instance -> instance | None -> Instance.encode ~path in
   Cbor.Array [ instance data.data_key; Ground.encode ~path data.ty; encode_static path data.value ]
 
+let encode_table ?(path = Ground.encode_path) ?instance (table : table) =
+  let instance = match instance with Some instance -> instance | None -> Instance.encode ~path in
+  let encoders_default = { path; instance } in
+  Cbor.Array
+    [
+      instance table.table_key;
+      list
+        (fun (key, s) -> Cbor.Array [ instance key; encode_signature encoders_default s ])
+        table.entries;
+    ]
+
+let encode_evidence ?(path = Ground.encode_path) ?instance (evidence : evidence) =
+  let instance = match instance with Some instance -> instance | None -> Instance.encode ~path in
+  Cbor.Array
+    [ instance evidence.evidence_key; instance evidence.table; list instance evidence.outer ]
+
 let hash t =
   Blake3.hash
     (Cbor.encode (Cbor.Array [ Text "truss lir"; Cbor.int version; encode (canonical_instance t) ]))
@@ -732,6 +772,7 @@ let constant_to_string = function
   | Character code -> Printf.sprintf "U+%04X" code
   | Bytes text -> Printf.sprintf "%S" text
   | Null -> "null"
+  | Symbol_address key -> "&" ^ Instance.to_string key
 
 let rec place_to_string (place : place) =
   List.fold_left
@@ -816,6 +857,9 @@ let intrinsic_name = function
   | Debug_string -> "debug_string"
   | Debug_bytes -> "debug_bytes"
   | Debug_length -> "debug_length"
+  | Evidence_implementation -> "evidence_implementation"
+  | Evidence_outer -> "evidence_outer"
+  | Program_argument -> "program_argument"
 
 let rvalue_to_string = function
   | Use operand -> operand_to_string operand
@@ -838,6 +882,8 @@ let target_to_string = function
   | Direct { function_; _ } -> function_ref_to_string function_
   | Indirect { value; _ } -> "(" ^ operand_to_string value ^ ")"
   | Intrinsic intrinsic -> "intrinsic " ^ intrinsic_name intrinsic
+  | Evidence_call { evidence; slot; _ } ->
+      Printf.sprintf "(%s table %d)" (operand_to_string evidence) slot
 
 let statement_to_string = function
   | Assign (place, rvalue) -> place_to_string place ^ " = " ^ rvalue_to_string rvalue

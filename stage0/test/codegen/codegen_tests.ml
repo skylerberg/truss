@@ -244,8 +244,11 @@ let compiler =
 
 (* Generated C must compile with every warning an error, apart from these,
    which are known not to apply to it: parameters a function does not read
-   are normal, as for an adapter's environment. *)
-let strict = [ "-Wall"; "-Wextra"; "-Werror"; "-Wno-unused-parameter" ]
+   are normal, as for an adapter's environment, and so is a value computed
+   and never read, as [let _ = ...] does. *)
+let strict =
+  [ "-Wall"; "-Wextra"; "-Werror"; "-Wno-unused-parameter"; "-Wno-unused-but-set-variable" ]
+
 let counter = ref 0
 let cache = lazy (Build.cache (Filename.concat (Lazy.force scratch) "objects"))
 let settings : Build.settings = { build = Development; optimization = O1; extra = strict }
@@ -264,7 +267,7 @@ let run_program ?(extra = []) ?(anchors = []) (instances : Lir.t list) =
   in
   match
     Build.program (Lazy.force compiler) (Lazy.force cache) env settings
-      ~files:[ (List.map (fun i -> (i, Emit_c.External)) instances, []) ]
+      ~files:[ List.map (fun i -> Lir.Code i) instances ]
       ~sources ~output
   with
   | Ok () -> Toolchain.run output []
@@ -1299,7 +1302,10 @@ let () =
         (String.concat " "
            (List.map
               (function
-                | Lir.Code i -> Instance.to_string i.key | Data d -> Instance.to_string d.data_key)
+                | Lir.Code i -> Instance.to_string i.key
+                | Data d -> Instance.to_string d.data_key
+                | Table t -> Instance.to_string t.table_key
+                | Evidence e -> Instance.to_string e.evidence_key)
               reached)));
   test "a drop reaches the type's drop function" (fun () ->
       let f =
@@ -1363,7 +1369,7 @@ let () =
       in
       match
         Build.program (Lazy.force compiler) (Lazy.force cache) (shape_env ()) settings
-          ~files:[ (List.map (fun t -> (t, Emit_c.External)) tests, []) ]
+          ~files:[ List.map (fun t -> Lir.Code t) tests ]
           ~sources ~output
       with
       | Error message -> fail "%s" message
@@ -1662,7 +1668,7 @@ let () =
       in
       match
         Build.program (Lazy.force compiler) (Lazy.force cache) env settings
-          ~files:[ (List.map (fun i -> (i, Emit_c.External)) program, []) ]
+          ~files:[ List.map (fun i -> Lir.Code i) program ]
           ~sources ~output
       with
       | Error message -> fail "%s" message
@@ -1921,5 +1927,49 @@ test "constants" {
   assert ExitCode.failure.code == 1
 }
 |}
+
+(* Programs *)
+
+(* Compiles a module with a [main] and runs it with the arguments. *)
+let run_main ?(arguments = []) text =
+  let database = Query.create () in
+  List.iter
+    (fun (module_, text) -> Query.set database Workspace.file_text module_ text)
+    Standard_library.modules;
+  Query.set database Workspace.file_text example text;
+  Query.set database Workspace.packages Standard_library.package
+    {
+      name = Standard_library.package;
+      dependencies = [];
+      modules = List.map fst Standard_library.modules;
+    };
+  Query.set database Workspace.packages "example"
+    { name = "example"; dependencies = []; modules = [ example ] };
+  List.iter
+    (fun (d : Diagnostic.t) -> fail "the source has a diagnostic: %s" d.message)
+    (Infer.diagnostics database example
+    @ Infer.diagnostics database { package = "standard"; modules = [ "capabilities" ] });
+  let compile =
+    Compile.create database target_64 (Lazy.force compiler) (Lazy.force cache) settings
+  in
+  match Compile.run_program compile ~main:(Top { module_ = example; name = "main" }) ~arguments with
+  | Ok result -> result
+  | Error message -> failwith message
+
+let () =
+  test "a program prints through the real console and exits with its code" (fun () ->
+      let status, output, _ =
+        run_main ~arguments:[ "one"; "two" ]
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  Console.print_line("hello")
+  Console.print_line("${arguments.length()} arguments, then ${arguments[1]}")
+  ExitCode(3)
+}
+|}
+      in
+      expect_int ~expected:3 status;
+      expect_string ~expected:"hello\n3 arguments, then one\n" output)
 
 let () = Harness.finish ()

@@ -30,5 +30,11 @@ val instance : context -> Instance.key -> Lir.t
    constant expression. *)
 val constant : context -> Path.t -> Lir.data
 
+(* A capability [impl]'s table of entries. *)
+val table : context -> Instance.key -> Lir.table
+
+(* The evidence for the real implementation of a standard capability. *)
+val real_evidence : context -> Path.t -> Lir.evidence
+
 (* The key of a test's instance. *)
 val test_key : Path.t -> Instance.key

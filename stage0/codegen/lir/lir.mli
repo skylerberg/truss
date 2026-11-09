@@ -49,6 +49,7 @@ and constant =
   | Character of int
   | Bytes of string  (** The address of static bytes, such as a string literal's *)
   | Null
+  | Symbol_address of Instance.key  (** The address of static evidence or a table *)
 
 and function_ref =
   | Instance of Instance.key
@@ -129,12 +130,19 @@ type intrinsic =
   | Debug_string  (** [(bytes, count)]: as a quoted string with escapes *)
   | Debug_bytes  (** [() -> pointer] to the buffer's bytes *)
   | Debug_length  (** [() -> USize] *)
+  | Evidence_implementation  (** [(evidence) -> pointer] to the value that implements it *)
+  | Evidence_outer  (** [(evidence, index) -> evidence] the implementation captured *)
+  | Program_argument
+      (** [(arguments, index, length pointer) -> bytes]: a program argument as UTF-8, with bad
+          sequences replaced by U+FFFD *)
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
   | Indirect of { value : operand; signature : signature }
       (** A call through a function value: its code with its environment first *)
   | Intrinsic of intrinsic
+  | Evidence_call of { evidence : operand; slot : int; signature : signature }
+      (** A capability's method: entry [slot] of the evidence's table, given the evidence first *)
 
 type rvalue =
   | Use of operand
@@ -212,7 +220,14 @@ type static_value =
 type data = { data_key : Instance.key; ty : Ground.ty; value : static_value }
 
 (* What an instance compiles to: code, or static data. *)
-type compiled = Code of t | Data of data
+(* A capability [impl]'s table: its entries, in the order of the
+   capability's methods. *)
+type table = { table_key : Instance.key; entries : (Instance.key * signature) list }
+
+(* Static evidence: its implementation, a value of zero size here, its
+   table, and the evidence the implementation captured. *)
+type evidence = { evidence_key : Instance.key; table : Instance.key; outer : Instance.key list }
+type compiled = Code of t | Data of data | Table of table | Evidence of evidence
 
 val signature : function_ -> signature
 
@@ -253,6 +268,10 @@ val version : int
    results". *)
 val encode : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> t -> Cbor.t
 val encode_data : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> data -> Cbor.t
+val encode_table : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> table -> Cbor.t
+
+val encode_evidence :
+  ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> evidence -> Cbor.t
 
 (* The BLAKE3 hash of the canonical form's encoding and [version], which
    early cutoff compares. *)

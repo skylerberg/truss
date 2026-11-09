@@ -36,6 +36,8 @@ static void t_write_all(int descriptor, const void *bytes, size_t length) {
   }
 }
 
+void *t_runtime_allocate(t_usize size, t_usize alignment);
+
 /* A test worker reports to the runner through this pipe; anywhere else it
    is -1, and reports go to standard error. */
 static int t_report = -1;
@@ -167,6 +169,46 @@ static void t_stack_overflow(int signal) {
   t_text_length = 0;
   t_text_string("stack overflow");
   t_end(t_panicked, "", 101);
+}
+
+/* A program argument as UTF-8: the argument itself when it is valid, and
+   otherwise a copy with each bad sequence replaced by U+FFFD. Either way it
+   lives as long as the program, so the [String] that holds it has capacity
+   0 and never frees it. */
+static t_usize t_utf8_sequence(const uint8_t *bytes, t_usize left) {
+  uint8_t first = bytes[0];
+  t_usize length = first < 0x80 ? 1 : (first & 0xe0) == 0xc0 ? 2 : (first & 0xf0) == 0xe0 ? 3 : (first & 0xf8) == 0xf0 ? 4 : 0;
+  if (length == 0 || length > left) return 0;
+  for (t_usize k = 1; k < length; k++) if ((bytes[k] & 0xc0) != 0x80) return 0;
+  uint32_t code = length == 1 ? first : (uint32_t)(first & (0x7f >> length));
+  for (t_usize k = 1; k < length; k++) code = (code << 6) | (bytes[k] & 0x3f);
+  if ((length == 2 && code < 0x80) || (length == 3 && code < 0x800) || (length == 4 && code < 0x10000)) return 0;
+  if (code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return 0;
+  return length;
+}
+
+uint8_t *t_runtime_program_argument(void *arguments, int32_t index, t_usize *length) {
+  uint8_t *bytes = (uint8_t *)((char **)arguments)[index];
+  t_usize count = strlen((const char *)bytes);
+  t_usize at = 0, fixed = 0;
+  int valid = 1;
+  while (at < count) {
+    t_usize step = t_utf8_sequence(bytes + at, count - at);
+    if (step == 0) { valid = 0; step = 1; fixed += 3; } else fixed += step;
+    at += step;
+  }
+  if (valid) { *length = count; return bytes; }
+  uint8_t *copy = t_runtime_allocate(fixed, 1);
+  t_usize out = 0;
+  at = 0;
+  while (at < count) {
+    t_usize step = t_utf8_sequence(bytes + at, count - at);
+    if (step == 0) { copy[out++] = 0xef; copy[out++] = 0xbf; copy[out++] = 0xbd; step = 1; }
+    else { memcpy(copy + out, bytes + at, step); out += step; }
+    at += step;
+  }
+  *length = out;
+  return copy;
 }
 
 void t_runtime_install(void) {
@@ -678,3 +720,14 @@ let tests_calling ~time_limit tests =
     declarations
     (if tests = [] then "0" else table)
     (List.length tests) time_limit
+
+let program_calling entry =
+  Printf.sprintf
+    "typedef __INT32_TYPE__ int32_t;\n\
+     void t_runtime_install(void);\n\
+     int32_t %s(int32_t count, void *arguments);\n\
+     int main(int count, char **arguments) {\n\
+    \  t_runtime_install();\n\
+    \  return (int)%s((int32_t)count, (void *)arguments);\n\
+     }\n"
+    entry entry

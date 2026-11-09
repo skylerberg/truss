@@ -19,7 +19,7 @@ type settings = { build : Emit_c.build; optimization : Toolchain.optimization; e
 val objects :
   Toolchain.t -> cache -> settings -> (string * string) list -> (string list, string) result
 
-(* A program: each list of instances and data is one C file, [sources] are
+(* A program: each list of what instances compile to is one C file, [sources] are
    further C files, such as the startup code and the anchors, and the
    runtime for the target is always linked. *)
 val program :
@@ -27,7 +27,7 @@ val program :
   cache ->
   Memory_layout.env ->
   settings ->
-  files:((Lir.t * Emit_c.linkage) list * Lir.data list) list ->
+  files:Lir.compiled list list ->
   sources:(string * string) list ->
   output:string ->
   (unit, string) result

@@ -15,7 +15,14 @@ type linkage = External | Internal
 
 (* One C file holding the given instances, in order, and the given static
    data. *)
-val file : Memory_layout.env -> build -> ?data:Lir.data list -> (Lir.t * linkage) list -> string
+val file :
+  Memory_layout.env ->
+  build ->
+  ?data:Lir.data list ->
+  ?tables:Lir.table list ->
+  ?evidence:Lir.evidence list ->
+  (Lir.t * linkage) list ->
+  string
 
 (* The C type and name of a struct, for the runtime and startup code that
    are written in C. *)

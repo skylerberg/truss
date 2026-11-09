@@ -9,6 +9,7 @@ let rec place_keys (place : Lir.place) keys =
 and operand_keys (operand : Lir.operand) keys =
   match operand with
   | Copy place | Move place | Address { place; _ } -> place_keys place keys
+  | Constant (Symbol_address key) -> add key keys
   | Constant _ -> keys
 
 let function_ref_keys (f : Lir.function_ref) keys =
@@ -38,7 +39,8 @@ let references env (instance : Lir.t) =
                   let keys =
                     match target with
                     | Direct { function_; _ } -> function_ref_keys function_ keys
-                    | Indirect { value; _ } -> operand_keys value keys
+                    | Indirect { value; _ } | Evidence_call { evidence = value; _ } ->
+                        operand_keys value keys
                     | Intrinsic _ -> keys
                   in
                   let keys = List.fold_left (fun keys o -> operand_keys o keys) keys arguments in
@@ -64,11 +66,17 @@ let references env (instance : Lir.t) =
   let keys = Array.fold_left in_function (in_function [] instance.main) instance.nested in
   List.filter (fun key -> not (Instance.equal key instance.key)) (List.rev keys)
 
-let compiled_key : Lir.compiled -> Instance.key = function Code t -> t.key | Data d -> d.data_key
+let compiled_key : Lir.compiled -> Instance.key = function
+  | Code t -> t.key
+  | Data d -> d.data_key
+  | Table t -> t.table_key
+  | Evidence e -> e.evidence_key
 
 let compiled_references env : Lir.compiled -> Instance.key list = function
   | Code t -> references env t
   | Data _ -> []
+  | Table t -> List.map fst t.entries
+  | Evidence e -> e.table :: e.outer
 
 let reachable env ~lookup roots =
   (* Breadth-first, so an instance's number depends only on the shape of
@@ -109,7 +117,9 @@ let test_key env ~lookup root =
     List.map
       (function
         | Lir.Code i -> Lir.encode ~path ~instance (Lir.canonical_instance i)
-        | Data d -> Lir.encode_data ~path ~instance d)
+        | Data d -> Lir.encode_data ~path ~instance d
+        | Table t -> Lir.encode_table ~path ~instance t
+        | Evidence e -> Lir.encode_evidence ~path ~instance e)
       instances
   in
   Blake3.hash

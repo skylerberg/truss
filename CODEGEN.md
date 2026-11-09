@@ -1028,7 +1028,8 @@ fact about a small input, and there are no golden files.
   to apply to generated code, which catches emitter bugs that a C compiler
   would otherwise accept quietly. The list is `-Wno-unused-parameter`, since
   an adapter ignores its environment and a trait's implementation may not
-  read every parameter.
+  read every parameter, and `-Wno-unused-but-set-variable`, since
+  `let _ = ...` computes a value that nothing reads.
 - **Output is deterministic.** A test lowers and emits the same definition
   twice and checks that the LIR and C are byte-identical.
 - **The documents' complete programs build and run,** each as a test of its

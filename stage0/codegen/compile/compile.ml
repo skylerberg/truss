@@ -38,6 +38,9 @@ let make t (key : Instance.key) : Lir.compiled =
   | Drop ty -> code (Glue.drop glue ty)
   | Copy ty -> code (Glue.copy glue ty)
   | Debug ty -> code (Glue.debug glue ty)
+  | Entry _ | Program_main _ -> code (Lower.instance t.context key)
+  | Table _ -> Table (Lower.table t.context key)
+  | Real_evidence capability -> Evidence (Lower.real_evidence t.context capability)
   | Cursor_next _ | Adapter _ -> invalid_arg ("Compile: not built yet: " ^ Instance.to_string key)
 
 let compiled t key =
@@ -71,35 +74,44 @@ let anchor t (path : Path.t) : Positions.anchor option =
           let line, _ = Source.position file.source base in
           Some { definition = path; path = Source.path file.source; first_line = line })
 
-let run_tests t ~time_limit tests =
-  let roots = List.map Lower.test_key tests in
+(* Builds what the roots reach into a program with the given startup code,
+   and runs it with [arguments]. *)
+let build_and_run t ~roots ~startup ~arguments =
   match Reachable.reachable t.context.env ~lookup:(compiled t) roots with
   | exception Invalid_argument message -> Error message
-  | instances -> (
-      let code = List.filter_map (function Lir.Code i -> Some i | Data _ -> None) instances in
-      let data = List.filter_map (function Lir.Data d -> Some d | Code _ -> None) instances in
+  | units -> (
+      let code = List.filter_map (function Lir.Code i -> Some i | _ -> None) units in
       let paths = List.sort_uniq Path.compare (List.concat_map anchored code) in
       let anchors = List.filter_map (anchor t) paths in
       let target = Memory_layout.target t.context.env in
-      let sources =
-        [
-          ("tests", Startup.tests_calling ~time_limit (List.map Instance.symbol roots));
-          ("anchors", Positions.anchors_file target anchors);
-        ]
-      in
+      let sources = [ ("startup", startup); ("anchors", Positions.anchors_file target anchors) ] in
       let output =
         Filename.concat (Filename.get_temp_dir_name ())
-          (Printf.sprintf "truss-tests-%d" (Unix.getpid ()))
+          (Printf.sprintf "truss-%d-%d" (Unix.getpid ()) (Hashtbl.hash roots))
       in
       match
         Build.program t.toolchain t.cache t.context.env t.settings
-          ~files:
-            (List.map (fun instance -> ([ (instance, Emit_c.External) ], [])) code
-            @ List.map (fun d -> ([], [ d ])) data)
+          ~files:(List.map (fun unit -> [ unit ]) units)
           ~sources ~output
       with
       | Error message -> Error message
       | Ok () ->
-          let status, out, _ = Toolchain.run output [] in
+          let result = Toolchain.run output arguments in
           (try Sys.remove output with Sys_error _ -> ());
-          Ok (status, out))
+          Ok result)
+
+let run_tests t ~time_limit tests =
+  let roots = List.map Lower.test_key tests in
+  match
+    build_and_run t ~roots
+      ~startup:(Startup.tests_calling ~time_limit (List.map Instance.symbol roots))
+      ~arguments:[]
+  with
+  | Error message -> Error message
+  | Ok (status, out, _) -> Ok (status, out)
+
+let run_program t ~main ~arguments =
+  let root = Instance.Program_main main in
+  build_and_run t ~roots:[ root ]
+    ~startup:(Startup.program_calling (Instance.symbol root))
+    ~arguments

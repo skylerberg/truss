@@ -17,3 +17,8 @@ val compiled : t -> Instance.key -> Lir.compiled
    it, returning its exit status and its output, as [Startup.tests_calling]
    describes it. *)
 val run_tests : t -> time_limit:int -> Path.t list -> (int * string, string) result
+
+(* Builds the program whose [main] is at that path, and runs it with the
+   arguments, returning its exit status, its output, and its errors. *)
+val run_program :
+  t -> main:Path.t -> arguments:string list -> (int * string * string, string) result

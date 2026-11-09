@@ -82,10 +82,17 @@ let program toolchain cache env settings ~files ~sources ~output =
   let target = Memory_layout.target env in
   let emitted =
     List.mapi
-      (fun i (instances, data) ->
-        (Printf.sprintf "file %d" i, Emit_c.file env settings.build ~data instances))
+      (fun i units ->
+        let code =
+          List.filter_map (function Lir.Code t -> Some (t, Emit_c.External) | _ -> None) units
+        in
+        let data = List.filter_map (function Lir.Data d -> Some d | _ -> None) units in
+        let tables = List.filter_map (function Lir.Table t -> Some t | _ -> None) units in
+        let evidence = List.filter_map (function Lir.Evidence e -> Some e | _ -> None) units in
+        (Printf.sprintf "file %d" i, Emit_c.file env settings.build ~data ~tables ~evidence code))
       files
   in
+
   let runtime = ("the runtime", Startup.runtime target) in
   match objects toolchain cache settings ((runtime :: emitted) @ sources) with
   | Error message -> Error message

@@ -60,7 +60,9 @@ let rvalue_moves (rvalue : Lir.rvalue) =
   | Function_value { environment; _ } -> Option.fold ~none:[] ~some:operand_moves environment
 
 let target_moves (target : Lir.target) =
-  match target with Indirect { value; _ } -> operand_moves value | Direct _ | Intrinsic _ -> []
+  match target with
+  | Indirect { value; _ } | Evidence_call { evidence = value; _ } -> operand_moves value
+  | Direct _ | Intrinsic _ -> []
 
 (* What a statement does to ownership: the places it moves out of, then the
    place it gives a value, then the place it drops. *)

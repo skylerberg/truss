@@ -6,6 +6,15 @@ type key =
   | Debug of Ground.ty
   | Cursor_next of Ground.yielding
   | Adapter of key
+  | Entry of key
+      (** The entry for an [impl]'s method of a capability: takes the evidence, then calls the
+          method on its implementation with the evidence that implementation captured *)
+  | Table of { impl : Path.t; type_arguments : Ground.argument list }
+      (** A capability [impl]'s table of entries, one for each of the capability's methods *)
+  | Real_evidence of Path.t
+      (** The evidence for the real implementation of a standard capability, which a program's
+          [main] is given *)
+  | Program_main of Path.t  (** The C [main]'s Truss side: it calls the program's [main] *)
 
 let rank = function
   | Code _ -> 0
@@ -15,6 +24,10 @@ let rank = function
   | Debug _ -> 4
   | Cursor_next _ -> 5
   | Adapter _ -> 6
+  | Entry _ -> 7
+  | Table _ -> 8
+  | Real_evidence _ -> 9
+  | Program_main _ -> 10
 
 let ( >>= ) c next = if c <> 0 then c else next ()
 
@@ -26,7 +39,11 @@ let rec compare a b =
   | Constant a, Constant b -> Path.compare a b
   | Drop a, Drop b | Copy a, Copy b | Debug a, Debug b -> Ground.compare a b
   | Cursor_next a, Cursor_next b -> Ground.compare (Cursor a) (Cursor b)
-  | Adapter a, Adapter b -> compare a b
+  | Adapter a, Adapter b | Entry a, Entry b -> compare a b
+  | Table a, Table b ->
+      Path.compare a.impl b.impl >>= fun () ->
+      Ground.compare_arguments a.type_arguments b.type_arguments
+  | Real_evidence a, Real_evidence b | Program_main a, Program_main b -> Path.compare a b
   | _ -> Int.compare (rank a) (rank b)
 
 let equal a b = compare a b = 0
@@ -43,6 +60,10 @@ let rec encode ?(path = Ground.encode_path) key =
   | Debug t -> tagged 4 [ ty t ]
   | Cursor_next yielding -> tagged 5 [ ty (Cursor yielding) ]
   | Adapter key -> tagged 6 [ encode ~path key ]
+  | Entry key -> tagged 7 [ encode ~path key ]
+  | Table { impl; type_arguments } -> tagged 8 [ path impl; arguments type_arguments ]
+  | Real_evidence capability -> tagged 9 [ path capability ]
+  | Program_main main -> tagged 10 [ path main ]
 
 (* Mangling. A Truss name is either [UpperCamelCase], with no [_], or
    [lower_snake_case], with no uppercase letter, no [__], and no [_] at
@@ -132,6 +153,10 @@ let rec mangle = function
   | Debug ty -> marker "Debug" ^ mangle_ty ty
   | Cursor_next yielding -> marker "Next" ^ mangle_yielding yielding
   | Adapter key -> marker "Adapter" ^ mangle key
+  | Entry key -> marker "Entry" ^ mangle key
+  | Table { impl; type_arguments } -> marker "Table" ^ path impl ^ mangle_arguments type_arguments
+  | Real_evidence capability -> marker "Evidence" ^ path capability
+  | Program_main main -> marker "Program" ^ path main
 
 let limit = 200
 let kept = 180
@@ -154,6 +179,10 @@ let rec to_string = function
   | Debug ty -> "debug " ^ Ground.to_string ty
   | Cursor_next yielding -> "next " ^ Ground.to_string (Cursor yielding)
   | Adapter key -> "adapter " ^ to_string key
+  | Entry key -> "entry " ^ to_string key
+  | Table { impl; type_arguments } -> "table " ^ Path.show impl ^ arguments_to_string type_arguments
+  | Real_evidence capability -> "real evidence " ^ Path.show capability
+  | Program_main main -> "program " ^ Path.show main
 
 and arguments_to_string = function
   | [] -> ""

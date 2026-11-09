@@ -32,3 +32,8 @@ val main_calling : string -> string
    block of the test's echo output, give their length in bytes and then the
    bytes. The program exits with 1 if any test did not pass. *)
 val tests_calling : time_limit:int -> string list -> string
+
+(* A C [main] that installs the stack-overflow handler and calls [entry]
+   with the program's arguments, the generated Truss side of startup, and
+   exits with the status it returns. *)
+val program_calling : string -> string
