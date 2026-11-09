@@ -21,11 +21,10 @@ Nothing is built yet. This is the design agreed so far.
 ## Source files
 
 - Source files are UTF-8. There is no other encoding and no setting for one.
-- Each language version names one Unicode version, and every rule here that
-  depends on Unicode, such as which characters names can use, which
-  characters are invisible, and which names look alike, follows that version.
-  It changes only with a new language version. A string can still hold a
-  character from a later Unicode version.
+- Each language version names one Unicode version, and the rules here that
+  depend on Unicode, such as which characters are invisible, follow that
+  version. It changes only with a new language version. A string can still
+  hold a character from a later Unicode version.
 - A byte order mark is allowed only as the very first character, and is
   ignored.
 - Tabs count as whitespace, like spaces.
@@ -58,30 +57,10 @@ Nothing is built yet. This is the design agreed so far.
   contain `_`. Any other name is `lower_snake_case`: it has no uppercase
   letters, and `_` appears only singly, between parts. Names cannot start or
   end with `_`. `_` on its own is the wildcard pattern.
-- Names can use letters from any script, following Unicode's rules for
-  identifiers ([UAX #31](https://www.unicode.org/reports/tr31/)): a letter,
-  then letters, digits, and joining marks. Keywords and the standard library
-  use only ASCII.
-- Only characters that Unicode recommends for identifiers are allowed: those
-  with `Identifier_Status=Allowed` in UTS #39. This leaves out look-alike
-  forms such as mathematical bold `𝐟𝐢𝐥𝐞`, fullwidth `ｆｉｌｅ`, the
-  ligature `ﬁ`, the fullwidth `＿`, and Roman numerals such as `Ⅻ`, as well as
-  historic scripts.
-- The zero-width joiner and non-joiner cannot appear in names, though some
-  scripts, such as Persian, use them in words. They may be allowed later, in
-  the places UAX #31 permits them.
-- Letters from scripts without case, such as Chinese or Arabic, count as
-  lowercase, so a name written in them is a value or function. A type name in
-  such a script starts with an uppercase Latin letter.
-- A name must be in Unicode Normalization Form C, so two names that look the
-  same are spelled the same. `truss fmt` converts names to it.
-- Names cannot be made to look like other names
-  ([UTS #39](https://www.unicode.org/reports/tr39/)). A name mixes Latin with
-  at most one other script, and never mixes Latin with Cyrillic or Greek. Two
-  names visible in the same package that Unicode lists as confusable, such as
-  Latin `paypal` and a Cyrillic look-alike, are an error. Two names made only of
-  ASCII are never compared, so `modern` and `modem` can both be used, though
-  Unicode lists `m` as confusable with `rn`.
+- Names use only ASCII: a letter from `a` to `z` or `A` to `Z`, then letters,
+  digits, and `_`. A letter from another script, such as `é` in `café`, is
+  an error. Text in any language goes in strings, including test names, as in
+  `test "café counts accents"`. See [DESIGN.md](DESIGN.md#naming).
 - By convention, names are made of whole words: `items`, not `xs`; `config`,
   not `cfg`; `length`, not `len`. Single letters are kept for loop indices
   such as `i` and `j`. This applies to generic parameters too: `[Element]` and

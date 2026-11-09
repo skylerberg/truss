@@ -1,0 +1,5 @@
+(test
+ (name lexer_tests)
+ (libraries source diagnostic token layout lexer unicode zarith)
+ (deps
+  (glob_files %{workspace_root}/*.md)))

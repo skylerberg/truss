@@ -1,0 +1,3 @@
+(executable
+ (name fuzz)
+ (libraries source diagnostic token lexer zarith))

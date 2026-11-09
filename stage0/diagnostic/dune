@@ -1,0 +1,3 @@
+(library
+ (name diagnostic)
+ (libraries source unicode))

@@ -1,0 +1,8 @@
+(executable
+ (name generate)
+ (modules generate))
+
+(executable
+ (name conformance)
+ (modules conformance)
+ (libraries unicode))

@@ -4,7 +4,8 @@ This document designs the stage0 lexer. It implements the lexical grammar in
 [GRAMMAR.md](GRAMMAR.md), and the rules in [SYNTAX.md](SYNTAX.md) and
 [DESIGN.md](DESIGN.md) behind it. Where this design departs from those
 documents, it says so. The changes this design made to those documents are
-listed at the end. Nothing is built yet.
+listed at the end. The lexer is built, in [`stage0/`](stage0); the last
+section lists what building it settled.
 
 ## What the lexer does
 
@@ -18,16 +19,13 @@ The lexer:
   forbidden characters
 - splits it into tokens: names, keywords, numbers, strings with their
   interpolations already lexed, and punctuation
-- checks each name on its own: case rules, normalization, allowed characters,
-  and scripts
+- checks each name on its own: ASCII and the case rules
 - decides which line breaks are `NEWLINE` tokens, and matches brackets
 - recognizes habits from other languages and reports each with an exact fix
 
 It does not:
 
 - know the grammar, beyond brackets and strings
-- check names against each other. Confusable names are found by a later stage
-  that sees every name visible in a package.
 - decide what `name[...]` means, or what type a literal has
 - round float literals. The type checker does that once it knows the type.
 
@@ -83,9 +81,34 @@ lookahead across lines.
 | `Layout` | `NEWLINE` tokens and bracket matching |
 | `Lexer` | The entry point: `Lexer.lex : Source.t -> Token.t array * Diagnostic.t list` |
 
-Each module is its own dune library, so the parser depends only on `Token` and
-`Lexer`, and the formatter and language server can reuse `Source` and
-`Diagnostic`.
+Each module is its own dune library under `stage0/`, so the parser depends
+only on `Token` and `Lexer`, and the formatter and language server can reuse
+`Source` and `Diagnostic`. The scanner's library holds:
+
+| Module | Job |
+|---|---|
+| `Cursor` | The scanner's state and byte-level helpers |
+| `Source_text` | UTF-8, forbidden characters, line breaks, and removing trivia |
+| `Trivia` | Comments, `;`, and characters Truss does not use |
+| `Strings` | Ordinary and raw strings, escapes, interpolations, and character literals |
+| `Names`, `Numbers` | The checks on one name or one number literal |
+| `Scanner` | The loop that finds the next token, and punctuation |
+
+The scanner's loop looks at each position once and decides there whether
+it holds trivia or the start of a token, so no second place has to agree
+with it. It stops at every line break: between tokens, the line break is
+trivia, and in an interpolation it is an error. Each scanner for a
+construct that must end on its line, such as an interpolation or an
+ordinary string, returns whether it was `Closed` or `Cut_off` by an error
+already reported, and an enclosing construct that must end on its line
+then ends too, without another error. The dune
+project is at the repository root, so that tests can read the documents.
+`stage0/bin/truss_lex.ml` builds `truss-lex`, which prints a file's
+diagnostics, as JSON with `--json`, and its tokens with `--tokens`.
+
+The scanner uses Layout too: it lays out each interpolation's tokens as it
+reads them, as [Interpolation](#interpolation) asks, so `Layout` defines the
+input both of its uses take.
 
 ### Hand-written, not generated
 
@@ -172,7 +195,7 @@ language does and the rules would have to know every emoji and script.
 ## Tokens
 
 ```ocaml
-type span = { start : int; stop : int }
+type span = private { start : int; stop : int }   (* made only by Source.span *)
 
 type token = {
   kind : kind;
@@ -188,7 +211,7 @@ and kind =
   | Keyword of keyword
   | Reserved of reserved              (* as, async, loop, ... *)
   | Integer of Z.t
-  | Float of { significand : Z.t; exponent : Z.t }   (* significand × 10^exponent, exactly *)
+  | Float of Decimal.t                (* significand × 10^exponent, exactly *)
   | String of string_literal
   | Punctuation of punctuation
   | Foreign of foreign                (* ++, --, and others the parser reports *)
@@ -198,8 +221,8 @@ and kind =
 and string_literal = {
   tag : (string * span) option;
   form : form;
-  texts : text array;                 (* always one more than interpolations *)
-  interpolations : interpolation array;
+  first : text;
+  rest : (interpolation * text) array;
 }
 
 and form = Ordinary | Raw of { quotes : int; dollars : int; multi_line : bool }
@@ -219,10 +242,15 @@ and interpolation = { tokens : token array; span : span }
   decimal value, and the type checker rounds once, to the type it decides.
   The significand has its trailing zeros removed, so `1.50` and `1.5` have
   the same value.
-- **A string's texts and interpolations alternate.** `texts` always has one
-  more entry than `interpolations`, which is the shape of a `Template`:
-  `"a${x}b"` has the texts `"a"` and `"b"`, and `"${x}"` has two empty texts.
-  This holds for untagged strings too.
+- **A string's texts and interpolations alternate,** starting and ending
+  with a text, which is the shape of a `Template`: `"a${x}b"` has `first`
+  `"a"` and `rest` `[(x, "b")]`, and `"${x}"` has two empty texts. The type
+  allows no other shape. This holds for untagged strings too.
+- **Types rule out what must not happen.** A span is built only by
+  `Source.span`, which checks `start <= stop`. `Decimal.make` removes
+  trailing zeros, and is the only way to build a float's value. Brackets are
+  `Open` and `Close` of a `bracket`, so matching them is comparing two
+  values.
 - **An interpolation is a nested token array,** already laid out. The parser
   parses each one as an expression from its own array. This matches
   GRAMMAR.md's single `STRING` token, keeps the outer token stream flat, and
@@ -241,25 +269,27 @@ and interpolation = { tokens : token array; span : span }
 
 ### Scanning
 
-- A name starts with an `XID_Start` character and continues with
-  `XID_Continue` characters. `_` is `XID_Continue` but not `XID_Start`.
+- A name is ASCII letters, digits, and `_`, starting with a letter. The
+  scanner reads a word as Unicode defines one, an `XID_Start` character and
+  then `XID_Continue` characters, so that `café` is one name with one error,
+  not the name `caf` followed by a stray character.
 - `_` on its own is `Underscore`. `_` followed by name characters is an
   error, since names cannot start with `_`. The fix removes the leading
   underscores.
-- A name made only of ASCII is looked up in the keyword table. Keywords are
-  ASCII, so other names skip the lookup.
+- A name is looked up in the keyword table.
 - A reserved word becomes a `Reserved` token, and the **parser** reports it.
   A good fix depends on the construct around it: `x as Int64` becomes
   `Int64.from(x)`, and `loop {` becomes `while true {`.
 
 ### Classification and checks
 
-A name that is not a keyword is an `Upper` name if its first character has the
-general category `Lu` or `Lt`, and a `Lower` name otherwise. It is then
-checked:
+A name that is not a keyword is an `Upper` name if its first letter is
+uppercase, and a `Lower` name otherwise. It is then checked:
 
-1. **Case rules.** An `Upper` name contains no `_`. A `Lower` name contains no
-   `Lu` or `Lt` character, does not start or end with `_`, and has no `__`.
+1. **ASCII.** A letter outside ASCII is an error that names it. There is no
+   fix, since no spelling can be chosen for the author.
+2. **Case rules.** An `Upper` name contains no `_`. A `Lower` name contains no
+   uppercase letter, does not start or end with `_`, and has no `__`.
    Each violation gets a fix that rewrites the name into the right form:
 
    | Written | Fix |
@@ -272,24 +302,9 @@ checked:
    Every use of a misspelled name gets the same fix, so applying every fix in a
    file renames the name consistently. Renaming a definition across files is
    the rename tool's job.
-2. **Normalization Form C.** If every character has `NFC_Quick_Check=Yes`, the
-   name is already in NFC. Otherwise the scanner normalizes it and compares.
-   The fix replaces the name with its NFC form.
-3. **Allowed characters.** Every character must have
-   `Identifier_Status=Allowed` under
-   [UTS #39](https://www.unicode.org/reports/tr39/). ZWJ and ZWNJ are not
-   `XID_Continue`, so a name stops before one, and the error says that joiners
-   are not supported in names yet.
-4. **Scripts.** The name must meet UTS #39's Moderately Restrictive level,
-   worked out from `Script_Extensions` as section 5.2 describes. The message
-   names the scripts it found.
 
-A name that is all ASCII needs only the case rules, so the other checks cost
-nothing in ordinary code. Each check depends only on the name, which is why it
-belongs in the lexer and not in a later stage. The `Unicode` module also
-provides UTS #39's `skeleton` function, for the later check of names across a
-package. That check compares only pairs in which at least one name contains a
-character outside ASCII, so a package of ASCII names never runs it.
+Each check depends only on the name, so each spelling is checked once per
+file.
 
 ## Numbers
 
@@ -413,19 +428,22 @@ For a raw string opened with *q* quotes and *n* dollar signs:
    - A line that holds only whitespace and does not start with the indentation
      becomes an empty line, since nothing visible can be lost.
    - Any other line is an error. The error points at the first character that
-     differs from the indentation and shows tabs and spaces visibly. There is
-     no automatic fix, since the intended indentation is not clear.
+     differs from the indentation and shows tabs and spaces visibly. The fix
+     replaces the line's leading whitespace with the indentation, since the
+     usual cause is a tab among spaces or the reverse.
    - The check looks at the text before any interpolation on the line, so an
      interpolation cannot start inside the indentation.
    - The line breaks just after the opening delimiter and just before the
      closing line are not part of the value. Every other line break is a line
      feed.
-6. **An unterminated string** swallows the rest of the file unless the
-   scanner guesses where it ends. It ends the string before the first
-   non-blank line that is indented less than the line holding the opening
-   delimiter, or before the first line that starts with a definition keyword
-   in column 0. The error offers a fix that inserts the closing delimiter
-   there.
+6. **An unterminated string** runs to the end of the file, with one error at
+   its opening delimiter and no fix, as in Rust, Python, and Go. The scanner
+   does not guess where the string was meant to end and lex the rest as code:
+   errors in the code after it are reported once the string is closed. Like
+   Rust, which points at a likely terminator, the error has a note at the
+   line where the string seems to end: the first non-blank line indented less
+   than the line holding the opening delimiter, or the first line where a
+   definition starts in column 0.
 
 The span of a text piece covers its source, including indentation that the
 value leaves out.
@@ -472,10 +490,10 @@ each sequence is already an error. Habits fall into two groups:
 | Written | Group | What the lexer emits | Fix |
 |---|---|---|---|
 | `// ...`, `/// ...`, `# ...` | local | Nothing, up to the end of the line | Remove the comment |
-| `/* ... */`, nested | local | Nothing. If the comment spans lines, the next token counts as starting a new line. | Remove the comment |
+| `/* ... */`, nested | local | Nothing. If the comment spans lines, the next token counts as starting a new line. | Remove the comment. An unterminated one runs to the end of the file and has no fix. |
 | `#[derive(...)]`, `#![...]` *Later* | local | Nothing, up to the end of the line | "Truss has no attributes", pointing to `derives` |
 | `;` | local | At the end of a line, nothing. Mid-line, the next token counts as starting a new line. | Remove the `;`, or replace it with a line break |
-| `===`, `!==` | local | `==`, `!=` | `==`, `!=` |
+| `===`, `!==` | local | `==`, `!=` | `==`, `!=`. A longer run, such as `====`, is not this habit, and lexes as `==`s. |
 | `<>` *Later* | local | `!=` | `!=` |
 | `...` *Later* | local | `..=` between two operands, otherwise `todo` | `..=`, or `todo` for a placeholder body |
 | `..<` *Later* | local | `..` | `..` |
@@ -490,6 +508,16 @@ each sequence is already an error. Habits fall into two groups:
   the whitespace before it, to the end of the line. A line left empty is
   deleted entirely. The message says where the comment's content belongs: in a
   name, a contract, or a test.
+- **Removing trivia.** Comments, `;`, and forbidden characters in code all
+  lex as whitespace, and their fixes are built by one function. It removes the
+  text and the whitespace around it, or the whole line if nothing else is on
+  it. Between two tokens it leaves a space, or a line break with the line's
+  indentation where the removed text acted as one, so that the tokens stay
+  apart: removing a character from `""`, a character, and `"` must not make
+  `"""`.
+- **`'`.** A character literal from another language, `'a'` or `'\n'`,
+  becomes the tagged string `Character"a"`, with a fix. Any other `'` is an
+  error without a fix, and is skipped.
 - **Look-alike punctuation** (*Later*) is a small, hand-picked table: curly quotes
   `“ ” ‘ ’` become `"` and `'`; fullwidth `（ ） ［ ］ ｛ ｝ ， ： ； ＝` become
   their ASCII forms; no-break and other Unicode spaces become a space; `–` and
@@ -531,7 +559,12 @@ at the end: if the last token can end a statement, emit NEWLINE; then END_OF_FIL
   against GRAMMAR.md.
 - A closing `}` cannot begin a statement, so no `NEWLINE` comes before one.
   The parser still skips a `NEWLINE` before a `{` that must open a body.
-- Each interpolation's tokens are a separate array with their own stack.
+- Each interpolation's tokens are a separate array with their own stack. An
+  interpolation cut off by an error the scanner already reported, such as a
+  line break, closes its open brackets without another error.
+- GRAMMAR.md leaves out the foreign tokens `++` and `--`, which no rule
+  accepts. Layout treats them as able both to end and to begin a statement,
+  so that `i++` stays on a line of its own for the parser to report.
 
 ### Brackets
 
@@ -550,12 +583,29 @@ brackets:
   `capability`, `let`, `test`, `theorem`, `proof`, `use`, `public`,
   `internal`) closes every open bracket. `truss fmt` starts every definition
   in column 0, so a missing `}` in one definition cannot swallow the
-  definitions after it. The error points at the innermost unclosed opener, and
-  its fix inserts the closer before that line. Only a broken file runs again,
-  so valid code is never affected, however it is laid out.
+  definitions after it. The error points at the innermost unclosed opener,
+  and its fix closes every open bracket. Only a broken file runs again, so
+  valid code is never affected, however it is laid out.
+- **A file that ends inside an unterminated comment or raw string** has its
+  open brackets closed without another error. They are part of what the
+  comment or string swallowed, and closing it is the fix that matters. An
+  interpolation cut off by an error closes its brackets the same way.
 
 Inserted closers are zero-width, so the parser can tell them apart and avoid
 reporting the same mistake again.
+
+**Where a fix puts a missing closer.** The token stream shows where a bracket
+was found unclosed, which is often far from where it was meant to close, as
+in `let x = [1, 2` followed by `g(x)`. As rustc does, the indentation decides
+instead. Among the elements directly inside the bracket, where an element is
+a token or a whole nested group, the closer goes after the last one on a line
+indented more than the opener's line, or else after the last one on the
+opener's line. So `[1, 2` becomes `[1, 2]`, a closer never lands inside a
+nested group or inside a comment that ends the line, and a `}` goes on a line
+of its own at the opener's indentation. When the bracket's last element is a
+string cut off at the end of its line, the string probably swallowed the
+closer, and the bracket gets no fix: closing the string is the fix that
+matters.
 
 ## Diagnostics
 
@@ -564,7 +614,8 @@ type edit = { span : span; replacement : string }
 type fix = { title : string; edits : edit list }
 
 type t = {
-  code : string;                  (* stable, such as "lexer.unterminated_string" *)
+  code : Code.t;                  (* Lexer of lexer, and a group for each later stage;
+                                     Code.name gives "lexer.unterminated_string" *)
   message : string;
   span : span;
   notes : (span * string) list;
@@ -580,35 +631,48 @@ type t = {
   on message text.
 - A diagnostic may offer alternative fixes, as `0755` does.
 - Applying any fix must remove its diagnostic without adding another from the
-  lexer. A test applies every fix across the test corpus and lexes the result
-  again.
+  lexer. Each fix has a focused test, and the fuzzer checks this for a
+  mistake inserted into each document example. Fixes are not checked while
+  lexing: that could only show that a fix lexes cleanly, not that it is
+  what the author meant, and it made every change to the lexer keep a subtle
+  argument true. A fix offered for an error that only arises where two
+  recoveries meet may leave an error behind; lexing again shows it.
+- An error with no exact fix gets none, even where a guess would usually be
+  right: an agent applies fixes without reading them, so a wrong fix is
+  worse than none. A closer that matches nothing has no fix, since an extra
+  `}` is as often a missing `{`.
 - A file lists at most 200 diagnostics, then gives a count of the rest, so a
-  binary file opened by mistake gives a short report.
+  binary file opened by mistake gives a short report. The lexer keeps every
+  diagnostic, and `Diagnostic.shown` applies the limit when they are
+  listed.
+- Messages never copy bytes that are not valid UTF-8; they describe them,
+  as in "the byte 0xFF", and JSON output is always valid UTF-8.
 
 ## Unicode data
 
 - **One Unicode version, named by the language version.** All tables come
-  from that version's data files. Stage0 starts from the latest Unicode
-  version at the time the tables are first generated.
-- **A generator in `tools/`** downloads the UCD and UTS #39 data files of that
-  version, checks each against a SHA-256 hash recorded in the repository, and
-  writes `unicode_tables.ml`. Only the generated module, the list of source
+  from that version's data files. Stage0 starts from Unicode 18.0.0, the
+  latest when the tables were first generated.
+- **A generator in `stage0/tools/unicode/`** downloads the UCD data files of
+  that version, checks each against a SHA-256 hash recorded in
+  `sources.txt`, and writes `stage0/unicode/unicode_tables.ml`.
+  `regenerate.sh` runs the whole process. Only the generated module, the list of source
   URLs, and their hashes are checked in, which keeps the repository small and
   the output reproducible. Building the compiler never downloads anything;
   only regenerating the tables does.
 - **Tables** are sorted arrays of code point ranges, searched by binary search,
   with a 128-entry table for ASCII.
-- **Properties used:** `XID_Start` and `XID_Continue`, `Default_Ignorable_Code_Point`
-  (`DerivedCoreProperties.txt`); `Bidi_Control` and `Variation_Selector`
-  (`PropList.txt`); the general categories `Lu`, `Lt`, and `Cc`
-  (`DerivedGeneralCategory.txt`); `NFC_Quick_Check`
-  (`DerivedNormalizationProps.txt`); `Script` and `Script_Extensions`;
-  `Identifier_Status` (`IdentifierStatus.txt`) and `confusables.txt` from UTS
-  #39.
-- **NFC is implemented directly** from the decompositions, combining classes,
-  and composition exclusions in `UnicodeData.txt` and
-  `CompositionExclusions.txt`. It is a few hundred lines, and the UCD's own
-  `NormalizationTest.txt` serves as its conformance test.
+- **Properties used:** `XID_Start` and `XID_Continue`, to find words, and
+  `Default_Ignorable_Code_Point` (`DerivedCoreProperties.txt`);
+  `Bidi_Control` and `Variation_Selector` (`PropList.txt`); and the general
+  category `Cc` (`DerivedGeneralCategory.txt`). The forbidden characters are
+  combined into one table when the tables are generated.
+- **Names of characters** in messages come from `UnicodeData.txt`, or from
+  `NameAliases.txt` for control characters, which `UnicodeData.txt` calls
+  `<control>`. Only the forbidden characters' names are kept.
+- **Conformance.** After writing the tables, `regenerate.sh` checks each
+  property against the data file it came from, for every code point. The
+  data files are not checked in, so this runs only when the tables change.
 - The only library the lexer needs is Zarith.
 
 ## Interfaces to other stages
@@ -634,24 +698,28 @@ type t = {
 
 ## Testing
 
-- **Golden tests.** Small `.truss` files, each with the expected tokens and
-  diagnostics, compared using dune's `diff` actions. This needs no test
-  library.
-- **The documents as a corpus.** Every ` ```truss ` block in SYNTAX.md,
-  DESIGN.md, and GRAMMAR.md must lex with no diagnostics. This keeps the
-  examples honest.
+The tests follow IMPLEMENTATION.md's rules for testing: each states one
+fact about a small input.
+
+- **Focused tests** in `stage0/test/lexer_tests.ml`, grouped by section of
+  this document. A test gives an input and asserts its tokens, shown
+  compactly, or its one diagnostic: the code, where it starts, and the exact
+  text each fix produces, which must lex cleanly.
 - **The documents agree with the code.** Tests read the keyword lists, the
   punctuation list, and the line-break sets from GRAMMAR.md and compare them
   with `Token` and `Layout`.
-- **Fixes work.** Every fix in the corpus is applied, and the result is lexed
-  again (see [Diagnostics](#diagnostics)).
-- **Round trips.** Random sequences of valid tokens, printed with spaces in
-  between, lex back to the same tokens.
-- **Robustness.** Random bytes, and corpus files with random mutations, never
-  raise an exception, always finish, and always produce spans that are in
-  bounds and in order. A fuzzer such as AFL can drive this later.
-- **Unicode conformance.** `NormalizationTest.txt` for NFC, and spot checks of
-  each generated table against the data file it came from.
+- **The documents' examples lex cleanly.** Each ` ```truss ` block in a
+  Markdown document at the root of the repository is a test of its own, so a
+  new document is covered without being listed.
+- **The fuzzer**, `stage0/tools/fuzz`, is run by hand. It checks that no
+  input raises or gives spans out of bounds or out of order, that for one
+  mistake inserted into a document example every fix removes its error and
+  adds no other, and that valid tokens round-trip. Each problem it finds becomes a
+  focused test.
+- **The benchmark**, `stage0/tools/benchmark`, measures throughput on given
+  files.
+- **Unicode conformance** runs with `regenerate.sh` (see
+  [Unicode data](#unicode-data)).
 - **Both parsers.** Tokens from the corpus go to the Menhir reference as well as
   the hand-written parser, as IMPLEMENTATION.md plans.
 
@@ -669,7 +737,8 @@ that it costs almost nothing; Truss does not lead the way on rules like these.
 - **Decimal literals have no leading zeros** (P3), as in Python 3 and
   JavaScript's strict mode.
 - **Names use only UTS #39's allowed characters, and two ASCII names are never
-  compared for confusability** (P4), as in Rust.
+  compared for confusability** (P4), as in Rust. Building the lexer replaced
+  this with ASCII-only names (see the next section).
 - **The line-break rule is Scala's** (P7): a `NEWLINE` comes exactly where the
   token before can end a statement and the token after can begin one.
 - **Raw-string whitespace is fully specified:** spaces after an opening `"""`
@@ -677,9 +746,44 @@ that it costs almost nothing; Truss does not lead the way on rules like these.
   indentation is empty.
 
 Considered and left out, because no other language does them and each has a
-cost: checking names for mixed numbering systems and for look-alikes of
-keywords; allowing ZWJ and ZWNJ in names, which was deferred; limiting where
+cost: limiting where
 joiners and variation selectors may appear in strings, forbidding U+2028 and
 U+2029, and requiring string literals in NFC (P5); rejecting `"$name"` (P6);
 and making `test`, `proof`, `law`, `theorem`, and `capability` contextual
 keywords (P8).
+
+## What building the lexer settled
+
+Building the lexer settled these points, which the sections above now
+describe:
+
+- **Unicode 18.0.0** is the pinned version.
+- **Names are ASCII.** Supporting every script safely took NFC, script
+  restriction levels, `Identifier_Status`, case mappings, and a check for
+  confusable names across a package, and all of it changes with each Unicode
+  version. ASCII names, as in Zig and Gleam, rule out look-alike names
+  instead.
+- **An unterminated raw string runs to the end of the file,** as in Rust,
+  Python, and Go, with a note at the line where it seems to end. Guessing the
+  end and lexing what follows as code took a second scan and interacted
+  badly with other recovery.
+- **Fixes are made right, not checked while lexing.** An earlier version
+  lexed the result of each fix again and dropped any that failed. It could
+  not tell a fix that was wrong but lexed cleanly, it needed a subtle
+  argument that part of a file lexes the same on its own, and it hid bugs in
+  how fixes are made. The fuzzer found those bugs instead, and each is now a
+  focused test.
+- **A missing closer goes where the indentation says,** as rustc's hints do,
+  not where the bracket is found unclosed.
+- **One function removes trivia,** so a fix for a comment, a `;`, or a
+  forbidden character never joins the tokens around it.
+- **Errors do not cascade out of an interpolation.** One cut off by a line
+  break or a broken nested string closes its brackets silently.
+- **The foreign tokens `++` and `--`** can end and begin a statement.
+- **The diagnostic limit applies when listing,** not when collecting.
+- **What must hold is in the types where it can be:** spans, string shapes,
+  normalized floats, brackets, and diagnostic codes.
+- **Inside a multi-line raw string,** a run of more quotes than the delimiter
+  after text on a line is an error and stays text. On a line of its own, it
+  closes the string, also with an error.
+

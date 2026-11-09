@@ -1,0 +1,9 @@
+# The Unicode 18.0.0 data files the tables in stage0/unicode are generated
+# from, with their SHA-256 hashes. regenerate.sh downloads each file and checks
+# its hash before using it. Changing the Unicode version means changing every
+# line here, which comes with a new language version.
+0736451de439ae7baf1425136617da495e09ee5afbe6e394374db7009ea08950 https://www.unicode.org/Public/18.0.0/ucd/UnicodeData.txt
+09c928886a178fcafd93c29e4bd59073a058e5a100b716d425cb563ab50f68c9 https://www.unicode.org/Public/18.0.0/ucd/DerivedCoreProperties.txt
+f438f532e8737bb8a2702126cdf9c4af5e357c58c7acf9d9eb2fc7c1a1d955d6 https://www.unicode.org/Public/18.0.0/ucd/PropList.txt
+d6b151d2d40ee9b1876d26f417980f45ffae47b6055ccf7203cb31f07a030f94 https://www.unicode.org/Public/18.0.0/ucd/extracted/DerivedGeneralCategory.txt
+3d5cf5e468901b080cd99adf2230061b748083705fe633db43ac8b73ec7a13da https://www.unicode.org/Public/18.0.0/ucd/NameAliases.txt
