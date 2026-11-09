@@ -135,6 +135,7 @@ let describe names base (target : Resolve.target option) =
   | Some (Field name) -> "field " ^ name
   | Some Result_value -> "result"
   | Some Old -> "old"
+  | Some Identical -> "identical"
   | Some (Cost_function _) -> "cost function"
   | Some Unknown -> "unknown"
 

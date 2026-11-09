@@ -24,6 +24,12 @@ module Ids = Map.Make (Int)
 
 exception Unsupported of span * string
 
+(* Something the prover cannot read in another definition's tree, such as
+   a callee's contract, whose span means nothing in this one. The nearest
+   expression of the definition being proven reports it, with its own
+   span. *)
+exception Foreign_unsupported of string
+
 let unsupported span format =
   Printf.ksprintf (fun message -> raise (Unsupported (span, message))) format
 
@@ -86,6 +92,7 @@ type context = {
   fits : (int * T.ty) list;  (** The type checker's [Integer_fits] obligations, by expression. *)
   mutable output : T.ty option;  (** What the function proven returns, for [?]. *)
   graph : Call_graph.t;  (** The package's call graph, for recursion in cycles. *)
+  home : Names.key;  (** The definition being proven, whose tree spans and obligations are in. *)
   mutable laws_assumed : string list;  (** Each trait and type whose laws are facts already. *)
 }
 
@@ -107,8 +114,11 @@ let fresh context prefix sort =
   declare context (L.Constant (name, sort));
   L.Symbol name
 
+(* A fact is guarded by its path's condition. Inside a quantifier, either
+   may mention a bound variable, and such a fact has no place outside the
+   quantifier, so it is left out, which is always sound. *)
 let assume context frame fact =
-  if not (L.mentions frame.bound fact) then
+  if not (L.mentions frame.bound fact || L.mentions frame.bound frame.condition) then
     match fact with
     | L.Boolean true -> ()
     | _ -> context.facts <- L.( ==> ) frame.condition fact :: context.facts
@@ -118,7 +128,8 @@ let assume context frame fact =
    left to the definition of the quantifier's body, which this stage does
    not check yet. *)
 let oblige context frame code span message goal =
-  if frame.checking && not (L.mentions frame.bound goal) then begin
+  if frame.checking && not (L.mentions frame.bound goal || L.mentions frame.bound frame.condition)
+  then begin
     let guarded = L.( ==> ) frame.condition goal in
     context.obligations <-
       {
@@ -627,8 +638,19 @@ let comparison operator =
   | _ -> None
 
 let rec expression context frame (written : expression) : (frame * L.term) option =
-  let result = expression_kind context frame written in
-  (match (result, List.assoc_opt written.id context.fits) with
+  let home = frame.source.key = context.home in
+  let result =
+    if home then
+      try expression_kind context frame written
+      with Foreign_unsupported message -> raise (Unsupported (written.span, message))
+    else
+      try expression_kind context frame written
+      with Unsupported (_, message) ->
+        raise
+          (Foreign_unsupported
+             (Printf.sprintf "%s, in `%s`" message (Names.show_key frame.source.key)))
+  in
+  (match (result, if home then List.assoc_opt written.id context.fits else None) with
   | Some (after, value), Some ty ->
       oblige context after Fits written.span
         (Printf.sprintf "`%s` may not fit in `%s`." (quote frame.source written.span) (T.show ty))
@@ -991,6 +1013,14 @@ and quantified context frame (written : expression) quantifier binder body =
 and call context frame (written : expression) callee_expression arguments =
   let source = frame.source in
   match callee_expression.kind with
+  | Name path when source.resolved.names.(path.last.id) = Some Identical -> (
+      (* Identity, for every type: the solver's equality. *)
+      match arguments with
+      | [ { value = first; _ }; { value = second; _ } ] ->
+          let frame, first_value = value context frame first in
+          let frame, second_value = value context frame second in
+          Some (frame, L.equal first_value second_value)
+      | _ -> unsupported written.span "`identical` with other than two arguments")
   | Name path when source.resolved.names.(path.last.id) = Some Old -> (
       match arguments with
       | [ { value = inner; _ } ] ->
@@ -1000,7 +1030,9 @@ and call context frame (written : expression) callee_expression arguments =
       | _ -> unsupported written.span "`old` with other than one argument")
   | _ -> (
       match source.checked.calls.(written.id) with
-      | None -> unsupported written.span "a call the type checker did not resolve"
+      | None ->
+          unsupported written.span "a call the type checker did not resolve, `%s`"
+            (quote source written.span)
       | Some call_ -> resolved_call context frame written call_)
 
 and resolved_call context frame (written : expression) (call_ : C.call) =
@@ -1512,7 +1544,7 @@ and law_fact context frame source trait ty (law : law) =
                ( List.map2 (fun symbol ty -> (symbol, sort_of context ty)) symbols types,
                  L.( ==> ) (L.( &&& ) range premise) holds ))
       | None -> None
-    with Unsupported _ -> None
+    with Unsupported _ | Foreign_unsupported _ -> None
   end
 
 and signature_terminates context path =
@@ -1945,7 +1977,7 @@ and validity context frame ~assuming ?(deep = true) ?(seen = []) ty term =
           in
           try
             L.conjunction (List.map (fun invariant -> snd (value context inner invariant)) written)
-          with Unsupported _ when assuming -> L.Boolean true)
+          with Unsupported _ | Foreign_unsupported _ when assuming -> L.Boolean true)
       | None -> L.Boolean true
     in
     let fields =
@@ -2202,7 +2234,7 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
           match block_value context unfolding body with
           | Some (_, defined) -> assume context after (L.( ==> ) required (L.equal result defined))
           | None -> ()
-        with Unsupported _ -> ())
+        with Unsupported _ | Foreign_unsupported _ -> ())
     | _ -> ());
     (* The [ensures], after, where the [requires] held: [mut] parameters
        have their new values, and [old] the ones they had. *)
@@ -2661,8 +2693,9 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
 
 (* Definitions *)
 
-let new_context database ~current ~terminates ~measures checked =
+let new_context database ~home ~current ~terminates ~measures checked =
   {
+    home;
     graph = Query.demand database Call_graph.graph (Path.package current);
     laws_assumed = [];
     database;
@@ -2732,7 +2765,9 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
       (fun (clause : clause) -> match clause.kind with Decreases measures -> measures | _ -> [])
       signature.clauses
   in
-  let context = new_context database ~current:path ~terminates ~measures source.checked in
+  let context =
+    new_context database ~home:source.key ~current:path ~terminates ~measures source.checked
+  in
   context.parameters <- signature.parameters;
   costs_unproven context signature.clauses;
   (match Query.demand database Interface.Environment.signature path with
@@ -2933,7 +2968,10 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
    values of its parameters, after the bodies of the [proof]s written for
    it. *)
 let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
-  let context = new_context database ~current:impl ~terminates:false ~measures:[] source.checked in
+  let context =
+    new_context database ~home:source.key ~current:impl ~terminates:false ~measures:[]
+      source.checked
+  in
   let start =
     {
       source;
@@ -2995,7 +3033,10 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
 
 let test database (source : source) ~path (body : block) =
   reject_checker_obligations source;
-  let context = new_context database ~current:path ~terminates:false ~measures:[] source.checked in
+  let context =
+    new_context database ~home:source.key ~current:path ~terminates:false ~measures:[]
+      source.checked
+  in
   let start =
     {
       source;

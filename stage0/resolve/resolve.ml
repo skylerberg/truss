@@ -14,6 +14,7 @@ type target = Walk.target =
   | Field of string
   | Result_value
   | Old
+  | Identical
   | Cost_function of cost_function
   | Unknown
 

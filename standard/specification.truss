@@ -1,0 +1,132 @@
+public opaque type Sequence[Element] = todo
+
+public fn Sequence[Element].empty() -> Sequence[Element]
+  ensures result.length() == 0
+  cost time finite
+{
+  todo
+}
+
+public fn Sequence[Element].length(self) -> Integer
+  ensures result >= 0
+  cost time finite
+{
+  todo
+}
+
+public fn Sequence[Element].append(self, value: Element) -> Sequence[Element]
+  ensures result.length() == self.length() + 1
+  ensures identical(result[self.length()], value)
+  ensures forall i in 0..self.length() => identical(result[i], self[i])
+  cost time finite
+{
+  todo
+}
+
+public fn Sequence[Element].concatenate(self, other: Sequence[Element]) -> Sequence[Element]
+  ensures result.length() == self.length() + other.length()
+  ensures forall i in 0..self.length() => identical(result[i], self[i])
+  ensures forall i in 0..other.length() => identical(result[self.length() + i], other[i])
+  cost time finite
+{
+  todo
+}
+
+public fn Sequence[Element].update(self, index: Integer, value: Element) -> Sequence[Element]
+  requires 0 <= index && index < self.length()
+  ensures result.length() == self.length()
+  ensures identical(result[index], value)
+  ensures forall i in 0..self.length() => i == index || identical(result[i], self[i])
+  cost time finite
+{
+  todo
+}
+
+public fn Sequence[Element].contains(self, value: Element) -> Bool
+  ensures result == (exists i in 0..self.length() => identical(self[i], value))
+  cost time finite
+{
+  todo
+}
+
+impl Index for Sequence[Element] {
+  type Key = Integer
+  type Output = Element
+
+  fn at(self, key: Integer) lends Element
+    requires 0 <= key && key < self.length()
+    cost time finite
+  {
+    todo
+  }
+
+  fn at(mut self, key: Integer) lends mut Element
+    requires 0 <= key && key < self.length()
+  {
+    todo
+  }
+}
+
+public opaque type FiniteSet[Element] = todo
+
+public fn FiniteSet[Element].empty() -> FiniteSet[Element]
+  ensures result.size() == 0
+  cost time finite
+{
+  todo
+}
+
+public fn FiniteSet[Element].size(self) -> Integer
+  ensures result >= 0
+  cost time finite
+{
+  todo
+}
+
+public fn FiniteSet[Element].contains(self, value: Element) -> Bool
+  cost time finite
+{
+  todo
+}
+
+public fn FiniteSet[Element].insert(self, value: Element) -> FiniteSet[Element]
+  ensures result.contains(value)
+  cost time finite
+{
+  todo
+}
+
+public opaque type FiniteMap[Key, Value] = todo
+
+public fn FiniteMap[Key, Value].empty() -> FiniteMap[Key, Value]
+  cost time finite
+{
+  todo
+}
+
+public fn FiniteMap[Key, Value].contains_key(self, key: Key) -> Bool
+  cost time finite
+{
+  todo
+}
+
+public fn FiniteMap[Key, Value].keys(self) -> FiniteSet[Key]
+  cost time finite
+{
+  todo
+}
+
+public opaque type Multiset[Element] = todo
+
+public fn Multiset[Element].empty() -> Multiset[Element]
+  cost time finite
+{
+  todo
+}
+
+public fn Multiset[Element].count(self, value: Element) -> Integer
+  ensures result >= 0
+  cost time finite
+{
+  todo
+}

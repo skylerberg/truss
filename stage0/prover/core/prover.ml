@@ -145,7 +145,9 @@ let prove database (key : Names.key) =
                   List.concat_map (fun (o : Translate.outcome) -> o.unproven_clauses) outcomes;
               }
         | _ -> Not_proven_here
-      with Translate.Unsupported (span, message) -> Unsupported (span, message))
+      with
+      | Translate.Unsupported (span, message) -> Unsupported (span, message)
+      | Translate.Foreign_unsupported message -> Unsupported (Syntax.Span.make 0 0, message))
   | _ -> Not_proven_here
 
 let proof = Query.query ~name:"proof" ~show:Names.show_key prove
@@ -245,7 +247,16 @@ let counterexample members (values : (string * string) list) answer_values =
 let diagnostic code span message = Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
 let source_span (span : span) : Diagnostic.span = Source.span span.start span.stop
 
+(* A span inside its definition's text, which every span of the
+   definition's own tree is; anything else would be a bug, and is shown at
+   the definition's start rather than outside its file. *)
+let within database (key : Names.key) (span : span) =
+  match Query.demand database Names.text key with
+  | Some text when span.stop <= String.length text -> span
+  | _ -> Syntax.Span.make 0 0
+
 let definition_diagnostics database solver (key : Names.key) =
+  let source_span span = source_span (within database key span) in
   match Query.demand database proof key with
   | Not_proven_here -> []
   | Unsupported (span, what) ->

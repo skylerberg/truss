@@ -22,6 +22,7 @@ type target =
   | Field of string  (** A record's field, by name, in the record's invariant or potential. *)
   | Result_value  (** [result], in [ensures] and [cost]. *)
   | Old  (** [old], in specifications and proofs. *)
+  | Identical  (** [identical], in specifications and proofs: identity, for every type. *)
   | Cost_function of cost_function  (** [log], [power], [time], or [calls], in a [cost] bound. *)
   | Unknown  (** A name that refers to nothing; its error is reported. *)
 
@@ -329,6 +330,7 @@ and local_value state scope (name : name) =
   | Some (Value_field field, _) -> set state name (Field field)
   | None ->
       if scope.specification.active && text = "old" then set state name Old
+      else if scope.specification.active && text = "identical" then set state name Identical
       else if scope.specification.result && text = "result" then set state name Result_value
       else
         begin match file_item state text with

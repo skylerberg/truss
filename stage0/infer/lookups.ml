@@ -100,7 +100,7 @@ and name state env (value : expression) (path : path) =
   | Some Result_value -> (
       state.tables.meanings.(value.id) <- Some Specification_value;
       match env.output with Some output -> output_type output | None -> T.Error)
-  | Some (Old | Cost_function _) ->
+  | Some (Old | Identical | Cost_function _) ->
       state.tables.meanings.(value.id) <- Some Specification_value;
       T.Error
   | Some (Binding | Module _ | Unknown) | None -> T.Error

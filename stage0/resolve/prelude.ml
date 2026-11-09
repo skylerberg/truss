@@ -37,6 +37,7 @@ let types =
             "Remainder";
             "Negate";
             "Index";
+            "Model";
             "Iterable";
             "Cursor";
             "Range";
@@ -47,6 +48,7 @@ let types =
         ( [ "text" ],
           [ "String"; "StringSlice"; "TextBuilder"; "FromTemplate"; "Template"; "Literal" ] );
         ([ "list" ], [ "List"; "Slice" ]);
+        ([ "specification" ], [ "Sequence"; "FiniteSet"; "FiniteMap"; "Multiset" ]);
         ([ "map" ], [ "Map" ]);
         ([ "set" ], [ "Set" ]);
         ( [ "capabilities" ],

@@ -6,7 +6,29 @@ public opaque type List[Element](storage: intrinsic::Storage[Element])
 public opaque type Slice[Element](elements: intrinsic::View[Element])
   derives Plain
 
-public fn List[Element].with_capacity(capacity: USize) -> List[Element] {
+impl Model for List[Element] {
+  type Value = Sequence[Element]
+
+  fn model(self) -> Sequence[Element]
+    cost time finite
+  {
+    todo
+  }
+}
+
+impl Model for Slice[Element] {
+  type Value = Sequence[Element]
+
+  fn model(self) -> Sequence[Element]
+    cost time finite
+  {
+    todo
+  }
+}
+
+public fn List[Element].with_capacity(capacity: USize) -> List[Element]
+  ensures result.model().length() == 0
+{
   List(storage: intrinsic::storage_with_capacity(capacity))
 }
 
@@ -19,6 +41,7 @@ internal fn List[Element].elements(self) -> intrinsic::View[Element] {
 }
 
 public fn List[Element].length(self) -> USize
+  ensures result == self.model().length()
   cost time O(1)
 {
   intrinsic::storage_length(self.storage)
@@ -31,6 +54,7 @@ public fn List[Element].is_empty(self) -> Bool
 }
 
 public fn List[Element].push(mut self, item: own Element)
+  ensures identical(self.model(), old(self.model()).append(item))
   cost amortized time O(1)
 {
   intrinsic::storage_push(mut self.storage, value: own item)
@@ -64,6 +88,7 @@ public fn List[Element].partition_point(self, before: fn(Element) -> Bool) -> US
 }
 
 public fn List[Element].slice(self) -> Slice[Element]
+  ensures identical(result.model(), self.model())
   cost time O(1)
 {
   Slice(elements: intrinsic::storage_view(self.storage))
@@ -94,6 +119,7 @@ public fn List[Element].filter(self, keep: fn(Element) -> Bool) -> List[Element]
 }
 
 public fn Slice[Element].length(self) -> USize
+  ensures result == self.model().length()
   cost time O(1)
 {
   intrinsic::view_length(self.elements)
@@ -111,6 +137,7 @@ impl Index for List[Element] {
 
   fn at(self, key: USize) lends Element
     requires key < self.length()
+    ensures identical(result, self.model()[key])
   {
     yield intrinsic::storage_at(self.storage, index: key)
   }
@@ -128,6 +155,7 @@ impl Index for Slice[Element] {
 
   fn at(self, key: USize) lends Element
     requires key < self.length()
+    ensures identical(result, self.model()[key])
   {
     yield intrinsic::view_at(self.elements, index: key)
   }

@@ -615,6 +615,36 @@ let () =
         \  if count > 0 { visit(count - 1) } else { 0 }\n\
          }\n")
 
+(* Models *)
+
+let () =
+  test "a push's contract, through the list's model" (fun () ->
+      proven
+        "fn f(items: mut List[Int64])\n\
+        \  ensures items.length() == old(items.length()) + 1\n\
+        \  ensures items[old(items.length())] == 5\n\
+         {\n\
+        \  mut items.push(5)\n\
+         }\n");
+  test "a push does not keep the length" (fun () ->
+      not_proven
+        "fn f(items: mut List[Int64])\n\
+        \  ensures items.length() == old(items.length())\n\
+         {\n\
+        \  mut items.push(5)\n\
+         }\n"
+        "prover.ensures");
+  test "an index into a list after a push is in bounds" (fun () ->
+      proven
+        "fn f(items: mut List[Int64]) -> Int64\n\
+        \  requires items.length() == 0\n\
+         {\n\
+        \  mut items.push(7)\n\
+        \  items[0]\n\
+         }\n");
+  test "identical is the same value, for any type" (fun () ->
+      proven "fn f[Item](value: Item) -> Bool\n  ensures identical(value, value)\n{\n  true\n}\n")
+
 (* Laws *)
 
 let monoid =

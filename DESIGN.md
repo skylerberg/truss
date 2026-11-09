@@ -714,7 +714,7 @@ Hylo also keep accessors apart from sequences, and Python's
   method's `ensures`, `result` names the part being handed out, so a clause
   that mentions it holds at each `yield` and is what the caller's statement
   or loop body may rely on: `List`'s `each` promises
-  `ensures result == self[yielded.length()]`, and a range's promises that
+  `ensures identical(result, self[yielded.length()])`, and a range's promises that
   each value lies within it. Clauses that do not mention `result` hold
   wherever the method ends. `yielded` names the parts handed out so far, as
   a `Sequence`, each as the caller left it, and `finished` is `true` when the
@@ -1698,13 +1698,27 @@ them:
   `FiniteSet` with its order. A user's type can have a model too, such as a
   `Sequence` of its cells for a `Grid`.
 - **Contracts are written against models,** as in
-  `ensures self.model() == old(self.model()).append(item)`, and against
+  `ensures identical(self.model(), old(self.model()).append(item))`, and against
   methods whose own contracts relate to the model, such as `length()` and
   indexing. An opaque type's model is how other packages reason about it
   without seeing its fields.
 - **The mathematical types have structural equality,** so the prover can
   substitute through them even where the collection's own `Equal` is
   hand-written.
+- **`identical(a, b)` is identity, for every type, in specifications.**
+  Generic contracts must say that an element is a given value whatever its
+  type, as `List`'s indexing does with
+  `ensures identical(result, self.model()[key])`, and `==` cannot: it is
+  the type's `Equal`, which `List[Element]` does not require, and for a
+  type with a hand-written `Equal`, such as a set stored as an unsorted
+  list, it is an equivalence rather than identity. So `==` keeps that one
+  meaning everywhere, and identity has a spelling of its own. Lean
+  distinguishes logical `=` from the decidable `==` the same way, and F\*
+  `==` from `=`. Verus instead gives `==` a different meaning in
+  specifications than in code, which would let a contract on a set mean
+  identical representations where its author meant the same set.
+  `identical` is a specification word, like `old`, so no function may be
+  named `identical`.
 - **Collection literals take these types from context too,** so `[]` is an
   empty `Sequence` where one is expected.
 
@@ -2116,7 +2130,7 @@ familiar name has been replaced by a local one.
 lexer tell a keyword from a name on its own, which keeps the grammar simple
 and lets the lexer alone decide whether a newline ends a statement. The
 exceptions are words that are both common names and needed only in one
-narrow place: `result` in `ensures`, `old` in specifications, `yielded` and
+narrow place: `result` in `ensures`, `old` and `identical` in specifications, `yielded` and
 `finished` in the contracts of lending and yielding methods, and the words
 of `cost` clauses, such as `time`, `calls`, `finite`, and `log`. Reserving
 those would ban names like `result` and `time` from all code to serve a few

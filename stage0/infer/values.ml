@@ -145,7 +145,8 @@ and list_literal state env ?expected (value : expression) items =
   let element, make =
     match expected with
     | Some (T.Named { path; arguments = T.Type element :: rest })
-      when Path.equal path set_path || Path.equal path list_path ->
+      when Path.equal path set_path || Path.equal path list_path || Path.equal path sequence_path
+           || Path.equal path finite_set_path ->
         (element, fun element -> T.Named { path; arguments = T.Type element :: rest })
     | Some (T.Named { path; arguments = [ T.Type element; count ] })
       when Intrinsic.builtin_of_path path = Some Array ->
@@ -168,16 +169,21 @@ and map_literal state env ?expected (_ : expression) entries =
   let key, value_type =
     match Option.map (normalize state) expected with
     | Some (T.Named { path; arguments = [ T.Type key; T.Type value_type ] })
-      when Path.equal path map_path ->
+      when Path.equal path map_path || Path.equal path finite_map_path ->
         (key, value_type)
     | _ -> (fresh state, fresh state)
+  in
+  let map_type =
+    match Option.map (normalize state) expected with
+    | Some (T.Named { path; _ }) when Path.equal path finite_map_path -> finite_map_path
+    | _ -> map_path
   in
   List.iter
     (fun (entry_key, entry_value) ->
       check state env entry_key key;
       check state env entry_value value_type)
     entries;
-  T.Named { path = map_path; arguments = [ T.Type key; T.Type value_type ] }
+  T.Named { path = map_type; arguments = [ T.Type key; T.Type value_type ] }
 
 (* Lambdas: their types come only from where they are used. *)
 and lambda state env ?expected (value : expression) parameters body =

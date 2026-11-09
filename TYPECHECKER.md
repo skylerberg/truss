@@ -9,11 +9,10 @@ described in [PARSER.md](PARSER.md), and produces what
 [PROVER.md](PROVER.md) reads. Every stage described here is built, in
 [`stage0/`](stage0), and `truss-check` runs them over a package's
 directory. Not built yet: storing checked forms in CBOR, and these rules
-that came with the prover's design: the types of specifications other than
-`Integer` and the `Model` trait, structural equality for constants in
-patterns, clauses on an `impl`'s methods, `yielded` and `finished`, the
-error for `==>` or a quantifier over a type in a compiled body, and the
-condition on replacing a provided method.
+that came with the prover's design: structural equality for constants in
+patterns, `yielded` and `finished`, the error for `==>` or a quantifier
+over a type in a compiled body, and the condition on replacing a provided
+method.
 
 ## What the type checker does
 
@@ -238,6 +237,8 @@ can have a version for each mode.
   names the return value inside `ensures` and `cost`; `old(...)` is the
   value on entry inside specifications and proofs; `log`, `power`,
   `time(...)`, and `calls(...)` are the cost functions inside a `cost` bound;
+  `identical(a, b)` is identity, for two values of one type, inside
+  specifications;
   `yielded` and `finished` are what a lending or yielding method has handed
   out and whether it ran to its end, inside its `ensures`, and `yielded` is
   what a `for` loop's earlier iterations received, inside its `invariant`.

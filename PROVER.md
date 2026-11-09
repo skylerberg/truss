@@ -211,18 +211,25 @@ and `reads` clauses):
 
 ### Mathematical collections
 
-`Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset` are sorts with axioms
-written in the prover, as Dafny's prelude axiomatizes its `seq`, `set`,
-`map`, and `multiset`. The solver's own theory of sequences is not used: its
-behavior differs between solvers and versions, and its decision procedures
-are a common source of unstable proofs, while a fixed set of axioms with
-explicit triggers behaves the same on every query.
+`Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset` are types of
+`standard::specification`, uninterpreted sorts to the solver, whose
+operations are pure functions with `time` clauses and contracts written in
+Truss, with `identical`, as `Sequence.append`'s
+`ensures identical(result[self.length()], value)`. So they are functions in
+the logic, known by those contracts, like any other function, and the
+trusted base holds only the contracts, not axioms in the prover. The
+solver's own theory of sequences is not used: its behavior differs between
+solvers and versions, and its decision procedures are a common source of
+unstable proofs.
 
-- **A `Sequence`** has a length, indexing, slicing, `append`,
-  `concatenate`, and `update`, and two sequences are equal exactly when
-  their lengths and their elements are, which is extensionality.
+- **A `Sequence`** has a length, indexing, `append`, `concatenate`,
+  `update`, and `contains`.
 - **A `FiniteSet`, `FiniteMap`, and `Multiset`** have membership, a size,
-  and the usual operations, each with its extensionality axiom.
+  and a few operations so far.
+- **Extensionality,** that two sequences with the same length and
+  elements are identical, is the one fact contracts cannot state, since a
+  contract describes a result, and is to be an axiom of the prover's.
+- **`identical(a, b)`** is the solver's equality, for every type.
 - **Each type's `model()`** is a function from its sort to its model's.
   Inside the standard library, `List`'s `model()` is a definition over its
   buffer, whose model the intrinsic module states. Outside it, `model()` is
@@ -896,6 +903,12 @@ It proves, with one canonical, numbered, hashed query per obligation:
   about, and operators on other types are calls of their traits' methods.
 - `assert` in theorems and proofs, assumed in tests
 - quantifiers over ranges and over the integers, in specifications
+- models: `Model.model()` and the operations of `standard::specification`
+  are functions in the logic, known by their contracts, and `identical` is
+  the solver's equality, so the contracts of `List` and `Slice`, stated
+  through their models, prove facts such as a pushed element's index and
+  value. Extensionality of sequences, sequence literals, and the contracts
+  of `Map`, `Set`, and `String` are not built yet.
 - the type checker's `Integer_fits` obligations, and its `Guards_cover`,
   which the `_ => unreachable` arm it is about shows
 - pruning: each query keeps only the facts that share a symbol with its

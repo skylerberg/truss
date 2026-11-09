@@ -96,6 +96,7 @@ or name resolution gives them their meaning where they appear:
 | `time(...)`, `calls(...)`, `log(...)`, `power(...)` | Called inside a `cost` bound, where they are the cost functions |
 | `result` | Inside `ensures` and `cost`, where it names the return value |
 | `old` | Inside specifications: `requires`, `ensures`, invariants, laws, `decreases`, `cost`, and proofs |
+| `identical` | Inside specifications: `identical(a, b)`, whether two values of one type are the same value |
 | `yielded`, `finished` | Inside the `ensures` of a lending or yielding method, and `yielded` in the `invariant` of a `for` loop, where they name what was handed out so far and whether the method ran to its end |
 
 A parameter cannot be named `result`, and a function cannot be named `old`,
@@ -1333,7 +1334,7 @@ leaves behind:
 
 ```truss
 fn List[Element].each(self) yields Element
-  ensures result == self[yielded.length()]
+  ensures identical(result, self[yielded.length()])
   ensures finished ==> yielded.length() == self.length()
   cost time O(self.length())
 {
@@ -1344,10 +1345,10 @@ fn List[Element].each(self) yields Element
 
 fn Grid.cell(mut self, position: Position) lends mut Cell
   requires position.row < self.height && position.column < self.width
-  ensures result == old(self.cells[position.row * self.width + position.column])
-  ensures self.cells.model() == old(self.cells.model()).update(
-    position.row * self.width + position.column,
-    value: yielded[0],
+  ensures identical(result, old(self.cells[position.row * self.width + position.column]))
+  ensures identical(
+    self.cells.model(),
+    old(self.cells.model()).update(position.row * self.width + position.column, value: yielded[0]),
   )
 {
   yield mut self.cells[position.row * self.width + position.column]
@@ -2625,6 +2626,7 @@ These forms can be used in `requires`, `ensures`, invariants, laws, and proofs:
 | `exists item in items => item == target` | True for at least one value. |
 | `index < split ==> items[index] < pivot` | Implication: when the left side is true, so is the right. |
 | `old(self.items)` | A value as it was when the function was called. |
+| `identical(result, self.model()[key])` | The same value, for values of any one type, whether or not it implements `Equal`. `==` is always the type's `Equal`. |
 | `assert condition` | Inside a proof: a fact the prover must show, which can then be used. |
 
 A quantifier over a range or a collection is an ordinary expression, and can
@@ -2707,7 +2709,7 @@ compare models:
 
 ```truss
 fn List[Element].push(mut self, item: own Element)
-  ensures self.model() == old(self.model()).append(item)
+  ensures identical(self.model(), old(self.model()).append(item))
   cost amortized time O(1)
 {
   todo
@@ -2717,8 +2719,12 @@ fn List[Element].push(mut self, item: own Element)
 - `model()` can be called only in specifications.
 - The mathematical types compare by structure, so two lists with equal
   models are interchangeable in a proof.
+- Their contracts, in `standard::specification`, are written with
+  `identical`, as are the contracts that describe a collection through its
+  model, such as `List.push`'s
+  `ensures identical(self.model(), old(self.model()).append(item))`.
 - A `[...]` literal is one of these types where one is expected, as in
-  `ensures self.model() == []`.
+  `ensures identical(self.model(), [])`.
 - A function whose signature mentions one of these types is for
   specifications only, as for `Integer`.
 

@@ -71,6 +71,7 @@ let name context (written : name) =
       | Field field -> node "field" [ text field ]
       | Result_value -> node "result" []
       | Old -> node "old" []
+      | Identical -> node "identical" []
       | Cost_function function_ ->
           node "cost_function"
             [

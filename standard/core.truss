@@ -95,6 +95,13 @@ public trait Negate {
   fn negate(self) -> Self.Output
 }
 
+public trait Model {
+  type Value
+
+  fn model(self) -> Self.Value
+    cost time finite
+}
+
 public trait Index {
   type Key
   type Output
