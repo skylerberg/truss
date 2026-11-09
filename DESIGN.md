@@ -14,9 +14,10 @@ see [SYNTAX.md](SYNTAX.md). For the goals behind these decisions, see
   reformatting never triggers a rebuild. The order of clauses of one kind
   does: each `requires` may rely on the ones before it, as in Dafny, so
   swapping two of them can change what they mean.
-- **Each result records what it depended on.** This lets builds, tests, and
-  proofs redo only the work a change actually affects. See
-  [Incremental builds](#incremental-builds).
+- **The compiler knows what each result read.** A change is pushed to the
+  results that read what changed, so builds, tests, and proofs redo only the
+  work a change actually affects. See [Incremental builds](#incremental-builds)
+  and [DATABASE.md](DATABASE.md).
 - **A function's signature and body are hashed separately.** Type checking and
   proofs in callers depend only on the signature. Changing a body without
   changing its signature, such as filling in a `todo`, re-checks no callers.
@@ -47,42 +48,47 @@ see [SYNTAX.md](SYNTAX.md). For the goals behind these decisions, see
 
 ### Incremental builds
 
-A definition's hash is a key, and the work done on the definition is stored
-under it. Each definition is parsed, has its names resolved, and is hashed
-once per change; the hash is what tells whether it changed. Type checking then
-produces the definition's checked form: the type of every expression, and the
-exact method, variant, field, `impl`, or associated type each name turned out
-to mean. The checked form is stored under the hash together with a *trace* of
-everything type checking relied on, and proofs, code generation, and tests are
-stored the same way. A result is reused as long as every entry in its trace
-is unchanged. "Build Systems à la Carte" (Mokhov, Mitchell, and Peyton Jones,
-2018) calls these verifying traces, and Shake and Rust's incremental compiler
-use them.
+Each definition is parsed, has its names resolved, and is hashed in parts
+once per change; the hashes are what tell whether it changed. Type checking
+then produces the definition's checked form: the type of every expression,
+and the exact method, variant, field, `impl`, or associated type each name
+turned out to mean. Each of these steps, and code generation after them, is a
+query, and the compiler records what each query read as it runs. The records
+form a graph, and a change is *pushed* along it: editing a file marks the
+results that read it, and only those are computed again. Jane Street's
+Incremental and spreadsheets recalculate the same way. A compiler that instead
+pulls, checking each result's inputs whenever the result is asked for, as
+Salsa and Rust's incremental compiler do, spends time in proportion to what
+is asked for, which for a whole build is the whole project. Pushing spends
+time in proportion to what changed. [DATABASE.md](DATABASE.md) designs it.
 
 - **A hash names other definitions by their module path and name, never by
   their hash.** Unison refers to code by hash, so a function's hash covers its
   callees' hashes, and changing one body changes the hash of everything that
-  reaches it. Truss keeps a definition's hash to its own text, and records
-  what it depends on in its trace instead.
-- **A trace records two kinds of dependency:** the signature hash of each
-  definition used, and each lookup made, keyed by where and what name: the
-  members of `List` named `length`, the `impl`s of `Add` for `Instant`, the
-  constants named `not_found` in a file. When a definition is added, removed,
-  or renamed, only the lookups with its scope and name are made again. Swift's
-  incremental builds keyed such lookups by name alone, and rebuilt far too
-  much. Truss's rules keep each lookup to a few places: methods live with
-  their type, an `impl` lives with its trait, its type, or a type its trait's
-  arguments name, and an unqualified constant can only come from the same
-  file.
+  reaches it. Truss keeps a definition's hash to its own text, and the graph
+  records what it depends on instead.
+- **A result reads two kinds of thing about other definitions:** the parts
+  of the definitions it uses, such as an interface or a shape, and lookups,
+  keyed by where and what name: the members of `List` named `length`, the
+  `impl`s of `Add` for `Instant`, the constants named `not_found` in a file.
+  A lookup that found nothing is read too. When a definition is added,
+  removed, or renamed, only the lookups with its scope and name are made
+  again. Swift's incremental builds keyed such lookups by name alone, and
+  rebuilt far too much. Truss's rules keep each lookup to a few places:
+  methods live with their type, an `impl` lives with its trait, its type, or
+  a type its trait's arguments name, and an unqualified constant can only
+  come from the same file.
 - **Work stops as soon as an output comes out the same.** When a re-checked
   definition's signature is unchanged, its callers are not checked again;
   when generated code is unchanged, tests are not run again. This *early
   cutoff* is what makes editing a body cost O(change).
-- **Proofs and tests are keyed by forms with names replaced.** References in
-  a proof obligation or a compiled test are numbered rather than named, so
-  renaming a definition or moving it to another module re-checks its callers'
-  types, which is cheap, but finds their proofs and test results already
-  done.
+- **Proofs, tests, and compiled C are kept under exact keys.** Each is kept
+  under the hash of exactly the input it consumed: a proof under the query
+  sent to the solver, a test under the code it can reach, an object file
+  under its C. References to other definitions in these keys are numbered
+  rather than named, so renaming a definition or moving it to another module
+  re-checks its callers' types, which is cheap, but finds their proofs and
+  test results already done. Every worktree on a machine shares them.
 - **Positions are relative to their definition.** Panics, `echo`, failed
   asserts, and debug information record where they are within their
   definition, and a table built at the end of the build turns that into a
@@ -92,8 +98,8 @@ use them.
   numbering, no hash-map iteration order, and no timestamps. Early cutoff
   compares outputs, so any instability would defeat it.
 - **Optimizations record the bodies they read.** Inlining one definition into
-  another makes the caller's code depend on the callee's body, so it is
-  recorded in the caller's trace. Development builds do not inline across
+  another makes the caller's code depend on the callee's body, so the caller
+  reads that body like anything else it depends on. Development builds do not inline across
   definitions of the packages being worked on, which keeps rebuilds narrow.
   They do inline from the standard library and from dependencies, whose
   bodies change only with a new toolchain or a new version in the manifest,
@@ -107,7 +113,8 @@ use them.
 
 ### The hash format
 
-Content hashes last: they are stored in caches, shared between machines, and
+Content hashes last: they are stored in caches, shared between worktrees and
+compiler versions, may later be shared between machines, and are
 used to tell whether code changed. So they are defined over a specified
 encoding, not over any compiler's data structures.
 
@@ -1023,6 +1030,15 @@ comparisons over `&&`. Every other combination needs parentheses.
 - **`USize` is used for sizes, lengths, and indices.** A length can never be
   negative, and a bounds check is a single comparison (`index < length`).
   **`ISize` is used for offsets and the distance between two positions.**
+- **Code is verified for every width `USize` can have.** `USize` and `ISize`
+  have 32 or 64 bits, and the prover knows only that, so a proof holds on
+  every target and its result needs no target in its key. A literal or
+  constant of either type must fit in 32 bits. Verus treats `usize` the same
+  way by default. A package that runs only on 64-bit targets says so in its
+  manifest with `usize_bits = 64`, and its code may then rely on 64 bits, as
+  Verus allows with `global size_of usize == 8`. Building such a package for
+  a 32-bit target is an error, and a package that does not say so cannot
+  depend on one that does, so a package that claims to run everywhere does.
 - **Integer types never convert implicitly.**
 - **Literals take their type from context, with no suffixes.** `3` can be any
   integer type, so there is one way to write it, and `let small: UInt8 = 3`

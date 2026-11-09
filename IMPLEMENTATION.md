@@ -102,9 +102,8 @@ The full design is in [PARSER.md](PARSER.md). In short:
 The full design is in [TYPECHECKER.md](TYPECHECKER.md). In short:
 
 - **Name resolution, hashing, and type checking are one stage,** built as
-  demand-driven queries, each stored with a trace of the queries it made, as
-  in rustc and Salsa. Signatures depend only on other signatures and type
-  shapes, so a body edit re-checks no caller.
+  queries that the code database keeps current. Signatures depend only on
+  other signatures and type shapes, so a body edit re-checks no caller.
 - **Hashes are split by what reads them:** a function's interface, its
   contract, each default, and its body, so changing an `ensures` re-checks no
   caller's types.
@@ -131,22 +130,30 @@ The full design is in [TYPECHECKER.md](TYPECHECKER.md). In short:
   specification, since `digestif` provides BLAKE2 but not BLAKE3. It is
   tested against the official test vectors. Every hash carries a prefix
   naming the format version and algorithm, so this can change.
-- **Queries** are `stage0/query`: inputs the driver sets, and queries whose
-  results are stored with a trace of what they read, checked again by
-  revision and cut off early when a result comes out the same, as in Salsa.
-  The store is in memory, which the background process keeps alive between
-  commands.
-- **A content-addressed store** of results, each with the trace of what it
-  depended on, can start as files in a cache directory named by hash.
-  Each compiler stage has its own version in the key.
+- **Queries** are `stage0/query` for now: an in-memory engine that checks
+  a result's inputs by revision when the result is asked for, as Salsa does.
+  The code database replaces it.
 
-### Background process
+### Code database
 
-- **Starting fresh on every command costs O(files),** because the compiler must
-  at least check which files changed. A long-running process that watches the
-  files (FSEvents on macOS, inotify on Linux) and keeps parsed definitions and
-  traces in memory makes each command O(change). The language server and the
-  command line can share it.
+The full design is in [DATABASE.md](DATABASE.md). In short:
+
+- **Changes are pushed, not pulled.** Each query's reads are edges in a
+  graph, and a change computes again only the results that read what
+  changed, stopping where one comes out the same. Pulling, which checks
+  every result asked for, costs O(project) for a whole build.
+- **Three narrow interfaces:** `Query` for compiler stages, `Engine` for the
+  database, and `Store` for bytes on disk. Stages never see the engine, the
+  store, files, or sessions.
+- **One store per user, in `~/.cache/truss`,** shared by every project,
+  worktree, and compiler: values by content hash, results of expensive steps
+  by exact key, and each session's graph as an append-only journal. It uses
+  only ordinary file operations, so the compiler written in Truss can keep
+  the same store.
+- **One background process per user and compiler** serves every worktree,
+  the command line, and the language server. It watches files with FSEvents
+  on macOS and inotify on Linux, starts a new worktree from the nearest
+  session, and finds where two worktrees' changes overlap.
 
 ### Code generation through C
 

@@ -8,7 +8,10 @@ described in [PARSER.md](PARSER.md), and produces what
 [CODEGEN.md](CODEGEN.md) expects. The prover is not designed yet, so this
 document states what it hands to it. Every stage described here is built,
 in [`stage0/`](stage0), and `truss-check` runs them over a package's
-directory. Storing checked forms in CBOR is not built yet.
+directory. The queries run on `stage0/query`'s in-memory engine, which
+checks results when they are asked for. The code database that
+[DATABASE.md](DATABASE.md) designs, which pushes changes and saves checked
+forms in CBOR, is not built yet.
 
 ## What the type checker does
 
@@ -16,8 +19,8 @@ The type checker takes the syntax tree of each definition, the package's
 manifest, and the manifests of its dependencies. For each definition it
 produces a *resolved form*, which is hashed, an *interface*, which is what
 other definitions may depend on, and a *checked form*, which is what the
-prover and code generation read. Each result is stored with a trace of what
-it relied on.
+prover and code generation read. The database records what each result
+read, as DATABASE.md describes.
 
 The type checker:
 
@@ -105,22 +108,24 @@ generation depend on the checked form without depending on the checker.
 ### One definition at a time, through queries
 
 DESIGN.md asks that a change cost O(change). The type checker meets this by
-never reading anything about another definition except through a query, and
-recording every query in the trace of the result that made it.
+never reading anything about another definition except through a query.
+The code database, designed in [DATABASE.md](DATABASE.md), records each read
+as an edge from the reader to what it read, and pushes each change along
+those edges to the results it affects.
 
 - **Each check is a query** with a key: the resolved form of a definition,
   its interface, its checked body, the shape of a type, the members of a type
-  with a given name, and so on (see [Traces](#traces)). A query's result is
-  stored under its key with a trace, as DESIGN.md describes. When an input
-  changes, a result is reused if every entry in its trace still gives the
-  same answer. This is the verifying-trace scheme of "Build Systems à la
-  Carte", and the same design as rustc's queries and Salsa.
-- **Queries are demand-driven.** Checking a body asks for the interfaces of
-  what it calls, which checks those signatures if they are not stored yet,
-  but never their bodies. A build asks for the checked body of every
-  definition in the packages being built.
+  with a given name, and so on (see [Dependencies](#dependencies)). A query
+  is a pure function of what it reads through `Query`, which is all the type
+  checker sees of the database.
+- **A query that nobody has asked for is computed on demand.** Checking a
+  body asks for the interfaces of what it calls, which checks those
+  signatures if they have not been checked yet, but never their bodies. A
+  check of a package asks for the checked body of every definition in it.
+- **A query that has been asked for is kept current.** When a file changes,
+  the database computes again only the results that read what changed.
 - **Early cutoff happens at every query.** A query whose result comes out
-  the same as before stops the work above it: a body edit that leaves the
+  the same as before stops the push there: a body edit that leaves the
   interface alone re-checks no caller.
 - **Cycles between queries are errors or are designed away.** Signatures
   depend only on other signatures and type shapes, never on bodies, so
@@ -320,7 +325,7 @@ The type checker uses that as follows:
   is broken keeps its interface, so callers are checked against its
   signature as written, as for any function.
 - **A broken definition is a dependency like any other.** Results that used
-  its `Error` interface record it in their traces, so when the definition is
+  its `Error` interface read it like any other interface, so when the definition is
   fixed, exactly they are checked again.
 - **Builds and tests skip what cannot run.** A build refuses a program that
   can reach a definition with any error, broken or not. A test that can
@@ -448,7 +453,7 @@ is `Plain` exactly when `Value` is.
   the concrete type behind it is unknown.
 - **Whether a type is a view is part of its shape,** and so of its hash.
   Making a type hold a view changes how every user of it is checked, which
-  the trace records like any other change of shape.
+  reaches every reader of the shape like any other change of shape.
 
 ## Checking signatures and definitions
 
@@ -603,7 +608,10 @@ known:
 
 - **An integer literal must fit** its type, after negation: a `-` applied
   directly to a literal negates the value, so `-128` fits an `Int8`. Negating
-  a literal of an unsigned type is an error.
+  a literal of an unsigned type is an error. A `USize` or `ISize` literal
+  must fit in 32 bits unless the package says `usize_bits = 64`, as
+  DESIGN.md requires. Stage0 still checks these against 64 bits, since
+  manifests do not carry `usize_bits` yet.
 - **A float literal is rounded once,** from its exact decimal value to its
   type, with ties to even. A literal that rounds to infinity is an error, as
   in Rust.
@@ -994,7 +1002,7 @@ with `copy()`, unless it is `Plain`. Otherwise the error offers both fixes.
   a method in its own call cycle, cannot be pulled, and whether a method
   yields views of places is read from the body too. This is the one fact
   callers read from a body. It is stored apart from the interface, and a
-  caller's trace records it only when the caller pulls the method.
+  caller reads it only when the caller pulls the method.
 
 ### `parallel`
 
@@ -1072,7 +1080,7 @@ server needs only the grants for what the program calls.
 ## Traits and `impl`s across a package
 
 These checks look at more than one definition, so they are package checks,
-each with its own query and trace.
+each its own query.
 
 ### Where an `impl` may live
 
@@ -1169,8 +1177,8 @@ describes. Overflow in a constant's arithmetic is an error. Constants that
 refer to each other in a cycle are an error. Every other constant is built
 by code generation, and the values of tagged templates and `Map` and `Set`
 tables by compiled code run while compiling, as CODEGEN.md describes. A
-result that used a constant's value records the hash of that value in its
-trace.
+result that used a constant's value reads that value, so changing the
+constant's expression in a way that keeps its value checks nothing again.
 
 ## Tests
 
@@ -1202,9 +1210,9 @@ needs to work anything out from the syntax tree again:
   implementations implement
 - **obligations** that the type checker created, as described next
 
-It is to be stored in deterministic CBOR, as other stored forms are, so that
-two checks of the same definition give the same bytes. For now it lives
-only in the query database.
+It is saved in deterministic CBOR, as DATABASE.md describes, so that two
+checks of the same definition give the same bytes, and the same checked form
+in two worktrees is stored once. Stage0 keeps it in memory only, for now.
 
 ### Obligations the type checker creates
 
@@ -1220,12 +1228,12 @@ checker made, and the checked form records each with its position:
 | A function value's costs imply the expected costs | Passing a function where its type's costs differ |
 | A guarded `match` is covered | `_ => unreachable` after guards |
 
-## Traces
+## Dependencies
 
-A trace lists what a result relied on. A trace entry is one of these, each
-with the hash it had:
+A result depends on exactly what it read through `Query`, and the database
+pushes a change in any of these to the results that read it:
 
-| Entry | Example |
+| What a result reads | Example |
 |---|---|
 | The resolved form of a definition, or a part of it | The body of `parse_config` |
 | The interface of a definition | The interface of `List.push` |
@@ -1249,14 +1257,14 @@ What each kind of result depends on:
   the interfaces, shapes, and lookups it used. It never depends on another
   body, except through a pulled method's pullability.
 
-So the costs of everyday edits follow from the entries:
+So the costs of everyday edits follow from what each result reads:
 
 | Edit | Checked again |
 |---|---|
 | A function's body | That body. Its interface is unchanged, so nothing else. |
 | A local's name | That body |
 | A function's `ensures` | Nothing's types. Callers' proofs, which depend on the contract. |
-| A function's parameter type | That function, and every definition whose trace has its interface |
+| A function's parameter type | That function, and every definition that read its interface |
 | A method added to `List` | Definitions that looked up a member of `List` with that name |
 | An `impl` added | Definitions that looked up `impl`s of that trait for that type in that package |
 | A definition added to a file | Definitions in that file that looked up that name, including bindings checked for hiding |

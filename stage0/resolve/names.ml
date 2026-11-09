@@ -1,5 +1,5 @@
 (* What each file defines, and finding a definition by name. See
-   TYPECHECKER.md, "Name resolution" and "Traces".
+   TYPECHECKER.md, "Name resolution" and "Dependencies".
 
    Every lookup across definitions is a query keyed by where and what name,
    so a change re-runs only the lookups it can affect: adding a definition
