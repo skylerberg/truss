@@ -332,11 +332,119 @@ let () =
         \  Ok(inner)\n\
          }\n")
 
+(* Collections, definitions, and impls *)
+
+let () =
+  test "an index must be in bounds" (fun () ->
+      not_proven "fn f(items: List[Int64], index: USize) -> Int64 {\n  items[index]\n}\n"
+        "prover.requires");
+  test "an index the requires bounds" (fun () ->
+      proven
+        "fn f(items: List[Int64], index: USize) -> Int64\n\
+        \  requires index < items.length()\n\
+         {\n\
+        \  items[index]\n\
+         }\n");
+  test "an index a range loop bounds" (fun () ->
+      proven
+        "fn f(items: List[Int64]) -> Int64 {\n\
+        \  var total: Int64 = 0\n\
+        \  for i in 0..items.length() {\n\
+        \    total = total.saturating_add(items[i])\n\
+        \  }\n\
+        \  total\n\
+         }\n");
+  test "assigning to an element checks its index" (fun () ->
+      not_proven "fn f(items: mut List[Int64]) {\n  items[0] = 5\n}\n" "prover.requires");
+  test "a functional body is its function's definition" (fun () ->
+      proven
+        "fn is_small(value: Int64) -> Bool\n\
+        \  cost time finite\n\
+         {\n\
+        \  value < 10\n\
+         }\n\n\
+         fn f() -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  is_small(3)\n\
+         }\n");
+  test "a body with a loop is not a definition" (fun () ->
+      not_proven
+        "fn is_small(value: Int64) -> Bool\n\
+        \  cost time finite\n\
+         {\n\
+        \  var small = value < 10\n\
+        \  small\n\
+         }\n\n\
+         fn f() -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  is_small(3)\n\
+         }\n"
+        "prover.ensures");
+  test "a function without a time clause is not a definition" (fun () ->
+      not_proven
+        "fn is_small(value: Int64) -> Bool {\n\
+        \  value < 10\n\
+         }\n\n\
+         fn f() -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  is_small(3)\n\
+         }\n"
+        "prover.ensures");
+  test "an impl method's contract is read at a call" (fun () ->
+      proven
+        "type Counter(count: Int64)\n\n\
+         trait Next {\n\
+        \  fn next(self) -> Int64\n\
+         }\n\n\
+         impl Next for Counter {\n\
+        \  fn next(self) -> Int64\n\
+        \    requires self.count < 100\n\
+        \    ensures result == self.count + 1\n\
+        \  {\n\
+        \    self.count + 1\n\
+        \  }\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  ensures result == 6\n\
+         {\n\
+        \  Counter(count: 5).next()\n\
+         }\n");
+  test "a mut argument that is part of a value leaves its value unknown" (fun () ->
+      not_proven
+        "type Point(x: Int64, y: Int64)\n\n\
+         fn bump(value: mut Int64)\n\
+        \  requires value < 100\n\
+        \  ensures value == old(value) + 1\n\
+         {\n\
+        \  value += 1\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  ensures result == 2\n\
+         {\n\
+        \  var point = Point(x: 1, y: 2)\n\
+        \  bump(mut point.x)\n\
+        \  point.y\n\
+         }\n"
+        "prover.ensures");
+  test "assigning a field keeps the other fields" (fun () ->
+      proven
+        "type Point(x: Int64, y: Int64)\n\n\
+         fn f() -> Int64\n\
+        \  ensures result == 2\n\
+         {\n\
+        \  var point = Point(x: 1, y: 2)\n\
+        \  point.x = 7\n\
+        \  point.y\n\
+         }\n")
+
 (* What is not proven yet *)
 
 let () =
   test "a construct the prover cannot read yet" (fun () ->
-      not_proven "fn f(items: List[Int64]) -> Int64 {\n  items[0]\n}\n" "prover.unsupported");
+      not_proven "fn f(text: String) -> String {\n  \"${text}!\"\n}\n" "prover.unsupported");
   test "a cost bound is reported as not proven yet" (fun () ->
       not_proven "fn f() -> Int64\n  cost time O(1)\n{\n  0\n}\n" "prover.unsupported")
 

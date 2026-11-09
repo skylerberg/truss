@@ -61,6 +61,8 @@ and frame = {
   checking : bool;  (** Whether obligations are made here; not in a callee's clauses. *)
   bound : string list;  (** Symbols bound by quantifiers around this point. *)
   loop : loop_exits option;
+  substitution : T.substitution;
+      (** The type arguments of the callee whose clauses are read here, for its generic types. *)
 }
 
 type context = {
@@ -309,10 +311,15 @@ let arrive context frame prefix ty =
   assume context frame (in_range ty value);
   value
 
-let type_of source (expression : expression) =
-  match source.checked.types.(expression.id) with
-  | Some ty -> ty
+let type_of frame (expression : expression) =
+  match frame.source.checked.types.(expression.id) with
+  | Some ty -> T.substitute frame.substitution ty
   | None -> unsupported expression.span "an expression without a type"
+
+let local_type frame id =
+  Option.map (T.substitute frame.substitution) frame.source.checked.local_types.(id)
+
+let substituted frame ty = T.substitute frame.substitution ty
 
 (* Paths *)
 
@@ -333,6 +340,24 @@ let join context ?value_type frames =
         | (_, Some term) :: rest when List.for_all (fun (_, other) -> other = Some term) rest ->
             Some term
         | _ when List.exists (fun (_, term) -> term = None) values -> None
+        | _
+          when List.exists
+                 (fun ((frame : frame), term) ->
+                   L.mentions first.bound frame.condition
+                   || match term with Some term -> L.mentions first.bound term | None -> false)
+                 values -> (
+            (* Inside a quantifier, a fact about a fresh symbol could not
+               mention the bound variable, so the value is an [ite]. *)
+            match List.rev values with
+            | (_, Some last) :: earlier ->
+                Some
+                  (List.fold_left
+                     (fun otherwise ((frame : frame), term) ->
+                       match term with
+                       | Some term -> L.ite frame.condition term otherwise
+                       | None -> otherwise)
+                     last earlier)
+            | _ -> None)
         | _ ->
             let symbol = fresh context prefix sort in
             List.iter
@@ -349,7 +374,7 @@ let join context ?value_type frames =
         Ids.mapi
           (fun id term ->
             let sort =
-              match first.source.checked.local_types.(id) with
+              match local_type first id with
               | Some ty -> sort_of context ty
               | None -> ( match term with L.Boolean _ -> L.Bool | _ -> L.Int)
             in
@@ -372,14 +397,21 @@ let join_frames context frames =
 
 type parameter_binding = Self_binding | Parameter_binding of name
 
-type contract = {
+(* One tree's clauses about a callee: its own, or, for a method of an
+   [impl], its trait's. *)
+type part = {
   callee : source;
   binding : parameter_binding list;  (** In the order a call's arguments are numbered. *)
   defaults : (int * expression) list;
   requires : expression list;
   ensures : expression list;
+}
+
+type contract = {
+  parts : part list;  (** The callee's own first. *)
   pure : bool;  (** Pure and terminating, so a function in the logic. *)
-  unsupported_result : bool;  (** [yields] or [lends], whose contracts are not read yet. *)
+  result_kind : [ `Returns | `Lends | `Yields ];
+  definition : (part * block) option;  (** A functional body, which is the callee's definition. *)
 }
 
 let callee_source database (key : Names.key) =
@@ -391,80 +423,179 @@ let callee_source database (key : Names.key) =
   | Some resolved, Some checked, Some text -> Some { key; checked; resolved; text }
   | _ -> None
 
-let contract_of database (path : Path.t) =
+let part_of callee (parameters : parameter list) (clauses : clause list) =
+  let named =
+    List.filter_map
+      (fun (parameter : parameter) ->
+        match parameter.kind with
+        | Named_parameter { name; default; _ } -> Some (name, default)
+        | Self_parameter _ | Parameter_error -> None)
+      parameters
+  in
+  let has_self =
+    List.exists
+      (fun (parameter : parameter) ->
+        match parameter.kind with Self_parameter _ -> true | _ -> false)
+      parameters
+  in
+  let offset = if has_self then 1 else 0 in
+  {
+    callee;
+    binding =
+      (if has_self then [ Self_binding ] else [])
+      @ List.map (fun (name, _) -> Parameter_binding name) named;
+    defaults =
+      List.concat
+        (List.mapi
+           (fun index (_, default) ->
+             match default with Some value -> [ (index + offset, value) ] | None -> [])
+           named);
+    requires =
+      List.filter_map
+        (fun (clause : clause) -> match clause.kind with Requires value -> Some value | _ -> None)
+        clauses;
+    ensures =
+      List.filter_map
+        (fun (clause : clause) -> match clause.kind with Ensures value -> Some value | _ -> None)
+        clauses;
+  }
+
+let receiver_of (parameters : parameter list) : Path.receiver =
+  match parameters with
+  | { kind = Self_parameter None; _ } :: _ -> Read
+  | { kind = Self_parameter (Some Mut); _ } :: _ -> Mut
+  | { kind = Self_parameter (Some Own); _ } :: _ -> Own
+  | _ -> Static
+
+let name_of (signature : signature) =
+  match signature.name with Plain_name name | Member_name (_, name) -> name.text
+
+(* Whether a body is functional, so that it can be the function's
+   definition: [let], [if], [match], [is], calls, fields, building values,
+   [with], operators, and quantifiers, with no [var], assignment, loop,
+   [return], or argument passed [mut] or [own]. See DESIGN.md, "What a
+   function means to the prover". *)
+let rec functional_block (written : block) = List.for_all functional_statement written.statements
+
+and functional_statement (written : statement) =
+  match written.kind with
+  | Let { mutable_ = false; value; else_ = None; _ } -> functional_expression value
+  | Expression value -> functional_expression value
+  | _ -> false
+
+and functional_expression (written : expression) =
+  match written.kind with
+  | Mode _ | Lambda _ | Return _ | Break | Continue | Todo | Echo _ | Provide _ | Unreachable ->
+      false
+  | _ ->
+      let fine = ref true in
+      Syntax_walk.expression_parts
+        ~expression:(fun inner -> if not (functional_expression inner) then fine := false)
+        ~statement:(fun inner -> if not (functional_statement inner) then fine := false)
+        written;
+      !fine
+
+let make_contract database path ~own ~others ~(result : result option) ~body =
+  let pure =
+    match Query.demand database Interface.Environment.signature path with
+    | Some (signature : T.signature) -> (
+        signature.uses = [] && signature.terminates
+        && List.for_all (fun (info : T.parameter_info) -> info.mode = T.Read) signature.parameters
+        && match signature.receiver with Some ((Mut | Own), _) -> false | _ -> true)
+    | None -> false
+  in
+  let result_kind =
+    match result with Some (Lends _) -> `Lends | Some (Yields _) -> `Yields | _ -> `Returns
+  in
+  let definition =
+    match body with
+    | Some body when pure && result_kind = `Returns && functional_block body -> Some (own, body)
+    | _ -> None
+  in
+  { parts = own :: others; pure; result_kind; definition }
+
+let function_contract database (path : Path.t) =
   match Interface.Summary.definition database path with
-  | None -> None
-  | Some (key, definition) -> (
-      let from parameters clauses ~receiver_first ~result =
-        match callee_source database key with
-        | None -> None
-        | Some callee ->
-            let named =
-              List.filter_map
-                (fun (parameter : parameter) ->
-                  match parameter.kind with
-                  | Named_parameter { name; default; _ } -> Some (name, default)
-                  | Self_parameter _ | Parameter_error -> None)
-                parameters
-            in
-            let has_self =
-              List.exists
-                (fun (parameter : parameter) ->
-                  match parameter.kind with Self_parameter _ -> true | _ -> false)
-                parameters
-            in
-            let offset = if has_self || receiver_first then 1 else 0 in
-            let binding =
-              (if has_self then [ Self_binding ] else [])
-              @ List.map (fun (name, _) -> Parameter_binding name) named
-            in
-            let defaults =
-              List.concat
-                (List.mapi
-                   (fun index (_, default) ->
-                     match default with Some value -> [ (index + offset, value) ] | None -> [])
-                   named)
-            in
-            let requires =
-              List.filter_map
-                (fun (clause : clause) ->
-                  match clause.kind with Requires value -> Some value | _ -> None)
-                clauses
-            in
-            let ensures =
-              List.filter_map
-                (fun (clause : clause) ->
-                  match clause.kind with Ensures value -> Some value | _ -> None)
-                clauses
-            in
-            let pure =
-              match Query.demand database Interface.Environment.signature path with
-              | Some (signature : T.signature) -> (
-                  signature.uses = [] && signature.terminates
-                  && List.for_all
-                       (fun (info : T.parameter_info) -> info.mode = T.Read)
-                       signature.parameters
-                  && match signature.receiver with Some ((Mut | Own), _) -> false | _ -> true)
-              | None -> false
-            in
-            Some
-              {
-                callee;
-                binding;
-                defaults;
-                requires;
-                ensures;
-                pure;
-                unsupported_result =
-                  (match result with Some (Yields _ | Lends _) -> true | _ -> false);
-              }
-      in
-      match definition.kind with
-      | Function { signature; _ } ->
-          from signature.parameters signature.clauses ~receiver_first:false ~result:signature.result
-      | Theorem { parameters; clauses; _ } ->
-          from parameters clauses ~receiver_first:false ~result:None
+  | Some (key, { kind = Function { signature; body }; _ }) ->
+      Option.map
+        (fun callee ->
+          make_contract database path
+            ~own:(part_of callee signature.parameters signature.clauses)
+            ~others:[] ~result:signature.result ~body:(Some body))
+        (callee_source database key)
+  | Some (key, { kind = Theorem { parameters; clauses; _ }; _ }) ->
+      Option.map
+        (fun callee ->
+          make_contract database path
+            ~own:(part_of callee parameters clauses)
+            ~others:[] ~result:None ~body:None)
+        (callee_source database key)
+  | _ -> None
+
+(* A trait's method's clauses, from the trait's definition. *)
+let trait_part database (trait : Path.t) name receiver =
+  match Interface.Summary.definition database trait with
+  | Some (key, { kind = Trait { members; _ }; _ }) -> (
+      match callee_source database key with
+      | Some callee ->
+          List.find_map
+            (fun (member : trait_member line) ->
+              match member.kind with
+              | Trait_method { signature; _ }
+                when name_of signature = name && receiver_of signature.parameters = receiver ->
+                  Some (part_of callee signature.parameters signature.clauses, signature)
+              | _ -> None)
+            members
+      | None -> None)
+  | _ -> None
+
+(* A trait method's contract: the [impl]'s own clauses with the trait's,
+   when the call is known to reach one [impl], and the trait's alone
+   through a bound or [any]. See DESIGN.md, "An [impl] can promise more
+   than its trait". *)
+let method_contract database (trait : T.trait_reference) name receiver (evidence : C.evidence) =
+  let trait_side = trait_part database trait.trait name receiver in
+  match evidence with
+  | Impl { impl; _ } -> (
+      let path = Path.Method { owner = impl; name; receiver } in
+      match Interface.Summary.definition database impl with
+      | Some (key, { kind = Impl { members; _ }; _ }) -> (
+          let own =
+            match callee_source database key with
+            | Some callee ->
+                List.find_map
+                  (fun (member : impl_member line) ->
+                    match member.kind with
+                    | Impl_method { signature; body }
+                      when name_of signature = name && receiver_of signature.parameters = receiver
+                      ->
+                        Some (part_of callee signature.parameters signature.clauses, signature, body)
+                    | _ -> None)
+                  members
+            | None -> None
+          in
+          match (own, trait_side) with
+          | Some (part, signature, body), _ ->
+              Some
+                (make_contract database path ~own:part
+                   ~others:(Option.to_list (Option.map fst trait_side))
+                   ~result:signature.result ~body:(Some body))
+          | None, Some (part, signature) ->
+              (* A provided method the [impl] does not replace. *)
+              Some
+                (make_contract database
+                   (Path.Method { owner = trait.trait; name; receiver })
+                   ~own:part ~others:[] ~result:signature.result ~body:None)
+          | None, None -> None)
       | _ -> None)
+  | Bound _ | Dynamic ->
+      Option.map
+        (fun (part, (signature : signature)) ->
+          make_contract database
+            (Path.Method { owner = trait.trait; name; receiver })
+            ~own:part ~others:[] ~result:signature.result ~body:None)
+        trait_side
+  | Built_in -> None
 
 (* Expressions *)
 
@@ -538,7 +669,7 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
       Some (frame, L.not_ inner_value)
   | Prefix (Negate, inner) ->
       let frame, inner_value = value context frame inner in
-      let ty = type_of source written in
+      let ty = type_of frame written in
       let negated = L.Apply ("-", [ inner_value ]) in
       if bounds ty <> None then
         oblige context frame Overflow written.span
@@ -548,7 +679,7 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
       Some (frame, negated)
   | Prefix (Complement, inner) ->
       let frame, inner_value = value context frame inner in
-      let ty = type_of source written in
+      let ty = type_of frame written in
       Some (frame, opaque_operation context frame ty "complement" [ inner_value ])
   | If { condition; then_; else_ } -> if_ context frame written condition then_ else_
   | Block block_ -> block_value context frame block_
@@ -564,7 +695,7 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
       oblige context frame Unreachable written.span "This `unreachable` may be reached."
         (L.Boolean false);
       None
-  | Todo -> Some (frame, arrive context frame "todo" (type_of source written))
+  | Todo -> Some (frame, arrive context frame "todo" (type_of frame written))
   | Break -> (
       match frame.loop with
       | Some exits ->
@@ -582,10 +713,13 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
   | Call (callee, arguments) -> call context frame written callee arguments
   | Mode (_, inner) -> expression context frame inner
   | Member (base, _) -> member context frame written base
-  | Bracket _ -> unsupported written.span "indexing"
+  | Bracket _ -> (
+      match source.checked.calls.(written.id) with
+      | Some call_ -> resolved_call context frame written call_
+      | None -> unsupported written.span "type arguments outside a call")
   | Is { value = tested; pattern; _ } ->
       let frame, term = value context frame tested in
-      let condition, frame = pattern_match context frame pattern term (type_of source tested) in
+      let condition, frame = pattern_match context frame pattern term (type_of frame tested) in
       Some (frame, condition)
   | Match { scrutinees; arms } -> match_ context frame written scrutinees arms
   | Try inner -> try_ context frame written inner
@@ -629,6 +763,8 @@ and name context frame (written : expression) (path : path) =
       | Some (Global { path = global; _ }) ->
           Some (frame, constant_value context frame written global)
       | Some (Variant_value { type_; variant }) ->
+          let type_ = substituted frame type_ in
+          let type_ = substituted frame type_ in
           Some (frame, variant_value context written type_ variant)
       | _ -> unsupported written.span "this name")
 
@@ -643,8 +779,8 @@ and opaque_operation context frame ty name arguments =
 
 and binary context frame (written : expression) operator left right =
   let source = frame.source in
-  let operand_type = type_of source left in
-  let result_type = type_of source written in
+  let operand_type = type_of frame left in
+  let result_type = type_of frame written in
   let primitive =
     (is_numeric operand_type || is_bool operand_type || T.is_builtin Character operand_type)
     && (is_numeric result_type || is_bool result_type)
@@ -734,7 +870,7 @@ and if_ context frame (written : expression) condition then_ else_ =
     | Some (Else_if inner) -> expression context otherwise inner
     | None -> Some (otherwise, L.Boolean true)
   in
-  let ty = type_of frame.source written in
+  let ty = type_of frame written in
   let carries_value = else_ <> None && not (T.equal ty T.unit) in
   let reached = List.filter_map Fun.id [ then_result; else_result ] in
   if carries_value then
@@ -748,7 +884,6 @@ and if_ context frame (written : expression) condition then_ else_ =
     Option.map (fun frame -> (frame, L.Boolean true)) (join_frames context (List.map fst reached))
 
 and quantified context frame (written : expression) quantifier binder body =
-  let source = frame.source in
   let make bound_symbol sort premise body_frame =
     let _, body_value = value context { body_frame with checking = false } body in
     let bound = [ (bound_symbol, sort) ] in
@@ -764,7 +899,7 @@ and quantified context frame (written : expression) quantifier binder body =
   in
   match binder with
   | Binder_type (name_, _) -> (
-      match source.checked.local_types.(name_.id) with
+      match local_type frame name_.id with
       | Some ty when is_numeric ty || is_bool ty ->
           let inner, ty = with_bound name_.id ty in
           make symbol (sort_of context ty) (in_range ty (L.Symbol symbol)) inner
@@ -774,9 +909,7 @@ and quantified context frame (written : expression) quantifier binder body =
         { kind = Range { start = Some start; stop = Some stop; inclusive; _ }; _ } ) ->
       let _, low = value context frame start in
       let _, high = value context frame stop in
-      let ty =
-        match source.checked.local_types.(name_.id) with Some ty -> ty | None -> T.Integer
-      in
+      let ty = match local_type frame name_.id with Some ty -> ty | None -> T.Integer in
       let inner, _ = with_bound name_.id ty in
       let bound = L.Symbol symbol in
       let premise =
@@ -818,7 +951,7 @@ and resolved_call context frame (written : expression) (call_ : C.call) =
       (frame, []) call_.arguments
   in
   let values = List.rev values in
-  let result_type = call_.result in
+  let result_type = substituted frame call_.result in
   let havoc_mut frame =
     List.fold_left
       (fun frame ((argument : C.argument), (expression_ : expression), _) ->
@@ -826,21 +959,101 @@ and resolved_call context frame (written : expression) (call_ : C.call) =
           match place_local frame expression_ with
           | Some (id, ty) ->
               { frame with locals = Ids.add id (arrive context frame "changed" ty) frame.locals }
-          | None -> unsupported expression_.span "passing `mut` a place that is not a local"
+          | None -> havoc_root context frame expression_
         else frame)
       frame values
   in
+  let arguments_of (type_arguments : T.argument list) =
+    List.map (T.substitute_argument frame.substitution) type_arguments
+  in
+  let generics_of path =
+    match Query.demand context.database Interface.Environment.signature path with
+    | Some (signature : T.signature) ->
+        List.map (fun (generic : T.generic) -> generic.generic) signature.generics
+    | None -> []
+  in
+  (* Pairs generic parameters with arguments, leaving out those already
+     given, such as an [impl]'s. *)
+  let pair parameters arguments ~given =
+    let parameters =
+      List.filter (fun parameter -> not (List.mem_assoc parameter given)) parameters
+    in
+    let rec go parameters arguments =
+      match (parameters, arguments) with
+      | parameter :: parameters, argument :: arguments ->
+          (parameter, argument) :: go parameters arguments
+      | _ -> []
+    in
+    given @ go parameters arguments
+  in
+  let instance_of arguments =
+    match arguments with
+    | [] -> ""
+    | _ -> "[" ^ String.concat ", " (List.map argument_key arguments) ^ "]"
+  in
+  let with_contract ?(substitution_of = fun _ -> []) ?(instance = "") path = function
+    | Some contract when contract.result_kind <> `Yields ->
+        Some
+          (contract_call context frame written call_ path contract values ~havoc_mut
+             ~substitution_of ~instance)
+    | Some _ -> unsupported written.span "a call to a yielding method outside a `for` loop"
+    | None ->
+        let frame = havoc_mut frame in
+        Some (frame, arrive context frame "result" result_type)
+  in
   match call_.callee with
-  | Function { path; _ } -> (
-      match contract_of context.database path with
-      | Some contract when not contract.unsupported_result ->
-          Some (contract_call context frame written call_ path contract values ~havoc_mut)
-      | Some _ -> unsupported written.span "a call to a lending or yielding method"
-      | None ->
-          let frame = havoc_mut frame in
-          Some (frame, arrive context frame "result" result_type))
+  | Function { path; type_arguments } ->
+      let arguments = arguments_of type_arguments in
+      let substitution = pair (generics_of path) arguments ~given:[] in
+      with_contract
+        ~substitution_of:(fun _ -> substitution)
+        ~instance:(instance_of arguments) path
+        (function_contract context.database path)
+  | Trait_method { trait; name; receiver; evidence; self_type; type_arguments } ->
+      let arguments = arguments_of type_arguments in
+      let self_type = substituted frame self_type in
+      let trait_path = Path.Method { owner = trait.trait; name; receiver } in
+      (* The trait's clauses are about [Self] and the trait's parameters. *)
+      let trait_substitution =
+        let trait_generics =
+          match Query.demand context.database Interface.Environment.interface trait.trait with
+          | Some (Interface.Environment.Trait_interface interface) ->
+              List.map (fun (generic : T.generic) -> generic.generic) interface.trait_generics
+          | _ -> []
+        in
+        let given =
+          ({ T.owner = trait.trait; name = "Self" }, T.Type self_type)
+          :: pair trait_generics (arguments_of trait.trait_arguments) ~given:[]
+        in
+        pair (generics_of trait_path) arguments ~given
+      in
+      let path, own_substitution =
+        match evidence with
+        | Impl { impl; arguments = impl_arguments } ->
+            let given =
+              List.map
+                (fun (parameter, argument) ->
+                  (parameter, T.substitute_argument frame.substitution argument))
+                impl_arguments
+            in
+            let path = Path.Method { owner = impl; name; receiver } in
+            (path, pair (generics_of path) arguments ~given)
+        | _ -> (trait_path, trait_substitution)
+      in
+      let own_key =
+        match evidence with
+        | Impl { impl; _ } -> Query.demand context.database Interface.Summary.key impl
+        | _ -> None
+      in
+      let substitution_of (part : part) =
+        if Some part.callee.key = own_key then own_substitution else trait_substitution
+      in
+      with_contract ~substitution_of
+        ~instance:(instance_of (T.Type self_type :: arguments))
+        path
+        (method_contract context.database trait name receiver evidence)
   | Constructor { variant; _ } -> Some (construct context frame written call_ variant values)
-  | Trait_method _ | Capability_method _ | Function_value | Intrinsic _ | Built_in_operator ->
+  | Capability_method _ | Function_value | Intrinsic _ | Built_in_operator ->
       let frame = havoc_mut frame in
       ignore source;
       Some (frame, arrive context frame "result" result_type)
@@ -851,6 +1064,7 @@ and member context frame (written : expression) base =
   let source = frame.source in
   match source.checked.meanings.(written.id) with
   | Some (Field_read { type_; field }) ->
+      let type_ = substituted frame type_ in
       let frame, term = value context frame base in
       if constructors context type_ = None then
         unsupported written.span "a field of `%s`, whose fields the prover does not see"
@@ -863,6 +1077,7 @@ and member context frame (written : expression) base =
       in
       Some (frame, field_of context frame type_ None field field_type term)
   | Some (Variant_value { type_; variant }) ->
+      let type_ = substituted frame type_ in
       Some (frame, variant_value context written type_ variant)
   | Some (Global { path; _ }) -> Some (frame, constant_value context frame written path)
   | _ -> unsupported written.span "this member"
@@ -905,7 +1120,7 @@ and constant_value context frame (written : expression) path =
 (* Building a record or a variant: its constructor, with each field given
    or defaulted. *)
 and construct context frame (written : expression) (call_ : C.call) variant values =
-  let ty = call_.result in
+  let ty = substituted frame call_.result in
   match (constructors context ty, declared_fields context ty variant) with
   | Some shape, Some declared ->
       ignore (sort_of context ty);
@@ -1003,6 +1218,7 @@ and pattern_match context frame (written : pattern) term ty : L.term * frame =
   | Variant { fields; _ } -> (
       match source.checked.patterns.(written.id) with
       | Some (Variant_pattern { type_; variant }) ->
+          let type_ = substituted frame type_ in
           ignore (sort_of context type_);
           if constructors context type_ = None then
             unsupported written.span "a variant of `%s`, which the prover does not see"
@@ -1017,6 +1233,7 @@ and pattern_match context frame (written : pattern) term ty : L.term * frame =
   | Record fields -> (
       match source.checked.patterns.(written.id) with
       | Some (Record_pattern { type_ }) ->
+          let type_ = substituted frame type_ in
           ignore (sort_of context type_);
           if constructors context type_ = None then
             unsupported written.span "the fields of `%s`, which the prover does not see"
@@ -1068,16 +1285,15 @@ and fields_match context frame (written : pattern) type_ variant term fields =
     (L.Boolean true, frame) fields
 
 and match_ context frame (written : expression) scrutinees arms =
-  let source = frame.source in
   let frame, scrutinee_values =
     List.fold_left
       (fun (frame, values) scrutinee ->
         let frame, term = value context frame scrutinee in
-        (frame, (term, type_of source scrutinee) :: values))
+        (frame, (term, type_of frame scrutinee) :: values))
       (frame, []) scrutinees
   in
   let scrutinee_values = List.rev scrutinee_values in
-  let result_type = type_of source written in
+  let result_type = type_of frame written in
   let carries_value = not (T.equal result_type T.unit || result_type = T.Never) in
   let remaining = ref (L.Boolean true) in
   let reached =
@@ -1123,9 +1339,8 @@ and match_ context frame (written : expression) scrutinees arms =
 (* [?]: the value inside an [Ok] or a [Some] goes on, and an [Err] or a
    [None] returns, unchanged. *)
 and try_ context frame (written : expression) inner =
-  let source = frame.source in
   let frame, term = value context frame inner in
-  let ty = type_of source inner in
+  let ty = type_of frame inner in
   let shape =
     match constructors context ty with
     | Some shape -> shape
@@ -1167,7 +1382,7 @@ and try_ context frame (written : expression) inner =
 and with_ context frame (written : expression) base updates =
   let source = frame.source in
   let frame, base_term = value context frame base in
-  let ty = type_of source written in
+  let ty = type_of frame written in
   let rec replace ty term path replacement =
     match (path, constructors context ty) with
     | [], _ -> replacement
@@ -1222,14 +1437,14 @@ and place_local frame (expression_ : expression) =
   | Name _ -> (
       match frame.source.checked.meanings.(expression_.id) with
       | Some (Local_value id) -> (
-          match frame.source.checked.local_types.(id) with Some ty -> Some (id, ty) | None -> None)
+          match local_type frame id with Some ty -> Some (id, ty) | None -> None)
       | _ -> None)
   | _ -> None
 
 (* A call to a function whose contract the prover reads: its [requires]
    must hold, its [ensures] holds after, and a recursive call decreases. *)
 and contract_call context frame (written : expression) (call_ : C.call) path contract values
-    ~havoc_mut =
+    ~havoc_mut ~substitution_of ~instance =
   let caller = frame.source in
   let argument_at index =
     List.find_map
@@ -1237,23 +1452,31 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
         if argument.parameter = index then Some term else None)
       values
   in
-  let entry_bindings =
+  (* Each part binds its own parameters to the call's arguments, or to its
+     defaults. *)
+  let bindings (part : part) =
     List.mapi
       (fun index binding ->
         let term =
           match argument_at index with
           | Some term -> Some term
           | None -> (
-              match List.assoc_opt index contract.defaults with
+              match List.assoc_opt index part.defaults with
               | Some default ->
                   let empty =
-                    { frame with source = contract.callee; locals = Ids.empty; checking = false }
+                    {
+                      frame with
+                      source = part.callee;
+                      locals = Ids.empty;
+                      checking = false;
+                      substitution = substitution_of part;
+                    }
                   in
                   Some (snd (value context empty default))
               | None -> None)
         in
         (binding, term))
-      contract.binding
+      part.binding
   in
   let bind bindings =
     List.fold_left
@@ -1264,21 +1487,22 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
         | _, None -> (locals, self))
       (Ids.empty, None) bindings
   in
-  let entry_locals, entry_self = bind entry_bindings in
-  let callee_frame =
+  let entry_frame (part : part) =
+    let locals, self = bind (bindings part) in
     {
       frame with
-      source = contract.callee;
-      locals = entry_locals;
-      old_locals = entry_locals;
-      self = entry_self;
-      old_self = entry_self;
+      source = part.callee;
+      locals;
+      old_locals = locals;
+      self;
+      old_self = self;
       result = None;
       checking = false;
-      bound = frame.bound;
       loop = None;
+      substitution = substitution_of part;
     }
   in
+  let own = List.hd contract.parts in
   (* Recursion must decrease. *)
   if Path.equal path context.current && context.terminates then
     begin match context.measures with
@@ -1289,97 +1513,135 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
         let current_frame =
           { frame with checking = false; locals = frame.old_locals; self = frame.old_self }
         in
+        let callee_entry = entry_frame own in
         let before = List.map (fun measure -> snd (value context current_frame measure)) measures in
         let after =
           List.map
-            (fun measure ->
-              snd
-                (value context
-                   { callee_frame with source = caller; locals = entry_locals; self = entry_self }
-                   measure))
+            (fun measure -> snd (value context { callee_entry with source = caller } measure))
             measures
-        in
-        let rec smaller before after =
-          match (before, after) with
-          | [ b ], [ a ] -> L.(Apply ("<=", [ int 0; b ]) &&& Apply ("<", [ a; b ]))
-          | b :: before, a :: after ->
-              L.(
-                Apply ("<=", [ int 0; b ])
-                &&& (Apply ("<", [ a; b ]) ||| (equal a b &&& smaller before after)))
-          | _ -> L.Boolean true
         in
         oblige context frame Termination written.span
           (Printf.sprintf "This recursive call may not decrease `%s`."
              (String.concat ", " (List.map (fun (m : expression) -> quote caller m.span) measures)))
           (smaller before after)
     end;
-  (* Requires, at the call. *)
-  List.iter
-    (fun (clause : expression) ->
-      let _, term = value context callee_frame clause in
-      oblige context frame Requires written.span
-        (Printf.sprintf "`%s` may not hold for this call to `%s`."
-           (quote contract.callee clause.span)
-           (Path.show path))
-        term)
-    contract.requires;
+  (* The callee's [requires]: its own when it states any, and otherwise
+     its trait's. *)
+  let requiring =
+    match contract.parts with
+    | own :: others -> if own.requires <> [] || others = [] then [ own ] else others
+    | [] -> []
+  in
+  let required =
+    List.concat_map
+      (fun (part : part) ->
+        let entry = entry_frame part in
+        List.map
+          (fun (clause : expression) ->
+            let _, term = value context entry clause in
+            oblige context frame Requires written.span
+              (Printf.sprintf "`%s` may not hold for this call to `%s`."
+                 (quote part.callee clause.span) (Path.show path))
+              term;
+            term)
+          part.requires)
+      requiring
+  in
+  let required = L.conjunction required in
   let after = havoc_mut frame in
+  (* What each [mut] argument holds after the call: a local's new value,
+     or, for a part of a value, a fresh one, since the prover does not yet
+     write it back into the value it is part of. *)
+  let changed =
+    List.filter_map
+      (fun ((argument : C.argument), (expression_ : expression), _) ->
+        if argument.mode = T.Mut then
+          match place_local after expression_ with
+          | Some (id, _) ->
+              Option.map (fun term -> (argument.parameter, term)) (Ids.find_opt id after.locals)
+          | None ->
+              Some (argument.parameter, arrive context after "changed" (type_of frame expression_))
+        else None)
+      values
+  in
+  let own_arguments = List.filter_map snd (bindings own) in
   let result =
-    if contract.pure then begin
-      let arguments = List.filter_map snd entry_bindings in
-      let symbol = "function." ^ Path.show path in
+    if contract.pure && List.length own_arguments = List.length values then begin
+      let symbol = "function." ^ Path.show path ^ instance in
       declare context
         (L.Function
            ( symbol,
              List.map
                (fun ((_ : C.argument), (expression_ : expression), _) ->
-                 sort_of context (type_of caller expression_))
+                 sort_of context (type_of frame expression_))
                values,
-             sort_of context call_.result ));
-      let term = L.Apply (symbol, arguments) in
-      assume context after (in_range call_.result term);
+             sort_of context (substituted frame call_.result) ));
+      let term = L.Apply (symbol, own_arguments) in
+      assume context after (in_range (substituted frame call_.result) term);
       term
     end
-    else arrive context after "result" call_.result
+    else arrive context after "result" (substituted frame call_.result)
   in
-  (* Ensures, after: [mut] parameters have their new values, and [old] the
-     ones they had. *)
   if not (List.exists (Path.equal path) context.instantiating) then begin
     context.instantiating <- path :: context.instantiating;
-    let exit_bindings =
-      List.mapi
-        (fun index (binding, term) ->
-          let changed =
-            List.find_map
-              (fun ((argument : C.argument), expression_, _) ->
-                if argument.parameter = index && argument.mode = T.Mut then
-                  match place_local after expression_ with
-                  | Some (id, _) -> Ids.find_opt id after.locals
-                  | None -> None
-                else None)
-              values
-          in
-          (binding, match changed with Some term -> Some term | None -> term))
-        entry_bindings
-    in
-    let exit_locals, exit_self = bind exit_bindings in
-    let ensures_frame =
-      {
-        callee_frame with
-        condition = after.condition;
-        locals = exit_locals;
-        self = exit_self;
-        result = Some result;
-      }
-    in
+    (* The definition, unfolded once, where the [requires] holds. A body
+       the prover cannot read is simply not unfolded. *)
+    (match contract.definition with
+    | Some (part, body) when not (List.exists (L.mentions after.bound) own_arguments) -> (
+        let unfolding = { (entry_frame part) with condition = after.condition } in
+        try
+          match block_value context unfolding body with
+          | Some (_, defined) -> assume context after (L.( ==> ) required (L.equal result defined))
+          | None -> ()
+        with Unsupported _ -> ())
+    | _ -> ());
+    (* The [ensures], after, where the [requires] held: [mut] parameters
+       have their new values, and [old] the ones they had. *)
     List.iter
-      (fun (clause : expression) ->
-        let _, term = value context ensures_frame clause in
-        assume context after term)
-      contract.ensures;
+      (fun (part : part) ->
+        let entry = bindings part in
+        let exit_bindings =
+          List.mapi
+            (fun index (binding, term) ->
+              ( binding,
+                match List.assoc_opt index changed with Some term -> Some term | None -> term ))
+            entry
+        in
+        let entry_locals, entry_self = bind entry in
+        let exit_locals, exit_self = bind exit_bindings in
+        let ensures_frame =
+          {
+            frame with
+            source = part.callee;
+            condition = after.condition;
+            locals = exit_locals;
+            old_locals = entry_locals;
+            self = exit_self;
+            old_self = entry_self;
+            result = Some result;
+            checking = false;
+            loop = None;
+            substitution = substitution_of part;
+          }
+        in
+        List.iter
+          (fun (clause : expression) ->
+            match value context ensures_frame clause with
+            | _, term -> assume context after (L.( ==> ) required term))
+          part.ensures)
+      contract.parts;
     context.instantiating <- List.tl context.instantiating
   end;
   (after, result)
+
+and smaller before after =
+  match (before, after) with
+  | [ b ], [ a ] -> L.(Apply ("<=", [ int 0; b ]) &&& Apply ("<", [ a; b ]))
+  | b :: before, a :: after ->
+      L.(
+        Apply ("<=", [ int 0; b ])
+        &&& (Apply ("<", [ a; b ]) ||| (equal a b &&& smaller before after)))
+  | _ -> L.Boolean true
 
 (* Statements and blocks *)
 
@@ -1405,7 +1667,7 @@ and statement context frame (written : statement) : frame option =
       | None -> None
       | Some (frame, term) ->
           (* A [let]'s pattern cannot fail, so only its names matter. *)
-          let _, frame = pattern_match context frame pattern term (type_of frame.source initial) in
+          let _, frame = pattern_match context frame pattern term (type_of frame initial) in
           Some frame)
   | Let { else_ = Some _; _ } -> unsupported written.span "`let ... else`"
   | Assignment { target; operator; value = assigned } ->
@@ -1436,19 +1698,63 @@ and statement context frame (written : statement) : frame option =
 
 and is_test context = match context.current with Path.Test _ -> true | _ -> false
 
+(* The local or [self] a place is part of, which takes a fresh value when
+   a part of it changes in a way the prover does not follow. *)
+and havoc_root context frame (place : expression) =
+  match place.kind with
+  | Mode (_, inner) | Parenthesized inner | Member (inner, _) | Bracket (inner, _) ->
+      havoc_root context frame inner
+  | Self_value -> { frame with self = Some (arrive context frame "changed" (type_of frame place)) }
+  | Name _ -> (
+      match place_local frame place with
+      | Some (id, ty) ->
+          { frame with locals = Ids.add id (arrive context frame "changed" ty) frame.locals }
+      | None -> unsupported place.span "changing this place")
+  | _ -> unsupported place.span "changing this place"
+
+(* Stores a value into a place: a local, a field of a place, or [self]. An
+   element of a collection changes its collection in a way the prover does
+   not follow yet, so the collection's root takes a fresh value. *)
+and store context frame (place : expression) new_value =
+  let source = frame.source in
+  match place.kind with
+  | Mode (_, inner) | Parenthesized inner -> store context frame inner new_value
+  | Self_value -> { frame with self = Some new_value }
+  | Name _ -> (
+      match place_local frame place with
+      | Some (id, _) -> { frame with locals = Ids.add id new_value frame.locals }
+      | None -> unsupported place.span "assigning to this place")
+  | Member (base, _) -> (
+      match source.checked.meanings.(place.id) with
+      | Some (Field_read { type_; field }) -> (
+          let type_ = substituted frame type_ in
+          let frame, base_value = value context frame base in
+          match constructors context type_ with
+          | Some [ (None, fields) ] ->
+              let rebuilt =
+                L.Apply
+                  ( constructor_name type_ None,
+                    List.map
+                      (fun (name_, _) ->
+                        if name_ = field then new_value
+                        else L.Apply (selector_name type_ None name_, [ base_value ]))
+                      fields )
+              in
+              store context frame base rebuilt
+          | _ -> unsupported place.span "assigning to a field of `%s`" (T.show type_))
+      | _ -> unsupported place.span "assigning to this place")
+  | Bracket _ -> havoc_root context frame place
+  | _ -> unsupported place.span "assigning to this place"
+
 and assignment context frame (written : statement) target operator assigned =
   let source = frame.source in
-  let id, ty =
-    match place_local frame target with
-    | Some place -> place
-    | None -> unsupported target.span "assigning to a place that is not a local"
-  in
+  let ty = type_of frame target in
   let frame, new_value =
     match operator with
     | Assign -> value context frame assigned
     | _ ->
         let frame, right = value context frame assigned in
-        let current = Ids.find id frame.locals in
+        let frame, current = value context frame target in
         let binary_operator : binary =
           match operator with
           | Add_assign -> Add
@@ -1475,7 +1781,13 @@ and assignment context frame (written : statement) target operator assigned =
           | _ -> (frame, opaque_operation context frame ty "assignment" [ current; right ])
           end
   in
-  Some { frame with locals = Ids.add id new_value frame.locals }
+  (* An index is checked once, when the place is read or written. *)
+  let frame =
+    match (operator, target.kind) with
+    | Assign, Bracket _ -> fst (value context frame target)
+    | _ -> frame
+  in
+  Some (store context frame target new_value)
 
 (* The locals a loop's body may change, which are havocked at its head. *)
 and changed_locals frame (body : block) =
@@ -1499,9 +1811,7 @@ and changed_locals frame (body : block) =
 and havoc context frame ids =
   List.fold_left
     (fun frame id ->
-      let ty =
-        match frame.source.checked.local_types.(id) with Some ty -> ty | None -> T.Integer
-      in
+      let ty = match local_type frame id with Some ty -> ty | None -> T.Integer in
       { frame with locals = Ids.add id (arrive context frame "loop" ty) frame.locals })
     frame ids
 
@@ -1648,7 +1958,59 @@ and for_ context frame (written : statement) pattern iterable clauses body =
         :: List.map (fun (f : frame) -> { f with loop = frame.loop }) exits.breaks)
       |> Option.map (fun (joined : frame) ->
           { joined with locals = Ids.filter (fun id _ -> Ids.mem id frame.locals) joined.locals })
-  | _ -> unsupported written.span "a `for` loop over anything but a range of integers"
+  | Some (Yielding { call = driven; mode }), _, _ ->
+      each_loop context frame written pattern iterable clauses body driven mode
+  | _ -> unsupported written.span "a `for` loop over a cursor"
+
+(* A [for] loop over a yielding method: each element is a fresh value of
+   its type, since the method's contract for each [yield] is not read
+   yet, and the loop ends when the method has a [time] clause. *)
+and each_loop context frame (written : statement) pattern iterable clauses body (driven : C.call)
+    mode =
+  let source = frame.source in
+  let frame =
+    List.fold_left
+      (fun frame (argument : C.argument) ->
+        fst (value context frame (find_expression iterable argument.expression)))
+      frame driven.arguments
+  in
+  let terminates =
+    match driven.callee with
+    | Function { path; _ } -> (
+        match Query.demand context.database Interface.Environment.signature path with
+        | Some signature -> signature.terminates
+        | None -> false)
+    | _ -> false
+  in
+  if context.terminates && not terminates then
+    oblige context frame Termination written.span
+      "This loop may not end: the method it loops over has no `time` clause." (L.Boolean false);
+  check_invariants context frame clauses ~when_:"on entry to the loop";
+  let changed = changed_locals frame body in
+  let head = havoc context frame changed in
+  let head = if mode = T.Mut then havoc_root context head iterable else head in
+  assume_invariants context head clauses;
+  let element_type =
+    match Option.map (substituted frame) source.checked.pattern_types.(pattern.id) with
+    | Some ty -> ty
+    | None -> unsupported pattern.span "a loop variable without a type"
+  in
+  let element = arrive context head "element" element_type in
+  let exits = { breaks = []; continues = [] } in
+  let _, inside =
+    pattern_match context { head with loop = Some exits } pattern element element_type
+  in
+  let finished = block_value context inside body in
+  let ends = (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues in
+  List.iter
+    (fun (end_ : frame) ->
+      check_invariants context { end_ with loop = frame.loop } clauses ~when_:"after an iteration")
+    ends;
+  join_frames context
+    ({ head with loop = frame.loop }
+    :: List.map (fun (f : frame) -> { f with loop = frame.loop }) exits.breaks)
+  |> Option.map (fun (joined : frame) ->
+      { joined with locals = Ids.filter (fun id _ -> Ids.mem id frame.locals) joined.locals })
 
 (* Definitions *)
 
@@ -1734,6 +2096,7 @@ let function_ ?(proof = false) database (source : source) ~path (signature : sig
       checking = true;
       bound = [];
       loop = None;
+      substitution = [];
     }
   in
   let start =
@@ -1741,7 +2104,7 @@ let function_ ?(proof = false) database (source : source) ~path (signature : sig
       (fun frame (parameter : parameter) ->
         match parameter.kind with
         | Named_parameter { name = name_; _ } -> (
-            match source.checked.local_types.(name_.id) with
+            match local_type frame name_.id with
             | Some ty ->
                 let term = arrive context frame ("parameter." ^ name_.text) ty in
                 (match term with
@@ -1808,6 +2171,7 @@ let test database (source : source) ~path (body : block) =
       checking = true;
       bound = [];
       loop = None;
+      substitution = [];
     }
   in
   ignore (block_value context start body);

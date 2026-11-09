@@ -104,7 +104,14 @@ let truss_value members text =
         | [] -> internal)
     | None -> name
   in
+  let opaque atom =
+    (* The solver's name for a value of a sort it knows nothing about. *)
+    match String.index_opt atom '!' with
+    | Some _ -> true
+    | None -> false
+  in
   let rec one = function
+    | `Atom atom :: rest when opaque atom -> ("a value the prover knows nothing more about", rest)
     | `Atom atom :: rest -> (display atom, rest)
     | `Open :: `Atom "-" :: `Atom number :: `Close :: rest -> ("-" ^ number, rest)
     | `Open :: `Atom head :: rest ->

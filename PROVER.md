@@ -824,11 +824,23 @@ It proves, with one canonical, numbered, hashed query per obligation:
 - overflow of `+`, `-`, `*`, `/`, `%`, and negation on built-in integers;
   division by zero and the least value over `-1`; shift amounts; and
   `unreachable`
-- every `requires` at a call to a function or theorem whose contract it
-  reads, and every `ensures` at each way a function returns, with `old`,
-  `result`, and `mut` arguments
+- every `requires` at a call to a function, a theorem, or a trait method
+  whose contract it reads, and every `ensures` at each way a function
+  returns, with `old`, `result`, and `mut` arguments. A call resolved to an
+  `impl` reads the `impl`'s clauses with its trait's, and its own `requires`
+  when it states any; a call through a bound reads the trait's. Each
+  callee's clauses are read with the call's type arguments, and its
+  `ensures` is assumed only where its `requires` holds.
+- indexing, through the `impl` of `Index` a call reaches, so every index
+  into a `List` or a `Slice` is checked against `key < self.length()`; and
+  assigning to an element, after which the collection is not known any
+  more, since `lends mut` contracts are not read yet
+- functional bodies as definitions: a pure function with a `time` clause
+  and a functional body is unfolded once at each call, where its
+  `requires` holds, unless its body reads what the prover cannot
 - `if`, blocks, `let` and `var` with any pattern that cannot fail,
-  assignment and compound assignment to a local, `return`, `parallel`
+  assignment and compound assignment to a local, to a field of a place, or
+  to an element, `return`, `parallel`
   blocks in order, and `proof` blocks
 - records and sum types whose fields the package sees, as algebraic
   datatypes with their variants and fields sorted by name: building them,
@@ -838,9 +850,12 @@ It proves, with one canonical, numbered, hashed query per obligation:
   as the solver's equality for types with structural equality. Each field
   read is in its type's range, and a counterexample shows a value by its
   variant and fields.
-- `while` loops and `for` loops over ranges of integers, with invariants on
-  entry and after each iteration, and, in a function with a `time` clause,
-  termination by `decreases` or the one measure the prover tries itself
+- `while` loops, `for` loops over ranges of integers, and `for` loops over
+  an `each` method, whose elements are fresh values of their type, since
+  `yield`s' contracts are not read yet; with invariants on entry and after
+  each iteration, and, in a function with a `time` clause, termination by
+  `decreases`, the one measure the prover tries itself, or the `time`
+  clause of the `each` a loop calls
 - direct recursion that decreases its `decreases`, in functions with a
   `time` clause and in theorems
 - `assert` in theorems and proofs, assumed in tests
@@ -851,8 +866,8 @@ A call to anything whose contract it does not read yet, such as a trait
 method or a capability, gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
-definition that uses anything else, such as an index, a lambda, a string,
-a float, or a lending or yielding method, is reported as
+definition that uses anything else, such as a lambda, a string, a float, a
+cursor, or a lending or yielding method's own body, is reported as
 `prover.unsupported` with what stopped it, and none of its obligations
 count as proven. A cost bound, and a loop's
 `cost`, are reported as not proven yet, while the rest of the definition is
