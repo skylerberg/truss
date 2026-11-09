@@ -326,6 +326,82 @@ let within database (key : Names.key) (span : span) =
   | Some text when span.stop <= String.length text -> span
   | _ -> Syntax.Span.make 0 0
 
+(* Bitwise operations, exactly. A query proves bitwise facts first from
+   the few facts the prover states about [&], [|], [^], [~], and shifts;
+   when it does not, and it mentions any, it is asked once more with each
+   of them defined exactly, as the operation on its operands' bits of
+   their type's width, which the solver decides by bit-blasting. A
+   definition says what the operation is, so the second query means what
+   the first does, and its answer is as sound. See PROVER.md, "Types as
+   sorts". *)
+let bitwise_operations = [ "and"; "or"; "xor"; "complement"; "shift_left"; "shift_right" ]
+
+let integer_width = function
+  | "Int8" -> Some (8, true)
+  | "Int16" -> Some (16, true)
+  | "Int32" -> Some (32, true)
+  | "Int64" | "ISize" -> Some (64, true)
+  | "UInt8" -> Some (8, false)
+  | "UInt16" -> Some (16, false)
+  | "UInt32" -> Some (32, false)
+  | "UInt64" | "USize" -> Some (64, false)
+  | _ -> None
+
+let bitwise_of name =
+  match String.split_on_char '.' name with
+  | [ "operation"; operation; type_ ] when List.mem operation bitwise_operations ->
+      Option.map (fun (bits, signed) -> (operation, bits, signed)) (integer_width type_)
+  | _ -> None
+
+let exactly (query : L.query) =
+  let found = ref [] in
+  let rec walk = function
+    | L.Apply (name, arguments) as term ->
+        if bitwise_of name <> None && not (List.mem term !found) then found := term :: !found;
+        List.iter walk arguments
+    | L.Forall (_, body) | L.Exists (_, body) -> walk body
+    | L.Symbol _ | L.Integer _ | L.Boolean _ | L.Bits _ -> ()
+  in
+  List.iter walk (query.goal :: query.facts);
+  let defined term =
+    match term with
+    | L.Apply (name, arguments) -> (
+        match (bitwise_of name, arguments) with
+        | Some (operation, bits, signed), first :: rest ->
+            let bits_of value = L.Apply (Printf.sprintf "(_ int2bv %d)" bits, [ value ]) in
+            let a = bits_of first in
+            let result =
+              match (operation, rest) with
+              | "complement", _ -> Some (L.Apply ("bvnot", [ a ]))
+              | "and", [ b ] -> Some (L.Apply ("bvand", [ a; bits_of b ]))
+              | "or", [ b ] -> Some (L.Apply ("bvor", [ a; bits_of b ]))
+              | "xor", [ b ] -> Some (L.Apply ("bvxor", [ a; bits_of b ]))
+              | "shift_left", [ b ] -> Some (L.Apply ("bvshl", [ a; bits_of b ]))
+              | "shift_right", [ b ] ->
+                  Some (L.Apply ((if signed then "bvashr" else "bvlshr"), [ a; bits_of b ]))
+              | _ -> None
+            in
+            Option.map
+              (fun result ->
+                let unsigned = L.Apply ("bv2nat", [ result ]) in
+                let value =
+                  if signed then
+                    let half = L.Integer (Z.shift_left Z.one (bits - 1)) in
+                    L.ite
+                      (L.Apply (">=", [ unsigned; half ]))
+                      (L.Apply ("-", [ unsigned; L.Integer (Z.shift_left Z.one bits) ]))
+                      unsigned
+                  else unsigned
+                in
+                L.equal term value)
+              result
+        | _ -> None)
+    | _ -> None
+  in
+  match List.filter_map defined (List.rev !found) with
+  | [] -> None
+  | definitions -> Some { query with facts = query.facts @ definitions }
+
 (* Each obligation's answer. One that mentions the constants of [O(...)]
    bounds is asked with each choice of a pair for every bound in turn, the
    same choice for all of them, since a recursive call assumes the bound
@@ -340,8 +416,12 @@ let answers solver (obligations : Translate.obligation list) =
           Costs.pin constants (List.assoc constants.factor choice))
         obligation.constants
     in
-    Solver.solve solver ~values:(List.map fst obligation.values)
-      { obligation.query with facts = obligation.query.facts @ pins }
+    let query = { obligation.query with facts = obligation.query.facts @ pins } in
+    let values = List.map fst obligation.values in
+    match Solver.solve solver ~values query with
+    | Proven -> Solver.Proven
+    | first -> (
+        match exactly query with Some exact -> Solver.solve solver ~values exact | None -> first)
   in
   let groups =
     List.fold_left

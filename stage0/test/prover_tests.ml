@@ -1018,6 +1018,27 @@ let () =
          }\n"
         "prover.ensures")
 
+(* Bitwise operations *)
+
+let () =
+  test "a value or itself is itself, bit for bit" (fun () ->
+      proven "fn f(value: UInt32) -> UInt32\n  ensures result == value\n{\n  value | value\n}\n");
+  test "a value xor itself is zero" (fun () ->
+      proven "fn f(value: UInt64) -> UInt64\n  ensures result == 0\n{\n  value ^ value\n}\n");
+  test "signed bitwise operations are two's complement" (fun () ->
+      proven "fn f(value: Int8) -> Int8\n  ensures result == -1\n{\n  value | -1\n}\n");
+  test "a shift by a literal is a multiplication" (fun () ->
+      proven
+        "fn f(value: UInt8) -> UInt8\n\
+        \  requires value < 16\n\
+        \  ensures result == value * 16\n\
+         {\n\
+        \  value << 4\n\
+         }\n");
+  test "a bitwise fact that does not hold has a counterexample" (fun () ->
+      not_proven "fn f(value: UInt32) -> Bool\n  ensures result\n{\n  (value & 1) == 0\n}\n"
+        "prover.ensures")
+
 (* Floats *)
 
 let () =

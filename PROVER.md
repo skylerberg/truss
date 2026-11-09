@@ -192,14 +192,17 @@ and `reads` clauses):
   remainders, and the checked and saturating ones with `if`.
 - **Bitwise operations get a second encoding.** On integers, `&`, `|`, `^`,
   `~`, and shifts are functions the solver knows only by a few facts, such
-  as `0 <= a & b <= a` for unsigned values and shifts by a literal as
-  multiplication by a power of two. That proves the bounds most bit
+  as `0 <= a & b <= a` for unsigned values. That proves the bounds most bit
   twiddling needs. When a query that mentions a bitwise operation is not
-  proven that way, and every integer in it is of a built-in type, the
-  prover tries it once more with every integer as a bit-vector of its
-  width, where the solver decides such facts exactly. Verus asks for this
-  by hand with `by (bit_vector)`; Truss tries both, always in the same
-  order, and caches both answers.
+  proven that way, the prover tries it once more with each such operation
+  defined exactly: as the operation on its operands' bits, of their type's
+  width, read back as an integer, which the solver decides by
+  bit-blasting. Verus asks for this by hand with `by (bit_vector)`; Truss
+  tries both, always in the same order, and caches both answers. Only the
+  bitwise operations change, not the integers, so arithmetic stays exact
+  and the second query means exactly what the first does: an integer that
+  is never in its type's range, which recoding every integer as a
+  bit-vector would wrap, cannot make it prove something false.
 - **Floats follow IEEE 754 exactly,** as DESIGN.md requires, through the
   solver's floating-point theory. `==` on floats is `fp.eq` or both NaN,
   and `<` puts NaN last, which is the lawful comparison DESIGN.md defines.
@@ -1021,6 +1024,8 @@ It proves, with one canonical, numbered, hashed query per obligation:
   of maps and sets, are not built yet.
 - quantifiers over every value of a type, each in its range and meeting
   its type's invariants
+- bitwise operations, by their facts and then, once more, exactly, as
+  [Types as sorts](#types-as-sorts) describes
 - floats, in the solver's floating-point theory: literals bit for bit, `+`,
   `-`, `*`, `/`, and negation rounding to nearest, ties to even, as IEEE
   754 does, and the lawful `==` and ordering, with every NaN equal and

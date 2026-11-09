@@ -4406,6 +4406,21 @@ and assignment context frame (written : statement) target operator assigned =
                 arithmetic context frame
                   { target with span = written.span }
                   ty binary_operator current right )
+          | Bit_and -> (frame, opaque_operation context frame ty "and" [ current; right ])
+          | Bit_or -> (frame, opaque_operation context frame ty "or" [ current; right ])
+          | Bit_xor -> (frame, opaque_operation context frame ty "xor" [ current; right ])
+          | Shift_left | Shift_right ->
+              (match width ty with
+              | Some bits ->
+                  oblige context frame Shift assigned.span
+                    (Printf.sprintf "The shift amount `%s` may not be less than %d."
+                       (quote source assigned.span) bits)
+                    L.(Apply ("<", [ right; int bits ]))
+              | None -> unsupported written.span "a shift of `%s`" (T.show ty));
+              ( frame,
+                opaque_operation context frame ty
+                  (if binary_operator = Shift_left then "shift_left" else "shift_right")
+                  [ current; right ] )
           | _ -> (frame, opaque_operation context frame ty "assignment" [ current; right ])
           end
   in
