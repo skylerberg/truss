@@ -288,6 +288,7 @@ struct t_worker {
   int commands;
   int reports;
   int64_t test;
+  uint8_t ending; /* It reported a failure, so it is about to exit and gets no more tests. */
   uint64_t started;
   uint8_t *buffer;
   size_t used;
@@ -359,6 +360,7 @@ static void t_spawn(struct t_worker *workers, uint32_t width, struct t_worker *w
   worker->commands = commands[1];
   worker->reports = reports[0];
   worker->test = -1;
+  worker->ending = 0;
   worker->used = 0;
 }
 
@@ -385,6 +387,7 @@ static void t_take_records(struct t_worker *worker, struct t_result *results, ui
       t_finish(&results[test], kind, text, length);
       *finished += 1;
       worker->test = -1;
+      if (kind != t_passed) worker->ending = 1;
     }
     at += 9 + length;
   }
@@ -450,7 +453,7 @@ int t_runtime_run_tests(uint32_t count, const t_test *tests, uint32_t time_limit
   while (finished < count) {
     for (uint32_t w = 0; w < width; w++) {
       if (workers[w].pid < 0 && next < count) t_spawn(workers, width, &workers[w], tests);
-      if (workers[w].pid >= 0 && workers[w].test < 0 && next < count) {
+      if (workers[w].pid >= 0 && !workers[w].ending && workers[w].test < 0 && next < count) {
         uint32_t index = next++;
         workers[w].test = index;
         workers[w].started = t_milliseconds();
