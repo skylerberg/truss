@@ -2,7 +2,4 @@
  (name lexer_tests)
  (libraries source diagnostic token layout lexer unicode zarith)
  (deps
-  %{workspace_root}/SYNTAX.md
-  %{workspace_root}/DESIGN.md
-  %{workspace_root}/GRAMMAR.md
-  %{workspace_root}/CODEGEN.md))
+  (glob_files %{workspace_root}/*.md)))

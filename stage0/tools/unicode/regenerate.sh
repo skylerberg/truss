@@ -1,8 +1,7 @@
 #!/bin/sh
 # Downloads the Unicode data files listed in sources.txt, checks each against
 # its recorded SHA-256 hash, writes stage0/unicode/unicode_tables.ml from them,
-# and then checks the result against the data files: NFC against
-# NormalizationTest.txt, and every table against the file it came from.
+# and then checks every table against the file it came from.
 #
 # Building the compiler never runs this. Run it only to regenerate the tables.
 # The files are kept in tools/unicode/data, or in $TRUSS_UNICODE_DATA if set.

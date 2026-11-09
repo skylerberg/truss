@@ -428,8 +428,9 @@ For a raw string opened with *q* quotes and *n* dollar signs:
    - A line that holds only whitespace and does not start with the indentation
      becomes an empty line, since nothing visible can be lost.
    - Any other line is an error. The error points at the first character that
-     differs from the indentation and shows tabs and spaces visibly. There is
-     no automatic fix, since the intended indentation is not clear.
+     differs from the indentation and shows tabs and spaces visibly. The fix
+     replaces the line's leading whitespace with the indentation, since the
+     usual cause is a tab among spaces or the reverse.
    - The check looks at the text before any interpolation on the line, so an
      interpolation cannot start inside the indentation.
    - The line breaks just after the opening delimiter and just before the
@@ -582,9 +583,9 @@ brackets:
   `capability`, `let`, `test`, `theorem`, `proof`, `use`, `public`,
   `internal`) closes every open bracket. `truss fmt` starts every definition
   in column 0, so a missing `}` in one definition cannot swallow the
-  definitions after it. The error points at the innermost unclosed opener, and
-  its fix inserts the closer before that line. Only a broken file runs again,
-  so valid code is never affected, however it is laid out.
+  definitions after it. The error points at the innermost unclosed opener,
+  and its fix closes every open bracket. Only a broken file runs again, so
+  valid code is never affected, however it is laid out.
 - **A file that ends inside an unterminated comment or raw string** has its
   open brackets closed without another error. They are part of what the
   comment or string swallowed, and closing it is the fix that matters. An
@@ -592,6 +593,19 @@ brackets:
 
 Inserted closers are zero-width, so the parser can tell them apart and avoid
 reporting the same mistake again.
+
+**Where a fix puts a missing closer.** The token stream shows where a bracket
+was found unclosed, which is often far from where it was meant to close, as
+in `let x = [1, 2` followed by `g(x)`. As rustc does, the indentation decides
+instead. Among the elements directly inside the bracket, where an element is
+a token or a whole nested group, the closer goes after the last one on a line
+indented more than the opener's line, or else after the last one on the
+opener's line. So `[1, 2` becomes `[1, 2]`, a closer never lands inside a
+nested group or inside a comment that ends the line, and a `}` goes on a line
+of its own at the opener's indentation. When the bracket's last element is a
+string cut off at the end of its line, the string probably swallowed the
+closer, and the bracket gets no fix: closing the string is the fix that
+matters.
 
 ## Diagnostics
 
@@ -617,27 +631,20 @@ type t = {
   on message text.
 - A diagnostic may offer alternative fixes, as `0755` does.
 - Applying any fix must remove its diagnostic without adding another from the
-  lexer. `Lexer.lex` makes this hold by construction: it applies each fix,
-  lexes the result again, and leaves out a fix that fails. A fix is built from
-  the text around one error, but whether it is right can depend on what it
-  cannot see, such as where recovery from another error guesses a string
-  ends. The fuzzer checks that fixes for single mistakes never fail the
-  check, so ordinary mistakes keep their fixes and only unusual combinations
-  of errors lose them.
-- **Checking a fix lexes only the part of the file around it.** A token that
-  starts a line outside brackets begins with the lexer's state empty, so the
-  text between two such tokens, usually one top-level statement or
-  definition, lexes the same on its own as in the file, when it is lexed in
-  the same mode: bracket recovery is on for the whole file or not at all, so
-  a part is lexed with recovery exactly when the file needed it. A fix that leaves a
-  bracket, string, or comment open at the end of its part gets an error
-  there, so it fails the check instead of changing what follows unseen.
-  Only the fixes of the diagnostics that are shown are checked; the others
-  get theirs once earlier errors are fixed.
+  lexer. Each fix has a focused test, and the fuzzer checks this for a
+  mistake inserted into each document example. Fixes are not checked while
+  lexing: that could only show that a fix lexes cleanly, not that it is
+  what the author meant, and it made every change to the lexer keep a subtle
+  argument true. A fix offered for an error that only arises where two
+  recoveries meet may leave an error behind; lexing again shows it.
+- An error with no exact fix gets none, even where a guess would usually be
+  right: an agent applies fixes without reading them, so a wrong fix is
+  worse than none. A closer that matches nothing has no fix, since an extra
+  `}` is as often a missing `{`.
 - A file lists at most 200 diagnostics, then gives a count of the rest, so a
   binary file opened by mistake gives a short report. The lexer keeps every
-  diagnostic, so that checks see them all, and `Diagnostic.shown` applies the
-  limit when they are listed.
+  diagnostic, and `Diagnostic.shown` applies the limit when they are
+  listed.
 - Messages never copy bytes that are not valid UTF-8; they describe them,
   as in "the byte 0xFF", and JSON output is always valid UTF-8.
 
@@ -701,12 +708,13 @@ fact about a small input.
 - **The documents agree with the code.** Tests read the keyword lists, the
   punctuation list, and the line-break sets from GRAMMAR.md and compare them
   with `Token` and `Layout`.
-- **The documents' examples lex cleanly.** Each ` ```truss ` block in
-  SYNTAX.md, DESIGN.md, GRAMMAR.md, and CODEGEN.md is a test of its own.
+- **The documents' examples lex cleanly.** Each ` ```truss ` block in a
+  Markdown document at the root of the repository is a test of its own, so a
+  new document is covered without being listed.
 - **The fuzzer**, `stage0/tools/fuzz`, is run by hand. It checks that no
-  input raises or gives spans out of bounds or out of order, that one
-  mistake inserted into a document example never loses its fix to the fix
-  check, and that valid tokens round-trip. Each problem it finds becomes a
+  input raises or gives spans out of bounds or out of order, that for one
+  mistake inserted into a document example every fix removes its error and
+  adds no other, and that valid tokens round-trip. Each problem it finds becomes a
   focused test.
 - **The benchmark**, `stage0/tools/benchmark`, measures throughput on given
   files.
@@ -759,18 +767,20 @@ describe:
   Python, and Go, with a note at the line where it seems to end. Guessing the
   end and lexing what follows as code took a second scan and interacted
   badly with other recovery.
-- **Fixes are checked by construction.** `Lexer.lex` lexes the result of
-  each fix again, only in the part of the file around it, and leaves out any
-  fix that fails, instead of relying on each fix being built right. Fuzzing found fixes that went wrong only where
-  two recoveries met, such as a missing `}` and an unterminated raw string
-  guessed to end on the same line.
+- **Fixes are made right, not checked while lexing.** An earlier version
+  lexed the result of each fix again and dropped any that failed. It could
+  not tell a fix that was wrong but lexed cleanly, it needed a subtle
+  argument that part of a file lexes the same on its own, and it hid bugs in
+  how fixes are made. The fuzzer found those bugs instead, and each is now a
+  focused test.
+- **A missing closer goes where the indentation says,** as rustc's hints do,
+  not where the bracket is found unclosed.
 - **One function removes trivia,** so a fix for a comment, a `;`, or a
   forbidden character never joins the tokens around it.
 - **Errors do not cascade out of an interpolation.** One cut off by a line
   break or a broken nested string closes its brackets silently.
 - **The foreign tokens `++` and `--`** can end and begin a statement.
-- **The diagnostic limit applies when listing,** not when collecting, so
-  that checking a fix compares complete lists.
+- **The diagnostic limit applies when listing,** not when collecting.
 - **What must hold is in the types where it can be:** spans, string shapes,
   normalized floats, brackets, and diagnostic codes.
 - **Inside a multi-line raw string,** a run of more quotes than the delimiter

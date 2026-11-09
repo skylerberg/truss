@@ -9,8 +9,8 @@
 
    - no input raises, every token and diagnostic span is in bounds and in
      order, and brackets are balanced;
-   - one mistake inserted into an example never loses its fix to the fix
-     check, so fixes for single mistakes are right as built;
+   - for one mistake inserted into an example, every fix removes its
+     diagnostic and adds no other;
    - valid tokens printed with spaces between them lex back to the same
      tokens.
 
@@ -86,19 +86,33 @@ let check_robust text =
 
 (* Fixes for single mistakes *)
 
-let check_fixes_kept text =
-  let source = Source.create ~path:"fuzz.truss" text in
-  let _, unchecked = Lexer.lex ~check_fixes:false source in
-  let _, checked = Lexer.lex source in
-  List.iter2
-    (fun (before : Diagnostic.t) (after : Diagnostic.t) ->
+(* Applying a fix removes its diagnostic and adds no other: what is left is
+   the other diagnostics, or fewer. *)
+let check_fixes_work text =
+  let codes text = List.sort compare (List.map (fun (d : Diagnostic.t) -> d.code) (snd (lex text))) in
+  let before = codes text in
+  List.iter
+    (fun (diagnostic : Diagnostic.t) ->
       List.iter
         (fun (fix : Diagnostic.fix) ->
-          if not (List.mem fix after.fixes) then
-            fail "the fix %S for %s fails its check in %s" fix.title (Diagnostic.Code.name before.code)
-              (Diagnostic.quote text))
-        before.fixes)
-    unchecked checked
+          let rec remove_one = function [] -> [] | code :: rest -> if code = diagnostic.code then rest else code :: remove_one rest in
+          let rec contained smaller larger =
+            match (smaller, larger) with
+            | [], _ -> true
+            | _ :: _, [] -> false
+            | first :: rest, candidate :: larger_rest ->
+                if first = candidate then contained rest larger_rest
+                else if first > candidate then contained smaller larger_rest
+                else false
+          in
+          match Diagnostic.apply_fix text fix with
+          | exception Invalid_argument _ -> fail "the fix %S has overlapping edits in %s" fix.title (Diagnostic.quote text)
+          | fixed ->
+              if not (contained (codes fixed) (remove_one before)) then
+                fail "the fix %S for %s leaves or adds an error in %s" fix.title
+                  (Diagnostic.Code.name diagnostic.code) (Diagnostic.quote text))
+        diagnostic.fixes)
+    (snd (lex text))
 
 let mistakes =
   [| "\""; "\"\"\""; "$"; "${"; "}"; "{"; "("; ")"; "["; "]"; "\n"; "\r"; "\\"; "'"; "/*"; "//"; "#"; ";"; "0x";
@@ -154,7 +168,7 @@ let () =
       several := insert !several (mistakes.(Random.State.int random (Array.length mistakes)))
     done;
     check_robust !several;
-    check_fixes_kept (insert (example ()) mistakes.(Random.State.int random (Array.length mistakes)));
+    check_fixes_work (insert (example ()) mistakes.(Random.State.int random (Array.length mistakes)));
     round_trip random
   done;
   if !failures > 0 then begin

@@ -240,11 +240,9 @@ let rec next cursor =
           blank_line = cursor.blank_line;
           cut_off = cursor.ended_inside_error;
         }
-  | Token { kind; start; ending = _ } ->
-      (* At the top level, a line break is legal, so how a string ended does
-         not matter here. *)
+  | Token { kind; start; ending } ->
       let first_line_break = cursor.first_line_break and blank_line = cursor.blank_line in
       cursor.first_line_break <- None;
       cursor.blank_line <- false;
       cursor.line_is_blank <- false;
-      Layout.Next { kind; span = span start cursor.position; first_line_break; blank_line }
+      Layout.Next { kind; span = span start cursor.position; first_line_break; blank_line; cut_off = ending = Cut_off }

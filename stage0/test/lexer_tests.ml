@@ -108,6 +108,12 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
       fail "expected one diagnostic, got [%s]"
         (String.concat "; " (List.map (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code) diagnostics))
 
+(* The texts that the fixes of the diagnostic with [code] produce. *)
+let fixed_texts text ~code =
+  List.concat_map
+    (fun (d : Diagnostic.t) -> if d.code = Lexer code then List.map (Diagnostic.apply_fix text) d.fixes else [])
+    (snd (lex text))
+
 (* Source text *)
 
 let () =
@@ -267,7 +273,14 @@ let () =
         ~code:Raw_string_closing_not_alone ~at:{|"""|} ~occurrence:2
         ~fixed:(lines [ {|"""|}; "  text"; {|  """|} ]));
   test "a line that does not start with the indentation" (fun () ->
-      error (lines [ {|"""|}; "  spaces"; "\ttab"; {|  """|} ]) ~code:Raw_string_indentation ~at:"\ttab");
+      error
+        (lines [ {|"""|}; "  spaces"; "\ttab"; {|  """|} ])
+        ~code:Raw_string_indentation ~at:"\ttab"
+        ~fixed:(lines [ {|"""|}; "  spaces"; "  tab"; {|  """|} ]));
+  test "Python's empty triple-quoted string gets a note" (fun () ->
+      match snd (lex {|x = """"""|}) with
+      | [ { notes = [ (_, note) ]; _ } ] when String.ends_with ~suffix:{|`""`.|} note -> ()
+      | _ -> fail "expected one diagnostic, with a note suggesting an empty string");
   test "an unterminated one-line raw string closes at the end of its line" (fun () ->
       error "\"\"\"abc\nx" ~code:Unterminated_string ~at:"\"" ~fixed:"\"\"\"abc\"\"\"\nx");
   test "an unterminated multi-line raw string runs to the end of the file" (fun () ->
@@ -352,14 +365,26 @@ let () =
   test "an unclosed bracket inside another" (fun () ->
       error "f(1, [2)" ~code:Unclosed_bracket ~at:"[" ~fixed:"f(1, [2])";
       equal_lists Fun.id "tokens" [ "f"; "("; "1"; ","; "["; "2"; "+]"; ")"; "NL" ] (tokens_of "f(1, [2)"));
+  test "the indentation says where a bracket was meant to close" (fun () ->
+      error "fn f() {\n  let x = [1, 2\n  g(x)\n}\n" ~code:Unclosed_bracket ~at:"[" ~fixed:"fn f() {\n  let x = [1, 2]\n  g(x)\n}\n";
+      error "f(\n  a,\n  b\n" ~code:Unclosed_bracket ~at:"(" ~fixed:"f(\n  a,\n  b)\n");
+  test "a closer goes after the last token, not inside a comment that ends the line" (fun () ->
+      equal_lists Fun.id "fixed" [ "f(a, b) // note\n" ] (fixed_texts "f(a, b // note\n" ~code:Unclosed_bracket));
+  test "a closer goes after a nested group, not inside it" (fun () ->
+      equal_lists Fun.id "fixed" [ "x = m(a {\n  b\n})\n" ] (fixed_texts "x = m(a {\n  b\n}\n" ~code:Unclosed_bracket));
+  test "a bracket whose closer a cut-off string swallowed has no fix" (fun () ->
+      equal_lists Fun.id "fixed" [] (fixed_texts "f(a, \"b)\n" ~code:Unclosed_bracket);
+      equal_lists Fun.id "fixed" [ "f(a, \"b)\"\n" ] (fixed_texts "f(a, \"b)\n" ~code:Unterminated_string));
+  test "a missing } goes on a line of its own" (fun () ->
+      error "fn f() {\n  body\n" ~code:Unclosed_bracket ~at:"{" ~fixed:"fn f() {\n  body\n}\n");
   test "a closer that matches nothing is dropped" (fun () ->
       error "a }" ~code:Unmatched_closing_bracket ~at:"}";
       equal_lists Fun.id "tokens" [ "a"; "NL" ] (tokens_of "a }"));
   test "a bracket still open at the end of the file" (fun () ->
-      error "let x = (1\n" ~code:Unclosed_bracket ~at:"(" ~fixed:"let x = (1\n)\n");
+      error "let x = (1\n" ~code:Unclosed_bracket ~at:"(" ~fixed:"let x = (1)\n");
   test "a definition in column 0 closes open brackets" (fun () ->
       let text = "fn a() {\n  f(1,\nfn b() {}\n" in
-      error text ~code:Unclosed_bracket ~at:"(" ~occurrence:2 ~fixed:"fn a() {\n  f(1,\n)}\nfn b() {}\n";
+      error text ~code:Unclosed_bracket ~at:"(" ~occurrence:2 ~fixed:"fn a() {\n  f(1,)\n}\nfn b() {}\n";
       equal_lists Fun.id "tokens"
         [ "fn"; "a"; "("; ")"; "{"; "f"; "("; "1"; ","; "+)"; "+}"; "NL"; "fn"; "b"; "("; ")"; "{"; "}"; "NL" ]
         (tokens_of text));
@@ -387,19 +412,9 @@ let () =
       | _ -> fail "expected Invalid_argument"
       | exception Invalid_argument _ -> ())
 
-(* Checking fixes *)
-
-let semicolon_fixes (_, diagnostics) =
-  List.concat_map (fun (d : Diagnostic.t) -> if d.code = Lexer Semicolon then d.fixes else []) diagnostics
+(* Fixes in a file with several errors *)
 
 let () =
-  test "a fix that would change how another part of the file lexes is left out" (fun () ->
-      (* Replacing the `;` with a line break puts `fn` in column 0, where
-         bracket recovery, which the open `{` of g turns on, closes the
-         parenthesis around it. *)
-      let source = Source.create ~path:"test.truss" "let p = s.filter(;fn(x) { x })\nfn g() {\n" in
-      if semicolon_fixes (Lexer.lex ~check_fixes:false source) = [] then fail "the fix is built";
-      if semicolon_fixes (Lexer.lex source) <> [] then fail "the checked fix is left out");
   test "the fixes for errors in two definitions each remove only their own error" (fun () ->
       let text = "fn a() {\n  let userName = 1;\n  f(1,\n}\nfn b() {\n  let x = 0755 // note\n}\n" in
       let before = List.sort compare (codes text) in
@@ -522,7 +537,9 @@ let () =
           test (Printf.sprintf "%s block %d lexes cleanly" name (index + 1)) (fun () ->
               equal_lists Fun.id "codes" [] (codes text)))
         (truss_blocks name))
-    [ "SYNTAX.md"; "DESIGN.md"; "GRAMMAR.md"; "CODEGEN.md" ]
+    (* Every document at the root of the repository, so a new one is
+       covered without being listed here. *)
+    (Sys.readdir "../.." |> Array.to_list |> List.filter (fun name -> Filename.check_suffix name ".md") |> List.sort compare)
 
 let () =
   if !failures > 0 then begin

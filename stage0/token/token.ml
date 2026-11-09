@@ -154,24 +154,3 @@ let keyword_spelling = spelling_of keywords
 let reserved_spelling = spelling_of reserved_words
 let punctuation_spelling = spelling_of punctuation
 let foreign_spelling = spelling_of foreign_sequences
-
-let is_ascii_name_byte c =
-  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c = '_'
-
-(* Whether a definition starts at [offset]: a definition keyword in column 0,
-   which `truss fmt` puts at the start of every definition. Bracket recovery
-   and the guess at where an unterminated raw string ends both use this one
-   rule. *)
-let starts_definition source offset =
-  Source.starts_line source offset
-  &&
-  let text = Source.text source in
-  let rec word_end index =
-    if index < String.length text && is_ascii_name_byte text.[index] then word_end (index + 1) else index
-  in
-  let stop = word_end offset in
-  stop > offset
-  &&
-  match word (String.sub text offset (stop - offset)) with
-  | Some (Keyword keyword) -> List.mem keyword definition_keywords
-  | _ -> false

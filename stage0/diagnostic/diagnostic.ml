@@ -88,7 +88,8 @@ let insert offset replacement = { span = Source.zero_width offset; replacement }
 let delete span = { span; replacement = "" }
 
 let apply_fix text fix =
-  let edits = List.sort (fun (a : edit) (b : edit) -> compare a.span.start b.span.start) fix.edits in
+  (* Edits at the same offset apply in the order they are listed. *)
+  let edits = List.stable_sort (fun (a : edit) (b : edit) -> compare a.span.start b.span.start) fix.edits in
   let buffer = Buffer.create (String.length text) in
   let position =
     List.fold_left

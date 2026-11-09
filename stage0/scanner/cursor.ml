@@ -34,10 +34,10 @@ let create source diagnostics =
   }
 
 (* How a construct that must end on its line ended. [Cut_off] means it
-   stopped at the end of its line because of an error already reported, and
-   every enclosing construct that must end on its line ends there too,
-   without another error. The cursor is then always at a line break or the
-   end of the file. *)
+   stopped at the end of its line because of an error already reported, such
+   as an unterminated string, and every enclosing construct that must end on
+   its line ends there too, without another error. The cursor is then always
+   at a line break or the end of the file. *)
 type ending = Closed | Cut_off
 
 (* What the scanner found next. It always stops at a line break, which the
