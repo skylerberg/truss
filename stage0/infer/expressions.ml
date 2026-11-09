@@ -3557,12 +3557,12 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
             mismatch state written.span ~expected:type_ ~found:(T.builtin USize)
       | _ -> ())
   | Qualified_constant constant -> qualified_constant state written.id written.span constant type_
-  | Literal literal -> literal_pattern state env written literal type_
+  | Literal literal -> literal_pattern state written.id written.span literal type_
   | Pattern_range { start; stop; _ } ->
       List.iter
         (fun (end_ : range_end) ->
           match end_.kind with
-          | End_literal literal -> literal_pattern state env written literal type_
+          | End_literal literal -> literal_pattern state end_.id end_.span literal type_
           | End_constant constant -> qualified_constant state end_.id end_.span constant type_
           | End_name bound -> (
               match target state bound with
@@ -3724,25 +3724,25 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
                    (List.length fields) names)))
     written_fields
 
-and literal_pattern state env (written : pattern) literal type_ =
-  ignore env;
+(* A literal in a pattern, or a range's end: recorded by the node's id, and
+   of the matched type. *)
+and literal_pattern state id (span : span) literal type_ =
   match literal with
   | Literal_integer number -> (
-      state.tables.literals.(written.id) <- Some (Integer_value number);
+      state.tables.literals.(id) <- Some (Integer_value number);
       if not (T.is_integer_type type_ || type_ = T.Error || type_ = T.Hole) then
-        report state Mismatch written.span
+        report state Mismatch span
           (Printf.sprintf "An integer pattern matches an integer, not `%s`." (T.show type_))
       else
         match builtin_range type_ with
         | Some (low, high) when Z.lt number low || Z.gt number high ->
-            report state Literal_out_of_range written.span
+            report state Literal_out_of_range span
               (Printf.sprintf "`%s` does not fit in `%s`." (Z.to_string number) (T.show type_))
         | _ -> ())
   | Literal_true | Literal_false ->
-      if not (unify state type_ T.bool) then
-        mismatch state written.span ~expected:type_ ~found:T.bool
+      if not (unify state type_ T.bool) then mismatch state span ~expected:type_ ~found:T.bool
   | Literal_string _ ->
       if not (is_named string_path type_ || is_named string_slice_path type_ || type_ = T.Error)
       then
-        report state Mismatch written.span
+        report state Mismatch span
           (Printf.sprintf "A string pattern matches a string, not `%s`." (T.show type_))

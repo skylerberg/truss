@@ -606,6 +606,25 @@ let () =
       | Some (Float_value rounded) ->
           if rounded <> Float.of_string "0x1.000002p+0" then fail "rounded to %h" rounded
       | _ -> fail "no value");
+  test "each end of a range pattern records its own value" (fun () ->
+      let value, checked =
+        expression_at "fn f(n: Int64) -> Int64 {\n  match n {\n    1..=5 => 1\n    _ => 2\n  }\n}\n"
+          "match" 1
+      in
+      match value.kind with
+      | Match
+          {
+            arms = { patterns = [ { kind = Pattern_range { start; stop; _ }; id; _ } ]; _ } :: _;
+            _;
+          } -> (
+          match
+            (checked.literals.(start.id), checked.literals.(stop.id), checked.literals.(id))
+          with
+          | Some (Integer_value low), Some (Integer_value high), None
+            when Z.equal low (Z.of_int 1) && Z.equal high (Z.of_int 5) ->
+              ()
+          | _ -> fail "the ends are not recorded each by its own id")
+      | _ -> fail "not a match on a range");
   test "a negated literal of an unsigned type is one error" (fun () ->
       one_diagnostic "fn f() {\n  let value: UInt8 = -1\n}\n" "types.negated_unsigned");
   test "explicit type arguments give exactly the function's own" (fun () ->
