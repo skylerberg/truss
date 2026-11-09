@@ -67,6 +67,7 @@ let make t (key : Instance.key) : Lir.compiled =
   | Copy ty -> code (Glue.copy glue ty)
   | Debug ty -> code (Glue.debug glue ty)
   | Encode ty -> code (Glue.encode glue ty)
+  | Any_drop ty -> code (Glue.any_drop glue ty)
   | Evaluator path -> code (Lower.evaluator t.context path)
   | Entry _ | Program_main _ | Any_entry _ | Adapter _ -> code (Lower.instance t.context key)
   | Any_table _ -> Table (Lower.any_table t.context key)

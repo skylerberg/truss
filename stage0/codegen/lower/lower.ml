@@ -1045,12 +1045,12 @@ and evaluate_arguments st ~(expressions : S.expression list) ~(arguments : C.arg
     let place, ty = convert st argument place ty in
     (argument.parameter, argument.mode, ty, place)
   in
-  List.map evaluate arguments
-  |> List.sort (fun (a, _, _, _) (b, _, _, _) -> Int.compare a b)
-  |> List.map (fun (_, mode, ty, place) -> (mode, ty, place))
+  List.map evaluate arguments |> List.sort (fun (a, _, _, _) (b, _, _, _) -> Int.compare a b)
 
 (* Inlines a lending or yielding method's body with its parameters bound to
-   [arguments], handing each [yield] to [on_yield]. *)
+   [arguments], each by its parameter's index, handing each [yield] to
+   [on_yield]. A parameter left out is given its default, worked out where
+   the method writes it. *)
 and inline st path type_arguments ~arguments ~on_yield =
   if List.exists (Path.equal path) st.frame.inlined then
     bug "%s yields through recursion, which stage0 does not lower yet" (Path.show path);
@@ -1067,20 +1067,31 @@ and inline st path type_arguments ~arguments ~on_yield =
       exit = Some (exit, List.length st.scopes);
     }
   in
-  if List.length code.parameter_types <> List.length arguments then
-    bug "%s takes %d parameters and is given %d arguments" (Path.show path)
-      (List.length code.parameter_types)
-      (List.length arguments);
   st.frame <- frame;
   in_scope st (fun () ->
-      List.iter2
-        (fun (mode, _, (parameter : S.parameter)) (_, ty, place) ->
+      List.iteri
+        (fun index (mode, written_ty, (parameter : S.parameter)) ->
+          let ty, place, filled =
+            match List.find_opt (fun (i, _, _, _) -> i = index) arguments with
+            | Some (_, _, ty, place) -> (ty, place, false)
+            | None -> (
+                let ty = Monomorphic.ground st.context.monomorphic code.substitution written_ty in
+                match parameter.kind with
+                | Named_parameter { default = Some default; _ } ->
+                    let place = new_local st ty in
+                    st.temporaries <- [] :: st.temporaries;
+                    into st default place;
+                    end_statement st;
+                    (ty, place, true)
+                | _ -> bug "%s is given no argument for parameter %d" (Path.show path) index)
+          in
           (match parameter.kind with
           | Self_parameter _ -> frame.self_place <- Some place
           | Named_parameter { name; _ } -> Hashtbl.replace frame.bindings name.id place
           | Parameter_error -> ());
-          if mode = T.Own && not (trivial st ty) then own_in_scope st place)
-        code.parameter_types arguments;
+          (* A default is the method's own to drop, whatever the mode. *)
+          if (mode = T.Own || filled) && not (trivial st ty) then own_in_scope st place)
+        code.parameter_types;
       check_requires st;
       block_into st code.body None);
   finish st.b (Goto exit);
@@ -2010,9 +2021,18 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
         let substitution = bind signature.generics type_arguments in
         let arguments = with_placeholders st signature substitution in_order in
         let passed = List.filter_map (fun (mode, ty, place) -> hold st mode ty place) arguments in
+        let mask =
+          if has_defaults signature then
+            [ constant_int UInt64 (Z.of_int (default_mask signature call_)) ]
+          else []
+        in
         let evidence = List.map (evidence_of st) (evidence_for substitution signature.uses) in
+        (* In the order of the pulled method's parameters: its own, the
+           defaults' mask, then the evidence. *)
         let fields =
-          List.mapi (fun i operand -> (Printf.sprintf "local%d" i, operand)) (passed @ evidence)
+          List.mapi
+            (fun i operand -> (Printf.sprintf "local%d" i, operand))
+            (passed @ mask @ evidence)
         in
         let cursor = Ground.Cursor { method_ = path; type_arguments } in
         emit st.b
@@ -2789,6 +2809,61 @@ and check_requires st =
           close_scope st scope
         end)
       st.frame.code.requires
+
+(* Fills in each parameter whose default the caller left out, as the bits
+   of [mask] say, from the default's expression, so that changing a default
+   compiles only the function again. A parameter that arrives as a pointer
+   is pointed at the default's value instead. *)
+and fill_defaults st mask =
+  let b = st.b in
+  let code = st.frame.code in
+  let defaulted =
+    List.filter_map
+      (fun (mode, ty, (parameter : S.parameter)) ->
+        match parameter.kind with
+        | Named_parameter { name; default = Some default; _ } -> Some (mode, ty, name, default)
+        | _ -> None)
+      code.parameter_types
+  in
+  List.iteri
+    (fun bit (mode, ty, (name : S.name), default) ->
+      let ty = Monomorphic.ground st.context.monomorphic code.substitution ty in
+      let passed = local b (Raw (Integer UInt64)) and given = local b (Raw Bool) in
+      emit b
+        (Assign
+           ( at passed,
+             Binary (Bit_and, Copy (at mask), constant_int UInt64 (Z.shift_left Z.one bit)) ));
+      emit b (Assign (at given, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
+      let fill = block b and after = block b in
+      finish b (Switch { value = Copy (at given); cases = [ (Z.one, after) ]; default = Some fill });
+      start b fill;
+      st.temporaries <- [] :: st.temporaries;
+      (match Hashtbl.find_opt st.frame.bindings name.id with
+      | Some ({ projections = [ Deref ]; root = Local pointer } : Lir.place) ->
+          if st.pulling then
+            bug "%s's %s has a default and is held as a pointer, which a cursor cannot point at"
+              (Path.show code.anchor) name.text;
+          let value = new_local st ty in
+          into st default value;
+          if not (trivial st ty) then own_in_scope st value;
+          emit b (Assign (at pointer, Use (Address { place = value; writable = true })))
+      | Some place when mode <> T.Own && not (trivial st ty) ->
+          if st.pulling then
+            bug "%s's %s has a default and is a view, which a cursor would not drop"
+              (Path.show code.anchor) name.text;
+          (* The parameter is a view: of the caller's value, or of the
+             default, which the function owns, and drops only where it made
+             one. *)
+          let value = new_local st ty in
+          into st default value;
+          own_in_scope st value;
+          emit b (Assign (place, Use (Copy value)))
+      | Some place -> into st default place
+      | None -> ());
+      st.temporaries <- List.tl st.temporaries;
+      finish b (Goto after);
+      start b after)
+    defaulted
 
 (* Patterns *)
 
@@ -3983,7 +4058,7 @@ let any_table context (key : Instance.key) : Lir.table =
             (Instance.Any_entry method_key, fst (any_entry_signature context m.method_signature)))
           (any_methods context trait)
       in
-      { table_key = key; entries = (Instance.Drop self_ty, drop_signature) :: entries }
+      { table_key = key; entries = (Instance.Any_drop self_ty, drop_signature) :: entries }
   | _ -> bug "not an any table: %s" (Instance.to_string key)
 
 (* Whether a method of a derived [impl] is the trait's own, written in the
@@ -4055,8 +4130,9 @@ let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list
         local)
       code.parameter_types
   in
-  if code.has_defaults then
-    bug "%s has defaults, which pulled methods do not take yet" (Path.show yielding.method_);
+  let mask =
+    if code.has_defaults then Some (local b ~name:"passed" (Raw (Integer UInt64))) else None
+  in
   let evidence =
     List.map
       (fun capability -> (capability, local b ~name:"evidence" Convention.evidence))
@@ -4064,11 +4140,14 @@ let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list
   in
   st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
   start b (block b);
+  Option.iter (fill_defaults st) mask;
   check_requires st;
   block_into st code.body None;
   drop_scope st (List.hd st.scopes);
   finish b (Return None);
-  ( Lir_builder.build b ~parameters:(parameters @ List.map snd evidence) ~result:None,
+  ( Lir_builder.build b
+      ~parameters:(parameters @ Option.to_list mask @ List.map snd evidence)
+      ~result:None,
     List.rev !owned )
 
 let instance context (key : Instance.key) : Lir.t =
@@ -4163,50 +4242,7 @@ let instance context (key : Instance.key) : Lir.t =
       st.evidence <-
         List.map (fun (capability, local) -> (capability, Lir.Copy (at local))) evidence;
       start b (block b);
-      (* The function fills in each default the caller left out, from its
-         constant, so changing a default compiles only the function again. *)
-      (match mask with
-      | None -> ()
-      | Some mask ->
-          let defaulted =
-            List.filter_map
-              (fun (mode, ty, (parameter : S.parameter)) ->
-                match parameter.kind with
-                | Named_parameter { name; default = Some default; _ } ->
-                    Some (mode, ty, name, default)
-                | _ -> None)
-              code.parameter_types
-          in
-          List.iteri
-            (fun bit (_, ty, (name : S.name), default) ->
-              let ty = Monomorphic.ground context.monomorphic code.substitution ty in
-              let passed = local b (Raw (Integer UInt64)) and given = local b (Raw Bool) in
-              emit b
-                (Assign
-                   ( at passed,
-                     Binary (Bit_and, Copy (at mask), constant_int UInt64 (Z.shift_left Z.one bit))
-                   ));
-              emit b
-                (Assign (at given, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
-              let fill = block b and after = block b in
-              finish b
-                (Switch { value = Copy (at given); cases = [ (Z.one, after) ]; default = Some fill });
-              start b fill;
-              (match Hashtbl.find_opt st.frame.bindings name.id with
-              | Some ({ projections = [ Deref ]; root = Local pointer } : Lir.place) ->
-                  let value = new_local st ty in
-                  st.temporaries <- [] :: st.temporaries;
-                  into st default value;
-                  st.temporaries <- List.tl st.temporaries;
-                  emit b (Assign (at pointer, Use (Address { place = value; writable = true })))
-              | Some place ->
-                  st.temporaries <- [] :: st.temporaries;
-                  into st default place;
-                  st.temporaries <- List.tl st.temporaries
-              | None -> ());
-              finish b (Goto after);
-              start b after)
-            defaulted);
+      Option.iter (fill_defaults st) mask;
       let destination =
         match (st.return_, result_local) with
         | Some pointer, _ -> Some pointer

@@ -4,6 +4,7 @@ type key =
   | Drop of Ground.ty
   | Copy of Ground.ty
   | Debug of Ground.ty
+  | Any_drop of Ground.ty
   | Encode of Ground.ty
   | Evaluator of Path.t
   | Cursor_next of Ground.yielding
@@ -39,6 +40,7 @@ let rank = function
   | Any_table _ -> 12
   | Encode _ -> 13
   | Evaluator _ -> 14
+  | Any_drop _ -> 15
 
 let ( >>= ) c next = if c <> 0 then c else next ()
 
@@ -48,7 +50,9 @@ let rec compare a b =
       Path.compare a.path b.path >>= fun () ->
       Ground.compare_arguments a.type_arguments b.type_arguments
   | Constant a, Constant b -> Path.compare a b
-  | Drop a, Drop b | Copy a, Copy b | Debug a, Debug b | Encode a, Encode b -> Ground.compare a b
+  | Drop a, Drop b | Copy a, Copy b | Debug a, Debug b | Encode a, Encode b | Any_drop a, Any_drop b
+    ->
+      Ground.compare a b
   | Cursor_next a, Cursor_next b -> Ground.compare (Cursor a) (Cursor b)
   | Adapter a, Adapter b ->
       compare a.function_ b.function_ >>= fun () -> Ground.compare (Function a.ty) (Function b.ty)
@@ -76,6 +80,7 @@ let rec encode ?(path = Ground.encode_path) key =
   | Copy t -> tagged 3 [ ty t ]
   | Debug t -> tagged 4 [ ty t ]
   | Encode t -> tagged 13 [ ty t ]
+  | Any_drop t -> tagged 15 [ ty t ]
   | Evaluator p -> tagged 14 [ path p ]
   | Cursor_next yielding -> tagged 5 [ ty (Cursor yielding) ]
   | Adapter { function_; ty } ->
@@ -174,6 +179,7 @@ let rec mangle = function
   | Copy ty -> marker "Copy" ^ mangle_ty ty
   | Debug ty -> marker "Debug" ^ mangle_ty ty
   | Encode ty -> marker "Encode" ^ mangle_ty ty
+  | Any_drop ty -> marker "Any_drop" ^ mangle_ty ty
   | Evaluator p -> marker "Evaluator" ^ path p
   | Cursor_next yielding -> marker "Next" ^ mangle_yielding yielding
   | Adapter { function_; ty } ->
@@ -206,6 +212,7 @@ let rec to_string = function
   | Copy ty -> "copy " ^ Ground.to_string ty
   | Debug ty -> "debug " ^ Ground.to_string ty
   | Encode ty -> "encode " ^ Ground.to_string ty
+  | Any_drop ty -> "any drop " ^ Ground.to_string ty
   | Evaluator path -> "evaluator " ^ Path.show path
   | Cursor_next yielding -> "next " ^ Ground.to_string (Cursor yielding)
   | Adapter { function_; _ } -> "adapter " ^ to_string function_

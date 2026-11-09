@@ -12,6 +12,9 @@ type key =
   | Drop of Ground.ty
   | Copy of Ground.ty
   | Debug of Ground.ty  (** The built-in debug output *)
+  | Any_drop of Ground.ty
+      (** Slot 0 of an [any] table: drops the value its untyped pointer points at, with exactly the
+          signature the slot is called through *)
   | Encode of Ground.ty
       (** A value's binary form, which code run while compiling writes its result in *)
   | Evaluator of Path.t

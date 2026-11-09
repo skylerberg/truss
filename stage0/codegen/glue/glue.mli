@@ -46,6 +46,10 @@ val drop : t -> Ground.ty -> Lir.t
 val copy : t -> Ground.ty -> Lir.t
 val copy_signature : t -> Ground.ty -> Lir.signature
 
+(* Slot 0 of an [any] table: [Instance.Any_drop ty], which takes the value's
+   pointer untyped and drops the value. *)
+val any_drop : t -> Ground.ty -> Lir.t
+
 (* The function that writes a value of a type in its binary form to the
    debug buffer: [Instance.Encode ty], taking a read-only pointer to the
    value. See CODEGEN.md, "Code run while compiling". *)

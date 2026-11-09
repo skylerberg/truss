@@ -164,6 +164,20 @@ let drop t ty =
   finish b (Return None);
   instance (Drop ty) (build b ~parameters:[ pointer ] ~result:None)
 
+(* The drop in slot 0 of an [any] table, which takes the value's pointer
+   untyped, as the slot is called. *)
+let any_drop t ty =
+  let b = create () in
+  let untyped = local b ~name:"value" (Raw (Pointer Opaque)) in
+  start b (block b);
+  if not (trivial t ty) then begin
+    let typed = local b (Pointer { target = Value ty; writable = true }) in
+    emit b (Assign (at typed, Use (Copy (at untyped))));
+    emit b (Drop { root = Local typed; projections = [ Deref ] })
+  end;
+  finish b (Return None);
+  instance (Any_drop ty) (build b ~parameters:[ untyped ] ~result:None)
+
 (* Copy *)
 
 let copy_signature t ty : Lir.signature =

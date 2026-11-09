@@ -2456,6 +2456,48 @@ test "everything" {
   assert scores == [10, 20, 30]
 }
 |};
+  passes "a yielding method's defaults are filled when it is pulled or looped over"
+    {|fn count(from: Int64, step: Int64 = 1, label: own String = "n") yields String {
+  var at = from
+  while at < from + 3 * step {
+    yield "${label}${at}"
+    at += step
+  }
+}
+
+test "defaults pulled" {
+  var plain = count(0)
+  assert mut plain.next() == Some("n0")
+  assert mut plain.next() == Some("n1")
+  var stepped = count(10, step: 5, label: "${1}:")
+  assert mut stepped.next() == Some("1:10")
+  assert mut stepped.next() == Some("1:15")
+  var words: USize = 0
+  for word in count(1, step: 2) {
+    words += word.length()
+  }
+  assert words == 6
+}
+|};
+  passes "a read-only parameter's default with something to drop is dropped once"
+    {|fn total(items: List[Int64] = [1, 2, 3]) -> Int64 {
+  var sum = 0
+  for item in items {
+    sum += item
+  }
+  sum
+}
+
+fn first(names: List[String] = ["a", "b"]) -> USize {
+  names[0].length()
+}
+
+test "defaults" {
+  assert total() == 6
+  assert total([4]) == 4
+  assert first() == 1
+}
+|};
   passes "names an is test binds are used where it holds"
     {|fn describe(found: Option[String], limit: USize) -> String {
   if found is Some(text) && text.length() > limit {
