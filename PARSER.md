@@ -34,9 +34,10 @@ It does not:
   `.` is one node whether it names a type or a value. Name resolution
   decides, without changing the tree's shape (see
   [GRAMMAR.md](GRAMMAR.md#what-the-grammar-leaves-to-later-stages)).
-- check that a bare argument after the first names a parameter, or that the
-  expression after `mut` or `own` starts with a place. Both need name
-  resolution.
+- check that a bare argument after the first names a parameter, which needs
+  the callee's signature, or that the expression after `mut` or `own` starts
+  with a place, which needs name resolution (see
+  [TYPECHECKER.md](TYPECHECKER.md)).
 - know types, or anything outside the definition it is parsing
 
 **The parser is a pure function of one definition's tokens.** The tree for a
@@ -358,14 +359,14 @@ says.
 
 `Check` walks a definition's tree once with a small context: whether it is
 inside a specification, a test, a proof, a loop, a lambda, a `parallel`
-branch, and a method that yields. It reports:
+branch, and a method that yields or lends. It reports:
 
 - `forall`, `exists`, and `==>` outside specifications. Specifications are
   `requires`, `ensures`, `invariant`, `decreases`, `cost`, laws, theorems, and
   `proof` blocks.
 - `assert` outside tests, theorems, and proofs, and `proof` blocks outside
   function bodies
-- `yield` outside a method whose signature `yields`
+- `yield` outside a method whose signature `yields` or `lends`
 - `break` and `continue` outside a loop, or inside a lambda in that loop
 - `return`, `break`, `continue`, and `?` that would leave a `parallel` block,
   and `break`, `return`, and `?` in a `parallel for`
@@ -445,7 +446,8 @@ The first version handles the habits SYNTAX.md lists that reach the parser:
 | `elif` | The name `elif` starting a statement right after an `if` | `else if` |
 
 Habits that are names, such as `null`, `nil`, and a second argument without a
-label, depend on what names mean, so name resolution reports them. These are
+label, depend on what names mean, so name resolution and type checking
+report them (see [TYPECHECKER.md](TYPECHECKER.md)). These are
 added once the compiler works:
 
 | Written *Later* | Fix |
@@ -466,8 +468,9 @@ added once the compiler works:
   the source bytes only through spans, to build fixes and to keep each
   definition's source text.
 - **Name resolution** gets one tree per definition and annotates its nodes.
-  It decides `Bracket`, `Binding_or_constant`, and `Name` nodes, and reports
-  bare arguments that name no parameter.
+  It decides `Bracket`, `Binding_or_constant`, and `Name` nodes. Type
+  checking then reports bare arguments that name no parameter. Both are
+  designed in [TYPECHECKER.md](TYPECHECKER.md).
 - **Hashing** walks the tree and ignores spans, `Parenthesized` nodes, blank
   lines, and how literals were written, as DESIGN.md's hash format says.
 - **`truss fmt`** prints the tree, taking literals from the definition's

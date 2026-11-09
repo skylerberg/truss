@@ -27,6 +27,7 @@ type keyword =
   | Invariant
   | Is
   | Law
+  | Lends
   | Let
   | Match
   | Mut

@@ -80,10 +80,10 @@ These keywords are reserved everywhere and cannot be used as names:
 
 `any` `assert` `break` `capability` `continue` `cost` `decreases` `derives`
 `echo` `else` `ensures` `exists` `false` `fn` `for` `forall` `if` `impl` `in`
-`indirect` `internal` `is` `invariant` `law` `let` `match` `mut` `opaque` `own`
-`parallel` `proof` `provide` `public` `requires` `return` `self` `Self` `test`
-`theorem` `todo` `trait` `true` `type` `unreachable` `use` `uses` `var`
-`while` `with` `yield` `yields`
+`indirect` `internal` `is` `invariant` `law` `lends` `let` `match` `mut`
+`opaque` `own` `parallel` `proof` `provide` `public` `requires` `return`
+`self` `Self` `test` `theorem` `todo` `trait` `true` `type` `unreachable`
+`use` `uses` `var` `while` `with` `yield` `yields`
 
 A few words have a special meaning in one position only, and are ordinary
 names everywhere else, because they are common names for variables and
@@ -127,9 +127,9 @@ the line before can end a statement and the next line can begin one:
      `unreachable`, `break`, `continue`, or `return`.
    - The next line starts with a token that can begin a statement. A line
      that starts with anything else continues the one before: `.`, `else`,
-     `with`, `is`, `in`, `|`, `=>`, `->`, `yields`, a clause keyword (`uses`,
-     `requires`, `ensures`, `cost`, `invariant`, `decreases`, `derives`), a
-     binary operator that cannot begin an expression
+     `with`, `is`, `in`, `|`, `=>`, `->`, `yields`, `lends`, a clause keyword
+     (`uses`, `requires`, `ensures`, `cost`, `invariant`, `decreases`,
+     `derives`), a binary operator that cannot begin an expression
      (`+ * / % == != < <= > >= & ^ << >> && || ==> .. ..=`), `=` or a compound
      assignment, or a closing `)`, `]`, or `}`.
 3. The `{` that opens a body may start the next line.
@@ -244,9 +244,15 @@ that cannot lose information, and `UInt32.try_from(size)` (which returns a
 - The prefixes `0x`, `0b`, and `0o` and the exponent `e` are lowercase. Hex
   digits may be either case.
 - Literals have no type suffixes. A literal takes its type from its context,
-  as in `let small: UInt8 = 3` or `count + 1`. When nothing decides it, an
-  integer literal is an `Int64` and a float literal is a `Float64`, so
-  `var best = 0` makes an `Int64`.
+  as in `let small: UInt8 = 3`. When nothing decides it, an integer literal is
+  an `Int64` and a float literal is a `Float64`, so `var best = 0` makes an
+  `Int64`.
+- A literal operand of an arithmetic operator, a comparison, or a range takes
+  the type of the other operand when it can be that type, as Go's untyped
+  constants do. So in `count + 1` with a `UInt8` count, the `1` is a `UInt8`,
+  and in `index == 0` with a `USize` index, the `0` is a `USize`. In
+  `duration * 2`, a `Duration` is not an integer type, so the `2` is an
+  `Int64`. A literal shift amount, as in `flags << 3`, is a `USize`.
 - An integer literal is never a float: `let ratio: Float64 = 1` is an error.
   Write `1.0`.
 - A literal that does not fit its type is a compile error.
@@ -494,6 +500,9 @@ match status_code {
   appears in a pattern. Any other bare name binds a new variable. Constants
   from other modules and constants under a type are qualified, as everywhere
   else: `http::ok`, `Status.teapot`.
+- A constant in a pattern must have a type whose equality is built in, as for
+  numbers, strings, and `Bool`, or derived, so that matching it compares the
+  value's structure.
 - The ends of a range are literals or constants, as in `0..=max_port` or
   `http::informational_first..=http::informational_last`. A name there must
   be a constant. Both ends are needed.
@@ -695,7 +704,10 @@ fn area(shape: Shape) -> Float64 {
 ```
 
 Parameter and return types are always written out. Inside function bodies,
-types are inferred.
+types are inferred, one statement at a time: a variable's type comes from its
+own `let` or `var` and never changes. When the statement alone cannot decide
+it, as in `var names = []`, give the `let` a type:
+`var names: List[String] = []`.
 
 A function that returns nothing leaves out the return type, and its result is
 `Unit`. The formatter removes a written `-> Unit`. A function that never
@@ -1067,17 +1079,28 @@ While such a name is still in use, the original cannot be changed or moved.
 Here `push` is allowed because `middle` is not used after it. The compiler
 checks this within each function, with no annotations.
 
-- A view cannot be stored in a record field or a collection, and cannot be
-  returned, with one exception: a method may return a view of `self`, as
-  `items[1..4]`, `split_at`, `split_first`, and `text.trim()` do. A record
-  holding views, such as the result of `split_at`, is a view itself.
+- `Slice`, `StringSlice`, a cursor from a `self` method, and a lambda that
+  reads local variables are views, and so is any type that holds one, in a
+  field, a variant, an element, or a type argument. `Option[Slice[Int64]]`
+  and the record that `split_at` returns are views.
+- A view can be bound, kept in local records and collections, and passed as
+  an argument. It cannot be put where a stored value is needed, such as an
+  `own` parameter of function type, and putting it into a record or a list
+  makes that record or list a view too.
+- A function can return a view only of what its parameters view or of the
+  parameters themselves, never of its own locals, as `items[1..4]`,
+  `split_at`, `split_first`, and `text.trim()` do. The caller treats the
+  result as viewing everything its read-only and view arguments view: after
+  `let chosen = found.unwrap_or(default: backup[..])`, `backup` is frozen
+  while `chosen` is in use.
 - A `var` can hold a view, such as a cursor over a list (see
-  [Yielding methods](#yielding-methods)), as long as the view never leaves the
-  function.
+  [Lending and yielding methods](#lending-and-yielding-methods)), as long as
+  the view never leaves the function.
 - `mut` access is never stored. It has a name only as a `mut` parameter, a
   `mut` loop's variable, or a lambda's `mut` parameter, and lasts only for
-  that call, iteration, or `provide mut` block. Disjoint parts can be changed side by side, as in
-  `sort(mut items[..middle])` and `sort(mut items[middle..])`.
+  that call, iteration, or `provide mut` block. Disjoint parts can be
+  changed side by side, as in `sort(mut items[..middle])` and
+  `sort(mut items[middle..])`.
 - A view of a temporary cannot be bound with `let`. Bind the value first:
   `let loaded = load()`, then `let first = loaded.first()`.
 - A `List` passed to a `Slice` parameter, or a `String` passed to a
@@ -1146,17 +1169,22 @@ read-only one. On a temporary value, the `own` version is used if there is one,
 so `scores.filter(is_valid).enumerate()` moves the filtered elements instead of
 copying them. This is the only overloading Truss allows.
 
-### Yielding methods
+### Lending and yielding methods
 
-A method can *yield* a part of `self` instead of returning a value. The caller
-uses the part, and then the method continues:
+A method can give its caller parts of `self` instead of returning a value,
+in one of two ways. A *lending* method gives out one part, exactly once. A
+*yielding* method gives out any number of parts, one after another. The
+signature says which, with `lends` or `yields` in place of a return type, and
+both use `yield` in their bodies.
+
+A lending method gives the caller access to one part, and then continues:
 
 ```truss
-fn Grid.cell(self, position: Position) yields Cell {
+fn Grid.cell(self, position: Position) lends Cell {
   yield self.cells[position.row * self.width + position.column]
 }
 
-fn Grid.cell(mut self, position: Position) yields mut Cell {
+fn Grid.cell(mut self, position: Position) lends mut Cell {
   yield mut self.cells[position.row * self.width + position.column]
 }
 
@@ -1164,14 +1192,22 @@ let current = grid.cell(position).state
 mut grid.cell(position).visit()
 ```
 
-- `yields Cell` takes the place of a return type. `yields mut Cell` lends
-  `mut` access, and `yields own Cell` hands over owned values. A method can
-  have a version for each receiver mode, as other methods can.
-- **A method that yields once** lends the part for the rest of the caller's
-  statement. Then it always continues after its `yield`, even if the
-  statement leaves early with `?` or `return`. So a type can update what
-  depends on the part, such as a cached total, after the caller changes it.
-- **A method that yields several times** drives a loop:
+- `lends Cell` lends read-only access, and `lends mut Cell` lends `mut`
+  access. A method can have a version for each receiver mode, as other
+  methods can.
+- **The part is lent for the rest of the caller's statement.** Then the
+  method always continues after its `yield`, even if the statement leaves
+  early with `?` or `return`. So a type can update what depends on the part,
+  such as a cached total, after the caller changes it.
+- **A lending method yields exactly once on every path.** A path with no
+  `yield`, or with two, is a compile error.
+- A lending method cannot drive a `for` loop or be pulled.
+
+A yielding method gives out parts one after another:
+
+- `yields Cell` gives read-only parts, `yields mut Cell` lends `mut` access
+  to each, and `yields own Cell` hands over owned values.
+- **A yielding method drives a loop:**
 
   ```truss
   fn Grid.each(mut self) yields mut Cell {
@@ -1193,8 +1229,9 @@ mut grid.cell(position).visit()
 - `for item in items` uses `items.each()`, and `for item in mut items` and
   `for item in own items` use the `mut self` and `own self` versions. A
   user's type supports `for` by defining `each`.
-- **A method that yields read-only or owned values can also be pulled** one
-  value at a time, through a cursor:
+- **Called anywhere but a `for` loop, a yielding method makes a cursor.** A
+  method that yields read-only or owned values can be pulled one value at a
+  time, through a cursor:
 
   ```truss
   var first_cursor = first.each()
@@ -1290,6 +1327,10 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
 - Every variable must be used. A `let` or a pattern that binds a name nothing
   reads is a compile error; bind it to `_` instead. Parameters are exempt,
   because an implementation of a trait may not need all of them.
+- Code that can never run is a compile error, such as a statement after a
+  `return`, a `break`, a call that returns `Never`, or a `while true` that is
+  never left. Code after a `todo` is exempt, since it is unfinished, not
+  dead.
 - Statements end at a line break. There are no semicolons. See
   [Line breaks](#line-breaks) for when a line continues.
 - Lambdas are written `fn(score) { score / 2 }`. See [Lambdas](#lambdas).
@@ -1439,9 +1480,9 @@ fn sum[count: USize](values: Array[Int64, count]) -> Int64
 - Strings cannot be indexed. Use `text.bytes()` or `text.characters()` to say
   which you mean.
 - A type supports `[]` by implementing the prelude trait `Index`, whose
-  yielding methods give read and `mut` access to an element and state with
+  lending methods give read and `mut` access to an element and state with
   `requires` what an index must satisfy. See
-  [Yielding methods](#yielding-methods).
+  [Lending and yielding methods](#lending-and-yielding-methods).
 
 ### Loops
 
@@ -1457,7 +1498,8 @@ fn sum[count: USize](values: Array[Int64, count]) -> Int64
 - The mode keyword goes on the collection, following the same rule as call
   sites. A `mut` loop may change elements but may not add or remove them.
 - `while true { ... }` is the infinite loop. There is no `loop` keyword and no
-  C-style `for`.
+  C-style `for`. A `while true` that no `break` leaves has type `Never`, so a
+  function whose main loop runs forever can return `Never`.
 - Loops are statements, not expressions. `break` and `continue` take no value
   or label. To leave nested loops at once, move them into a function and
   `return`.
@@ -1698,10 +1740,26 @@ early returns from `?`.
 - Anything that can fail, or that the program needs to know happened, is an
   explicit call that returns a `Result`, such as `flush`, `sync`, `shutdown`
   for closing a connection cleanly, and `wait` for a process's exit status.
-- A writer that may still hold unwritten data must be finished before its
-  owner is done with it: `own writer.finish()?` writes out the data and
-  reports any error. A path that drops an unfinished writer is a compile
-  error, because the data would be lost without anyone knowing.
+- A buffered writer is only lent, inside a scope, so its data can never be
+  lost without anyone knowing. `write_with` lends the writer to a function,
+  then writes out what is left and returns the first error, from the
+  function or from writing:
+
+  ```truss
+  fn save_report(path: Path, report: Report) -> Result[Unit, FileError]
+    uses FileWrite
+  {
+    FileWrite.write_with(path, fn(writer) {
+      mut writer.write(report.header())?
+      mut writer.write(report.body())
+    })
+  }
+  ```
+
+  Code never owns a writer, so it can never drop one with data left in it,
+  and `?` inside the function needs no cleanup. A type that writes in
+  stages, such as a CSV encoder, takes the writer as a `mut` parameter of
+  each call.
 - When the program panics, the operating system releases everything.
 
 ### main
@@ -2168,15 +2226,15 @@ A trait can leave a type for each implementation to choose:
 trait Index {
   type Key
   type Output
-  fn at(self, key: Self.Key) yields Self.Output
-  fn at(mut self, key: Self.Key) yields mut Self.Output
+  fn at(self, key: Self.Key) lends Self.Output
+  fn at(mut self, key: Self.Key) lends mut Self.Output
 }
 
 impl Index for Grid {
   type Key = Position
   type Output = Cell
-  fn at(self, key: Position) yields Cell { todo }
-  fn at(mut self, key: Position) yields mut Cell { todo }
+  fn at(self, key: Position) lends Cell { todo }
+  fn at(mut self, key: Position) lends mut Cell { todo }
 }
 
 fn total[Items: Iterable[Element = Int64]](items: Items) -> Int64
@@ -2218,6 +2276,7 @@ type Option[Value] =
 | `Hash` | Combines the hashes of all fields. |
 | `Ordered` | Compares variants in the order they are declared, then fields in the order they are declared. |
 | `Default` | Uses each field's default. |
+| `Copyable`, `Plain` | Nothing: they state that an opaque type can be copied, explicitly or implicitly. See below. |
 
 - Every field must already have the trait, or deriving it is an error.
 - A derived trait needs the traits it requires. Deriving `Ordered` or `Hash`
@@ -2227,6 +2286,15 @@ type Option[Value] =
   `Option[Value]` is `Equal` only when `Value` is.
 - A derived implementation satisfies the trait's laws automatically. A
   hand-written `impl` must prove them.
+
+`Copyable` and `Plain` are prelude traits that the compiler implements. A
+`Copyable` type has `copy()`, and a `Plain` type copies implicitly (see
+[DESIGN.md](DESIGN.md#memory)). The compiler works them out from a type's
+fields, except for an opaque type, which has them only when it declares them,
+as in `public opaque type Token(bytes: Array[UInt8, 16]) derives Plain`. The
+compiler checks a declaration against the fields, and other packages rely only
+on what is declared. Generic code that copies says so with a bound, as in
+`[Element: Copyable]`.
 
 Every type also has debug output, which tools such as the test runner use to
 show values, as in a failed `assert`. Nothing needs to be derived for it. To
@@ -2245,7 +2313,9 @@ hand.
 - A type's own methods cannot share a name with the methods of any trait it
   implements. An `impl` that would give a type a second method with the same
   name is a compile error, wherever the `impl` is.
-- An `impl` must be in the package of the trait or the package of the type.
+- An `impl` must be in the package of the trait, of the type, or of the
+  outermost type of one of the trait's arguments. So `impl Multiply[Vector]
+  for Float64`, which makes `2.0 * velocity` work, lives with `Vector`.
 - Contracts and costs on a trait's methods apply to every `impl` and are
   proven for each one.
 
@@ -2275,7 +2345,7 @@ for handler in server.handlers {
   once, which counts in `cost` clauses.
 - `any` names exactly one trait. To combine traits, declare a trait that
   requires them, like `Loggable` above.
-- `any` can fix a trait's associated types, as a bound can:
+- `any` fixes every associated type of its trait, as a bound can:
   `any Cursor[Element = Int64]`.
 - A method can be called through `any` if it takes `self`, `mut self`, or
   `own self`, has no generic parameters of its own, and does not take or
@@ -2419,8 +2489,20 @@ These forms can be used in `requires`, `ensures`, invariants, laws, and proofs:
   `requires count > 0 && forall i in 0..count => items[i] > 0`, whose body is
   `items[i] > 0`.
 
-Integer arithmetic in specifications is exact and never overflows. Float
-arithmetic in specifications follows IEEE 754, the same as in code.
+Integer arithmetic in specifications is exact and never overflows. It is done
+on `Integer`, the mathematical integers, a prelude type that exists only in
+specifications:
+
+- Every built-in integer type is a subset of `Integer`. In a specification,
+  arithmetic on integers gives an `Integer`, and comparisons can mix integer
+  types: `requires count <= items.length()` works with a `UInt32` count.
+- An `Integer` can stand where a built-in integer is expected, as in
+  `items[i + 1]`, and the prover checks that it fits.
+- A function whose signature mentions `Integer`, such as
+  `fn sum(items: Slice[Int64]) -> Integer`, can be called only from
+  specifications. It is never compiled.
+
+Float arithmetic in specifications follows IEEE 754, the same as in code.
 
 `assert` means two different things in the two places it can appear. In a
 proof, it is proven at compile time. In a test, it is checked when the test
@@ -2507,6 +2589,7 @@ let local = file_system::Path.new("app.toml")
   it when two imported modules would have the same last name. Importing two
   modules with the same last name is a compile error.
 - `use` lines come before every definition in a file. `truss fmt` sorts them.
+- A `use` whose module the file never names is a compile error, as in Go.
 
 The standard library's root module is `standard`.
 
@@ -2552,8 +2635,10 @@ never clash with variable or function names:
 - `Option` (`Some`, `None`) and `Result` (`Ok`, `Err`)
 - the core collections: `List`, `Slice`, `Map`, and `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
-  `Index`, `Cursor`, `FromTemplate`, and the arithmetic traits `Add`, `Subtract`,
-  `Multiply`, `Divide`, `Remainder`, and `Negate`
+  `Copyable`, `Plain`, `Index`, `Iterable`, `Cursor`, `FromTemplate`, and the
+  arithmetic traits `Add`, `Subtract`, `Multiply`, `Divide`, `Remainder`, and
+  `Negate`
+- `Integer`, for specifications
 - the standard capabilities, such as `Console`, `FileRead`, and `Panic`
 
 Everything else is imported with `use`. Projects cannot define their own
@@ -2579,6 +2664,10 @@ public. Outside its package, an opaque type can be named and passed around,
 but its fields cannot be read, built, updated, or matched on. Other packages
 use its methods instead. `opaque` is only allowed on `public` types, because
 private and `internal` types are only visible within the package anyway.
+
+A public function's signature cannot mention a private or `internal` type, and
+neither can a public type's fields, unless the type is opaque. Other packages
+could never name such a type.
 
 ### No foreign code
 
