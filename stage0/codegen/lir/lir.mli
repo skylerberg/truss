@@ -129,9 +129,12 @@ type rvalue =
   | Is_variant of place * string  (** Whether a sum type's value holds the variant *)
   | Function_value of { code : function_ref; environment : operand option }
 
-(* A position within the instance's definition, which its anchor turns into
-   a file and line. See CODEGEN.md, "Positions". *)
-type site = { line : int; column : int }
+(* A position within a definition, which the definition's anchor turns into
+   a file and line. See CODEGEN.md, "Positions". It names its definition,
+   rather than taking the instance's, because code can come from another
+   definition: a trait's provided method compiled for an [impl] reports
+   positions in the trait. *)
+type site = { definition : Path.t; line : int; column : int }
 
 type statement =
   | Assign of place * rvalue

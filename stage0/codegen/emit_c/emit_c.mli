@@ -22,4 +22,4 @@ val anchor_struct : string
 val runtime_declarations : Memory_layout.target -> string
 
 (* The C symbol of a definition's position anchor. *)
-val anchor_symbol : Ground.definition -> string
+val anchor_symbol : Path.t -> string

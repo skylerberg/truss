@@ -157,7 +157,7 @@ type context = {
   mutable environments : (string * Lir.ty) list Keys.t;
   mutable bytes : (string * string) list;  (** Text and name, most recent first *)
   mutable prototypes : (string * string) list;  (** Symbol and declaration, most recent first *)
-  mutable anchors : (string * Ground.definition) list;
+  mutable anchors : (string * Path.t) list;
   mutable references : key list option;  (** While defining a key, what its text names *)
   mutable helpers_used : string list;
 }
@@ -849,14 +849,11 @@ let unreachable_c context =
   | Development -> "t_runtime_compiler_bug();"
   | Release -> "__builtin_unreachable();"
 
-let anchor_c context key =
-  match Instance.definition key with
-  | None -> "((const struct t_anchor *)0)"
-  | Some definition ->
-      let symbol = anchor_symbol definition in
-      if not (List.mem_assoc symbol context.anchors) then
-        context.anchors <- (symbol, definition) :: context.anchors;
-      "&" ^ symbol
+let anchor_c context definition =
+  let symbol = anchor_symbol definition in
+  if not (List.mem_assoc symbol context.anchors) then
+    context.anchors <- (symbol, definition) :: context.anchors;
+  "&" ^ symbol
 
 let terminator_c context fc key buffer (terminator : Lir.terminator) =
   let line format =
@@ -916,7 +913,8 @@ let terminator_c context fc key buffer (terminator : Lir.terminator) =
       line "t_runtime_panic(%s, %s, %s, %d, %d);"
         (fst (operand message))
         (fst (operand length))
-        (anchor_c context key) site.line site.column
+        (anchor_c context site.definition)
+        site.line site.column
   | Yield _ -> bug "a yield that yield lowering left in place"
 
 let function_c context key symbol ~linkage (f : Lir.function_) =

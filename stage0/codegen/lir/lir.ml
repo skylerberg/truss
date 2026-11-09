@@ -121,7 +121,7 @@ type rvalue =
 
 (* A position within the instance's definition, which its anchor turns into
    a file and line. See CODEGEN.md, "Positions". *)
-type site = { line : int; column : int }
+type site = { definition : Path.t; line : int; column : int }
 
 type statement =
   | Assign of place * rvalue
@@ -554,7 +554,14 @@ let encode_terminator instance terminator =
   | Return value -> tagged 3 [ option operand value ]
   | Unreachable -> tagged 4 []
   | Panic { message; length; site } ->
-      tagged 5 [ operand message; operand length; Cbor.int site.line; Cbor.int site.column ]
+      tagged 5
+        [
+          operand message;
+          operand length;
+          Ground.encode_path site.definition;
+          Cbor.int site.line;
+          Cbor.int site.column;
+        ]
   | Yield { value; resume; stop } -> tagged 6 [ operand value; Cbor.int resume; block stop ]
 
 let encode_function instance (f : function_) =

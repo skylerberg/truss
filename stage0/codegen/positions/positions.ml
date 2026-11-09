@@ -1,4 +1,4 @@
-type anchor = { definition : Ground.definition; path : string; first_line : int }
+type anchor = { definition : Path.t; path : string; first_line : int }
 
 let c_string text =
   let buffer = Buffer.create (String.length text + 2) in

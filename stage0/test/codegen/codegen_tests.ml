@@ -19,8 +19,8 @@ let expect_int ~expected actual =
 (* Types for the tests: a few prelude types and types defined by each test,
    with their shapes. *)
 
-let definition name : Ground.definition = { package = "test"; modules = []; name }
-let named ?(arguments = []) name = Ground.Named { definition = definition name; arguments }
+let definition name : Path.t = Top { module_ = { package = "test"; modules = [] }; name }
+let named ?(arguments = []) name = Ground.Named { path = definition name; arguments }
 let int64 = named "Int64"
 let bool = named "Bool"
 let character = named "Character"
@@ -40,27 +40,27 @@ let variant ?(indirect = false) name fields : variant_shape = { name; indirect; 
    each test defines. *)
 let shapes extra (ty : Ground.ty) : shape =
   match ty with
-  | Named { definition = { name = "Int64"; _ }; _ } -> Scalar (Integer Int64)
-  | Named { definition = { name = "UInt8"; _ }; _ } -> Scalar (Integer UInt8)
-  | Named { definition = { name = "USize"; _ }; _ } -> Scalar (Integer USize)
-  | Named { definition = { name = "Float64"; _ }; _ } -> Scalar Float64
-  | Named { definition = { name = "Bool"; _ }; _ } -> Scalar Bool
-  | Named { definition = { name = "Character"; _ }; _ } -> Scalar Character
-  | Named { definition = { name = "Unit"; _ }; _ } -> Record []
+  | Named { path = Top { name = "Int64"; _ }; _ } -> Scalar (Integer Int64)
+  | Named { path = Top { name = "UInt8"; _ }; _ } -> Scalar (Integer UInt8)
+  | Named { path = Top { name = "USize"; _ }; _ } -> Scalar (Integer USize)
+  | Named { path = Top { name = "Float64"; _ }; _ } -> Scalar Float64
+  | Named { path = Top { name = "Bool"; _ }; _ } -> Scalar Bool
+  | Named { path = Top { name = "Character"; _ }; _ } -> Scalar Character
+  | Named { path = Top { name = "Unit"; _ }; _ } -> Record []
   | Never -> Sum []
-  | Named { definition = { name = "Option"; _ }; arguments = [ Type value ] } ->
+  | Named { path = Top { name = "Option"; _ }; arguments = [ Type value ] } ->
       Sum [ variant "Some" [ field "value" value ]; variant "None" [] ]
-  | Named { definition = { name = "List"; _ }; arguments = [ Type element ] } ->
+  | Named { path = Top { name = "List"; _ }; arguments = [ Type element ] } ->
       Record
         [
           ("buffer", Raw (Pointer (Data element)));
           field "length" (named "USize");
           field "capacity" (named "USize");
         ]
-  | Named { definition = { name = "Array"; _ }; arguments = [ Type element; Value count ] } ->
+  | Named { path = Top { name = "Array"; _ }; arguments = [ Type element; Value count ] } ->
       Array (element, Z.to_int count)
-  | Named { definition = { name = "Int32"; _ }; _ } -> Scalar (Integer Int32)
-  | Named { definition = { name = "Storage"; _ }; arguments = [ Type element ] } ->
+  | Named { path = Top { name = "Int32"; _ }; _ } -> Scalar (Integer Int32)
+  | Named { path = Top { name = "Storage"; _ }; arguments = [ Type element ] } ->
       Record
         [
           ("buffer", Raw (Pointer (Data element)));
@@ -214,8 +214,7 @@ let function_ ?(parameters = []) ?result ?(returns = true) ?(environment = []) l
     environment;
   }
 
-let key name =
-  Instance.Function { definition = definition name; type_arguments = []; capabilities = [] }
+let key name = Instance.Code { path = definition name; type_arguments = []; capabilities = [] }
 
 let instance ?(nested = []) name main : Lir.t =
   { key = key name; main; nested = Array.of_list nested }
@@ -654,7 +653,7 @@ let () =
                      {
                        message = Constant (Bytes "boom");
                        length = Constant (Integer (USize, Z.of_int 4));
-                       site = { line = 3; column = 5 };
+                       site = { definition = definition "entry"; line = 3; column = 5 };
                      });
               ];
           ]
@@ -709,11 +708,16 @@ let () =
         fail "the hashes are equal");
   test "a symbol names the path and the type arguments" (fun () ->
       let key =
-        Instance.Method
+        Instance.Code
           {
-            owner = { package = "standard"; modules = [ "list" ]; name = "List" };
-            name = "each";
-            receiver = Some Read;
+            path =
+              Method
+                {
+                  owner =
+                    Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" };
+                  name = "each";
+                  receiver = Read;
+                };
             type_arguments = [ Type int64 ];
             capabilities = [];
           }
@@ -746,9 +750,9 @@ let drop_shapes =
 
 let rec needs_drop (ty : Ground.ty) =
   match ty with
-  | Named { definition = { name = "Text" | "Box" | "Counter"; _ }; _ } -> true
-  | Named { definition = { name = "Pair"; _ }; _ } -> true
-  | Named { definition = { name = "Option"; _ }; arguments = [ Type inner ] } -> needs_drop inner
+  | Named { path = Top { name = "Text" | "Box" | "Counter"; _ }; _ } -> true
+  | Named { path = Top { name = "Pair"; _ }; _ } -> true
+  | Named { path = Top { name = "Option"; _ }; arguments = [ Type inner ] } -> needs_drop inner
   | _ -> false
 
 let elaborate f =
@@ -1010,7 +1014,7 @@ let () =
   test "a loop body that stops ends the method at that yield" (fun () ->
       expect_status 6 (loop_program (fun item -> Binary (Not_equal, item, constant_int32 3))));
   let yielding : Ground.yielding =
-    { method_ = definition "count_to"; receiver = Read; type_arguments = []; capabilities = [] }
+    { method_ = definition "count_to"; type_arguments = []; capabilities = [] }
   in
   let cursor = Ground.Cursor yielding in
   test "a cursor keeps the parameters and the locals live across a yield" (fun () ->
@@ -1105,7 +1109,7 @@ let storage element = named "Storage" ~arguments:[ Type element ]
 
 let kind_of extra (ty : Ground.ty) : Glue.kind =
   match ty with
-  | Named { definition = { name = "Storage"; _ }; arguments = [ Type element ] } -> Storage element
+  | Named { path = Top { name = "Storage"; _ }; arguments = [ Type element ] } -> Storage element
   | _ -> Shape (shapes extra ty)
 
 let glue ?(extra = []) () = Glue.create (shape_env ~extra ()) ~kind_of:(kind_of extra) ~usize

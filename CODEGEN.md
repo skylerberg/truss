@@ -158,10 +158,16 @@ A build starts from roots and compiles only what they can reach:
 An instance is a definition together with everything that makes one copy of
 its code different from another:
 
-- the definition's path and kind: a function, a method and its receiver
-  mode, an `impl`'s method, a derived implementation, or one of a type's
-  generated functions (drop, copy, debug output)
-- its type arguments, fully monomorphic. Generic code is compiled once for
+- the definition's path, the same `Path.t` every stage names definitions
+  by. A method's path names its receiver mode, and an `impl`'s method is a
+  method of the `impl`, whether written, derived, or provided by the trait.
+  A type's generated functions (drop, copy, debug output) and a pulled
+  method's state machine are keyed by their type instead.
+- its type arguments, fully monomorphic, as ground types: types with no
+  generic parameters, projections, or inference variables, which the type
+  checker's substitution has fully decided. A method's are its type's and
+  then its own, and an `impl` method's are the `impl`'s and then its own.
+  Generic code is compiled once for
   each set of them, as DESIGN.md says, and the type checker has already
   rejected instantiation cycles.
 - the capability sets bound to its capability parameters, such as

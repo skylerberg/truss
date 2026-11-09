@@ -7,7 +7,7 @@
    link time, which is the only C that moving a definition changes. *)
 
 type anchor = {
-  definition : Ground.definition;
+  definition : Path.t;
   path : string;  (** The file, as the user sees it *)
   first_line : int;  (** The definition's first line, counting from 1 *)
 }
