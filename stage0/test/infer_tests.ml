@@ -167,6 +167,41 @@ let () =
       match checked.calls.(value.id) with
       | Some { arguments = [ { conversion = Some Owned_to_view; _ } ]; _ } -> ()
       | _ -> fail "no conversion recorded");
+  test "a cursor's next is the Cursor trait's, built in" (fun () ->
+      let text =
+        "fn count_to(limit: Int64) yields Int64 {\n\
+        \  yield limit\n\
+         }\n\n\
+         fn f() {\n\
+        \  var first = count_to(3)\n\
+        \  while mut first.next() is Some(left) {\n\
+        \    let _ = left\n\
+        \  }\n\
+         }\n"
+      in
+      fine text;
+      has_type text "count_to(3)" "the cursor of app::main::count_to";
+      let value, checked = expression_at text "first.next()" 1 in
+      match checked.calls.(value.id) with
+      | Some
+          {
+            callee =
+              Trait_method
+                {
+                  name = "next";
+                  receiver = Mut;
+                  self_type = Cursor _;
+                  evidence = Built_in;
+                  trait;
+                  _;
+                };
+            result;
+            _;
+          }
+        when Path.show trait.trait = "standard::core::Cursor" && Types.show result = "Option[Int64]"
+        ->
+          ()
+      | _ -> fail "not the built-in Cursor's next");
   test "an unknown label is an error with a fix to the closest" (fun () ->
       one_diagnostic
         (functions ^ "fn f() {\n  copy_file(1, destinaton: 2)\n}\n")
