@@ -3870,7 +3870,13 @@ let program_main context (key : Instance.key) main_path : Lir.t =
   start b after;
   st.evidence <-
     List.map
-      (fun capability -> (capability, Lir.Constant (Symbol_address (Real_evidence capability))))
+      (fun capability ->
+        if Interface.Impls.impl_interface context.database (real_implementation capability) = None
+        then
+          invalid_arg
+            (Printf.sprintf "main uses %s, which stage0's runtime has no real implementation of yet"
+               (Ground.path_name capability));
+        (capability, Lir.Constant (Symbol_address (Real_evidence capability))))
       (evidence_for [] signature.uses);
   let exit_ty =
     match signature.output with
