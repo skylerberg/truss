@@ -1,5 +1,17 @@
-(test
- (name lexer_tests)
- (libraries source diagnostic token layout lexer unicode zarith)
+(tests
+ (names lexer_tests parser_tests)
+ (libraries
+  source
+  diagnostic
+  token
+  layout
+  lexer
+  unicode
+  zarith
+  documents
+  syntax
+  syntax_print
+  parser
+  reference)
  (deps
   (glob_files %{workspace_root}/*.md)))

@@ -31,8 +31,49 @@ module Code = struct
     | Unclosed_bracket
     | Unmatched_closing_bracket
 
+  type parser =
+    | Unexpected_token
+    | Needs_parentheses
+    | Reserved_word
+    | Use_after_definition
+    | Statement_at_top_level
+    | Missing_body
+    | Open_range
+    | Interpolation_not_allowed
+    | Float_pattern
+    | Let_else_brace
+    | Nesting_too_deep
+    | Misplaced_opaque
+    | Misplaced_visibility
+    | Misplaced_self
+    | Lends_own
+    | Repeated_clause
+    | Cost_word
+    | Finite_not_time
+    | Misplaced_potential
+    | Increment
+    | Double_negation
+    | Match_arm_comma
+    | Conditional_operator
+    | Let_mut
+    | Address_of
+    | Closure_bars
+    | Brace_record
+    | Turbofish
+    | Trailing_lambda
+    | As_conversion
+    | Elif
+    | Specification_only
+    | Misplaced_assert
+    | Misplaced_proof
+    | Misplaced_yield
+    | Misplaced_loop_exit
+    | Leaves_parallel
+    | Echo_in_specification
+    | Reserved_name
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
-  type t = Lexer of lexer | Too_many_diagnostics
+  type t = Lexer of lexer | Parser of parser | Too_many_diagnostics
 
   let lexer_name code =
     match code with
@@ -65,8 +106,51 @@ module Code = struct
     | Unclosed_bracket -> "unclosed_bracket"
     | Unmatched_closing_bracket -> "unmatched_closing_bracket"
 
+  let parser_name code =
+    match code with
+    | Unexpected_token -> "unexpected_token"
+    | Needs_parentheses -> "needs_parentheses"
+    | Reserved_word -> "reserved_word"
+    | Use_after_definition -> "use_after_definition"
+    | Statement_at_top_level -> "statement_at_top_level"
+    | Missing_body -> "missing_body"
+    | Open_range -> "open_range"
+    | Interpolation_not_allowed -> "interpolation_not_allowed"
+    | Float_pattern -> "float_pattern"
+    | Let_else_brace -> "let_else_brace"
+    | Nesting_too_deep -> "nesting_too_deep"
+    | Misplaced_opaque -> "misplaced_opaque"
+    | Misplaced_visibility -> "misplaced_visibility"
+    | Misplaced_self -> "misplaced_self"
+    | Lends_own -> "lends_own"
+    | Repeated_clause -> "repeated_clause"
+    | Cost_word -> "cost_word"
+    | Finite_not_time -> "finite_not_time"
+    | Misplaced_potential -> "misplaced_potential"
+    | Increment -> "increment"
+    | Double_negation -> "double_negation"
+    | Match_arm_comma -> "match_arm_comma"
+    | Conditional_operator -> "conditional_operator"
+    | Let_mut -> "let_mut"
+    | Address_of -> "address_of"
+    | Closure_bars -> "closure_bars"
+    | Brace_record -> "brace_record"
+    | Turbofish -> "turbofish"
+    | Trailing_lambda -> "trailing_lambda"
+    | As_conversion -> "as_conversion"
+    | Elif -> "elif"
+    | Specification_only -> "specification_only"
+    | Misplaced_assert -> "misplaced_assert"
+    | Misplaced_proof -> "misplaced_proof"
+    | Misplaced_yield -> "misplaced_yield"
+    | Misplaced_loop_exit -> "misplaced_loop_exit"
+    | Leaves_parallel -> "leaves_parallel"
+    | Echo_in_specification -> "echo_in_specification"
+    | Reserved_name -> "reserved_name"
+
   let name = function
     | Lexer code -> "lexer." ^ lexer_name code
+    | Parser code -> "parser." ^ parser_name code
     | Too_many_diagnostics -> "too_many_diagnostics"
 end
 
@@ -86,6 +170,23 @@ let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
 let insert offset replacement = { span = Source.zero_width offset; replacement }
 let delete span = { span; replacement = "" }
+
+let move offset diagnostic =
+  let move_span (span : span) = Source.span (span.start + offset) (span.stop + offset) in
+  {
+    diagnostic with
+    span = move_span diagnostic.span;
+    notes = List.map (fun (span, note) -> (move_span span, note)) diagnostic.notes;
+    fixes =
+      List.map
+        (fun fix ->
+          {
+            fix with
+            edits =
+              List.map (fun (edit : edit) -> { edit with span = move_span edit.span }) fix.edits;
+          })
+        diagnostic.fixes;
+  }
 
 let apply_fix text fix =
   (* Edits at the same offset apply in the order they are listed. *)

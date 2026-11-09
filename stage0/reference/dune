@@ -1,0 +1,10 @@
+(library
+ (name reference)
+ (modules reference truss)
+ (libraries source diagnostic token parser))
+
+(rule
+ (copy %{workspace_root}/grammar/truss.mly truss.mly))
+
+(menhir
+ (modules truss))

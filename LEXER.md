@@ -79,8 +79,8 @@ lookahead across lines.
 | `Lexer` | The entry point: `Lexer.lex : Source.t -> Token.t array * Diagnostic.t list` |
 
 Each module is its own dune library under `stage0/`, so the parser depends
-only on `Token` and `Lexer`, and the formatter and language server can reuse
-`Source` and `Diagnostic`. The scanner's library holds:
+only on `Token`, `Source`, and `Diagnostic`, and the formatter and language
+server can reuse `Source` and `Diagnostic`. The scanner's library holds:
 
 | Module | Job |
 |---|---|
@@ -720,8 +720,8 @@ fact about a small input.
   files.
 - **Unicode conformance** runs with `regenerate.sh` (see
   [Unicode data](#unicode-data)).
-- **Both parsers.** Tokens from the corpus go to the Menhir reference as well as
-  the hand-written parser, as IMPLEMENTATION.md plans.
+- **Both parsers.** The documents' tokens go to the reference grammar as well
+  as to the parser, as [PARSER.md](PARSER.md#testing) describes.
 
 ## Left out on purpose
 

@@ -32,6 +32,11 @@
 
 %start <unit> file
 
+/* The documents' examples, piece by piece: each piece of an example is a
+   `use` line, a definition, a function's signature without a body, or a
+   statement. */
+%start <unit> snippet_use snippet_definition snippet_signature snippet_statement
+
 %%
 
 /* Helpers */
@@ -62,6 +67,18 @@ newline_separated1(X):
 file:
   | list(top_item) EOF { () }
 
+snippet_use:
+  | use_declaration EOF { () }
+
+snippet_definition:
+  | definition EOF { () }
+
+snippet_signature:
+  | visibility_opt FN function_name generics_opt parameters result_opt list(clause) EOF { () }
+
+snippet_statement:
+  | statement EOF { () }
+
 top_item:
   | use_declaration NEWLINE { () }
   | definition NEWLINE { () }
@@ -81,11 +98,11 @@ definition:
   | visibility_opt function_definition { () }
   | visibility_opt type_definition { () }
   | visibility_opt trait_definition { () }
-  | visibility_opt impl_definition { () }
+  | impl_definition { () }
   | visibility_opt capability_definition { () }
   | visibility_opt constant { () }
   | test_definition { () }
-  | theorem_definition { () }
+  | visibility_opt theorem_definition { () }
   | law_proof { () }
 
 visibility_opt:
@@ -258,7 +275,7 @@ bound_list:
 /* Traits, implementations, and capabilities */
 
 trait_definition:
-  | TRAIT UPPER generics_opt supertraits_opt LBRACE trait_members RBRACE { () }
+  | TRAIT UPPER generics_opt supertraits_opt newline_opt LBRACE trait_members RBRACE { () }
 
 supertraits_opt:
   | { () }
@@ -300,7 +317,7 @@ impl_item:
   | TYPE UPPER EQ type_expression { () }
 
 capability_definition:
-  | CAPABILITY UPPER LBRACE newline_separated(signature) RBRACE { () }
+  | CAPABILITY UPPER newline_opt LBRACE newline_separated(signature) RBRACE { () }
 
 /* Constants, tests, theorems, and proofs */
 
@@ -520,7 +537,7 @@ map_entry:
   | expression COLON expression { () }
 
 lambda:
-  | FN LPAREN comma_list(pattern) RPAREN block { () }
+  | FN LPAREN comma_list(pattern) RPAREN newline_opt block { () }
 
 if_expression:
   | IF expression newline_opt block { () }

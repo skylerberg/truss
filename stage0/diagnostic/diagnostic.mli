@@ -39,8 +39,49 @@ module Code : sig
     | Unclosed_bracket
     | Unmatched_closing_bracket
 
+  type parser =
+    | Unexpected_token
+    | Needs_parentheses
+    | Reserved_word
+    | Use_after_definition
+    | Statement_at_top_level
+    | Missing_body
+    | Open_range
+    | Interpolation_not_allowed
+    | Float_pattern
+    | Let_else_brace
+    | Nesting_too_deep
+    | Misplaced_opaque
+    | Misplaced_visibility
+    | Misplaced_self
+    | Lends_own
+    | Repeated_clause
+    | Cost_word
+    | Finite_not_time
+    | Misplaced_potential
+    | Increment
+    | Double_negation
+    | Match_arm_comma
+    | Conditional_operator
+    | Let_mut
+    | Address_of
+    | Closure_bars
+    | Brace_record
+    | Turbofish
+    | Trailing_lambda
+    | As_conversion
+    | Elif
+    | Specification_only
+    | Misplaced_assert
+    | Misplaced_proof
+    | Misplaced_yield
+    | Misplaced_loop_exit
+    | Leaves_parallel
+    | Echo_in_specification
+    | Reserved_name
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
-  type t = Lexer of lexer | Too_many_diagnostics
+  type t = Lexer of lexer | Parser of parser | Too_many_diagnostics
 
   val name : t -> string
 end
@@ -53,6 +94,9 @@ type fix = { title : string; edits : edit list }
 type t = {
   code : Code.t;
   message : string;
+      (** Whole sentences, each starting with a capital letter, or with code in backticks, and
+          ending with a period: "This string is not closed on its line." Every stage writes them the
+          same way. *)
   span : span;
   notes : (span * string) list;
   fixes : fix list;  (** Alternatives. Most diagnostics have at most one. *)
@@ -63,6 +107,12 @@ val fix : string -> edit list -> fix
 val replace : span -> string -> edit
 val insert : int -> string -> edit
 val delete : span -> edit
+
+val move : int -> t -> t
+(** [move offset diagnostic] adds [offset] to every span in [diagnostic]: its own, its notes', and
+    its fixes' edits. A stage whose results are cached apart from where they are in the file, such
+    as the parser's for each definition, keeps its diagnostics relative to a base and moves them
+    back when they are shown. Raises [Invalid_argument] if a span would start before 0. *)
 
 val apply_fix : string -> fix -> string
 (** Applies a fix's edits to the text it was made for. Raises [Invalid_argument] if the edits

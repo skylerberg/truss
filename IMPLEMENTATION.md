@@ -91,7 +91,9 @@ The full design is in [PARSER.md](PARSER.md). In short:
 - **An abstract tree, not a lossless one.** Truss has no comments, so the
   formatter needs only spans, blank lines, and parentheses from the source.
 - **`grammar/truss.mly` as a reference.** A Menhir parser built from it, for
-  tests only, must accept and reject the same files as the real one.
+  tests and tools only, accepts every piece of every example in the
+  documents, and the fuzzer checks that it accepts and rejects the same
+  mutated pieces as the real one.
 - **Diagnostics in a structured format,** with exact text replacements for
   fixes, shared with the lexer.
 

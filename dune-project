@@ -1,5 +1,7 @@
 (lang dune 3.24)
 
+(using menhir 3.0)
+
 (name truss)
 
 (generate_opam_files true)
