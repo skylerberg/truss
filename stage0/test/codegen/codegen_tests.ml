@@ -207,6 +207,7 @@ let function_ ?(parameters = []) ?result ?(returns = true) ?(environment = []) l
     Lir.function_ =
   {
     parameters;
+    written_result = None;
     result;
     returns;
     locals = Array.of_list locals;
@@ -2108,6 +2109,29 @@ test "patterns" {
   assert "${half} ${third} ${big} ${2.0}" == "0.5 0.25 1e+300 2.0"
 }
 |};
+  passes "a range is a value with its ends"
+    {|fn width(span: Range[Int64]) -> Int64 {
+  if span.inclusive { span.stop - span.start + 1 } else { span.stop - span.start }
+}
+
+test "ranges" {
+  assert width(2..5) == 3
+  assert width(2..=5) == 4
+  let words = "${1}"..="${2}"
+  assert words.start == "1"
+}
+|};
+  passes "a loop that binds an owned value each time frees each one once"
+    {|test "pop" {
+  var items: List[String] = ["${1}", "${2}"]
+  var count = 0
+  while mut items.pop() is Some(item) {
+    assert item.length() == 1
+    count += 1
+  }
+  assert count == 2
+}
+|};
   passes "names an is test binds are used where it holds"
     {|fn describe(found: Option[String], limit: USize) -> String {
   if found is Some(text) && text.length() > limit {
@@ -2171,9 +2195,11 @@ test "once" {
 (* Programs *)
 
 (* Compiles a module with a [main] and runs it with the arguments. *)
-let run_main ?(arguments = []) text =
+let run_main ?(arguments = []) ?input text =
   let _, compile = load text in
-  match Compile.run_program compile ~main:(Top { module_ = example; name = "main" }) ~arguments with
+  match
+    Compile.run_program ?input compile ~main:(Top { module_ = example; name = "main" }) ~arguments
+  with
   | Ok result -> result
   | Error message -> failwith message
 
@@ -2192,6 +2218,25 @@ let () =
       in
       expect_int ~expected:3 status;
       expect_string ~expected:"hello\n3 arguments, then one\n" output)
+
+let () =
+  test "a program reads its input a line at a time, with bad bytes replaced" (fun () ->
+      let status, output, _ =
+        run_main ~input:"first\nsecond \xff line\nlast"
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  var count: UInt8 = 0
+  while Console.read_line() is Some(line) {
+    Console.print_line("${count}: ${line}")
+    count += 1
+  }
+  ExitCode(count)
+}
+|}
+      in
+      expect_int ~expected:3 status;
+      expect_string ~expected:"0: first\n1: second \xef\xbf\xbd line\n2: last\n" output)
 
 (* The documents' examples: in every block that checks cleanly, each
    function that is not generic lowers, and each test passes or reaches a

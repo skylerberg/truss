@@ -67,9 +67,10 @@ let loop b ~usize:usize_ty ~count body =
   finish b (Goto test);
   start b after
 
-let build b ~parameters ~result : Lir.function_ =
+let build ?written_result b ~parameters ~result : Lir.function_ =
   {
     parameters;
+    written_result;
     result;
     returns = true;
     locals = Array.of_list (List.rev b.locals);

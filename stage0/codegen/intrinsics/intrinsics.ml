@@ -35,7 +35,14 @@ let lower env b types operation ~type_arguments arguments ~destination ~site =
   in
   let into intrinsic = call ?result:destination intrinsic (List.map operand arguments) in
   let usize_local name = local b ~name (Value types.usize) in
-  let element () = type_argument 0 in
+  (* The storage's element: the type argument, or bytes for the system's
+     operations, which take none. *)
+  let element () =
+    match operation with
+    | Intrinsic.Read_bytes | Random_fill | Write_float ->
+        Ground.Named { path = Intrinsic.builtin_path UInt8; arguments = [] }
+    | _ -> type_argument 0
+  in
   let element_layout () = Memory_layout.of_type env (element ()) in
   let field storage name = storage / Lir.Field name in
   let length storage = Lir.Copy (field storage "length") in

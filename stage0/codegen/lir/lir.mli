@@ -216,6 +216,9 @@ type local_info = { ty : ty; name : string option }
 
 type function_ = {
   parameters : local list;  (** Locals that arrive as the parameters, in order *)
+  written_result : local option;
+      (** The parameter pointing to where a result too large to return is written, which holds no
+          value until the function writes it *)
   result : ty option;
   returns : bool;
   locals : local_info array;

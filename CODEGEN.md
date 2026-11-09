@@ -479,6 +479,11 @@ it. A drop of an element reached through an index stays as it is, since
 elements are never moved out, which is how a `Storage`'s drop drops each
 element.
 
+A function starts with every parameter holding a value, except what the
+pointer for a large result points to: the LIR names that parameter, so the
+first write of the result drops nothing, whatever the caller's memory held
+before.
+
 An assignment to a place that may still own a value drops that value first,
 after the assignment's own moves, so `items = rebuild(own items)` drops
 nothing and `name = other_name` drops the old `name`. The new value is

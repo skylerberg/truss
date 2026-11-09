@@ -1155,6 +1155,18 @@ and into st (e : S.expression) (destination : Lir.place) =
            (fun ((key : S.expression), (value : S.expression)) ->
              [ (key, type_of st key.id); (value, type_of st value.id) ])
            entries)
+  | Range { start = Some start; stop = Some stop; inclusive } ->
+      (* A [Range] value: its two ends and whether it includes the last. *)
+      let end_ (e : S.expression) = owned st (expression st e) (type_of st e.id) in
+      let start = end_ start in
+      let stop = end_ stop in
+      assign
+        (Build
+           {
+             ty = ty ();
+             variant = None;
+             fields = [ ("start", start); ("stop", stop); ("inclusive", Constant (Bool inclusive)) ];
+           })
   | Range _ | Quantified _ | Provide _ ->
       bug "this expression is not lowered yet: %s" (source st e.span)
   | Self_type_value -> bug "Self as a value"
@@ -1439,7 +1451,7 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
   drop_scope inner (List.hd inner.scopes);
   finish b (Return (Option.map (fun local -> Lir.Move (at local)) result_local));
   let function_ =
-    Lir_builder.build b
+    Lir_builder.build b ?written_result:return_pointer
       ~parameters:
         ((environment_parameter :: Option.to_list return_pointer)
         @ List.filter_map (fun (l, _, _, _) -> l) parameter_places)
@@ -3113,7 +3125,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
   finish b (Return (match result with Returned _ -> Some (Lir.Move result_place) | _ -> None));
   ignore lir_signature;
   let main =
-    Lir_builder.build b
+    Lir_builder.build b ?written_result:result_pointer
       ~parameters:(Option.to_list result_pointer @ List.filter_map fst locals_and_places)
       ~result:(match result with Returned t -> Some t | _ -> None)
   in
@@ -3247,7 +3259,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
     ~mask:0 ~destination;
   finish b (Return (match result with Returned _ -> Some (Lir.Move destination) | _ -> None));
   let main =
-    Lir_builder.build b
+    Lir_builder.build b ?written_result:result_pointer
       ~parameters:
         ((evidence :: Option.to_list result_pointer)
         @ List.filter_map (fun (l, _, _, _) -> l) parameters)
@@ -3465,7 +3477,7 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
     ~destination;
   finish b (Return (match result with Returned _ -> Some (Lir.Move destination) | _ -> None));
   let main =
-    Lir_builder.build b
+    Lir_builder.build b ?written_result:result_pointer
       ~parameters:
         ((environment :: Option.to_list result_pointer)
         @ List.filter_map fst parameters @ List.map snd evidence)
@@ -3540,7 +3552,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
     ~mask:0 ~destination;
   finish b (Return (match result with Returned _ -> Some (Lir.Move destination) | _ -> None));
   let main =
-    Lir_builder.build b
+    Lir_builder.build b ?written_result:result_pointer
       ~parameters:
         ((value :: Option.to_list result_pointer)
         @ List.filter_map fst parameters @ List.map snd evidence)
@@ -3813,7 +3825,7 @@ let instance context (key : Instance.key) : Lir.t =
         | Returns Never -> Unreachable
         | _ -> Return (Option.map (fun local -> Lir.Move (at local)) result_local));
       let main =
-        Lir_builder.build b
+        Lir_builder.build b ?written_result:return_pointer
           ~parameters:
             (Option.to_list return_pointer @ parameters @ Option.to_list mask
            @ List.map snd evidence)

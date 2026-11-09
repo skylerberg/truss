@@ -327,7 +327,7 @@ let copy t ty =
   | None -> finish b (Return None));
   let parameters = Option.to_list result_pointer @ Option.to_list self_local in
   instance (Copy ty)
-    (build b ~parameters
+    (build ?written_result:result_pointer b ~parameters
        ~result:
          (match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None))
 

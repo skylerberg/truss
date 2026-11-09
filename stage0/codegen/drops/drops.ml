@@ -242,9 +242,15 @@ let apply a s statement =
   Option.iter (set_init a s) ownership.init;
   Option.iter (set_uninit a s) ownership.dropped
 
+(* At the start, what the parameters hold has a value, except where the
+   result is to be written. *)
 let entry_state a =
   let n = Array.length a.paths in
-  let parameter i = List.mem a.paths.(i).local a.f.parameters in
+  let parameter i =
+    let path = a.paths.(i) in
+    List.mem path.local a.f.parameters
+    && not (a.f.written_result = Some path.local && path.steps <> [])
+  in
   { maybe_init = Array.init n parameter; maybe_uninit = Array.init n (fun i -> not (parameter i)) }
 
 (* The state at the start of each block, by iterating to a fixed point. *)

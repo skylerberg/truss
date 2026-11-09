@@ -34,5 +34,7 @@ val compile :
 val link : t -> objects:string list -> output:string -> (unit, string) result
 
 (* Runs a program and returns its exit status, its standard output, and its
-   standard error. A program ended by a signal has status [128 + signal]. *)
-val run : string -> string list -> int * string * string
+   standard error. A program ended by a signal has status [128 + signal].
+   With [input], the program reads that as its standard input; without, it
+   reads this process's. *)
+val run : ?input:string -> string -> string list -> int * string * string

@@ -255,6 +255,7 @@ let cursor_next env ~cursor ~result (f : Lir.function_) =
   let result_pointer = match convention with Through_pointer ty -> [ ty ] | _ -> [] in
   {
     Lir.parameters = (if through_pointer then [ 0; 1 ] else [ 0 ]);
+    written_result = (if through_pointer then Some 0 else None);
     result = (match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None);
     returns = true;
     locals =
@@ -305,6 +306,7 @@ let cursor_drop _env ~cursor ~owned (f : Lir.function_) =
   in
   {
     Lir.parameters = [ 0 ];
+    written_result = None;
     result = None;
     returns = true;
     locals =

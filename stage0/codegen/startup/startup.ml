@@ -293,7 +293,28 @@ t_isize t_runtime_write(int32_t descriptor, const uint8_t *bytes, t_usize count)
   }
 }
 
+/* Standard input is read a block at a time and handed out from this
+   buffer, so that reading a line a byte at a time costs one system call a
+   block. */
+static uint8_t t_input[4096];
+static t_usize t_input_start = 0, t_input_end = 0;
+
 t_isize t_runtime_read(int32_t descriptor, uint8_t *bytes, t_usize count) {
+  if (descriptor == 0) {
+    if (t_input_start == t_input_end) {
+      ssize_t got;
+      do got = read(0, t_input, sizeof t_input);
+      while (got < 0 && errno == EINTR);
+      if (got <= 0) return got;
+      t_input_start = 0;
+      t_input_end = (t_usize)got;
+    }
+    t_usize available = t_input_end - t_input_start;
+    t_usize given = count < available ? count : available;
+    memcpy(bytes, t_input + t_input_start, given);
+    t_input_start += given;
+    return (t_isize)given;
+  }
   for (;;) {
     ssize_t got = read(descriptor, bytes, count);
     if (got < 0 && errno == EINTR) continue;

@@ -34,7 +34,16 @@ val when_ : t -> Lir.operand -> (unit -> unit) -> unit
 (* A counted loop over [0, count), running [body] with the index, a local of
    type [usize]. *)
 val loop : t -> usize:Ground.ty -> count:Lir.operand -> (Lir.local -> unit) -> unit
-val build : t -> parameters:Lir.local list -> result:Lir.ty option -> Lir.function_
+
+(* The function built: [written_result] is the parameter pointing to where
+   a large result is written, if any. *)
+val build :
+  ?written_result:Lir.local ->
+  t ->
+  parameters:Lir.local list ->
+  result:Lir.ty option ->
+  Lir.function_
+
 val at : Lir.local -> Lir.place
 val ( / ) : Lir.place -> Lir.projection -> Lir.place
 val usize : int -> Lir.operand

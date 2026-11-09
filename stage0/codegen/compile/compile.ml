@@ -120,7 +120,7 @@ let anchor t (path : Path.t) : Positions.anchor option =
 
 (* Builds what the roots reach into a program with the given startup code,
    and runs it with [arguments]. *)
-let build_and_run t ~roots ~startup ~arguments =
+let build_and_run ?input t ~roots ~startup ~arguments =
   match Reachable.reachable t.context.env ~lookup:(compiled t) roots with
   | exception Invalid_argument message -> Error message
   | units -> (
@@ -140,7 +140,7 @@ let build_and_run t ~roots ~startup ~arguments =
       with
       | Error message -> Error message
       | Ok () ->
-          let result = Toolchain.run output arguments in
+          let result = Toolchain.run ?input output arguments in
           (try Sys.remove output with Sys_error _ -> ());
           Ok result)
 
@@ -154,8 +154,8 @@ let run_tests t ~time_limit tests =
   | Error message -> Error message
   | Ok (status, out, _) -> Ok (status, out)
 
-let run_program t ~main ~arguments =
+let run_program ?input t ~main ~arguments =
   let root = Instance.Program_main main in
-  build_and_run t ~roots:[ root ]
+  build_and_run ?input t ~roots:[ root ]
     ~startup:(Startup.program_calling (Instance.symbol root))
     ~arguments

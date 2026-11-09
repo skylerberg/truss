@@ -20,7 +20,19 @@ impl Console for SystemConsole {
   }
 
   fn read_line(self) -> Option[String] {
-    todo
+    var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+    var ended = false
+    while !ended && intrinsic::read_bytes(0, buffer: mut bytes, count: 1) == 1 {
+      if intrinsic::view_at(intrinsic::storage_view(bytes), index: intrinsic::storage_length(bytes) - 1) == 10 {
+        let _ = intrinsic::storage_pop(mut bytes)
+        ended = true
+      }
+    }
+    if !ended && intrinsic::storage_length(bytes) == 0 {
+      None
+    } else {
+      Some(String.from_bytes(own bytes))
+    }
   }
 }
 

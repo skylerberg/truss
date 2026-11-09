@@ -19,6 +19,11 @@ val compiled : t -> Instance.key -> Lir.compiled
 val run_tests : t -> time_limit:int -> Path.t list -> (int * string, string) result
 
 (* Builds the program whose [main] is at that path, and runs it with the
-   arguments, returning its exit status, its output, and its errors. *)
+   arguments, and [input] as its standard input if given, returning its exit
+   status, its output, and its errors. *)
 val run_program :
-  t -> main:Path.t -> arguments:string list -> (int * string * string, string) result
+  ?input:string ->
+  t ->
+  main:Path.t ->
+  arguments:string list ->
+  (int * string * string, string) result

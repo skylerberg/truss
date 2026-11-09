@@ -11,21 +11,45 @@ let read_all channel =
 
 (* Runs a program with arguments, with no shell, and returns its status and
    what it wrote to standard output and standard error. *)
-let run program arguments =
+let run ?input program arguments =
   let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
   let stderr_read, stderr_write = Unix.pipe ~cloexec:true () in
+  let stdin_read, stdin_write =
+    match input with
+    | Some _ ->
+        let read, write = Unix.pipe ~cloexec:true () in
+        (read, Some write)
+    | None -> (Unix.stdin, None)
+  in
   let pid =
     Unix.create_process program
       (Array.of_list (program :: arguments))
-      Unix.stdin stdout_write stderr_write
+      stdin_read stdout_write stderr_write
   in
   Unix.close stdout_write;
   Unix.close stderr_write;
+  (* Write the input on another domain too, and close it, so the program
+     sees its end. *)
+  let writer =
+    match (input, stdin_write) with
+    | Some text, Some write ->
+        (* A program that ends without reading it all closes the pipe, which
+           must not end this process. *)
+        Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+        Unix.close stdin_read;
+        Some
+          (Domain.spawn (fun () ->
+               let channel = Unix.out_channel_of_descr write in
+               (try output_string channel text with Sys_error _ -> ());
+               try close_out channel with Sys_error _ -> ()))
+    | _ -> None
+  in
   (* Read standard error on another domain, so neither pipe fills while the
      other is read. *)
   let errors = Domain.spawn (fun () -> read_all (Unix.in_channel_of_descr stderr_read)) in
   let output = read_all (Unix.in_channel_of_descr stdout_read) in
   let errors = Domain.join errors in
+  Option.iter Domain.join writer;
   Unix.close stdout_read;
   Unix.close stderr_read;
   let _, status = Unix.waitpid [] pid in

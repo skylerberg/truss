@@ -202,6 +202,9 @@ type local_info = { ty : ty; name : string option }
 
 type function_ = {
   parameters : local list;  (** Locals that arrive as the parameters, in order *)
+  written_result : local option;
+      (** The parameter pointing to where a result too large to return is written, which holds no
+          value until the function writes it *)
   result : ty option;
   returns : bool;
   locals : local_info array;
@@ -474,10 +477,16 @@ let canonical (f : function_) =
            })
          order)
   in
-  { f with parameters = List.map map_local f.parameters; locals; blocks }
+  {
+    f with
+    parameters = List.map map_local f.parameters;
+    written_result = Option.map map_local f.written_result;
+    locals;
+    blocks;
+  }
 
 let canonical_instance t = { t with main = canonical t.main; nested = Array.map canonical t.nested }
-let version = 4
+let version = 5
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -719,6 +728,7 @@ let encode_function instance (f : function_) =
   Cbor.Array
     [
       list Cbor.int f.parameters;
+      option Cbor.int f.written_result;
       option (encode_ty instance) f.result;
       Bool f.returns;
       list
