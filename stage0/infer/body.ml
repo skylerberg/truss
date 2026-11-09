@@ -16,7 +16,8 @@ open Expressions
 
 type result = { checked : C.t; diagnostics : Diagnostic.t list }
 
-let no_output : env = { output = None; specification = false; self = None; self_mode = T.Read }
+let no_output : env =
+  { output = None; specification = false; self = None; self_mode = T.Read; loop_element = None }
 
 (* A body: each statement settles its own types, and the last is checked
    against the result type. *)
@@ -145,6 +146,7 @@ let check_function state ~broken_body (written : signature) (body_block : block 
       specification = false;
       self = Option.map snd signature.receiver;
       self_mode = self_mode signature;
+      loop_element = None;
     }
   in
   declare_parameters state written.parameters signature;

@@ -103,6 +103,21 @@ and name state env (value : expression) (path : path) =
   | Some (Old | Identical | Cost_function _) ->
       state.tables.meanings.(value.id) <- Some Specification_value;
       T.Error
+  | Some Yielded -> (
+      (* The parts handed out so far, in order. *)
+      state.tables.meanings.(value.id) <- Some Specification_value;
+      let part =
+        match (env.loop_element, env.output) with
+        | Some element, _ -> Some element
+        | None, Some (Yields (_, part) | Lends (_, part)) -> Some part
+        | _ -> None
+      in
+      match part with
+      | Some part -> T.Named { path = sequence_path; arguments = [ T.Type part ] }
+      | None -> T.Error)
+  | Some Finished ->
+      state.tables.meanings.(value.id) <- Some Specification_value;
+      T.bool
   | Some (Binding | Module _ | Unknown) | None -> T.Error
 
 (* A variant used as a value: one with no fields is a value, and one with

@@ -15,6 +15,8 @@ type target = Walk.target =
   | Result_value
   | Old
   | Identical
+  | Yielded
+  | Finished
   | Cost_function of cost_function
   | Unknown
 

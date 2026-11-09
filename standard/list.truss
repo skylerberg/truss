@@ -94,7 +94,12 @@ public fn List[Element].slice(self) -> Slice[Element]
   Slice(elements: intrinsic::storage_view(self.storage))
 }
 
-public fn List[Element].each(self) yields Element {
+public fn List[Element].each(self) yields Element
+  ensures identical(result, self[yielded.length()])
+  ensures yielded.length() <= self.length()
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
   for index in 0..self.length() {
     yield self[index]
   }
@@ -125,7 +130,12 @@ public fn Slice[Element].length(self) -> USize
   intrinsic::view_length(self.elements)
 }
 
-public fn Slice[Element].each(self) yields Element {
+public fn Slice[Element].each(self) yields Element
+  ensures identical(result, self[yielded.length()])
+  ensures yielded.length() <= self.length()
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
   for index in 0..self.length() {
     yield self[index]
   }
@@ -138,6 +148,7 @@ impl Index for List[Element] {
   fn at(self, key: USize) lends Element
     requires key < self.length()
     ensures identical(result, self.model()[key])
+    cost time O(1)
   {
     yield intrinsic::storage_at(self.storage, index: key)
   }
@@ -156,6 +167,7 @@ impl Index for Slice[Element] {
   fn at(self, key: USize) lends Element
     requires key < self.length()
     ensures identical(result, self.model()[key])
+    cost time O(1)
   {
     yield intrinsic::view_at(self.elements, index: key)
   }

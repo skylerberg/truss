@@ -24,6 +24,9 @@ type env = {
   specification : bool;
   self : T.ty option;  (** The type of [self]. *)
   self_mode : T.mode;  (** How the method takes [self]: only [mut self] can be assigned to. *)
+  loop_element : T.ty option;
+      (** In a [for] loop's clauses, what each iteration receives, which [yielded] is a sequence of.
+      *)
 }
 
 type frame = {

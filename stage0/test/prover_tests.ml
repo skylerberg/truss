@@ -645,6 +645,49 @@ let () =
   test "identical is the same value, for any type" (fun () ->
       proven "fn f[Item](value: Item) -> Bool\n  ensures identical(value, value)\n{\n  true\n}\n")
 
+let () =
+  test "a loop over a list runs once per element" (fun () ->
+      proven
+        "fn f(items: List[Int64]) -> USize\n\
+        \  ensures result == items.length()\n\
+         {\n\
+        \  var seen: USize = 0\n\
+        \  for item in items\n\
+        \    invariant seen == yielded.length()\n\
+        \  {\n\
+        \    let _ = item\n\
+        \    seen += 1\n\
+        \  }\n\
+        \  seen\n\
+         }\n");
+  test "a loop's element is the list's element at its position" (fun () ->
+      proven
+        "fn f(items: List[Int64]) -> Bool\n\
+        \  ensures result ==> (forall i in 0..items.length() => items[i] > 0)\n\
+         {\n\
+        \  for item in items\n\
+        \    invariant forall i in 0..yielded.length() => items[i] > 0\n\
+        \  {\n\
+        \    if item <= 0 { return false }\n\
+        \  }\n\
+        \  true\n\
+         }\n");
+  test "a loop over a list does not run once more" (fun () ->
+      not_proven
+        "fn f(items: List[Int64]) -> USize\n\
+        \  ensures result == items.length() + 1\n\
+         {\n\
+        \  var seen: USize = 0\n\
+        \  for item in items\n\
+        \    invariant seen == yielded.length()\n\
+        \  {\n\
+        \    let _ = item\n\
+        \    seen += 1\n\
+        \  }\n\
+        \  seen\n\
+         }\n"
+        "prover.ensures")
+
 (* Laws *)
 
 let monoid =

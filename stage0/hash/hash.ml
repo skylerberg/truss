@@ -72,6 +72,8 @@ let name context (written : name) =
       | Result_value -> node "result" []
       | Old -> node "old" []
       | Identical -> node "identical" []
+      | Yielded -> node "yielded" []
+      | Finished -> node "finished" []
       | Cost_function function_ ->
           node "cost_function"
             [

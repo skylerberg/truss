@@ -70,6 +70,12 @@ and frame = {
   substitution : T.substitution;
       (** The type arguments of the callee whose clauses are read here, for its generic types. *)
   self_type : T.ty option;  (** The type of [self], whose fields an invariant names directly. *)
+  yielded : L.term option;
+      (** What [yielded] names here: the parts a lending or yielding callee handed out, or the
+          values a [for] loop's earlier iterations received. *)
+  finished : L.term option;  (** What [finished] names here. *)
+  handed_out : L.term option;
+      (** In a lending or yielding method's own body, the parts it has handed out so far. *)
 }
 
 type context = {
@@ -91,6 +97,10 @@ type context = {
   mutable instantiating : Path.t list;  (** Contracts being assumed, to stop at recursion. *)
   fits : (int * T.ty) list;  (** The type checker's [Integer_fits] obligations, by expression. *)
   mutable output : T.ty option;  (** What the function proven returns, for [?]. *)
+  mutable hands_out : (T.ty * [ `Lends | `Yields ]) option;
+      (** In a lending or yielding method's body, the type of the parts it hands out. *)
+  mutable handing : (expression list * expression list) option;
+      (** Its [ensures]: the clauses for each [yield], which mention [result], and the others. *)
   graph : Call_graph.t;  (** The package's call graph, for recursion in cycles. *)
   home : Names.key;  (** The definition being proven, whose tree spans and obligations are in. *)
   mutable laws_assumed : string list;  (** Each trait and type whose laws are facts already. *)
@@ -785,6 +795,14 @@ and name context frame (written : expression) (path : path) =
       match frame.result with
       | Some result -> Some (frame, result)
       | None -> unsupported written.span "`result` here")
+  | Some Yielded -> (
+      match frame.yielded with
+      | Some yielded -> Some (frame, yielded)
+      | None -> unsupported written.span "`yielded` here")
+  | Some Finished -> (
+      match frame.finished with
+      | Some finished -> Some (frame, finished)
+      | None -> unsupported written.span "`finished` here")
   | _ -> (
       match source.checked.meanings.(written.id) with
       | Some (Local_value id) -> (
@@ -1546,6 +1564,90 @@ and law_fact context frame source trait ty (law : law) =
       | None -> None
     with Unsupported _ | Foreign_unsupported _ -> None
   end
+
+(* Sequences of handed-out parts, through the same functions in the
+   logic that the contracts of [standard::specification] are about. *)
+and sequence_path : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "specification" ] }; name = "Sequence" }
+
+and sequence_type element = T.Named { path = sequence_path; arguments = [ T.Type element ] }
+
+and sequence_length context element term =
+  let path = Path.Method { owner = sequence_path; name = "length"; receiver = Read } in
+  let symbol = "function." ^ Path.show path ^ "[" ^ type_key element ^ "]" in
+  declare context (L.Function (symbol, [ sort_of context (sequence_type element) ], L.Int));
+  L.Apply (symbol, [ term ])
+
+and sequence_at context element term index =
+  let sequence = sequence_type element in
+  let index_trait : Path.t =
+    Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Index" }
+  in
+  match
+    Call_graph.impls_for
+      (Query.demand context.database Call_graph.package_impls "standard")
+      [ index_trait ] sequence
+  with
+  | impl :: _ ->
+      let path = Path.Method { owner = impl; name = "at"; receiver = Read } in
+      let symbol = "function." ^ Path.show path ^ "[" ^ type_key sequence ^ "]" in
+      declare context
+        (L.Function (symbol, [ sort_of context sequence; L.Int ], sort_of context element));
+      Some (L.Apply (symbol, [ term; index ]))
+  | [] -> None
+
+(* A sequence of parts with nothing in it. *)
+and empty_parts context frame element =
+  let parts = fresh context "parts" (sort_of context (sequence_type element)) in
+  assume context frame (L.equal (sequence_length context element parts) (L.int 0));
+  parts
+
+(* A sequence of parts about which only its length is known. *)
+and some_parts context frame element =
+  let parts = fresh context "parts" (sort_of context (sequence_type element)) in
+  assume context frame L.(Apply (">=", [ sequence_length context element parts; int 0 ]));
+  parts
+
+(* The parts, with one more after them. *)
+and appended context frame element parts part =
+  let longer = fresh context "parts" (sort_of context (sequence_type element)) in
+  let length = sequence_length context element parts in
+  assume context frame
+    L.(
+      Apply (">=", [ length; int 0 ])
+      &&& equal (sequence_length context element longer) (Apply ("+", [ length; int 1 ])));
+  (match (sequence_at context element longer length, frame.bound) with
+  | Some last, _ -> assume context frame (L.equal last part)
+  | None, _ -> ());
+  context.fresh <- context.fresh + 1;
+  let index = Printf.sprintf "index.%d" context.fresh in
+  (match
+     ( sequence_at context element longer (L.Symbol index),
+       sequence_at context element parts (L.Symbol index) )
+   with
+  | Some after, Some before ->
+      assume context frame
+        (L.Forall
+           ( [ (index, L.Int) ],
+             L.(
+               Apply ("<=", [ int 0; Symbol index ])
+               &&& Apply ("<", [ Symbol index; length ])
+               ==> equal after before) ))
+  | _ -> ());
+  longer
+
+(* Whether a clause mentions [result], so that it holds at each [yield]
+   of a lending or yielding method, rather than where the method ends. *)
+and mentions_result source (clause : expression) =
+  let found = ref false in
+  let rec visit (expression : expression) =
+    (match expression.kind with
+    | Name path when source.resolved.names.(path.last.id) = Some Result_value -> found := true
+    | _ -> ());
+    Syntax_walk.expression_parts ~expression:visit ~statement:(fun _ -> ()) expression
+  in
+  visit clause;
+  !found
 
 and signature_terminates context path =
   match Query.demand context.database Interface.Environment.signature path with
@@ -2332,6 +2434,12 @@ and block_value context frame (written : block) =
   | None -> None
 
 and statement context frame (written : statement) : frame option =
+  if frame.source.key = context.home then
+    try statement_kind context frame written
+    with Foreign_unsupported message -> raise (Unsupported (written.span, message))
+  else statement_kind context frame written
+
+and statement_kind context frame (written : statement) : frame option =
   match written.kind with
   | Expression value_ -> Option.map fst (expression context frame value_)
   | Let { pattern; value = initial; else_ = None; _ } -> (
@@ -2531,6 +2639,9 @@ and while_ context frame (written : statement) condition clauses body =
   check_invariants context frame clauses ~when_:"on entry to the loop";
   let changed = changed_locals frame body in
   let head = havoc context frame changed in
+  let head =
+    if contains_yield body then { head with handed_out = havoc_parts context head } else head
+  in
   assume_invariants context head clauses;
   let head, test = value context head condition in
   let exits = { breaks = []; continues = [] } in
@@ -2609,6 +2720,9 @@ and for_ context frame (written : statement) pattern iterable clauses body =
       check_invariants context frame clauses ~when_:"on entry to the loop";
       let changed = changed_locals frame body in
       let head = havoc context frame changed in
+      let head =
+        if contains_yield body then { head with handed_out = havoc_parts context head } else head
+      in
       assume_invariants context head clauses;
       let index = arrive context head "index" element in
       let in_range =
@@ -2646,50 +2760,147 @@ and for_ context frame (written : statement) pattern iterable clauses body =
 and each_loop context frame (written : statement) pattern iterable clauses body (driven : C.call)
     mode =
   let source = frame.source in
-  let frame =
+  let frame, arguments =
     List.fold_left
-      (fun frame (argument : C.argument) ->
-        fst (value context frame (find_expression iterable argument.expression)))
-      frame driven.arguments
+      (fun (frame, arguments) (argument : C.argument) ->
+        let frame, term = value context frame (find_expression iterable argument.expression) in
+        (frame, (argument.parameter, term) :: arguments))
+      (frame, []) driven.arguments
   in
-  let terminates =
+  (* An implicit [each] takes the loop's collection as its receiver. *)
+  let frame, arguments =
+    if List.mem_assoc 0 arguments then (frame, arguments)
+    else
+      let frame, receiver = value context frame iterable in
+      (frame, (0, receiver) :: arguments)
+  in
+  let terminates, contract, substitution =
     match driven.callee with
-    | Function { path; _ } -> (
+    | Function { path; type_arguments } -> (
+        let substitution =
+          match Query.demand context.database Interface.Environment.signature path with
+          | Some (signature : T.signature) ->
+              let rec pair generics arguments =
+                match (generics, arguments) with
+                | (generic : T.generic) :: generics, argument :: arguments ->
+                    (generic.generic, T.substitute_argument frame.substitution argument)
+                    :: pair generics arguments
+                | _ -> []
+              in
+              pair signature.generics type_arguments
+          | None -> []
+        in
         match Query.demand context.database Interface.Environment.signature path with
-        | Some signature -> signature.terminates
-        | None -> false)
-    | _ -> false
+        | Some signature ->
+            (signature.terminates, function_contract context.database path, substitution)
+        | None -> (false, None, substitution))
+    | _ -> (false, None, [])
   in
   if context.terminates && not terminates then
     oblige context frame Termination written.span
       "This loop may not end: the method it loops over has no `time` clause." (L.Boolean false);
-  check_invariants context frame clauses ~when_:"on entry to the loop";
-  let changed = changed_locals frame body in
-  let head = havoc context frame changed in
-  let head = if mode = T.Mut then havoc_root context head iterable else head in
-  assume_invariants context head clauses;
   let element_type =
     match Option.map (substituted frame) source.checked.pattern_types.(pattern.id) with
     | Some ty -> ty
     | None -> unsupported pattern.span "a loop variable without a type"
   in
+  (* The method's clauses, read with the loop's arguments, the part handed
+     out, and the parts before it. *)
+  let method_clauses (at : frame) ~each ~result ~yielded ~finished =
+    match contract with
+    | Some { parts = (own : part) :: _; _ } ->
+        let locals, self =
+          List.fold_left
+            (fun (locals, self) (position, binding) ->
+              match (binding, List.assoc_opt position arguments) with
+              | Self_binding, Some term -> (locals, Some term)
+              | Parameter_binding name_, Some term -> (Ids.add name_.id term locals, self)
+              | _ -> (locals, self))
+            (Ids.empty, None)
+            (List.mapi (fun position binding -> (position, binding)) own.binding)
+        in
+        let inside =
+          {
+            at with
+            source = own.callee;
+            locals;
+            old_locals = locals;
+            self;
+            old_self = self;
+            result;
+            yielded = Some yielded;
+            finished;
+            checking = false;
+            loop = None;
+            substitution;
+          }
+        in
+        List.iter
+          (fun (clause : expression) ->
+            if mentions_result own.callee clause = each then
+              assume context at (snd (value context inside clause)))
+          own.ensures
+    | _ -> ()
+  in
+  let entry = { frame with yielded = Some (empty_parts context frame element_type) } in
+  check_invariants context entry clauses ~when_:"on entry to the loop";
+  let changed = changed_locals frame body in
+  let head = havoc context frame changed in
+  let head = if mode = T.Mut then havoc_root context head iterable else head in
+  let head =
+    if contains_yield body then { head with handed_out = havoc_parts context head } else head
+  in
+  let before = some_parts context head element_type in
+  let head = { head with yielded = Some before } in
+  assume_invariants context head clauses;
+  (* Each time round, the method either hands out another part or ends. *)
+  let another = fresh context "another" L.Bool in
   let element = arrive context head "element" element_type in
-  assume_valid context head element_type element;
+  let inside = restrict head another in
+  assume_valid context inside element_type element;
+  method_clauses inside ~each:true ~result:(Some element) ~yielded:before ~finished:None;
+  let through = appended context inside element_type before element in
+  method_clauses inside ~each:false ~result:None ~yielded:through ~finished:(Some (L.Boolean false));
   let exits = { breaks = []; continues = [] } in
   let _, inside =
-    pattern_match context { head with loop = Some exits } pattern element element_type
+    pattern_match context
+      { inside with loop = Some exits; yielded = frame.yielded }
+      pattern element element_type
   in
   let finished = block_value context inside body in
   let ends = (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues in
   List.iter
     (fun (end_ : frame) ->
-      check_invariants context { end_ with loop = frame.loop } clauses ~when_:"after an iteration")
+      check_invariants context
+        { end_ with loop = frame.loop; yielded = Some through }
+        clauses ~when_:"after an iteration")
     ends;
+  let ended = restrict head (L.not_ another) in
+  method_clauses ended ~each:false ~result:None ~yielded:before ~finished:(Some (L.Boolean true));
   join_frames context
-    ({ head with loop = frame.loop }
-    :: List.map (fun (f : frame) -> { f with loop = frame.loop }) exits.breaks)
+    ({ ended with loop = frame.loop; yielded = frame.yielded }
+    :: List.map
+         (fun (f : frame) -> { f with loop = frame.loop; yielded = frame.yielded })
+         exits.breaks)
   |> Option.map (fun (joined : frame) ->
       { joined with locals = Ids.filter (fun id _ -> Ids.mem id frame.locals) joined.locals })
+
+(* Whether a loop's body hands out parts of the method it is in. *)
+and contains_yield (body : block) =
+  let found = ref false in
+  let rec visit_statement (statement_ : statement) =
+    (match statement_.kind with Yield _ -> found := true | _ -> ());
+    Syntax_walk.statement_parts ~expression:visit_expression ~statement:visit_statement statement_
+  and visit_expression expression_ =
+    Syntax_walk.expression_parts ~expression:visit_expression ~statement:visit_statement expression_
+  in
+  List.iter visit_statement body.statements;
+  !found
+
+and havoc_parts context frame =
+  match context.hands_out with
+  | Some (part, _) -> Some (some_parts context frame part)
+  | None -> frame.handed_out
 
 (* Definitions *)
 
@@ -2712,6 +2923,8 @@ let new_context database ~home ~current ~terminates ~measures checked =
     returns = [];
     instantiating = [];
     output = None;
+    hands_out = None;
+    handing = None;
     parameters = [];
     fits =
       List.filter_map
@@ -2787,6 +3000,9 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
       loop = None;
       substitution = [];
       self_type = None;
+      yielded = None;
+      finished = None;
+      handed_out = None;
     }
   in
   let start =
@@ -2986,6 +3202,9 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
       loop = None;
       substitution = [];
       self_type = None;
+      yielded = None;
+      finished = None;
+      handed_out = None;
     }
   in
   List.iter
@@ -3051,6 +3270,9 @@ let test database (source : source) ~path (body : block) =
       loop = None;
       substitution = [];
       self_type = None;
+      yielded = None;
+      finished = None;
+      handed_out = None;
     }
   in
   ignore (block_value context start body);
