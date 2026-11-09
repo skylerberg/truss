@@ -161,6 +161,14 @@ let () =
       if recovered "fn f() {\n  assert true\n}" <> [] then
         fail "a rule checked after parsing is recorded";
       if recovered "fn f(x: Int64) -> Int64" = [] then fail "the missing body is not recorded");
+  test "a missing body's recovery is where the body starts" (fun () ->
+      match (fst (parse "fn f(x: Int64) -> Int64\nfn g() {}")).definitions with
+      | { value = { kind = Function { body; _ }; recovered; _ }; _ } :: _ ->
+          if
+            List.map (fun (span : Syntax.span) -> (span.start, span.stop)) recovered
+            <> [ (body.span.start, body.span.start) ]
+          then fail "recovered at the wrong place"
+      | _ -> fail "the signature was not kept");
   test "a definition whose header did not parse keeps its keyword and name" (fun () ->
       let file, _ = parse "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn f() {}" in
       let printed =
