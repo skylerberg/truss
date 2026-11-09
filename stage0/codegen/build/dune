@@ -1,0 +1,3 @@
+(library
+ (name build)
+ (libraries memory_layout lir emit_c toolchain startup cbor blake3 unix))

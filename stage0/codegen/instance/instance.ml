@@ -7,7 +7,6 @@ type key =
   | Copy of Ground.ty
   | Debug of Ground.ty
   | Cursor_next of Ground.yielding
-  | Cursor_drop of Ground.yielding
   | Adapter of key
 
 let rank = function
@@ -17,8 +16,7 @@ let rank = function
   | Copy _ -> 3
   | Debug _ -> 4
   | Cursor_next _ -> 5
-  | Cursor_drop _ -> 6
-  | Adapter _ -> 7
+  | Adapter _ -> 6
 
 let ( >>= ) c next = if c <> 0 then c else next ()
 let compare_capabilities = List.compare (List.compare Path.compare)
@@ -31,31 +29,26 @@ let rec compare a b =
       compare_capabilities a.capabilities b.capabilities
   | Constant a, Constant b -> Path.compare a b
   | Drop a, Drop b | Copy a, Copy b | Debug a, Debug b -> Ground.compare a b
-  | Cursor_next a, Cursor_next b | Cursor_drop a, Cursor_drop b ->
-      Ground.compare (Cursor a) (Cursor b)
+  | Cursor_next a, Cursor_next b -> Ground.compare (Cursor a) (Cursor b)
   | Adapter a, Adapter b -> compare a b
   | _ -> Int.compare (rank a) (rank b)
 
 let equal a b = compare a b = 0
 let tagged n items = Cbor.Array (Cbor.int n :: items)
-let encode_arguments arguments = Cbor.Array (List.map Ground.encode_argument arguments)
 
-let encode_capabilities sets =
-  Cbor.Array (List.map (fun set -> Cbor.Array (List.map Ground.encode_path set)) sets)
-
-let rec encode = function
-  | Code { path; type_arguments; capabilities } ->
-      tagged 0
-        [
-          Ground.encode_path path; encode_arguments type_arguments; encode_capabilities capabilities;
-        ]
-  | Constant path -> tagged 1 [ Ground.encode_path path ]
-  | Drop ty -> tagged 2 [ Ground.encode ty ]
-  | Copy ty -> tagged 3 [ Ground.encode ty ]
-  | Debug ty -> tagged 4 [ Ground.encode ty ]
-  | Cursor_next yielding -> tagged 5 [ Ground.encode (Cursor yielding) ]
-  | Cursor_drop yielding -> tagged 6 [ Ground.encode (Cursor yielding) ]
-  | Adapter key -> tagged 7 [ encode key ]
+let rec encode ?(path = Ground.encode_path) key =
+  let ty = Ground.encode ~path in
+  let arguments arguments = Cbor.Array (List.map (Ground.encode_argument ~path) arguments) in
+  let capabilities sets = Cbor.Array (List.map (fun set -> Cbor.Array (List.map path set)) sets) in
+  match key with
+  | Code { path = p; type_arguments; capabilities = c } ->
+      tagged 0 [ path p; arguments type_arguments; capabilities c ]
+  | Constant p -> tagged 1 [ path p ]
+  | Drop t -> tagged 2 [ ty t ]
+  | Copy t -> tagged 3 [ ty t ]
+  | Debug t -> tagged 4 [ ty t ]
+  | Cursor_next yielding -> tagged 5 [ ty (Cursor yielding) ]
+  | Adapter key -> tagged 6 [ encode ~path key ]
 
 (* Mangling. A Truss name is either [UpperCamelCase], with no [_], or
    [lower_snake_case], with no uppercase letter, no [__], and no [_] at
@@ -154,7 +147,6 @@ let rec mangle = function
   | Copy ty -> marker "Copy" ^ mangle_ty ty
   | Debug ty -> marker "Debug" ^ mangle_ty ty
   | Cursor_next yielding -> marker "Next" ^ mangle_yielding yielding
-  | Cursor_drop yielding -> marker "Release" ^ mangle_yielding yielding
   | Adapter key -> marker "Adapter" ^ mangle key
 
 let limit = 200
@@ -177,7 +169,6 @@ let rec to_string = function
   | Copy ty -> "copy " ^ Ground.to_string ty
   | Debug ty -> "debug " ^ Ground.to_string ty
   | Cursor_next yielding -> "next " ^ Ground.to_string (Cursor yielding)
-  | Cursor_drop yielding -> "release " ^ Ground.to_string (Cursor yielding)
   | Adapter key -> "adapter " ^ to_string key
 
 and arguments_to_string = function

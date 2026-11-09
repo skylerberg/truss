@@ -92,13 +92,14 @@ let statement_uses_defines (statement : Lir.statement) =
       let reads, defined = match result with Some place -> written place | None -> ([], None) in
       (target_reads @ List.concat_map operand_reads arguments @ reads, defined)
   | Drop place | Free_block { place; _ } -> (place_reads place, None)
+  | Echo { text; length; _ } -> (operand_reads text @ operand_reads length, None)
 
 let terminator_reads (terminator : Lir.terminator) =
   match terminator with
   | Switch { value; _ } -> operand_reads value
   | Switch_variant { place; _ } -> place_reads place
   | Return value -> Option.fold ~none:[] ~some:operand_reads value
-  | Panic { message; length; _ } -> operand_reads message @ operand_reads length
+  | Fail { message; length; _ } -> operand_reads message @ operand_reads length
   | Yield { value; _ } -> operand_reads value
   | Goto _ | Unreachable -> []
 

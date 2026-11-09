@@ -175,9 +175,9 @@ its code different from another:
   for each set
 
 Collecting instances walks the LIR of each instance from a root and adds every
-instance it calls, takes as a function value, puts in an `any` vtable, or
-drops. The walk visits calls in the order they appear in the LIR, so the
-result is the same on every run.
+instance it calls, takes as a function value, reads as a constant, puts in
+an `any` vtable, or drops. The walk is breadth-first and takes references in
+the order they appear in the LIR, so the result is the same on every run.
 
 ### Symbol names
 
@@ -223,6 +223,7 @@ parameter. The emitter only prints.
 | `call(target, arguments, result place)` | A call. The target is an instance or nested function with its C signature, a function value, or an intrinsic |
 | `drop(place)` | Run the type's drop code. Before drop elaboration: drop whatever the place still owns |
 | `free_block(place, variant)` | Free the block of an `indirect` variant whose fields have all been moved out or dropped |
+| `echo(text, length, site)` | Record a value's debug output, with its position |
 
 | Rvalue | Meaning |
 |---|---|
@@ -240,7 +241,7 @@ parameter. The emitter only prints.
 | `switch_variant(place, cases, default)` | Branch on a sum type's variant |
 | `return operand` | Return a value, or nothing |
 | `unreachable` | A proven-impossible point |
-| `panic(message, length, site)` | End the process with a message and a position |
+| `fail(reason, message, length, site)` | End the run with a message and a position: a panic, a failed `assert` in a test, or a `todo` that was reached |
 | `yield(operand, resume, stop)` | Before yield lowering only: give a value to the caller's loop, then go on at `resume`, or at `stop` if the loop has ended. A lending method's `yield` has no `stop`, since it always continues. |
 
 Places are a local or a constant's static data, followed by fields, the
@@ -814,6 +815,11 @@ Failures end the process without running anything else:
 | Running out of memory | Writes a message to stderr and calls `abort` |
 | Stack overflow | The signal handler writes a message to stderr and exits with status 101 |
 
+In a test worker, each of these, and a failed `assert` or a `todo`, is
+reported to the runner instead (see [The test program](#the-test-program)).
+The text of a report is built in a fixed buffer, so failing never
+allocates, even when memory ran out.
+
 None of these use stdio, so there are no buffers to flush and no `atexit`
 handlers to run.
 
@@ -862,14 +868,26 @@ runs in the test runner's workers.
 ### The test program
 
 A test run builds one program containing every test that must run, their
-instances, and a generated runner `main`. The runner starts one worker
-process per core by forking itself after startup, so workers share its
-loaded code. It sends each worker a test to run, over a pipe, and gets back
-the result and the test's `echo` output. A worker that panics, overflows its
-stack, runs out of memory, or reaches a `todo` ends. The runner records why
-from the exit status or the message on the pipe, starts a new worker, and
-carries on. The runner kills a worker whose test exceeds the project's time
-limit.
+instances, and a generated `main` that hands a table of the tests to the
+runner in the runtime. The runner starts one worker process per core by
+forking itself after startup, so workers share its loaded code. It sends
+each worker a test to run, over a pipe, and gets back, on another pipe,
+records of the test's end and of its `echo` output. A test that returns has
+passed.
+
+A worker whose test fails an `assert`, panics, overflows its stack, runs out
+of memory, or reaches a `todo` reports why and ends; one that dies without
+a report is recorded from its exit status. The runner then starts a new
+worker and carries on, so a new process starts only after a failure. Ending
+the worker is also what lets an `assert` inside a lambda end its test, which
+an early return could not. The runner kills a worker whose test exceeds the
+project's time limit.
+
+Results are printed in the order of the tests, however the tests were spread
+over workers, each as `test N outcome`, where the outcome is `passed`,
+`failed`, `panicked`, `incomplete`, `timed_out`, or `crashed`, followed by
+an optional `message` block and an optional `echo` block, each giving its
+length in bytes and then its bytes.
 
 ### Test results
 
@@ -880,7 +898,9 @@ finds test results already done, so the key contains no names:
 - Walk the instances reachable from the test, in the deterministic order of
   their calls, and number them in the order they are first reached.
 - Hash each instance's LIR with every reference to another instance replaced
-  by that instance's number.
+  by that instance's number, and every path, in a type or a position,
+  replaced by a number given in the order paths are first met, since a
+  type's path is a name too.
 - The test's key is the hash of that numbered list, plus the version of code
   generation.
 
@@ -899,7 +919,7 @@ on, as DESIGN.md describes for every stage:
 |---|---|
 | An instance's LIR | The instance, the codegen version, and a trace: the checked forms it lowered, the signatures it called, the layouts it used, and the bodies it inlined |
 | An instance's C | The LIR's hash and the emitter's version |
-| An object file | The C's hash, the C compiler's identity (its `--version` output and path), the flags, and the target |
+| An object file | The C's text, the C compiler's identity (its `--version` output and path), and the flags, which name the target |
 | A program | The objects, the anchors file, and the linker's identity |
 
 Early cutoff happens at the LIR: if an instance's LIR comes out the same, no
@@ -909,6 +929,10 @@ recompiles objects but invalidates no test result.
 
 ### C files and optimization
 
+- **Object files are cached by their key,** each written under a temporary
+  name and renamed into place, so a build that stops partway leaves no
+  broken object. Files that need compiling are compiled in parallel, across
+  the machine's cores.
 - **Development builds compile one C file per instance.** The C compiler
   runs once for each instance whose LIR changed, in parallel across cores.
   Small standard-library and dependency instances that the instance calls

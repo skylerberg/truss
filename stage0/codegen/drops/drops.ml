@@ -81,12 +81,14 @@ let statement_effect (statement : Lir.statement) =
       }
   | Drop place -> { moves = place_index_moves place; init = None; dropped = Some place }
   | Free_block _ -> { moves = []; init = None; dropped = None }
+  | Echo { text; length; _ } ->
+      { moves = operand_moves text @ operand_moves length; init = None; dropped = None }
 
 let terminator_moves (terminator : Lir.terminator) =
   match terminator with
   | Switch { value; _ } -> operand_moves value
   | Return value -> Option.fold ~none:[] ~some:operand_moves value
-  | Panic { message; length; _ } -> operand_moves message @ operand_moves length
+  | Fail { message; length; _ } -> operand_moves message @ operand_moves length
   | Yield { value; _ } -> operand_moves value
   | Switch_variant { place; _ } -> place_index_moves place
   | Goto _ | Unreachable -> []
@@ -487,7 +489,10 @@ let elaborate env ~needs_drop ~environment (f : Lir.function_) =
                     push builder statement;
                     apply a s statement;
                     update before s)
-            | Free_block _ -> push builder statement)
+            | Free_block _ | Echo _ ->
+                push builder statement;
+                apply a s statement;
+                update before s)
           block.statements;
         let before = copy_state s in
         List.iter (set_uninit a s) (terminator_moves block.terminator);

@@ -52,6 +52,12 @@ let runtime_declarations (target : Memory_layout.target) =
       anchor_struct;
       "_Noreturn void t_runtime_panic(const uint8_t *message, t_usize length, const struct \
        t_anchor *anchor, uint32_t line, uint32_t column);\n";
+      "_Noreturn void t_runtime_assertion_failed(const uint8_t *message, t_usize length, const \
+       struct t_anchor *anchor, uint32_t line, uint32_t column);\n";
+      "_Noreturn void t_runtime_todo(const uint8_t *message, t_usize length, const struct t_anchor \
+       *anchor, uint32_t line, uint32_t column);\n";
+      "void t_runtime_echo(const uint8_t *text, t_usize length, const struct t_anchor *anchor, \
+       uint32_t line, uint32_t column);\n";
       "_Noreturn void t_runtime_compiler_bug(void);\n";
       "void *t_runtime_allocate(t_usize size, t_usize alignment);\n";
       "void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usize alignment);\n";
@@ -804,6 +810,12 @@ let call_c context fc (target : Lir.target) arguments =
         (String.concat ", " ((value ^ ".f_environment") :: List.map fst arguments))
   | Intrinsic intrinsic -> intrinsic_c context intrinsic arguments
 
+let anchor_c context definition =
+  let symbol = anchor_symbol definition in
+  if not (List.mem_assoc symbol context.anchors) then
+    context.anchors <- (symbol, definition) :: context.anchors;
+  "&" ^ symbol
+
 let statement_c context fc buffer (statement : Lir.statement) =
   let line format =
     Printf.ksprintf (fun text -> Buffer.add_string buffer ("  " ^ text ^ "\n")) format
@@ -838,6 +850,15 @@ let statement_c context fc buffer (statement : Lir.statement) =
             ^ ";\n");
           line "%s(&%s);" symbol text
       | Some _ -> bug "a drop of a place that is not a value")
+  | Echo { text; length; site } ->
+      let operand o =
+        match operand_c context fc o with
+        | Some (text, _) -> text
+        | None -> bug "an echo of nothing"
+      in
+      line "t_runtime_echo(%s, %s, %s, %d, %d);" (operand text) (operand length)
+        (anchor_c context site.definition)
+        site.line site.column
   | Free_block { place; variant } -> (
       match place_c context fc place with
       | Some (text, Value sum) ->
@@ -848,12 +869,6 @@ let unreachable_c context =
   match context.build with
   | Development -> "t_runtime_compiler_bug();"
   | Release -> "__builtin_unreachable();"
-
-let anchor_c context definition =
-  let symbol = anchor_symbol definition in
-  if not (List.mem_assoc symbol context.anchors) then
-    context.anchors <- (symbol, definition) :: context.anchors;
-  "&" ^ symbol
 
 let terminator_c context fc key buffer (terminator : Lir.terminator) =
   let line format =
@@ -909,8 +924,12 @@ let terminator_c context fc key buffer (terminator : Lir.terminator) =
       | None, _ | _, None -> line "return;"
       | Some _, Some (text, _) -> line "return %s;" text)
   | Unreachable -> line "%s" (unreachable_c context)
-  | Panic { message; length; site } ->
-      line "t_runtime_panic(%s, %s, %s, %d, %d);"
+  | Fail { failure; message; length; site } ->
+      line "%s(%s, %s, %s, %d, %d);"
+        (match failure with
+        | Panic -> "t_runtime_panic"
+        | Assertion -> "t_runtime_assertion_failed"
+        | Todo -> "t_runtime_todo")
         (fst (operand message))
         (fst (operand length))
         (anchor_c context site.definition)

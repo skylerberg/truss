@@ -136,10 +136,16 @@ type rvalue =
    positions in the trait. *)
 type site = { definition : Path.t; line : int; column : int }
 
+(* Why a [fail] ends the run: a panic, a failed [assert] in a test, or a
+   [todo] that was reached. *)
+type failure = Panic | Assertion | Todo
+
 type statement =
   | Assign of place * rvalue
   | Call of { target : target; arguments : operand list; result : place option }
   | Drop of place  (** Runs the type's drop code *)
+  | Echo of { text : operand; length : operand; site : site }
+      (** Records the debug output of a value: a pointer to UTF-8 bytes and their length *)
   | Free_block of { place : place; variant : string }
       (** Frees the block of an [indirect] variant whose fields have all been moved out or dropped
       *)
@@ -151,8 +157,8 @@ type terminator =
   | Switch_variant of { place : place; cases : (string * block) list; default : block option }
   | Return of operand option
   | Unreachable  (** A point the prover has shown is never reached *)
-  | Panic of { message : operand; length : operand; site : site }
-      (** Ends the process: the message is a pointer to UTF-8 bytes and their length *)
+  | Fail of { failure : failure; message : operand; length : operand; site : site }
+      (** Ends a test or the process: the message is a pointer to UTF-8 bytes and their length *)
   | Yield of { value : operand; resume : block; stop : block option }
       (** Before yield lowering only. [stop] runs when the caller leaves the loop at this [yield]; a
           lending method's [yield] has none, since it always continues. *)
@@ -205,11 +211,12 @@ val canonical_instance : t -> t
 (* The version of code generation, part of every key built from the LIR. *)
 val version : int
 
-(* The canonical encoding, in deterministic CBOR. Each reference to another
-   instance is written by [instance], which by default encodes its key;
-   test keys pass one that numbers instances instead, so that no name is in
-   them. See CODEGEN.md, "Test results". *)
-val encode : ?instance:(Instance.key -> Cbor.t) -> t -> Cbor.t
+(* The canonical encoding, in deterministic CBOR. Each path, in a type or a
+   site, is written by [path], and each reference to another instance by
+   [instance], which by default encode them; test keys pass ones that
+   number them instead, so that no name is in them. See CODEGEN.md, "Test
+   results". *)
+val encode : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> t -> Cbor.t
 
 (* The BLAKE3 hash of the canonical form's encoding and [version], which
    early cutoff compares. *)

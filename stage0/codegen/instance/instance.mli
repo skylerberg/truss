@@ -13,16 +13,18 @@ type key =
   | Drop of Ground.ty
   | Copy of Ground.ty
   | Debug of Ground.ty  (** The built-in debug output *)
-  | Cursor_next of Ground.yielding  (** The state machine of a pulled yielding method *)
-  | Cursor_drop of Ground.yielding
+  | Cursor_next of Ground.yielding
+      (** The state machine of a pulled yielding method. Its drop is the [Drop] of its cursor type.
+      *)
   | Adapter of key
       (** A named function used as a function value: it takes the environment and ignores it *)
 
 val compare : key -> key -> int
 val equal : key -> key -> bool
 
-(* The canonical encoding, in deterministic CBOR. *)
-val encode : key -> Cbor.t
+(* The canonical encoding, in deterministic CBOR, with each path written by
+   [path], as in [Ground.encode]. *)
+val encode : ?path:(Path.t -> Cbor.t) -> key -> Cbor.t
 
 (* The C symbol of an instance: [t_], then its path and type arguments, with
    markers between them that no Truss name can contain. A name longer than

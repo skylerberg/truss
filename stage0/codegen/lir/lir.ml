@@ -123,10 +123,16 @@ type rvalue =
    a file and line. See CODEGEN.md, "Positions". *)
 type site = { definition : Path.t; line : int; column : int }
 
+(* Why a [fail] ends the run: a panic, a failed [assert] in a test, or a
+   [todo] that was reached. *)
+type failure = Panic | Assertion | Todo
+
 type statement =
   | Assign of place * rvalue
   | Call of { target : target; arguments : operand list; result : place option }
   | Drop of place  (** Runs the type's drop code *)
+  | Echo of { text : operand; length : operand; site : site }
+      (** Records the debug output of a value: a pointer to UTF-8 bytes and their length *)
   | Free_block of { place : place; variant : string }
       (** Frees the block of an [indirect] variant whose fields have all been moved out or dropped
       *)
@@ -138,8 +144,8 @@ type terminator =
   | Switch_variant of { place : place; cases : (string * block) list; default : block option }
   | Return of operand option
   | Unreachable  (** A point the prover has shown is never reached *)
-  | Panic of { message : operand; length : operand; site : site }
-      (** Ends the process: the message is a pointer to UTF-8 bytes and their length *)
+  | Fail of { failure : failure; message : operand; length : operand; site : site }
+      (** Ends a test or the process: the message is a pointer to UTF-8 bytes and their length *)
   | Yield of { value : operand; resume : block; stop : block option }
       (** Before yield lowering only. [stop] runs when the caller leaves the loop at this [yield]; a
           lending method's [yield] has none, since it always continues. *)
@@ -245,7 +251,7 @@ let successors = function
   | Goto block -> [ block ]
   | Switch { cases; default; _ } -> List.map snd cases @ Option.to_list default
   | Switch_variant { cases; default; _ } -> List.map snd cases @ Option.to_list default
-  | Return _ | Unreachable | Panic _ -> []
+  | Return _ | Unreachable | Fail _ -> []
   | Yield { resume; stop; _ } -> resume :: Option.to_list stop
 
 (* Blocks in reverse postorder of a depth-first walk that takes successors
@@ -306,6 +312,9 @@ let map_statement ~place ~block = function
         }
   | Drop p -> Drop (map_place ~place ~block p)
   | Free_block { place = p; variant } -> Free_block { place = map_place ~place ~block p; variant }
+  | Echo { text; length; site } ->
+      Echo
+        { text = map_operand ~place ~block text; length = map_operand ~place ~block length; site }
 
 let map_terminator ~place ~block terminator =
   let operand = map_operand ~place ~block in
@@ -327,8 +336,8 @@ let map_terminator ~place ~block terminator =
         }
   | Return value -> Return (Option.map operand value)
   | Unreachable -> Unreachable
-  | Panic { message; length; site } ->
-      Panic { message = operand message; length = operand length; site }
+  | Fail { failure; message; length; site } ->
+      Fail { failure; message = operand message; length = operand length; site }
   | Yield { value; resume; stop } ->
       Yield { value = operand value; resume = block resume; stop = Option.map block stop }
 
@@ -394,6 +403,10 @@ let integer_tag = function
   | USize -> 8
   | ISize -> 9
 
+(* How references to other definitions are written: every path, and every
+   instance. *)
+type encoders = { path : Path.t -> Cbor.t; instance : Instance.key -> Cbor.t }
+
 let rec encode_scalar instance (scalar : Memory_layout.scalar) =
   match scalar with
   | Integer integer -> tagged 0 [ Cbor.int (integer_tag integer) ]
@@ -404,20 +417,20 @@ let rec encode_scalar instance (scalar : Memory_layout.scalar) =
   | Pointer pointee -> tagged 5 [ encode_pointee instance pointee ]
   | Nullable_pointer pointee -> tagged 6 [ encode_pointee instance pointee ]
 
-and encode_pointee _instance : Memory_layout.pointee -> Cbor.t = function
-  | Data ty -> tagged 0 [ Ground.encode ty ]
-  | Block (ty, variant) -> tagged 1 [ Ground.encode ty; Text variant ]
-  | Code f -> tagged 2 [ Ground.encode (Function f) ]
+and encode_pointee e : Memory_layout.pointee -> Cbor.t = function
+  | Data ty -> tagged 0 [ Ground.encode ~path:e.path ty ]
+  | Block (ty, variant) -> tagged 1 [ Ground.encode ~path:e.path ty; Text variant ]
+  | Code f -> tagged 2 [ Ground.encode ~path:e.path (Function f) ]
   | Opaque -> tagged 3 []
 
 let rec encode_ty instance = function
-  | Value ty -> tagged 0 [ Ground.encode ty ]
+  | Value ty -> tagged 0 [ Ground.encode ~path:instance.path ty ]
   | Pointer { target; writable } -> tagged 1 [ encode_ty instance target; Bool writable ]
   | Raw scalar -> tagged 2 [ encode_scalar instance scalar ]
   | Environment n -> tagged 3 [ Cbor.int n ]
 
 let encode_function_ref instance = function
-  | Instance key -> tagged 0 [ instance key ]
+  | Instance key -> tagged 0 [ instance.instance key ]
   | Nested n -> tagged 1 [ Cbor.int n ]
 
 let rec encode_place instance (place : place) =
@@ -425,7 +438,8 @@ let rec encode_place instance (place : place) =
     [
       (match place.root with
       | Local local -> tagged 0 [ Cbor.int local ]
-      | Static { key; ty } -> tagged 1 [ instance key; Ground.encode ty ]);
+      | Static { key; ty } ->
+          tagged 1 [ instance.instance key; Ground.encode ~path:instance.path ty ]);
       list (encode_projection instance) place.projections;
     ]
 
@@ -513,7 +527,7 @@ let encode_rvalue instance rvalue =
   | Build { ty; variant; fields } ->
       tagged 4
         [
-          Ground.encode ty;
+          Ground.encode ~path:instance.path ty;
           option (fun v -> Cbor.Text v) variant;
           list (fun (name, o) -> Cbor.Array [ Text name; operand o ]) fields;
         ]
@@ -540,6 +554,15 @@ let encode_statement instance = function
         ]
   | Drop place -> tagged 2 [ encode_place instance place ]
   | Free_block { place; variant } -> tagged 3 [ encode_place instance place; Text variant ]
+  | Echo { text; length; site } ->
+      tagged 4
+        [
+          encode_operand instance text;
+          encode_operand instance length;
+          instance.path site.definition;
+          Cbor.int site.line;
+          Cbor.int site.column;
+        ]
 
 let encode_terminator instance terminator =
   let operand = encode_operand instance in
@@ -553,12 +576,13 @@ let encode_terminator instance terminator =
       tagged 2 [ encode_place instance place; cases (fun v -> Cbor.Text v) c; block default ]
   | Return value -> tagged 3 [ option operand value ]
   | Unreachable -> tagged 4 []
-  | Panic { message; length; site } ->
+  | Fail { failure; message; length; site } ->
       tagged 5
         [
+          Cbor.int (match failure with Panic -> 0 | Assertion -> 1 | Todo -> 2);
           operand message;
           operand length;
-          Ground.encode_path site.definition;
+          instance.path site.definition;
           Cbor.int site.line;
           Cbor.int site.column;
         ]
@@ -584,12 +608,14 @@ let encode_function instance (f : function_) =
       list (fun (name, ty) -> Cbor.Array [ Text name; encode_ty instance ty ]) f.environment;
     ]
 
-let encode ?(instance = Instance.encode) t =
+let encode ?(path = Ground.encode_path) ?instance t =
+  let instance = match instance with Some instance -> instance | None -> Instance.encode ~path in
+  let encoders = { path; instance } in
   Cbor.Array
     [
       instance t.key;
-      encode_function instance t.main;
-      list (encode_function instance) (Array.to_list t.nested);
+      encode_function encoders t.main;
+      list (encode_function encoders) (Array.to_list t.nested);
     ]
 
 let hash t =
@@ -737,6 +763,8 @@ let statement_to_string = function
       ^ ")"
   | Drop place -> "drop " ^ place_to_string place
   | Free_block { place; variant } -> "free " ^ place_to_string place ^ "." ^ variant
+  | Echo { text; length; _ } ->
+      "echo(" ^ operand_to_string text ^ ", " ^ operand_to_string length ^ ")"
 
 let terminator_to_string = function
   | Goto block -> Printf.sprintf "goto b%d" block
@@ -754,8 +782,9 @@ let terminator_to_string = function
   | Return None -> "return"
   | Return (Some operand) -> "return " ^ operand_to_string operand
   | Unreachable -> "unreachable"
-  | Panic { message; length; _ } ->
-      "panic(" ^ operand_to_string message ^ ", " ^ operand_to_string length ^ ")"
+  | Fail { failure; message; length; _ } ->
+      (match failure with Panic -> "panic(" | Assertion -> "assertion failed(" | Todo -> "todo(")
+      ^ operand_to_string message ^ ", " ^ operand_to_string length ^ ")"
   | Yield { value; resume; stop } ->
       Printf.sprintf "yield %s resume b%d%s" (operand_to_string value) resume
         (match stop with None -> "" | Some b -> Printf.sprintf " stop b%d" b)

@@ -126,40 +126,41 @@ let rec encode_path : Path.t -> Cbor.t = function
 
 let encode_mode = function Read -> Cbor.int 0 | Mut -> Cbor.int 1 | Own -> Cbor.int 2
 
-let rec encode = function
-  | Named { path; arguments } ->
-      tagged 0 [ encode_path path; Cbor.Array (List.map encode_argument arguments) ]
-  | Function f -> tagged 1 [ encode_function f ]
+let rec encode ?(path = encode_path) ty =
+  let encode = encode ~path and argument = encode_argument ~path in
+  match ty with
+  | Named { path = p; arguments } -> tagged 0 [ path p; Cbor.Array (List.map argument arguments) ]
+  | Function f -> tagged 1 [ encode_function ~path f ]
   | Any { trait; arguments; associated } ->
       tagged 2
         [
-          encode_path trait;
-          Cbor.Array (List.map encode_argument arguments);
+          path trait;
+          Cbor.Array (List.map argument arguments);
           Cbor.Array (List.map (fun (name, ty) -> Cbor.Array [ Text name; encode ty ]) associated);
         ]
-  | Cursor yielding -> tagged 3 [ encode_yielding yielding ]
+  | Cursor yielding -> tagged 3 [ encode_yielding ~path yielding ]
   | Never -> tagged 4 []
 
-and encode_argument = function
-  | Type ty -> tagged 0 [ encode ty ]
+and encode_argument ?(path = encode_path) = function
+  | Type ty -> tagged 0 [ encode ~path ty ]
   | Value v -> tagged 1 [ Cbor.Integer v ]
 
-and encode_function f =
+and encode_function ~path f =
   Cbor.Array
     [
       Cbor.Array
-        (List.map (fun (mode, ty) -> Cbor.Array [ encode_mode mode; encode ty ]) f.parameters);
+        (List.map (fun (mode, ty) -> Cbor.Array [ encode_mode mode; encode ~path ty ]) f.parameters);
       (match f.result with
-      | Returns ty -> tagged 0 [ encode ty ]
-      | Yields (mode, ty) -> tagged 1 [ encode_mode mode; encode ty ]
-      | Lends (mode, ty) -> tagged 2 [ encode_mode mode; encode ty ]);
-      Cbor.Array (List.map encode_path f.uses);
+      | Returns ty -> tagged 0 [ encode ~path ty ]
+      | Yields (mode, ty) -> tagged 1 [ encode_mode mode; encode ~path ty ]
+      | Lends (mode, ty) -> tagged 2 [ encode_mode mode; encode ~path ty ]);
+      Cbor.Array (List.map path f.uses);
     ]
 
-and encode_yielding y =
+and encode_yielding ~path y =
   Cbor.Array
     [
-      encode_path y.method_;
-      Cbor.Array (List.map encode_argument y.type_arguments);
-      Cbor.Array (List.map (fun set -> Cbor.Array (List.map encode_path set)) y.capabilities);
+      path y.method_;
+      Cbor.Array (List.map (encode_argument ~path) y.type_arguments);
+      Cbor.Array (List.map (fun set -> Cbor.Array (List.map path set)) y.capabilities);
     ]

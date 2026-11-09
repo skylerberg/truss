@@ -246,49 +246,29 @@ let compiler =
    which are known not to apply to it: parameters a function does not read
    are normal, as for an adapter's environment. *)
 let strict = [ "-Wall"; "-Wextra"; "-Werror"; "-Wno-unused-parameter" ]
-
-let runtime_object =
-  lazy
-    (let directory = Lazy.force scratch in
-     let source = Filename.concat directory "runtime.c" in
-     let output = Filename.concat directory "runtime.o" in
-     Out_channel.with_open_bin source (fun channel ->
-         output_string channel (Startup.runtime target_64));
-     match
-       Toolchain.compile (Lazy.force compiler) ~optimization:O1 ~extra:strict ~source ~output ()
-     with
-     | Ok () -> output
-     | Error message -> failwith ("the runtime does not compile: " ^ message))
-
 let counter = ref 0
-let write path text = Out_channel.with_open_bin path (fun channel -> output_string channel text)
+let cache = lazy (Build.cache (Filename.concat (Lazy.force scratch) "objects"))
+let settings : Build.settings = { build = Development; optimization = O1; extra = strict }
 
 (* Compiles the instances into a program whose [main] calls [entry], runs
    it, and returns its status, output, and errors. *)
 let run_program ?(extra = []) ?(anchors = []) (instances : Lir.t list) =
   incr counter;
-  let directory = Lazy.force scratch in
-  let base = Filename.concat directory (Printf.sprintf "program%d" !counter) in
+  let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "program%d" !counter) in
   let env = shape_env ~extra () in
-  let c = Emit_c.file env Development (List.map (fun i -> (i, Emit_c.External)) instances) in
-  write (base ^ ".c") c;
-  write (base ^ "_main.c") (Startup.main_calling (Instance.symbol (key "entry")));
-  write (base ^ "_anchors.c") (Positions.anchors_file target_64 anchors);
-  let toolchain = Lazy.force compiler in
-  let compile name =
-    match
-      Toolchain.compile toolchain ~optimization:O1 ~extra:strict
-        ~source:(base ^ name ^ ".c")
-        ~output:(base ^ name ^ ".o")
-        ()
-    with
-    | Ok () -> base ^ name ^ ".o"
-    | Error message -> failwith (Printf.sprintf "%s%s.c does not compile:\n%s" base name message)
+  let sources =
+    [
+      ("main", Startup.main_calling (Instance.symbol (key "entry")));
+      ("anchors", Positions.anchors_file target_64 anchors);
+    ]
   in
-  let objects = [ compile ""; compile "_main"; compile "_anchors"; Lazy.force runtime_object ] in
-  match Toolchain.link toolchain ~objects ~output:base with
-  | Ok () -> Toolchain.run base []
-  | Error message -> failwith ("link failed: " ^ message)
+  match
+    Build.program (Lazy.force compiler) (Lazy.force cache) env settings
+      ~files:[ List.map (fun i -> (i, Emit_c.External)) instances ]
+      ~sources ~output
+  with
+  | Ok () -> Toolchain.run output []
+  | Error message -> failwith message
 
 let expect_status ?extra ?anchors expected instances =
   let status, _, errors = run_program ?extra ?anchors instances in
@@ -649,8 +629,9 @@ let () =
             entry []
               [
                 block []
-                  (Panic
+                  (Fail
                      {
+                       failure = Panic;
                        message = Constant (Bytes "boom");
                        length = Constant (Integer (USize, Z.of_int 4));
                        site = { definition = definition "entry"; line = 3; column = 5 };
@@ -1289,5 +1270,110 @@ let () =
                 (Return (Some (copy 9)));
             ];
         ])
+
+(* What a build reaches, and test keys *)
+
+(* A program whose [entry] calls [helper], under the given names, and whose
+   [helper] returns [value]. *)
+let named_program ~entry_name ~helper_name returned =
+  let helper =
+    instance helper_name
+      (function_ ~result:(value int32) [] [ block [] (Return (Some (constant_int32 returned))) ])
+  in
+  let main =
+    instance entry_name
+      (function_ ~result:(value int32)
+         [ local (Lir.Value int32) ]
+         [ block [ call helper_name [] (Some (at 0)) ] (Return (Some (copy 0))) ])
+  in
+  [ main; helper ]
+
+let lookup instances key = List.find (fun (i : Lir.t) -> Instance.equal i.key key) instances
+
+let () =
+  test "a build reaches each called instance once, in order" (fun () ->
+      let program = named_program ~entry_name:"start" ~helper_name:"helper" 1 in
+      let reached = Reachable.reachable (shape_env ()) ~lir:(lookup program) [ key "start" ] in
+      expect_string ~expected:"test::start test::helper"
+        (String.concat " " (List.map (fun (i : Lir.t) -> Instance.to_string i.key) reached)));
+  test "a drop reaches the type's drop function" (fun () ->
+      let f =
+        instance "f"
+          (function_ ~parameters:[ 0 ]
+             [ local (value text) ]
+             [ block [ Drop (at 0) ] (Return None) ])
+      in
+      let references = Reachable.references (shape_env ~extra:drop_shapes ()) f in
+      expect_string ~expected:"drop Text"
+        (String.concat " " (List.map Instance.to_string references)));
+  let test_key ~entry_name ~helper_name returned =
+    let program = named_program ~entry_name ~helper_name returned in
+    Reachable.test_key (shape_env ()) ~lir:(lookup program) (key entry_name)
+  in
+  test "renaming the definitions a test reaches keeps its key" (fun () ->
+      if
+        test_key ~entry_name:"start" ~helper_name:"helper" 1
+        <> test_key ~entry_name:"begin" ~helper_name:"assist" 1
+      then fail "the keys differ");
+  test "changing what a test reaches changes its key" (fun () ->
+      if
+        test_key ~entry_name:"start" ~helper_name:"helper" 1
+        = test_key ~entry_name:"start" ~helper_name:"helper" 2
+      then fail "the keys are equal")
+
+(* The test runner *)
+
+let () =
+  test "the test runner reports each test's outcome, message, and echo output in order" (fun () ->
+      let site : Lir.site = { definition = definition "suite"; line = 2; column = 3 } in
+      let text value = Lir.Constant (Bytes value) in
+      let length value = Lir.Constant (Integer (USize, Z.of_int (String.length value))) in
+      let ending failure message =
+        Lir.Fail { failure; message = text message; length = length message; site }
+      in
+      let suite name blocks = instance name (function_ [] blocks) in
+      let tests =
+        [
+          suite "passes" [ block [] (Return None) ];
+          suite "fails" [ block [] (ending Assertion "values differ") ];
+          suite "panics" [ block [] (ending Panic "boom") ];
+          suite "echoes"
+            [ block [ Echo { text = text "42"; length = length "42"; site } ] (Return None) ];
+          suite "never_ends" [ block [] (Goto 0) ];
+          suite "unfinished" [ block [] (ending Todo "hole of type Int64") ];
+        ]
+      in
+      incr counter;
+      let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "tests%d" !counter) in
+      let symbols = List.map (fun (t : Lir.t) -> Instance.symbol t.key) tests in
+      let sources =
+        [
+          ("tests", Startup.tests_calling ~time_limit:300 symbols);
+          ( "anchors",
+            Positions.anchors_file target_64
+              [ { definition = definition "suite"; path = "suite.truss"; first_line = 10 } ] );
+        ]
+      in
+      match
+        Build.program (Lazy.force compiler) (Lazy.force cache) (shape_env ()) settings
+          ~files:[ List.map (fun t -> (t, Emit_c.External)) tests ]
+          ~sources ~output
+      with
+      | Error message -> fail "%s" message
+      | Ok () ->
+          let status, out, _ = Toolchain.run output [] in
+          expect_int ~expected:1 status;
+          expect_string
+            ~expected:
+              (String.concat ""
+                 [
+                   "test 0 passed\n";
+                   "test 1 failed\nmessage 35\nvalues differ\n  at suite.truss:12:3\n";
+                   "test 2 panicked\nmessage 26\nboom\n  at suite.truss:12:3\n";
+                   "test 3 passed\necho 21\nsuite.truss:12:3: 42\n\n";
+                   "test 4 timed_out\nmessage 23\nran past the time limit\n";
+                   "test 5 incomplete\nmessage 40\nhole of type Int64\n  at suite.truss:12:3\n";
+                 ])
+            out)
 
 let () = Harness.finish ()
