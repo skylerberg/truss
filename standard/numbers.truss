@@ -1,0 +1,2041 @@
+use standard::intrinsic
+
+impl Equal for Int8 {
+  fn equal(self, other: Int8) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for Int8 {
+  fn compare(self, other: Int8) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for Int8 {
+  fn default() -> Int8 {
+    0
+  }
+}
+
+impl Display for Int8 {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl Add[Int8] for Int8 {
+  type Output = Int8
+
+  fn add(self, right: Int8) -> Int8 {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[Int8] for Int8 {
+  type Output = Int8
+
+  fn subtract(self, right: Int8) -> Int8 {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[Int8] for Int8 {
+  type Output = Int8
+
+  fn multiply(self, right: Int8) -> Int8 {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[Int8] for Int8 {
+  type Output = Int8
+
+  fn divide(self, right: Int8) -> Int8 {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[Int8] for Int8 {
+  type Output = Int8
+
+  fn remainder(self, right: Int8) -> Int8 {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Negate for Int8 {
+  type Output = Int8
+
+  fn negate(self) -> Int8 {
+    intrinsic::negate(self)
+  }
+}
+
+impl Hash for Int8 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(self))
+  }
+}
+
+public let Int8.minimum: Int8 = -128
+
+public let Int8.maximum: Int8 = 127
+
+public fn Int8.checked_add(self, other: Int8) -> Option[Int8] {
+  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+}
+
+public fn Int8.checked_subtract(self, other: Int8) -> Option[Int8] {
+  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+}
+
+public fn Int8.checked_multiply(self, other: Int8) -> Option[Int8] {
+  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+}
+
+public fn Int8.wrapping_add(self, other: Int8) -> Int8 {
+  intrinsic::wrapping_add(self, other)
+}
+
+public fn Int8.wrapping_subtract(self, other: Int8) -> Int8 {
+  intrinsic::wrapping_subtract(self, other)
+}
+
+public fn Int8.wrapping_multiply(self, other: Int8) -> Int8 {
+  intrinsic::wrapping_multiply(self, other)
+}
+
+public fn Int8.saturating_add(self, other: Int8) -> Int8 {
+  if intrinsic::add_overflows(self, other) {
+    if other < 0 { Int8.minimum } else { Int8.maximum }
+  } else {
+    intrinsic::add(self, other)
+  }
+}
+
+impl TryFrom[Int16] for Int8 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int16) -> Result[Int8, ConversionError] {
+    if intrinsic::fits[Int16, Int8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int32] for Int8 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int32) -> Result[Int8, ConversionError] {
+    if intrinsic::fits[Int32, Int8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int64] for Int8 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int64) -> Result[Int8, ConversionError] {
+    if intrinsic::fits[Int64, Int8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[ISize] for Int8 {
+  type Error = ConversionError
+
+  fn try_from(value: own ISize) -> Result[Int8, ConversionError] {
+    if intrinsic::fits[ISize, Int8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[UInt8] for Int8 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt8) -> Result[Int8, ConversionError] {
+    if intrinsic::fits[UInt8, Int8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[UInt16] for Int8 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt16) -> Result[Int8, ConversionError] {
+    if intrinsic::fits[UInt16, Int8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[UInt32] for Int8 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt32) -> Result[Int8, ConversionError] {
+    if intrinsic::fits[UInt32, Int8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[UInt64] for Int8 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt64) -> Result[Int8, ConversionError] {
+    if intrinsic::fits[UInt64, Int8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[USize] for Int8 {
+  type Error = ConversionError
+
+  fn try_from(value: own USize) -> Result[Int8, ConversionError] {
+    if intrinsic::fits[USize, Int8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl Equal for Int16 {
+  fn equal(self, other: Int16) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for Int16 {
+  fn compare(self, other: Int16) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for Int16 {
+  fn default() -> Int16 {
+    0
+  }
+}
+
+impl Display for Int16 {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl Add[Int16] for Int16 {
+  type Output = Int16
+
+  fn add(self, right: Int16) -> Int16 {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[Int16] for Int16 {
+  type Output = Int16
+
+  fn subtract(self, right: Int16) -> Int16 {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[Int16] for Int16 {
+  type Output = Int16
+
+  fn multiply(self, right: Int16) -> Int16 {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[Int16] for Int16 {
+  type Output = Int16
+
+  fn divide(self, right: Int16) -> Int16 {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[Int16] for Int16 {
+  type Output = Int16
+
+  fn remainder(self, right: Int16) -> Int16 {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Negate for Int16 {
+  type Output = Int16
+
+  fn negate(self) -> Int16 {
+    intrinsic::negate(self)
+  }
+}
+
+impl Hash for Int16 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(self))
+  }
+}
+
+public let Int16.minimum: Int16 = -32768
+
+public let Int16.maximum: Int16 = 32767
+
+public fn Int16.checked_add(self, other: Int16) -> Option[Int16] {
+  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+}
+
+public fn Int16.checked_subtract(self, other: Int16) -> Option[Int16] {
+  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+}
+
+public fn Int16.checked_multiply(self, other: Int16) -> Option[Int16] {
+  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+}
+
+public fn Int16.wrapping_add(self, other: Int16) -> Int16 {
+  intrinsic::wrapping_add(self, other)
+}
+
+public fn Int16.wrapping_subtract(self, other: Int16) -> Int16 {
+  intrinsic::wrapping_subtract(self, other)
+}
+
+public fn Int16.wrapping_multiply(self, other: Int16) -> Int16 {
+  intrinsic::wrapping_multiply(self, other)
+}
+
+public fn Int16.saturating_add(self, other: Int16) -> Int16 {
+  if intrinsic::add_overflows(self, other) {
+    if other < 0 { Int16.minimum } else { Int16.maximum }
+  } else {
+    intrinsic::add(self, other)
+  }
+}
+
+impl From[Int8] for Int16 {
+  fn from(value: own Int8) -> Int16 {
+    intrinsic::convert(value)
+  }
+}
+
+impl TryFrom[Int32] for Int16 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int32) -> Result[Int16, ConversionError] {
+    if intrinsic::fits[Int32, Int16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int64] for Int16 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int64) -> Result[Int16, ConversionError] {
+    if intrinsic::fits[Int64, Int16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[ISize] for Int16 {
+  type Error = ConversionError
+
+  fn try_from(value: own ISize) -> Result[Int16, ConversionError] {
+    if intrinsic::fits[ISize, Int16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl From[UInt8] for Int16 {
+  fn from(value: own UInt8) -> Int16 {
+    intrinsic::convert(value)
+  }
+}
+
+impl TryFrom[UInt16] for Int16 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt16) -> Result[Int16, ConversionError] {
+    if intrinsic::fits[UInt16, Int16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[UInt32] for Int16 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt32) -> Result[Int16, ConversionError] {
+    if intrinsic::fits[UInt32, Int16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[UInt64] for Int16 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt64) -> Result[Int16, ConversionError] {
+    if intrinsic::fits[UInt64, Int16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[USize] for Int16 {
+  type Error = ConversionError
+
+  fn try_from(value: own USize) -> Result[Int16, ConversionError] {
+    if intrinsic::fits[USize, Int16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl Equal for Int32 {
+  fn equal(self, other: Int32) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for Int32 {
+  fn compare(self, other: Int32) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for Int32 {
+  fn default() -> Int32 {
+    0
+  }
+}
+
+impl Display for Int32 {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl Add[Int32] for Int32 {
+  type Output = Int32
+
+  fn add(self, right: Int32) -> Int32 {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[Int32] for Int32 {
+  type Output = Int32
+
+  fn subtract(self, right: Int32) -> Int32 {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[Int32] for Int32 {
+  type Output = Int32
+
+  fn multiply(self, right: Int32) -> Int32 {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[Int32] for Int32 {
+  type Output = Int32
+
+  fn divide(self, right: Int32) -> Int32 {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[Int32] for Int32 {
+  type Output = Int32
+
+  fn remainder(self, right: Int32) -> Int32 {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Negate for Int32 {
+  type Output = Int32
+
+  fn negate(self) -> Int32 {
+    intrinsic::negate(self)
+  }
+}
+
+impl Hash for Int32 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(self))
+  }
+}
+
+public let Int32.minimum: Int32 = -2147483648
+
+public let Int32.maximum: Int32 = 2147483647
+
+public fn Int32.checked_add(self, other: Int32) -> Option[Int32] {
+  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+}
+
+public fn Int32.checked_subtract(self, other: Int32) -> Option[Int32] {
+  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+}
+
+public fn Int32.checked_multiply(self, other: Int32) -> Option[Int32] {
+  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+}
+
+public fn Int32.wrapping_add(self, other: Int32) -> Int32 {
+  intrinsic::wrapping_add(self, other)
+}
+
+public fn Int32.wrapping_subtract(self, other: Int32) -> Int32 {
+  intrinsic::wrapping_subtract(self, other)
+}
+
+public fn Int32.wrapping_multiply(self, other: Int32) -> Int32 {
+  intrinsic::wrapping_multiply(self, other)
+}
+
+public fn Int32.saturating_add(self, other: Int32) -> Int32 {
+  if intrinsic::add_overflows(self, other) {
+    if other < 0 { Int32.minimum } else { Int32.maximum }
+  } else {
+    intrinsic::add(self, other)
+  }
+}
+
+impl From[Int8] for Int32 {
+  fn from(value: own Int8) -> Int32 {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[Int16] for Int32 {
+  fn from(value: own Int16) -> Int32 {
+    intrinsic::convert(value)
+  }
+}
+
+impl TryFrom[Int64] for Int32 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int64) -> Result[Int32, ConversionError] {
+    if intrinsic::fits[Int64, Int32](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[ISize] for Int32 {
+  type Error = ConversionError
+
+  fn try_from(value: own ISize) -> Result[Int32, ConversionError] {
+    if intrinsic::fits[ISize, Int32](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl From[UInt8] for Int32 {
+  fn from(value: own UInt8) -> Int32 {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[UInt16] for Int32 {
+  fn from(value: own UInt16) -> Int32 {
+    intrinsic::convert(value)
+  }
+}
+
+impl TryFrom[UInt32] for Int32 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt32) -> Result[Int32, ConversionError] {
+    if intrinsic::fits[UInt32, Int32](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[UInt64] for Int32 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt64) -> Result[Int32, ConversionError] {
+    if intrinsic::fits[UInt64, Int32](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[USize] for Int32 {
+  type Error = ConversionError
+
+  fn try_from(value: own USize) -> Result[Int32, ConversionError] {
+    if intrinsic::fits[USize, Int32](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl Equal for Int64 {
+  fn equal(self, other: Int64) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for Int64 {
+  fn compare(self, other: Int64) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for Int64 {
+  fn default() -> Int64 {
+    0
+  }
+}
+
+impl Display for Int64 {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl Add[Int64] for Int64 {
+  type Output = Int64
+
+  fn add(self, right: Int64) -> Int64 {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[Int64] for Int64 {
+  type Output = Int64
+
+  fn subtract(self, right: Int64) -> Int64 {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[Int64] for Int64 {
+  type Output = Int64
+
+  fn multiply(self, right: Int64) -> Int64 {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[Int64] for Int64 {
+  type Output = Int64
+
+  fn divide(self, right: Int64) -> Int64 {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[Int64] for Int64 {
+  type Output = Int64
+
+  fn remainder(self, right: Int64) -> Int64 {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Negate for Int64 {
+  type Output = Int64
+
+  fn negate(self) -> Int64 {
+    intrinsic::negate(self)
+  }
+}
+
+impl Hash for Int64 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(self))
+  }
+}
+
+public let Int64.minimum: Int64 = -9223372036854775808
+
+public let Int64.maximum: Int64 = 9223372036854775807
+
+public fn Int64.checked_add(self, other: Int64) -> Option[Int64] {
+  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+}
+
+public fn Int64.checked_subtract(self, other: Int64) -> Option[Int64] {
+  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+}
+
+public fn Int64.checked_multiply(self, other: Int64) -> Option[Int64] {
+  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+}
+
+public fn Int64.wrapping_add(self, other: Int64) -> Int64 {
+  intrinsic::wrapping_add(self, other)
+}
+
+public fn Int64.wrapping_subtract(self, other: Int64) -> Int64 {
+  intrinsic::wrapping_subtract(self, other)
+}
+
+public fn Int64.wrapping_multiply(self, other: Int64) -> Int64 {
+  intrinsic::wrapping_multiply(self, other)
+}
+
+public fn Int64.saturating_add(self, other: Int64) -> Int64 {
+  if intrinsic::add_overflows(self, other) {
+    if other < 0 { Int64.minimum } else { Int64.maximum }
+  } else {
+    intrinsic::add(self, other)
+  }
+}
+
+impl From[Int8] for Int64 {
+  fn from(value: own Int8) -> Int64 {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[Int16] for Int64 {
+  fn from(value: own Int16) -> Int64 {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[Int32] for Int64 {
+  fn from(value: own Int32) -> Int64 {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[ISize] for Int64 {
+  fn from(value: own ISize) -> Int64 {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[UInt8] for Int64 {
+  fn from(value: own UInt8) -> Int64 {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[UInt16] for Int64 {
+  fn from(value: own UInt16) -> Int64 {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[UInt32] for Int64 {
+  fn from(value: own UInt32) -> Int64 {
+    intrinsic::convert(value)
+  }
+}
+
+impl TryFrom[UInt64] for Int64 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt64) -> Result[Int64, ConversionError] {
+    if intrinsic::fits[UInt64, Int64](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[USize] for Int64 {
+  type Error = ConversionError
+
+  fn try_from(value: own USize) -> Result[Int64, ConversionError] {
+    if intrinsic::fits[USize, Int64](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl Equal for ISize {
+  fn equal(self, other: ISize) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for ISize {
+  fn compare(self, other: ISize) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for ISize {
+  fn default() -> ISize {
+    0
+  }
+}
+
+impl Display for ISize {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl Add[ISize] for ISize {
+  type Output = ISize
+
+  fn add(self, right: ISize) -> ISize {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[ISize] for ISize {
+  type Output = ISize
+
+  fn subtract(self, right: ISize) -> ISize {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[ISize] for ISize {
+  type Output = ISize
+
+  fn multiply(self, right: ISize) -> ISize {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[ISize] for ISize {
+  type Output = ISize
+
+  fn divide(self, right: ISize) -> ISize {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[ISize] for ISize {
+  type Output = ISize
+
+  fn remainder(self, right: ISize) -> ISize {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Negate for ISize {
+  type Output = ISize
+
+  fn negate(self) -> ISize {
+    intrinsic::negate(self)
+  }
+}
+
+impl Hash for ISize {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(self))
+  }
+}
+
+public let ISize.minimum: ISize = -9223372036854775808
+
+public let ISize.maximum: ISize = 9223372036854775807
+
+public fn ISize.checked_add(self, other: ISize) -> Option[ISize] {
+  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+}
+
+public fn ISize.checked_subtract(self, other: ISize) -> Option[ISize] {
+  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+}
+
+public fn ISize.checked_multiply(self, other: ISize) -> Option[ISize] {
+  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+}
+
+public fn ISize.wrapping_add(self, other: ISize) -> ISize {
+  intrinsic::wrapping_add(self, other)
+}
+
+public fn ISize.wrapping_subtract(self, other: ISize) -> ISize {
+  intrinsic::wrapping_subtract(self, other)
+}
+
+public fn ISize.wrapping_multiply(self, other: ISize) -> ISize {
+  intrinsic::wrapping_multiply(self, other)
+}
+
+public fn ISize.saturating_add(self, other: ISize) -> ISize {
+  if intrinsic::add_overflows(self, other) {
+    if other < 0 { ISize.minimum } else { ISize.maximum }
+  } else {
+    intrinsic::add(self, other)
+  }
+}
+
+impl From[Int8] for ISize {
+  fn from(value: own Int8) -> ISize {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[Int16] for ISize {
+  fn from(value: own Int16) -> ISize {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[Int32] for ISize {
+  fn from(value: own Int32) -> ISize {
+    intrinsic::convert(value)
+  }
+}
+
+impl TryFrom[Int64] for ISize {
+  type Error = ConversionError
+
+  fn try_from(value: own Int64) -> Result[ISize, ConversionError] {
+    if intrinsic::fits[Int64, ISize](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl From[UInt8] for ISize {
+  fn from(value: own UInt8) -> ISize {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[UInt16] for ISize {
+  fn from(value: own UInt16) -> ISize {
+    intrinsic::convert(value)
+  }
+}
+
+impl TryFrom[UInt32] for ISize {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt32) -> Result[ISize, ConversionError] {
+    if intrinsic::fits[UInt32, ISize](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[UInt64] for ISize {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt64) -> Result[ISize, ConversionError] {
+    if intrinsic::fits[UInt64, ISize](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[USize] for ISize {
+  type Error = ConversionError
+
+  fn try_from(value: own USize) -> Result[ISize, ConversionError] {
+    if intrinsic::fits[USize, ISize](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl Equal for UInt8 {
+  fn equal(self, other: UInt8) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for UInt8 {
+  fn compare(self, other: UInt8) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for UInt8 {
+  fn default() -> UInt8 {
+    0
+  }
+}
+
+impl Display for UInt8 {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl Add[UInt8] for UInt8 {
+  type Output = UInt8
+
+  fn add(self, right: UInt8) -> UInt8 {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[UInt8] for UInt8 {
+  type Output = UInt8
+
+  fn subtract(self, right: UInt8) -> UInt8 {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[UInt8] for UInt8 {
+  type Output = UInt8
+
+  fn multiply(self, right: UInt8) -> UInt8 {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[UInt8] for UInt8 {
+  type Output = UInt8
+
+  fn divide(self, right: UInt8) -> UInt8 {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[UInt8] for UInt8 {
+  type Output = UInt8
+
+  fn remainder(self, right: UInt8) -> UInt8 {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Hash for UInt8 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(self))
+  }
+}
+
+public let UInt8.minimum: UInt8 = 0
+
+public let UInt8.maximum: UInt8 = 255
+
+public fn UInt8.checked_add(self, other: UInt8) -> Option[UInt8] {
+  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+}
+
+public fn UInt8.checked_subtract(self, other: UInt8) -> Option[UInt8] {
+  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+}
+
+public fn UInt8.checked_multiply(self, other: UInt8) -> Option[UInt8] {
+  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+}
+
+public fn UInt8.wrapping_add(self, other: UInt8) -> UInt8 {
+  intrinsic::wrapping_add(self, other)
+}
+
+public fn UInt8.wrapping_subtract(self, other: UInt8) -> UInt8 {
+  intrinsic::wrapping_subtract(self, other)
+}
+
+public fn UInt8.wrapping_multiply(self, other: UInt8) -> UInt8 {
+  intrinsic::wrapping_multiply(self, other)
+}
+
+public fn UInt8.saturating_add(self, other: UInt8) -> UInt8 {
+  if intrinsic::add_overflows(self, other) {
+    UInt8.maximum
+  } else {
+    intrinsic::add(self, other)
+  }
+}
+
+impl TryFrom[Int8] for UInt8 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int8) -> Result[UInt8, ConversionError] {
+    if intrinsic::fits[Int8, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int16] for UInt8 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int16) -> Result[UInt8, ConversionError] {
+    if intrinsic::fits[Int16, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int32] for UInt8 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int32) -> Result[UInt8, ConversionError] {
+    if intrinsic::fits[Int32, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int64] for UInt8 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int64) -> Result[UInt8, ConversionError] {
+    if intrinsic::fits[Int64, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[ISize] for UInt8 {
+  type Error = ConversionError
+
+  fn try_from(value: own ISize) -> Result[UInt8, ConversionError] {
+    if intrinsic::fits[ISize, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[UInt16] for UInt8 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt16) -> Result[UInt8, ConversionError] {
+    if intrinsic::fits[UInt16, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[UInt32] for UInt8 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt32) -> Result[UInt8, ConversionError] {
+    if intrinsic::fits[UInt32, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[UInt64] for UInt8 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt64) -> Result[UInt8, ConversionError] {
+    if intrinsic::fits[UInt64, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[USize] for UInt8 {
+  type Error = ConversionError
+
+  fn try_from(value: own USize) -> Result[UInt8, ConversionError] {
+    if intrinsic::fits[USize, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl Equal for UInt16 {
+  fn equal(self, other: UInt16) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for UInt16 {
+  fn compare(self, other: UInt16) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for UInt16 {
+  fn default() -> UInt16 {
+    0
+  }
+}
+
+impl Display for UInt16 {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl Add[UInt16] for UInt16 {
+  type Output = UInt16
+
+  fn add(self, right: UInt16) -> UInt16 {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[UInt16] for UInt16 {
+  type Output = UInt16
+
+  fn subtract(self, right: UInt16) -> UInt16 {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[UInt16] for UInt16 {
+  type Output = UInt16
+
+  fn multiply(self, right: UInt16) -> UInt16 {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[UInt16] for UInt16 {
+  type Output = UInt16
+
+  fn divide(self, right: UInt16) -> UInt16 {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[UInt16] for UInt16 {
+  type Output = UInt16
+
+  fn remainder(self, right: UInt16) -> UInt16 {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Hash for UInt16 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(self))
+  }
+}
+
+public let UInt16.minimum: UInt16 = 0
+
+public let UInt16.maximum: UInt16 = 65535
+
+public fn UInt16.checked_add(self, other: UInt16) -> Option[UInt16] {
+  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+}
+
+public fn UInt16.checked_subtract(self, other: UInt16) -> Option[UInt16] {
+  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+}
+
+public fn UInt16.checked_multiply(self, other: UInt16) -> Option[UInt16] {
+  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+}
+
+public fn UInt16.wrapping_add(self, other: UInt16) -> UInt16 {
+  intrinsic::wrapping_add(self, other)
+}
+
+public fn UInt16.wrapping_subtract(self, other: UInt16) -> UInt16 {
+  intrinsic::wrapping_subtract(self, other)
+}
+
+public fn UInt16.wrapping_multiply(self, other: UInt16) -> UInt16 {
+  intrinsic::wrapping_multiply(self, other)
+}
+
+public fn UInt16.saturating_add(self, other: UInt16) -> UInt16 {
+  if intrinsic::add_overflows(self, other) {
+    UInt16.maximum
+  } else {
+    intrinsic::add(self, other)
+  }
+}
+
+impl TryFrom[Int8] for UInt16 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int8) -> Result[UInt16, ConversionError] {
+    if intrinsic::fits[Int8, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int16] for UInt16 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int16) -> Result[UInt16, ConversionError] {
+    if intrinsic::fits[Int16, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int32] for UInt16 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int32) -> Result[UInt16, ConversionError] {
+    if intrinsic::fits[Int32, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int64] for UInt16 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int64) -> Result[UInt16, ConversionError] {
+    if intrinsic::fits[Int64, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[ISize] for UInt16 {
+  type Error = ConversionError
+
+  fn try_from(value: own ISize) -> Result[UInt16, ConversionError] {
+    if intrinsic::fits[ISize, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl From[UInt8] for UInt16 {
+  fn from(value: own UInt8) -> UInt16 {
+    intrinsic::convert(value)
+  }
+}
+
+impl TryFrom[UInt32] for UInt16 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt32) -> Result[UInt16, ConversionError] {
+    if intrinsic::fits[UInt32, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[UInt64] for UInt16 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt64) -> Result[UInt16, ConversionError] {
+    if intrinsic::fits[UInt64, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[USize] for UInt16 {
+  type Error = ConversionError
+
+  fn try_from(value: own USize) -> Result[UInt16, ConversionError] {
+    if intrinsic::fits[USize, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl Equal for UInt32 {
+  fn equal(self, other: UInt32) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for UInt32 {
+  fn compare(self, other: UInt32) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for UInt32 {
+  fn default() -> UInt32 {
+    0
+  }
+}
+
+impl Display for UInt32 {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl Add[UInt32] for UInt32 {
+  type Output = UInt32
+
+  fn add(self, right: UInt32) -> UInt32 {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[UInt32] for UInt32 {
+  type Output = UInt32
+
+  fn subtract(self, right: UInt32) -> UInt32 {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[UInt32] for UInt32 {
+  type Output = UInt32
+
+  fn multiply(self, right: UInt32) -> UInt32 {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[UInt32] for UInt32 {
+  type Output = UInt32
+
+  fn divide(self, right: UInt32) -> UInt32 {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[UInt32] for UInt32 {
+  type Output = UInt32
+
+  fn remainder(self, right: UInt32) -> UInt32 {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Hash for UInt32 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(self))
+  }
+}
+
+public let UInt32.minimum: UInt32 = 0
+
+public let UInt32.maximum: UInt32 = 4294967295
+
+public fn UInt32.checked_add(self, other: UInt32) -> Option[UInt32] {
+  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+}
+
+public fn UInt32.checked_subtract(self, other: UInt32) -> Option[UInt32] {
+  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+}
+
+public fn UInt32.checked_multiply(self, other: UInt32) -> Option[UInt32] {
+  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+}
+
+public fn UInt32.wrapping_add(self, other: UInt32) -> UInt32 {
+  intrinsic::wrapping_add(self, other)
+}
+
+public fn UInt32.wrapping_subtract(self, other: UInt32) -> UInt32 {
+  intrinsic::wrapping_subtract(self, other)
+}
+
+public fn UInt32.wrapping_multiply(self, other: UInt32) -> UInt32 {
+  intrinsic::wrapping_multiply(self, other)
+}
+
+public fn UInt32.saturating_add(self, other: UInt32) -> UInt32 {
+  if intrinsic::add_overflows(self, other) {
+    UInt32.maximum
+  } else {
+    intrinsic::add(self, other)
+  }
+}
+
+impl TryFrom[Int8] for UInt32 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int8) -> Result[UInt32, ConversionError] {
+    if intrinsic::fits[Int8, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int16] for UInt32 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int16) -> Result[UInt32, ConversionError] {
+    if intrinsic::fits[Int16, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int32] for UInt32 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int32) -> Result[UInt32, ConversionError] {
+    if intrinsic::fits[Int32, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int64] for UInt32 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int64) -> Result[UInt32, ConversionError] {
+    if intrinsic::fits[Int64, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[ISize] for UInt32 {
+  type Error = ConversionError
+
+  fn try_from(value: own ISize) -> Result[UInt32, ConversionError] {
+    if intrinsic::fits[ISize, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl From[UInt8] for UInt32 {
+  fn from(value: own UInt8) -> UInt32 {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[UInt16] for UInt32 {
+  fn from(value: own UInt16) -> UInt32 {
+    intrinsic::convert(value)
+  }
+}
+
+impl TryFrom[UInt64] for UInt32 {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt64) -> Result[UInt32, ConversionError] {
+    if intrinsic::fits[UInt64, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[USize] for UInt32 {
+  type Error = ConversionError
+
+  fn try_from(value: own USize) -> Result[UInt32, ConversionError] {
+    if intrinsic::fits[USize, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl Equal for UInt64 {
+  fn equal(self, other: UInt64) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for UInt64 {
+  fn compare(self, other: UInt64) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for UInt64 {
+  fn default() -> UInt64 {
+    0
+  }
+}
+
+impl Display for UInt64 {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl Add[UInt64] for UInt64 {
+  type Output = UInt64
+
+  fn add(self, right: UInt64) -> UInt64 {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[UInt64] for UInt64 {
+  type Output = UInt64
+
+  fn subtract(self, right: UInt64) -> UInt64 {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[UInt64] for UInt64 {
+  type Output = UInt64
+
+  fn multiply(self, right: UInt64) -> UInt64 {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[UInt64] for UInt64 {
+  type Output = UInt64
+
+  fn divide(self, right: UInt64) -> UInt64 {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[UInt64] for UInt64 {
+  type Output = UInt64
+
+  fn remainder(self, right: UInt64) -> UInt64 {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Hash for UInt64 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(self))
+  }
+}
+
+public let UInt64.minimum: UInt64 = 0
+
+public let UInt64.maximum: UInt64 = 18446744073709551615
+
+public fn UInt64.checked_add(self, other: UInt64) -> Option[UInt64] {
+  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+}
+
+public fn UInt64.checked_subtract(self, other: UInt64) -> Option[UInt64] {
+  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+}
+
+public fn UInt64.checked_multiply(self, other: UInt64) -> Option[UInt64] {
+  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+}
+
+public fn UInt64.wrapping_add(self, other: UInt64) -> UInt64 {
+  intrinsic::wrapping_add(self, other)
+}
+
+public fn UInt64.wrapping_subtract(self, other: UInt64) -> UInt64 {
+  intrinsic::wrapping_subtract(self, other)
+}
+
+public fn UInt64.wrapping_multiply(self, other: UInt64) -> UInt64 {
+  intrinsic::wrapping_multiply(self, other)
+}
+
+public fn UInt64.saturating_add(self, other: UInt64) -> UInt64 {
+  if intrinsic::add_overflows(self, other) {
+    UInt64.maximum
+  } else {
+    intrinsic::add(self, other)
+  }
+}
+
+impl TryFrom[Int8] for UInt64 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int8) -> Result[UInt64, ConversionError] {
+    if intrinsic::fits[Int8, UInt64](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int16] for UInt64 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int16) -> Result[UInt64, ConversionError] {
+    if intrinsic::fits[Int16, UInt64](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int32] for UInt64 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int32) -> Result[UInt64, ConversionError] {
+    if intrinsic::fits[Int32, UInt64](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int64] for UInt64 {
+  type Error = ConversionError
+
+  fn try_from(value: own Int64) -> Result[UInt64, ConversionError] {
+    if intrinsic::fits[Int64, UInt64](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[ISize] for UInt64 {
+  type Error = ConversionError
+
+  fn try_from(value: own ISize) -> Result[UInt64, ConversionError] {
+    if intrinsic::fits[ISize, UInt64](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl From[UInt8] for UInt64 {
+  fn from(value: own UInt8) -> UInt64 {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[UInt16] for UInt64 {
+  fn from(value: own UInt16) -> UInt64 {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[UInt32] for UInt64 {
+  fn from(value: own UInt32) -> UInt64 {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[USize] for UInt64 {
+  fn from(value: own USize) -> UInt64 {
+    intrinsic::convert(value)
+  }
+}
+
+impl Equal for USize {
+  fn equal(self, other: USize) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for USize {
+  fn compare(self, other: USize) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for USize {
+  fn default() -> USize {
+    0
+  }
+}
+
+impl Display for USize {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl Add[USize] for USize {
+  type Output = USize
+
+  fn add(self, right: USize) -> USize {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[USize] for USize {
+  type Output = USize
+
+  fn subtract(self, right: USize) -> USize {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[USize] for USize {
+  type Output = USize
+
+  fn multiply(self, right: USize) -> USize {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[USize] for USize {
+  type Output = USize
+
+  fn divide(self, right: USize) -> USize {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[USize] for USize {
+  type Output = USize
+
+  fn remainder(self, right: USize) -> USize {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Hash for USize {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(self))
+  }
+}
+
+public let USize.minimum: USize = 0
+
+public let USize.maximum: USize = 18446744073709551615
+
+public fn USize.checked_add(self, other: USize) -> Option[USize] {
+  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+}
+
+public fn USize.checked_subtract(self, other: USize) -> Option[USize] {
+  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+}
+
+public fn USize.checked_multiply(self, other: USize) -> Option[USize] {
+  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+}
+
+public fn USize.wrapping_add(self, other: USize) -> USize {
+  intrinsic::wrapping_add(self, other)
+}
+
+public fn USize.wrapping_subtract(self, other: USize) -> USize {
+  intrinsic::wrapping_subtract(self, other)
+}
+
+public fn USize.wrapping_multiply(self, other: USize) -> USize {
+  intrinsic::wrapping_multiply(self, other)
+}
+
+public fn USize.saturating_add(self, other: USize) -> USize {
+  if intrinsic::add_overflows(self, other) {
+    USize.maximum
+  } else {
+    intrinsic::add(self, other)
+  }
+}
+
+impl TryFrom[Int8] for USize {
+  type Error = ConversionError
+
+  fn try_from(value: own Int8) -> Result[USize, ConversionError] {
+    if intrinsic::fits[Int8, USize](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int16] for USize {
+  type Error = ConversionError
+
+  fn try_from(value: own Int16) -> Result[USize, ConversionError] {
+    if intrinsic::fits[Int16, USize](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int32] for USize {
+  type Error = ConversionError
+
+  fn try_from(value: own Int32) -> Result[USize, ConversionError] {
+    if intrinsic::fits[Int32, USize](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[Int64] for USize {
+  type Error = ConversionError
+
+  fn try_from(value: own Int64) -> Result[USize, ConversionError] {
+    if intrinsic::fits[Int64, USize](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl TryFrom[ISize] for USize {
+  type Error = ConversionError
+
+  fn try_from(value: own ISize) -> Result[USize, ConversionError] {
+    if intrinsic::fits[ISize, USize](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl From[UInt8] for USize {
+  fn from(value: own UInt8) -> USize {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[UInt16] for USize {
+  fn from(value: own UInt16) -> USize {
+    intrinsic::convert(value)
+  }
+}
+
+impl From[UInt32] for USize {
+  fn from(value: own UInt32) -> USize {
+    intrinsic::convert(value)
+  }
+}
+
+impl TryFrom[UInt64] for USize {
+  type Error = ConversionError
+
+  fn try_from(value: own UInt64) -> Result[USize, ConversionError] {
+    if intrinsic::fits[UInt64, USize](value) { Ok(intrinsic::convert(value)) } else { Err(ConversionError()) }
+  }
+}
+
+impl Equal for Float32 {
+  fn equal(self, other: Float32) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for Float32 {
+  fn compare(self, other: Float32) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for Float32 {
+  fn default() -> Float32 {
+    0.0
+  }
+}
+
+impl Display for Float32 {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl Add[Float32] for Float32 {
+  type Output = Float32
+
+  fn add(self, right: Float32) -> Float32 {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[Float32] for Float32 {
+  type Output = Float32
+
+  fn subtract(self, right: Float32) -> Float32 {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[Float32] for Float32 {
+  type Output = Float32
+
+  fn multiply(self, right: Float32) -> Float32 {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[Float32] for Float32 {
+  type Output = Float32
+
+  fn divide(self, right: Float32) -> Float32 {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[Float32] for Float32 {
+  type Output = Float32
+
+  fn remainder(self, right: Float32) -> Float32 {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Negate for Float32 {
+  type Output = Float32
+
+  fn negate(self) -> Float32 {
+    intrinsic::negate(self)
+  }
+}
+
+public fn Float32.is_nan(self) -> Bool {
+  intrinsic::is_nan(self)
+}
+
+public fn Float32.square_root(self) -> Float32 {
+  intrinsic::square_root(self)
+}
+
+impl Equal for Float64 {
+  fn equal(self, other: Float64) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for Float64 {
+  fn compare(self, other: Float64) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for Float64 {
+  fn default() -> Float64 {
+    0.0
+  }
+}
+
+impl Display for Float64 {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl Add[Float64] for Float64 {
+  type Output = Float64
+
+  fn add(self, right: Float64) -> Float64 {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[Float64] for Float64 {
+  type Output = Float64
+
+  fn subtract(self, right: Float64) -> Float64 {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[Float64] for Float64 {
+  type Output = Float64
+
+  fn multiply(self, right: Float64) -> Float64 {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[Float64] for Float64 {
+  type Output = Float64
+
+  fn divide(self, right: Float64) -> Float64 {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[Float64] for Float64 {
+  type Output = Float64
+
+  fn remainder(self, right: Float64) -> Float64 {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Negate for Float64 {
+  type Output = Float64
+
+  fn negate(self) -> Float64 {
+    intrinsic::negate(self)
+  }
+}
+
+public fn Float64.is_nan(self) -> Bool {
+  intrinsic::is_nan(self)
+}
+
+public fn Float64.square_root(self) -> Float64 {
+  intrinsic::square_root(self)
+}
+
+public type ConversionError()
+
+impl Equal for Bool {
+  fn equal(self, other: Bool) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Hash for Bool {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(if self { 1 } else { 0 })
+  }
+}
+
+impl Equal for Character {
+  fn equal(self, other: Character) -> Bool {
+    intrinsic::equal(self, other)
+  }
+}
+
+impl Ordered for Character {
+  fn compare(self, other: Character) -> Ordering {
+    if intrinsic::less(self, other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Hash for Character {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(self))
+  }
+}
+
+impl Equal for Unit {
+  fn equal(self, other: Unit) -> Bool {
+    true
+  }
+}

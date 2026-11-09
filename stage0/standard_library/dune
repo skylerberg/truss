@@ -1,0 +1,17 @@
+(executable
+ (name embed)
+ (modules embed))
+
+(rule
+ (target files.ml)
+ (deps
+  (glob_files_rec %{workspace_root}/standard/**.truss))
+ (action
+  (with-stdout-to
+   %{target}
+   (run ./embed.exe %{deps}))))
+
+(library
+ (name standard_library)
+ (modules files standard_library)
+ (libraries path))

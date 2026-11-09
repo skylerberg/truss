@@ -6,8 +6,8 @@ generation read. It follows the decisions in [DESIGN.md](DESIGN.md),
 [SYNTAX.md](SYNTAX.md), and [GRAMMAR.md](GRAMMAR.md), reads the trees
 described in [PARSER.md](PARSER.md), and produces what
 [CODEGEN.md](CODEGEN.md) expects. The prover is not designed yet, so this
-document states what it hands to it. Name resolution and hashing are built,
-in [`stage0/`](stage0); the rest is not built yet.
+document states what it hands to it. Name resolution, hashing, and checking
+interfaces are built, in [`stage0/`](stage0); the rest is not built yet.
 
 ## What the type checker does
 
@@ -70,8 +70,11 @@ syntax tree ──▶ Resolve ──▶ Hash ──▶ Interface ──▶ Body 
 | `Intrinsic` | `standard::intrinsic`, which the compiler declares: the built-in types and the operations the standard library is written on |
 | `Resolve` | Names to definitions, locals, and modules; the scope rules; unused imports; what each file declares, and the prelude |
 | `Hash` | The parts of a definition's hash, in deterministic CBOR |
-| `Types` | The type representation, substitution, and equality |
+| `Types` | The type representation, substitution, and equality, and the interfaces of definitions |
 | `Properties` | Whether a type is `Copyable`, `Plain`, or a view, from its shape |
+| `Summary` | What a definition's syntax alone says: where it is, its generic parameters, and a trait's associated types, which lowering reads so a recursive type makes no cycle of queries |
+| `Lower` | Written types to `Types`, from a definition's resolved form |
+| `Constants` | The exact values of integer constants that types use |
 | `Interface` | Checking signatures, type definitions, traits, `impl`s, and capabilities |
 | `Environment` | Every query a definition makes about others, each recorded in its trace |
 | `Infer` | Bidirectional checking of bodies, one statement at a time |
@@ -86,9 +89,15 @@ syntax tree ──▶ Resolve ──▶ Hash ──▶ Interface ──▶ Body 
 | `Package_checks` | Coherence, `indirect` cycles, instantiation cycles, and pullability |
 | `Checked` | The checked form's types, and printing and hashing it canonically |
 | `Type_checker` | The entry point, as queries over the definitions of a build |
+| `Standard_library` | The `standard` package's source, built into the compiler |
 
-Each is its own dune library, as in the lexer and code generation. `Types`
-and `Checked` are separate from the rest, so that the prover and code
+Each stage is its own dune library, as in the lexer and code generation, and
+the libraries link together into one program; no stage reads another's
+output from text. Modules that need each other's queries share a library:
+`Interface` holds `Lower`, `Constants`, `Environment`, `Properties`,
+`Impls`, and `Check`, since checking a bound needs the `impl`s of other
+definitions and finding an `impl` needs their interfaces. `Types` and
+`Checked` are separate from the rest, so that the prover and code
 generation depend on the checked form without depending on the checker.
 
 ### One definition at a time, through queries
@@ -1284,11 +1293,39 @@ gives an exact fix whenever it knows what was meant:
 
 The type checker needs the prelude before it can check anything. Built-in
 types such as `Int64`, `Bool`, `Unit`, `Never`, `Integer`, and `Array` are
-declared by the compiler. Everything else in the prelude, such as `Option`,
-`Result`, `List`, `Equal`, `Copyable`, `Plain`, `Iterable`, `Cursor`, and the
-standard capabilities, is ordinary Truss in the `standard` package, checked
-like any other package, on top of `standard::intrinsic`. Stage0 therefore
-starts by writing that part of the standard library.
+declared by the compiler, in `standard::intrinsic`, as are two types the
+standard library's collections are made of:
+
+- **`Storage[Element]`** is owned storage on the heap: a buffer, a length,
+  and a capacity, with the elements below the length live. The compiler
+  generates its drop and copy, so `List` and `String`, which each hold one,
+  need no destructor. It is `Copyable` when its elements are, never
+  `Plain`, and holds its elements off the stack, so a type that contains
+  itself through one needs no `indirect`.
+- **`View[Element]`** is a read-only view of elements, a pointer and a
+  length, which `Slice` and `StringSlice` hold. It is a view, and `Plain`,
+  since copying it copies no element, so `Option[Slice[Int64]]` copies
+  implicitly.
+
+The intrinsic module also declares the operations the standard library is
+written on, such as arithmetic on built-in numbers and growing a
+`Storage`, as one type that the type checker and code generation each
+match on exhaustively.
+
+Everything else in the prelude is ordinary Truss in the `standard` package,
+in [`standard/`](standard), checked like any other package and built into
+the compiler. The prelude holds:
+
+- the built-in types
+- `Option`, with `Some` and `None` written bare, and `Result`, with `Ok` and
+  `Err`
+- `List`, `Slice`, `String`, `StringSlice`, `Map`, and `Set`
+- `Equal`, `Ordered`, `Ordering`, `Hash`, `Hasher`, `Default`, `Display`,
+  `TextBuilder`, `From`, `TryFrom`, `Copyable`, `Plain`, `Add`, `Subtract`,
+  `Multiply`, `Divide`, `Remainder`, `Negate`, `Index`, `Iterable`,
+  `Cursor`, `FromTemplate`, `Template`, and `ExitCode`
+- the standard capabilities, and the types their methods take and return:
+  `Instant`, `Duration`, `Path`, `Bytes`, and `FileError`
 
 ## Testing
 

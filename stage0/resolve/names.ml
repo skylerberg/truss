@@ -196,9 +196,18 @@ let builtin_items () =
         name = Intrinsic.builtin_name builtin;
         kind = Type;
         visibility = Public;
-        generic = builtin = Intrinsic.Array;
+        generic = (match builtin with Array | Storage | View -> true | _ -> false);
       })
     Intrinsic.builtins
+  @ List.map
+      (fun operation ->
+        {
+          name = Intrinsic.operation_name operation;
+          kind = Function;
+          visibility = Public;
+          generic = true;
+        })
+      Intrinsic.operations
 
 let entries =
   Query.query ~name:"entries" ~show:Path.show_module (fun database module_ ->
