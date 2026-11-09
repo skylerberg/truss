@@ -468,15 +468,25 @@ memory and handles.
 `Glue` generates these for each monomorphic type, each as its own instance,
 so they are compiled once and shared:
 
-- **Drop:** frees what the value owns, field by field. Plain data has
-  nothing to drop, so drop code for it is empty and every call to it is
-  removed. An `indirect` variant drops its fields and frees its block. A
-  standard-library handle frees its operating-system resource (see
-  [Handles](#handles)).
+- **Drop:** frees what the value owns, field by field. A type is *trivial*
+  when it holds no `Storage`, no `indirect` variant, and no handle
+  anywhere; its drop is empty and every drop of it is removed. A sum type's
+  drop switches on its variant and drops that variant's fields. An
+  `indirect` variant drops its fields and frees its block. `Storage` drops
+  each of its live elements, unless they are trivial, and frees its buffer
+  unless its capacity is 0, which is how static bytes and empty storage go
+  unfreed. A standard-library handle frees its operating-system resource
+  (see [Handles](#handles)). A drop function takes a writable pointer to
+  the value.
 - **Copy:** `copy()` follows the structure of the value, for each type that
-  is `Copyable`; handles and the types that hold one have none. Plain data
-  is a memory copy. A `List` of plain data is one allocation and one memory copy,
-  the fast path DESIGN.md mentions. A static `String` is shared, not copied.
+  is `Copyable`; handles and the types that hold one have none. A trivial
+  type is a memory copy. A copy function takes the value as a read-only
+  parameter and returns the copy, by the
+  [calling convention](#calling-convention). `Storage` with capacity 0, as
+  static bytes have, or with no elements, is shared, not copied, so a
+  static `String` is shared. Otherwise its copy is one allocation of
+  exactly its length, and for trivial elements one memory copy, the fast
+  path DESIGN.md mentions; other elements are copied one by one.
 - **Debug output:** the built-in debug output every type has, used by
   `echo`, failed `assert`s, and the test runner, and to write out values
   computed while compiling.

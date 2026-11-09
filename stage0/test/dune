@@ -27,6 +27,7 @@
   startup
   positions
   drops
-  yields)
+  yields
+  glue)
  (deps
   (glob_files %{workspace_root}/*.md)))
