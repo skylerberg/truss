@@ -1,5 +1,5 @@
-(** The inputs of a build, and the queries that parse them. See TYPECHECKER.md, "One definition at
-    a time, through queries".
+(** The inputs of a build, and the queries that parse them. See TYPECHECKER.md, "One definition at a
+    time, through queries".
 
     The driver sets each package, with its manifest and the modules it has, and the text of each
     module's file. Everything else is a query, so changing one file re-parses that file alone, and a

@@ -17,18 +17,53 @@ let types =
         ([ "result" ], [ "Result" ]);
         ( [ "core" ],
           [
-            "Equal"; "Ordered"; "Ordering"; "Hash"; "Hasher"; "Default"; "Display"; "From"; "TryFrom";
-            "Copyable"; "Plain"; "Add"; "Subtract"; "Multiply"; "Divide"; "Remainder"; "Negate";
-            "Index"; "Iterable"; "Cursor"; "Range"; "Indexed"; "Pair"; "ExitCode";
+            "Equal";
+            "Ordered";
+            "Ordering";
+            "Hash";
+            "Hasher";
+            "Default";
+            "Display";
+            "From";
+            "TryFrom";
+            "Copyable";
+            "Plain";
+            "Add";
+            "Subtract";
+            "Multiply";
+            "Divide";
+            "Remainder";
+            "Negate";
+            "Index";
+            "Iterable";
+            "Cursor";
+            "Range";
+            "Indexed";
+            "Pair";
+            "ExitCode";
           ] );
-        ([ "text" ], [ "String"; "StringSlice"; "TextBuilder"; "FromTemplate"; "Template"; "Literal" ]);
+        ( [ "text" ],
+          [ "String"; "StringSlice"; "TextBuilder"; "FromTemplate"; "Template"; "Literal" ] );
         ([ "list" ], [ "List"; "Slice" ]);
         ([ "map" ], [ "Map"; "Entry" ]);
         ([ "set" ], [ "Set" ]);
         ( [ "capabilities" ],
           [
-            "Console"; "FileRead"; "FileWrite"; "NetworkClient"; "NetworkServer"; "Clock"; "Random";
-            "Environment"; "Processes"; "Tasks"; "Panic"; "Instant"; "Duration"; "Path"; "Bytes";
+            "Console";
+            "FileRead";
+            "FileWrite";
+            "NetworkClient";
+            "NetworkServer";
+            "Clock";
+            "Random";
+            "Environment";
+            "Processes";
+            "Tasks";
+            "Panic";
+            "Instant";
+            "Duration";
+            "Path";
+            "Bytes";
             "FileError";
           ] );
       ]

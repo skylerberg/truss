@@ -1,6 +1,6 @@
 (** What every definition is named by, across stages: its package, module, and name. See
-    TYPECHECKER.md, "What a name can refer to", and DESIGN.md, "The hash format": results name
-    other definitions by path, never by hash. Code generation's instance keys use the same paths. *)
+    TYPECHECKER.md, "What a name can refer to", and DESIGN.md, "The hash format": results name other
+    definitions by path, never by hash. Code generation's instance keys use the same paths. *)
 
 type module_ = { package : string; modules : string list }
 (** [weather::forecast::hourly] is the package [weather] and the modules [forecast; hourly]. A
@@ -8,9 +8,13 @@ type module_ = { package : string; modules : string list }
 
 val show_module : module_ -> string
 
-type receiver = Static | Read | Mut | Own
-(** How a method takes [self]: [Static] for a method without [self], such as
-    [List.with_capacity]. One name can have a version for each receiver. *)
+type receiver =
+  | Static
+  | Read
+  | Mut
+  | Own
+      (** How a method takes [self]: [Static] for a method without [self], such as
+          [List.with_capacity]. One name can have a version for each receiver. *)
 
 type t =
   | Top of { module_ : module_; name : string }
@@ -26,8 +30,8 @@ type t =
   | Law_proof of { module_ : module_; name : string }  (** ["Monoid.associative for Int64"] *)
 
 val module_of : t -> module_
-(** The module a definition is written in. A method or member constant is in its owner's module
-    only when it is written there, so this is the module of the outermost path, for a [Top]. *)
+(** The module a definition is written in. A method or member constant is in its owner's module only
+    when it is written there, so this is the module of the outermost path, for a [Top]. *)
 
 val show : t -> string
 (** As in messages: [standard::list::List.push], with [(mut self)] after a method's name for a

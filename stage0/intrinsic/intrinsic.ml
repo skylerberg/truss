@@ -22,8 +22,24 @@ type builtin =
 
 let builtins =
   [
-    Int8; Int16; Int32; Int64; UInt8; UInt16; UInt32; UInt64; USize; ISize; Float32; Float64; Bool;
-    Character; Unit; Never; Integer; Array;
+    Int8;
+    Int16;
+    Int32;
+    Int64;
+    UInt8;
+    UInt16;
+    UInt32;
+    UInt64;
+    USize;
+    ISize;
+    Float32;
+    Float64;
+    Bool;
+    Character;
+    Unit;
+    Never;
+    Integer;
+    Array;
   ]
 
 let builtin_name = function

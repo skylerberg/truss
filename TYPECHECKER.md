@@ -6,7 +6,8 @@ generation read. It follows the decisions in [DESIGN.md](DESIGN.md),
 [SYNTAX.md](SYNTAX.md), and [GRAMMAR.md](GRAMMAR.md), reads the trees
 described in [PARSER.md](PARSER.md), and produces what
 [CODEGEN.md](CODEGEN.md) expects. The prover is not designed yet, so this
-document states what it hands to it. Nothing is built yet.
+document states what it hands to it. Name resolution and hashing are built,
+in [`stage0/`](stage0); the rest is not built yet.
 
 ## What the type checker does
 
@@ -64,7 +65,10 @@ syntax tree ──▶ Resolve ──▶ Hash ──▶ Interface ──▶ Body 
 
 | OCaml module | Job |
 |---|---|
-| `Resolve` | Names to definitions, locals, and modules; the scope rules; unused imports |
+| `Path` | What definitions are named by, in every stage: package, module, and name, and a method's receiver |
+| `Workspace` | The inputs of a build: packages, their manifests and modules, and each module's text, which it lexes and parses as queries |
+| `Intrinsic` | `standard::intrinsic`, which the compiler declares: the built-in types and the operations the standard library is written on |
+| `Resolve` | Names to definitions, locals, and modules; the scope rules; unused imports; what each file declares, and the prelude |
 | `Hash` | The parts of a definition's hash, in deterministic CBOR |
 | `Types` | The type representation, substitution, and equality |
 | `Properties` | Whether a type is `Copyable`, `Plain`, or a view, from its shape |

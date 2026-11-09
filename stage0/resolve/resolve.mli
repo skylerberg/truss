@@ -1,0 +1,50 @@
+(** Name resolution. See TYPECHECKER.md, "Name resolution".
+
+    Resolution turns a definition's tree into its resolved form: tables, keyed by the tree's node
+    ids, of what every name refers to and how each [name[...]] reads. The tree is unchanged. A
+    definition reads other definitions only through the queries of {!Names}, each recorded in its
+    trace. *)
+
+module Names = Names
+module Parts = Parts
+module Prelude = Prelude
+
+type cost_function = Walk.cost_function = Log | Power | Time | Calls
+
+type target = Walk.target =
+  | Binding  (** This name binds a local, a parameter, or a generic parameter. *)
+  | Local of Syntax.id  (** A local or parameter, by the id of the name that binds it. *)
+  | Generic of Syntax.id  (** A generic parameter of the definition, by the id of its name. *)
+  | Definition of Path.t
+  | Variant of Path.t * string  (** A prelude variant written bare, such as [Some]. *)
+  | Module of Path.module_
+  | Field of string  (** A record's field, by name, in the record's invariant or potential. *)
+  | Result_value  (** [result], in [ensures] and [cost]. *)
+  | Old  (** [old], in specifications and proofs. *)
+  | Cost_function of cost_function
+  | Unknown  (** A name that refers to nothing; its error is reported. *)
+
+type bracket = Walk.bracket =
+  | Index
+  | Type_arguments
+  | Method_bracket  (** After a method's name, which type checking decides. *)
+
+type resolved = {
+  names : target option array;
+      (** By the id of each [Syntax.name]: what the name refers to, or [None] for a name resolution
+          leaves to type checking, such as a field, a label, or a variant in a pattern. *)
+  brackets : bracket option array;  (** By the id of each [Bracket] expression. *)
+  imports_used : string list;  (** The imported modules the definition names, by last name. *)
+  diagnostics : Diagnostic.t list;  (** Relative to the definition. *)
+}
+
+val resolved : (Names.key, resolved option) Query.query
+(** A definition's resolved form, or [None] if there is no such definition. *)
+
+val file_diagnostics : (Path.module_, Diagnostic.t list) Query.query
+(** The errors of a file's [use] lines, in the file's offsets: a module that does not exist, two
+    imports with one last name, [standard::intrinsic] outside the standard library, and an import
+    nothing uses, with a fix that deletes it. *)
+
+val diagnostics : Query.database -> Path.module_ -> Diagnostic.t list
+(** Every resolution error of a file, in its offsets and in order, including each definition's. *)
