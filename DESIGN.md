@@ -129,9 +129,9 @@ encoding, not over any compiler's data structures.
 
 ### What you see is what compiles
 
-Invisible characters that change how text is displayed are a compile error
-anywhere in a source file, including inside strings. They have no other use
-in source that an escape cannot serve.
+The invisible characters behind known attacks are a compile error anywhere in
+a source file, including inside strings. They have no other use in source that
+an escape cannot serve.
 
 - **Bidirectional controls** can make code display differently from how it
   compiles, the "Trojan Source" attack (CVE-2021-42574). Truss has no
@@ -149,6 +149,12 @@ The zero-width joiner, the zero-width non-joiner, and the variation selectors
 stay legal, because emoji and scripts such as Persian need them in visible
 text. Anything rejected can still be written in an ordinary string as an
 escape, such as `\u{2068}`, so a rare legitimate use is visible in review.
+
+This stops the known attacks, not every way of hiding data. A run of
+variation selectors after an emoji, or joiners between letters, can still
+carry hidden bytes in a string. Closing that would mean rules about where each
+of these characters may appear for every emoji and script, which no other
+language has, so Truss leaves it to review tools.
 
 ## No comments
 
@@ -171,15 +177,21 @@ documentation files beside the code.
 
 ## Line breaks
 
-Statements end at a line break, following Go's rule: a line break ends a
-statement when the line ends with a token that can end one. Truss adds a short
-list of tokens that may start a continuation line: `.`, `else`, `with`, `|`,
-`=>`, `->`, the clause keywords, and binary operators that cannot begin an
-expression. Inside `(` and `[`, line breaks are ignored, as in Python.
+Statements end at a line break, following Scala's rule: a line break ends a
+statement when the token before it can end one and the token after it can
+begin one. Go's rule looks only at the token before. Looking at both sides
+lets a line start with `.`, `else`, `with`, `|`, `=>`, `->`, the clause
+keywords, or a binary operator that cannot begin an expression, and continue
+the line before, since none of those can begin a statement. Inside `(` and
+`[`, line breaks are ignored, as in Python.
 
 - **It fits how Truss code is laid out.** Clauses sit on the lines after a
   signature, variants start with `|`, and the body's `{` follows the
   clauses. Go's rule alone would forbid all of these.
+- **It follows from one principle,** not a hand-kept list. Which tokens
+  continue a line falls out of the grammar: exactly those that cannot begin a
+  statement. A closing `}` is one of them, so no special case is needed for
+  a line break before it.
 - **It allows the method chains LLMs write by habit,** with each `.` at the
   start of a line, as in Kotlin, Swift, and Rust.
 - **It never guesses.** JavaScript continues a line whenever the next one
@@ -847,6 +859,11 @@ comparisons over `&&`. Every other combination needs parentheses.
   needs no `3u8`. When nothing decides the type, it defaults to `Int64` or
   `Float64`, which keeps simple local variables free of annotations. An
   integer literal is never a float, so `1` and `1.0` always look different.
+- **A leading zero is an error, not octal and not ignored.** `0755` is octal
+  in C, Go, and shell, and the obvious use is file permissions. Reading it as
+  decimal 755, as Rust and Swift do, would silently give the wrong
+  permissions, so Truss rejects it as Python 3 and JavaScript's strict mode
+  do, and octal is always written `0o755`.
 - **Negation is an operator.** A negated literal is range-checked after
   negation, so `-128` fits an `Int8`. Negating a signed value is an overflow
   proof obligation like any other arithmetic, and unsigned values cannot be
@@ -1607,10 +1624,14 @@ familiar name has been replaced by a local one.
 lexer tell a keyword from a name on its own, which keeps the grammar simple
 and lets the lexer alone decide whether a newline ends a statement. The
 exceptions are words that are both common names and needed only in one
-narrow place: `result` in `ensures`, `old` in specifications, and `time`,
-`allocations`, `allocated_bytes`, `calls`, and `finite` in `cost` clauses.
-Reserving those would ban names like `result` and `time` from all code to
-serve a few specifications. Words that other languages use as keywords, such
+narrow place: `result` in `ensures`, `old` in specifications, and the words
+of `cost` clauses, such as `time`, `calls`, `finite`, and `log`. Reserving
+those would ban names like `result` and `time` from all code to serve a few
+specifications. They are not contextual keywords in the lexer either: the
+lexer reads them as names, and the parser recognizes them by their spelling
+where a clause expects them, as C#, Kotlin, Swift, and Rust do with their
+contextual keywords. A lexer mode for them would have to know where each
+clause ends, which is the parser's job. Words that other languages use as keywords, such
 as `loop`, `async`, and `where`, are reserved now, so that adding one later
 breaks no code and borrowed code gets a clear error.
 
@@ -1621,10 +1642,35 @@ existing one but is spelled with different characters, which matters for a
 language built for supply-chain safety. So the protections are errors, not
 warnings: names must be in Normalization Form C, a name cannot mix Latin with
 Cyrillic or Greek or with more than one other script, and two names in a
-package that Unicode lists as confusable cannot both be visible. Scripts
+package that Unicode lists as confusable cannot both be visible. Names use
+only the characters UTS #39's General Security Profile allows, which leaves
+out look-alike forms that normalization keeps, such as mathematical bold
+letters, fullwidth letters, and a fullwidth `＿` that would get around the
+case rules. Rust warns about the same characters; Python instead folds them
+into ordinary letters with NFKC, which gives one name several spellings.
+Two names that are entirely ASCII are never compared, because
+Unicode lists `m` as confusable with `rn`, which would forbid `modern` beside
+`modem`; look-alikes within ASCII are a matter of fonts, and an attack needs
+characters outside ASCII, as Rust's check for confusable names also assumes.
+Scripts
 without case count as lowercase, as in Go and Haskell, so the parser's rule
 that case tells a type from a value still holds. Keywords and the standard
 library stay ASCII so that every program can be read with them.
+
+**Each language version pins a Unicode version.** Which characters names can
+use, which characters are invisible, how scripts are assigned, and which names
+look alike all come from Unicode data, and the data changes every year, not
+only by adding characters: scripts are reassigned and the list of confusable
+characters is revised. If the compiler used whatever version its libraries
+had, as Rust and Go do, whether a file compiles would depend on which build of
+the compiler checked it, and the first compiler in OCaml and the later one in
+Truss could disagree. Java names a Unicode version in each language
+specification, and Truss does the same. Moving to a new Unicode version comes
+with a new language version, like a change to the prelude, and can bring
+automatic fixes, such as renaming names that the new data finds confusable.
+The cost is that letters added to Unicode after the pinned version cannot be
+used in names until then. Strings are not limited: a string can hold any
+character that is not forbidden, including ones from later versions.
 
 **Constants are values, so they are `lower_snake_case`:** `math::pi`,
 `UInt8.maximum`, `Instant.epoch`. A separate case for constants, such as

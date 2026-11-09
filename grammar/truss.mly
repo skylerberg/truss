@@ -3,11 +3,16 @@
    empty; this file checks the grammar's shape, not what it builds.
 
    The lexer is assumed to:
-   - apply the line-break rule, emitting a single NEWLINE where a line ends a
-     statement, and a NEWLINE before EOF when the last line needs one;
-   - return the cost words (time, allocations, allocated_bytes, calls,
-     finite, amortized, potential, and O) as their own tokens while inside a
-     `cost` clause, and as LOWER or UPPER names elsewhere;
+   - apply the line-break rule, emitting a single NEWLINE where the token
+     before a line break can end a statement and the token after it can begin
+     one, and a NEWLINE before EOF when the last token can end a statement.
+     So no NEWLINE ever comes right after an opening `{` or before a closing
+     `}`, and items inside braces are separated by NEWLINEs, not ended by
+     them;
+   - return the cost words (amortized, time, allocations, allocated_bytes,
+     calls, O, finite, and potential) as ordinary LOWER or UPPER names. The
+     rules below accept any name in their positions; the real parser checks
+     the spelling;
    - return a whole string literal, interpolations included, as one STRING
      or TAGGED token. */
 
@@ -18,8 +23,6 @@
 %token LET MATCH MUT OPAQUE OWN PARALLEL PROOF PROVIDE PUBLIC REQUIRES RETURN
 %token SELF SELF_TYPE TEST THEOREM TODO TRAIT TRUE TYPE UNREACHABLE USE USES
 %token VAR WHILE WITH YIELD YIELDS
-
-%token TIME ALLOCATIONS ALLOCATED_BYTES CALLS FINITE AMORTIZED POTENTIAL BIG_O
 
 %token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE COMMA COLON COLONCOLON
 %token DOT DOTDOT DOTDOTEQ ARROW FATARROW QUESTION BAR
@@ -46,10 +49,18 @@ newline_opt:
   | { () }
   | NEWLINE { () }
 
+newline_separated(X):
+  | { () }
+  | newline_separated1(X) { () }
+
+newline_separated1(X):
+  | X { () }
+  | X NEWLINE newline_separated1(X) { () }
+
 /* Files and definitions */
 
 file:
-  | newline_opt list(top_item) EOF { () }
+  | list(top_item) EOF { () }
 
 top_item:
   | use_declaration NEWLINE { () }
@@ -132,15 +143,23 @@ clause:
 capability_list:
   | separated_nonempty_list(COMMA, path_type) { () }
 
+/* A cost clause starts with one or two words: `time ...`, `calls(...) ...`,
+   or `amortized time ...`. Whether a second word is a resource or `finite` is
+   decided by the token after it, so the rules are factored to need only one
+   token of lookahead. */
 cost:
-  | resource bound { () }
-  | AMORTIZED resource bound { () }
+  | LOWER cost_after_word { () }
 
-resource:
-  | TIME { () }
-  | ALLOCATIONS { () }
-  | ALLOCATED_BYTES { () }
-  | CALLS LPAREN call_target RPAREN { () }
+cost_after_word:
+  | marked_bound { () }
+  | LPAREN call_target RPAREN bound { () }
+  | LOWER cost_after_second_word { () }
+
+cost_after_second_word:
+  | { () }
+  | marked_bound { () }
+  | LOWER { () }
+  | LPAREN call_target RPAREN bound { () }
 
 call_target:
   | LOWER { () }
@@ -148,8 +167,11 @@ call_target:
   | path_type DOT LOWER { () }
 
 bound:
-  | BIG_O LPAREN expression RPAREN { () }
-  | FINITE { () }
+  | marked_bound { () }
+  | LOWER { () }
+
+marked_bound:
+  | UPPER LPAREN expression RPAREN { () }
   | LE expression { () }
   | EQEQ expression { () }
 
@@ -180,7 +202,7 @@ variant:
 type_clause:
   | INVARIANT expression { () }
   | DERIVES separated_nonempty_list(COMMA, path_type) { () }
-  | COST POTENTIAL expression { () }
+  | COST LOWER expression { () }
 
 /* Types */
 
@@ -233,36 +255,46 @@ bound_list:
 /* Traits, implementations, and capabilities */
 
 trait_definition:
-  | TRAIT UPPER generics_opt supertraits_opt LBRACE newline_opt list(trait_item) RBRACE { () }
+  | TRAIT UPPER generics_opt supertraits_opt LBRACE trait_members RBRACE { () }
 
 supertraits_opt:
   | { () }
   | COLON bound_list { () }
 
-trait_item:
-  | signature NEWLINE { () }
-  | signature NEWLINE block NEWLINE { () }
-  | signature block NEWLINE { () }
-  | TYPE UPPER NEWLINE { () }
-  | TYPE UPPER COLON bound_list NEWLINE { () }
-  | LAW LOWER parameters block NEWLINE { () }
+/* A method declared without a body and a method whose body starts on the
+   next line both begin `signature NEWLINE`. The token after the NEWLINE
+   decides: `{` starts the body, and anything else starts the next member. */
+trait_members:
+  | { () }
+  | trait_members1 { () }
+
+trait_members1:
+  | trait_member { () }
+  | trait_member NEWLINE trait_members1 { () }
+  | signature { () }
+  | signature NEWLINE trait_members1 { () }
+  | signature NEWLINE block { () }
+  | signature NEWLINE block NEWLINE trait_members1 { () }
+
+trait_member:
+  | signature block { () }
+  | TYPE UPPER { () }
+  | TYPE UPPER COLON bound_list { () }
+  | LAW LOWER parameters block { () }
 
 impl_definition:
   | IMPL path_type FOR type_head list(impl_uses) newline_opt
-    LBRACE newline_opt list(impl_item) RBRACE { () }
+    LBRACE newline_separated(impl_item) RBRACE { () }
 
 impl_uses:
   | USES capability_list { () }
 
 impl_item:
-  | signature newline_opt block NEWLINE { () }
-  | TYPE UPPER EQ type_expression NEWLINE { () }
+  | signature newline_opt block { () }
+  | TYPE UPPER EQ type_expression { () }
 
 capability_definition:
-  | CAPABILITY UPPER generics_opt LBRACE newline_opt list(capability_item) RBRACE { () }
-
-capability_item:
-  | signature NEWLINE { () }
+  | CAPABILITY UPPER generics_opt LBRACE newline_separated(signature) RBRACE { () }
 
 /* Constants, tests, theorems, and proofs */
 
@@ -286,12 +318,7 @@ law_proof:
 /* Statements and blocks */
 
 block:
-  | LBRACE newline_opt statements RBRACE { () }
-
-statements:
-  | { () }
-  | statement { () }
-  | statement NEWLINE statements { () }
+  | LBRACE newline_separated(statement) RBRACE { () }
 
 statement:
   | LET pattern annotation_opt EQ expression else_opt { () }
@@ -475,10 +502,10 @@ if_expression:
 
 match_expression:
   | MATCH separated_nonempty_list(COMMA, expression) newline_opt
-    LBRACE newline_opt list(arm) RBRACE { () }
+    LBRACE newline_separated(arm) RBRACE { () }
 
 arm:
-  | separated_nonempty_list(COMMA, pattern) guard_opt FATARROW expression NEWLINE { () }
+  | separated_nonempty_list(COMMA, pattern) guard_opt FATARROW expression { () }
 
 guard_opt:
   | { () }

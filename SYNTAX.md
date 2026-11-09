@@ -21,6 +21,11 @@ Nothing is built yet. This is the design agreed so far.
 ## Source files
 
 - Source files are UTF-8. There is no other encoding and no setting for one.
+- Each language version names one Unicode version, and every rule here that
+  depends on Unicode, such as which characters names can use, which
+  characters are invisible, and which names look alike, follows that version.
+  It changes only with a new language version. A string can still hold a
+  character from a later Unicode version.
 - A byte order mark is allowed only as the very first character, and is
   ignored.
 - Tabs count as whitespace, like spaces.
@@ -57,6 +62,14 @@ Nothing is built yet. This is the design agreed so far.
   identifiers ([UAX #31](https://www.unicode.org/reports/tr31/)): a letter,
   then letters, digits, and joining marks. Keywords and the standard library
   use only ASCII.
+- Only characters that Unicode recommends for identifiers are allowed: those
+  with `Identifier_Status=Allowed` in UTS #39. This leaves out look-alike
+  forms such as mathematical bold `𝐟𝐢𝐥𝐞`, fullwidth `ｆｉｌｅ`, the
+  ligature `ﬁ`, the fullwidth `＿`, and Roman numerals such as `Ⅻ`, as well as
+  historic scripts.
+- The zero-width joiner and non-joiner cannot appear in names, though some
+  scripts, such as Persian, use them in words. They may be allowed later, in
+  the places UAX #31 permits them.
 - Letters from scripts without case, such as Chinese or Arabic, count as
   lowercase, so a name written in them is a value or function. A type name in
   such a script starts with an uppercase Latin letter.
@@ -66,7 +79,9 @@ Nothing is built yet. This is the design agreed so far.
   ([UTS #39](https://www.unicode.org/reports/tr39/)). A name mixes Latin with
   at most one other script, and never mixes Latin with Cyrillic or Greek. Two
   names visible in the same package that Unicode lists as confusable, such as
-  Latin `paypal` and a Cyrillic look-alike, are an error.
+  Latin `paypal` and a Cyrillic look-alike, are an error. Two names made only of
+  ASCII are never compared, so `modern` and `modem` can both be used, though
+  Unicode lists `m` as confusable with `rn`.
 - By convention, names are made of whole words: `items`, not `xs`; `config`,
   not `cfg`; `length`, not `len`. Single letters are kept for loop indices
   such as `i` and `j`. This applies to generic parameters too: `[Element]` and
@@ -91,18 +106,24 @@ These keywords are reserved everywhere and cannot be used as names:
 `theorem` `todo` `trait` `true` `type` `unreachable` `use` `uses` `var`
 `while` `with` `yield` `yields`
 
-A few words are keywords only in one position and ordinary names everywhere
-else, because they are common names for variables and fields:
+A few words have a special meaning in one position only, and are ordinary
+names everywhere else, because they are common names for variables and
+fields. They are not keywords: the lexer reads them as names, and the parser
+or name resolution gives them their meaning where they appear:
 
-| Keywords | Where |
+| Words | Where they mean something special |
 |---|---|
-| `time`, `allocations`, `allocated_bytes`, `calls`, `finite`, `log`, `power`, `amortized`, `potential` | Inside a `cost` clause |
+| `amortized`, `time`, `allocations`, `allocated_bytes`, `calls`, `O`, `finite`, `potential` | In the fixed positions of a `cost` clause: `cost [amortized] resource bound` and `cost potential expression` |
+| `time(...)`, `calls(...)`, `log(...)`, `power(...)` | Called inside a `cost` bound, where they are the cost functions |
 | `result` | Inside `ensures` and `cost`, where it names the return value |
 | `old` | Inside specifications: `requires`, `ensures`, invariants, laws, `decreases`, `cost`, and proofs |
 
 A parameter cannot be named `result`, and a function cannot be named `old`,
 because inside specifications those names mean the return value and a value as
-it was when the function was called.
+it was when the function was called. Other names are unaffected: in
+`fn wait(time: Duration) cost time O(time.seconds())`, the second `time` is
+the resource and the third is the parameter. A function named `log` or `power`
+can be defined and called anywhere except inside a `cost` bound.
 
 These are reserved for possible later use, so they cannot be used as names
 either:
@@ -116,22 +137,26 @@ such as "Truss has no `loop`; write `while true`".
 
 ## Line breaks
 
-A line break ends a statement, with no semicolons. These rules say when one
-does not:
+A line break ends a statement, with no semicolons. It does so exactly when
+the line before can end a statement and the next line can begin one:
 
 1. Inside `(` and `[`, line breaks are ignored. Inside `{`, they count again,
    so a block inside a call's arguments works as usual.
 2. Elsewhere, a line break ends the statement only if both of these hold:
-   - The line ends with a token that can end an expression: a name, `_`, a
+   - The line ends with a token that can end a statement: a name, `_`, a
      literal, `)`, `]`, `}`, `?`, `true`, `false`, `self`, `Self`, `todo`,
      `unreachable`, `break`, `continue`, or `return`.
-   - The next line does not start with a token that continues one: `.`,
-     `else`, `with`, `is`, `|`, `=>`, `->`, `yields`, a clause keyword
-     (`uses`, `requires`, `ensures`, `cost`, `invariant`, `decreases`,
-     `derives`), or a binary operator that cannot begin an expression
-     (`+ * / % == != < <= > >= & ^ << >> && || .. ..=`).
-3. The `{` that opens a body may start the next line, and a line break may
-   come just before a closing `}`.
+   - The next line starts with a token that can begin a statement. A line
+     that starts with anything else continues the one before: `.`, `else`,
+     `with`, `is`, `in`, `|`, `=>`, `->`, `yields`, a clause keyword (`uses`,
+     `requires`, `ensures`, `cost`, `invariant`, `decreases`, `derives`), a
+     binary operator that cannot begin an expression
+     (`+ * / % == != < <= > >= & ^ << >> && || .. ..=`), `=` or a compound
+     assignment, or a closing `)`, `]`, or `}`.
+3. The `{` that opens a body may start the next line.
+
+[GRAMMAR.md](GRAMMAR.md#line-breaks) lists exactly which tokens can begin a
+statement.
 
 So all of these continue onto the next line:
 
@@ -231,6 +256,10 @@ that cannot lose information, and `UInt32.try_from(size)` (which returns a
 | `0.5`, `6.02e23`, `1.0e-9` | Floating point |
 
 - `_` may appear between digits to group them.
+- A decimal literal does not start with `0` unless it is `0` or a float
+  such as `0.5`. In C and Go, `0755` is octal, so Truss rejects it rather than
+  silently reading 755: write `0o755`, or `755` if decimal was meant. Digits
+  after the `.` and in an exponent may start with zeros, as in `1.0e-09`.
 - A float has digits on both sides of the `.`: `0.5`, not `.5` or `1.`. This
   keeps `1..2` a range and `1.max(2)` a method call. The exponent is optional.
 - The prefixes `0x`, `0b`, and `0o` and the exponent `e` are lowercase. Hex
@@ -1818,8 +1847,9 @@ let query = SqlQuery"""
   spaces.
 - Every line must start with exactly the same whitespace as the closing
   `"""`, so a tab where the closing line has spaces is a compile error. A line
-  that is empty or holds only whitespace may be shorter, and becomes an empty
-  line.
+  that holds only whitespace is exempt: if it does not start with that
+  whitespace, it becomes an empty line. Spaces after the opening `"""` are
+  ignored, and `truss fmt` removes them.
 - All other whitespace is kept exactly, including at the ends of lines.
   `truss fmt` never changes the text inside a string.
 - Text that contains `"""` uses a longer delimiter. A string opened with

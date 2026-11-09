@@ -21,20 +21,17 @@ These notes collect implementation consequences of the decisions in
 
 ### Lexer
 
-- **Unicode.** Names follow UAX #31, must be in Normalization Form C, and are
-  checked against UTS #39 for mixed scripts and confusables. sedlex is a
-  Unicode-aware lexer generator for OCaml; `uucp` provides Unicode character
-  properties and `uunf` normalization. The confusable data comes from UTS #39's
-  published tables.
-- **A stack of modes.** The lexer tracks open brackets (`(`, `[`, `{`,
-  `${`), the kind of string it is inside (ordinary, or raw with a given number
-  of quotes and `$` signs), and whether it is inside a `cost` clause, where it
-  returns the cost words as their own tokens.
-- **Line breaks need one token of lookahead.** Whether a line feed becomes a
-  `NEWLINE` depends on the next token, so the lexer reads the first token of
-  the next line before deciding.
+The full design is in [LEXER.md](LEXER.md). In short:
+
+- **Hand-written, in two passes.** A scanner turns bytes into raw tokens that
+  record whether a line break came before them, and a layout pass inserts
+  `NEWLINE` tokens and matches brackets.
+- **Unicode tables generated from one pinned Unicode version,** including
+  NFC, rather than taken from sedlex, `uucp`, and `uunf`, whose versions follow
+  their own releases.
 - **Integer literals do not fit OCaml's `int`,** which has 63 bits. Store them
-  with Zarith, which the prover's exact integer arithmetic needs anyway.
+  with Zarith, which the prover's exact integer arithmetic needs anyway. Float
+  literals are kept as exact decimals until the type checker rounds them.
 
 ### Parser
 

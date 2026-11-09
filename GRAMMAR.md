@@ -28,6 +28,14 @@ may end with a comma:
 list(item) = [ item { "," item } [ "," ] ] ;
 ```
 
+`lines(item)` is shorthand for items separated by line breaks, as inside
+braces. The lexer never puts a `NEWLINE` right after `{` or right before `}`,
+and never two in a row (see [Line breaks](#line-breaks)):
+
+```ebnf
+lines(item) = [ item { NEWLINE item } ] ;
+```
+
 ## Lexical grammar
 
 ### Source text
@@ -36,6 +44,9 @@ A source file is UTF-8. A byte order mark may appear only as the first
 character, and is ignored. A carriage return followed by a line feed is read as
 a line feed; a carriage return on its own is an error. Tab and space are
 whitespace.
+
+Every Unicode property this grammar uses comes from the Unicode version named
+by the language version (see [SYNTAX.md](SYNTAX.md#source-files)).
 
 These characters are an error anywhere in a file, including inside string
 literals:
@@ -72,11 +83,14 @@ A `raw_name` that is a reserved keyword is that keyword. Otherwise:
   `Lu` or `Lt`, must not start or end with `_`, and must not contain `__`.
 - `_` on its own is the token `"_"`.
 
-Every name must be in Unicode Normalization Form C, must follow the
-"Moderately Restrictive" profile of UTS #39 (Latin plus at most one other
-script, and never Latin with Cyrillic or Greek), and must not be confusable,
-as UTS #39 defines it, with another name visible in the same package. These
-checks happen after lexing.
+Every name must be in Unicode Normalization Form C, must contain only
+characters with `Identifier_Status=Allowed` in UTS #39, and must meet UTS
+#39's "Moderately Restrictive" level (Latin plus at most one other script, and
+never Latin with Cyrillic or Greek). The lexer checks these, since each
+depends only on the name. After lexing, a name
+containing a character outside ASCII must not be confusable with another name
+visible in the same package. Two names that are both entirely ASCII are never
+compared.
 
 ### Keywords
 
@@ -95,30 +109,31 @@ Reserved for later use, and an error if written:
 as async await const defer extern loop macro static unsafe where
 ```
 
-These are `LOWER_NAME`s to the lexer, and become keywords only in the
-positions shown in the syntactic grammar. While reading a `cost` clause, the
-lexer returns `time`, `allocations`, `allocated_bytes`, `calls`, `finite`,
-`amortized`, `potential`, and `O` as their own tokens; elsewhere they are
-ordinary names:
+The lexer has no contextual keywords. These words are ordinary names to it,
+`LOWER_NAME`s except `O`, which is an `UPPER_NAME`. The parser recognizes
+them by their spelling in the positions shown in the syntactic grammar, and
+name resolution gives the rest their meaning:
 
 ```text
-time allocations allocated_bytes calls finite log power amortized potential
-result old
+amortized time allocations allocated_bytes calls O finite potential
+log power result old
 ```
 
 ### Number literals
 
 ```ebnf
-INTEGER  = decimal | "0x" hex_digits | "0b" binary_digits | "0o" octal_digits ;
-FLOAT    = decimal "." decimal [ exponent ] | decimal exponent ;
+INTEGER  = whole | "0x" hex_digits | "0b" binary_digits | "0o" octal_digits ;
+FLOAT    = whole "." decimal [ exponent ] | whole exponent ;
 exponent = "e" [ "+" | "-" ] decimal ;
 
+whole         = "0" | nonzero_digit { [ "_" ] digit } ;
 decimal       = digit { [ "_" ] digit } ;
 hex_digits    = hex_digit { [ "_" ] hex_digit } ;
 binary_digits = binary_digit { [ "_" ] binary_digit } ;
 octal_digits  = octal_digit { [ "_" ] octal_digit } ;
 
 digit        = "0" ... "9" ;
+nonzero_digit = "1" ... "9" ;
 hex_digit    = digit | "a" ... "f" | "A" ... "F" ;
 binary_digit = "0" | "1" ;
 octal_digit  = "0" ... "7" ;
@@ -129,6 +144,9 @@ octal_digit  = "0" ... "7" ;
 - A number literal is never directly followed by a name character. `3u8` is
   an error.
 - `-` is never part of a literal.
+- The whole-number part of a decimal literal has no leading zero, so `0755`
+  and `007` are errors, with fixes to `0o755` and `755`. The digits after
+  the `.` and in an exponent may start with zeros: `0.05`, `1.0e-09`.
 
 ### String literals
 
@@ -168,11 +186,13 @@ quotes       = '"""' { '"' } ;
 - The opening and closing delimiters have the same number of quotes, at
   least three.
 - If the opening delimiter is followed by a line feed, the string is
-  multi-line: the closing delimiter must be on a line of its own, preceded
-  only by whitespace, and that whitespace is the indentation. Every other
-  line must start with exactly that whitespace, unless it is empty or holds
-  only whitespace. The line feeds after the opening delimiter and before the
-  closing one are not part of the string.
+  multi-line. Spaces and tabs between the delimiter and the line feed are
+  ignored. The closing delimiter must be on a line of its own, preceded only
+  by whitespace, and that whitespace is the indentation. Every other line
+  must start with exactly that whitespace, which is removed. A line that holds
+  only whitespace and does not start with the indentation is an empty line.
+  The line feeds after the opening delimiter and before the closing one are
+  not part of the string.
 - Otherwise the string is on one line, and its text cannot start or end with
   `"`.
 - A run of more quotes than the delimiter is an error.
@@ -213,28 +233,45 @@ These are errors, each with its own message and fix (see
 
 ### Line breaks
 
-The lexer keeps a stack of open brackets: `(`, `[`, `{`, and `${`.
+A line feed becomes a `NEWLINE` token exactly when the token before it can end
+a statement and the token after it can begin one, outside `(` and `[`. This is
+Scala's rule. In detail, the lexer keeps a stack of open brackets: `(`, `[`,
+and `{`. An interpolation is lexed on its own and cannot contain a line feed,
+so it needs no entry.
 
 1. While the innermost open bracket is `(` or `[`, line feeds are skipped.
 2. Otherwise, a line feed becomes a `NEWLINE` token when both of these hold:
-   - the last token before it is one of: a name, `_`, a number or string
-     literal, `)`, `]`, `}`, `?`, `true`, `false`, `self`, `Self`, `todo`,
-     `unreachable`, `break`, `continue`, `return`;
-   - the first token after it is none of: `.`, `else`, `with`, `is`, `|`,
-     `=>`, `->`, `yields`, `uses`, `requires`, `ensures`, `cost`,
-     `invariant`, `decreases`, `derives`, `+`, `*`, `/`, `%`, `==`, `!=`,
-     `<`, `<=`, `>`, `>=`, `&`, `^`, `<<`, `>>`, `&&`, `||`, `..`, `..=`.
+   - the last token before it **can end a statement**: a name, `_`, a number
+     or string literal, `)`, `]`, `}`, `?`, `true`, `false`, `self`, `Self`,
+     `todo`, `unreachable`, `break`, `continue`, `return`;
+   - the first token after it **can begin a statement**: a name, `_`, a
+     number or string literal, `(`, `[`, `{`, `-`, `!`, `~`, a reserved word,
+     or one of the keywords `any`, `assert`, `break`, `capability`,
+     `continue`, `echo`, `exists`, `false`, `fn`, `for`, `forall`, `if`,
+     `impl`, `internal`, `law`, `let`, `match`, `mut`, `own`, `parallel`,
+     `proof`, `provide`, `public`, `return`, `self`, `Self`, `test`,
+     `theorem`, `todo`, `trait`, `true`, `type`, `unreachable`, `use`, `var`,
+     `while`, `yield`.
 3. Several line feeds in a row produce at most one `NEWLINE`.
+4. At the end of the file, a `NEWLINE` follows the last token if it can end a
+   statement.
 
-The parser skips a `NEWLINE` immediately before a `{` that must open a body,
-and immediately before a closing `}`.
+Every other token continues the line before it: `.`, `,`, `:`, `::`, `)`,
+`]`, `}`, `?`, `|`, `=>`, `->`, `=` and the compound assignments, the binary
+operators other than `-`, `..`, `..=`, and the keywords `cost`, `decreases`,
+`derives`, `else`, `ensures`, `in`, `invariant`, `is`, `opaque`, `requires`,
+`uses`, `with`, and `yields`. So no `NEWLINE` ever comes before a closing `}`,
+and statements, `match` arms, and members are separated by `NEWLINE`s, not
+ended by them.
+
+The parser skips a `NEWLINE` immediately before a `{` that must open a body.
 
 ## Syntactic grammar
 
 ### Files and definitions
 
 ```ebnf
-file       = { NEWLINE } { use NEWLINE { NEWLINE } } { definition { NEWLINE } } ;
+file       = { use NEWLINE } { definition NEWLINE } ;
 use        = "use" module_path ;
 module_path = LOWER_NAME { "::" LOWER_NAME } ;
 
@@ -286,6 +323,10 @@ bound         = "O" "(" expression ")" | "finite"
               | ( "<=" | "==" ) expression ;
 ```
 
+- `"amortized"`, `"time"`, `"allocations"`, `"allocated_bytes"`, `"calls"`,
+  `"O"`, `"finite"`, and `"potential"` stand for a `LOWER_NAME` or
+  `UPPER_NAME` with that spelling, not for a keyword token (see
+  [Keywords](#keywords)).
 - `uses` and `decreases` appear at most once. The others may repeat.
 - `finite` is allowed only for `time`.
 - In a `cost` clause, `time(...)`, `calls(...)`, `log(...)`, and
@@ -353,19 +394,19 @@ A `LOWER_NAME` generic parameter is a value, and its type must be `USize`.
 
 ```ebnf
 trait        = "trait" UPPER_NAME [ generics ] [ ":" bound ]
-               "{" { NEWLINE } { trait_member { NEWLINE } } "}" ;
+               "{" lines(trait_member) "}" ;
 trait_member = signature [ body ]
              | "type" UPPER_NAME [ ":" bound ]
              | "law" LOWER_NAME parameters block ;
 signature    = "fn" LOWER_NAME [ generics ] parameters [ result ] { clause } ;
 
 impl         = "impl" path_type "for" type_head { "uses" capability_list }
-               "{" { NEWLINE } { impl_member { NEWLINE } } "}" ;
+               "{" lines(impl_member) "}" ;
 impl_member  = function_member | "type" UPPER_NAME "=" type ;
 function_member = signature body ;
 
 capability   = "capability" UPPER_NAME
-               "{" { NEWLINE } { signature { NEWLINE } } "}" ;
+               "{" lines(signature) "}" ;
 ```
 
 ### Constants, tests, theorems, and proofs
@@ -387,8 +428,7 @@ law_proof = "proof" path_type "." LOWER_NAME "for" type block ;
 ### Statements and blocks
 
 ```ebnf
-block     = "{" { NEWLINE } [ statement { NEWLINE { NEWLINE } statement } ]
-            { NEWLINE } "}" ;
+block     = "{" lines(statement) "}" ;
 
 statement = "let" pattern [ ":" type ] "=" expression [ "else" block ]
           | "var" pattern [ ":" type ] "=" expression [ "else" block ]
@@ -512,7 +552,7 @@ map_entry  = expression ":" expression ;
 lambda     = "fn" "(" list(pattern) ")" block ;
 if         = "if" expression block [ "else" ( if | block ) ] ;
 match      = "match" expression { "," expression }
-             "{" { NEWLINE } { arm NEWLINE { NEWLINE } } "}" ;
+             "{" lines(arm) "}" ;
 arm        = pattern { "," pattern } [ "if" expression ] "=>" expression ;
 provide    = "provide" expression { "," expression } block ;
 ```
@@ -574,5 +614,5 @@ things. These are decided afterward, without changing the tree's shape:
 | A variant in a pattern | Type checking | Looked up in the type of the matched value. |
 | A method call or field | Type checking | Looked up in the type of the receiver. |
 | An `impl` for a trait with type parameters | Type checking | Chosen by the argument types, worked out first. |
-| `time`, `log`, `power`, `result`, `old` | The position | Keywords only in the clauses shown above. |
+| The cost words, `log`, `power`, `result`, `old` | The parser and name resolution | Names to the lexer. The parser checks their spelling where a `cost` clause expects them, and name resolution gives `log`, `power`, `time(...)`, `calls(...)`, `result`, and `old` their meaning in specifications. |
 | The expected type of `[...]` | Type checking | `List` unless an `Array` or `Set` is expected. |
