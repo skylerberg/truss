@@ -242,17 +242,36 @@ and `Shape::Circle` becomes `Shape.Circle`.
 
 ### Broken definitions
 
-A definition with a parser diagnostic is still registered and checked as far
-as it can be, so that its error is reported once, by the parser, and nothing
-that uses it reports another. PARSER.md states what the parser keeps:
+A definition the parser could not read as written is still registered and
+checked as far as it can be, so that its error is reported once, by the
+parser, and nothing that uses it reports another. PARSER.md states what the
+parser keeps:
 
 - **A definition whose header did not parse** keeps only its keyword and
   name, when those could be read.
 - **Any other broken definition** keeps its whole tree, with an `Error` node
   for each part that failed, and its signature as written when every
   diagnostic lies in its body.
+- **The members of a trait, an `impl`, or a capability recover one by one.**
+  A broken member is an `Error` member, or a method whose own signature or
+  body holds the diagnostic. The members around it are as written.
 - **Nodes built for a habit** lie in the same signature or body as the
   habit's diagnostic.
+
+**A part is broken only when its tree differs from its source.** The unit is
+one signature, one body, or one type's fields or variants, whether of a
+definition or of a member. A part is broken when the parser changed or left
+out anything in it: an `Error` node, a node built for a habit, or a closer
+the lexer inserted. The parser records this on each part. A parser
+diagnostic that only enforces a rule on code it read exactly as written,
+such as a misplaced `assert`, `yield`, `break`, or `echo`, `forall` outside a
+specification, a parameter named `result`, `lends own`, a repeated clause,
+or a misplaced `public` or `opaque`, does not make its part broken. Such a
+part is checked as usual, since checking it cannot report on invented code,
+and an agent then sees its type errors in the same build as the parser's.
+The parser decides this from its own work, not the type checker from a list
+of diagnostic codes, so a new kind of parser diagnostic cannot be
+misclassified.
 
 The type checker uses that as follows:
 
@@ -260,25 +279,29 @@ The type checker uses that as follows:
   definition of its kind, so uses of it resolve. One whose name could not be
   read registers nothing, and a use of what it meant to define is an
   unknown name.
-- **A part with a parser diagnostic is never checked.** A definition whose
-  header or signature has one gets the `Error` interface, and a type whose
-  fields or variants have one gets the `Error` shape. A body with one is not
-  checked. Since nodes built for a habit lie in the part with the habit's
-  diagnostic, no invented code is ever checked.
+- **A broken part is never checked.** A definition whose header or
+  signature is broken gets the `Error` interface, and a type whose fields or
+  variants are broken gets the `Error` shape. A broken body is not checked.
+  A broken member of a trait, an `impl`, or a capability affects only that
+  member: a trait with one broken method keeps every other method's
+  interface, so uses of those are checked as usual, and only uses of the
+  broken method get `Error`. Since nodes built for a habit lie in a broken
+  part, no invented code is ever checked.
 - **Everything is accepted of an `Error` interface or shape, silently.** A
   call to such a function takes any arguments and has type `Error`. Building
   such a type, reading its fields, matching on it, and looking up its
   members all give `Error`. A trait with the `Error` interface satisfies
   every bound that names it, and a constant with it has type `Error`.
-- **A part without a diagnostic is checked as usual.** A function whose body
+- **A part that is not broken is checked as usual.** A function whose body
   is broken keeps its interface, so callers are checked against its
   signature as written, as for any function.
 - **A broken definition is a dependency like any other.** Results that used
   its `Error` interface record it in their traces, so when the definition is
   fixed, exactly they are checked again.
 - **Builds and tests skip what cannot run.** A build refuses a program that
-  can reach a broken definition. A test that can reach one does not run, and
-  is reported as blocked by it; every other test runs as usual.
+  can reach a definition with any error, broken or not. A test that can
+  reach one does not run, and is reported as blocked by it; every other test
+  runs as usual.
 
 ## Hashing
 
