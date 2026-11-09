@@ -28,7 +28,14 @@ end = struct
 end
 
 type span = Span.t
-type name = { text : string; span : span }
+
+(* A node's id: a small integer, unique within its definition, given in the
+   order the parser builds the definition's nodes. Later stages record what
+   they decide about a node in tables keyed by its id, never by rebuilding
+   the tree. The same tokens give the same ids, and hashing ignores them.
+   See TYPECHECKER.md, "Node identity". *)
+type id = int
+type name = { text : string; span : span; id : id }
 
 (* [standard::json::parse] has the modules [standard] and [json]. *)
 type path = { modules : name list; last : name }
@@ -74,10 +81,10 @@ type quantifier = Forall | Exists
 (* A statement, or a member of a trait, an [impl], or a capability: a node
    that also records whether a blank line came before it, which [truss fmt]
    keeps and hashing ignores. *)
-type 'kind line = { kind : 'kind; span : span; blank_line_before : bool }
+type 'kind line = { kind : 'kind; span : span; blank_line_before : bool; id : id }
 
 (* Most of the tree is nodes: what a part of the program is, and its span. *)
-type 'kind node = { kind : 'kind; span : span }
+type 'kind node = { kind : 'kind; span : span; id : id }
 
 (* Types *)
 
@@ -91,7 +98,7 @@ and type_kind =
   | Function_type of function_type
   | Type_error
 
-and path_type = { path : path; arguments : type_argument list; span : span }
+and path_type = { path : path; arguments : type_argument list; span : span; id : id }
 
 and type_argument =
   | Type_argument of type_expression
@@ -190,6 +197,7 @@ and string_literal = {
   first : text;
   rest : (expression * text) list;
   span : span;
+  id : id;
 }
 
 and text = { value : string; span : span }
@@ -212,7 +220,7 @@ and binder =
   | Binder_type of name * type_expression  (** [value: Int64] *)
 
 and else_branch = Else of block | Else_if of expression
-and block = { statements : statement list; span : span }
+and block = { statements : statement list; span : span; id : id }
 
 (* Statements *)
 and statement = statement_kind line
@@ -250,6 +258,7 @@ and arm = {
   body : statement;
   span : span;
   blank_line_before : bool;
+  id : id;
 }
 
 (* Patterns *)
@@ -292,7 +301,7 @@ type visibility = Private | Internal | Public | Public_opaque
 
 (* The type a method or constant belongs to: [List[Element: Ordered]] in
    [fn List[Element: Ordered].sort], or [hourly::Forecast]. *)
-type type_head = { path : path; generics : generic_parameter list; span : span }
+type type_head = { path : path; generics : generic_parameter list; span : span; id : id }
 type definition_name = Plain_name of name | Member_name of type_head * name
 
 type parameter = parameter_kind node
@@ -332,7 +341,7 @@ and field_kind =
   | Field_declaration of { name : name; type_ : type_expression; default : expression option }
   | Field_error
 
-type variant = { indirect : bool; name : name; fields : field list option; span : span }
+type variant = { indirect : bool; name : name; fields : field list option; span : span; id : id }
 type type_body = Fields of field list | Variants of variant list | Type_todo
 
 type type_clause = type_clause_kind node
@@ -402,6 +411,7 @@ type definition = {
   kind : definition_kind;
   span : span;
   recovered : span list;
+  id : id;
 }
 
 (* A top-level item: a [use] line or a definition, with its base, the

@@ -322,6 +322,57 @@ let () =
       in
       if parsed text <> parsed ("fn g() {}\n\n\n" ^ text) then fail "the results differ")
 
+(* Node ids *)
+
+(* The ids of a definition's expressions and statements, after checking that
+   each child's id comes before its parent's, since a node gets its id when
+   it is built, after its children. *)
+let ids_of (definition : Syntax.definition) =
+  let ids = ref [] in
+  let rec expression ~parent (value : Syntax.expression) =
+    if value.id >= parent then
+      fail "an expression's id %d is not before its parent's %d" value.id parent;
+    ids := value.id :: !ids;
+    Syntax_walk.expression_parts ~expression:(expression ~parent:value.id)
+      ~statement:(statement ~parent:value.id) value
+  and statement ~parent (written : Syntax.statement) =
+    if written.id >= parent then
+      fail "a statement's id %d is not before its parent's %d" written.id parent;
+    ids := written.id :: !ids;
+    Syntax_walk.statement_parts ~expression:(expression ~parent:written.id)
+      ~statement:(statement ~parent:written.id) written
+  in
+  Syntax_walk.definition (expression ~parent:definition.id) definition;
+  !ids
+
+let () =
+  test "ids are unique within a definition, children first" (fun () ->
+      match
+        (fst
+           (parse
+              "fn f(items: List[Int64]) -> Int64 {\n\
+              \  let x = items[0] + \"${items.length()}\"\n\
+              \  if x > 0 { x } else { 0 }\n\
+               }"))
+          .definitions
+      with
+      | [ { value; _ } ] ->
+          let ids = ids_of value in
+          if List.length (List.sort_uniq compare ids) <> List.length ids then fail "ids repeat";
+          if ids = [] then fail "no ids"
+      | _ -> fail "wrong definitions");
+  test "a definition whose header was read again has an id of its own" (fun () ->
+      match (fst (parse "fn List[Element].sort[](mut self) {}")).definitions with
+      | [
+       {
+         value = { kind = Definition_error { name = Some (Member_name (head, name)); _ }; id; _ };
+         _;
+       };
+      ] ->
+          if List.length (List.sort_uniq compare [ id; head.id; name.id ]) <> 3 then
+            fail "ids repeat"
+      | _ -> fail "wrong definitions")
+
 (* Types *)
 
 let () =

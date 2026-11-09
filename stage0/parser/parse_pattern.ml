@@ -8,7 +8,8 @@
 open Token
 open Syntax
 
-let pattern_node cursor start kind : pattern = { kind; span = Cursor.span_from cursor start }
+let pattern_node cursor start kind : pattern =
+  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
 
 (* A string in a pattern is a literal, so it cannot interpolate. *)
 let string_literal cursor ~start ~modules literal =
@@ -61,7 +62,9 @@ let rec after_upper cursor start (path : path) =
 (* [kind] is the pattern on its own; [end_kind] is it as the start of a
    range, if [..] or [..=] follows. *)
 and range_or cursor start end_kind kind =
-  let first : range_end = { kind = end_kind; span = Cursor.span_from cursor start } in
+  let first : range_end =
+    { kind = end_kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
+  in
   match Cursor.peek_kind cursor with
   | Punctuation ((Dot_dot | Dot_dot_equal) as operator) ->
       Cursor.advance cursor;
@@ -69,7 +72,12 @@ and range_or cursor start end_kind kind =
       let stop =
         match literal cursor with
         | Some literal ->
-            ({ kind = End_literal literal; span = Cursor.span_from cursor stop_start } : range_end)
+            ({
+               kind = End_literal literal;
+               span = Cursor.span_from cursor stop_start;
+               id = Cursor.fresh cursor;
+             }
+              : range_end)
         | None -> (
             match Cursor.peek_kind cursor with
             | Lower _ | Upper _ -> constant_end cursor stop_start
@@ -95,7 +103,7 @@ and constant_end cursor start : range_end =
         End_constant (Type_constant (path, Atoms.lower cursor "the name of a constant"))
     | _ -> Cursor.fail cursor "a constant"
   in
-  { kind; span = Cursor.span_from cursor start }
+  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
 
 and primary cursor : pattern =
   let start = cursor.Cursor.index in
@@ -143,11 +151,15 @@ and pattern_fields cursor =
           Named_field (name, pattern cursor)
       | _ -> Field (pattern cursor)
     in
-    { kind; span = Cursor.span_from cursor start }
+    { kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
   in
   let fields =
     Cursor.bracketed cursor ~item:field ~recover:(fun span ->
-        { kind = Field { kind = Pattern_error; span }; span })
+        {
+          kind = Field { kind = Pattern_error; span; id = Cursor.fresh cursor };
+          span;
+          id = Cursor.fresh cursor;
+        })
   in
   List.iteri
     (fun index (field : pattern_field) ->

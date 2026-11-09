@@ -215,7 +215,19 @@ its visibility, its kind, and its span.
   type arguments, `Name` is a variable, a constant, a function, a type, or a
   variant, and `Member` is a field, a variant under its type, an associated
   type, or the start of a method call. Name resolution and type checking
-  annotate these nodes; they never rebuild them.
+  record what they decide about these nodes in tables keyed by node id;
+  they never rebuild the tree.
+- **Every node has an id,** an integer unique within its definition, as
+  TYPECHECKER.md's "Node identity" asks. So do the records that stand for a
+  piece of syntax without being a `node`: names, path types, type heads,
+  string literals, blocks, arms, variants, and the definition itself. A node
+  gets its id when the parser builds it, after its children, from one
+  counter for the definition, which its interpolations and the second read
+  of a broken header share. So the same tokens give the same ids, a
+  definition that only moved keeps them, and a later stage keeps its
+  results for a node in a dense table indexed by the id. A node the parser
+  extends rather than builds, such as the expression a trailing lambda
+  joins, keeps its id.
 - **Types inside expressions are expressions.** In
   `List[String].with_capacity(64)`, `List[String]` is a `Bracket` over two
   `Name`s. Name resolution reads it as a type. Type positions, such as
@@ -544,7 +556,8 @@ added once the compiler works:
 - **The lexer** gives the parser one token array per file. The parser reads
   the source bytes only through spans, to build fixes and to keep each
   definition's source text.
-- **Name resolution** gets one tree per definition and annotates its nodes.
+- **Name resolution** gets one tree per definition, and records what each
+  name refers to in a table keyed by node id, leaving the tree as it is.
   It decides `Bracket`, `Binding_or_constant`, and `Name` nodes. Type
   checking then reports bare arguments that name no parameter. Both are
   designed in [TYPECHECKER.md](TYPECHECKER.md).
@@ -574,8 +587,10 @@ added once the compiler works:
   code cannot be added without deciding. TYPECHECKER.md decides how
   resolution registers a broken definition and which of its parts it
   checks.
-- **Hashing** walks the tree and ignores spans, `Parenthesized` nodes, blank
-  lines, and how literals were written, as DESIGN.md's hash format says.
+- **Hashing** walks the tree and ignores spans, node ids, `Parenthesized`
+  nodes, blank lines, and how literals were written, as DESIGN.md's hash
+  format says. Ids follow from the tree's structure, so hashing them would
+  add nothing.
 - **`truss fmt`** prints the tree, taking literals from the definition's
   source text and keeping a blank line where one was. A file with any parse
   error is left unchanged.
@@ -615,7 +630,10 @@ about a small input, and there are no golden files.
 - **The documents agree with the code.** A test checks GRAMMAR.md's list of
   words the parser recognizes by spelling against the parser's own list.
 - **Moving a definition changes nothing.** Adding lines above a definition
-  gives an identical tree and identical diagnostics for it.
+  gives an identical tree, with identical ids, and identical diagnostics
+  for it.
+- **Ids are unique and come after the ids of their children,** checked on
+  a definition by a test, and on mutated examples by the fuzzer.
 - **The fuzzer**, `stage0/tools/fuzz`, is run by hand. It also checks that
   mutated examples never make the parser raise, that every tree's spans are
   in bounds and inside the node around them, that every fix removes its

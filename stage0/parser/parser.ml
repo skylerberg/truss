@@ -56,6 +56,7 @@ let definition source tokens piece =
                 kind = Definition_error { keyword; name };
                 span = Cursor.span_from cursor cursor.first;
                 recovered = [];
+                id = Cursor.fresh cursor;
               }
         in
         let recovered =

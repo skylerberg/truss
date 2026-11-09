@@ -13,8 +13,12 @@
 open Token
 open Syntax
 
-let expression_node cursor start kind : expression = { kind; span = Cursor.span_from cursor start }
-let type_node cursor start kind : type_expression = { kind; span = Cursor.span_from cursor start }
+let expression_node cursor start kind : expression =
+  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
+
+let type_node cursor start kind : type_expression =
+  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
+
 let error_expression cursor start : expression = expression_node cursor start Expression_error
 
 (* Whether a token can start an expression. *)
@@ -178,13 +182,13 @@ and path_type cursor : path_type =
   let arguments =
     if Cursor.is_punctuation cursor (Open Square) then type_arguments cursor else []
   in
-  { path; arguments; span = Cursor.span_from cursor start }
+  { path; arguments; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
 
 and type_arguments cursor =
   let start = cursor.Cursor.index in
   let arguments =
     Cursor.bracketed cursor ~item:type_argument ~recover:(fun span ->
-        Type_argument { kind = Type_error; span })
+        Type_argument { kind = Type_error; span; id = Cursor.fresh cursor })
   in
   if arguments = [] then begin
     Cursor.report cursor Unexpected_token (Cursor.token_at cursor start).span
@@ -217,7 +221,7 @@ and function_type cursor ~clauses:with_clauses =
       ~item:(fun cursor ->
         let mode = mode cursor in
         (mode, type_expression cursor))
-      ~recover:(fun span -> (None, { kind = Type_error; span }))
+      ~recover:(fun span -> (None, { kind = Type_error; span; id = Cursor.fresh cursor }))
   in
   let output =
     if Cursor.accept_punctuation cursor Arrow then Some (type_expression cursor) else None
@@ -275,7 +279,7 @@ and generics cursor : generic_parameter list =
     let start = cursor.Cursor.index in
     let parameters =
       Cursor.bracketed cursor ~item:generic_parameter ~recover:(fun span ->
-          { kind = Generic_error; span })
+          { kind = Generic_error; span; id = Cursor.fresh cursor })
     in
     if parameters = [] then begin
       Cursor.report cursor Unexpected_token (Cursor.token_at cursor start).span
@@ -300,7 +304,7 @@ and generic_parameter cursor : generic_parameter =
         Value_parameter (name, type_expression cursor)
     | _ -> Cursor.fail cursor "a generic parameter"
   in
-  { kind; span = Cursor.span_from cursor start }
+  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
 
 (* [FileRead, FileWrite]. *)
 and capability_list cursor =
@@ -332,7 +336,7 @@ and clause cursor : clause =
     | Keyword Cost -> Cost (cost cursor)
     | _ -> Cursor.fail cursor "a clause"
   in
-  { kind; span = Cursor.span_from cursor start }
+  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
 
 (* [cost [amortized] resource bound], after [cost]. A type's
    [cost potential expression] is parsed with the type. *)
@@ -546,11 +550,15 @@ and prefix cursor : expression =
       let callee : expression_kind =
         match target.kind with
         | Path_type { path; arguments = []; _ } ->
-            Member ({ kind = Name path; span = target.span }, { text = "from"; span = target.span })
+            Member
+              ( { kind = Name path; span = target.span; id = Cursor.fresh cursor },
+                { text = "from"; span = target.span; id = Cursor.fresh cursor } )
         | _ -> Expression_error
       in
       expression_node cursor start
-        (Call ({ kind = callee; span = target.span }, [ { label = None; value } ]))
+        (Call
+           ( { kind = callee; span = target.span; id = Cursor.fresh cursor },
+             [ { label = None; value } ] ))
   | _ -> value
 
 and prefix_operator cursor start operator =
@@ -601,9 +609,18 @@ and closure_bars cursor =
     | Block block -> block
     | _ ->
         let statement : statement =
-          { kind = Expression body; span = body.span; blank_line_before = false }
+          {
+            kind = Expression body;
+            span = body.span;
+            blank_line_before = false;
+            id = Cursor.fresh cursor;
+          }
         in
-        { statements = [ statement ]; span = Cursor.span_from cursor body_start }
+        {
+          statements = [ statement ];
+          span = Cursor.span_from cursor body_start;
+          id = Cursor.fresh cursor;
+        }
   in
   expression_node cursor start (Lambda { parameters; body = block })
 
@@ -621,7 +638,7 @@ and postfix cursor : expression =
     | Punctuation (Open Square) ->
         let items =
           Cursor.bracketed cursor ~item:bracket_item ~recover:(fun span ->
-              Item { kind = Expression_error; span })
+              Item { kind = Expression_error; span; id = Cursor.fresh cursor })
         in
         if items = [] then begin
           (* At the [\]], so that one the lexer inserted reports nothing. *)
@@ -659,7 +676,8 @@ and postfix cursor : expression =
         if not (Cursor.is_punctuation cursor (Open Paren)) then
           Cursor.fail cursor "`(` after `with`";
         let updates =
-          Cursor.bracketed cursor ~item:update ~recover:(fun span -> { kind = Update_error; span })
+          Cursor.bracketed cursor ~item:update ~recover:(fun span ->
+              { kind = Update_error; span; id = Cursor.fresh cursor })
         in
         loop (expression_node cursor start (With (value, updates)))
     | _ -> value
@@ -679,8 +697,17 @@ and conditional cursor start condition question =
   Habits.conditional cursor ~condition ~then_ ~else_ ~question;
   let block (value : expression) : block =
     {
-      statements = [ { kind = Expression value; span = value.span; blank_line_before = false } ];
+      statements =
+        [
+          {
+            kind = Expression value;
+            span = value.span;
+            blank_line_before = false;
+            id = Cursor.fresh cursor;
+          };
+        ];
       span = value.span;
+      id = Cursor.fresh cursor;
     }
   in
   expression_node cursor start
@@ -696,7 +723,7 @@ and bracket_item cursor =
 
 and arguments cursor =
   Cursor.bracketed cursor ~item:argument ~recover:(fun span ->
-      { label = None; value = { kind = Expression_error; span } })
+      { label = None; value = { kind = Expression_error; span; id = Cursor.fresh cursor } })
 
 and argument cursor =
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
@@ -716,7 +743,11 @@ and update cursor : update =
   in
   let path = path [] in
   let value = if Cursor.accept_punctuation cursor Colon then Some (expression cursor) else None in
-  { kind = Update { field; path; value }; span = Cursor.span_from cursor start }
+  {
+    kind = Update { field; path; value };
+    span = Cursor.span_from cursor start;
+    id = Cursor.fresh cursor;
+  }
 
 and primary cursor : expression =
   let start = cursor.Cursor.index in
@@ -832,20 +863,31 @@ and turbofish cursor start (function_path : path) =
      expression are expressions: [parse[Int64]]. *)
   let rec as_expression (type_ : type_expression) : expression =
     match type_.kind with
-    | Path_type { path; arguments = []; _ } -> { kind = Name path; span = type_.span }
+    | Path_type { path; arguments = []; _ } ->
+        { kind = Name path; span = type_.span; id = Cursor.fresh cursor }
     | Path_type { path; arguments; span } ->
         let items =
           List.map
             (function
               | Type_argument argument -> Item (as_expression argument)
-              | Count (value, span) -> Item { kind = Integer value; span }
+              | Count (value, span) -> Item { kind = Integer value; span; id = Cursor.fresh cursor }
               | Count_name name ->
-                  Item { kind = Name { modules = []; last = name }; span = name.span }
+                  Item
+                    {
+                      kind = Name { modules = []; last = name };
+                      span = name.span;
+                      id = Cursor.fresh cursor;
+                    }
               | Constraint (name, argument) -> Item_constraint (name, argument))
             arguments
         in
-        { kind = Bracket ({ kind = Name path; span = path.last.span }, items); span }
-    | _ -> { kind = Expression_error; span = type_.span }
+        {
+          kind =
+            Bracket ({ kind = Name path; span = path.last.span; id = Cursor.fresh cursor }, items);
+          span;
+          id = Cursor.fresh cursor;
+        }
+    | _ -> { kind = Expression_error; span = type_.span; id = Cursor.fresh cursor }
   in
   let definition_name = expression_node cursor start (Name function_path) in
   expression_node cursor start
@@ -866,7 +908,8 @@ and interpolation cursor (inner : Token.interpolation) : expression =
   nested.cut_off_end <- written = "" || written.[String.length written - 1] <> '}';
   (* An empty interpolation, or one a line break cut off before its first
      token, already has the lexer's error. *)
-  if stop = 0 then { kind = Expression_error; span = Cursor.span cursor inner.span }
+  if stop = 0 then
+    { kind = Expression_error; span = Cursor.span cursor inner.span; id = Cursor.fresh cursor }
   else
     match
       let value = expression nested in
@@ -874,7 +917,8 @@ and interpolation cursor (inner : Token.interpolation) : expression =
       value
     with
     | value -> value
-    | exception Cursor.Failed -> { kind = Expression_error; span = Cursor.span cursor inner.span }
+    | exception Cursor.Failed ->
+        { kind = Expression_error; span = Cursor.span cursor inner.span; id = Cursor.fresh cursor }
 
 (* [[1, 2]], [[]], [["a": 1]], and [[:]]. A map is told from a list by the
    [:] after its first element. *)
@@ -898,7 +942,7 @@ and collection cursor =
       in
       let elements =
         Cursor.bracketed cursor ~item:element ~recover:(fun span ->
-            ({ kind = Expression_error; span }, None))
+            ({ kind = Expression_error; span; id = Cursor.fresh cursor }, None))
       in
       let is_error ((key : expression), _) = key.kind = Expression_error in
       let entries =
@@ -927,7 +971,7 @@ and lambda cursor =
     Cursor.fail cursor "`(` after `fn` in a lambda";
   let parameters =
     Cursor.bracketed cursor ~item:Parse_pattern.pattern ~recover:(fun span ->
-        { kind = Pattern_error; span })
+        { kind = Pattern_error; span; id = Cursor.fresh cursor })
   in
   expression_node cursor start (Lambda { parameters; body = body cursor })
 
@@ -954,9 +998,11 @@ and match_expression cursor =
         {
           patterns = [];
           guard = None;
-          body = { kind = Statement_error; span; blank_line_before = false };
+          body =
+            { kind = Statement_error; span; blank_line_before = false; id = Cursor.fresh cursor };
           span;
           blank_line_before = Cursor.blank_line_before cursor start;
+          id = Cursor.fresh cursor;
         })
   in
   expression_node cursor start (Match { scrutinees; arms })
@@ -984,6 +1030,7 @@ and arm cursor : arm =
     body;
     span = Cursor.span_from cursor start;
     blank_line_before = Cursor.blank_line_before cursor start;
+    id = Cursor.fresh cursor;
   }
 
 (* Blocks and statements *)
@@ -1014,9 +1061,14 @@ and block cursor : block =
   let statements =
     Cursor.lines cursor ~item ~recover:(fun start span ->
         previous := None;
-        { kind = Statement_error; span; blank_line_before = Cursor.blank_line_before cursor start })
+        {
+          kind = Statement_error;
+          span;
+          blank_line_before = Cursor.blank_line_before cursor start;
+          id = Cursor.fresh cursor;
+        })
   in
-  { statements; span = Cursor.span_from cursor start }
+  { statements; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
 
 (* A statement that is a line of a block. Habits from other languages that
    show up at the end of a statement, or as [elif] after an [if], are
@@ -1042,6 +1094,7 @@ and statement_line cursor ~previous : statement =
         kind = Expression value;
         span = value.span;
         blank_line_before = Cursor.blank_line_before cursor start;
+        id = Cursor.fresh cursor;
       }
   | _ ->
       let statement = statement cursor in
@@ -1060,7 +1113,9 @@ and end_of_statement cursor (statement : statement) =
       let operator_kind =
         if operator.kind = Foreign Plus_plus then Add_assign else Subtract_assign
       in
-      let one : expression = { kind = Integer Z.one; span = Cursor.span cursor operator.span } in
+      let one : expression =
+        { kind = Integer Z.one; span = Cursor.span cursor operator.span; id = Cursor.fresh cursor }
+      in
       let stop = (Cursor.span cursor operator.span).stop in
       {
         statement with
@@ -1078,7 +1133,8 @@ and end_of_statement cursor (statement : statement) =
 and replace_trailing (statement : statement) ~replace =
   let rec rightmost (value : expression) =
     let around kind (inner : expression) : expression =
-      { kind; span = Syntax.Span.make value.span.start inner.span.stop }
+      (* The same node, so it keeps its id, with its span reaching the replacement's end. *)
+      { value with kind; span = Syntax.Span.make value.span.start inner.span.stop }
     in
     match value.kind with
     | Name _ | Member _ -> Some (replace value)
@@ -1160,18 +1216,23 @@ and trailing_lambda cursor statement =
               parameters =
                 [
                   {
-                    kind = Binding_or_constant { text = parameter; span = at_start };
+                    kind =
+                      Binding_or_constant
+                        { text = parameter; span = at_start; id = Cursor.fresh cursor };
                     span = at_start;
+                    id = Cursor.fresh cursor;
                   };
                 ];
               body;
             };
         span = body.span;
+        id = Cursor.fresh cursor;
       }
     in
     {
       kind = Call (callee, [ { label = None; value = lambda } ]);
       span = Syntax.Span.make callee.span.start body.span.stop;
+      id = Cursor.fresh cursor;
     }
   in
   if uses = [] then statement
@@ -1180,7 +1241,9 @@ and trailing_lambda cursor statement =
 and statement cursor : statement =
   let start = cursor.Cursor.index in
   let blank_line_before = Cursor.blank_line_before cursor start in
-  let finish kind : statement = { kind; span = Cursor.span_from cursor start; blank_line_before } in
+  let finish kind : statement =
+    { kind; span = Cursor.span_from cursor start; blank_line_before; id = Cursor.fresh cursor }
+  in
   match Cursor.peek_kind cursor with
   | Keyword Let ->
       let let_token = Cursor.next cursor in
@@ -1282,7 +1345,12 @@ and loop_clauses cursor =
         Cursor.advance cursor;
         let value = expression cursor in
         loop
-          (({ kind = Invariant value; span = Cursor.span_from cursor start } : loop_clause)
+          (({
+              kind = Invariant value;
+              span = Cursor.span_from cursor start;
+              id = Cursor.fresh cursor;
+            }
+             : loop_clause)
           :: clauses)
     | Keyword Decreases ->
         let keyword = Cursor.next cursor in
@@ -1297,7 +1365,12 @@ and loop_clauses cursor =
              commas.";
         let measures = expression_list cursor in
         loop
-          (({ kind = Loop_decreases measures; span = Cursor.span_from cursor start } : loop_clause)
+          (({
+              kind = Loop_decreases measures;
+              span = Cursor.span_from cursor start;
+              id = Cursor.fresh cursor;
+            }
+             : loop_clause)
           :: clauses)
     | _ -> List.rev clauses
   in
