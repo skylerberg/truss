@@ -365,112 +365,100 @@ let files t name =
   make_directory path;
   path
 
-(* Journals *)
+(* Pointers *)
 
-type journal = {
+type pointer = {
   store : t;
-  journal_path : string;
+  pointer_path : string;
   mutable lock_descriptor : Unix.file_descr option;
 }
 
-let journals_directory t = Filename.concat t.root "journals"
+let pointers_directory t = Filename.concat t.root "pointers"
 
 let file_name name =
   String.map
     (fun c -> match c with 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '.' -> c | _ -> '_')
     name
 
-let journal t name =
-  make_directory (journals_directory t);
+let pointer t name =
+  make_directory (pointers_directory t);
   {
     store = t;
-    journal_path = Filename.concat (journals_directory t) (file_name name ^ ".journal");
+    pointer_path = Filename.concat (pointers_directory t) (file_name name ^ ".pointer");
     lock_descriptor = None;
   }
 
-let journals t =
-  match Sys.readdir (journals_directory t) with
+let pointers t =
+  match Sys.readdir (pointers_directory t) with
   | entries ->
       Array.to_list entries
-      |> List.filter (fun entry -> Filename.check_suffix entry ".journal")
+      |> List.filter (fun entry -> Filename.check_suffix entry ".pointer")
       |> List.map Filename.remove_extension
       |> List.sort compare
   | exception Sys_error _ -> []
 
-let lock journal =
-  match journal.lock_descriptor with
+let lock pointer =
+  match pointer.lock_descriptor with
   | Some _ -> true
   | None -> (
       let descriptor =
-        Unix.openfile (journal.journal_path ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
+        Unix.openfile (pointer.pointer_path ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
       in
       match Unix.lockf descriptor F_TLOCK 0 with
       | () ->
-          journal.lock_descriptor <- Some descriptor;
+          pointer.lock_descriptor <- Some descriptor;
           true
       | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) ->
           Unix.close descriptor;
           false)
 
-let unlock journal =
-  match journal.lock_descriptor with
+let unlock pointer =
+  match pointer.lock_descriptor with
   | Some descriptor ->
       Unix.close descriptor;
-      journal.lock_descriptor <- None
+      pointer.lock_descriptor <- None
   | None -> ()
 
+(* What a pointer holds is framed with its length and a checksum, so that
+   one cut short or damaged reads as nothing. *)
 let framed bytes =
   let length = Bytes.create 4 in
   Bytes.set_int32_le length 0 (Int32.of_int (String.length bytes));
   let head = Bytes.to_string length in
   head ^ checksum (head ^ bytes) ^ bytes
 
-let records journal =
-  match read_file journal.journal_path with
-  | exception Sys_error _ -> []
+let read pointer =
+  match read_file pointer.pointer_path with
+  | exception Sys_error _ -> None
   | contents ->
       let total = String.length contents in
-      let rec loop offset acc =
-        if offset + 12 > total then List.rev acc
+      if total < 12 then None
+      else
+        let length = Int32.to_int (String.get_int32_le contents 0) in
+        if length < 0 || 12 + length <> total then None
         else
-          let length = Int32.to_int (String.get_int32_le contents offset) in
-          if length < 0 || offset + 12 + length > total then List.rev acc
-          else
-            let head = String.sub contents offset 4 in
-            let check = String.sub contents (offset + 4) 8 in
-            let bytes = String.sub contents (offset + 12) length in
-            if checksum (head ^ bytes) <> check then List.rev acc
-            else loop (offset + 12 + length) (bytes :: acc)
-      in
-      loop 0 []
+          let head = String.sub contents 0 4 in
+          let check = String.sub contents 4 8 in
+          let bytes = String.sub contents 12 length in
+          if checksum (head ^ bytes) = check then Some bytes else None
 
-let durable_write path ~flags bytes =
-  let descriptor = Unix.openfile path (O_WRONLY :: O_CLOEXEC :: flags) 0o644 in
+(* Written beside the pointer and renamed over it, after the values it may
+   name are durable, so a pointer never names a value a crash lost. *)
+let point pointer bytes =
+  flush pointer.store;
+  let temporary = pointer.pointer_path ^ ".partial" in
+  let descriptor = Unix.openfile temporary [ O_WRONLY; O_CLOEXEC; O_CREAT; O_TRUNC ] 0o644 in
   Fun.protect
     ~finally:(fun () -> Unix.close descriptor)
     (fun () ->
-      write_all descriptor bytes 0;
-      Unix.fsync descriptor)
+      write_all descriptor (framed bytes) 0;
+      Unix.fsync descriptor);
+  Sys.rename temporary pointer.pointer_path
 
-let append journal bytes =
-  flush journal.store;
-  durable_write journal.journal_path ~flags:[ O_CREAT; O_APPEND ] (framed bytes)
-
-let compact journal bytes =
-  flush journal.store;
-  let temporary = journal.journal_path ^ ".partial" in
-  durable_write temporary ~flags:[ O_CREAT; O_TRUNC ] (framed bytes);
-  Sys.rename temporary journal.journal_path
-
-let journal_name journal = journal.journal_path
-
-let journal_size journal =
-  try (Unix.stat journal.journal_path).st_size with Unix.Unix_error _ -> 0
-
-let remove_journal journal =
+let remove_pointer pointer =
   List.iter
     (fun path -> try Sys.remove path with Sys_error _ -> ())
-    [ journal.journal_path; journal.journal_path ^ ".lock" ]
+    [ pointer.pointer_path; pointer.pointer_path ^ ".lock" ]
 
 (* Collection *)
 

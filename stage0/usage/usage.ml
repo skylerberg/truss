@@ -221,7 +221,8 @@ let check_unreachable context (definition : definition) =
   Syntax_walk.definition ~statement expression definition
 
 let definition_diagnostics =
-  Query.query ~name:"usage_diagnostics" ~show:Resolve.Names.show_key (fun database key ->
+  Query.query ~name:"usage_diagnostics" ~phase:Bodies ~saved:true ~show:Resolve.Names.show_key
+    (fun database key ->
       match
         ( Query.demand database Resolve.Names.definition key,
           Query.demand database Resolve.resolved key,

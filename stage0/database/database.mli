@@ -1,7 +1,7 @@
 (** The code database: sessions, which keep each worktree's packages and modules as inputs and every
-    result asked of them current as files change and saved to the store; the questions the graph of
-    those results answers; and the background process that holds sessions between commands. See
-    DATABASE.md.
+    result asked of them current as files change, with each state written to the store as a
+    difference over an earlier one; the questions the graph of those results answers; and the
+    background process that holds sessions between commands. See DATABASE.md.
 
     The database answers with data. What a command does with it, and how it is shown, is the command
     line's, in [stage0/cli]; the background process runs the command line's own handler, so a
@@ -150,8 +150,13 @@ val load_package :
 val load_standard : Engine.t -> unit
 (** Sets the [standard] package, built into the compiler. *)
 
-val standard_layer : ?log:bool -> unit -> Engine.t
-(** A frozen layer with the standard library set. *)
+val standard_layer : unit -> Engine.t
+(** The standard library, checked whole and frozen as a fixed base for engines to be made over. *)
+
+val trial : session -> Engine.t
+(** An engine that starts from a session's state and changes on its own, for trying a change, such
+    as a rename, before any file is written. It shares with the session everything but what the
+    trial changes. *)
 
 val reset : unit -> unit
 (** Saves and closes every session and the store, so that the next request starts as a new process

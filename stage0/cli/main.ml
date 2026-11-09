@@ -295,9 +295,7 @@ let clean =
   command "clean" ~doc:"Stop the background process and delete the store, which costs only time."
     Term.(const (fun () -> Outcome.Exit 0) $ const ())
 
-let version =
-  Printf.sprintf "stage0 (hash format %d, code generation %d, Unicode %s)" Hash.format_version
-    Lir.version Unicode.version
+let version = Printf.sprintf "stage0 (code generation %d, Unicode %s)" Lir.version Unicode.version
 
 let truss =
   Cmd.group

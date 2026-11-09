@@ -91,7 +91,7 @@ let () =
   test "a USize literal must fit in 32 bits, so that the code holds on every target" (fun () ->
       one_diagnostic "fn f() {\n  let size: USize = 5_000_000_000\n}\n" "types.literal_out_of_range");
   test "a package that runs only on 64-bit targets may use 64-bit USize literals" (fun () ->
-      let engine = Engine.create ~shared:(Lazy.force Support.standard) () in
+      let engine = Engine.create ~bases:[ Lazy.force Support.standard ] () in
       Database.load_package ~usize_bits:64 engine ~name:"app" ~dependencies:[]
         [ (module_of "app::main", "fn f() {\n  let size: USize = 5_000_000_000\n}\n") ];
       match check (Engine.context engine) (module_of "app::main") with

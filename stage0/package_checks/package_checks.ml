@@ -422,7 +422,8 @@ let check_tests database (package : Workspace.package) =
 (* The package *)
 
 let check =
-  Query.query ~name:"package_checks" ~show:Fun.id ~saved:true (fun database package_name ->
+  Query.query ~name:"package_checks" ~phase:Checks ~show:Fun.id ~saved:true
+    (fun database package_name ->
       match Workspace.package database package_name with
       | None -> []
       | Some package ->

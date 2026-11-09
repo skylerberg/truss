@@ -48,7 +48,7 @@ let rec fresh_context lowering database =
 (* A pulled method's version, with its drops elaborated. *)
 and pulled =
   lazy
-    (Query.query ~name:"pulled" ~saved:true
+    (Query.query ~name:"pulled" ~phase:Lowering ~saved:true
        ~show:(fun (lowering, yielding) ->
          show_lowering lowering ^ " " ^ Ground.to_string (Cursor yielding))
        (fun database (lowering, yielding) ->
@@ -94,7 +94,7 @@ let make (context : Lower.context) lowering database (key : Instance.key) : Lir.
   | Real_evidence capability -> Evidence (Lower.real_evidence context capability)
 
 let lowered =
-  Query.query ~name:"lowered_instance" ~saved:true
+  Query.query ~name:"lowered_instance" ~phase:Lowering ~saved:true
     ~show:(fun (lowering, key) -> show_lowering lowering ^ " " ^ Instance.to_string key)
     (fun database (lowering, key) ->
       let context = fresh_context lowering database in
@@ -106,7 +106,7 @@ let lowered =
    worked out by running code is keyed by the evaluator that works it out,
    whose code is what decides its value. *)
 let test_key_query =
-  Query.query ~name:"test_key" ~saved:true
+  Query.query ~name:"test_key" ~phase:Keys ~saved:true
     ~show:(fun (lowering, path) -> show_lowering lowering ^ " " ^ Path.show path)
     (fun database (lowering, path) ->
       let context = fresh_context lowering database in

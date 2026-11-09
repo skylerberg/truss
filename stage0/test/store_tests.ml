@@ -1,5 +1,5 @@
-(* The tests of the store, and of saving and loading the engine's graph
-   through it. See DATABASE.md, "Content hashes and the store". *)
+(* The tests of the store, and of the states and facts the engine keeps in
+   it. See DATABASE.md, "The store" and "Facts". *)
 
 open Harness
 
@@ -77,36 +77,33 @@ let () =
       if Store.find_result store ~kind:"proofs" ~key:"k" <> None then fail "found as another kind")
 
 let () =
-  test "a journal gives back its records in order" (fun () ->
+  test "a pointer gives back what it was last pointed at" (fun () ->
       let store = Store.open_ (fresh_directory ()) in
-      let journal = Store.journal store "session" in
-      Store.append journal "first";
-      Store.append journal "second";
-      if Store.records journal <> [ "first"; "second" ] then fail "other records");
-  test "a journal cut short gives its whole records" (fun () ->
+      let pointer = Store.pointer store "session" in
+      Store.point pointer "first";
+      Store.point pointer "second";
+      if Store.read pointer <> Some "second" then fail "another value");
+  test "a pointer never pointed holds nothing" (fun () ->
       let store = Store.open_ (fresh_directory ()) in
-      let journal = Store.journal store "session" in
-      Store.append journal "first";
-      Store.append journal "second";
-      let path = Store.journal_name journal in
-      let contents = In_channel.with_open_bin path In_channel.input_all in
-      Out_channel.with_open_bin path (fun out ->
-          Out_channel.output_string out (String.sub contents 0 (String.length contents - 3)));
-      if Store.records journal <> [ "first" ] then fail "other records");
-  test "compacting a journal leaves one record" (fun () ->
-      let store = Store.open_ (fresh_directory ()) in
-      let journal = Store.journal store "session" in
-      Store.append journal "first";
-      Store.compact journal "base";
-      if Store.records journal <> [ "base" ] then fail "other records");
-  test "a journal another process holds cannot be taken" (fun () ->
+      if Store.read (Store.pointer store "session") <> None then fail "holds a value");
+  test "a pointer cut short holds nothing" (fun () ->
       let directory = fresh_directory () in
       let store = Store.open_ directory in
-      let journal = Store.journal store "session" in
-      if not (Store.lock journal) then fail "could not take it";
+      let pointer = Store.pointer store "session" in
+      Store.point pointer "whole";
+      let path = Filename.concat (Filename.concat directory "pointers") "session.pointer" in
+      let contents = In_channel.with_open_bin path In_channel.input_all in
+      Out_channel.with_open_bin path (fun out ->
+          Out_channel.output_string out (String.sub contents 0 (String.length contents - 2)));
+      if Store.read pointer <> None then fail "read a damaged pointer");
+  test "a pointer another process holds cannot be taken" (fun () ->
+      let directory = fresh_directory () in
+      let store = Store.open_ directory in
+      let pointer = Store.pointer store "session" in
+      if not (Store.lock pointer) then fail "could not take it";
       match Unix.fork () with
       | 0 ->
-          let other = Store.journal (Store.open_ directory) "session" in
+          let other = Store.pointer (Store.open_ directory) "session" in
           Unix._exit (if Store.lock other then 1 else 0)
       | child -> (
           match Unix.waitpid [] child with
@@ -135,10 +132,13 @@ let () =
       Store.collect store ~budget:max_int ~live:(fun _ -> false);
       if Store.get store dead <> Some "dead" then fail "removed a value")
 
-(* Saving and loading *)
+(* States and facts *)
 
-let unit_query name ?saved compute = Query.query ~name ?saved ~show:(fun () -> "") compute
+let version = "test"
 let value_input = Query.input ~name:"saved_value" ~show:(fun () -> "") ()
+
+let unit_query name ?saved ?(phase = Query.Syntax) compute =
+  Query.query ~name ~phase ?saved ~show:(fun () -> "") compute
 
 let doubled =
   unit_query "saved_doubled" ~saved:true (fun database () -> 2 * Query.get database value_input ())
@@ -147,70 +147,148 @@ let through_unsaved =
   unit_query "unsaved_middle" (fun database () -> Query.get database value_input () + 1)
 
 let reads_through =
-  unit_query "saved_reads_through" ~saved:true (fun database () ->
+  unit_query "saved_reads_through" ~saved:true ~phase:Bodies (fun database () ->
       Query.demand database through_unsaved () * 10)
 
-let saved_session () =
+let other_input = Query.input ~name:"saved_other" ~show:(fun () -> "") ()
+
+let tripled =
+  unit_query "saved_tripled" ~saved:true (fun database () -> 3 * Query.get database other_input ())
+
+let attached store =
+  let engine = Engine.create ~log:true () in
+  Engine.attach engine store ~version;
+  engine
+
+(* A store holding one state: two inputs, two saved results of the first,
+   and one of the second. *)
+let written () =
   let store = Store.open_ (fresh_directory ()) in
-  let journal = Store.journal store "session" in
-  let engine = Engine.create () in
-  Engine.attach engine store;
+  let engine = attached store in
   Engine.set engine value_input () 4;
+  Engine.set engine other_input () 1;
   ignore (Engine.get engine doubled ());
   ignore (Engine.get engine reads_through ());
-  Engine.save engine journal;
-  (store, journal)
+  ignore (Engine.get engine tripled ());
+  (store, Engine.write engine)
+
+let opened ?(bases = []) store artifact =
+  match Engine.open_ ~log:true store ~version ~bases artifact with
+  | Some engine -> engine
+  | None -> failwith "the store has no such state"
 
 let () =
-  test "a saved result is found done after loading" (fun () ->
-      let store, journal = saved_session () in
-      match Engine.load ~log:true store journal with
-      | None -> fail "nothing loaded"
-      | Some engine ->
-          if Engine.get engine doubled () <> 8 then fail "another result";
-          if Engine.executed engine <> [] then
-            fail "computed [%s]" (String.concat "; " (Engine.executed engine)));
-  test "a change after loading computes what read it" (fun () ->
-      let store, journal = saved_session () in
-      match Engine.load ~log:true store journal with
-      | None -> fail "nothing loaded"
-      | Some engine ->
-          Engine.set engine value_input () 5;
-          if Engine.get engine doubled () <> 10 then fail "stale result");
-  test "a saved result that read through an unsaved one sees changes after loading" (fun () ->
-      let store, journal = saved_session () in
-      match Engine.load store journal with
-      | None -> fail "nothing loaded"
-      | Some engine ->
-          if Engine.get engine reads_through () <> 50 then fail "stale before the change";
-          Engine.set engine value_input () 6;
-          let value = Engine.get engine reads_through () in
-          if value <> 70 then fail "result %d after the change" value);
-  test "saving again appends only what changed" (fun () ->
-      let store, journal = saved_session () in
-      match Engine.load store journal with
-      | None -> fail "nothing loaded"
-      | Some engine -> (
-          let before = List.length (Store.records journal) in
-          Engine.set engine value_input () 7;
-          ignore (Engine.get engine doubled ());
-          Engine.save engine journal;
-          let after = List.length (Store.records journal) in
-          if after <> before + 1 then fail "%d records, then %d" before after;
-          match Engine.load store journal with
-          | Some reloaded ->
-              if Engine.get reloaded doubled () <> 14 then fail "the change was not saved"
-          | None -> fail "nothing loaded again"));
+  test "a saved result is found done in a state opened from the store" (fun () ->
+      let store, artifact = written () in
+      let engine = opened store artifact in
+      if Engine.get engine doubled () <> 8 then fail "another result";
+      if Engine.executed engine <> [] then
+        fail "computed [%s]" (String.concat "; " (Engine.executed engine)));
+  test "a change in an opened state computes what read it" (fun () ->
+      let store, artifact = written () in
+      let engine = opened store artifact in
+      Engine.set engine value_input () 5;
+      if Engine.get engine doubled () <> 10 then fail "stale result");
+  test "a saved result that read through an unsaved one sees changes in an opened state" (fun () ->
+      let store, artifact = written () in
+      let engine = opened store artifact in
+      if Engine.get engine reads_through () <> 50 then fail "stale before the change";
+      Engine.set engine value_input () 6;
+      let value = Engine.get engine reads_through () in
+      if value <> 70 then fail "result %d after the change" value);
+  test "an opened state holds nothing of its own until something changes" (fun () ->
+      let store, artifact = written () in
+      let engine = opened store artifact in
+      ignore (Engine.get engine doubled ());
+      if Engine.count engine <> 0 then fail "holds %d nodes" (Engine.count engine));
+  test "two states opened from one artifact each see only their own changes" (fun () ->
+      let store, artifact = written () in
+      let first = opened store artifact and second = opened store artifact in
+      Engine.set first value_input () 5;
+      if Engine.get first doubled () <> 10 then fail "the first is stale";
+      if Engine.get second doubled () <> 8 then fail "the second saw the first's change");
+  test "writing again writes a difference holding only what changed" (fun () ->
+      let store, artifact = written () in
+      let engine = opened store artifact in
+      Engine.set engine value_input () 7;
+      ignore (Engine.get engine doubled ());
+      let changed = Engine.write engine in
+      let debt = Engine.debt engine in
+      if debt.depth <> 1 then fail "%d differences" debt.depth;
+      (* The input and the three results that read it, of the six nodes. *)
+      if debt.whole <> 6 then fail "the whole state holds %d nodes" debt.whole;
+      if debt.differences <> 4 then fail "the difference holds %d nodes" debt.differences;
+      if Engine.get (opened store changed) doubled () <> 14 then fail "the change was not written";
+      if Engine.get (opened store artifact) doubled () <> 8 then fail "the earlier state changed");
+  test "the whole state is written again when asked" (fun () ->
+      let store, artifact = written () in
+      let engine = opened store artifact in
+      Engine.set engine value_input () 7;
+      ignore (Engine.get engine doubled ());
+      let whole = Engine.write ~full:true engine in
+      if (Engine.debt engine).depth <> 0 then fail "still a difference";
+      let again = opened store whole in
+      if Engine.get again doubled () <> 14 then fail "another result";
+      if Engine.get again reads_through () <> 80 then fail "lost a result");
+  test "a result that is unchanged is not written, and nothing is written twice" (fun () ->
+      let store, artifact = written () in
+      let engine = opened store artifact in
+      if Engine.unwritten engine then fail "something to write after opening";
+      Engine.set engine value_input () 7;
+      ignore (Engine.get engine doubled ());
+      if not (Engine.unwritten engine) then fail "nothing to write after a change";
+      ignore (Engine.write engine);
+      if Engine.unwritten engine then fail "something to write after writing");
   test "a result whose value is gone from the store is computed again" (fun () ->
-      let store, journal = saved_session () in
+      let store, artifact = written () in
+      (* Another store holding the artifact, and none of the values. *)
       let empty = Store.open_ (fresh_directory ()) in
-      ignore store;
-      match Engine.load ~log:true empty journal with
-      | None -> fail "nothing loaded"
-      | Some engine ->
-          Engine.set engine value_input () 4;
-          if Engine.get engine doubled () <> 8 then fail "another result";
-          if not (List.mem "saved_doubled()" (Engine.executed engine)) then fail "not computed")
+      let copied = Store.put empty (Option.get (Store.get store artifact)) in
+      let engine = opened empty copied in
+      Engine.set engine value_input () 4;
+      if Engine.get engine doubled () <> 8 then fail "another result";
+      if not (List.mem "saved_doubled()" (Engine.executed engine)) then fail "not computed")
+
+let () =
+  test "a result computed in one state is found by another that reads the same" (fun () ->
+      let store, _ = written () in
+      let engine = attached store in
+      Engine.set engine value_input () 4;
+      if Engine.get engine doubled () <> 8 then fail "another result";
+      if Engine.executed engine <> [] then
+        fail "computed [%s]" (String.concat "; " (Engine.executed engine));
+      if (Engine.counters engine).adopted <> 1 then fail "not found as a fact");
+  test "a result is computed when what it reads has another value" (fun () ->
+      let store, _ = written () in
+      let engine = attached store in
+      Engine.set engine value_input () 5;
+      if Engine.get engine doubled () <> 10 then fail "another result";
+      if Engine.executed engine <> [ "saved_doubled()" ] then fail "not computed");
+  test "going back to an earlier input finds the earlier result" (fun () ->
+      let store, artifact = written () in
+      let engine = opened store artifact in
+      Engine.set engine value_input () 5;
+      ignore (Engine.get engine doubled ());
+      Engine.record engine;
+      Engine.clear_log engine;
+      Engine.set engine value_input () 4;
+      if Engine.get engine doubled () <> 8 then fail "another result";
+      if Engine.get engine reads_through () <> 50 then fail "another result read through";
+      (* The results that are not saved are computed, being cheap; the saved
+         ones are found. *)
+      if
+        List.exists
+          (fun label -> label = "saved_doubled()" || label = "saved_reads_through()")
+          (Engine.executed engine)
+      then fail "computed [%s]" (String.concat "; " (Engine.executed engine)));
+  test "a result found as a fact reads what the computed one read" (fun () ->
+      let store, _ = written () in
+      let engine = attached store in
+      Engine.set engine value_input () 4;
+      ignore (Engine.get engine reads_through ());
+      Engine.set engine value_input () 9;
+      let value = Engine.get engine reads_through () in
+      if value <> 100 then fail "result %d after the change" value)
 
 let layer_value = Query.input ~name:"layer_input" ~show:(fun () -> "") ()
 let own_value = Query.input ~name:"own_input" ~show:(fun () -> "") ()
@@ -219,30 +297,29 @@ let layer_unsaved =
   unit_query "layer_unsaved" (fun database () -> Query.get database layer_value () + 1)
 
 let reads_layer =
-  unit_query "reads_layer" ~saved:true (fun database () ->
+  unit_query "reads_layer" ~saved:true ~phase:Bodies (fun database () ->
       Query.demand database layer_unsaved () + Query.get database own_value ())
 
 let reads_reader =
-  unit_query "reads_reader" ~saved:true (fun database () ->
+  unit_query "reads_reader" ~saved:true ~phase:Bodies (fun database () ->
       10 * Query.demand database reads_layer ())
 
 let () =
-  test "a saved result that read an unsaved frozen result still sees changes after loading"
+  test "a saved result that read an unsaved result of a fixed base sees changes when opened"
     (fun () ->
       let store = Store.open_ (fresh_directory ()) in
-      let journal = Store.journal store "session" in
-      let layer = Engine.frozen_layer () in
-      Engine.set layer layer_value () 1;
-      let engine = Engine.create ~shared:layer () in
-      Engine.attach engine store;
+      let base = Engine.create () in
+      Engine.set base layer_value () 1;
+      Engine.freeze ~fixed:true base;
+      let engine = Engine.create ~bases:[ base ] () in
+      Engine.attach engine store ~version;
       Engine.set engine own_value () 5;
       ignore (Engine.get engine reads_reader ());
-      Engine.save engine journal;
-      match Engine.load ~shared:layer store journal with
-      | None -> fail "nothing loaded"
-      | Some loaded ->
-          Engine.set loaded own_value () 6;
-          let value = Engine.get loaded reads_reader () in
-          if value <> 80 then fail "result %d after the change" value)
+      let artifact = Engine.write engine in
+      let again = opened ~bases:[ base ] store artifact in
+      if Engine.get again reads_reader () <> 70 then fail "another result";
+      Engine.set again own_value () 6;
+      let value = Engine.get again reads_reader () in
+      if value <> 80 then fail "result %d after the change" value)
 
 let () = finish ()

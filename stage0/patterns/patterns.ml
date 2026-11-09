@@ -696,7 +696,8 @@ let check_definition context ~text (definition : definition) =
   Syntax_walk.definition ~statement expression definition
 
 let definition_diagnostics =
-  Query.query ~name:"pattern_diagnostics" ~show:Resolve.Names.show_key (fun database key ->
+  Query.query ~name:"pattern_diagnostics" ~phase:Bodies ~saved:true ~show:Resolve.Names.show_key
+    (fun database key ->
       match
         ( Query.demand database Resolve.Names.definition key,
           Infer.clean database key,

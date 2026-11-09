@@ -1,5 +1,5 @@
 (** The code database's store on disk: values by the hash of their bytes, results by the hash of the
-    input that made them, and append-only journals. See DATABASE.md, "Content hashes and the store".
+    input that made them, and pointers to the states being worked on. See DATABASE.md, "The store".
 
     Values and results live in append-only segment files. Each process that writes has a segment of
     its own, so writers never share a file or take a lock to write. A full segment is sealed with a
@@ -31,7 +31,7 @@ val get : t -> string -> string option
 (** The bytes with that name, or [None] if the store does not have them. *)
 
 val flush : t -> unit
-(** Makes every value and result added so far durable, before a journal refers to them. *)
+(** Makes every value and result added so far durable, before a pointer refers to them. *)
 
 (** {1 Results} *)
 
@@ -45,35 +45,28 @@ val files : t -> string -> string
 (** A directory of the store for results that must be files, such as object files, which a linker
     reads by path. *)
 
-(** {1 Journals} *)
+(** {1 Pointers} *)
 
-type journal
+type pointer
+(** A named place that holds a few bytes and is replaced whole, such as the name of a worktree's
+    current state. Everything else in the store is named by what it holds and never changes. *)
 
-val journal : t -> string -> journal
-(** A session's journal, by name. *)
+val pointer : t -> string -> pointer
 
-val lock : journal -> bool
-(** Takes the journal for this process alone, while it lives; [false] if another process has it. *)
+val lock : pointer -> bool
+(** Takes the pointer for this process alone, while it lives; [false] if another process has it. *)
 
-val unlock : journal -> unit
-(** Gives up a journal taken with {!lock}. *)
+val unlock : pointer -> unit
+(** Gives up a pointer taken with {!lock}. *)
 
-val records : journal -> string list
-(** Every whole record, in the order appended. Reading stops at the first record that is cut short
-    or damaged. *)
+val read : pointer -> string option
+(** What the pointer holds, or [None] if it was never written, or is cut short or damaged. *)
 
-val append : journal -> string -> unit
-(** Appends a record and makes it durable, after flushing the store's values. *)
+val point : pointer -> string -> unit
+(** Replaces what the pointer holds, after making every value and result added so far durable. *)
 
-val compact : journal -> string -> unit
-(** Replaces every record with one, written beside the journal and renamed over it. *)
-
-val journal_name : journal -> string
-(** The journal's file, which names it. *)
-
-val journal_size : journal -> int
-val remove_journal : journal -> unit
-val journals : t -> string list
+val remove_pointer : pointer -> unit
+val pointers : t -> string list
 
 (** {1 Collection} *)
 

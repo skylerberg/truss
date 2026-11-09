@@ -43,7 +43,6 @@
   path
   workspace
   resolve
-  hash
   standard_library
   support
   parse_support

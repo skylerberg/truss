@@ -25,7 +25,7 @@ let derivable (trait : Path.t) =
 (* Every [impl] of a package, written or derived, by trait and type
    constructor. *)
 let index =
-  Query.query ~name:"impl_index" ~show:Fun.id (fun database package ->
+  Query.query ~name:"impl_index" ~phase:Interfaces ~show:Fun.id (fun database package ->
       match Workspace.package database package with
       | None -> []
       | Some package ->
@@ -63,7 +63,7 @@ module Path_map = Map.Make (Path)
 
 (* A package's impls by the type they are for: each with its trait. *)
 let by_type =
-  Query.query ~name:"impls_by_type" ~show:Fun.id (fun database package ->
+  Query.query ~name:"impls_by_type" ~phase:Interfaces ~show:Fun.id (fun database package ->
       List.fold_left
         (fun table ((trait, type_), impl) ->
           Path_map.update type_
@@ -78,7 +78,7 @@ let impls_for database (type_ : Path.t) package =
   Option.value ~default:[] (Path_map.find_opt type_ (Query.demand database by_type package))
 
 let impls_in =
-  Query.query ~name:"impls"
+  Query.query ~name:"impls" ~phase:Interfaces ~saved:true
     ~show:(fun (trait, type_, package) ->
       Printf.sprintf "%s for %s in %s" (Path.show trait) (Path.show type_) package)
     (fun database ((trait : Path.t), (type_ : Path.t), package) ->

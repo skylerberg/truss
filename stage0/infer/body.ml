@@ -433,7 +433,7 @@ let check database (key : Names.key) =
   | _ -> None
 
 let checked =
-  Query.query ~name:"checked" ~show:Names.show_key ~saved:true
+  Query.query ~name:"checked" ~phase:Bodies ~show:Names.show_key ~saved:true
     ~about:(fun (key : Names.key) -> Some { Query.path = key.path; part = Some "body" })
     check
 

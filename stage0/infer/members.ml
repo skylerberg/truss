@@ -9,7 +9,7 @@ module Environment = Interface.Environment
    may find: the standard library's, the calling package's, and those of
    the packages its manifest lists. One query per package and name. *)
 let traits_declaring =
-  Query.query ~name:"traits_declaring"
+  Query.query ~name:"traits_declaring" ~phase:Interfaces ~saved:true
     ~show:(fun (package, name) -> package ^ " " ^ name)
     (fun database (package, name) ->
       match Workspace.package database package with

@@ -216,16 +216,48 @@ let () =
       expect_errors (Filename.concat root "good") 0;
       expect_errors (Filename.concat root "bad") 1;
       expect_errors root 1);
-  test "a new worktree starts from the nearest session" (fun () ->
+  test "a new worktree starts from the nearest saved state" (fun () ->
       fresh_store ();
       let first = package () in
       expect_errors first 0;
-      let fresh_work = List.length (computed first) in
       let second = package () in
       write second "main.truss" (program ^ "\nfn extra() -> Int64 {\n  1\n}\n");
       expect_errors second 0;
-      let work = List.length (computed second) in
-      if work * 2 >= fresh_work then fail "computed %d of %d" work fresh_work)
+      let again = computed second in
+      if List.mem "checked(app::main::double)" again then fail "checked double again";
+      if not (List.mem "checked(app::main::extra)" again) then fail "did not check extra");
+  test "a new worktree's state is a difference over the state it started from" (fun () ->
+      fresh_store ();
+      (* Eight modules, of which the second worktree changes one. *)
+      let module_text index =
+        Printf.sprintf
+          "fn first_%d(value: Int64) -> Int64 {\n\
+          \  value + %d\n\
+           }\n\n\
+           fn second_%d(value: Int64) -> Int64 {\n\
+          \  first_%d(value) * 2\n\
+           }\n"
+          index index index index
+      in
+      let worktree () =
+        let directory = fresh "package" in
+        write directory "truss.toml" (manifest "app");
+        for index = 1 to 8 do
+          write directory (Printf.sprintf "part_%d.truss" index) (module_text index)
+        done;
+        directory
+      in
+      let first = worktree () in
+      expect_errors first 0;
+      let second = worktree () in
+      write second "part_3.truss" (module_text 3 ^ "\nfn extra() -> Int64 {\n  1\n}\n");
+      expect_errors second 0;
+      match (Database.session_engine first, Database.session_engine second) with
+      | Some whole, Some difference ->
+          let own = Engine.count difference and all = List.length (Engine.nodes whole) in
+          if own * 2 >= all then
+            fail "the second holds %d nodes of its own, and the first state has %d" own all
+      | _ -> fail "no sessions")
 
 let double : Path.t = Top { module_ = { package = "app"; modules = [ "main" ] }; name = "double" }
 
