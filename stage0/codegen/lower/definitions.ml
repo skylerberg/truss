@@ -10,7 +10,7 @@ module Environment = Interface.Environment
 let bug format = Printf.ksprintf (fun message -> invalid_arg ("Lower: " ^ message)) format
 
 type context = {
-  database : Query.database;
+  database : Query.context;
   env : Memory_layout.env;
   glue : Glue.t;
   monomorphic : Monomorphic.context;

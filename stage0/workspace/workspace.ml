@@ -1,5 +1,13 @@
 type dependency = { package : string; capabilities : string list }
-type package = { name : string; dependencies : dependency list; modules : Path.module_ list }
+
+type package = {
+  name : string;
+  dependencies : dependency list;
+  modules : Path.module_ list;
+  usize_bits : int;
+      (** 64 when the manifest says the package runs only on 64-bit targets, and 32 otherwise, so
+          that its code holds for both widths of [USize] *)
+}
 
 let packages : (string, package) Query.input = Query.input ~name:"package" ~show:Fun.id ()
 

@@ -10,7 +10,7 @@ module T = Types
 module Names = Resolve.Names
 
 type state = {
-  database : Query.database;
+  database : Query.context;
   key : Names.key;
   definition : definition;
   lowered : Environment.lowered;

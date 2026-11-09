@@ -1,5 +1,5 @@
 (* What each file defines, and finding a definition by name. See
-   TYPECHECKER.md, "Name resolution" and "Traces".
+   TYPECHECKER.md, "Name resolution" and "Dependencies".
 
    Every lookup across definitions is a query keyed by where and what name,
    so a change re-runs only the lookups it can affect: adding a definition
@@ -312,7 +312,7 @@ let owner database ~from (head : type_head) =
   | None -> top from (spell_path head.path)
 
 let declarations =
-  Query.query ~name:"declarations" ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"declarations" ~show:Path.show_module ~saved:true (fun database module_ ->
       let file = Query.demand database Workspace.file module_ in
       let counts = Hashtbl.create 16 in
       let declare index (definition : definition) path kind generic =
@@ -471,7 +471,9 @@ let locate =
 (* A definition's tree, with positions relative to it, so that a definition
    that only moved gives the same tree and changes nothing that reads it. *)
 let definition =
-  Query.query ~name:"definition" ~show:show_key (fun database key ->
+  Query.query ~name:"definition" ~show:show_key ~saved:true
+    ~about:(fun key -> Some { path = key.path; part = Some "tree" })
+    (fun database key ->
       match Query.demand database locate key with
       | None -> None
       | Some (module_, declaration) ->
@@ -479,7 +481,7 @@ let definition =
 
 (* Where a definition starts in its file, for showing its diagnostics. *)
 let base =
-  Query.query ~name:"base" ~show:show_key (fun database key ->
+  Query.query ~name:"base" ~show:show_key ~saved:true (fun database key ->
       match Query.demand database locate key with
       | None -> None
       | Some (module_, declaration) ->

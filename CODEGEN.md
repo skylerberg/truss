@@ -432,8 +432,8 @@ of any cursors it pulls from inside it. An `own` argument is held as a
 value the cursor owns and drops, whatever its size, since the cursor may
 outlive the statement that made it. Other arguments are held as their
 parameters take them, a view or a pointer to the caller's place. The type has no name in Truss, and
-its layout depends on the method's body. That dependency is recorded in the
-trace of every instance that holds one, as Rust records it for
+its layout depends on the method's body, so every instance that holds one
+reads that body, as Rust's incremental compiler records for
 `impl Iterator`.
 
 ## Calling convention
@@ -711,7 +711,7 @@ and its siblings. Full-width multiplication, used by hashing and
 - **Derived implementations may be inlined into callers even in
   development builds.** Their code comes from the type's shape, which every
   caller already depends on through the layout, so inlining them adds
-  nothing to a trace.
+  no dependency.
 - **`any` calls** load the method from the vtable and call it with the
   value's pointer.
 
@@ -787,8 +787,8 @@ caller's statement or running the caller's loop body there: `continue` goes
 on after the `yield`, and `break` takes the `yield`'s `stop` path, so the
 method's locals are dropped as the loop leaves them. This gives the plain
 loop the C compiler would make of the loop form, and needs no rewriting of
-the caller into continuation-passing style. The caller then depends on the
-method's body, which its trace records. A lending method's `yield` must be
+the caller into continuation-passing style. The caller then reads the
+method's body, and depends on it. A lending method's `yield` must be
 its last statement, which needs the loop form above to lift.
 
 A loop over a yielding method that is already inlined around it, as a
@@ -1114,14 +1114,17 @@ finds test results already done, so the key contains no names:
   replaced by a number given in the order paths are first met, since a
   type's path is a name too.
 - The test's key is the hash of that numbered list, plus the version of code
-  generation.
+  generation and the target. `USize` is a `typedef` in the generated C, so
+  the LIR is the same for 32-bit and 64-bit targets, but results such as
+  `USize.maximum` are not.
 
 Two programs that differ only in names give the same key, and any change to
 what the test can run changes it. A layout change appears in the LIR of
 every instance that uses the layout, so it changes the key too.
 
-`truss test` keeps results in `~/.cache/truss/results`, one file per key,
-and builds and runs only the tests without one. Stage0 keeps only a pass
+`truss test` keeps results in the code database's store, as
+[DATABASE.md](DATABASE.md#exact-keys) describes, and builds and runs only
+the tests without one. Stage0 keeps only a pass
 with nothing to show. A failure's message and an `echo` give positions,
 which the key leaves out so that moving code keeps its results, so those
 tests run again, as do tests that ran out of time or crashed, which the
@@ -1131,12 +1134,13 @@ machine may have caused. A sanitized run keeps nothing.
 
 ### Caching
 
-Each step's output is stored under a key, with a trace of what it depended
-on, as DESIGN.md describes for every stage:
+Lowering is a query, kept current by the code database as DATABASE.md's
+"Lowering" describes, and so is each test's key. The steps after it are kept
+under exact keys, the hash of exactly the input each consumed:
 
-| Output | Key |
+| Output | Kept by |
 |---|---|
-| An instance's LIR | The instance, the codegen version, and a trace: the checked forms it lowered, the signatures it called, the layouts it used, and the bodies it inlined |
+| An instance's LIR | A query on the instance, which reads the checked forms it lowers, the signatures it calls, the layouts it uses, and the bodies it inlines |
 | An instance's C | The LIR's hash and the emitter's version |
 | An object file | The C's text, the C compiler's identity (its `--version` output and path), and the flags, which name the target |
 | A program | The objects, the anchors file, and the linker's identity |
@@ -1158,7 +1162,7 @@ recompiles objects but invalidates no test result.
   are emitted into the same file as `static` functions, so the C compiler
   can inline them, as DESIGN.md allows for development builds. They are
   chosen by size, and every yielding method is chosen. Each one is recorded
-  in the instance's trace.
+  as a body the instance reads.
 - **A package's own code compiles at `-O1`** in development builds, which is
   fast to compile and avoids the stack traffic of `-O0`.
 - **The standard library and dependencies compile at `-O2`** and are cached,
@@ -1177,8 +1181,8 @@ builds its tests into one test program and runs it. `truss run DIRECTORY
 ARGUMENTS` builds the package's program from its `main` and runs it with
 the arguments, on the terminal's own input and output, so it can prompt and
 read, and exits with its status. A package is a directory with a `truss.toml` naming it, and
-each `.truss` file under it is one of its modules. Object files are cached
-in `~/.cache/truss/objects`.
+each `.truss` file under it is one of its modules. Object files are kept in
+the code database's store.
 
 ### Linking
 

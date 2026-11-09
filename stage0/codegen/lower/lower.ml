@@ -43,7 +43,7 @@ let () =
   Forward.statement := Statements.statement
 
 type context = Definitions.context = {
-  database : Query.database;
+  database : Query.context;
   env : Memory_layout.env;
   glue : Glue.t;
   monomorphic : Monomorphic.context;

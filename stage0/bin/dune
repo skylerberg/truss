@@ -10,6 +10,8 @@
   parser
   path
   query
+  engine
+  database
   workspace
   type_checker
   memory_layout

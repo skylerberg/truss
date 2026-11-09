@@ -11,7 +11,7 @@
 (* What lowering reads, each one of the type checker's queries or code
    generation's own tables. *)
 type context = {
-  database : Query.database;
+  database : Query.context;
   env : Memory_layout.env;
   glue : Glue.t;
   monomorphic : Monomorphic.context;
@@ -27,7 +27,7 @@ type context = {
           runs, for a constant whose value is not folded while compiling *)
 }
 
-val context : ?checks:bool -> Query.database -> Memory_layout.target -> context
+val context : ?checks:bool -> Query.context -> Memory_layout.target -> context
 
 (* The LIR of an instance of a function, a method, an [impl]'s method, or a
    test, before drop elaboration. Raises [Invalid_argument] for an instance

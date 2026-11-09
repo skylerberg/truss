@@ -58,7 +58,7 @@ let is_prefix prefix place =
 type kind = Owned | Viewing | Mut_access
 
 type context = {
-  database : Query.database;
+  database : Query.context;
   definition : definition;
   resolved : Resolve.resolved;
   checked : C.t;

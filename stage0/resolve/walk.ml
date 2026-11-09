@@ -47,7 +47,7 @@ let no_specification = { active = false; result = false; cost_bound = false }
 let in_specification = { active = true; result = false; cost_bound = false }
 
 type state = {
-  database : Query.database;
+  database : Query.context;
   module_ : Path.module_;
   names : target option array;
   brackets : bracket option array;

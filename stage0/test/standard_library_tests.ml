@@ -4,8 +4,8 @@
 open Harness
 
 let () =
-  let database = Query.create () in
-  Type_checker.load_standard database;
+  let database = Engine.context (Engine.create ()) in
+  Database.load_standard (Engine.of_context database);
   List.iter
     (fun ((module_ : Path.module_), _) ->
       test

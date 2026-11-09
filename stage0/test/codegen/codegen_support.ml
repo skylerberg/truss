@@ -188,9 +188,10 @@ let example : Path.module_ = { package = "example"; modules = [ "main" ] }
 (* A module of Truss source with the standard library, which must check
    cleanly, ready to compile. *)
 let load text =
-  let database = Query.create () in
-  Type_checker.load_standard database;
-  Type_checker.load_package database ~name:"example" ~dependencies:[] [ (example, text) ];
+  let database = Engine.context (Engine.create ()) in
+  Database.load_standard (Engine.of_context database);
+  Database.load_package (Engine.of_context database) ~name:"example" ~dependencies:[]
+    [ (example, text) ];
   let source = (Query.demand database Workspace.file example).source in
   (match Type_checker.diagnostics database example with
   | [] -> ()
@@ -245,15 +246,17 @@ let drop_shapes =
 
 let standard_database =
   lazy
-    (let database = Query.create () in
+    (let database = Engine.context (Engine.create ()) in
      List.iter
-       (fun (module_, text) -> Query.set database Workspace.file_text module_ text)
+       (fun (module_, text) ->
+         Engine.set (Engine.of_context database) Workspace.file_text module_ text)
        Standard_library.modules;
-     Query.set database Workspace.packages Standard_library.package
+     Engine.set (Engine.of_context database) Workspace.packages Standard_library.package
        {
          name = Standard_library.package;
          dependencies = [];
          modules = List.map fst Standard_library.modules;
+         usize_bits = 64;
        };
      database)
 
