@@ -81,6 +81,7 @@ type context = {
   mutable instantiating : Path.t list;  (** Contracts being assumed, to stop at recursion. *)
   fits : (int * T.ty) list;  (** The type checker's [Integer_fits] obligations, by expression. *)
   mutable output : T.ty option;  (** What the function proven returns, for [?]. *)
+  graph : Call_graph.t;  (** The package's call graph, for recursion in cycles. *)
 }
 
 (* Symbols and facts *)
@@ -405,6 +406,7 @@ type part = {
   defaults : (int * expression) list;
   requires : expression list;
   ensures : expression list;
+  decreases : expression list;
 }
 
 type contract = {
@@ -457,6 +459,10 @@ let part_of callee (parameters : parameter list) (clauses : clause list) =
     ensures =
       List.filter_map
         (fun (clause : clause) -> match clause.kind with Ensures value -> Some value | _ -> None)
+        clauses;
+    decreases =
+      List.concat_map
+        (fun (clause : clause) -> match clause.kind with Decreases measures -> measures | _ -> [])
         clauses;
   }
 
@@ -991,6 +997,52 @@ and resolved_call context frame (written : expression) (call_ : C.call) =
     | [] -> ""
     | _ -> "[" ^ String.concat ", " (List.map argument_key arguments) ^ "]"
   in
+  (* In a function with a [time] clause, every call must end, and an
+     [impl] used where a bound needs one must not reach back here. *)
+  if context.terminates && frame.checking then begin
+    let ends =
+      match call_.callee with
+      | Function { path; _ } -> signature_terminates context path
+      | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ } ->
+          signature_terminates context (Path.Method { owner = impl; name; receiver })
+      | Trait_method { trait; name; receiver; _ } ->
+          signature_terminates context (Path.Method { owner = trait.trait; name; receiver })
+      | Capability_method { capability; name } ->
+          signature_terminates context (Path.Method { owner = capability; name; receiver = Static })
+      | Function_value -> (
+          match written.kind with
+          | Call (callee, _) -> (
+              match frame.source.checked.types.(callee.id) with
+              | Some (T.Function function_type) -> T.terminates function_type
+              | _ -> false)
+          | _ -> false)
+      | Constructor _ | Intrinsic _ | Built_in_operator -> true
+    in
+    if not ends then
+      oblige context frame Termination written.span
+        "This call may not end, since what it calls has no `time` clause, so neither may this \
+         function."
+        (L.Boolean false);
+    let impls =
+      Query.demand context.database Call_graph.package_impls (Path.package context.current)
+    in
+    List.iter
+      (fun impl ->
+        let reaches_here =
+          List.exists
+            (fun method_ -> Call_graph.reaches context.graph ~from:method_ ~target:context.current)
+            (Call_graph.targets context.graph (Uses_impl impl))
+        in
+        if reaches_here then
+          oblige context frame Termination written.span
+            (Printf.sprintf
+               "This call uses `%s` where a bound needs it, and that `impl`'s methods reach back \
+                here. Such a use passes no arguments the prover can compare, so the recursion \
+                cannot be shown to end: write it as a direct call on a part."
+               (Path.show impl))
+            (L.Boolean false))
+      (Call_graph.impls_used context.database impls call_)
+  end;
   let with_contract ?(substitution_of = fun _ -> []) ?(instance = "") path = function
     | Some contract when contract.result_kind <> `Yields ->
         Some
@@ -1057,6 +1109,11 @@ and resolved_call context frame (written : expression) (call_ : C.call) =
       let frame = havoc_mut frame in
       ignore source;
       Some (frame, arrive context frame "result" result_type)
+
+and signature_terminates context path =
+  match Query.demand context.database Interface.Environment.signature path with
+  | Some (signature : T.signature) -> signature.terminates
+  | None -> true
 
 (* Data *)
 
@@ -1503,25 +1560,39 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
     }
   in
   let own = List.hd contract.parts in
-  (* Recursion must decrease. *)
-  if Path.equal path context.current && context.terminates then
-    begin match context.measures with
-    | [] ->
-        unsupported written.span
-          "recursion without a `decreases` clause, since structural recursion is not proven yet"
-    | measures ->
+  (* A call in a cycle of the call graph must decrease: the callee's
+     measure, at the call's arguments, is below the caller's on entry. *)
+  if
+    context.terminates && frame.checking
+    && Call_graph.reaches context.graph ~from:path ~target:context.current
+  then
+    begin match (context.measures, own.decreases) with
+    | [], _ | _, [] ->
+        oblige context frame Termination written.span
+          (Printf.sprintf
+             "This call to `%s` may not end: it calls back here, and both need a `decreases` \
+              clause for the prover to show that the recursion ends."
+             (Path.show path))
+          (L.Boolean false)
+    | measures, callee_measures ->
         let current_frame =
           { frame with checking = false; locals = frame.old_locals; self = frame.old_self }
         in
         let callee_entry = entry_frame own in
+        let rec prefix before after =
+          match (before, after) with
+          | b :: before, a :: after ->
+              let rest_before, rest_after = prefix before after in
+              (b :: rest_before, a :: rest_after)
+          | _ -> ([], [])
+        in
         let before = List.map (fun measure -> snd (value context current_frame measure)) measures in
         let after =
-          List.map
-            (fun measure -> snd (value context { callee_entry with source = caller } measure))
-            measures
+          List.map (fun measure -> snd (value context callee_entry measure)) callee_measures
         in
+        let before, after = prefix before after in
         oblige context frame Termination written.span
-          (Printf.sprintf "This recursive call may not decrease `%s`."
+          (Printf.sprintf "This call may not decrease `%s`."
              (String.concat ", " (List.map (fun (m : expression) -> quote caller m.span) measures)))
           (smaller before after)
     end;
@@ -2016,6 +2087,7 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
 
 let new_context database ~current ~terminates ~measures checked =
   {
+    graph = Query.demand database Call_graph.graph (Path.package current);
     database;
     current;
     terminates;

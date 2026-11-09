@@ -856,8 +856,13 @@ It proves, with one canonical, numbered, hashed query per obligation:
   each iteration, and, in a function with a `time` clause, termination by
   `decreases`, the one measure the prover tries itself, or the `time`
   clause of the `each` a loop calls
-- direct recursion that decreases its `decreases`, in functions with a
-  `time` clause and in theorems
+- recursion over each package's call graph, whose edges are calls,
+  functions named as values, and `impl`s used where a bound needs one: a
+  call in a cycle through a function with a `time` clause, or a theorem,
+  must decrease the caller's `decreases` measure, compared in order, by the
+  callee's; a use of an `impl` that reaches back cannot, and is an error;
+  and every call from such a function must reach something with a `time`
+  clause. Structural recursion without a `decreases` is not proven yet.
 - `assert` in theorems and proofs, assumed in tests
 - quantifiers over ranges and over the integers, in specifications
 - the type checker's `Integer_fits` obligations

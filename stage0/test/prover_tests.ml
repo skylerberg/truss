@@ -215,6 +215,73 @@ let () =
         "fn f(steps: UInt32) -> UInt32\n  decreases steps\n  cost time finite\n{\n  f(steps)\n}\n"
         "prover.termination")
 
+let () =
+  test "mutual recursion without measures cannot be shown to end" (fun () ->
+      let database =
+        Support.setup
+          [
+            ( "app::main",
+              "fn even(n: UInt32) -> Bool\n\
+              \  cost time finite\n\
+               {\n\
+              \  if n == 0 { true } else { odd(n - 1) }\n\
+               }\n\n\
+               fn odd(n: UInt32) -> Bool\n\
+              \  cost time finite\n\
+               {\n\
+              \  if n == 0 { false } else { even(n - 1) }\n\
+               }\n" );
+          ]
+      in
+      match Support.codes (check database (Support.module_of "app::main")) with
+      | [ "prover.termination"; "prover.termination" ] -> ()
+      | codes -> fail "codes %s" (String.concat ", " codes));
+  test "mutual recursion that decreases" (fun () ->
+      proven
+        "fn even(n: UInt32) -> Bool\n\
+        \  decreases n\n\
+        \  cost time finite\n\
+         {\n\
+        \  if n == 0 { true } else { odd(n - 1) }\n\
+         }\n\n\
+         fn odd(n: UInt32) -> Bool\n\
+        \  decreases n\n\
+        \  cost time finite\n\
+         {\n\
+        \  if n == 0 { false } else { even(n - 1) }\n\
+         }\n");
+  test "a function with a time clause cannot call one without" (fun () ->
+      not_proven
+        "fn forever() -> Int64 {\n\
+        \  forever()\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  cost time finite\n\
+         {\n\
+        \  forever()\n\
+         }\n"
+        "prover.termination");
+  test "an impl that reaches itself through a generic function cannot be shown to end" (fun () ->
+      not_proven
+        "trait Check {\n\
+        \  fn check(self) -> Bool\n\
+        \    cost time finite\n\
+         }\n\n\
+         fn run[Item: Check](item: Item) -> Bool\n\
+        \  cost time finite\n\
+         {\n\
+        \  item.check()\n\
+         }\n\n\
+         type Loop()\n\n\
+         impl Check for Loop {\n\
+        \  fn check(self) -> Bool\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    !run(self)\n\
+        \  }\n\
+         }\n"
+        "prover.termination")
+
 (* Proofs *)
 
 let () =
