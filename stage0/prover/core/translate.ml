@@ -69,7 +69,10 @@ and frame = {
 type context = {
   database : Query.database;
   current : Path.t;
-  terminates : bool;  (** Whether the definition proven has a [time] clause. *)
+  mutable terminates : bool;
+      (** Whether the code being proven must end: the definition's [time] clause, or, in a lambda,
+          its function type's. *)
+  mutable parameters : parameter list;  (** The definition's, for its callbacks' [requires]. *)
   measures : expression list;  (** Its [decreases], for its recursive calls. *)
   mutable declarations : L.declaration list;
   declared : (string, unit) Hashtbl.t;
@@ -731,7 +734,7 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
   | Match { scrutinees; arms } -> match_ context frame written scrutinees arms
   | Try inner -> try_ context frame written inner
   | With (base, updates) -> with_ context frame written base updates
-  | Lambda _ -> unsupported written.span "a lambda"
+  | Lambda { parameters; body } -> Some (lambda context frame written parameters body ~facts:(fun _ -> []))
   | List _ | Map _ -> unsupported written.span "a collection literal"
   | String _ -> unsupported written.span "a string"
   | Float _ -> unsupported written.span "a float"
@@ -957,19 +960,35 @@ and call context frame (written : expression) callee_expression arguments =
 
 and resolved_call context frame (written : expression) (call_ : C.call) =
   let source = frame.source in
-  (* Arguments run in the order written. *)
-  let frame, values =
+  (* Arguments run in the order written, except lambdas, which are proven
+     last, as the type checker checks them, so that what the callee
+     promises to pass them can mention the other arguments. *)
+  let is_lambda (argument : C.argument) =
+    let (argument_expression : expression) = find_expression written argument.expression in
+    match argument_expression.kind with Lambda _ -> true | _ -> false
+  in
+  let frame, evaluated =
     List.fold_left
       (fun (frame, values) (argument : C.argument) ->
-        let expression_ = find_expression written argument.expression in
-        let frame, term = value context frame expression_ in
-        (match argument.conversion with
-        | Some From_integer -> ()
-        | Some (From_never | Owned_to_view | Function_widening | To_integer) | None -> ());
-        (frame, (argument, expression_, term) :: values))
+        if is_lambda argument then (frame, values)
+        else
+          let expression_ = find_expression written argument.expression in
+          let frame, term = value context frame expression_ in
+          (frame, (argument.parameter, term) :: values))
       (frame, []) call_.arguments
   in
-  let values = List.rev values in
+  let values =
+    List.map
+      (fun (argument : C.argument) ->
+        let (expression_ : expression) = find_expression written argument.expression in
+        match (List.assoc_opt argument.parameter evaluated, expression_.kind) with
+        | Some term, _ -> (argument, expression_, term)
+        | None, Lambda { parameters; body } ->
+            let facts = callback_facts context frame call_ argument.parameter evaluated in
+            (argument, expression_, lambda context frame expression_ parameters body ~facts |> snd)
+        | None, _ -> unsupported expression_.span "an argument")
+      call_.arguments
+  in
   let result_type = substituted frame call_.result in
   (match call_.callee with
   | Constructor _ | Built_in_operator | Intrinsic _ -> ()
@@ -1128,10 +1147,161 @@ and resolved_call context frame (written : expression) (call_ : C.call) =
         path
         (method_contract context.database trait name receiver evidence)
   | Constructor { variant; _ } -> Some (construct context frame written call_ variant values)
-  | Capability_method _ | Function_value | Intrinsic _ | Built_in_operator ->
+  | Function_value ->
+      check_callback_requires context frame written values;
+      let frame = havoc_mut frame in
+      Some (frame, arrive context frame "result" result_type)
+  | Capability_method _ | Intrinsic _ | Built_in_operator ->
       let frame = havoc_mut frame in
       ignore source;
       Some (frame, arrive context frame "result" result_type)
+
+(* Lambdas and callbacks *)
+
+(* A lambda is proven where it is written, with fresh arguments of its
+   function type and what the callee promises to pass it; it ends exactly
+   when its function type has a [time] clause; and it is a value about
+   which nothing more is known. *)
+and lambda context frame (written : expression) (parameters : pattern list) body ~facts =
+  let ty = type_of frame written in
+  let function_type =
+    match ty with T.Function function_type -> function_type | _ -> unsupported written.span "a lambda"
+  in
+  if List.length parameters <> List.length function_type.inputs then
+    unsupported written.span "a lambda with a different number of parameters";
+  let inside = { frame with result = None; loop = None } in
+  let arguments, inside =
+    List.fold_left2
+      (fun (arguments, inside) (pattern : pattern) (_, input) ->
+        let input = substituted frame input in
+        let argument = arrive context inside "argument" input in
+        assume_valid context inside input argument;
+        let _, inside = pattern_match context inside pattern argument input in
+        (argument :: arguments, inside))
+      ([], inside) parameters function_type.inputs
+  in
+  let arguments = List.rev arguments in
+  List.iter (assume context inside) (facts arguments);
+  let saved_returns = context.returns
+  and saved_output = context.output
+  and saved_terminates = context.terminates in
+  context.returns <- [];
+  context.output <- (match function_type.output with Returns output -> Some output | _ -> None);
+  context.terminates <- T.terminates function_type;
+  Fun.protect
+    ~finally:(fun () ->
+      context.returns <- saved_returns;
+      context.output <- saved_output;
+      context.terminates <- saved_terminates)
+    (fun () -> ignore (block_value context inside body));
+  (frame, arrive context frame "lambda" ty)
+
+(* The [requires] on the type of a function-typed parameter, with the
+   names of its inputs, in the definition that declares it. *)
+and callback_requires (parameters : parameter list) index =
+  let named =
+    List.filter_map
+      (fun (parameter : parameter) ->
+        match parameter.kind with Named_parameter { type_; _ } -> Some type_ | _ -> None)
+      parameters
+  in
+  let has_self =
+    List.exists (fun (p : parameter) -> match p.kind with Self_parameter _ -> true | _ -> false) parameters
+  in
+  match List.nth_opt named (if has_self then index - 1 else index) with
+  | Some { kind = Function_type { input_names; clauses; _ }; _ } when input_names <> [] ->
+      Some
+        ( input_names,
+          List.filter_map
+            (fun (clause : clause) -> match clause.kind with Requires value -> Some value | _ -> None)
+            clauses )
+  | _ -> None
+
+(* What a callee promises the lambda it is passed for one parameter: that
+   parameter's [requires], read in the callee with the call's other
+   arguments, and the lambda's arguments for the inputs it names. *)
+and callback_facts context frame (call_ : C.call) index evaluated arguments =
+  match call_.callee with
+  | Function { path; type_arguments } -> (
+      match Interface.Summary.definition context.database path with
+      | Some (key, { kind = Function { signature; _ }; _ }) -> (
+          match (callback_requires signature.parameters index, callee_source context.database key) with
+          | Some (input_names, requires), Some callee ->
+              let part = part_of callee signature.parameters signature.clauses in
+              let locals, self =
+                List.fold_left
+                  (fun (locals, self) (position, binding) ->
+                    match (binding, List.assoc_opt position evaluated) with
+                    | Self_binding, Some term -> (locals, Some term)
+                    | Parameter_binding name_, Some term -> (Ids.add name_.id term locals, self)
+                    | _ -> (locals, self))
+                  (Ids.empty, None)
+                  (List.mapi (fun position binding -> (position, binding)) part.binding)
+              in
+              if List.length input_names <> List.length arguments then []
+              else
+                let locals =
+                  List.fold_left2 (fun locals (name_ : name) term -> Ids.add name_.id term locals) locals input_names arguments
+                in
+                let substitution =
+                  match Query.demand context.database Interface.Environment.signature path with
+                  | Some (signature : T.signature) ->
+                      let rec pair generics arguments =
+                        match (generics, arguments) with
+                        | (generic : T.generic) :: generics, argument :: arguments ->
+                            (generic.generic, T.substitute_argument frame.substitution argument) :: pair generics arguments
+                        | _ -> []
+                      in
+                      pair signature.generics type_arguments
+                  | None -> []
+                in
+                let inside =
+                  { frame with source = callee; locals; old_locals = locals; self; old_self = self; checking = false; loop = None; substitution; result = None }
+                in
+                List.map (fun clause -> snd (value context inside clause)) requires
+          | _ -> [])
+      | _ -> [])
+  | _ -> []
+
+(* A call through a function-typed parameter whose type has a [requires]
+   must meet it. *)
+and check_callback_requires context frame (written : expression) values =
+  match written.kind with
+  | Call ({ kind = Name _; _ } as callee, _) -> (
+      match frame.source.checked.meanings.(callee.id) with
+      | Some (Local_value id) -> (
+          let index =
+            let rec find position = function
+              | [] -> None
+              | (parameter : parameter) :: rest -> (
+                  match parameter.kind with
+                  | Named_parameter { name = name_; _ } when name_.id = id -> Some position
+                  | Self_parameter _ | Named_parameter _ -> find (position + 1) rest
+                  | Parameter_error -> find (position + 1) rest)
+            in
+            find 0 context.parameters
+          in
+          match index with
+          | Some index -> (
+              match callback_requires context.parameters index with
+              | Some (input_names, requires) when List.length input_names = List.length values ->
+                  let locals =
+                    List.fold_left2
+                      (fun locals (name_ : name) (_, _, term) -> Ids.add name_.id term locals)
+                      frame.locals input_names values
+                  in
+                  let inside = { frame with locals; checking = false } in
+                  List.iter
+                    (fun (clause : expression) ->
+                      oblige context frame Requires written.span
+                        (Printf.sprintf "`%s` may not hold for this call through `%s`."
+                           (quote frame.source clause.span) (quote frame.source callee.span))
+                        (snd (value context inside clause)))
+                    requires
+              | _ -> ())
+          | None -> ())
+      | _ -> ())
+  | _ -> ()
 
 (* Whether a call is to a private method that takes [mut self], which is a
    step of an update: its receiver's invariant is neither shown at the call
@@ -2246,6 +2416,7 @@ let new_context database ~current ~terminates ~measures checked =
     returns = [];
     instantiating = [];
     output = None;
+    parameters = [];
     fits =
       List.filter_map
         (function C.Integer_fits { expression; type_ } -> Some (expression, type_) | _ -> None)
@@ -2296,6 +2467,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
       signature.clauses
   in
   let context = new_context database ~current:path ~terminates ~measures source.checked in
+  context.parameters <- signature.parameters;
   costs_unproven context signature.clauses;
   (match Query.demand database Interface.Environment.signature path with
   | Some { output = Returns ty; _ } -> context.output <- Some ty

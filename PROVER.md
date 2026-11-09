@@ -875,6 +875,12 @@ It proves, with one canonical, numbered, hashed query per obligation:
   call, returned, or left in a `mut` parameter or `mut self`; a private
   method that takes `mut self` neither assumes nor shows its `self`'s, and
   neither does a call to one for its receiver
+- lambdas, proven where they are written, with fresh arguments, what the
+  callee's function-typed parameter promises them in its `requires`, and
+  the `time` clause of their function type deciding whether they must end;
+  and each call through a function-typed parameter whose type has a
+  `requires`, which must meet it. A function named as a value is not read
+  yet.
 - `assert` in theorems and proofs, assumed in tests
 - quantifiers over ranges and over the integers, in specifications
 - the type checker's `Integer_fits` obligations
@@ -883,8 +889,9 @@ A call to anything whose contract it does not read yet, such as a trait
 method or a capability, gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
-definition that uses anything else, such as a lambda, a string, a float, a
-cursor, or a lending or yielding method's own body, is reported as
+definition that uses anything else, such as a string, a float, a cursor,
+a function named as a value, or a lending or yielding method's own body,
+is reported as
 `prover.unsupported` with what stopped it, and none of its obligations
 count as proven. A cost bound, and a loop's
 `cost`, are reported as not proven yet, while the rest of the definition is

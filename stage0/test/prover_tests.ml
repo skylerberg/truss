@@ -541,6 +541,52 @@ let () =
           }\n")
         "prover.requires")
 
+(* Lambdas and callbacks *)
+
+let each_index =
+  "fn each_index(count: USize, visit: (fn(index: USize) -> Int64 requires index < count)) -> Int64 {\n\
+  \  todo\n\
+   }\n\n"
+
+let () =
+  test "a lambda's body is proven where it is written" (fun () ->
+      not_proven
+        "fn apply(transform: fn(UInt8) -> UInt8) -> UInt8 {\n\
+        \  todo\n\
+         }\n\n\
+         fn f() -> UInt8 {\n\
+        \  apply(fn(value) { value + 1 })\n\
+         }\n"
+        "prover.overflow");
+  test "a lambda may rely on what its callee promises to pass it" (fun () ->
+      proven
+        (each_index
+       ^ "fn f(items: List[Int64]) -> Int64 {\n\
+         \  each_index(items.length(), visit: fn(i) { items[i] })\n\
+          }\n"));
+  test "a lambda without such a promise knows nothing of its arguments" (fun () ->
+      not_proven
+        "fn each(count: USize, visit: fn(USize) -> Int64) -> Int64 {\n\
+        \  todo\n\
+         }\n\n\
+         fn f(items: List[Int64]) -> Int64 {\n\
+        \  each(items.length(), visit: fn(i) { items[i] })\n\
+         }\n"
+        "prover.requires");
+  test "a function must meet what it promises its callback" (fun () ->
+      not_proven
+        "fn each_index(count: USize, visit: (fn(index: USize) -> Int64 requires index < count)) -> \
+         Int64 {\n\
+        \  visit(count)\n\
+         }\n"
+        "prover.requires");
+  test "a function that meets what it promises its callback" (fun () ->
+      proven
+        "fn each_index(count: USize, visit: (fn(index: USize) -> Int64 requires index < count)) -> \
+         Int64 {\n\
+        \  if count > 0 { visit(count - 1) } else { 0 }\n\
+         }\n")
+
 (* Type invariants *)
 
 let span = "type Span(low: Int64, high: Int64)\n  invariant low <= high\n\n"
