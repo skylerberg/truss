@@ -10,8 +10,10 @@ val version : string
 type t
 (** A solver found on this machine, of the pinned version. *)
 
-val find : unit -> (t, string) result
-(** [$TRUSS_Z3], or [z3] on the path, checked to be the pinned version. *)
+val find : ?cache:string -> unit -> (t, string) result
+(** [$TRUSS_Z3], or [z3] on the path, checked to be the pinned version. With [cache], answers are
+    also kept in that directory, one file per key, so a query solved once is never solved again on
+    this machine. *)
 
 val steps : int
 (** The limit in steps every query runs with. *)

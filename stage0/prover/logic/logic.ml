@@ -81,6 +81,54 @@ let rec mentions symbols = function
       let shadowed = List.map fst bound in
       mentions (List.filter (fun symbol -> not (List.mem symbol shadowed)) symbols) body
 
+(* Pruning *)
+
+(* The declared symbols a term mentions. A datatype's constructors and
+   selectors are shared vocabulary, like SMT-LIB's own operations, so they
+   connect nothing. *)
+let declared_symbols declared term =
+  let found = ref [] in
+  let rec walk bound = function
+    | Symbol name ->
+        if (not (List.mem name bound)) && Hashtbl.mem declared name then found := name :: !found
+    | Integer _ | Boolean _ -> ()
+    | Apply (name, arguments) ->
+        if Hashtbl.mem declared name then found := name :: !found;
+        List.iter (walk bound) arguments
+    | Forall (variables, body) | Exists (variables, body) ->
+        walk (List.map fst variables @ bound) body
+  in
+  walk [] term;
+  !found
+
+let prune query =
+  let declared = Hashtbl.create 64 in
+  List.iter
+    (function
+      | Constant (name, _) | Function (name, _, _) -> Hashtbl.replace declared name ()
+      | Datatype _ -> ())
+    query.declarations;
+  let reached = Hashtbl.create 64 in
+  let reach symbols = List.iter (fun symbol -> Hashtbl.replace reached symbol ()) symbols in
+  reach (declared_symbols declared query.goal);
+  let facts =
+    Array.of_list (List.map (fun fact -> (fact, declared_symbols declared fact)) query.facts)
+  in
+  let kept = Array.make (Array.length facts) false in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    Array.iteri
+      (fun index (_, symbols) ->
+        if (not kept.(index)) && List.exists (Hashtbl.mem reached) symbols then begin
+          kept.(index) <- true;
+          reach symbols;
+          changed := true
+        end)
+      facts
+  done;
+  { query with facts = List.filteri (fun index _ -> kept.(index)) query.facts }
+
 (* Canonical text *)
 
 (* Numbering: every declared symbol and every sort is named by the order

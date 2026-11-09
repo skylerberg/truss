@@ -866,7 +866,11 @@ It proves, with one canonical, numbered, hashed query per obligation:
   must decrease the caller's `decreases` measure, compared in order, by the
   callee's; a use of an `impl` that reaches back cannot, and is an error;
   and every call from such a function must reach something with a `time`
-  clause. Structural recursion without a `decreases` is not proven yet.
+  clause. A direct recursive call without a `decreases` ends when it is on
+  parts of the parameters: each field read is below the value it is read
+  from in an order of ranks, compared in the parameters' order, as Dafny
+  orders its datatypes. The standard library's elements of a collection
+  are not ranked yet.
 - type invariants, as [Type invariants](#type-invariants) describes: a
   value's validity, its type's invariants with its fields' validity, is
   assumed of parameters, call results, values left in `mut` arguments, and
@@ -883,7 +887,12 @@ It proves, with one canonical, numbered, hashed query per obligation:
   yet.
 - `assert` in theorems and proofs, assumed in tests
 - quantifiers over ranges and over the integers, in specifications
-- the type checker's `Integer_fits` obligations
+- the type checker's `Integer_fits` obligations, and its `Guards_cover`,
+  which the `_ => unreachable` arm it is about shows
+- pruning: each query keeps only the facts that share a symbol with its
+  goal, directly or through other kept facts
+- a cache of answers on disk, by each query's key, which `truss prove`
+  keeps in `~/.cache/truss/proofs`
 
 A call to anything whose contract it does not read yet, such as a trait
 method or a capability, gives a value known only by its type's range, and

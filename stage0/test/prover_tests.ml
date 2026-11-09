@@ -282,6 +282,34 @@ let () =
          }\n"
         "prover.termination")
 
+let tree = "type Tree =\n  | Leaf\n  | indirect Node(left: Tree, value: Int64, right: Tree)\n\n"
+
+let () =
+  test "recursion on a part of a parameter ends" (fun () ->
+      proven
+        (tree
+       ^ "fn leftmost(tree: Tree) -> Int64\n\
+         \  cost time finite\n\
+          {\n\
+         \  match tree {\n\
+         \    Leaf => 0\n\
+         \    Node(left, value, ..) => if left is Leaf { value } else { leftmost(left) }\n\
+         \  }\n\
+          }\n"));
+  test "recursion on the parameter itself does not end" (fun () ->
+      not_proven
+        (tree ^ "fn spin(tree: Tree) -> Int64\n  cost time finite\n{\n  spin(tree)\n}\n")
+        "prover.termination");
+  test "a match with guards ends in an unreachable that is proven" (fun () ->
+      proven
+        "fn f(value: Int64) -> Int64 {\n\
+        \  match value {\n\
+        \    x if x > 0 => 1\n\
+        \    x if x <= 0 => 2\n\
+        \    _ => unreachable\n\
+        \  }\n\
+         }\n")
+
 (* Proofs *)
 
 let () =

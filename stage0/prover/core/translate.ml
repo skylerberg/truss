@@ -125,11 +125,12 @@ let oblige context frame code span message goal =
         span;
         message;
         query =
-          {
-            declarations = List.rev context.declarations;
-            facts = List.rev context.facts;
-            goal = guarded;
-          };
+          L.prune
+            {
+              declarations = List.rev context.declarations;
+              facts = List.rev context.facts;
+              goal = guarded;
+            };
         values = context.values;
       }
       :: context.obligations;
@@ -1349,7 +1350,20 @@ and member context frame (written : expression) base =
 and field_of context frame ty variant field field_type term =
   let part = L.Apply (selector_name ty variant field, [ term ]) in
   assume context frame (in_range field_type part);
+  (* A part of a value is below it, which is how structural recursion is
+     shown to end. *)
+  if constructors context field_type <> None then begin
+    let below = rank context field_type part in
+    assume context frame L.(Apply ("<=", [ int 0; below ]) &&& Apply ("<", [ below; rank context ty term ]))
+  end;
   part
+
+(* A value's place in the order of parts, as Dafny's datatypes have one:
+   any field is below the value it is in. *)
+and rank context ty term =
+  let symbol = "rank." ^ type_key ty in
+  declare context (L.Function (symbol, [ sort_of context ty ], L.Int));
+  L.Apply (symbol, [ term ])
 
 (* A variant with no fields, such as [None]. *)
 and variant_value context (written : expression) type_ variant =
@@ -1864,6 +1878,16 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
     && Call_graph.reaches context.graph ~from:path ~target:context.current
   then
     begin match (context.measures, own.decreases) with
+    | [], [] when Path.equal path context.current && structural_parameters frame own <> [] ->
+        (* With no [decreases], a call on parts of the parameters ends:
+           their ranks decrease, compared in the parameters' order. *)
+        let pairs = structural_parameters frame own in
+        let before = List.map (fun (ty, entry, _) -> rank context ty entry) pairs in
+        let after = List.map (fun (ty, _, index) -> rank context ty (argument_at_index values index)) pairs in
+        oblige context frame Termination written.span
+          "This recursive call may not be on a part of its parameters: give the function a \
+           `decreases` clause."
+          L.(conjunction (List.map (fun b -> Apply ("<=", [ int 0; b ])) before) &&& smaller before after)
     | [], _ | _, [] ->
         oblige context frame Termination written.span
           (Printf.sprintf
@@ -2011,6 +2035,34 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
     context.instantiating <- List.tl context.instantiating
   end;
   (after, result)
+
+(* The parameters of the definition proven whose types are datatypes,
+   with their values on entry and their arguments' positions. *)
+and structural_parameters frame (own : part) =
+  List.concat
+    (List.mapi
+       (fun index binding ->
+         match binding with
+         | Self_binding -> (
+             match (frame.old_self, frame.self_type) with
+             | Some entry, Some ty when is_datatype frame ty -> [ (ty, entry, index) ]
+             | _ -> [])
+         | Parameter_binding name_ -> (
+             match (Ids.find_opt name_.id frame.old_locals, local_type frame name_.id) with
+             | Some entry, Some ty when is_datatype frame ty -> [ (ty, entry, index) ]
+             | _ -> []))
+       own.binding)
+
+and is_datatype frame ty = (ignore frame; match ty with T.Named _ -> builtin ty = None | _ -> false)
+
+and argument_at_index values index =
+  match
+    List.find_map
+      (fun ((argument : C.argument), _, term) -> if argument.parameter = index then Some term else None)
+      values
+  with
+  | Some term -> term
+  | None -> L.Boolean false
 
 and smaller before after =
   match (before, after) with
@@ -2433,7 +2485,10 @@ let reject_checker_obligations (source : source) =
       | C.Disjoint { first; _ } ->
           raise (Unsupported (Span.make 0 0, Printf.sprintf "disjoint indexes (at node %d)" first))
       | C.Costs_imply _ -> raise (Unsupported (Span.make 0 0, "a function value's costs"))
-      | C.Guards_cover _ -> raise (Unsupported (Span.make 0 0, "a `match` with guards")))
+      | C.Guards_cover _ ->
+          (* Shown by the [_ => unreachable] arm it is about, which is an
+             obligation of its own. *)
+          ())
     source.checked.obligations
 
 let costs_unproven context (clauses : clause list) =

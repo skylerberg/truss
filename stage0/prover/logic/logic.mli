@@ -61,6 +61,13 @@ val truncated_remainder : term -> term -> term
 val mentions : string list -> term -> bool
 (** Whether a term mentions any of the symbols, free. *)
 
+val prune : query -> query
+(** The query with only the facts its goal can depend on: starting from the goal's declared symbols,
+    each fact that mentions one of them is kept, with its symbols, until no more are added. Dropping
+    a fact is always sound, and a fact about symbols the goal never reaches cannot help to prove it,
+    so a change to such a fact leaves the query's text, and its cached result, as they were. See
+    PROVER.md, "Pruning". *)
+
 (** {1 Canonical text} *)
 
 val text : query -> string

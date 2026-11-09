@@ -139,7 +139,7 @@ let () =
   | _ :: "prove" :: [ directory ] -> (
       let database, modules = load directory in
       check database modules;
-      match Solver.find () with
+      match Solver.find ~cache:(Filename.concat home ".cache/truss/proofs") () with
       | Error message -> fail "%s" message
       | Ok solver ->
           let found =
