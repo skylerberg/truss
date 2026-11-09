@@ -11,8 +11,8 @@ type kind = Upper | Lower
 
 type checked = {
   kind : kind;
-  name : string;  (* the corrected name when there is a fix *)
-  problem : (Diagnostic.Code.lexer * string) option;  (* code, message *)
+  name : string; (* the corrected name when there is a fix *)
+  problem : (Diagnostic.Code.lexer * string) option; (* code, message *)
   fix : string option;
 }
 
@@ -20,7 +20,11 @@ let is_upper c = c >= 'A' && c <= 'Z'
 let is_lower c = c >= 'a' && c <= 'z'
 
 let kind_of name =
-  match String.fold_left (fun found c -> match found with None when c <> '_' -> Some c | found -> found) None name with
+  match
+    String.fold_left
+      (fun found c -> match found with None when c <> '_' -> Some c | found -> found)
+      None name
+  with
   | Some first when is_upper first -> Upper
   | _ -> Lower
 
@@ -40,7 +44,8 @@ let to_snake name =
           index > 0
           &&
           let previous = name.[index - 1] in
-          previous <> '_' && ((not (is_upper previous)) || (index + 1 < length && is_lower name.[index + 1]))
+          previous <> '_'
+          && ((not (is_upper previous)) || (index + 1 < length && is_lower name.[index + 1]))
         in
         if starts_word then Buffer.add_char buffer '_';
         Buffer.add_char buffer (Char.lowercase_ascii c)
@@ -51,21 +56,26 @@ let to_snake name =
 
 (* `Http_client` becomes `HttpClient`. *)
 let to_camel name =
-  String.concat "" (List.mapi (fun index part -> if index = 0 then part else String.capitalize_ascii part) (parts name))
+  String.concat ""
+    (List.mapi
+       (fun index part -> if index = 0 then part else String.capitalize_ascii part)
+       (parts name))
 
 let correct_case name =
   match parts name with
   | [] -> name
   | first :: _ when is_upper first.[0] ->
       if not (String.contains name '_') then name
-      else if not (String.exists is_lower name) then String.lowercase_ascii (String.concat "_" (parts name))
+      else if not (String.exists is_lower name) then
+        String.lowercase_ascii (String.concat "_" (parts name))
       else to_camel name
   | _ -> to_snake name
 
 let case_problem name =
   let length = String.length name in
   let rec has_double_underscore index =
-    index + 1 < length && ((name.[index] = '_' && name.[index + 1] = '_') || has_double_underscore (index + 1))
+    index + 1 < length
+    && ((name.[index] = '_' && name.[index + 1] = '_') || has_double_underscore (index + 1))
   in
   let message =
     if length > 0 && name.[0] = '_' then Some "Names cannot start with `_`."
@@ -74,14 +84,16 @@ let case_problem name =
       else if not (String.exists is_lower name) then
         Some
           (Printf.sprintf
-             "`%s` is written like a constant from another language. Constants are values, so their \
-              names are lower_snake_case."
+             "`%s` is written like a constant from another language. Constants are values, so \
+              their names are lower_snake_case."
              name)
       else Some "A name that starts with an uppercase letter is UpperCamelCase, with no `_`."
     else if String.exists is_upper name then
-      Some "A name that starts with a lowercase letter is lower_snake_case, with no uppercase letters."
+      Some
+        "A name that starts with a lowercase letter is lower_snake_case, with no uppercase letters."
     else if length > 0 && name.[length - 1] = '_' then Some "Names cannot end with `_`."
-    else if has_double_underscore 0 then Some "`_` appears only singly, between the parts of a name."
+    else if has_double_underscore 0 then
+      Some "`_` appears only singly, between the parts of a name."
     else None
   in
   Option.map (fun message -> (Diagnostic.Code.Name_case, message)) message

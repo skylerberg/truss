@@ -10,14 +10,14 @@
 type problem = {
   code : Diagnostic.Code.lexer;
   message : string;
-  start : int;  (* offsets within the literal *)
+  start : int; (* offsets within the literal *)
   stop : int;
 }
 
 type checked = {
-  value : Token.kind;  (* an Integer or a Float *)
+  value : Token.kind; (* an Integer or a Float *)
   problem : problem option;
-  fixes : (string * string) list;  (* title, replacement for the whole literal *)
+  fixes : (string * string) list; (* title, replacement for the whole literal *)
 }
 
 let is_digit c = c >= '0' && c <= '9'
@@ -65,14 +65,35 @@ let scan_end text start =
 (* Type suffixes from other languages, and the Truss type each one means. *)
 let suffixes =
   [
-    ("u8", Some "UInt8"); ("u16", Some "UInt16"); ("u32", Some "UInt32"); ("u64", Some "UInt64");
-    ("u128", None); ("usize", Some "USize"); ("uz", Some "USize"); ("z", Some "ISize");
-    ("i8", Some "Int8"); ("i16", Some "Int16"); ("i32", Some "Int32"); ("i64", Some "Int64");
-    ("i128", None); ("isize", Some "ISize");
-    ("f16", None); ("f32", Some "Float32"); ("f64", Some "Float64"); ("f128", None);
-    ("f", Some "Float32"); ("d", Some "Float64"); ("m", None);
-    ("u", Some "UInt32"); ("l", Some "Int64"); ("ll", Some "Int64"); ("ul", Some "UInt64");
-    ("lu", Some "UInt64"); ("ull", Some "UInt64"); ("llu", Some "UInt64"); ("n", None);
+    ("u8", Some "UInt8");
+    ("u16", Some "UInt16");
+    ("u32", Some "UInt32");
+    ("u64", Some "UInt64");
+    ("u128", None);
+    ("usize", Some "USize");
+    ("uz", Some "USize");
+    ("z", Some "ISize");
+    ("i8", Some "Int8");
+    ("i16", Some "Int16");
+    ("i32", Some "Int32");
+    ("i64", Some "Int64");
+    ("i128", None);
+    ("isize", Some "ISize");
+    ("f16", None);
+    ("f32", Some "Float32");
+    ("f64", Some "Float64");
+    ("f128", None);
+    ("f", Some "Float32");
+    ("d", Some "Float64");
+    ("m", None);
+    ("u", Some "UInt32");
+    ("l", Some "Int64");
+    ("ll", Some "Int64");
+    ("ul", Some "UInt64");
+    ("lu", Some "UInt64");
+    ("ull", Some "UInt64");
+    ("llu", Some "UInt64");
+    ("n", None);
   ]
 
 let suffix_type text = List.assoc_opt (String.lowercase_ascii text) suffixes
@@ -92,9 +113,7 @@ let clean_underscores group =
     let length = String.length group in
     let rec first_bad index =
       if index >= length then None
-      else if
-        group.[index] = '_'
-        && (index = 0 || index = length - 1 || group.[index + 1] = '_')
+      else if group.[index] = '_' && (index = 0 || index = length - 1 || group.[index + 1] = '_')
       then Some index
       else first_bad (index + 1)
     in
@@ -130,7 +149,9 @@ let suffix_issue text ~at ~fixed =
     match suffix_type suffix with
     | Some (Some type_name) -> Printf.sprintf "`let value: %s = %s`" type_name fixed
     | _ ->
-        let default_type = if String.contains fixed '.' || String.contains fixed 'e' then "Float64" else "Int64" in
+        let default_type =
+          if String.contains fixed '.' || String.contains fixed 'e' then "Float64" else "Int64"
+        in
         Printf.sprintf "`let value: %s = %s`" default_type fixed
   in
   issue Number_suffix
@@ -140,8 +161,7 @@ let suffix_issue text ~at ~fixed =
        suffix example)
     at (String.length text)
 
-let underscore_issue at =
-  issue Number_underscore "`_` can only go between digits." at (at + 1)
+let underscore_issue at = issue Number_underscore "`_` can only go between digits." at (at + 1)
 
 (* Picks the problem to report: the leftmost one without an exact fix if
    there is one, and otherwise the leftmost one, with a fix for them all. *)
@@ -155,7 +175,8 @@ let decide value issues fixes =
       None issues
   in
   match List.filter (fun issue -> not issue.fixable) issues with
-  | _ :: _ as unfixable -> { value; problem = Option.map (fun i -> i.problem) (leftmost unfixable); fixes = [] }
+  | _ :: _ as unfixable ->
+      { value; problem = Option.map (fun i -> i.problem) (leftmost unfixable); fixes = [] }
   | [] -> (
       match leftmost issues with
       | None -> { value; problem = None; fixes = [] }
@@ -222,7 +243,9 @@ type group = { group : string; at : int }
 
 let digits group = without_underscores group.group
 let cleaned group = fst (clean_underscores group.group)
-let misplaced_underscore group = Option.map (fun offset -> group.at + offset) (snd (clean_underscores group.group))
+
+let misplaced_underscore group =
+  Option.map (fun offset -> group.at + offset) (snd (clean_underscores group.group))
 
 type exponent = { marker : char; marker_at : int; sign : string; exponent_digits : group }
 
@@ -234,20 +257,23 @@ let parse_decimal text =
   let length = String.length text in
   let group_from at =
     let rec stop index =
-      if index < length && (is_digit text.[index] || text.[index] = '_') then stop (index + 1) else index
+      if index < length && (is_digit text.[index] || text.[index] = '_') then stop (index + 1)
+      else index
     in
     { group = String.sub text at (stop at - at); at }
   in
   let after group = group.at + String.length group.group in
   let whole = group_from 0 in
   let fraction =
-    if after whole < length && text.[after whole] = '.' then Some (group_from (after whole + 1)) else None
+    if after whole < length && text.[after whole] = '.' then Some (group_from (after whole + 1))
+    else None
   in
   let position = match fraction with Some fraction -> after fraction | None -> after whole in
   let exponent =
     if position < length && (text.[position] = 'e' || text.[position] = 'E') then
       let digits_at =
-        if position + 1 < length && (text.[position + 1] = '+' || text.[position + 1] = '-') then position + 2
+        if position + 1 < length && (text.[position + 1] = '+' || text.[position + 1] = '-') then
+          position + 2
         else position + 1
       in
       let exponent_digits = group_from digits_at in
@@ -263,7 +289,9 @@ let parse_decimal text =
           }
     else None
   in
-  let rest_at = match exponent with Some exponent -> after exponent.exponent_digits | None -> position in
+  let rest_at =
+    match exponent with Some exponent -> after exponent.exponent_digits | None -> position
+  in
   { whole; fraction; exponent; rest_at }
 
 let check_decimal text =
@@ -275,9 +303,13 @@ let check_decimal text =
   (* The literal with every fixable problem corrected, given the whole part
      to use. *)
   let assemble whole_part =
-    let fraction_part = match parts.fraction with Some fraction -> "." ^ cleaned fraction | None -> "" in
+    let fraction_part =
+      match parts.fraction with Some fraction -> "." ^ cleaned fraction | None -> ""
+    in
     let exponent_part =
-      match parts.exponent with Some exponent -> "e" ^ exponent.sign ^ cleaned exponent.exponent_digits | None -> ""
+      match parts.exponent with
+      | Some exponent -> "e" ^ exponent.sign ^ cleaned exponent.exponent_digits
+      | None -> ""
     in
     let float_part = if has_float_suffix && not is_float then ".0" else "" in
     whole_part ^ fraction_part ^ exponent_part ^ float_part
@@ -299,7 +331,9 @@ let check_decimal text =
     && String.for_all (fun c -> c >= '0' && c <= '7') whole_digits
   in
   let fixed = assemble (if leading_zero then without_zeros else cleaned parts.whole) in
-  let underscore group = match misplaced_underscore group with Some at -> [ underscore_issue at ] | None -> [] in
+  let underscore group =
+    match misplaced_underscore group with Some at -> [ underscore_issue at ] | None -> []
+  in
   let issues =
     List.concat
       [
@@ -329,8 +363,9 @@ let check_decimal text =
                  else []);
                 (if digits exponent.exponent_digits = "" then
                    [
-                     issue ~fixable:false Number_missing_digits "The exponent needs digits after `e`."
-                       exponent.marker_at exponent.exponent_digits.at;
+                     issue ~fixable:false Number_missing_digits
+                       "The exponent needs digits after `e`." exponent.marker_at
+                       exponent.exponent_digits.at;
                    ]
                  else underscore exponent.exponent_digits);
               ]
@@ -340,7 +375,8 @@ let check_decimal text =
          else
            [
              issue ~fixable:false Number_followed_by_name
-               (Printf.sprintf "A number cannot be followed directly by a name character such as `%s`."
+               (Printf.sprintf
+                  "A number cannot be followed directly by a name character such as `%s`."
                   (character_at text parts.rest_at))
                parts.rest_at
                (parts.rest_at + character_length text parts.rest_at);
@@ -350,7 +386,9 @@ let check_decimal text =
   let value =
     if not is_float then Token.Integer (Z.of_string whole_digits)
     else
-      let fraction_digits = match parts.fraction with Some fraction -> digits fraction | None -> "" in
+      let fraction_digits =
+        match parts.fraction with Some fraction -> digits fraction | None -> ""
+      in
       let written_exponent =
         match parts.exponent with
         | Some exponent when digits exponent.exponent_digits <> "" ->

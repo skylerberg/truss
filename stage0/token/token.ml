@@ -4,34 +4,119 @@
 type span = Source.span = private { start : int; stop : int }
 
 type keyword =
-  | Any | Assert | Break | Capability | Continue | Cost | Decreases | Derives
-  | Echo | Else | Ensures | Exists | False | Fn | For | Forall | If | Impl | In
-  | Indirect | Internal | Invariant | Is | Law | Let | Match | Mut | Opaque | Own
-  | Parallel | Proof | Provide | Public | Requires | Return
-  | Self_value  (* self *)
-  | Self_type  (* Self *)
-  | Test | Theorem | Todo | Trait | True | Type | Unreachable | Use | Uses
-  | Var | While | With | Yield | Yields
+  | Any
+  | Assert
+  | Break
+  | Capability
+  | Continue
+  | Cost
+  | Decreases
+  | Derives
+  | Echo
+  | Else
+  | Ensures
+  | Exists
+  | False
+  | Fn
+  | For
+  | Forall
+  | If
+  | Impl
+  | In
+  | Indirect
+  | Internal
+  | Invariant
+  | Is
+  | Law
+  | Let
+  | Match
+  | Mut
+  | Opaque
+  | Own
+  | Parallel
+  | Proof
+  | Provide
+  | Public
+  | Requires
+  | Return
+  | Self_value (* self *)
+  | Self_type (* Self *)
+  | Test
+  | Theorem
+  | Todo
+  | Trait
+  | True
+  | Type
+  | Unreachable
+  | Use
+  | Uses
+  | Var
+  | While
+  | With
+  | Yield
+  | Yields
 
 (* Reserved for later use. The parser reports them, since a good fix depends
    on the construct around them. *)
 type reserved =
-  | As | Async | Await | Const | Defer | Extern | Loop | Macro | Static
-  | Unsafe | Where
+  | As
+  | Async
+  | Await
+  | Const
+  | Defer
+  | Extern
+  | Loop
+  | Macro
+  | Static
+  | Unsafe
+  | Where
 
 type bracket = Paren | Square | Curly
 
 type punctuation =
   | Open of bracket
   | Close of bracket
-  | Comma | Colon | Colon_colon | Dot | Dot_dot | Dot_dot_equal
-  | Arrow | Fat_arrow | Question | Bar
-  | Equal | Plus_equal | Minus_equal | Star_equal | Slash_equal
-  | Percent_equal | Ampersand_equal | Bar_equal | Caret_equal
-  | Shift_left_equal | Shift_right_equal
-  | Plus | Minus | Star | Slash | Percent | Equal_equal | Not_equal | Less
-  | Less_equal | Greater | Greater_equal | And_and | Or_or | Implies | Bang
-  | Ampersand | Caret | Tilde | Shift_left | Shift_right
+  | Comma
+  | Colon
+  | Colon_colon
+  | Dot
+  | Dot_dot
+  | Dot_dot_equal
+  | Arrow
+  | Fat_arrow
+  | Question
+  | Bar
+  | Equal
+  | Plus_equal
+  | Minus_equal
+  | Star_equal
+  | Slash_equal
+  | Percent_equal
+  | Ampersand_equal
+  | Bar_equal
+  | Caret_equal
+  | Shift_left_equal
+  | Shift_right_equal
+  | Plus
+  | Minus
+  | Star
+  | Slash
+  | Percent
+  | Equal_equal
+  | Not_equal
+  | Less
+  | Less_equal
+  | Greater
+  | Greater_equal
+  | And_and
+  | Or_or
+  | Implies
+  | Bang
+  | Ampersand
+  | Caret
+  | Tilde
+  | Shift_left
+  | Shift_right
 
 (* Sequences from other languages whose fix depends on the expression around
    them. No grammar rule accepts them, and the parser reports them. *)
@@ -59,8 +144,8 @@ end
 type t = {
   kind : kind;
   span : span;
-  line_break_before : bool;  (* a line break between this token and the one before *)
-  blank_line_before : bool;  (* a blank line between them *)
+  line_break_before : bool; (* a line break between this token and the one before *)
+  blank_line_before : bool; (* a blank line between them *)
 }
 
 and kind =
@@ -96,40 +181,122 @@ let interpolations literal = Array.map fst literal.rest
 
 let keywords =
   [
-    ("any", Any); ("assert", Assert); ("break", Break); ("capability", Capability);
-    ("continue", Continue); ("cost", Cost); ("decreases", Decreases); ("derives", Derives);
-    ("echo", Echo); ("else", Else); ("ensures", Ensures); ("exists", Exists);
-    ("false", False); ("fn", Fn); ("for", For); ("forall", Forall); ("if", If);
-    ("impl", Impl); ("in", In); ("indirect", Indirect); ("internal", Internal); ("invariant", Invariant);
-    ("is", Is); ("law", Law); ("let", Let); ("match", Match); ("mut", Mut);
-    ("opaque", Opaque); ("own", Own); ("parallel", Parallel); ("proof", Proof);
-    ("provide", Provide); ("public", Public); ("requires", Requires); ("return", Return);
-    ("self", Self_value); ("Self", Self_type); ("test", Test); ("theorem", Theorem);
-    ("todo", Todo); ("trait", Trait); ("true", True); ("type", Type);
-    ("unreachable", Unreachable); ("use", Use); ("uses", Uses); ("var", Var);
-    ("while", While); ("with", With); ("yield", Yield); ("yields", Yields);
+    ("any", Any);
+    ("assert", Assert);
+    ("break", Break);
+    ("capability", Capability);
+    ("continue", Continue);
+    ("cost", Cost);
+    ("decreases", Decreases);
+    ("derives", Derives);
+    ("echo", Echo);
+    ("else", Else);
+    ("ensures", Ensures);
+    ("exists", Exists);
+    ("false", False);
+    ("fn", Fn);
+    ("for", For);
+    ("forall", Forall);
+    ("if", If);
+    ("impl", Impl);
+    ("in", In);
+    ("indirect", Indirect);
+    ("internal", Internal);
+    ("invariant", Invariant);
+    ("is", Is);
+    ("law", Law);
+    ("let", Let);
+    ("match", Match);
+    ("mut", Mut);
+    ("opaque", Opaque);
+    ("own", Own);
+    ("parallel", Parallel);
+    ("proof", Proof);
+    ("provide", Provide);
+    ("public", Public);
+    ("requires", Requires);
+    ("return", Return);
+    ("self", Self_value);
+    ("Self", Self_type);
+    ("test", Test);
+    ("theorem", Theorem);
+    ("todo", Todo);
+    ("trait", Trait);
+    ("true", True);
+    ("type", Type);
+    ("unreachable", Unreachable);
+    ("use", Use);
+    ("uses", Uses);
+    ("var", Var);
+    ("while", While);
+    ("with", With);
+    ("yield", Yield);
+    ("yields", Yields);
   ]
 
 let reserved_words =
   [
-    ("as", As); ("async", Async); ("await", Await); ("const", Const); ("defer", Defer);
-    ("extern", Extern); ("loop", Loop); ("macro", Macro); ("static", Static);
-    ("unsafe", Unsafe); ("where", Where);
+    ("as", As);
+    ("async", Async);
+    ("await", Await);
+    ("const", Const);
+    ("defer", Defer);
+    ("extern", Extern);
+    ("loop", Loop);
+    ("macro", Macro);
+    ("static", Static);
+    ("unsafe", Unsafe);
+    ("where", Where);
   ]
 
 let punctuation =
   [
-    ("(", Open Paren); (")", Close Paren); ("[", Open Square); ("]", Close Square);
-    ("{", Open Curly); ("}", Close Curly); (",", Comma); (":", Colon); ("::", Colon_colon);
-    (".", Dot); ("..", Dot_dot); ("..=", Dot_dot_equal); ("->", Arrow); ("=>", Fat_arrow);
-    ("?", Question); ("|", Bar);
-    ("=", Equal); ("+=", Plus_equal); ("-=", Minus_equal); ("*=", Star_equal);
-    ("/=", Slash_equal); ("%=", Percent_equal); ("&=", Ampersand_equal); ("|=", Bar_equal);
-    ("^=", Caret_equal); ("<<=", Shift_left_equal); (">>=", Shift_right_equal);
-    ("+", Plus); ("-", Minus); ("*", Star); ("/", Slash); ("%", Percent);
-    ("==", Equal_equal); ("!=", Not_equal); ("<", Less); ("<=", Less_equal);
-    (">", Greater); (">=", Greater_equal); ("&&", And_and); ("||", Or_or); ("==>", Implies);
-    ("!", Bang); ("&", Ampersand); ("^", Caret); ("~", Tilde); ("<<", Shift_left);
+    ("(", Open Paren);
+    (")", Close Paren);
+    ("[", Open Square);
+    ("]", Close Square);
+    ("{", Open Curly);
+    ("}", Close Curly);
+    (",", Comma);
+    (":", Colon);
+    ("::", Colon_colon);
+    (".", Dot);
+    ("..", Dot_dot);
+    ("..=", Dot_dot_equal);
+    ("->", Arrow);
+    ("=>", Fat_arrow);
+    ("?", Question);
+    ("|", Bar);
+    ("=", Equal);
+    ("+=", Plus_equal);
+    ("-=", Minus_equal);
+    ("*=", Star_equal);
+    ("/=", Slash_equal);
+    ("%=", Percent_equal);
+    ("&=", Ampersand_equal);
+    ("|=", Bar_equal);
+    ("^=", Caret_equal);
+    ("<<=", Shift_left_equal);
+    (">>=", Shift_right_equal);
+    ("+", Plus);
+    ("-", Minus);
+    ("*", Star);
+    ("/", Slash);
+    ("%", Percent);
+    ("==", Equal_equal);
+    ("!=", Not_equal);
+    ("<", Less);
+    ("<=", Less_equal);
+    (">", Greater);
+    (">=", Greater_equal);
+    ("&&", And_and);
+    ("||", Or_or);
+    ("==>", Implies);
+    ("!", Bang);
+    ("&", Ampersand);
+    ("^", Caret);
+    ("~", Tilde);
+    ("<<", Shift_left);
     (">>", Shift_right);
   ]
 
@@ -148,7 +315,6 @@ let words : (string, kind) Hashtbl.t =
   table
 
 let word spelling = Hashtbl.find_opt words spelling
-
 let spelling_of list value = fst (List.find (fun (_, candidate) -> candidate = value) list)
 let keyword_spelling = spelling_of keywords
 let reserved_spelling = spelling_of reserved_words

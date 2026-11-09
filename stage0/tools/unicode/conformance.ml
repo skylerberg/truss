@@ -29,13 +29,11 @@ let read_lines name =
 let records name =
   read_lines name
   |> List.filter_map (fun line ->
-         let line =
-           match String.index_opt line '#' with
-           | Some index -> String.sub line 0 index
-           | None -> line
-         in
-         if String.trim line = "" then None
-         else Some (List.map String.trim (String.split_on_char ';' line)))
+      let line =
+        match String.index_opt line '#' with Some index -> String.sub line 0 index | None -> line
+      in
+      if String.trim line = "" then None
+      else Some (List.map String.trim (String.split_on_char ';' line)))
 
 let code_point text = int_of_string ("0x" ^ text)
 
@@ -81,7 +79,8 @@ let () =
     let set = Array.make 0x110000 false in
     List.iter
       (function
-        | range :: value :: _ when value = property -> each_in_range range (fun c -> set.(c) <- true)
+        | range :: value :: _ when value = property ->
+            each_in_range range (fun c -> set.(c) <- true)
         | _ -> ())
       (records file);
     set
@@ -97,7 +96,8 @@ let () =
         || (control.(value) && value <> 0x09 && value <> 0x0A && value <> 0x0D)
         || (ignorable.(value) && (not selector.(value)) && value <> 0x200C && value <> 0x200D)
       in
-      if Unicode.is_forbidden value <> expected then fail "forbidden: U+%04X: expected %b" value expected;
+      if Unicode.is_forbidden value <> expected then
+        fail "forbidden: U+%04X: expected %b" value expected;
       if expected && control.(value) && Unicode.forbidden_name value = None then
         fail "forbidden control U+%04X has no name" value
     end

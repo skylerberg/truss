@@ -20,23 +20,20 @@ let read_lines name =
   loop []
 
 let strip_byte_order_mark line =
-  if String.starts_with ~prefix:"\xEF\xBB\xBF" line then
-    String.sub line 3 (String.length line - 3)
+  if String.starts_with ~prefix:"\xEF\xBB\xBF" line then String.sub line 3 (String.length line - 3)
   else line
 
 let strip_comment line =
-  match String.index_opt line '#' with
-  | Some index -> String.sub line 0 index
-  | None -> line
+  match String.index_opt line '#' with Some index -> String.sub line 0 index | None -> line
 
 (* The fields of each data line of a semicolon-separated file, trimmed, with
    comments and blank lines left out. *)
 let records name =
   read_lines name
   |> List.filter_map (fun line ->
-         let line = strip_comment (strip_byte_order_mark line) in
-         if String.trim line = "" then None
-         else Some (List.map String.trim (String.split_on_char ';' line)))
+      let line = strip_comment (strip_byte_order_mark line) in
+      if String.trim line = "" then None
+      else Some (List.map String.trim (String.split_on_char ';' line)))
 
 let code_point text = int_of_string ("0x" ^ text)
 
@@ -66,16 +63,15 @@ let merge ranges =
 let property_ranges file property =
   records file
   |> List.filter_map (function
-       | range :: name :: _ when name = property -> Some (code_point_range range)
-       | _ -> None)
+    | range :: name :: _ when name = property -> Some (code_point_range range)
+    | _ -> None)
   |> merge
 
 let general_category_ranges categories =
   records "DerivedGeneralCategory.txt"
   |> List.filter_map (function
-       | range :: category :: _ when List.mem category categories ->
-           Some (code_point_range range)
-       | _ -> None)
+    | range :: category :: _ when List.mem category categories -> Some (code_point_range range)
+    | _ -> None)
   |> merge
 
 let contains ranges value =
@@ -96,7 +92,10 @@ let subtract ranges removed =
 (* Output *)
 
 let output = Buffer.create (1 lsl 20)
-let line text = Buffer.add_string output text; Buffer.add_char output '\n'
+
+let line text =
+  Buffer.add_string output text;
+  Buffer.add_char output '\n'
 
 let emit_ints name values =
   Buffer.add_string output (Printf.sprintf "let %s = [|" name);
@@ -121,8 +120,8 @@ let characters =
   lazy
     (records "UnicodeData.txt"
     |> List.map (function
-         | value :: name :: _ -> (code_point value, name)
-         | _ -> failwith "UnicodeData.txt: unexpected line"))
+      | value :: name :: _ -> (code_point value, name)
+      | _ -> failwith "UnicodeData.txt: unexpected line"))
 
 let unicode_version () =
   (* The first line of DerivedCoreProperties.txt is
@@ -159,10 +158,7 @@ let () =
       ([ (0x200C, 0x200D) ] @ property_ranges "PropList.txt" "Variation_Selector")
   in
   let forbidden =
-    merge
-      (bidi_control
-      @ subtract control [ (0x09, 0x0A); (0x0D, 0x0D) ]
-      @ ignorable)
+    merge (bidi_control @ subtract control [ (0x09, 0x0A); (0x0D, 0x0D) ] @ ignorable)
   in
   emit_ranges "forbidden" forbidden;
   emit_ranges "bidi_control" bidi_control;

@@ -5,6 +5,7 @@ let span start stop =
   { start; stop }
 
 let zero_width position = span position position
+
 type t = { path : string; text : string; line_starts : int array }
 
 let compute_line_starts text =
@@ -57,7 +58,9 @@ let line_end source offset =
 
 let position source offset =
   let index = line_index source offset in
-  let start = max source.line_starts.(index) (if index = 0 then byte_order_mark_length source else 0) in
+  let start =
+    max source.line_starts.(index) (if index = 0 then byte_order_mark_length source else 0)
+  in
   let column = ref 1 in
   for byte = start to min offset (String.length source.text) - 1 do
     (* Count every byte except UTF-8 continuation bytes. *)

@@ -42,10 +42,7 @@ type ending = Closed | Cut_off
 
 (* What the scanner found next. It always stops at a line break, which the
    caller treats as trivia or as an error. *)
-type item =
-  | Token of { kind : Token.kind; start : int; ending : ending }
-  | Line_end
-  | End
+type item = Token of { kind : Token.kind; start : int; ending : ending } | Line_end | End
 
 let span = Source.span
 
@@ -55,7 +52,8 @@ let byte cursor index =
 
 (* Reports an error with one of the lexer's codes. *)
 let report cursor ?notes ?fixes ~code span message =
-  Diagnostic.Collector.add cursor.diagnostics (Diagnostic.make ?notes ?fixes ~code:(Lexer code) span message)
+  Diagnostic.Collector.add cursor.diagnostics
+    (Diagnostic.make ?notes ?fixes ~code:(Lexer code) span message)
 
 let is_line_break byte = byte = 0x0A || byte = 0x0D
 let is_end_of_line byte = byte < 0 || is_line_break byte
@@ -71,15 +69,21 @@ let dollar = Char.code '$'
 let decode cursor index = if index < cursor.length then Unicode.decode cursor.text index else -1
 
 let run_length cursor index character =
-  let rec loop position = if byte cursor position = character then loop (position + 1) else position in
+  let rec loop position =
+    if byte cursor position = character then loop (position + 1) else position
+  in
   loop index - index
 
 let skip_spaces cursor index =
-  let rec loop position = if is_space (byte cursor position) then loop (position + 1) else position in
+  let rec loop position =
+    if is_space (byte cursor position) then loop (position + 1) else position
+  in
   loop index
 
 let end_of_line cursor index =
-  let rec loop position = if is_end_of_line (byte cursor position) then position else loop (position + 1) in
+  let rec loop position =
+    if is_end_of_line (byte cursor position) then position else loop (position + 1)
+  in
   loop index
 
 (* The length of the line break at [index]: 2 for a carriage return and line
@@ -118,4 +122,7 @@ let show_character cursor index =
   else
     let value = Unicode.decoded_code_point packed in
     if value < 0x80 then Printf.sprintf "`%c`" (Char.chr value)
-    else Printf.sprintf "`%s` (U+%04X)" (String.sub cursor.text index (Unicode.decoded_length packed)) value
+    else
+      Printf.sprintf "`%s` (U+%04X)"
+        (String.sub cursor.text index (Unicode.decoded_length packed))
+        value
