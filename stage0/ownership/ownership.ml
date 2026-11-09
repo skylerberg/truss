@@ -921,6 +921,15 @@ and parallel state flow (body : block) =
 
 let prepare context =
   let paths = context.paths and loops = context.loops in
+  (* What a pattern binds follows the matched value's mode, in a [match],
+     an [is], and a [let] alike: an owned value's parts are owned, a place's
+     are views of it, and a [mut] place's are [mut] access to it. *)
+  let matched (value : expression) =
+    match value.kind with
+    | Mode (Own, _) -> Owned
+    | Mode (Mut, _) -> Mut_access
+    | _ -> if place_of context value <> None then Viewing else Owned
+  in
   let rec expression ~path ~loop_ids (value : expression) =
     Hashtbl.replace paths value.span.start path;
     Hashtbl.replace loops value.span.start loop_ids;
@@ -943,17 +952,7 @@ let prepare context =
           else_
     | Match { scrutinees; arms } ->
         List.iter (expression ~path ~loop_ids) scrutinees;
-        (* What a pattern binds follows the matched value's mode: an owned
-           value's parts are owned, a place's are views of it. *)
-        let kinds =
-          List.map
-            (fun (scrutinee : expression) ->
-              match scrutinee.kind with
-              | Mode (Own, _) -> Owned
-              | Mode (Mut, _) -> Mut_access
-              | _ -> if place_of context scrutinee <> None then Viewing else Owned)
-            scrutinees
-        in
+        let kinds = List.map matched scrutinees in
         List.iteri
           (fun index (arm : arm) ->
             let path = (value.id, index) :: path in
@@ -965,7 +964,7 @@ let prepare context =
           arms
     | Is { value = tested; pattern = written; _ } ->
         expression ~path ~loop_ids tested;
-        pattern ~path ~loop_ids written
+        bind ~kind:(matched tested) written
     | Lambda { parameters; body } ->
         List.iter (pattern ~path ~loop_ids) parameters;
         block ~path ~loop_ids body
@@ -979,14 +978,7 @@ let prepare context =
     | Let { mutable_; pattern = written_pattern; value; else_; _ } ->
         expression ~path ~loop_ids value;
         Option.iter (block ~path ~loop_ids) else_;
-        let kind =
-          if mutable_ then Owned
-          else
-            match value.kind with
-            | Mode (Own, _) -> Owned
-            | _ -> if place_of context value <> None then Viewing else Owned
-        in
-        bind ~kind written_pattern
+        bind ~kind:(if mutable_ then Owned else matched value) written_pattern
     | For { pattern = written_pattern; iterable; body; _ } ->
         expression ~path ~loop_ids iterable;
         let loop_ids = written.id :: loop_ids in

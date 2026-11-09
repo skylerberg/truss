@@ -424,4 +424,24 @@ let () =
         \  count\n\
          }\n")
 
+let () =
+  test "is on a temporary binds its parts as owned, as match does" (fun () ->
+      fine
+        "fn make() -> Option[String] { todo }\n\n\
+         fn keep(text: own String) {}\n\n\
+         fn f() {\n\
+        \  if make() is Some(text) {\n\
+        \    keep(own text)\n\
+        \  }\n\
+         }\n");
+  test "is on a place binds views of its parts" (fun () ->
+      one_diagnostic
+        "fn keep(text: own String) {}\n\n\
+         fn f(found: Option[String]) {\n\
+        \  if found is Some(text) {\n\
+        \    keep(own text)\n\
+        \  }\n\
+         }\n"
+        "ownership.not_owned")
+
 let () = finish ()

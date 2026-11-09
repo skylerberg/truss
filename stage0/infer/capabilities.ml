@@ -450,8 +450,12 @@ let check (state : state) (lowered : Environment.lowered) =
                   match signature.name with Plain_name name | Member_name (_, name) -> name.text
                 in
                 let receiver = Names.receiver signature.parameters in
+                (* Inside an implementation of a capability, the capability
+                   itself is available, and means this implementation, so a
+                   method can hand it on, as [write_with] does to its
+                   callback. *)
                 let uses =
-                  if is_capability then impl.impl_uses
+                  if is_capability then union impl.impl_uses [ T.Capability impl.implements.trait ]
                   else
                     match
                       List.find_opt
