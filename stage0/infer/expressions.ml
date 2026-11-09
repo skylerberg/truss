@@ -59,8 +59,8 @@ type state = {
   mutable references : id list;  (** Locals read, newest first, for lambdas' captures. *)
   mutable receiver_modes : (id * T.mode) list;  (** Method calls whose receiver a mark covers. *)
   binding_spans : (id, span) Hashtbl.t;
-  mutable lambdas : span list;  (** The lambdas being checked, innermost first. *)
       (** Where each name of the definition is, for lambdas' captures. *)
+  mutable lambdas : span list;  (** The lambdas being checked, innermost first. *)
 }
 
 let report state ?(fixes = []) code (span : span) message =
@@ -95,10 +95,13 @@ let bounds state parameter =
   Option.value ~default:[] (Hashtbl.find_opt state.context.bounds parameter)
 
 let normalize state type_ = Impls.normalize state.database ~bounds:(bounds state) (zonk state type_)
+
 (* Projections whose base is known are normalized first, so [C.Key] meets
    the type the [impl] chooses. *)
 let unify state left right =
-  let normalize type_ = Impls.normalize state.database ~bounds:(bounds state) (Unify.zonk state.unifier type_) in
+  let normalize type_ =
+    Impls.normalize state.database ~bounds:(bounds state) (Unify.zonk state.unifier type_)
+  in
   Unify.unify state.unifier (normalize left) (normalize right)
 
 let implements state type_ trait =
@@ -177,7 +180,8 @@ let settle state frame =
   let unsolved =
     List.filter
       (function
-        | Unify.Unknown_type index | Unknown_value index | Unknown_literal (_, index) -> index >= frame.start)
+        | Unify.Unknown_type index | Unknown_value index | Unknown_literal (_, index) ->
+            index >= frame.start)
       (unknowns ())
   in
   if unsolved <> [] then begin
@@ -187,7 +191,8 @@ let settle state frame =
     (* Every unsolved variable becomes an error, so it is reported once. *)
     List.iter
       (function
-        | Unify.Unknown_type index | Unknown_literal (_, index) -> Hashtbl.replace state.unifier.types index T.Error
+        | Unify.Unknown_type index | Unknown_literal (_, index) ->
+            Hashtbl.replace state.unifier.types index T.Error
         | Unknown_value _ -> ())
       unsolved;
     (* What waits on them never runs, and needs not: the error is reported. *)
@@ -249,8 +254,11 @@ let mismatch state (span : span) ~expected ~found =
   | T.Literal (Integer_literal, _), _ when T.is_float_type expected ->
       report state Integer_for_float span
         ~fixes:[ fix "Write it as a float." [ insert span.stop ".0" ] ]
-        (Printf.sprintf "An integer literal is never a float, and `%s` is expected here." (T.show expected))
-  | _ -> report state Mismatch span (Printf.sprintf "Expected `%s`, found `%s`." (T.show expected) (T.show found))
+        (Printf.sprintf "An integer literal is never a float, and `%s` is expected here."
+           (T.show expected))
+  | _ ->
+      report state Mismatch span
+        (Printf.sprintf "Expected `%s`, found `%s`." (T.show expected) (T.show found))
 
 (* Places *)
 
@@ -351,7 +359,9 @@ let rec static_ state (value : expression) : static_ option =
           (match Query.demand state.database Interface.Summary.generics_of path with
           | Some expected when List.length expected <> List.length arguments ->
               report state Arity value.span
-                (Printf.sprintf "`%s` takes %d %s, and %d %s given." (T.show (Named { path; arguments = [] })) (List.length expected)
+                (Printf.sprintf "`%s` takes %d %s, and %d %s given."
+                   (T.show (Named { path; arguments = [] }))
+                   (List.length expected)
                    (if List.length expected = 1 then "argument" else "arguments")
                    (List.length arguments)
                    (if List.length arguments = 1 then "is" else "are"))
@@ -420,10 +430,11 @@ let instantiate state ?span ?(extra = []) (signature : T.signature) =
                       let bound = T.substitute_trait substitution bound in
                       if Unify.unknowns state.unifier argument <> [] then false
                       else begin
-                        (if Option.is_none (implements state argument bound) then
-                           report state Unsatisfied_bound span
-                             (Printf.sprintf "This call needs `%s: %s`, which does not hold." (T.show argument)
-                                (T.show_trait (Unify.zonk_trait state.unifier bound))));
+                        if Option.is_none (implements state argument bound) then
+                          report state Unsatisfied_bound span
+                            (Printf.sprintf "This call needs `%s: %s`, which does not hold."
+                               (T.show argument)
+                               (T.show_trait (Unify.zonk_trait state.unifier bound)));
                         true
                       end))
                 generic_bounds
@@ -578,20 +589,23 @@ and expression_kind state env ?expected (value : expression) : T.ty =
                 else Literals.float64 ~significand ~exponent
               in
               (match rounded with
-              | Some rounded_value -> state.tables.literals.(value.id) <- Some (Float_value rounded_value)
+              | Some rounded_value ->
+                  state.tables.literals.(value.id) <- Some (Float_value rounded_value)
               | None ->
                   report state Literal_out_of_range value.span
-                    (Printf.sprintf "This literal is too large for `%s`; it would round to infinity." (T.show resolved)));
+                    (Printf.sprintf
+                       "This literal is too large for `%s`; it would round to infinity."
+                       (T.show resolved)));
               true);
       type_
   | String literal -> string_literal state env ?expected literal
   | True | False -> T.bool
   | Todo -> ( match expected with Some expected -> expected | None -> T.Hole)
   | Unreachable | Break | Continue -> T.Never
-  | Self_value ->
+  | Self_value -> (
       (* A lambda that reads [self] captures it, named by the definition's id. *)
       state.references <- state.definition.id :: state.references;
-      ( match env.self with Some self -> self | None -> T.Error)
+      match env.self with Some self -> self | None -> T.Error)
   | Self_type_value ->
       report state Not_a_value value.span
         "`Self` is a type. Build a value of it, or call one of its methods.";
@@ -932,7 +946,10 @@ and bracket state env ?expected (value : expression) (base : expression) items =
 and explicit_type_arguments ?(head = 0) state (value : expression) instance items =
   if items <> [] then begin
     let given =
-      List.filter_map (function Item item -> Some (type_argument_of_expression state item) | Item_constraint _ -> None) items
+      List.filter_map
+        (function
+          | Item item -> Some (type_argument_of_expression state item) | Item_constraint _ -> None)
+        items
     in
     let own = List.filteri (fun index _ -> index >= head) instance.type_arguments in
     if List.length given <> List.length own then
@@ -947,8 +964,12 @@ and explicit_type_arguments ?(head = 0) state (value : expression) instance item
           match (given, own) with
           | T.Type given, T.Type own -> ignore (unify state given own)
           | T.Value given, T.Value own -> ignore (Unify.unify_value state.unifier given own)
-          | T.Type _, T.Value _ -> report state Arity value.span "A type argument is given where a `USize` value is expected."
-          | T.Value _, T.Type _ -> report state Arity value.span "A `USize` value is given where a type argument is expected."
+          | T.Type _, T.Value _ ->
+              report state Arity value.span
+                "A type argument is given where a `USize` value is expected."
+          | T.Value _, T.Type _ ->
+              report state Arity value.span
+                "A `USize` value is given where a type argument is expected."
           | _ -> ())
         given own
   end
@@ -1174,20 +1195,26 @@ and argument_value state env (value : expression) (parameter : T.parameter_info)
     if to_view then begin
       (match (expected, found_resolved) with
       | T.Named { arguments = expected_arguments; _ }, T.Named { arguments = found_arguments; _ } ->
-          if not (Unify.unify_arguments state.unifier expected_arguments found_arguments) then mismatch state value.span ~expected ~found
+          if not (Unify.unify_arguments state.unifier expected_arguments found_arguments) then
+            mismatch state value.span ~expected ~found
       | _ -> ());
       Some Owned_to_view
     end
     else if env.specification && resolve state found = T.Integer && T.is_integer_type expected then begin
-      state.obligations <- Integer_fits { expression = value.id; type_ = expected } :: state.obligations;
+      state.obligations <-
+        Integer_fits { expression = value.id; type_ = expected } :: state.obligations;
       Some From_integer
     end
-    else if env.specification && T.is_integer_type found_resolved && resolve state expected = T.Integer then Some To_integer
+    else if
+      env.specification && T.is_integer_type found_resolved && resolve state expected = T.Integer
+    then Some To_integer
     else begin
-      coerce state inner ~found ~expected:expected;
+      coerce state inner ~found ~expected;
       match (resolve state found, expected, found_resolved) with
       | T.Never, _, _ -> Some From_never
-      | _, T.Function expected_function, T.Function found_function when expected_function.uses <> found_function.uses || expected_function.costs <> found_function.costs ->
+      | _, T.Function expected_function, T.Function found_function
+        when expected_function.uses <> found_function.uses
+             || expected_function.costs <> found_function.costs ->
           Some Function_widening
       | _ -> None
     end
@@ -1251,7 +1278,10 @@ and match_arguments state (value : expression) (parameters : T.parameter_info li
                              match other.label with
                              | Some label -> Option.to_list (List.assoc_opt label.text named)
                              | None -> (
-                                 match Option.bind (bare_name other) (fun name -> List.assoc_opt name named) with
+                                 match
+                                   Option.bind (bare_name other) (fun name ->
+                                       List.assoc_opt name named)
+                                 with
                                  | Some index -> [ index ]
                                  | None -> if position = 0 && not record then [ 0 ] else []))
                            arguments)
@@ -1261,11 +1291,15 @@ and match_arguments state (value : expression) (parameters : T.parameter_info li
                         (List.filteri
                            (fun position (other : argument) ->
                              other.label = None
-                             && Option.is_none (Option.bind (bare_name other) (fun name -> List.assoc_opt name named))
+                             && Option.is_none
+                                  (Option.bind (bare_name other) (fun name ->
+                                       List.assoc_opt name named))
                              && (position > 0 || record))
                            arguments)
                     in
-                    let open_parameters = List.filter (fun (_, index) -> not (List.mem index claimed)) named in
+                    let open_parameters =
+                      List.filter (fun (_, index) -> not (List.mem index claimed)) named
+                    in
                     let fixes =
                       match (open_parameters, unlabeled) with
                       | [ (label, _) ], 1 ->
@@ -1371,7 +1405,12 @@ and check_arguments state env (parameters : T.parameter_info list) matched ~offs
   let check ((argument : argument), index) =
     let parameter = List.nth parameters index in
     let conversion = argument_value state env argument.value parameter in
-    { C.expression = argument.value.id; parameter = index + offset; mode = parameter.mode; conversion }
+    {
+      C.expression = argument.value.id;
+      parameter = index + offset;
+      mode = parameter.mode;
+      conversion;
+    }
   in
   let first = List.map check (List.filter (fun pair -> not (is_lambda pair)) matched) in
   let lambdas = List.map check (List.filter is_lambda matched) in
@@ -1519,11 +1558,19 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           match trait_static_method state path member.text with
           | [ (trait, method_) ] ->
               trait_method_through_type state env ?expected value type_ trait method_ arguments
-          | (_ :: _ :: _) as several ->
+          | _ :: _ :: _ as several ->
               report state Ambiguous_method member.span
-                (Printf.sprintf "More than one trait gives `%s` a method `%s`: %s. Call it through the trait to say which." (show state type_) member.text
-                   (String.concat ", " (List.map (fun ((trait : T.trait_reference), _) -> "`" ^ T.show_trait trait ^ "`") several)));
-              List.iter (fun (argument : argument) -> ignore (expression state env argument.value)) arguments;
+                (Printf.sprintf
+                   "More than one trait gives `%s` a method `%s`: %s. Call it through the trait to \
+                    say which."
+                   (show state type_) member.text
+                   (String.concat ", "
+                      (List.map
+                         (fun ((trait : T.trait_reference), _) -> "`" ^ T.show_trait trait ^ "`")
+                         several)));
+              List.iter
+                (fun (argument : argument) -> ignore (expression state env argument.value))
+                arguments;
               T.Error
           | [] ->
               report state Unknown_member member.span
@@ -1573,20 +1620,32 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
               | receiver :: rest -> (
                   (* The receiver's mark chooses the version, as with a dot. *)
                   let wanted : Path.receiver =
-                    match receiver.value.kind with Mode (Mut, _) -> Mut | Mode (Own, _) -> Own | _ -> Read
+                    match receiver.value.kind with
+                    | Mode (Mut, _) -> Mut
+                    | Mode (Own, _) -> Own
+                    | _ -> Read
                   in
-                  let inner = match receiver.value.kind with Mode (_, inner) -> inner | _ -> receiver.value in
+                  let inner =
+                    match receiver.value.kind with Mode (_, inner) -> inner | _ -> receiver.value
+                  in
                   let receiver_type = expression state env inner in
                   if inner != receiver.value then record state receiver.value receiver_type;
-                  if not (unify state receiver_type type_) then mismatch state inner.span ~expected:type_ ~found:receiver_type;
+                  if not (unify state receiver_type type_) then
+                    mismatch state inner.span ~expected:type_ ~found:receiver_type;
                   match List.assoc_opt wanted versions with
                   | Some method_path ->
                       let mode : T.mode = match wanted with Mut -> Mut | Own -> Own | _ -> Read in
-                      check_mode state receiver.value { name = "self"; mode; type_ = type_; has_default = false } receiver_type;
-                      method_with_receiver state env ?expected value ~receiver:receiver.value ~receiver_type method_path rest
+                      check_mode state receiver.value
+                        { name = "self"; mode; type_; has_default = false }
+                        receiver_type;
+                      method_with_receiver state env ?expected value ~receiver:receiver.value
+                        ~receiver_type method_path rest
                   | None ->
                       report state Wrong_receiver member.span
-                        (Printf.sprintf "`%s` has no version for this receiver's mark; mark the receiver `mut` or `own` as its versions take." member.text);
+                        (Printf.sprintf
+                           "`%s` has no version for this receiver's mark; mark the receiver `mut` \
+                            or `own` as its versions take."
+                           member.text);
                       T.Error)
               | [] ->
                   report state Missing_argument value.span
@@ -1615,7 +1674,8 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
 and could_implement state type_ trait =
   let arguments =
     match Query.demand state.database Environment.trait_interface trait with
-    | Some interface -> List.map (fun (_ : T.generic) -> T.Type (fresh state)) interface.trait_generics
+    | Some interface ->
+        List.map (fun (_ : T.generic) -> T.Type (fresh state)) interface.trait_generics
     | None -> []
   in
   Option.is_some (implements state type_ (trait_reference ~arguments trait))
@@ -1632,7 +1692,11 @@ and trait_static_method state path name =
           with
           | Some method_ ->
               let reference = trait_reference trait in
-              if could_implement state (T.Named { path; arguments = fresh_arguments state path }) trait then Some (reference, method_)
+              if
+                could_implement state
+                  (T.Named { path; arguments = fresh_arguments state path })
+                  trait
+              then Some (reference, method_)
               else None
           | None -> None)
         (Query.demand state.database Members.traits_declaring (package, name)))
@@ -1664,14 +1728,21 @@ and trait_method_through_type state env ?expected:_ (value : expression) self_ty
         match arguments with
         | first :: rest ->
             let mode : T.mode = match receiver with Mut -> Mut | Own -> Own | _ -> Read in
-            let parameter : T.parameter_info = { name = "self"; mode; type_ = receiver_type; has_default = false } in
+            let parameter : T.parameter_info =
+              { name = "self"; mode; type_ = receiver_type; has_default = false }
+            in
             let conversion = argument_value state env first.value parameter in
-            ([ { C.expression = first.value.id; parameter = 0; mode; conversion } ], 1, parameters, rest)
+            ( [ { C.expression = first.value.id; parameter = 0; mode; conversion } ],
+              1,
+              parameters,
+              rest )
         | [] -> ([], 1, parameters, []))
     | None -> ([], 0, parameters, arguments)
   in
   let matched, left_out = match_arguments state value parameters arguments ~record:false in
-  let checked = receiver_argument @ check_arguments state env parameters matched ~offset:receiver_offset in
+  let checked =
+    receiver_argument @ check_arguments state env parameters matched ~offset:receiver_offset
+  in
   let reference = { trait with trait_arguments } in
   let result = output_type instance.signature.output in
   let own_arguments =
@@ -1744,7 +1815,8 @@ and trait_call_in_full state env (value : expression) trait (member : name) argu
       | _ ->
           (* [Self] is the receiver's type, which checking it as the first
              argument decides. *)
-          trait_method_through_type state env value (fresh state) (trait_reference trait) method_ arguments)
+          trait_method_through_type state env value (fresh state) (trait_reference trait) method_
+            arguments)
   | [] ->
       report state Unknown_member member.span
         (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text);
@@ -1786,8 +1858,12 @@ and method_call state env ?expected (value : expression) (base : expression) (me
   (* A literal receiver, as in [5.wrapping_add(3)], has its default type. *)
   let receiver_type =
     match resolve state receiver_type with
-    | T.Literal (Integer_literal, _) -> ignore (unify state receiver_type (T.builtin Int64)); T.builtin Int64
-    | T.Literal (Float_literal, _) -> ignore (unify state receiver_type (T.builtin Float64)); T.builtin Float64
+    | T.Literal (Integer_literal, _) ->
+        ignore (unify state receiver_type (T.builtin Int64));
+        T.builtin Int64
+    | T.Literal (Float_literal, _) ->
+        ignore (unify state receiver_type (T.builtin Float64));
+        T.builtin Float64
     | _ -> receiver_type
   in
   let wanted : Path.receiver =
@@ -1902,7 +1978,11 @@ and method_call state env ?expected (value : expression) (base : expression) (me
               let arguments_text =
                 List.map
                   (fun (argument : argument) ->
-                    let start = match argument.label with Some label -> label.span.start | None -> argument.value.span.start in
+                    let start =
+                      match argument.label with
+                      | Some label -> label.span.start
+                      | None -> argument.value.span.start
+                    in
                     source state (Span.make start argument.value.span.stop))
                   arguments
               in
@@ -1910,12 +1990,15 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                 ~fixes:
                   (List.map
                      (fun ((trait : T.trait_reference), _) ->
-                       let name = match trait.trait with Top { name; _ } -> name | path -> Path.show path in
+                       let name =
+                         match trait.trait with Top { name; _ } -> name | path -> Path.show path
+                       in
                        fix
                          (Printf.sprintf "Call `%s`'s `%s`." name member.text)
                          [
                            replace value.span
-                             (Printf.sprintf "%s.%s(%s)" name member.text (String.concat ", " (receiver_text :: arguments_text)));
+                             (Printf.sprintf "%s.%s(%s)" name member.text
+                                (String.concat ", " (receiver_text :: arguments_text)));
                          ])
                      several)
                 (Printf.sprintf
@@ -1968,9 +2051,7 @@ and trait_candidates state receiver_type name =
                    | None -> false
                  in
                  ignore has_generics;
-                 if could_implement state receiver_type trait then
-                   with_method reference
-                 else None)
+                 if could_implement state receiver_type trait then with_method reference else None)
                (Query.demand state.database Members.traits_declaring (package, name)))
            (Members.visible_packages state.database state.package))
 
@@ -1980,7 +2061,10 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
   | None -> T.Error
   | Some signature ->
       let instance = instantiate state ~span:value.span signature in
-      explicit_type_arguments ~head:(match receiver_type with T.Named { arguments; _ } -> List.length arguments | _ -> 0) state value instance type_arguments;
+      explicit_type_arguments
+        ~head:
+          (match receiver_type with T.Named { arguments; _ } -> List.length arguments | _ -> 0)
+        state value instance type_arguments;
       (match instance.signature.receiver with
       | Some (_, self_type) ->
           if not (unify state self_type receiver_type) then
@@ -2113,8 +2197,11 @@ and try_ state env (value : expression) (inner : expression) =
 and with_ state env (value : expression) (base : expression) updates =
   let base_type = normalize state (expression state env base) in
   (match base_type with
-  | T.Named { path; _ } when not (Members.fields_visible state.database ~package:state.package path) ->
-      report state Private_field value.span (Printf.sprintf "`%s` is opaque, so only its own package can update its fields." (T.show base_type))
+  | T.Named { path; _ } when not (Members.fields_visible state.database ~package:state.package path)
+    ->
+      report state Private_field value.span
+        (Printf.sprintf "`%s` is opaque, so only its own package can update its fields."
+           (T.show base_type))
   | _ -> ());
   List.iter
     (fun (update : update) ->
@@ -2196,8 +2283,13 @@ and prefix state env ?expected (value : expression) operator (inner : expression
               | resolved ->
                   (* Negating a literal of an unsigned type is the one error,
                      not also a value out of range. *)
-                  if T.is_integer_type resolved && not (T.is_signed resolved) && not (Z.equal number Z.zero) then
-                    report state Negated_unsigned value.span (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (T.show resolved))
+                  if
+                    T.is_integer_type resolved
+                    && (not (T.is_signed resolved))
+                    && not (Z.equal number Z.zero)
+                  then
+                    report state Negated_unsigned value.span
+                      (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (T.show resolved))
                   else check_literal_fits state value (Z.neg number) type_;
                   true);
           type_
@@ -2212,8 +2304,10 @@ and prefix state env ?expected (value : expression) operator (inner : expression
           else if env.specification && (T.is_integer_type resolved || resolved = T.Integer) then
             T.Integer
           else
-            operator_call ~operands:[ { C.expression = inner.id; parameter = 0; mode = T.Read; conversion = None } ] state value ~trait:(core "Negate") ~method_:"negate"
-              ~left:type_ ~right:None)
+            operator_call
+              ~operands:
+                [ { C.expression = inner.id; parameter = 0; mode = T.Read; conversion = None } ]
+              state value ~trait:(core "Negate") ~method_:"negate" ~left:type_ ~right:None)
 
 (* An operator that is a trait method: the [impl] is chosen by the types of
    both operands, once known, and the result is its [Output]. *)
@@ -2261,7 +2355,9 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
             let decided = zonk state result in
             if not (unify state result output) then
               report state Mismatch value.span
-                (Printf.sprintf "This operator gives `%s`, and `%s` is expected." (T.show (zonk state output)) (T.show decided));
+                (Printf.sprintf "This operator gives `%s`, and `%s` is expected."
+                   (T.show (zonk state output))
+                   (T.show decided));
             state.tables.calls.(value.id) <-
               Some
                 {
@@ -2314,7 +2410,11 @@ and mutable_place state (value : expression) =
               {
                 call with
                 callee = Trait_method { method_ with receiver = Mut };
-                arguments = List.map (fun (argument : C.argument) -> if argument.parameter = 0 then { argument with mode = T.Mut } else argument) arguments;
+                arguments =
+                  List.map
+                    (fun (argument : C.argument) ->
+                      if argument.parameter = 0 then { argument with mode = T.Mut } else argument)
+                    arguments;
               }
       | _ -> ());
       mutable_place state base
@@ -2328,7 +2428,10 @@ and built_in_operator state (value : expression) (operands : expression list) re
       {
         callee = Built_in_operator;
         arguments =
-          List.mapi (fun index (operand : expression) -> { C.expression = operand.id; parameter = index; mode = Read; conversion = None }) operands;
+          List.mapi
+            (fun index (operand : expression) ->
+              { C.expression = operand.id; parameter = index; mode = Read; conversion = None })
+            operands;
         defaults_left_out = [];
         uses = [];
         capability_arguments = [];
@@ -2398,7 +2501,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
                      (T.show right_resolved));
               true);
       left_type
-  | Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
+  | (Equal | Not_equal | Less | Less_equal | Greater | Greater_equal)
     when operands_hole state env left right ->
       T.bool
   | Equal | Not_equal | Less | Less_equal | Greater | Greater_equal ->
@@ -2445,8 +2548,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
         resolve_evidence state value left_type (trait_reference trait);
         T.bool
       end
-  | Add | Subtract | Multiply | Divide | Remainder
-    when operands_hole state env left right ->
+  | (Add | Subtract | Multiply | Divide | Remainder) when operands_hole state env left right ->
       (* Every operation on a [todo] whose type is not decided is accepted,
          and gives such a value. *)
       T.Hole
@@ -2463,15 +2565,22 @@ and binary state env ?expected (value : expression) operator (left : expression)
           | String { tag = None; rest = []; _ } ->
               let written = source state side.span in
               let length = String.length written in
-              if length >= 2 && written.[0] = '"' && not (length >= 3 && String.sub written 0 3 = "\"\"\"") then
-                Some (String.sub written 1 (length - 2))
+              if
+                length >= 2
+                && written.[0] = '"'
+                && not (length >= 3 && String.sub written 0 3 = "\"\"\"")
+              then Some (String.sub written 1 (length - 2))
               else None
           | String _ -> None
           | _ -> Some ("${" ^ source state side.span ^ "}")
         in
         let fixes =
           match (piece left, piece right) with
-          | Some left, Some right -> [ fix "Join them with interpolation." [ replace value.span (Printf.sprintf "\"%s%s\"" left right) ] ]
+          | Some left, Some right ->
+              [
+                fix "Join them with interpolation."
+                  [ replace value.span (Printf.sprintf "\"%s%s\"" left right) ];
+              ]
           | _ -> []
         in
         report state String_addition value.span ~fixes
@@ -2521,8 +2630,13 @@ and binary state env ?expected (value : expression) operator (left : expression)
           end
           else begin
             let result =
-              operator_call ~operands:[ { C.expression = left.id; parameter = 0; mode = T.Read; conversion = None }; { C.expression = right.id; parameter = 1; mode = T.Read; conversion = None } ] state value ~trait ~method_
-                ~left:left_type ~right:(Some right_type)
+              operator_call
+                ~operands:
+                  [
+                    { C.expression = left.id; parameter = 0; mode = T.Read; conversion = None };
+                    { C.expression = right.id; parameter = 1; mode = T.Read; conversion = None };
+                  ]
+                state value ~trait ~method_ ~left:left_type ~right:(Some right_type)
             in
             if same_builtin then begin
               ignore (unify state result left_type);
@@ -2596,20 +2710,37 @@ and any_ state env ?expected (value : expression) (inner : expression) =
 and string_literal state env ?expected (literal : string_literal) =
   let parts = List.map (fun (part, _) -> (part, expression state env part)) literal.rest in
   let template : C.template =
-    { from_template = None; part_conversions = List.map (fun _ -> None) parts; interpolated = parts <> [] }
+    {
+      from_template = None;
+      part_conversions = List.map (fun _ -> None) parts;
+      interpolated = parts <> [];
+    }
   in
   state.tables.templates.(literal.id) <- Some template;
   let set_part index call =
     match state.tables.templates.(literal.id) with
     | Some template ->
         state.tables.templates.(literal.id) <-
-          Some { template with part_conversions = List.mapi (fun other existing -> if other = index then Some call else existing) template.part_conversions }
+          Some
+            {
+              template with
+              part_conversions =
+                List.mapi
+                  (fun other existing -> if other = index then Some call else existing)
+                  template.part_conversions;
+            }
     | None -> ()
   in
   let trait_call trait name receiver self_type evidence arguments result : C.call =
     {
-      callee = Trait_method { trait; name; receiver; self_type; type_arguments = []; evidence = evidence_of evidence };
-      arguments = List.mapi (fun index (written : expression) -> { C.expression = written.id; parameter = index; mode = T.Read; conversion = None }) arguments;
+      callee =
+        Trait_method
+          { trait; name; receiver; self_type; type_arguments = []; evidence = evidence_of evidence };
+      arguments =
+        List.mapi
+          (fun index (written : expression) ->
+            { C.expression = written.id; parameter = index; mode = T.Read; conversion = None })
+          arguments;
       defaults_left_out = [];
       uses = [];
       capability_arguments = [];
@@ -2627,10 +2758,14 @@ and string_literal state env ?expected (literal : string_literal) =
               else begin
                 let display = trait_reference (core "Display") in
                 (match implements state part_type display with
-                | Some evidence -> set_part index (trait_call display "display" Path.Read part_type evidence [ part ] T.unit)
+                | Some evidence ->
+                    set_part index
+                      (trait_call display "display" Path.Read part_type evidence [ part ] T.unit)
                 | None ->
                     report state No_impl part.span
-                      (Printf.sprintf "`%s` does not implement `Display`, so it cannot be interpolated." (T.show part_type)));
+                      (Printf.sprintf
+                         "`%s` does not implement `Display`, so it cannot be interpolated."
+                         (T.show part_type)));
                 true
               end))
         parts;
@@ -2639,7 +2774,9 @@ and string_literal state env ?expected (literal : string_literal) =
       match target state tag.last with
       | Some (Definition tag_path) ->
           let tag_type = T.Named { path = tag_path; arguments = fresh_arguments state tag_path } in
-          (match expected with Some expected -> ignore (unify state tag_type expected) | None -> ());
+          (match expected with
+          | Some expected -> ignore (unify state tag_type expected)
+          | None -> ());
           let template_trait = trait_reference (standard [ "text" ] "FromTemplate") in
           defer state (fun () ->
               let tag_type = normalize state tag_type in
@@ -2650,10 +2787,19 @@ and string_literal state env ?expected (literal : string_literal) =
                     (match state.tables.templates.(literal.id) with
                     | Some template ->
                         state.tables.templates.(literal.id) <-
-                          Some { template with from_template = Some (trait_call template_trait "from_template" Path.Static tag_type evidence [] tag_type) }
+                          Some
+                            {
+                              template with
+                              from_template =
+                                Some
+                                  (trait_call template_trait "from_template" Path.Static tag_type
+                                     evidence [] tag_type);
+                            }
                     | None -> ());
                     let part =
-                      Option.value ~default:T.Error (Impls.associated_type state.database ~bounds:(bounds state) tag_type template_trait "Part")
+                      Option.value ~default:T.Error
+                        (Impls.associated_type state.database ~bounds:(bounds state) tag_type
+                           template_trait "Part")
                     in
                     (* Each part becomes the tag's [Part] through [From], chosen by
                        the part's type. *)
@@ -2661,18 +2807,25 @@ and string_literal state env ?expected (literal : string_literal) =
                       (fun index ((part_expression : expression), part_type) ->
                         let part_type = normalize state part_type in
                         if not (T.equal part_type part) then
-                          let from = trait_reference ~arguments:[ T.Type part_type ] (core "From") in
+                          let from =
+                            trait_reference ~arguments:[ T.Type part_type ] (core "From")
+                          in
                           match implements state part from with
-                          | Some evidence -> set_part index (trait_call from "from" Path.Static part evidence [ part_expression ] part)
+                          | Some evidence ->
+                              set_part index
+                                (trait_call from "from" Path.Static part evidence
+                                   [ part_expression ] part)
                           | None ->
                               report state No_impl part_expression.span
-                                (Printf.sprintf "`%s` cannot become a `%s`, the part type of `%s`." (T.show part_type) (T.show part)
-                                   (T.show tag_type)))
+                                (Printf.sprintf "`%s` cannot become a `%s`, the part type of `%s`."
+                                   (T.show part_type) (T.show part) (T.show tag_type)))
                       parts
                 | None ->
                     if tag_type <> T.Error then
                       report state No_impl literal.span
-                        (Printf.sprintf "`%s` does not implement `FromTemplate`, so it is not a tag." (T.show tag_type)));
+                        (Printf.sprintf
+                           "`%s` does not implement `FromTemplate`, so it is not a tag."
+                           (T.show tag_type)));
                 true
               end);
           tag_type
@@ -2690,7 +2843,8 @@ and list_literal state env ?expected (value : expression) items =
     | Some (T.Named { path; arguments = [ T.Type element; count ] })
       when Intrinsic.builtin_of_path path = Some Array ->
         (match count with
-        | T.Value (Known count) when (not (Z.fits_int count)) || Z.to_int count <> List.length items ->
+        | T.Value (Known count) when (not (Z.fits_int count)) || Z.to_int count <> List.length items
+          ->
             report state Mismatch value.span
               (Printf.sprintf "This array has %d elements, and its type says %s."
                  (List.length items) (Z.to_string count))
@@ -2815,7 +2969,8 @@ and match_ state env ?expected (value : expression) scrutinees arms =
   (* The values a [match] matches settle before its arms, as a header. *)
   let types =
     List.map
-      (fun (scrutinee : expression) -> (scrutinee, in_statement state env scrutinee.span (fun () -> expression state env scrutinee)))
+      (fun (scrutinee : expression) ->
+        (scrutinee, in_statement state env scrutinee.span (fun () -> expression state env scrutinee)))
       scrutinees
   in
   let mode_of (scrutinee : expression) =
@@ -3006,7 +3161,16 @@ and statement state env (written : statement) ~last : unit =
               in
               let result =
                 operator_call
-                  ~operands:[ { C.expression = written_target.id; parameter = 0; mode = T.Read; conversion = None }; { C.expression = value.id; parameter = 1; mode = T.Read; conversion = None } ]
+                  ~operands:
+                    [
+                      {
+                        C.expression = written_target.id;
+                        parameter = 0;
+                        mode = T.Read;
+                        conversion = None;
+                      };
+                      { C.expression = value.id; parameter = 1; mode = T.Read; conversion = None };
+                    ]
                   state fake ~trait ~method_ ~left:target_type ~right:(Some right_type)
               in
               if not (unify state result target_type) then
@@ -3020,9 +3184,15 @@ and statement state env (written : statement) ~last : unit =
                   | (T.Literal _ | T.Variable _), _ | _, (T.Literal _ | T.Variable _) -> false
                   | left, right ->
                       if not (T.is_integer_type left || left = T.Error) then
-                        report state No_impl written_target.span (Printf.sprintf "Shifts work on built-in integers, not `%s`." (T.show left));
-                      if not ((T.is_integer_type right && not (T.is_signed right)) || right = T.Error) then
-                        report state Mismatch value.span (Printf.sprintf "A shift amount is an unsigned integer, not `%s`." (T.show right));
+                        report state No_impl written_target.span
+                          (Printf.sprintf "Shifts work on built-in integers, not `%s`."
+                             (T.show left));
+                      if
+                        not ((T.is_integer_type right && not (T.is_signed right)) || right = T.Error)
+                      then
+                        report state Mismatch value.span
+                          (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
+                             (T.show right));
                       true)
           | _ ->
               if not (unify state target_type right_type) then
@@ -3033,7 +3203,8 @@ and statement state env (written : statement) ~last : unit =
                   | resolved ->
                       if not (T.is_integer_type resolved || resolved = T.Error) then
                         report state No_impl written_target.span
-                          (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`." (T.show resolved));
+                          (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
+                             (T.show resolved));
                       true)))
   | For { pattern = written_pattern; iterable; clauses; body; _ } ->
       let mode, inner =
@@ -3240,7 +3411,8 @@ and check_assignable state env (written : expression) =
         | Some (Local id) -> (
             let captured =
               match (state.lambdas, Hashtbl.find_opt state.binding_spans id) with
-              | (lambda : span) :: _, Some (binding : span) -> binding.start < lambda.start || binding.start >= lambda.stop
+              | (lambda : span) :: _, Some (binding : span) ->
+                  binding.start < lambda.start || binding.start >= lambda.stop
               | _ -> false
             in
             match Hashtbl.find_opt state.locals id with
@@ -3260,7 +3432,10 @@ and check_assignable state env (written : expression) =
   | `Ok -> ()
   | `Captured name ->
       report state Not_assignable written.span
-        (Printf.sprintf "A lambda cannot change what it captures, and `%s` is from outside it. Return the new value instead, or use a loop." name)
+        (Printf.sprintf
+           "A lambda cannot change what it captures, and `%s` is from outside it. Return the new \
+            value instead, or use a loop."
+           name)
   | `Fixed name ->
       report state Not_assignable written.span
         (Printf.sprintf
@@ -3294,7 +3469,9 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
           | Some local ->
               if not (unify state local.type_ type_) then
                 report state Mismatch bound.span
-                  (Printf.sprintf "`%s` is a `%s` in the first alternative, and a `%s` here; every alternative binds it with one type."
+                  (Printf.sprintf
+                     "`%s` is a `%s` in the first alternative, and a `%s` here; every alternative \
+                      binds it with one type."
                      bound.text (show state local.type_) (show state type_))
           | None -> ())
       | Some (Definition path) -> (
@@ -3312,7 +3489,9 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
       let path =
         match constant with
         | Module_constant written_path -> (
-            match target state written_path.last with Some (Definition path) -> Some path | _ -> None)
+            match target state written_path.last with
+            | Some (Definition path) -> Some path
+            | _ -> None)
         | Type_constant (written_path, member) -> (
             match target state written_path.last with
             | Some (Definition owner) -> Members.own_constant state.database owner member.text
@@ -3323,7 +3502,8 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
           state.tables.patterns.(written.id) <- Some (Constant_pattern path);
           match Query.demand state.database Environment.constant_type path with
           | Some constant_type ->
-              if not (unify state constant_type type_) then mismatch state written.span ~expected:type_ ~found:constant_type
+              if not (unify state constant_type type_) then
+                mismatch state written.span ~expected:type_ ~found:constant_type
           | None -> ())
       | None -> report state Unknown_member written.span "This names no constant.")
   | Literal literal -> literal_pattern state env written literal type_
@@ -3363,8 +3543,11 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                   (match (variant.fields, fields) with
                   | Some (_ :: _), None ->
                       report state Missing_argument written.span
-                        ~fixes:[ fix "Match its fields with `..`." [ insert written.span.stop "(..)" ] ]
-                        (Printf.sprintf "`%s` has fields, so its pattern names them, or writes `(..)`." variant.variant_name)
+                        ~fixes:
+                          [ fix "Match its fields with `..`." [ insert written.span.stop "(..)" ] ]
+                        (Printf.sprintf
+                           "`%s` has fields, so its pattern names them, or writes `(..)`."
+                           variant.variant_name)
                   | _ -> ());
                   pattern_fields state env written
                     (Option.value ~default:[] variant.fields)
@@ -3402,7 +3585,8 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
           | Some record_fields ->
               if not (Members.fields_visible state.database ~package:state.package path) then
                 report state Private_field written.span
-                  (Printf.sprintf "`%s` is opaque, so only its own package can match on it." (T.show type_));
+                  (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
+                     (T.show type_));
               state.tables.patterns.(written.id) <- Some (Record_pattern { type_ });
               pattern_fields state env written record_fields fields ~mutable_ ~mode
           | None ->
@@ -3428,21 +3612,29 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
         | Named_field (name, _) -> Some name.text
         | Field inner -> (
             match bare_name inner with
-            | Some name when List.exists (fun (declared : T.field) -> declared.field_name = name) fields -> Some name
+            | Some name
+              when List.exists (fun (declared : T.field) -> declared.field_name = name) fields ->
+                Some name
             | _ -> ( match fields with [ only ] -> Some only.field_name | _ -> None))
         | Rest -> None)
       written_fields
   in
   let rest = List.exists (fun (field : pattern_field) -> field.kind = Rest) written_fields in
-  let all_matched = List.length named = List.length (List.filter (fun (field : pattern_field) -> field.kind <> Rest) written_fields) in
+  let all_matched =
+    List.length named
+    = List.length (List.filter (fun (field : pattern_field) -> field.kind <> Rest) written_fields)
+  in
   (if (not rest) && all_matched then
-     match List.filter (fun (declared : T.field) -> not (List.mem declared.field_name named)) fields with
+     match
+       List.filter (fun (declared : T.field) -> not (List.mem declared.field_name named)) fields
+     with
      | [] -> ()
      | missing ->
          if written_fields <> [] || List.length fields > 0 then
            report state Missing_argument written.span
              (Printf.sprintf "This pattern does not match %s. Name %s, or write `..` for the rest."
-                (String.concat ", " (List.map (fun (declared : T.field) -> "`" ^ declared.field_name ^ "`") missing))
+                (String.concat ", "
+                   (List.map (fun (declared : T.field) -> "`" ^ declared.field_name ^ "`") missing))
                 (if List.length missing = 1 then "it" else "them")));
   List.iter
     (fun (field : pattern_field) ->
