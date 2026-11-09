@@ -579,15 +579,37 @@ own query and trace, since a cycle can only be seen across definitions:
 
 | Resource | Counts |
 |---|---|
-| `time` | One for each primitive operation and each call, plus each callee's own `time` |
+| `time` | One for each call and each iteration of a loop, plus each callee's own `time` |
 | `allocations` | Each allocation, and each callee's `allocations` |
 | `allocated_bytes` | The bytes of each allocation, and each callee's `allocated_bytes` |
 | `calls(target)` | Each call to the target, and each callee's count for it |
 
-A counter is an `Integer` in the proof program, increased at each step and
-each call, so costs are proven by the same verification conditions as
-everything else. A callee's cost is what its cost clause promises, never
-what its body does, as DESIGN.md requires.
+- **A counter is an `Integer` in the proof program,** increased at each
+  call and each iteration, so costs are proven by the same verification
+  conditions as everything else. Where paths join, a counter is what the
+  path taken spent.
+- **A callee's cost is what its cost clause promises,** never what its body
+  does, as DESIGN.md requires, read with its parameters as they were passed
+  and with `result`. A callee with no clause about a resource may spend any
+  amount of it, so a bound that depends on it cannot be proven.
+- **The steps between calls and iterations are not counted one by one.**
+  Between two of them, a body runs a fixed number of primitive operations,
+  at most its own length, so counting them changes only a constant, which
+  an `O(...)` bound's constants absorb. A `time` bound is always
+  asymptotic, so nothing is lost.
+- **Allocations are counted where DESIGN.md says they happen:** building an
+  `indirect` variant is one allocation, of a fixed size that is not known
+  to the prover, and so is any callee's allocation.
+- **The intrinsic module's operations** each take a fixed number of steps
+  and allocate nothing, or are known by no bound, as the compiler declares
+  them: arithmetic and reading or swapping in place are the first kind,
+  growing storage, copying runs of bytes, and reaching the system the
+  second.
+- **A `calls(target)` counter** counts each call through a function value
+  or of a capability's method. A callee that is passed the function value,
+  or uses the capability, counts what its own `calls` clause about it says;
+  one that can reach neither counts nothing; and one passed a lambda that
+  captures the function value is known by no bound.
 
 ### Exact bounds
 
@@ -604,8 +626,9 @@ own, unknown to the caller, and the prover must find the caller's. Truss
 removes them in two steps:
 
 1. **Count in units.** Each callee's `O(g)` is counted as `g + 1` with its
-   arguments, each step as 1, and each call through a function value `visit`
-   as `time(visit)`, which is at least 1. Every callee's real cost is at
+   arguments, or 1 where `g` is below zero, each step as 1, and each call
+   through a function value `visit` as `time(visit)`, which is at least 1,
+   and 1 when its type has an `O(...)` bound. Every callee's real cost is at
    most `C` times what is counted, where `C` is the largest of the callees'
    constants and 1. That `C` is a fixed number, though unknown, so a bound
    `counted <= c' * f + d'` proves the real cost is at most
@@ -621,7 +644,12 @@ removes them in two steps:
 
 Recursion uses the same constants: a recursive call adds `c' * f + d'` with
 its arguments, which is the induction hypothesis, made sound by the measure
-that proves termination. So binary search's
+that proves termination. Functions that call each other in a cycle each
+assume the others' bounds with their own constants, which is sound only if
+all of them are proven with the same pair, so each of them tries only the
+first. The constants are two symbols in the queries; every query of a
+definition that mentions them is asked with the same pair, and the first
+pair that proves all of them is taken. So binary search's
 `1 + c' * log(n / 2) + d' <= c' * log(n) + d'` holds because
 `log(n / 2) == log(n) - 1` for every `n` at least 1, one of the facts the
 prover gives the solver about `log`. That fact is exact because DESIGN.md
@@ -647,6 +675,22 @@ plus what happens before and after:
 - **The prover adds the invariant** that the counter is at most its value
   on entry plus the iterations so far times that bound, or, for an exact
   bound, exactly that.
+- **The bound on one iteration is worked out, and then shown.** From what
+  the iterations that ended, or were left by `break`, spent, each value the
+  loop changes or makes is replaced by a bound on it from the facts at the
+  head and in the body: an upper bound where the cost grows with it, and a
+  lower bound where it shrinks, and a choice between paths by the larger
+  of them. The result is a guess, and every iteration is shown to spend no
+  more than it, so a wrong guess fails a proof but never makes one. When no
+  bound is found, the error says to give the loop a `cost` clause.
+- **The iterations are bounded where the loop is left.** A ghost count of
+  them is kept: for a range, the `n`th iteration has the index
+  `start + n`, so the count ends at the range's length; for an `each`, it
+  is the length of `yielded`, which the method's clauses bound; and for a
+  `while` loop with one measure, which every iteration shows to start at or
+  above zero and to decrease, a ghost for the measure where the latest
+  iteration began keeps the count within one more than the measure on
+  entry.
 
 - **A loop with a `cost` clause** is not bounded iteration by iteration.
   The clause is an invariant about the counter since the loop began: it is
@@ -677,6 +721,18 @@ plus what happens before and after:
   that pushes `count` times can promise `O(count + items.length())`.
 - **Potentials never go below zero,** which is proven for each type with
   one, from its invariants.
+
+### Lambdas and function values
+
+- **A lambda counts on its own.** Its type's cost clauses, which can only
+  be constants since a function type's inputs have no names, are shown of
+  its body like a function's.
+- **`time(f)` for a lambda** is a bound on one call of it, worked out as a
+  loop's iteration is, from the values around the lambda, and shown of
+  each way its body ends only when a cost the prover is showing uses it.
+- **A function type with an `O(...)` time bound** is one unit per call, to
+  the code that calls it and to the code that passes it, which must then
+  show it.
 
 ## Running code while proving
 
@@ -819,9 +875,11 @@ input and states one fact about the result, and there are no golden files.
 
 The prover is built in three libraries: `logic`, the terms and their
 canonical text; `solver`, the pinned Z3; and `prover`, which holds the rest
-of the table in [Structure](#structure) as two modules for now, `Translate`,
-which does the work of `Encode`, `Paths`, `Obligations`, and `Vc`, and
-`Prover`, the entry point and its diagnostics. Proof programs are not a data
+of the table in [Structure](#structure) as three modules for now,
+`Translate`, which does the work of `Encode`, `Paths`, `Obligations`, `Vc`,
+and the counting of `Costs`; `Costs`, the counters, the constants, `log`
+and `power`, and the bounds on one iteration; and `Prover`, the entry point
+and its diagnostics. Proof programs are not a data
 structure of their own yet: `Translate` executes a checked body forward in
 the passive form `Vc` describes, guarding every fact by its path and giving
 each local a fresh symbol where paths join.
@@ -926,6 +984,15 @@ It proves, with one canonical, numbered, hashed query per obligation:
   goal, directly or through other kept facts
 - a cache of answers on disk, by each query's key, which `truss prove`
   keeps in `~/.cache/truss/proofs`
+- cost clauses, as [Costs](#costs) describes: `time`, `allocations`,
+  `allocated_bytes`, and `calls(...)` of a function value, a capability, or
+  one of its methods, with `O(...)`, `<=`, and `==` bounds; counting in
+  units, with the constants tried in order, the same for every query of a
+  definition and the first pair alone in a cycle of calls; recursive calls
+  by the induction hypothesis; `log`, `power`, and `time(f)`; loops by their
+  `cost` clauses, or by their iterations times a bound on one; lambdas by
+  their types' clauses; and quantifiers in code, by their range times what
+  their body spends. Amortized bounds and potentials are not built yet.
 
 A call to anything whose contract it does not read yet, such as a trait
 method or a capability, gives a value known only by its type's range, and
@@ -934,9 +1001,7 @@ type without structural equality: sound, but it proves little. A
 definition that uses anything else, such as a string, a float, a cursor,
 or a function named as a value, is reported as
 `prover.unsupported` with what stopped it, and none of its obligations
-count as proven. A cost bound, and a loop's
-`cost`, are reported as not proven yet, while the rest of the definition is
-proven as usual.
+count as proven.
 
 ## Open questions
 

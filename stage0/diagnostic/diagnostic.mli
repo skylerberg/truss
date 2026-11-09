@@ -197,6 +197,7 @@ module Code : sig
     | Termination
     | Assertion
     | Law
+    | Cost
     | Unreachable
     | Unsupported
 

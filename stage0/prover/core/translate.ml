@@ -39,14 +39,11 @@ type obligation = {
   message : string;
   query : L.query;
   values : (string * string) list;  (** Each prover symbol a counterexample shows, with its name. *)
+  constants : Costs.constants list;
+      (** The constants of each [O(...)] bound the query mentions, which each try pins. *)
 }
 
-type outcome = {
-  obligations : obligation list;  (** In the order made. *)
-  unproven_clauses : (span * string) list;
-      (** Clauses this stage does not prove yet, such as cost bounds, which the rest does not rely
-          on. *)
-}
+type outcome = { obligations : obligation list  (** In the order made. *) }
 
 (* A definition whose tables are being read: the one proven, or a callee
    whose clauses are translated at a call. *)
@@ -76,6 +73,8 @@ and frame = {
   finished : L.term option;  (** What [finished] names here. *)
   handed_out : L.term option;
       (** In a lending or yielding method's own body, the parts it has handed out so far. *)
+  spent : (string * L.term) list;
+      (** Each counter's value here, by its key: what the code proven has spent since it began. *)
 }
 
 type context = {
@@ -90,7 +89,6 @@ type context = {
   declared : (string, unit) Hashtbl.t;
   mutable facts : L.term list;  (** Reversed. *)
   mutable obligations : obligation list;  (** Reversed. *)
-  mutable unproven : (span * string) list;
   mutable fresh : int;
   mutable values : (string * string) list;  (** For counterexamples. *)
   mutable returns : (frame * L.term option) list;
@@ -104,6 +102,21 @@ type context = {
   graph : Call_graph.t;  (** The package's call graph, for recursion in cycles. *)
   home : Names.key;  (** The definition being proven, whose tree spans and obligations are in. *)
   mutable laws_assumed : string list;  (** Each trait and type whose laws are facts already. *)
+  mutable counters : Costs.counter list;  (** What the code proven counts, for its cost clauses. *)
+  mutable own_constants : (string * Costs.constants) list;
+      (** By counter, the constants of the definition's own [O(...)] bounds, which a call back into
+          it assumes. *)
+  mutable groups : Costs.constants list;  (** Every bound's constants, made so far. *)
+  fresh_order : (string, int) Hashtbl.t;
+      (** Each fresh symbol's number, to tell what a loop made. *)
+  mutable logs : (L.term * bool) list;  (** Each term [log] is applied to, and whether halved. *)
+  mutable powers : (L.term * L.term) list;  (** Each base and exponent [power] is applied to. *)
+  mutable lambda_times : (L.term * (L.term * obligation list)) list;
+      (** A lambda's bound on the time of one call, and the obligations that show it, made only once
+          the bound is used. *)
+  mutable lambda_captures : (L.term * C.local list) list;  (** What each lambda captures. *)
+  mutable call_targets : (L.term * C.local) list;
+      (** Each function-typed parameter a [calls] clause counts, with its local. *)
 }
 
 (* Symbols and facts *)
@@ -122,7 +135,24 @@ let fresh context prefix sort =
   context.fresh <- context.fresh + 1;
   let name = Printf.sprintf "%s.%d" prefix context.fresh in
   declare context (L.Constant (name, sort));
+  Hashtbl.replace context.fresh_order name context.fresh;
   L.Symbol name
+
+(* Whether a term mentions a fresh symbol made after [mark]: a value a
+   loop changes, or one made inside it. *)
+let made_since context mark term =
+  let rec walk = function
+    | L.Symbol name -> (
+        match Hashtbl.find_opt context.fresh_order name with Some n -> n > mark | None -> false)
+    | L.Integer _ | L.Boolean _ -> false
+    | L.Apply (_, arguments) -> List.exists walk arguments
+    | L.Forall (_, body) | L.Exists (_, body) -> walk body
+  in
+  walk term
+
+(* A fact of mathematics, true on every path. *)
+let fact context frame term =
+  if not (L.mentions frame.bound term) then context.facts <- term :: context.facts
 
 (* A fact is guarded by its path's condition. Inside a quantifier, either
    may mention a bound variable, and such a fact has no place outside the
@@ -137,27 +167,38 @@ let assume context frame fact =
    after it. Inside a quantifier there is no path to state it on, so it is
    left to the definition of the quantifier's body, which this stage does
    not check yet. *)
-let oblige context frame code span message goal =
+let rec oblige context frame code span message goal =
   if frame.checking && not (L.mentions frame.bound goal || L.mentions frame.bound frame.condition)
   then begin
-    let guarded = L.( ==> ) frame.condition goal in
     context.obligations <-
-      {
-        code;
-        span;
-        message;
-        query =
-          L.prune
-            {
-              declarations = List.rev context.declarations;
-              facts = List.rev context.facts;
-              goal = guarded;
-            };
-        values = context.values;
-      }
-      :: context.obligations;
+      make_obligation context frame code span message goal :: context.obligations;
     assume context frame goal
   end
+
+(* An obligation made but not yet added, for one that is needed only if
+   what it shows is used. *)
+and obligation_at context frame code span message goal =
+  if frame.checking && not (L.mentions frame.bound goal || L.mentions frame.bound frame.condition)
+  then Some (make_obligation context frame code span message goal)
+  else None
+
+and make_obligation context frame code span message goal =
+  let query =
+    L.prune
+      {
+        declarations = List.rev context.declarations;
+        facts = List.rev context.facts;
+        goal = L.( ==> ) frame.condition goal;
+      }
+  in
+  let constants =
+    List.filter
+      (fun (group : Costs.constants) ->
+        let names = [ group.factor; group.addend ] in
+        L.mentions names query.goal || List.exists (L.mentions names) query.facts)
+      context.groups
+  in
+  { code; span; message; query; values = context.values; constants }
 
 (* Source text, for messages. *)
 let quote source (span : span) =
@@ -284,29 +325,35 @@ let declared_fields context ty variant =
 let rec sort_of context (ty : T.ty) : L.sort =
   if is_numeric ty then Int
   else if is_bool ty then Bool
-  else begin
-    let name = type_key ty in
-    (if not (Hashtbl.mem context.declared name) then
-       match constructors context ty with
-       | Some shape ->
-           (* Marked first, so a recursive type's fields find it declared. *)
-           Hashtbl.replace context.declared name ();
-           let declaration =
-             L.Datatype
-               ( name,
-                 List.map
-                   (fun (variant, fields) ->
-                     ( constructor_name ty variant,
-                       List.map
-                         (fun (field, field_type) ->
-                           (selector_name ty variant field, sort_of context field_type))
-                         fields ))
-                   shape )
-           in
-           context.declarations <- declaration :: context.declarations
-       | None -> ());
-    Uninterpreted name
-  end
+  else
+    match ty with
+    | Function function_type ->
+        (* One sort for each number of inputs, whatever the clauses, so a
+           value keeps its sort where a function type is widened. *)
+        Uninterpreted (Printf.sprintf "function/%d" (List.length function_type.inputs))
+    | _ -> begin
+        let name = type_key ty in
+        (if not (Hashtbl.mem context.declared name) then
+           match constructors context ty with
+           | Some shape ->
+               (* Marked first, so a recursive type's fields find it declared. *)
+               Hashtbl.replace context.declared name ();
+               let declaration =
+                 L.Datatype
+                   ( name,
+                     List.map
+                       (fun (variant, fields) ->
+                         ( constructor_name ty variant,
+                           List.map
+                             (fun (field, field_type) ->
+                               (selector_name ty variant field, sort_of context field_type))
+                             fields ))
+                       shape )
+               in
+               context.declarations <- declaration :: context.declarations
+           | None -> ());
+        Uninterpreted name
+      end
 
 (* Whether [==] on a type is the solver's equality: built in with identity
    semantics, or derived from fields that all are. See DESIGN.md,
@@ -411,12 +458,44 @@ let join context ?value_type frames =
             | None -> term)
           first.locals
       in
+      (* A counter where paths join is what the path taken spent: a fresh
+         symbol defined as a choice between them, which a loop's bound on
+         one iteration can see through. *)
+      let spent =
+        List.map
+          (fun (key, term) ->
+            let values =
+              List.map
+                (fun ((frame : frame), _) ->
+                  ( frame.condition,
+                    match List.assoc_opt key frame.spent with Some t -> t | None -> term ))
+                frames
+            in
+            match values with
+            | (_, first_value) :: rest when List.for_all (fun (_, v) -> v = first_value) rest ->
+                (key, first_value)
+            | _ ->
+                let choice =
+                  match List.rev values with
+                  | (_, last) :: earlier ->
+                      List.fold_left
+                        (fun otherwise (condition, value) -> L.ite condition value otherwise)
+                        last earlier
+                  | [] -> term
+                in
+                if L.mentions first.bound choice then (key, choice)
+                else
+                  let symbol = fresh context "spent" L.Int in
+                  context.facts <- L.equal symbol choice :: context.facts;
+                  (key, symbol))
+          first.spent
+      in
       let value =
         match value_type with
         | Some ty -> define "value" (sort_of context ty) (fun _ value -> value)
         | None -> None
       in
-      Some ({ merged with locals }, value)
+      Some ({ merged with locals; spent }, value)
 
 let join_frames context frames =
   Option.map fst (join context (List.map (fun frame -> (frame, None)) frames))
@@ -434,6 +513,7 @@ type part = {
   requires : expression list;
   ensures : expression list;
   decreases : expression list;
+  costs : (cost * span) list;  (** Its cost clauses, but [cost time finite]. *)
 }
 
 type contract = {
@@ -490,6 +570,14 @@ let part_of callee (parameters : parameter list) (clauses : clause list) =
     decreases =
       List.concat_map
         (fun (clause : clause) -> match clause.kind with Decreases measures -> measures | _ -> [])
+        clauses;
+    costs =
+      List.filter_map
+        (fun (clause : clause) ->
+          match clause.kind with
+          | Cost { resource = Time; bound = Finite; _ } -> None
+          | Cost cost -> Some (cost, clause.span)
+          | _ -> None)
         clauses;
   }
 
@@ -585,6 +673,22 @@ let trait_part database (trait : Path.t) name receiver =
       | None -> None)
   | _ -> None
 
+(* A capability's method's clauses, from the capability's definition. *)
+let capability_part database (capability : Path.t) name =
+  match Interface.Summary.definition database capability with
+  | Some (key, { kind = Capability { members; _ }; _ }) -> (
+      match callee_source database key with
+      | Some callee ->
+          List.find_map
+            (fun (member : capability_member line) ->
+              match member.kind with
+              | Capability_method signature when name_of signature = name ->
+                  Some (part_of callee signature.parameters signature.clauses)
+              | _ -> None)
+            members
+      | None -> None)
+  | _ -> None
+
 (* A trait method's body, when it provides one. *)
 let provided_body database (trait : Path.t) name receiver =
   match Interface.Summary.definition database trait with
@@ -646,6 +750,20 @@ let method_contract database (trait : T.trait_reference) name receiver (evidence
             ~own:part ~others:[] ~result:signature.result ~body:None)
         trait_side
   | Built_in -> None
+
+let distinct_counters counters =
+  List.fold_left
+    (fun found counter ->
+      if List.exists (fun other -> Costs.key other = Costs.key counter) found then found
+      else found @ [ counter ])
+    [] counters
+
+let resource_of (cost : cost) ~target_of : Costs.resource option =
+  match cost.resource with
+  | Time -> Some Time
+  | Allocations -> Some Allocations
+  | Allocated_bytes -> Some Allocated_bytes
+  | Calls written -> Option.map (fun target -> Costs.Calls target) (target_of written)
 
 (* Expressions *)
 
@@ -1008,9 +1126,35 @@ and if_ context frame (written : expression) condition then_ else_ =
     Option.map (fun frame -> (frame, L.Boolean true)) (join_frames context (List.map fst reached))
 
 and quantified context frame (written : expression) quantifier binder body =
-  let make bound_symbol sort premise body_frame =
-    let _, body_value = value context { body_frame with checking = false } body in
+  let make ?count bound_symbol sort premise body_frame =
+    let mark = context.fresh in
+    let after, body_value = value context { body_frame with checking = false } body in
     let bound = [ (bound_symbol, sort) ] in
+    (* In code, a quantifier over a range runs its body once for each value
+       in it, which costs that many times what the body spends, when that
+       is the same for every value. *)
+    let frame =
+      match count with
+      | Some count when frame.checking ->
+          spend context frame (fun counter ->
+              let key = Costs.key counter in
+              let spent =
+                match (List.assoc_opt key body_frame.spent, List.assoc_opt key after.spent) with
+                | Some start, Some total -> Costs.since ~start total
+                | _ -> Costs.zero
+              in
+              if made_since context mark spent || L.mentions [ bound_symbol ] spent then
+                unknown_amount context frame counter
+              else
+                match counter.counting with
+                | Units ->
+                    Costs.plus
+                      (Costs.times (Costs.at_least_zero count) (Costs.plus spent (L.int 1)))
+                      (L.int 1)
+                | At_most | Exactly ->
+                    if spent = Costs.zero then Costs.zero else unknown_amount context frame counter)
+      | _ -> frame
+    in
     match quantifier with
     | Forall -> Some (frame, L.Forall (bound, L.( ==> ) premise body_value))
     | Exists -> Some (frame, L.Exists (bound, L.( &&& ) premise body_value))
@@ -1040,7 +1184,10 @@ and quantified context frame (written : expression) quantifier binder body =
         L.(
           Apply ("<=", [ low; bound ]) &&& Apply ((if inclusive then "<=" else "<"), [ bound; high ]))
       in
-      make symbol Int premise inner
+      let count =
+        if inclusive then Costs.plus (Costs.minus high low) (L.int 1) else Costs.minus high low
+      in
+      make ~count symbol Int premise inner
   | Binder_in _ -> unsupported written.span "a quantifier over a collection"
 
 (* Calls *)
@@ -1056,6 +1203,13 @@ and call context frame (written : expression) callee_expression arguments =
           let frame, second_value = value context frame second in
           Some (frame, L.equal first_value second_value)
       | _ -> unsupported written.span "`identical` with other than two arguments")
+  | Name path
+    when match source.resolved.names.(path.last.id) with
+         | Some (Cost_function _) -> true
+         | _ -> false -> (
+      match source.resolved.names.(path.last.id) with
+      | Some (Cost_function kind) -> cost_function context frame written kind arguments
+      | _ -> None)
   | Name path when source.resolved.names.(path.last.id) = Some Old -> (
       match arguments with
       | [ { value = inner; _ } ] ->
@@ -1205,6 +1359,7 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
     | Some _ -> unsupported written.span "a call to a yielding method outside a `for` loop"
     | None ->
         let frame = havoc_mut frame in
+        let frame = spend context frame (step_amount context frame call_ values) in
         Some (frame, arrive context frame "result" result_type)
   in
   match call_.callee with
@@ -1269,14 +1424,27 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
         ~instance:(instance_of (T.Type self_type :: arguments))
         path
         (method_contract context.database trait name receiver evidence)
-  | Constructor { variant; _ } -> Some (construct context frame written call_ variant values)
+  | Constructor { variant; _ } ->
+      let frame, built = construct context frame written call_ variant values in
+      Some (spend context frame (step_amount context frame call_ values), built)
   | Function_value ->
       check_callback_requires context frame written values;
       let frame = havoc_mut frame in
+      let frame =
+        match written.kind with
+        | Call (callee, _) when context.counters <> [] -> (
+            let _, callee_term = value context frame callee in
+            match type_of frame callee with
+            | T.Function function_type ->
+                spend context frame (function_value_amount context frame function_type callee_term)
+            | _ -> spend context frame (unknown_amount context frame))
+        | _ -> frame
+      in
       Some (frame, arrive context frame "result" result_type)
   | Capability_method _ | Intrinsic _ | Built_in_operator ->
       let frame = havoc_mut frame in
       ignore source;
+      let frame = spend context frame (step_amount context frame call_ values) in
       Some (frame, arrive context frame "result" result_type)
 
 (* Lambdas and callbacks *)
@@ -1307,19 +1475,145 @@ and lambda context frame (written : expression) (parameters : pattern list) body
   in
   let arguments = List.rev arguments in
   List.iter (assume context inside) (facts arguments);
+  (* A lambda counts on its own: what its type's cost clauses promise, and,
+     where the code around it counts time, its time, to bound [time(f)]
+     for it. *)
+  let promised =
+    List.filter_map
+      (fun (cost : T.cost) ->
+        let counting : Costs.counting option =
+          match cost.bound with
+          | Order_of -> Some Units
+          | No_more_than (Some _) -> Some At_most
+          | Exactly_cost (Some _) -> Some Exactly
+          | Finite_cost | No_more_than None | Exactly_cost None -> None
+        in
+        let resource : Costs.resource option =
+          match cost.resource with
+          | "time" -> Some Time
+          | "allocations" -> Some Allocations
+          | "allocated_bytes" -> Some Allocated_bytes
+          | _ -> None
+        in
+        match (resource, counting) with
+        | Some resource, Some counting ->
+            let counter = { Costs.resource; counting } in
+            let constants =
+              if counting = Units then begin
+                let constants =
+                  Costs.constants (Printf.sprintf "lambda.%d.%s" written.id (Costs.key counter))
+                in
+                context.groups <- constants :: context.groups;
+                declare context (L.Constant (constants.factor, L.Int));
+                declare context (L.Constant (constants.addend, L.Int));
+                Some constants
+              end
+              else None
+            in
+            Some (counter, cost.bound, constants)
+        | _ -> None)
+      function_type.costs
+  in
+  let time_units = { Costs.resource = Time; counting = Units } in
+  let counts_time =
+    List.exists (fun counter -> Costs.key counter = Costs.key time_units) context.counters
+  in
+  let times_by_type = List.exists (fun (counter, _, _) -> counter = time_units) promised in
+  (* A call back into the definition around it still assumes its bound
+     with the definition's constants, which are kept. *)
+  let saved_counters = context.counters in
+  context.counters <-
+    distinct_counters
+      ((if counts_time then [ time_units ] else [])
+      @ List.map (fun (counter, _, _) -> counter) promised
+      @ loop_counters frame.source inside.locals body);
+  let inside =
+    {
+      inside with
+      spent = List.map (fun counter -> (Costs.key counter, Costs.zero)) context.counters;
+    }
+  in
+  let mark = context.fresh and facts_mark = List.length context.facts in
   let saved_returns = context.returns
   and saved_output = context.output
   and saved_terminates = context.terminates in
   context.returns <- [];
   context.output <- (match function_type.output with Returns output -> Some output | _ -> None);
   context.terminates <- T.terminates function_type;
-  Fun.protect
-    ~finally:(fun () ->
-      context.returns <- saved_returns;
-      context.output <- saved_output;
-      context.terminates <- saved_terminates)
-    (fun () -> ignore (block_value context inside body));
-  (frame, arrive context frame "lambda" ty)
+  let pending =
+    Fun.protect
+      ~finally:(fun () ->
+        context.returns <- saved_returns;
+        context.output <- saved_output;
+        context.terminates <- saved_terminates;
+        context.counters <- saved_counters)
+      (fun () ->
+        let finished = block_value context inside body in
+        let exits =
+          (match finished with Some (frame, _) -> [ frame ] | None -> [])
+          @ List.map fst context.returns
+        in
+        let spent_of (exit_ : frame) counter =
+          match List.assoc_opt (Costs.key counter) exit_.spent with
+          | Some term -> term
+          | None -> Costs.zero
+        in
+        List.iter
+          (fun (exit_ : frame) ->
+            List.iter
+              (fun (counter, (bound : T.cost_bound), constants) ->
+                let spent = spent_of exit_ counter in
+                let goal =
+                  match (bound, constants) with
+                  | Order_of, Some constants ->
+                      Costs.at_most spent (Costs.bound constants (L.int 1))
+                  | No_more_than (Some k), _ -> Costs.at_most spent (L.Integer k)
+                  | Exactly_cost (Some k), _ -> L.equal spent (L.Integer k)
+                  | _ -> L.Boolean true
+                in
+                oblige context exit_ Cost written.span
+                  (Printf.sprintf "This lambda may spend more than its type, `%s`, allows."
+                     (T.show ty))
+                  goal)
+              promised)
+          exits;
+        (* A bound on the time of one call, from what the lambda does not
+           change, shown only once a cost uses it. *)
+        if counts_time && not times_by_type then
+          let spent = List.map (fun exit_ -> spent_of exit_ time_units) exits in
+          let most =
+            match spent with
+            | [] -> Costs.zero
+            | first :: rest -> List.fold_left Costs.larger first rest
+          in
+          match
+            Costs.bound_on ~varies:(made_since context mark)
+              ~facts:
+                (facts_since context facts_mark
+                @ List.map (fun (exit_ : frame) -> exit_.condition) exits)
+              most
+          with
+          | Some bound ->
+              Some
+                ( bound,
+                  List.filter_map
+                    (fun ((exit_ : frame), spent) ->
+                      obligation_at context exit_ Cost written.span
+                        "The prover cannot show that a call of this lambda takes no more time than \
+                         the bound it found for every call, which a cost here relies on."
+                        (Costs.at_most spent bound))
+                    (List.combine exits spent) )
+          | None -> None
+        else None)
+  in
+  let term = arrive context frame "lambda" ty in
+  (match frame.source.checked.captures.(written.id) with
+  | Some captured -> context.lambda_captures <- (term, captured) :: context.lambda_captures
+  | None -> ());
+  (match pending with
+  | Some found -> context.lambda_times <- (term, found) :: context.lambda_times
+  | None -> ());
+  (frame, term)
 
 (* The [requires] on the type of a function-typed parameter, with the
    names of its inputs, in the definition that declares it. *)
@@ -2412,6 +2706,15 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
       contract.parts;
     context.instantiating <- List.tl context.instantiating
   end;
+  (* What the call spends, by the callee's cost clauses, read with the
+     arguments as passed and [result]. *)
+  let after =
+    spend context after
+      (callee_amount context after ~path ~parts:contract.parts
+         ~bound_frame:(fun part ->
+           { (entry_frame part) with result = Some result; condition = after.condition })
+         ~call_ ~values)
+  in
   (after, result)
 
 (* The parameters of the definition proven whose types are datatypes,
@@ -2453,6 +2756,603 @@ and smaller before after =
         Apply ("<=", [ int 0; b ])
         &&& (Apply ("<", [ a; b ]) ||| (equal a b &&& smaller before after)))
   | _ -> L.Boolean true
+
+(* Costs: what each step spends. See PROVER.md, "Costs". *)
+
+(* The counters a body's loops' [cost] clauses count, outside lambdas,
+   which count on their own. *)
+and loop_counters (source : source) locals (body : block) =
+  let found = ref [] in
+  let rec visit_statement (statement_ : statement) =
+    (match statement_.kind with
+    | While { clauses; _ } | For { clauses; _ } ->
+        List.iter
+          (fun (clause : loop_clause) ->
+            match clause.kind with
+            | Loop_cost cost -> (
+                match resource_of cost ~target_of:(target_in source locals) with
+                | Some resource ->
+                    found := { Costs.resource; counting = counting_of cost } :: !found
+                | None -> unsupported clause.span "this `calls` target")
+            | _ -> ())
+          clauses
+    | _ -> ());
+    Syntax_walk.statement_parts ~expression:visit_expression ~statement:visit_statement statement_
+  and visit_expression (expression_ : expression) =
+    match expression_.kind with
+    | Lambda _ -> ()
+    | _ ->
+        Syntax_walk.expression_parts ~expression:visit_expression ~statement:visit_statement
+          expression_
+  in
+  List.iter visit_statement body.statements;
+  List.rev !found
+
+(* Each counter, increased by what one step spends of it. *)
+and spend context frame (amount : Costs.counter -> L.term) =
+  if context.counters = [] then frame
+  else
+    {
+      frame with
+      spent =
+        List.map
+          (fun (key, term) ->
+            match List.find_opt (fun counter -> Costs.key counter = key) context.counters with
+            | Some counter -> (key, Costs.plus term (amount counter))
+            | None -> (key, term))
+          frame.spent;
+    }
+
+(* An amount nothing bounds: at least zero, or one for a call's time. *)
+and unknown_amount context frame (counter : Costs.counter) =
+  let amount = fresh context "spent" L.Int in
+  let least = match counter.resource with Time -> 1 | _ -> 0 in
+  assume context frame (L.Apply ("<=", [ L.int least; amount ]));
+  amount
+
+(* An amount from zero to [bound], for a counter that counts exactly. *)
+and bounded_amount context frame bound =
+  let amount = fresh context "spent" L.Int in
+  assume context frame L.(Apply ("<=", [ int 0; amount ]) &&& Apply ("<=", [ amount; bound ]));
+  amount
+
+(* Whether a cost clause is about a counter's resource. A [calls] clause's
+   target is read in the clause's own definition, through [target_of]. *)
+and same_resource (cost : cost) ~target_of (counter : Costs.counter) =
+  match (cost.resource, counter.resource) with
+  | Time, Time | Allocations, Allocations | Allocated_bytes, Allocated_bytes -> true
+  | Calls written, Calls counted -> (
+      match target_of written with
+      | Some target -> Costs.covers ~clause:target ~counter:counted
+      | None -> false)
+  | _ -> false
+
+(* What a [calls] clause counts, read in [source] with its parameters as
+   [locals]. *)
+and target_in (source : source) locals (written : call_target) : Costs.target option =
+  match written with
+  | Call_parameter name_ -> (
+      match source.resolved.names.(name_.id) with
+      | Some (Local id) -> Option.map (fun term -> Costs.Through term) (Ids.find_opt id locals)
+      | _ -> None)
+  | Call_capability path_type -> (
+      match source.resolved.names.(path_type.path.last.id) with
+      | Some (Definition path) -> Some (Costs.Capability path)
+      | _ -> None)
+  | Call_method (path_type, method_) -> (
+      match source.resolved.names.(path_type.path.last.id) with
+      | Some (Definition path) -> Some (Costs.Capability_method (path, method_.text))
+      | _ -> None)
+
+(* What a clause promises of a counter, in the counter's way of counting:
+   [assumed] is the bound to assume for a call back into the definition
+   proven, which is the induction hypothesis. *)
+and promised_amount context frame (counter : Costs.counter) (bound : bound) ~evaluate ~assumed
+    ~exact_target =
+  match (bound, counter.counting) with
+  | Big_o g, Units -> (
+      let g = evaluate g in
+      match assumed with
+      | Some constants ->
+          let hypothesis = Costs.at_least_zero (Costs.bound constants g) in
+          if counter.resource = Time then Costs.plus hypothesis (L.int 1) else hypothesis
+      | None -> Costs.units g)
+  | (At_most g | Exactly g), Units -> Costs.at_least_zero (evaluate g)
+  | At_most g, (At_most | Exactly) -> bounded_amount context frame (evaluate g)
+  | Exactly g, (At_most | Exactly) ->
+      if exact_target then evaluate g else bounded_amount context frame (evaluate g)
+  | (Big_o _ | Finite), _ -> unknown_amount context frame counter
+
+(* What a call to a callee whose clauses are read spends of a counter: its
+   clause about the counter's resource, from its first part that has one.
+   A call back into the definition proven, through a cycle, assumes its
+   [O(...)] bound with the definition's own constants; every function of a
+   cycle is then proven with the first pair, so that each assumes of the
+   others what they show. *)
+and callee_amount context after ~path ~(parts : part list) ~(bound_frame : part -> frame)
+    ~(call_ : C.call) ~values (counter : Costs.counter) =
+  let assumed =
+    if
+      counter.counting = Units
+      && Call_graph.reaches context.graph ~from:path ~target:context.current
+    then
+      match List.assoc_opt (Costs.key counter) context.own_constants with
+      | Some constants ->
+          if not (Path.equal path context.current) then constants.pairs <- [ List.hd Costs.pairs ];
+          Some constants
+      | None -> None
+    else None
+  in
+  let clauses_of (part : part) =
+    let frame = bound_frame part in
+    let target_of = target_in part.callee frame.locals in
+    List.filter_map
+      (fun ((cost : cost), _) ->
+        if same_resource cost ~target_of counter then Some (part, frame, cost) else None)
+      part.costs
+  in
+  let amount (_, (frame : frame), (cost : cost)) =
+    let exact_target =
+      match (cost.resource, counter.resource) with
+      | Calls (Call_capability _), Calls (Capability_method _) -> false
+      | _ -> true
+    in
+    promised_amount context after counter cost.bound
+      ~evaluate:(fun g -> snd (value context frame g))
+      ~assumed ~exact_target
+  in
+  let first_clauses () =
+    List.find_map (fun part -> match clauses_of part with [] -> None | found -> Some found) parts
+  in
+  match counter.resource with
+  | Calls target when not (call_reaches context call_ values target) -> Costs.zero
+  | Calls (Through term) -> (
+      (* Each parameter the function value is passed for must have a
+         clause about it. *)
+      let receiving =
+        List.filter_map
+          (fun ((argument : C.argument), _, argument_term) ->
+            if argument_term = term then Some argument.parameter else None)
+          values
+      in
+      let captured =
+        List.exists
+          (fun (_, _, argument_term) -> lambda_captures_target context argument_term term)
+          values
+      in
+      match first_clauses () with
+      | Some found
+        when (not captured) && List.length found >= List.length receiving && receiving <> [] ->
+          List.fold_left (fun total clause -> Costs.plus total (amount clause)) Costs.zero found
+      | _ -> unknown_amount context after counter)
+  | _ -> (
+      match first_clauses () with
+      | Some (clause :: _) -> amount clause
+      | _ -> unknown_amount context after counter)
+
+(* Whether a call can reach a [calls] clause's target: a function value
+   passed to it, or captured by a lambda passed to it, or a capability it
+   uses. *)
+and call_reaches context (call_ : C.call) values (target : Costs.target) =
+  match target with
+  | Through term ->
+      List.exists
+        (fun (_, _, argument_term) ->
+          argument_term = term || lambda_captures_target context argument_term term)
+        values
+  | Capability path | Capability_method (path, _) ->
+      List.exists
+        (function
+          | T.Capability used -> Path.equal used path
+          | T.Capability_parameter parameter -> (
+              match List.assoc_opt parameter call_.capability_arguments with
+              | Some given -> List.mem (T.Capability path) given
+              | None -> true))
+        call_.uses
+
+and lambda_captures_target context lambda target =
+  match
+    (List.assoc_opt lambda context.lambda_captures, List.assoc_opt target context.call_targets)
+  with
+  | Some captured, Some local -> List.mem local captured
+  | _ -> false
+
+(* What a call through a function value spends: its [time], which is one
+   unit for a function type with an [O(...)] bound, and its type's clauses
+   for other resources. *)
+and function_value_amount context frame (function_type : T.function_type) callee_term
+    (counter : Costs.counter) =
+  let clause resource =
+    List.find_opt (fun (cost : T.cost) -> cost.resource = resource) function_type.costs
+  in
+  let by_clause resource =
+    match (clause resource, counter.counting) with
+    | Some { bound = Order_of; _ }, Units -> L.int 1
+    | Some { bound = No_more_than (Some k) | Exactly_cost (Some k); _ }, Units -> L.Integer k
+    | Some { bound = No_more_than (Some k); _ }, (At_most | Exactly) ->
+        bounded_amount context frame (L.Integer k)
+    | Some { bound = Exactly_cost (Some k); _ }, (At_most | Exactly) -> L.Integer k
+    | _ -> unknown_amount context frame counter
+  in
+  match counter.resource with
+  | Time -> time_of context frame (T.Function function_type) callee_term
+  | Allocations -> by_clause "allocations"
+  | Allocated_bytes -> by_clause "allocated_bytes"
+  | Calls (Through term) ->
+      if callee_term = term then L.int 1
+      else if lambda_captures_target context callee_term term then
+        unknown_amount context frame counter
+      else Costs.zero
+  | Calls (Capability path | Capability_method (path, _)) ->
+      if
+        List.exists
+          (function T.Capability used -> Path.equal used path | T.Capability_parameter _ -> true)
+          function_type.uses
+      then unknown_amount context frame counter
+      else Costs.zero
+
+(* [time(f)], the time one call through a function value takes: one unit
+   when its type has an [O(...)] bound, at least one otherwise, and for a
+   lambda whose calls the prover could bound, that bound. *)
+and time_of context frame (ty : T.ty) term =
+  let sort = sort_of context ty in
+  let symbol = "time." ^ match sort with L.Uninterpreted name -> name | _ -> "value" in
+  declare context (L.Function (symbol, [ sort ], L.Int));
+  let time = L.Apply (symbol, [ term ]) in
+  fact context frame (L.Apply ("<=", [ L.int 1; time ]));
+  (match ty with
+  | T.Function { costs; _ }
+    when List.exists (fun (cost : T.cost) -> cost.resource = "time" && cost.bound = Order_of) costs
+    ->
+      fact context frame (L.equal time (L.int 1))
+  | _ -> ());
+  (match List.assoc_opt term context.lambda_times with
+  | Some (bound, showing) ->
+      (* The bound is used, so the obligations that show it are made. *)
+      context.lambda_times <- List.remove_assoc term context.lambda_times;
+      context.obligations <- List.rev_append showing context.obligations;
+      fact context frame (L.equal time (Costs.larger (L.int 1) bound))
+  | None -> ());
+  time
+
+(* What a step that is not a call to a definition spends. *)
+and step_amount context frame (call_ : C.call) values (counter : Costs.counter) =
+  match call_.callee with
+  | Constructor { variant; _ } -> (
+      let ty = substituted frame call_.result in
+      match counter.resource with
+      | (Allocations | Allocated_bytes) when not (indirect context ty variant) -> Costs.zero
+      | Allocations -> L.int 1
+      | Allocated_bytes when counter.counting = Units -> L.int 1
+      | Allocated_bytes ->
+          (* The size of the variant's block, which is fixed and not known
+             here. *)
+          let symbol = "bytes." ^ type_key ty ^ "." ^ Option.value variant ~default:"record" in
+          declare context (L.Constant (symbol, L.Int));
+          fact context frame (L.Apply ("<=", [ L.int 1; L.Symbol symbol ]));
+          L.Symbol symbol
+      | Time | Calls _ -> Costs.zero)
+  | Intrinsic { operation; _ } -> (
+      let cost = Intrinsic_signatures.cost operation in
+      match counter.resource with
+      | Time -> if cost.constant_time then Costs.zero else unknown_amount context frame counter
+      | Allocations | Allocated_bytes ->
+          if cost.allocation_free then Costs.zero else unknown_amount context frame counter
+      | Calls _ -> Costs.zero)
+  | Built_in_operator -> Costs.zero
+  | Capability_method { capability; name } -> (
+      let direct =
+        match counter.resource with
+        | Calls (Capability path) when Path.equal path capability -> L.int 1
+        | Calls (Capability_method (path, method_))
+          when Path.equal path capability && method_ = name ->
+            L.int 1
+        | _ -> Costs.zero
+      in
+      match counter.resource with
+      | Calls _ -> direct
+      | _ -> (
+          match capability_part context.database capability name with
+          | Some part ->
+              let locals =
+                List.fold_left
+                  (fun locals (index, binding) ->
+                    match (binding, argument_at_index_opt values index) with
+                    | Parameter_binding name_, Some term -> Ids.add name_.id term locals
+                    | _ -> locals)
+                  Ids.empty
+                  (List.mapi (fun index binding -> (index, binding)) part.binding)
+              in
+              let inside =
+                {
+                  frame with
+                  source = part.callee;
+                  locals;
+                  old_locals = locals;
+                  self = None;
+                  old_self = None;
+                  checking = false;
+                  loop = None;
+                  substitution = [];
+                }
+              in
+              callee_amount context frame
+                ~path:(Path.Method { owner = capability; name; receiver = Static })
+                ~parts:[ part ]
+                ~bound_frame:(fun _ -> inside)
+                ~call_ ~values counter
+          | None -> unknown_amount context frame counter))
+  | Function _ | Trait_method _ | Function_value -> (
+      (* A call whose contract is not read. *)
+      match counter.resource with
+      | Calls target when not (call_reaches context call_ values target) -> Costs.zero
+      | _ -> unknown_amount context frame counter)
+
+and argument_at_index_opt values index =
+  List.find_map
+    (fun ((argument : C.argument), _, term) ->
+      if argument.parameter = index then Some term else None)
+    values
+
+(* Whether building a variant allocates its block. See DESIGN.md,
+   "Recursive types say where they allocate". *)
+and indirect context (ty : T.ty) variant =
+  match (ty, variant) with
+  | Named { path; _ }, Some variant -> (
+      match Query.demand context.database Interface.Environment.interface path with
+      | Some (Interface.Environment.Type_interface { shape = Sum variants; _ }) ->
+          List.exists
+            (fun (written : T.variant) -> written.variant_name = variant && written.indirect)
+            variants
+      | _ -> false)
+  | _ -> false
+
+(* [log(n)], [power(b, e)], and [time(f)] in a cost bound. *)
+and cost_function context frame (written : expression) kind (arguments : argument list) =
+  let argument_values =
+    List.map (fun (argument : argument) -> snd (value context frame argument.value)) arguments
+  in
+  match (kind, argument_values, arguments) with
+  | Resolve.Log, [ n ], _ -> Some (frame, log_of context frame n)
+  | Power, [ base; exponent ], _ -> Some (frame, power_of context frame base exponent)
+  | Time, [ f ], [ { value = function_value; _ } ] ->
+      Some (frame, time_of context frame (type_of frame function_value) f)
+  | _ -> unsupported written.span "this cost function"
+
+and log_of context frame n =
+  declare context (L.Function (Costs.log_symbol, [ L.Int ], L.Int));
+  let rec add n ~halving =
+    match List.assoc_opt n context.logs with
+    | Some true -> ()
+    | Some false when not halving -> ()
+    | seen ->
+        if seen = None then
+          List.iter (fun (other, _) -> fact context frame (Costs.log_order n other)) context.logs;
+        context.logs <- (n, halving) :: List.remove_assoc n context.logs;
+        let facts, half = Costs.log_facts n ~halving in
+        List.iter (fact context frame) facts;
+        Option.iter (fun half -> add half ~halving:false) half
+  in
+  if not (L.mentions frame.bound n) then add n ~halving:true;
+  L.Apply (Costs.log_symbol, [ n ])
+
+and power_of context frame base exponent =
+  declare context (L.Function (Costs.power_symbol, [ L.Int; L.Int ], L.Int));
+  let add exponent =
+    if not (List.mem (base, exponent) context.powers) then begin
+      List.iter
+        (fun (other_base, other) ->
+          if other_base = base then fact context frame (Costs.power_order base exponent other))
+        context.powers;
+      context.powers <- (base, exponent) :: context.powers;
+      let facts, step = Costs.power_facts base exponent in
+      List.iter (fact context frame) facts;
+      Some step
+    end
+    else None
+  in
+  (if not (L.mentions frame.bound base || L.mentions frame.bound exponent) then
+     match add exponent with
+     | Some (step, previous) ->
+         fact context frame step;
+         ignore (add previous)
+     | None -> ());
+  L.Apply (Costs.power_symbol, [ base; exponent ])
+
+(* Loops' costs. A loop with a [cost] clause about a counter is bounded by
+   it: what the loop has spent so far is within the clause at its head, on
+   entry and after each iteration, and after the loop, the loop counts as
+   the clause, as a call with that bound would. Any other counter is
+   bounded by the loop's iterations so far times a bound on one iteration,
+   [per], which is worked out from what the body spends and then shown of
+   each iteration. *)
+and loop_costs context frame (clauses : loop_clause list) =
+  List.map
+    (fun (counter : Costs.counter) ->
+      let key = Costs.key counter in
+      let entry =
+        match List.assoc_opt key frame.spent with Some term -> term | None -> Costs.zero
+      in
+      let written =
+        List.find_map
+          (fun (clause : loop_clause) ->
+            match clause.kind with
+            | Loop_cost cost
+              when same_resource cost ~target_of:(target_in frame.source frame.locals) counter
+                   && counting_of cost = counter.counting ->
+                Some (clause, cost)
+            | _ -> None)
+          clauses
+      in
+      let rule =
+        match written with
+        | Some (clause, cost) ->
+            let constants =
+              match counter.counting with
+              | Units ->
+                  let constants = Costs.constants (Printf.sprintf "loop.%d" clause.id) in
+                  context.groups <- constants :: context.groups;
+                  declare context (L.Constant (constants.factor, L.Int));
+                  declare context (L.Constant (constants.addend, L.Int));
+                  Some constants
+              | At_most | Exactly -> None
+            in
+            `Clause (clause, cost, constants)
+        | None -> `Per (fresh context "per" L.Int)
+      in
+      (counter, key, entry, rule))
+    context.counters
+
+and counting_of (cost : cost) : Costs.counting =
+  match cost.bound with Big_o _ | Finite -> Units | At_most _ -> At_most | Exactly _ -> Exactly
+
+(* A loop's [cost] clause, about what the loop has spent so far, at [at]. *)
+and loop_clause_holds context (at : frame) (counter : Costs.counter) (cost : cost) constants ~since
+    =
+  let g =
+    match cost.bound with
+    | Big_o g | At_most g | Exactly g -> snd (value context { at with checking = false } g)
+    | Finite -> Costs.zero
+  in
+  match (counter.counting, constants) with
+  | Units, Some constants -> Costs.at_most since (Costs.bound constants g)
+  | Exactly, _ -> L.equal since g
+  | _ -> Costs.at_most since g
+
+(* The head of a loop: each counter takes a fresh value, within its
+   clause, or within its iterations so far times its bound on one. *)
+and loop_head context head costs ~iterations =
+  let iterations = Option.value iterations ~default:Costs.zero in
+  let spent = List.map (fun (_, key, _, _) -> (key, fresh context "spent" L.Int)) costs in
+  let head = { head with spent } in
+  List.iter
+    (fun ((counter : Costs.counter), key, entry, rule) ->
+      let at_head = List.assoc key spent in
+      match rule with
+      | `Clause (_, cost, constants) ->
+          assume context head
+            (loop_clause_holds context head counter cost constants
+               ~since:(Costs.minus at_head entry))
+      | `Per per ->
+          let most = Costs.plus entry (Costs.times iterations per) in
+          assume context head
+            (if counter.counting = Exactly then L.equal at_head most else Costs.at_most at_head most))
+    costs;
+  head
+
+(* Each [cost] clause on entry to the loop, when nothing is spent yet. *)
+and loop_entry context frame costs =
+  List.iter
+    (fun ((counter : Costs.counter), _, _, rule) ->
+      match rule with
+      | `Clause ((clause : loop_clause), cost, constants) ->
+          oblige context frame Cost clause.span
+            (Printf.sprintf "The loop's `%s` may not hold on entry to the loop."
+               (quote frame.source clause.span))
+            (loop_clause_holds context frame counter cost constants ~since:Costs.zero)
+      | `Per _ -> ())
+    costs
+
+(* After the body: each bound on one iteration is worked out from what the
+   iterations that ended spent, and every iteration, ended or left by
+   [break], is shown to be within its counter's bound. *)
+and loop_iterations context (written : statement) head costs ~mark ~facts ~ends ~breaks =
+  let at (frame : frame) key =
+    match List.assoc_opt key frame.spent with Some t -> t | None -> Costs.zero
+  in
+  List.iter
+    (fun ((counter : Costs.counter), key, entry, rule) ->
+      let spent_in (frame : frame) = Costs.since ~start:(at head key) (at frame key) in
+      match rule with
+      | `Clause ((clause : loop_clause), cost, constants) ->
+          List.iter
+            (fun (frame, when_) ->
+              oblige context frame Cost clause.span
+                (Printf.sprintf "The loop's `%s` may not hold %s." (quote frame.source clause.span)
+                   when_)
+                (loop_clause_holds context frame counter cost constants
+                   ~since:(Costs.minus (at frame key) entry)))
+            (List.map (fun f -> (f, "after an iteration")) ends
+            @ List.map (fun f -> (f, "where the loop is left")) breaks)
+      | `Per per -> (
+          let frames = ends @ breaks in
+          let spent = List.map spent_in frames in
+          let most =
+            match spent with
+            | [] -> Costs.zero
+            | first :: rest -> List.fold_left Costs.larger first rest
+          in
+          let facts = facts @ List.map (fun (frame : frame) -> frame.condition) frames in
+          match Costs.bound_on ~varies:(made_since context mark) ~facts most with
+          | Some bound ->
+              fact context head (L.equal per bound);
+              List.iter2
+                (fun (frame : frame) spent ->
+                  oblige context frame Cost written.span
+                    "The prover cannot show that this iteration of the loop spends no more than \
+                     the bound it found for every iteration from what the loop does not change: \
+                     give the loop a `cost` clause."
+                    (if counter.counting = Exactly then L.equal spent per
+                     else Costs.at_most spent per))
+                frames spent
+          | None ->
+              oblige context head Cost written.span
+                "The prover cannot bound what one iteration of this loop spends by what the loop \
+                 does not change, so it cannot count the loop's cost: give the loop a `cost` \
+                 clause."
+                (L.Boolean false)))
+    costs
+
+(* Where the loop is left: a counter bounded by a clause counts as the
+   clause, and one bounded by its iterations is also bounded by each upper
+   bound [most] on them, which is arithmetic, so assumed. *)
+and loop_exit context (exit_ : frame) costs ~iterations ~most =
+  let iterations = Option.value iterations ~default:Costs.zero in
+  let at key = match List.assoc_opt key exit_.spent with Some t -> t | None -> Costs.zero in
+  let spent =
+    List.map
+      (fun ((counter : Costs.counter), key, entry, rule) ->
+        match rule with
+        | `Clause (_, (cost : cost), _) ->
+            let g =
+              match cost.bound with
+              | Big_o g | At_most g | Exactly g ->
+                  snd (value context { exit_ with checking = false } g)
+              | Finite -> Costs.zero
+            in
+            let counted =
+              match counter.counting with
+              | Units -> Costs.units g
+              | At_most -> bounded_amount context exit_ g
+              | Exactly -> g
+            in
+            (key, Costs.plus entry counted)
+        | `Per per ->
+            if counter.counting <> Exactly then
+              List.iter
+                (fun most ->
+                  fact context exit_
+                    L.(
+                      conjunction
+                        [
+                          Costs.at_most (at key) (Costs.plus entry (Costs.times iterations per));
+                          Apply ("<=", [ int 0; iterations ]);
+                          Apply ("<=", [ iterations; most ]);
+                          Apply ("<=", [ int 0; per ]);
+                        ]
+                      ==> Costs.at_most (at key) (Costs.plus entry (Costs.times most per))))
+                most;
+            (key, at key))
+      costs
+  in
+  { exit_ with spent }
+
+(* The facts since a mark in the list, which is kept reversed. *)
+and facts_since context count =
+  let rec take n list =
+    if n <= 0 then [] else match list with [] -> [] | x :: rest -> x :: take (n - 1) rest
+  in
+  take (List.length context.facts - count) context.facts
 
 (* Statements and blocks *)
 
@@ -2717,27 +3617,23 @@ and assume_invariants context frame clauses =
       assume context frame term)
     (invariants clauses)
 
-and unproven_costs context (clauses : loop_clause list) =
-  List.iter
-    (fun (clause : loop_clause) ->
-      match clause.kind with
-      | Loop_cost _ ->
-          context.unproven <- (clause.span, "a loop's `cost` clause") :: context.unproven
-      | _ -> ())
-    clauses
-
 and while_ context frame (written : statement) condition clauses body =
-  unproven_costs context clauses;
   check_invariants context frame clauses ~when_:"on entry to the loop";
+  let costs = loop_costs context frame clauses in
+  loop_entry context frame costs;
+  let mark = context.fresh and facts_mark = List.length context.facts in
   let changed = changed_locals frame body in
   let head = havoc context frame changed in
   let head =
     if contains_yield body then { head with handed_out = havoc_parts context head } else head
   in
+  let iterations = iterations_so_far context head costs in
+  let head = loop_head context head costs ~iterations in
   assume_invariants context head clauses;
   let head, test = value context head condition in
   let exits = { breaks = []; continues = [] } in
   let inside = { (restrict head test) with loop = Some exits } in
+  let inside = spend context inside one_step in
   let measures =
     match
       List.find_map
@@ -2774,8 +3670,33 @@ and while_ context frame (written : statement) condition clauses body =
   if context.terminates && start_measures = None then
     oblige context inside Termination written.span
       "This loop may not end: give it a `decreases` clause." (L.Boolean false);
+  (* With one measure, which every iteration shows to start at or above
+     zero and to decrease, the loop runs at most one more time than the
+     measure on entry. A ghost [last] is the measure at the start of the
+     latest iteration. *)
+  let most =
+    match (start_measures, measure_terms frame, iterations) with
+    | Some [ at_head ], Some [ on_entry ], Some iterations ->
+        let last = fresh context "last" L.Int in
+        assume context head
+          L.(
+            equal iterations (int 0)
+            ==> Apply ("<=", [ at_head; on_entry ])
+            &&& (Apply (">=", [ iterations; int 1 ])
+                ==> (Apply ("<=", [ int 0; last ])
+                    &&& Apply
+                          ( "<=",
+                            [ Apply ("+", [ Apply ("-", [ iterations; int 1 ]); last ]); on_entry ]
+                          )
+                    &&& Apply ("<", [ at_head; last ]))));
+        [ Costs.at_least_zero (Costs.plus on_entry (L.int 1)) ]
+    | _ -> []
+  in
   let finished = block_value context inside body in
   let ends = (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues in
+  loop_iterations context written head costs ~mark
+    ~facts:(facts_since context facts_mark @ [ inside.condition ])
+    ~ends ~breaks:exits.breaks;
   List.iter
     (fun (end_ : frame) ->
       let end_ = { end_ with loop = frame.loop } in
@@ -2795,34 +3716,72 @@ and while_ context frame (written : statement) condition clauses body =
             (smaller before after)
       | _ -> ())
     ends;
-  let exit_ = { (restrict head (L.not_ test)) with loop = frame.loop } in
-  join_frames context
-    (exit_ :: List.map (fun (frame' : frame) -> { frame' with loop = frame.loop }) exits.breaks)
+  let exit_ =
+    loop_exit context
+      { (restrict head (L.not_ test)) with loop = frame.loop }
+      costs ~iterations ~most
+  in
+  let left =
+    List.map
+      (fun (frame' : frame) ->
+        loop_exit context { frame' with loop = frame.loop } costs
+          ~iterations:(Option.map (fun n -> Costs.plus n (L.int 1)) iterations)
+          ~most)
+      exits.breaks
+  in
+  join_frames context (exit_ :: left)
   |> Option.map (fun (joined : frame) ->
       { joined with locals = Ids.filter (fun id _ -> Ids.mem id frame.locals) joined.locals })
 
+(* A ghost count of a loop's iterations so far, when the loop counts a
+   cost by them. *)
+and iterations_so_far context head costs =
+  if
+    List.exists (fun (_, _, _, rule) -> match rule with `Per _ -> true | `Clause _ -> false) costs
+  then begin
+    let iterations = fresh context "iterations" L.Int in
+    assume context head (L.Apply ("<=", [ L.int 0; iterations ]));
+    Some iterations
+  end
+  else None
+
+and one_step (counter : Costs.counter) =
+  match counter.resource with Time -> L.int 1 | _ -> Costs.zero
+
 and for_ context frame (written : statement) pattern iterable clauses body =
-  unproven_costs context clauses;
   match (frame.source.checked.loops.(written.id), iterable.kind, pattern.kind) with
-  | ( Some (Integer_range { element; inclusive }),
+  | ( Some (Integer_range { element = _; inclusive }),
       Range { start = Some start; stop = Some stop; _ },
       (Binding_or_constant _ | Wildcard) ) ->
       let frame, low = value context frame start in
       let frame, high = value context frame stop in
       check_invariants context frame clauses ~when_:"on entry to the loop";
+      let costs = loop_costs context frame clauses in
+      loop_entry context frame costs;
+      let mark = context.fresh and facts_mark = List.length context.facts in
       let changed = changed_locals frame body in
       let head = havoc context frame changed in
       let head =
         if contains_yield body then { head with handed_out = havoc_parts context head } else head
       in
-      assume_invariants context head clauses;
-      let index = arrive context head "index" element in
-      let in_range =
-        L.(
-          Apply ("<=", [ low; index ]) &&& Apply ((if inclusive then "<=" else "<"), [ index; high ]))
+      (* The [n]th iteration, from 0, has the index [low + n]. *)
+      let count =
+        Costs.normalize
+          (if inclusive then Costs.plus (Costs.minus high low) (L.int 1) else Costs.minus high low)
       in
+      let iterations = fresh context "iterations" L.Int in
+      assume context head
+        L.(
+          Apply ("<=", [ int 0; iterations ])
+          &&& Apply ("<=", [ iterations; Costs.at_least_zero count ]));
+      let head = loop_head context head costs ~iterations:(Some iterations) in
+      assume_invariants context head clauses;
+      let index = Costs.plus low iterations in
       let exits = { breaks = []; continues = [] } in
-      let inside = { (restrict head in_range) with loop = Some exits } in
+      let inside =
+        { (restrict head (L.Apply ("<", [ iterations; count ]))) with loop = Some exits }
+      in
+      let inside = spend context inside one_step in
       let inside =
         match pattern.kind with
         | Binding_or_constant name_ -> { inside with locals = Ids.add name_.id index inside.locals }
@@ -2832,23 +3791,38 @@ and for_ context frame (written : statement) pattern iterable clauses body =
       let ends =
         (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues
       in
+      loop_iterations context written head costs ~mark
+        ~facts:(facts_since context facts_mark @ [ inside.condition ])
+        ~ends ~breaks:exits.breaks;
       List.iter
         (fun (end_ : frame) ->
           check_invariants context { end_ with loop = frame.loop } clauses
             ~when_:"after an iteration")
         ends;
-      join_frames context
-        ({ head with loop = frame.loop }
-        :: List.map (fun (f : frame) -> { f with loop = frame.loop }) exits.breaks)
+      let most = [ Costs.at_least_zero count ] in
+      let exit_ =
+        loop_exit context
+          { (restrict head (L.Apply (">=", [ iterations; count ]))) with loop = frame.loop }
+          costs ~iterations:(Some iterations) ~most
+      in
+      let left =
+        List.map
+          (fun (f : frame) ->
+            loop_exit context { f with loop = frame.loop } costs
+              ~iterations:(Some (Costs.plus iterations (L.int 1)))
+              ~most)
+          exits.breaks
+      in
+      join_frames context (exit_ :: left)
       |> Option.map (fun (joined : frame) ->
           { joined with locals = Ids.filter (fun id _ -> Ids.mem id frame.locals) joined.locals })
   | Some (Yielding { call = driven; mode }), _, _ ->
       each_loop context frame written pattern iterable clauses body driven mode
   | _ -> unsupported written.span "a `for` loop over a cursor"
 
-(* A [for] loop over a yielding method: each element is a fresh value of
-   its type, since the method's contract for each [yield] is not read
-   yet, and the loop ends when the method has a [time] clause. *)
+(* A [for] loop over a yielding method: each element is a fresh value
+   that meets the method's clauses for each part, and the loop ends when
+   the method has a [time] clause. *)
 and each_loop context frame (written : statement) pattern iterable clauses body (driven : C.call)
     mode =
   let source = frame.source in
@@ -2866,7 +3840,7 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
       let frame, receiver = value context frame iterable in
       (frame, (0, receiver) :: arguments)
   in
-  let terminates, contract, substitution =
+  let path, terminates, contract, substitution =
     match driven.callee with
     | Function { path; type_arguments } -> (
         let substitution =
@@ -2884,9 +3858,9 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
         in
         match Query.demand context.database Interface.Environment.signature path with
         | Some signature ->
-            (signature.terminates, function_contract context.database path, substitution)
-        | None -> (false, None, substitution))
-    | _ -> (false, None, [])
+            (Some path, signature.terminates, function_contract context.database path, substitution)
+        | None -> (Some path, false, None, substitution))
+    | _ -> (None, false, None, [])
   in
   if context.terminates && not terminates then
     oblige context frame Termination written.span
@@ -2896,37 +3870,37 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
     | Some ty -> ty
     | None -> unsupported pattern.span "a loop variable without a type"
   in
+  (* The method's frame, with the loop's arguments. *)
+  let method_frame (at : frame) (own : part) =
+    let locals, self =
+      List.fold_left
+        (fun (locals, self) (position, binding) ->
+          match (binding, List.assoc_opt position arguments) with
+          | Self_binding, Some term -> (locals, Some term)
+          | Parameter_binding name_, Some term -> (Ids.add name_.id term locals, self)
+          | _ -> (locals, self))
+        (Ids.empty, None)
+        (List.mapi (fun position binding -> (position, binding)) own.binding)
+    in
+    {
+      at with
+      source = own.callee;
+      locals;
+      old_locals = locals;
+      self;
+      old_self = self;
+      result = None;
+      checking = false;
+      loop = None;
+      substitution;
+    }
+  in
   (* The method's clauses, read with the loop's arguments, the part handed
      out, and the parts before it. *)
   let method_clauses (at : frame) ~each ~result ~yielded ~finished =
     match contract with
     | Some { parts = (own : part) :: _; _ } ->
-        let locals, self =
-          List.fold_left
-            (fun (locals, self) (position, binding) ->
-              match (binding, List.assoc_opt position arguments) with
-              | Self_binding, Some term -> (locals, Some term)
-              | Parameter_binding name_, Some term -> (Ids.add name_.id term locals, self)
-              | _ -> (locals, self))
-            (Ids.empty, None)
-            (List.mapi (fun position binding -> (position, binding)) own.binding)
-        in
-        let inside =
-          {
-            at with
-            source = own.callee;
-            locals;
-            old_locals = locals;
-            self;
-            old_self = self;
-            result;
-            yielded = Some yielded;
-            finished;
-            checking = false;
-            loop = None;
-            substitution;
-          }
-        in
+        let inside = { (method_frame at own) with result; yielded = Some yielded; finished } in
         List.iter
           (fun (clause : expression) ->
             if mentions_result own.callee clause = each then
@@ -2934,8 +3908,30 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
           own.ensures
     | _ -> ()
   in
+  (* The method's own work, by its cost clauses, once for the loop. *)
+  let frame =
+    match (contract, path) with
+    | Some contract, Some path ->
+        let values =
+          List.map
+            (fun (position, term) ->
+              ( ({ expression = iterable.id; parameter = position; mode = T.Read; conversion = None }
+                  : C.argument),
+                iterable,
+                term ))
+            arguments
+        in
+        spend context frame
+          (callee_amount context frame ~path ~parts:contract.parts
+             ~bound_frame:(fun part -> method_frame frame part)
+             ~call_:driven ~values)
+    | _ -> spend context frame (unknown_amount context frame)
+  in
   let entry = { frame with yielded = Some (empty_parts context frame element_type) } in
   check_invariants context entry clauses ~when_:"on entry to the loop";
+  let costs = loop_costs context frame clauses in
+  loop_entry context entry costs;
+  let mark = context.fresh and facts_mark = List.length context.facts in
   let changed = changed_locals frame body in
   let head = havoc context frame changed in
   let head = if mode = T.Mut then havoc_root context head iterable else head in
@@ -2943,7 +3939,10 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
     if contains_yield body then { head with handed_out = havoc_parts context head } else head
   in
   let before = some_parts context head element_type in
-  let head = { head with yielded = Some before } in
+  let iterations = sequence_length context element_type before in
+  let head =
+    loop_head context { head with yielded = Some before } costs ~iterations:(Some iterations)
+  in
   assume_invariants context head clauses;
   (* Each time round, the method either hands out another part or ends. *)
   let another = fresh context "another" L.Bool in
@@ -2954,6 +3953,7 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
   let through = appended context inside element_type before element in
   method_clauses inside ~each:false ~result:None ~yielded:through ~finished:(Some (L.Boolean false));
   let exits = { breaks = []; continues = [] } in
+  let inside = spend context inside one_step in
   let _, inside =
     pattern_match context
       { inside with loop = Some exits; yielded = frame.yielded }
@@ -2961,19 +3961,38 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
   in
   let finished = block_value context inside body in
   let ends = (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues in
+  let with_through (f : frame) = { f with loop = frame.loop; yielded = Some through } in
+  loop_iterations context written head costs ~mark
+    ~facts:(facts_since context facts_mark @ [ inside.condition ])
+    ~ends:(List.map with_through ends)
+    ~breaks:(List.map with_through exits.breaks);
   List.iter
     (fun (end_ : frame) ->
-      check_invariants context
-        { end_ with loop = frame.loop; yielded = Some through }
-        clauses ~when_:"after an iteration")
+      check_invariants context (with_through end_) clauses ~when_:"after an iteration")
     ends;
+  let ended_mark = List.length context.facts in
   let ended = restrict head (L.not_ another) in
   method_clauses ended ~each:false ~result:None ~yielded:before ~finished:(Some (L.Boolean true));
+  let varies = made_since context mark in
+  let ended_facts = facts_since context ended_mark @ facts_since context facts_mark in
+  let exit_ =
+    loop_exit context
+      { ended with loop = frame.loop; yielded = Some before }
+      costs ~iterations:(Some iterations)
+      ~most:(Costs.upper_bounds ~varies ~facts:ended_facts iterations)
+  in
+  let left =
+    List.map
+      (fun (f : frame) ->
+        loop_exit context (with_through f) costs
+          ~iterations:(Some (Costs.plus iterations (L.int 1)))
+          ~most:
+            (Costs.upper_bounds ~varies ~facts:ended_facts
+               (sequence_length context element_type through)))
+      exits.breaks
+  in
   join_frames context
-    ({ ended with loop = frame.loop; yielded = frame.yielded }
-    :: List.map
-         (fun (f : frame) -> { f with loop = frame.loop; yielded = frame.yielded })
-         exits.breaks)
+    (List.map (fun (f : frame) -> { f with yielded = frame.yielded }) (exit_ :: left))
   |> Option.map (fun (joined : frame) ->
       { joined with locals = Ids.filter (fun id _ -> Ids.mem id frame.locals) joined.locals })
 
@@ -3009,7 +4028,6 @@ let new_context database ~home ~current ~terminates ~measures checked =
     declared = Hashtbl.create 64;
     facts = [];
     obligations = [];
-    unproven = [];
     fresh = 0;
     values = [];
     returns = [];
@@ -3018,14 +4036,22 @@ let new_context database ~home ~current ~terminates ~measures checked =
     hands_out = None;
     handing = None;
     parameters = [];
+    counters = [];
+    own_constants = [];
+    groups = [];
+    fresh_order = Hashtbl.create 64;
+    logs = [];
+    powers = [];
+    lambda_times = [];
+    lambda_captures = [];
+    call_targets = [];
     fits =
       List.filter_map
         (function C.Integer_fits { expression; type_ } -> Some (expression, type_) | _ -> None)
         checked.C.obligations;
   }
 
-let outcome context =
-  { obligations = List.rev context.obligations; unproven_clauses = List.rev context.unproven }
+let outcome context = { obligations = List.rev context.obligations }
 
 let reject_checker_obligations (source : source) =
   List.iter
@@ -3040,18 +4066,91 @@ let reject_checker_obligations (source : source) =
           ())
     source.checked.obligations
 
-let costs_unproven context (clauses : clause list) =
-  List.iter
+(* A cost clause, as a promise about one counter, shown at each way its
+   definition returns. A trait's clause, which an [impl]'s method keeps, is
+   read in the trait's tree. *)
+type promise = {
+  counter : Costs.counter;
+  clause : cost;
+  constants : Costs.constants option;
+  span : span;
+  written_in : source;
+  inherited : bool;
+}
+
+let promises context (source : source) locals (clauses : clause list) ~inherited =
+  List.filter_map
     (fun (clause : clause) ->
       match clause.kind with
-      | Cost { resource = Time; bound = Finite; _ } -> ()
-      | Cost _ -> context.unproven <- (clause.span, "a `cost` bound") :: context.unproven
-      | _ -> ())
+      | Cost { resource = Time; bound = Finite; _ } -> None
+      | Cost cost -> (
+          match resource_of cost ~target_of:(target_in source locals) with
+          | None -> unsupported clause.span "this `calls` target"
+          | Some resource ->
+              let counter = { Costs.resource; counting = counting_of cost } in
+              let key = Costs.key counter in
+              (match cost.resource with
+              | Calls (Call_parameter name_) -> (
+                  match (source.resolved.names.(name_.id), resource) with
+                  | Some (Local id), Calls (Through term) ->
+                      context.call_targets <- (term, id) :: context.call_targets
+                  | _ -> ())
+              | _ -> ());
+              let constants =
+                match counter.counting with
+                | Units ->
+                    let constants = Costs.constants (key ^ if inherited then ".trait" else "") in
+                    context.groups <- constants :: context.groups;
+                    declare context (L.Constant (constants.factor, L.Int));
+                    declare context (L.Constant (constants.addend, L.Int));
+                    if not (List.mem_assoc key context.own_constants) then
+                      context.own_constants <- (key, constants) :: context.own_constants;
+                    Some constants
+                | At_most | Exactly -> None
+              in
+              Some
+                {
+                  counter;
+                  clause = cost;
+                  constants;
+                  span = clause.span;
+                  written_in = source;
+                  inherited;
+                })
+      | _ -> None)
     clauses
 
+(* A promise shown where its definition returns: what was spent within
+   its bound, read with the parameters as they were on entry. *)
+let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span =
+  let spent =
+    match List.assoc_opt (Costs.key promise.counter) frame.spent with
+    | Some term -> term
+    | None -> Costs.zero
+  in
+  let g =
+    match promise.clause.bound with
+    | Big_o g | At_most g | Exactly g -> snd (value context { at with checking = false } g)
+    | Finite -> Costs.zero
+  in
+  let goal =
+    match (promise.counter.counting, promise.constants) with
+    | Units, Some constants -> Costs.at_most spent (Costs.bound constants g)
+    | Exactly, _ -> L.equal spent g
+    | _ -> Costs.at_most spent g
+  in
+  oblige context frame Cost span
+    (if promise.inherited then
+       Printf.sprintf "This method may spend more than its trait's `%s` allows."
+         (quote promise.written_in promise.span)
+     else
+       Printf.sprintf "This may spend more than `%s` allows."
+         (quote promise.written_in promise.span))
+    goal
+
 (* A function, method, or theorem: its parameters arrive, its [requires]
-   are assumed, its body runs, and its [ensures] are shown at each way it
-   returns. *)
+   are assumed, its body runs, and its [ensures] and cost clauses are
+   shown at each way it returns. *)
 let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (source : source)
     ~path (signature : signature) (body : block) =
   reject_checker_obligations source;
@@ -3071,7 +4170,6 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
     new_context database ~home:source.key ~current:path ~terminates ~measures source.checked
   in
   context.parameters <- signature.parameters;
-  costs_unproven context signature.clauses;
   (match Query.demand database Interface.Environment.signature path with
   | Some { output = Returns ty; _ } -> context.output <- Some ty
   | _ -> ());
@@ -3092,6 +4190,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
       yielded = None;
       finished = None;
       handed_out = None;
+      spent = [];
     }
   in
   let start =
@@ -3199,6 +4298,26 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
       (fun (clause : clause) -> match clause.kind with Requires value_ -> Some value_ | _ -> None)
       signature.clauses
   in
+  (* Its cost clauses, and its trait's, each count from zero. *)
+  let promised =
+    promises context source start.locals signature.clauses ~inherited:false
+    @
+    match (inherited, trait_frame start ~result:None) with
+    | Some ((part : part), _, _), Some (_, inside) ->
+        promises context part.callee inside.locals
+          (List.map (fun (cost, span) : clause -> { kind = Cost cost; span; id = -1 }) part.costs)
+          ~inherited:true
+    | _ -> []
+  in
+  context.counters <-
+    distinct_counters
+      (List.map (fun promise -> promise.counter) promised @ loop_counters source start.locals body);
+  let start =
+    {
+      start with
+      spent = List.map (fun counter -> (Costs.key counter, Costs.zero)) context.counters;
+    }
+  in
   let start =
     match trait_frame start ~result:None with
     | Some (part, inside) when List.length part.binding = List.length own_terms ->
@@ -3298,6 +4417,20 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
                     term
               | _ -> ())
             signature.clauses);
+      List.iter
+        (fun promise ->
+          if promise.inherited then
+            match trait_frame frame ~result:returned with
+            | Some (_, inside) ->
+                keep_promise context frame promise
+                  ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
+                  ~span:body.span
+            | None -> ()
+          else
+            keep_promise context frame promise
+              ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
+              ~span:promise.span)
+        promised;
       match trait_frame frame ~result:returned with
       | Some (part, inside) when List.length part.binding = List.length own_terms ->
           List.iter
@@ -3357,6 +4490,7 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
       yielded = None;
       finished = None;
       handed_out = None;
+      spent = [];
     }
   in
   List.iter
@@ -3425,6 +4559,7 @@ let test database (source : source) ~path (body : block) =
       yielded = None;
       finished = None;
       handed_out = None;
+      spent = [];
     }
   in
   ignore (block_value context start body);

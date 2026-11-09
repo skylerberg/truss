@@ -14,4 +14,6 @@
   infer
   workspace
   diagnostic
+  intrinsic
+  intrinsic_signatures
   zarith))

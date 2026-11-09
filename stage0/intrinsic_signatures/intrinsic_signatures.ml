@@ -156,3 +156,27 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Clock_now -> make ~output:(Returns (T.builtin Int64)) []
   | Random_fill ->
       make [ input ~mode:Mut "buffer" (storage (T.builtin UInt8)); input "count" usize ]
+
+type cost = { constant_time : bool; allocation_free : bool }
+
+(* What each operation costs, as the prover trusts it: arithmetic and
+   reading or swapping in place take a fixed number of steps and allocate
+   nothing; anything that grows storage, copies a run of bytes, or reaches
+   the system may do more, and is known by no bound. See PROVER.md, "The
+   trusted base". *)
+let cost (operation : Intrinsic.operation) =
+  match operation with
+  | Add | Subtract | Multiply | Divide | Remainder | Negate | Wrapping_add | Wrapping_subtract
+  | Wrapping_multiply | Add_overflows | Subtract_overflows | Multiply_overflows | Equal | Less
+  | Ieee_equal | Ieee_less | Bit_and | Bit_or | Bit_xor | Complement | Shift_left | Shift_right
+  | Convert | Fits | Square_root | Fused_multiply_add | Floor | Ceiling | Truncate | Round_to_even
+  | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
+  | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
+  | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
+  | View_slice | Crash ->
+      { constant_time = true; allocation_free = true }
+  | Compare_bytes | Storage_remove -> { constant_time = false; allocation_free = true }
+  | Storage_with_capacity | Storage_reserve | Storage_push | Storage_insert | Write_bytes
+  | Read_bytes | Write_float | Open_file | Handle_read | Handle_write | Environment_variable
+  | Run_process | Clock_now | Random_fill ->
+      { constant_time = false; allocation_free = false }

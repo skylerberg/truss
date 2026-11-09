@@ -81,6 +81,19 @@ let rec mentions symbols = function
       let shadowed = List.map fst bound in
       mentions (List.filter (fun symbol -> not (List.mem symbol shadowed)) symbols) body
 
+(* Each occurrence of a term, outside the quantifiers that bind its
+   symbols, replaced. *)
+let rec replace ~from ~into term =
+  if term = from then into
+  else
+    match term with
+    | Symbol _ | Integer _ | Boolean _ -> term
+    | Apply (name, arguments) -> Apply (name, List.map (replace ~from ~into) arguments)
+    | Forall (bound, body) ->
+        if mentions (List.map fst bound) from then term else Forall (bound, replace ~from ~into body)
+    | Exists (bound, body) ->
+        if mentions (List.map fst bound) from then term else Exists (bound, replace ~from ~into body)
+
 (* Pruning *)
 
 (* The declared symbols a term mentions. A datatype's constructors and

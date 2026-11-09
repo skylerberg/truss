@@ -137,7 +137,7 @@ and variant_value state (value : expression) type_path variant ~arguments =
               inputs = List.map (fun (field : T.field) -> (T.Own, field.field_type)) fields;
               output = Returns type_;
               uses = [];
-              costs = [ { amortized = false; resource = "time"; bound = "O(...)" } ];
+              costs = [ { amortized = false; resource = "time"; bound = Order_of } ];
             }
       | None ->
           report state Unknown_variant value.span

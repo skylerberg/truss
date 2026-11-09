@@ -61,6 +61,10 @@ val truncated_remainder : term -> term -> term
 val mentions : string list -> term -> bool
 (** Whether a term mentions any of the symbols, free. *)
 
+val replace : from:term -> into:term -> term -> term
+(** Each occurrence of [from] in a term replaced by [into], except under a quantifier that binds one
+    of [from]'s symbols. *)
+
 val prune : query -> query
 (** The query with only the facts its goal can depend on: starting from the goal's declared symbols,
     each fact that mentions one of them is kept, with its symbols, until no more are added. Dropping

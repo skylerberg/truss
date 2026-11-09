@@ -143,8 +143,6 @@ let prove database (key : Names.key) =
               {
                 obligations =
                   List.concat_map (fun (o : Translate.outcome) -> o.obligations) outcomes;
-                unproven_clauses =
-                  List.concat_map (fun (o : Translate.outcome) -> o.unproven_clauses) outcomes;
               }
         | _ -> Not_proven_here
       with
@@ -257,6 +255,57 @@ let within database (key : Names.key) (span : span) =
   | Some text when span.stop <= String.length text -> span
   | _ -> Syntax.Span.make 0 0
 
+(* Each obligation's answer. One that mentions the constants of [O(...)]
+   bounds is asked with each choice of a pair for every bound in turn, the
+   same choice for all of them, since a recursive call assumes the bound
+   with the constants it is shown with; the first choice that proves them
+   all is taken, and if none does, the answers are the first choice's. See
+   PROVER.md, "Asymptotic bounds". *)
+let answers solver (obligations : Translate.obligation list) =
+  let solve (obligation : Translate.obligation) choice =
+    let pins =
+      List.map
+        (fun (constants : Costs.constants) ->
+          Costs.pin constants (List.assoc constants.factor choice))
+        obligation.constants
+    in
+    Solver.solve solver ~values:(List.map fst obligation.values)
+      { obligation.query with facts = obligation.query.facts @ pins }
+  in
+  let groups =
+    List.fold_left
+      (fun groups (obligation : Translate.obligation) ->
+        List.fold_left
+          (fun groups (constants : Costs.constants) ->
+            if List.exists (fun (g : Costs.constants) -> g.factor = constants.factor) groups then
+              groups
+            else groups @ [ constants ])
+          groups obligation.constants)
+      [] obligations
+  in
+  let rec choices = function
+    | [] -> [ [] ]
+    | (constants : Costs.constants) :: rest ->
+        List.concat_map
+          (fun pair -> List.map (fun choice -> (constants.factor, pair) :: choice) (choices rest))
+          constants.pairs
+  in
+  let bounded =
+    List.filter (fun (obligation : Translate.obligation) -> obligation.constants <> []) obligations
+  in
+  let all_choices = choices groups in
+  let chosen =
+    match
+      List.find_opt
+        (fun choice ->
+          List.for_all (fun obligation -> solve obligation choice = Solver.Proven) bounded)
+        all_choices
+    with
+    | Some choice -> choice
+    | None -> List.hd all_choices
+  in
+  List.map (fun obligation -> (obligation, solve obligation chosen)) obligations
+
 let definition_diagnostics database solver (key : Names.key) =
   let source_span span = source_span (within database key span) in
   match Query.demand database proof key with
@@ -269,8 +318,8 @@ let definition_diagnostics database solver (key : Names.key) =
       ]
   | Obligations outcome ->
       List.filter_map
-        (fun (obligation : Translate.obligation) ->
-          match Solver.solve solver ~values:(List.map fst obligation.values) obligation.query with
+        (fun ((obligation : Translate.obligation), (answer : Solver.answer)) ->
+          match answer with
           | Proven -> None
           | Counterexample values ->
               Some
@@ -283,12 +332,7 @@ let definition_diagnostics database solver (key : Names.key) =
                    (obligation.message
                   ^ " The solver ran out of steps, so it may hold but needs help: a `proof` block \
                      or a theorem.")))
-        outcome.obligations
-      @ List.map
-          (fun (span, what) ->
-            diagnostic Unsupported (source_span span)
-              (Printf.sprintf "The prover does not prove %s yet." what))
-          outcome.unproven_clauses
+        (answers solver outcome.obligations)
 
 let diagnostics database solver module_ =
   Names.per_definition database module_ (definition_diagnostics database solver)

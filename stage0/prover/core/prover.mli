@@ -19,6 +19,5 @@ val proof : (Resolve.Names.key, proof) Query.query
     results. *)
 
 val diagnostics : Query.database -> Solver.t -> Path.module_ -> Diagnostic.t list
-(** Every obligation of a file's definitions that the solver could not prove, every definition the
-    prover could not read, and every clause it does not prove yet, in the file's offsets and in
-    order. *)
+(** Every obligation of a file's definitions that the solver could not prove, and every definition
+    the prover could not read, in the file's offsets and in order. *)

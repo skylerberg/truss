@@ -19,6 +19,11 @@ let check database module_ =
 let proven text = Support.no_diagnostics ~check [ ("app::main", text) ]
 let not_proven text code = Support.one_diagnostic ~check text code
 
+(* The codes of a file's diagnostics. *)
+let codes text =
+  let database = Support.setup [ ("app::main", text) ] in
+  Support.codes (check database (Support.module_of "app::main"))
+
 (* The message of a file's one diagnostic. *)
 let message text =
   let database = Support.setup [ ("app::main", text) ] in
@@ -879,13 +884,485 @@ let () =
          \  mut self.restore()\n\
           }\n"))
 
+(* Costs *)
+
+let constant_step = "fn step(value: UInt32) -> UInt32\n  cost time O(1)\n{\n  value\n}\n\n"
+
+let () =
+  test "a body with no calls is O(1)" (fun () ->
+      proven "fn f() -> Int64\n  cost time O(1)\n{\n  0\n}\n");
+  test "calls to O(1) functions are O(1)" (fun () ->
+      proven
+        (constant_step
+       ^ "fn f(value: UInt32) -> UInt32\n  cost time O(1)\n{\n  step(step(value))\n}\n"));
+  test "a call to a function with no bound on its time" (fun () ->
+      not_proven
+        "fn g() -> Int64\n\
+        \  cost time finite\n\
+         {\n\
+        \  0\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  g()\n\
+         }\n"
+        "prover.cost");
+  test "a loop over a range is linear" (fun () ->
+      proven
+        (constant_step
+       ^ "fn f(count: UInt32)\n\
+         \  cost time O(count)\n\
+          {\n\
+         \  for index in 0..count {\n\
+         \    let _ = step(index)\n\
+         \  }\n\
+          }\n"));
+  test "a loop over a range is not constant" (fun () ->
+      not_proven
+        (constant_step
+       ^ "fn f(count: UInt32)\n\
+         \  cost time O(1)\n\
+          {\n\
+         \  for index in 0..count {\n\
+         \    let _ = step(index)\n\
+         \  }\n\
+          }\n")
+        "prover.cost");
+  test "nested loops over ranges are quadratic" (fun () ->
+      proven
+        (constant_step
+       ^ "fn f(count: UInt32)\n\
+         \  cost time O(count * count)\n\
+          {\n\
+         \  for row in 0..count {\n\
+         \    for _ in 0..count {\n\
+         \      let _ = step(row)\n\
+         \    }\n\
+         \  }\n\
+          }\n"));
+  test "a loop whose iterations cost their index is quadratic" (fun () ->
+      proven
+        "fn work(size: UInt32)\n\
+        \  cost time O(size)\n\
+         {\n\
+        \  for _ in 0..size {\n\
+        \  }\n\
+         }\n\n\
+         fn f(count: UInt32)\n\
+        \  cost time O(count * count)\n\
+         {\n\
+        \  for index in 0..count {\n\
+        \    work(index)\n\
+        \  }\n\
+         }\n");
+  test "a loop over a list runs once per element" (fun () ->
+      proven
+        (constant_step
+       ^ "fn f(items: List[UInt32])\n\
+         \  cost time O(items.length())\n\
+          {\n\
+         \  for item in items {\n\
+         \    let _ = step(item)\n\
+         \  }\n\
+          }\n"));
+  test "an iteration's cost is the larger of its branches'" (fun () ->
+      proven
+        "fn work(size: UInt32)\n\
+        \  cost time O(size)\n\
+         {\n\
+        \  for _ in 0..size {\n\
+        \  }\n\
+         }\n\n\
+         fn f(items: List[UInt32], size: UInt32)\n\
+        \  cost time O(items.length() * (size + 1))\n\
+         {\n\
+        \  for item in items {\n\
+        \    if item > 3 {\n\
+        \      work(size)\n\
+        \    } else {\n\
+        \      work(1)\n\
+        \    }\n\
+        \  }\n\
+         }\n");
+  test "a while loop runs at most its measure's times" (fun () ->
+      proven
+        "fn f(count: UInt32)\n\
+        \  cost time O(count)\n\
+         {\n\
+        \  var index: UInt32 = 0\n\
+        \  while index < count {\n\
+        \    index = index + 1\n\
+        \  }\n\
+         }\n");
+  test "recursion on one less is linear" (fun () ->
+      proven
+        "fn f(count: UInt32) -> UInt32\n\
+        \  decreases count\n\
+        \  cost time O(count)\n\
+         {\n\
+        \  if count == 0 { 0 } else { f(count - 1) }\n\
+         }\n");
+  test "recursion on one less is not constant" (fun () ->
+      not_proven
+        "fn f(count: UInt32) -> UInt32\n\
+        \  decreases count\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  if count == 0 { 0 } else { f(count - 1) }\n\
+         }\n"
+        "prover.cost");
+  test "recursion on half is logarithmic" (fun () ->
+      proven
+        "fn f(count: UInt64) -> UInt64\n\
+        \  decreases count\n\
+        \  cost time O(log(count))\n\
+         {\n\
+        \  if count == 0 { 0 } else { f(count / 2) }\n\
+         }\n");
+  test "functions that call each other in a cycle share their constants" (fun () ->
+      proven
+        "fn even(count: UInt32) -> Bool\n\
+        \  decreases count\n\
+        \  cost time O(count)\n\
+         {\n\
+        \  if count == 0 { true } else { odd(count - 1) }\n\
+         }\n\n\
+         fn odd(count: UInt32) -> Bool\n\
+        \  decreases count\n\
+        \  cost time O(count)\n\
+         {\n\
+        \  if count == 0 { false } else { even(count - 1) }\n\
+         }\n");
+  test "a quantifier in code runs over its range" (fun () ->
+      proven
+        "fn all_positive(items: List[Int64]) -> Bool\n\
+        \  cost time O(items.length())\n\
+         {\n\
+        \  forall index in 0..items.length() => items[index] > 0\n\
+         }\n");
+  test "calls through a function value are counted exactly" (fun () ->
+      proven
+        "fn each(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
+        \  cost calls(visit) == items.length()\n\
+        \  cost time O(items.length() * time(visit))\n\
+         {\n\
+        \  for item in items {\n\
+        \    visit(item)\n\
+        \  }\n\
+         }\n");
+  test "calling a function value twice per element is not once" (fun () ->
+      not_proven
+        "fn each(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
+        \  cost calls(visit) == items.length()\n\
+         {\n\
+        \  for item in items {\n\
+        \    visit(item)\n\
+        \    visit(item)\n\
+        \  }\n\
+         }\n"
+        "prover.cost");
+  test "a caller counts the calls its callee promises" (fun () ->
+      proven
+        "fn each(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
+        \  cost calls(visit) == items.length()\n\
+         {\n\
+        \  for item in items {\n\
+        \    visit(item)\n\
+        \  }\n\
+         }\n\n\
+         fn twice(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
+        \  cost calls(visit) == items.length() + items.length()\n\
+         {\n\
+        \  each(items, visit)\n\
+        \  each(items, visit)\n\
+         }\n");
+  test "a loop's cost clause bounds what it has spent" (fun () ->
+      proven
+        "fn f(count: UInt32)\n\
+        \  cost time O(count)\n\
+         {\n\
+        \  var index: UInt32 = 0\n\
+        \  while index < count\n\
+        \    invariant index <= count\n\
+        \    cost time O(index)\n\
+        \  {\n\
+        \    index = index + 1\n\
+        \  }\n\
+         }\n");
+  test "a function value with an O(1) type is one unit" (fun () ->
+      proven
+        "fn run(transform: (fn(Int64) -> Int64 cost time O(1))) -> Int64\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  transform(1)\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  run(fn(value) { value })\n\
+         }\n");
+  test "a lambda must meet its type's cost" (fun () ->
+      not_proven
+        "fn run(count: UInt32, transform: (fn(UInt32) -> UInt32 cost time O(1))) -> UInt32 {\n\
+        \  transform(count)\n\
+         }\n\n\
+         fn spin(size: UInt32)\n\
+        \  cost time O(size)\n\
+         {\n\
+        \  for _ in 0..size {\n\
+        \  }\n\
+         }\n\n\
+         fn f(count: UInt32) -> UInt32 {\n\
+        \  run(count, transform: fn(value) {\n\
+        \    spin(value)\n\
+        \    value\n\
+        \  })\n\
+         }\n"
+        "prover.cost");
+  test "nothing allocates without a block to allocate" (fun () ->
+      proven "fn f(value: Int64) -> Int64\n  cost allocations == 0\n{\n  value + 0\n}\n");
+  test "building an indirect variant allocates" (fun () ->
+      not_proven
+        "type Tree =\n\
+        \  | Leaf\n\
+        \  | indirect Node(left: Tree, right: Tree)\n\n\
+         fn f() -> Tree\n\
+        \  cost allocations == 0\n\
+         {\n\
+        \  Tree.Node(left: Tree.Leaf, right: Tree.Leaf)\n\
+         }\n"
+        "prover.cost");
+  test "an indirect variant is one allocation" (fun () ->
+      proven
+        "type Tree =\n\
+        \  | Leaf\n\
+        \  | indirect Node(left: Tree, right: Tree)\n\n\
+         fn f() -> Tree\n\
+        \  cost allocations == 1\n\
+         {\n\
+        \  Tree.Node(left: Tree.Leaf, right: Tree.Leaf)\n\
+         }\n");
+  test "nested loops are not linear" (fun () ->
+      not_proven
+        (constant_step
+       ^ "fn f(count: UInt32)\n\
+         \  cost time O(count)\n\
+          {\n\
+         \  for row in 0..count {\n\
+         \    for _ in 0..count {\n\
+         \      let _ = step(row)\n\
+         \    }\n\
+         \  }\n\
+          }\n")
+        "prover.cost");
+  test "two recursive calls on one less are not linear" (fun () ->
+      not_proven
+        "fn f(count: UInt32) -> UInt32\n\
+        \  decreases count\n\
+        \  cost time O(count)\n\
+         {\n\
+        \  if count == 0 { 0 } else {\n\
+        \    let _ = f(count - 1)\n\
+        \    f(count - 1)\n\
+        \  }\n\
+         }\n"
+        "prover.cost");
+  test "functions in a cycle that branch are not linear" (fun () ->
+      not_proven
+        "fn ping(count: UInt32) -> UInt32\n\
+        \  decreases count\n\
+        \  cost time O(count)\n\
+         {\n\
+        \  if count == 0 { 0 } else {\n\
+        \    let _ = pong(count - 1)\n\
+        \    pong(count - 1)\n\
+        \  }\n\
+         }\n\n\
+         fn pong(count: UInt32) -> UInt32\n\
+        \  decreases count\n\
+        \  cost time O(count)\n\
+         {\n\
+        \  if count == 0 { 0 } else { ping(count - 1) }\n\
+         }\n"
+        "prover.cost");
+  test "a callback's time is not free" (fun () ->
+      not_proven
+        "fn each(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
+        \  cost time O(items.length())\n\
+         {\n\
+        \  for item in items {\n\
+        \    visit(item)\n\
+        \  }\n\
+         }\n"
+        "prover.cost");
+  test "calls through a lambda that captures the function value are not known" (fun () ->
+      not_proven
+        "fn each(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
+        \  cost calls(visit) == items.length()\n\
+         {\n\
+        \  for item in items {\n\
+        \    visit(item)\n\
+        \  }\n\
+         }\n\n\
+         fn twice(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
+        \  cost calls(visit) == items.length()\n\
+         {\n\
+        \  each(items, visit: fn(item) {\n\
+        \    visit(item)\n\
+        \    visit(item)\n\
+        \  })\n\
+         }\n"
+        "prover.cost");
+  test "a quantifier over a costly body is not linear" (fun () ->
+      not_proven
+        "fn spin(items: List[Int64]) -> Bool\n\
+        \  cost time O(items.length())\n\
+         {\n\
+        \  for _ in items {\n\
+        \  }\n\
+        \  true\n\
+         }\n\n\
+         fn f(items: List[Int64]) -> Bool\n\
+        \  cost time O(items.length())\n\
+         {\n\
+        \  forall index in 0..items.length() => index >= 0 && spin(items)\n\
+         }\n"
+        "prover.cost");
+  test "a loop with no measure has no bound" (fun () ->
+      let found =
+        codes
+          "fn f(count: UInt32)\n\
+          \  cost time O(count)\n\
+           {\n\
+          \  var index: UInt32 = 0\n\
+          \  while index != count {\n\
+          \    index = index + 1\n\
+          \  }\n\
+           }\n"
+      in
+      if not (List.mem "prover.cost" found && List.mem "prover.termination" found) then
+        fail "%s" (String.concat ", " found));
+  test "a loop's cost clause that is too small" (fun () ->
+      not_proven
+        "fn f(count: UInt32)\n\
+        \  cost time O(count)\n\
+         {\n\
+        \  var index: UInt32 = 0\n\
+        \  while index < count\n\
+        \    invariant index <= count\n\
+        \    cost time O(1)\n\
+        \  {\n\
+        \    index = index + 1\n\
+        \  }\n\
+         }\n"
+        "prover.cost");
+  test "calls of a capability's method are counted" (fun () ->
+      proven
+        "capability Meter {\n\
+        \  fn tick()\n\
+         }\n\n\
+         fn f(items: List[Int64])\n\
+        \  uses Meter\n\
+        \  cost calls(Meter.tick) == items.length()\n\
+         {\n\
+        \  for _ in items {\n\
+        \    Meter.tick()\n\
+        \  }\n\
+         }\n");
+  test "a callee's allocations add up" (fun () ->
+      proven
+        "type Tree =\n\
+        \  | Leaf\n\
+        \  | indirect Node(left: Tree, right: Tree)\n\n\
+         fn node() -> Tree\n\
+        \  cost allocations == 1\n\
+         {\n\
+        \  Tree.Node(left: Tree.Leaf, right: Tree.Leaf)\n\
+         }\n\n\
+         fn pair() -> Tree\n\
+        \  cost allocations == 2\n\
+         {\n\
+        \  let _ = node()\n\
+        \  node()\n\
+         }\n");
+  test "a lambda's time is bounded where it is written" (fun () ->
+      proven
+        "fn each(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
+        \  cost time O(items.length() * time(visit))\n\
+         {\n\
+        \  for item in items {\n\
+        \    visit(item)\n\
+        \  }\n\
+         }\n\n\
+         fn f(items: List[Int64])\n\
+        \  cost time O(items.length())\n\
+         {\n\
+        \  each(items, visit: fn(item) {\n\
+        \    let _ = item\n\
+        \  })\n\
+         }\n");
+  test "a lambda that loops over its argument has no bound" (fun () ->
+      let found =
+        codes
+          "fn each(items: List[UInt32], visit: (fn(UInt32) cost time finite))\n\
+          \  cost time O(items.length() * time(visit))\n\
+           {\n\
+          \  for item in items {\n\
+          \    visit(item)\n\
+          \  }\n\
+           }\n\n\
+           fn f(items: List[UInt32])\n\
+          \  cost time O(items.length())\n\
+           {\n\
+          \  each(items, visit: fn(item) {\n\
+          \    for _ in 0..item {\n\
+          \    }\n\
+          \  })\n\
+           }\n"
+      in
+      if not (List.mem "prover.cost" found) then fail "%s" (String.concat ", " found));
+  test "a loop's cost clause over what it has received" (fun () ->
+      proven
+        (constant_step
+       ^ "fn f(items: List[UInt32])\n\
+         \  cost time O(items.length())\n\
+          {\n\
+         \  for item in items\n\
+         \    cost time O(yielded.length())\n\
+         \  {\n\
+         \    let _ = step(item)\n\
+         \  }\n\
+          }\n"));
+  test "an impl's method keeps its trait's cost" (fun () ->
+      not_proven
+        "trait Sized {\n\
+        \  fn size(self) -> Int64\n\
+        \    cost time O(1)\n\
+         }\n\n\
+         type Box(count: UInt32)\n\n\
+         fn spin(size: UInt32)\n\
+        \  cost time O(size)\n\
+         {\n\
+        \  for _ in 0..size {\n\
+        \  }\n\
+         }\n\n\
+         impl Sized for Box {\n\
+        \  fn size(self) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    spin(self.count)\n\
+        \    0\n\
+        \  }\n\
+         }\n"
+        "prover.cost")
+
 (* What is not proven yet *)
 
 let () =
   test "a construct the prover cannot read yet" (fun () ->
       not_proven "fn f(text: String) -> String {\n  \"${text}!\"\n}\n" "prover.unsupported");
-  test "a cost bound is reported as not proven yet" (fun () ->
-      not_proven "fn f() -> Int64\n  cost time O(1)\n{\n  0\n}\n" "prover.unsupported")
+  ()
 
 (* Queries *)
 

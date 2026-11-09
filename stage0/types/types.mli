@@ -56,9 +56,13 @@ and function_type = {
 and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
 and capability = Capability of Path.t | Capability_parameter of parameter
 
-and cost = { amortized : bool; resource : string; bound : string }
-(** A cost clause of a function type, which cannot mention parameters, spelled canonically. Only the
-    prover reads its bound; the checker reads whether there is a [time] clause. *)
+and cost = { amortized : bool; resource : string; bound : cost_bound }
+(** A cost clause of a function type, which cannot mention parameters. Only the prover reads its
+    bound; the checker reads whether there is a [time] clause. *)
+
+(** A function type's bound, which is a constant since its parameters have no names: the number,
+    when it is written as one. *)
+and cost_bound = Finite_cost | Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
 val unit : ty
 val bool : ty
