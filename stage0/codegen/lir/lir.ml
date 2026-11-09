@@ -46,6 +46,8 @@ and constant =
   | Bytes of string  (** The address of static bytes, such as a string literal's *)
   | Null
   | Symbol_address of Instance.key  (** The address of static evidence or a table *)
+  | Size_of of Ground.ty  (** A [USize]: how many bytes a value of the type takes *)
+  | Alignment_of of Ground.ty  (** A [USize]: the alignment of a value of the type *)
 
 and function_ref =
   | Instance of Instance.key
@@ -254,7 +256,10 @@ let signature (f : function_) =
 
 let bug format = Printf.ksprintf (fun message -> invalid_arg ("Lir: " ^ message)) format
 
+(* A cursor always holds its state, which lets code over a cursor that holds
+   another be lowered before the cursor's fields are known. *)
 let erased env = function
+  | Value (Cursor _) -> false
   | Value ty -> (Memory_layout.of_type env ty).size = 0
   | Pointer _ | Raw _ | Environment _ | Evidence _ -> false
 
@@ -492,7 +497,7 @@ let canonical (f : function_) =
   }
 
 let canonical_instance t = { t with main = canonical t.main; nested = Array.map canonical t.nested }
-let version = 6
+let version = 7
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -559,11 +564,11 @@ and encode_projection instance = function
 and encode_operand instance = function
   | Copy place -> tagged 0 [ encode_place instance place ]
   | Move place -> tagged 1 [ encode_place instance place ]
-  | Constant constant -> tagged 2 [ encode_constant constant ]
+  | Constant constant -> tagged 2 [ encode_constant instance constant ]
   | Address { place; writable } -> tagged 3 [ encode_place instance place; Bool writable ]
   | Moved_address place -> tagged 4 [ encode_place instance place ]
 
-and encode_constant = function
+and encode_constant instance = function
   | Integer (integer, value) -> tagged 0 [ Cbor.int (integer_tag integer); Integer value ]
   | Float32 bits -> tagged 1 [ Integer (Z.of_int32_unsigned bits) ]
   | Float64 bits -> tagged 2 [ Integer (Z.of_int64_unsigned bits) ]
@@ -571,7 +576,9 @@ and encode_constant = function
   | Character code -> tagged 4 [ Cbor.int code ]
   | Bytes text -> tagged 5 [ Bytes text ]
   | Null -> tagged 6 []
-  | Symbol_address key -> tagged 7 [ Instance.encode key ]
+  | Symbol_address key -> tagged 7 [ instance.instance key ]
+  | Size_of ty -> tagged 8 [ Ground.encode ~path:instance.path ty ]
+  | Alignment_of ty -> tagged 9 [ Ground.encode ~path:instance.path ty ]
 
 let encode_signature instance (s : signature) =
   Cbor.Array
@@ -763,23 +770,25 @@ let encode ?(path = Ground.encode_path) ?instance t =
       list (encode_function encoders) (Array.to_list t.nested);
     ]
 
-let rec encode_static path = function
-  | Static_scalar constant -> tagged 0 [ encode_constant constant ]
+let rec encode_static (e : encoders) = function
+  | Static_scalar constant -> tagged 0 [ encode_constant e constant ]
   | Static_record fields ->
-      tagged 1 [ list (fun (name, v) -> Cbor.Array [ Text name; encode_static path v ]) fields ]
+      tagged 1 [ list (fun (name, v) -> Cbor.Array [ Text name; encode_static e v ]) fields ]
   | Static_variant (variant, fields) ->
       tagged 2
-        [
-          Text variant;
-          list (fun (name, v) -> Cbor.Array [ Text name; encode_static path v ]) fields;
-        ]
-  | Static_array values -> tagged 3 [ list (encode_static path) values ]
+        [ Text variant; list (fun (name, v) -> Cbor.Array [ Text name; encode_static e v ]) fields ]
+  | Static_array values -> tagged 3 [ list (encode_static e) values ]
   | Static_storage { element; elements; owned } ->
-      tagged 4 [ Ground.encode ~path element; list (encode_static path) elements; Bool owned ]
+      tagged 4 [ Ground.encode ~path:e.path element; list (encode_static e) elements; Bool owned ]
 
 let encode_data ?(path = Ground.encode_path) ?instance data =
   let instance = match instance with Some instance -> instance | None -> Instance.encode ~path in
-  Cbor.Array [ instance data.data_key; Ground.encode ~path data.ty; encode_static path data.value ]
+  Cbor.Array
+    [
+      instance data.data_key;
+      Ground.encode ~path data.ty;
+      encode_static { path; instance } data.value;
+    ]
 
 let encode_table ?(path = Ground.encode_path) ?instance (table : table) =
   let instance = match instance with Some instance -> instance | None -> Instance.encode ~path in
@@ -844,6 +853,8 @@ let constant_to_string = function
   | Bytes text -> Printf.sprintf "%S" text
   | Null -> "null"
   | Symbol_address key -> "&" ^ Instance.to_string key
+  | Size_of ty -> "size_of(" ^ Ground.to_string ty ^ ")"
+  | Alignment_of ty -> "alignment_of(" ^ Ground.to_string ty ^ ")"
 
 let rec place_to_string (place : place) =
   List.fold_left

@@ -29,7 +29,10 @@ let rec trivial t ty =
          or storage, so it is not trivial, which is the answer a cycle
          gets. *)
       t.trivial_types <- Types.add ty false t.trivial_types;
-      let any = match ty with Ground.Any _ -> true | _ -> false in
+      (* An [any] value and a cursor always have a drop function, which a
+         cursor's shape, made from its method's body, need not be looked at
+         to know. *)
+      let any = match ty with Ground.Any _ | Cursor _ -> true | _ -> false in
       let member : Memory_layout.member -> bool = function
         | Typed ty -> trivial t ty
         | Raw _ -> true

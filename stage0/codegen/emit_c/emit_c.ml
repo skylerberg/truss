@@ -508,6 +508,9 @@ and constant_c context : Lir.constant -> string * Lir.ty = function
   | Character code -> (Printf.sprintf "((uint32_t)0x%xU)" code, Raw Character)
   | Bytes text -> ("((void *)" ^ bytes_name context text ^ ")", Raw (Pointer Opaque))
   | Null -> ("((void *)0)", Raw (Nullable_pointer Opaque))
+  | Size_of ty -> (Printf.sprintf "((t_usize)sizeof(%s))" (value_c context ty), Raw (Integer USize))
+  | Alignment_of ty ->
+      (Printf.sprintf "((t_usize)_Alignof(%s))" (value_c context ty), Raw (Integer USize))
   | Symbol_address key ->
       let symbol = Instance.symbol key in
       declare_prototype context symbol

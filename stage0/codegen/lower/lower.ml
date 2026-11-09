@@ -408,7 +408,10 @@ let interface_parameters (signature : T.signature) =
 
 (* Lowering one function *)
 
-type scope = { mutable owned : Lir.place list  (** Most recent first *) }
+(* What leaving a scope does: drop what a place still owns, or free the
+   heap block a pointer points at, once what is in it has been dropped. *)
+type cleanup = Drop_value of Lir.place | Free_pointed of Lir.place
+type scope = { mutable owned : cleanup list  (** Most recent first *) }
 
 (* Where [continue] and [break] go, and how many scopes each keeps. *)
 type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; break_depth : int }
@@ -482,9 +485,26 @@ let temporary st ty =
   place
 
 let own_in_scope st place =
-  match st.scopes with scope :: _ -> scope.owned <- place :: scope.owned | [] -> bug "no scope"
+  match st.scopes with
+  | scope :: _ -> scope.owned <- Drop_value place :: scope.owned
+  | [] -> bug "no scope"
 
-let drop_scope st (scope : scope) = List.iter (fun place -> emit st.b (Drop place)) scope.owned
+(* A heap block the scope frees as it ends, after the drops of what is in it,
+   which are owned later and so come first. *)
+let free_in_scope st pointer =
+  match st.scopes with
+  | scope :: _ -> scope.owned <- Free_pointed pointer :: scope.owned
+  | [] -> bug "no scope"
+
+let drop_scope st (scope : scope) =
+  List.iter
+    (function
+      | Drop_value place -> emit st.b (Drop place)
+      | Free_pointed pointer ->
+          emit st.b
+            (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded }))
+    scope.owned
+
 let drop_temporaries st temporaries = List.iter (fun place -> emit st.b (Drop place)) temporaries
 
 (* Drops everything owned in the scopes inside the [depth] outermost, and
@@ -2355,9 +2375,19 @@ and statement st (s : S.statement) =
           (* In a pulled method, a [yield] stays, for yield lowering to make a
              state of. Its [stop] path drops what the method owns. *)
           let ty = type_of st value.id in
-          let place = expression st value in
+          let place, temporary = scrutinee st value in
+          (* [next] gives its caller a value of its own: what the method
+             makes, or a copy of a part it yields a view of. *)
+          let given =
+            if temporary || trivial st ty then place
+            else begin
+              let copy = new_local st ty in
+              Glue.copy_into st.context.glue st.b ~destination:copy ~source:place ty;
+              copy
+            end
+          in
           let resume = block st.b and stop = block st.b in
-          finish st.b (Yield { value = owned st place ty; resume; stop = Some stop });
+          finish st.b (Yield { value = owned st given ty; resume; stop = Some stop });
           start st.b stop;
           leave_to st 0;
           finish st.b (Return None);
@@ -2479,10 +2509,10 @@ and for_ st (s : S.statement) ~pattern ~iterable ~body =
         else [ { C.expression = iterable.id; parameter = 0; mode; conversion = None } ]
       in
       match resolve_callee st call_ with
+      | Some (path, type_arguments) when List.exists (Path.equal path) st.frame.inlined ->
+          recursive_loop st s call_ ~expressions ~arguments ~path ~type_arguments ~pattern ~body
       | Some (path, type_arguments) ->
           let arguments = evaluate_arguments st ~expressions ~arguments in
-          let element = match ground st call_.result with ty -> ty in
-          ignore element;
           let caller = st.frame in
           let depth = List.length st.scopes in
           let after = block st.b in
@@ -2545,6 +2575,59 @@ and for_ st (s : S.statement) ~pattern ~iterable ~body =
           start st.b after
       | _ -> bug "a pulled loop over %s" (Ground.to_string cursor_ty))
   | None -> bug "a for loop with no meaning"
+
+(* A loop over a yielding method already inlined around it, which yields
+   through recursion: inlining it again would never end, so the loop pulls a
+   cursor over it instead, held in a heap block of its own so that a cursor
+   over the method can hold another, and freed as the loop ends. A pulled
+   cursor gives values of their own, so a view the method yields reaches the
+   loop as a copy. *)
+and recursive_loop st (s : S.statement) call_ ~expressions ~arguments ~path ~type_arguments ~pattern
+    ~body =
+  let yielding : Ground.yielding = { method_ = path; type_arguments } in
+  let element = cursor_element st.context yielding in
+  let cursor_ty = Ground.Cursor yielding in
+  let after = block st.b in
+  in_scope st (fun () ->
+      let boxed =
+        local st.b ~name:"cursor" (Pointer { target = Value cursor_ty; writable = true })
+      in
+      emit st.b
+        (Call
+           {
+             target = Intrinsic Allocate;
+             arguments = [ Constant (Size_of cursor_ty); Constant (Alignment_of cursor_ty) ];
+             result = Returned (at boxed);
+           });
+      free_in_scope st (at boxed);
+      let cursor = { Lir.root = Local boxed; projections = [ Deref ] } in
+      call_with st call_ ~expressions ~arguments cursor ~span:s.span;
+      own_in_scope st cursor;
+      let option = cursor_result st.context yielding in
+      let test = block st.b and inside = block st.b and ended = block st.b in
+      finish st.b (Goto test);
+      start st.b test;
+      let next = new_local st option in
+      call_next st yielding cursor next;
+      let more = local st.b (Raw Bool) in
+      emit st.b (Assign (at more, Is_variant (next, "Some")));
+      finish st.b
+        (Switch { value = Copy (at more); cases = [ (Z.one, inside) ]; default = Some ended });
+      start st.b inside;
+      let depth = List.length st.scopes in
+      in_scope st (fun () ->
+          bind_pattern st pattern
+            (next / Variant_field { variant = "Some"; field = "value" })
+            element ~owned:true;
+          st.loops <-
+            { continue_ = test; continue_depth = depth; break_ = ended; break_depth = depth }
+            :: st.loops;
+          block_into st body None;
+          st.loops <- List.tl st.loops);
+      finish st.b (Goto test);
+      start st.b ended);
+  finish st.b (Goto after);
+  start st.b after
 
 (* The type a yielding method yields, in this instance. *)
 and yielded_type st path type_arguments =

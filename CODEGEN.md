@@ -745,14 +745,25 @@ method's locals are dropped as the loop leaves them. This gives the plain
 loop the C compiler would make of the loop form, and needs no rewriting of
 the caller into continuation-passing style. The caller then depends on the
 method's body, which its trace records. A lending method's `yield` must be
-its last statement, and a method that yields through recursion is not
-lowered yet; both need the loop form above.
+its last statement, which needs the loop form above to lift.
+
+A loop over a yielding method that is already inlined around it, as a
+tree's `each` loops over its subtrees, would be inlined forever. Stage0
+pulls a cursor over the inner call instead, in a heap block the loop frees
+on every way out, so a cursor over the method can hold another: the cursor
+type holds a pointer to its own type, never itself. This is the room for
+every level of recursion that DESIGN.md says other languages allocate
+behind the scenes. The language still refuses `next()` on such a cursor,
+so it only drives `for` loops.
 
 ### Cursors
 
 When some code pulls a yielding method with `next()`, it is lowered a second
-time, for pulling, and `Yields` makes that version a state machine, as C#
-and Kotlin compile iterators:
+time, for pulling. `next` gives its caller a value of its own: what the
+method makes is moved out, and a part of a place it yields a view of, such
+as a `List` element from `each`, is copied, so that the element stays
+where it is. `Yields` makes that version a state machine, as C# and Kotlin
+compile iterators:
 
 1. Number each `yield` as a state, from 1 in the order of the blocks. State
    0 is the start, and the state after the last is the end.

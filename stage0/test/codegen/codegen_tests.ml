@@ -2247,6 +2247,72 @@ test "templates" {
   assert plain.pieces == 1 && plain.total == 0
 }
 |};
+  passes "a method that yields through recursion drives a for loop"
+    {|type Tree =
+  | Leaf
+  | indirect Node(left: Tree, value: Int64, right: Tree)
+
+fn Tree.walk(self) yields Int64 {
+  match self {
+    Leaf => {}
+    Node(left, value, right) => {
+      for item in left.walk() {
+        yield item
+      }
+      yield value
+      for item in right.walk() {
+        yield item
+      }
+    }
+  }
+}
+
+fn countdown(from: Int64) yields String {
+  if from > 0 {
+    yield "${from}"
+    for rest in countdown(from - 1) {
+      yield rest
+    }
+  }
+}
+
+test "recursion" {
+  let one = Tree.Node(left: Tree.Leaf, value: 1, right: Tree.Leaf)
+  let four = Tree.Node(left: Tree.Leaf, value: 4, right: Tree.Leaf)
+  let three = Tree.Node(left: Tree.Leaf, value: 3, right: own four)
+  let tree = Tree.Node(left: own one, value: 2, right: own three)
+  var total = 0
+  var order = 0
+  for item in tree.walk() {
+    order = order * 10 + item
+    total += item
+  }
+  assert total == 10
+  assert order == 1234
+  var seen = 0
+  for item in tree.walk() {
+    if item == 3 {
+      break
+    }
+    seen += 1
+  }
+  assert seen == 2
+  var words: USize = 0
+  for word in countdown(3) {
+    words += word.length()
+  }
+  assert words == 3
+}
+|};
+  passes "pulling a view of an element gives a copy, and leaves the element"
+    {|test "view" {
+  let names: List[String] = ["${1}", "${2}"]
+  var each = names.each()
+  let first = mut each.next()
+  assert first == Some("1")
+  assert names[0] == "1"
+}
+|};
   passes "names an is test binds are used where it holds"
     {|fn describe(found: Option[String], limit: USize) -> String {
   if found is Some(text) && text.length() > limit {

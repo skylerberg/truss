@@ -56,6 +56,8 @@ and constant =
   | Bytes of string  (** The address of static bytes, such as a string literal's *)
   | Null
   | Symbol_address of Instance.key  (** The address of static evidence or a table *)
+  | Size_of of Ground.ty  (** A [USize]: how many bytes a value of the type takes *)
+  | Alignment_of of Ground.ty  (** A [USize]: the alignment of a value of the type *)
 
 and function_ref =
   | Instance of Instance.key
