@@ -562,7 +562,11 @@ added once the compiler works:
     whose nodes are built as if its fix had been applied. A part of the
     definition, such as a signature, a body, or a member, is exactly as
     written when no recovery lies in its span, whatever other diagnostics
-    it has.
+    it has. Every recovery covers at least one byte of the part it is in: one
+    at the end of the definition, or at a closer the lexer inserted, which
+    sits where the part it closes ends, reaches back to the start of the
+    token before it. The one recovery with no width is where a missing body
+    goes, and it lies in the body that starts there.
 
   A diagnostic for valid syntax that breaks a rule checked after parsing,
   such as a misplaced `assert`, is not a recovery: the tree there is as

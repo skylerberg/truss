@@ -110,13 +110,25 @@ let peek cursor = token_at cursor cursor.index
 let peek_kind cursor = (peek cursor).kind
 let peek_ahead cursor count = (token_at cursor (cursor.index + count)).kind
 
+(* Records a recovery at the token at [index]. One with no width, at the
+   end of the slice or at a closer the lexer inserted, would sit on the
+   boundary after the part it is in, so it reaches back to the start of the
+   token before it, which lies in that part. *)
+let record cursor ~index (span : Source.span) =
+  let span =
+    if span.start = span.stop && index > cursor.first then
+      Source.span (min span.start (token_at cursor (index - 1)).span.start) span.stop
+    else span
+  in
+  cursor.recoveries := span :: !(cursor.recoveries)
+
 let advance cursor =
   if cursor.index < cursor.stop then begin
     let token = cursor.tokens.(cursor.index) in
     (match token.kind with
     | Punctuation (Close _) when token.span.start = token.span.stop ->
         cursor.cut_off <- true;
-        cursor.recoveries := token.span :: !(cursor.recoveries)
+        record cursor ~index:cursor.index token.span
     | _ -> ());
     cursor.index <- cursor.index + 1
   end
@@ -190,7 +202,12 @@ let recovers : Diagnostic.Code.parser -> bool = function
       false
 
 let report cursor ?notes ?fixes code span message =
-  if recovers code then cursor.recoveries := span :: !(cursor.recoveries);
+  (match code with
+  (* Where a body should be inserted, which belongs to the body that starts
+     there, not to the signature before it. *)
+  | Diagnostic.Code.Missing_body -> cursor.recoveries := span :: !(cursor.recoveries)
+  | _ when recovers code -> record cursor ~index:cursor.index span
+  | _ -> ());
   Diagnostic.Collector.add cursor.diagnostics
     (Diagnostic.make ?notes ?fixes ~code:(Diagnostic.Code.Parser code) span message)
 
@@ -213,7 +230,7 @@ let fail cursor expected =
   let token = peek cursor in
   (* Silent or not, a failure leaves the parser to recover. *)
   if inserted_closer token || cursor.cut_off || (token.kind = End_of_file && cursor.cut_off_end)
-  then cursor.recoveries := token.span :: !(cursor.recoveries);
+  then record cursor ~index:cursor.index token.span;
   (match token.kind with
   | _ when inserted_closer token || cursor.cut_off -> ()
   | End_of_file when cursor.cut_off_end -> ()

@@ -169,6 +169,24 @@ let () =
             <> [ (body.span.start, body.span.start) ]
           then fail "recovered at the wrong place"
       | _ -> fail "the signature was not kept");
+  test "a recovery at the end of a body lies in the body" (fun () ->
+      match (fst (parse "fn f() {\n  let x = (1 +\nfn g() {}\n")).definitions with
+      | { value = { kind = Function { body; _ }; recovered; _ }; _ } :: _ ->
+          if
+            not
+              (List.exists
+                 (fun (span : Syntax.span) ->
+                   span.start < span.stop && body.span.start <= span.start
+                   && span.start < body.span.stop)
+                 recovered)
+          then fail "no recovery inside the body"
+      | _ -> fail "wrong definitions");
+  test "a failed clause at the end lies in the signature" (fun () ->
+      match (fst (parse "fn f() requires")).definitions with
+      | { value = { kind = Function { body; _ }; recovered; _ }; _ } :: _ ->
+          if not (List.exists (fun (span : Syntax.span) -> span.start < body.span.start) recovered)
+          then fail "no recovery in the signature"
+      | _ -> fail "wrong definitions");
   test "a definition whose header did not parse keeps its keyword and name" (fun () ->
       let file, _ = parse "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn f() {}" in
       let printed =
