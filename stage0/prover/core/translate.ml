@@ -43,7 +43,11 @@ type obligation = {
       (** The constants of each [O(...)] bound the query mentions, which each try pins. *)
 }
 
-type outcome = { obligations : obligation list  (** In the order made. *) }
+type outcome = {
+  obligations : obligation list;  (** In the order made. *)
+  holes : (Names.key * span) list;
+      (** Each [todo] in a proof, in the definition whose tree it is in. *)
+}
 
 (* A definition whose tables are being read: the one proven, or a callee
    whose clauses are translated at a call. *)
@@ -94,6 +98,9 @@ type context = {
   mutable returns : (frame * L.term option) list;
   mutable instantiating : Path.t list;  (** Contracts being assumed, to stop at recursion. *)
   fits : (int * T.ty) list;  (** The type checker's [Integer_fits] obligations, by expression. *)
+  disjoint : (int * int) list;
+      (** The ownership check's pairs of indexes, by expression, that must differ. *)
+  mutable indexes : (int * (L.term * span)) list;  (** The value of each such index, once read. *)
   mutable output : T.ty option;  (** What the function proven returns, for [?]. *)
   mutable hands_out : (T.ty * [ `Lends | `Yields ]) option;
       (** In a lending or yielding method's body, the type of the parts it hands out. *)
@@ -116,6 +123,9 @@ type context = {
           the bound is used. *)
   mutable lambda_captures : (L.term * C.local list) list;  (** What each lambda captures. *)
   mutable potentials : L.term list;  (** Each value's potential whose definition is a fact. *)
+  mutable proving : bool;
+      (** In a theorem, a [proof] block, or a law's proof, where a [todo] is a hole. *)
+  mutable holes : (Names.key * span) list;  (** Reversed. *)
   mutable call_targets : (L.term * C.local) list;
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
 }
@@ -820,7 +830,33 @@ let rec expression context frame (written : expression) : (frame * L.term) optio
         (Printf.sprintf "`%s` may not fit in `%s`." (quote frame.source written.span) (T.show ty))
         (in_range ty value)
   | _ -> ());
+  (match result with
+  | Some (after, value) when home -> disjoint_index context after written value
+  | _ -> ());
   result
+
+(* Two indexes of one collection that are lent together, or used by two
+   branches of [parallel], must differ, which the ownership check left to
+   the prover. Each is read as it is evaluated, and the pair is shown once
+   both are. *)
+and disjoint_index context frame (written : expression) value =
+  if List.exists (fun (first, second) -> first = written.id || second = written.id) context.disjoint
+  then begin
+    context.indexes <- (written.id, (value, written.span)) :: context.indexes;
+    List.iter
+      (fun (first, second) ->
+        if first = written.id || second = written.id then
+          match (List.assoc_opt first context.indexes, List.assoc_opt second context.indexes) with
+          | Some (a, first_span), Some (b, second_span) ->
+              oblige context frame Disjoint written.span
+                (Printf.sprintf
+                   "`%s` and `%s` may be the same index, but the elements they reach are used \
+                    together."
+                   (quote frame.source first_span) (quote frame.source second_span))
+                (L.not_ (L.equal a b))
+          | _ -> ())
+      context.disjoint
+  end
 
 and value context frame written =
   match expression context frame written with
@@ -893,6 +929,13 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
       oblige context frame Unreachable written.span "This `unreachable` may be reached."
         (L.Boolean false);
       None
+  | Todo when context.proving ->
+      (* A hole in a proof: what follows it on this path is not shown, and
+         a build refuses what can reach it. See PROVER.md, "Holes". *)
+      context.holes <- (source.key, written.span) :: context.holes;
+      Some
+        ( { frame with condition = L.Boolean false },
+          arrive context frame "todo" (type_of frame written) )
   | Todo -> Some (frame, arrive context frame "todo" (type_of frame written))
   | Break -> (
       match frame.loop with
@@ -950,9 +993,12 @@ and name context frame (written : expression) (path : path) =
       | Some result -> Some (frame, result)
       | None -> unsupported written.span "`result` here")
   | Some Yielded -> (
-      match frame.yielded with
-      | Some yielded -> Some (frame, yielded)
-      | None -> unsupported written.span "`yielded` here")
+      (* What the nearest loop or method hands out: a loop's own parts, or
+         else, in a lending or yielding method's body, the method's. *)
+      match (frame.yielded, frame.handed_out) with
+      | Some yielded, _ -> Some (frame, yielded)
+      | None, Some handed_out when source.key = context.home -> Some (frame, handed_out)
+      | _ -> unsupported written.span "`yielded` here")
   | Some Finished -> (
       match frame.finished with
       | Some finished -> Some (frame, finished)
@@ -3683,8 +3729,12 @@ and statement_kind context frame (written : statement) : frame option =
           term;
       Some frame
   | Proof block_ -> (
-      match block_value context frame block_ with
-      | Some (after, _) -> Some { frame with locals = after.locals }
+      let proving = context.proving in
+      context.proving <- true;
+      let after = block_value context frame block_ in
+      context.proving <- proving;
+      match after with
+      | Some (after, _) -> Some { frame with locals = after.locals; condition = after.condition }
       | None -> None)
   | Parallel block_ ->
       (* Branches are disjoint, so they can run in order. *)
@@ -4072,12 +4122,16 @@ and one_step (counter : Costs.counter) =
 
 and for_ context frame (written : statement) pattern iterable clauses body =
   match (frame.source.checked.loops.(written.id), iterable.kind, pattern.kind) with
-  | ( Some (Integer_range { element = _; inclusive }),
+  | ( Some (Integer_range { element; inclusive }),
       Range { start = Some start; stop = Some stop; _ },
       (Binding_or_constant _ | Wildcard) ) ->
+      let element = substituted frame element in
       let frame, low = value context frame start in
       let frame, high = value context frame stop in
-      check_invariants context frame clauses ~when_:"on entry to the loop";
+      let outer_yielded = frame.yielded in
+      check_invariants context
+        { frame with yielded = Some (empty_parts context frame element) }
+        clauses ~when_:"on entry to the loop";
       let changed = changed_places frame body in
       let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
       loop_entry context frame costs;
@@ -4096,13 +4150,32 @@ and for_ context frame (written : statement) pattern iterable clauses body =
         L.(
           Apply ("<=", [ int 0; iterations ])
           &&& Apply ("<=", [ iterations; Costs.at_least_zero count ]));
-      let head = loop_head context head costs ~iterations:(Some iterations) in
+      (* [yielded] is the indexes so far, from [low] up. *)
+      let before = some_parts context head element in
+      assume context head (L.equal (sequence_length context element before) iterations);
+      (context.fresh <- context.fresh + 1;
+       let position = Printf.sprintf "index.%d" context.fresh in
+       match sequence_at context element before (L.Symbol position) with
+       | Some at ->
+           assume context head
+             (L.Forall
+                ( [ (position, L.Int) ],
+                  L.(
+                    Apply ("<=", [ int 0; Symbol position ])
+                    &&& Apply ("<", [ Symbol position; iterations ])
+                    ==> equal at (Apply ("+", [ low; Symbol position ]))) ))
+       | None -> ());
+      let head =
+        loop_head context { head with yielded = Some before } costs ~iterations:(Some iterations)
+      in
       assume_invariants context head clauses;
       let index = Costs.plus low iterations in
       let exits = { breaks = []; continues = [] } in
       let inside =
         { (restrict head (L.Apply ("<", [ iterations; count ]))) with loop = Some exits }
       in
+      let through = appended context inside element before index in
+      let inside = { inside with yielded = outer_yielded } in
       let inside = spend context inside one_step in
       let inside =
         match pattern.kind with
@@ -4113,13 +4186,14 @@ and for_ context frame (written : statement) pattern iterable clauses body =
       let ends =
         (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues
       in
+      let with_through (f : frame) = { f with loop = frame.loop; yielded = Some through } in
       loop_iterations context written head costs ~mark
         ~facts:(facts_since context facts_mark @ [ inside.condition ])
-        ~ends ~breaks:exits.breaks;
+        ~ends:(List.map with_through ends)
+        ~breaks:(List.map with_through exits.breaks);
       List.iter
         (fun (end_ : frame) ->
-          check_invariants context { end_ with loop = frame.loop } clauses
-            ~when_:"after an iteration")
+          check_invariants context (with_through end_) clauses ~when_:"after an iteration")
         ends;
       let most = [ Costs.at_least_zero count ] in
       let exit_ =
@@ -4130,12 +4204,13 @@ and for_ context frame (written : statement) pattern iterable clauses body =
       let left =
         List.map
           (fun (f : frame) ->
-            loop_exit context { f with loop = frame.loop } costs
+            loop_exit context (with_through f) costs
               ~iterations:(Some (Costs.plus iterations (L.int 1)))
               ~most)
           exits.breaks
       in
-      join_frames context (exit_ :: left)
+      join_frames context
+        (List.map (fun (f : frame) -> { f with yielded = outer_yielded }) (exit_ :: left))
       |> Option.map (fun (joined : frame) ->
           { joined with locals = Ids.filter (fun id _ -> Ids.mem id frame.locals) joined.locals })
   | Some (Yielding { call = driven; mode }), _, _ ->
@@ -4377,21 +4452,33 @@ let new_context database ~home ~current ~terminates ~measures checked =
     lambda_times = [];
     lambda_captures = [];
     potentials = [];
+    proving = false;
+    holes = [];
     call_targets = [];
     fits =
       List.filter_map
         (function C.Integer_fits { expression; type_ } -> Some (expression, type_) | _ -> None)
         checked.C.obligations;
+    disjoint =
+      List.filter_map
+        (function C.Disjoint { first; second } -> Some (first, second) | _ -> None)
+        (checked.C.obligations
+        @
+        match Query.demand database Ownership.ownership home with
+        | Some ownership -> ownership.obligations
+        | None -> []);
+    indexes = [];
   }
 
-let outcome context = { obligations = List.rev context.obligations }
+let outcome context = { obligations = List.rev context.obligations; holes = List.rev context.holes }
 
 let reject_checker_obligations (source : source) =
   List.iter
     (function
       | C.Integer_fits _ -> ()
-      | C.Disjoint { first; _ } ->
-          raise (Unsupported (Span.make 0 0, Printf.sprintf "disjoint indexes (at node %d)" first))
+      | C.Disjoint _ ->
+          (* Shown where both indexes are read. *)
+          ()
       | C.Costs_imply _ -> raise (Unsupported (Span.make 0 0, "a function value's costs"))
       | C.Guards_cover _ ->
           (* Shown by the [_ => unreachable] arm it is about, which is an
@@ -4505,6 +4592,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
   let context =
     new_context database ~home:source.key ~current:path ~terminates ~measures source.checked
   in
+  context.proving <- proof;
   context.parameters <- signature.parameters;
   (match Query.demand database Interface.Environment.signature path with
   | Some { output = Returns ty; _ } -> context.output <- Some ty
@@ -4887,9 +4975,12 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
            where their [requires] hold, which is all a proof needs. *)
         List.iter
           (fun ((proof_source : source), (body : block)) ->
-            match
+            context.proving <- true;
+            let after =
               block_value context { start with source = proof_source; checking = false } body
-            with
+            in
+            context.proving <- false;
+            match after with
             | Some (after, _) -> frame := { start with condition = after.condition }
             | None -> ())
           (List.filter_map

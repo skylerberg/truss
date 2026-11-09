@@ -21,3 +21,8 @@ val proof : (Resolve.Names.key, proof) Query.query
 val diagnostics : Query.database -> Solver.t -> Path.module_ -> Diagnostic.t list
 (** Every obligation of a file's definitions that the solver could not prove, and every definition
     the prover could not read, in the file's offsets and in order. *)
+
+val holes : Query.database -> Path.module_ -> Source.span list
+(** Each [todo] in a file's theorems, [proof] blocks, and laws' proofs, in the file's offsets and in
+    order: what follows one on its path is not shown, so a build of a program refuses one that can
+    reach it. Holes are not errors; tests run regardless. See PROVER.md, "Holes". *)

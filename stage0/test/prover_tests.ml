@@ -733,6 +733,35 @@ let () =
          \  }\n\
          \  seen\n\
           }\n"));
+  test "a loop over a range has its indexes as yielded" (fun () ->
+      proven
+        "fn f(count: UInt32) -> UInt32\n\
+        \  ensures result == count\n\
+         {\n\
+        \  var seen: UInt32 = 0\n\
+        \  for _ in 0..count\n\
+        \    invariant seen == yielded.length()\n\
+        \  {\n\
+        \    seen += 1\n\
+        \  }\n\
+        \  seen\n\
+         }\n");
+  test "a while loop in a yielding method names what the method handed out" (fun () ->
+      proven
+        "type Counter(limit: UInt32)\n\n\
+         fn Counter.each(self) yields UInt32\n\
+        \  ensures yielded.length() <= self.limit\n\
+        \  cost time finite\n\
+         {\n\
+        \  var next: UInt32 = 0\n\
+        \  while next < self.limit\n\
+        \    invariant next <= self.limit\n\
+        \    invariant next == yielded.length()\n\
+        \  {\n\
+        \    yield next\n\
+        \    next += 1\n\
+        \  }\n\
+         }\n");
   test "assigning an element changes only that element" (fun () ->
       proven
         "fn f(items: mut List[Int64])\n\
@@ -883,6 +912,45 @@ let () =
          \  self.low = self.high + 1\n\
          \  mut self.restore()\n\
           }\n"))
+
+(* Places lent together *)
+
+let swap =
+  "fn exchange(first: mut Int64, second: mut Int64) {\n\
+  \  let kept = first\n\
+  \  first = second\n\
+  \  second = kept\n\
+   }\n\n"
+
+let () =
+  test "two elements lent together must be different elements" (fun () ->
+      not_proven
+        (swap
+       ^ "fn f(items: mut List[Int64], first: USize, second: USize)\n\
+         \  requires first < items.length() && second < items.length()\n\
+          {\n\
+         \  exchange(mut items[first], second: mut items[second])\n\
+          }\n")
+        "prover.disjoint");
+  test "two different elements can be lent together" (fun () ->
+      proven
+        (swap
+       ^ "fn f(items: mut List[Int64], first: USize, second: USize)\n\
+         \  requires first < items.length() && second < items.length() && first != second\n\
+          {\n\
+         \  exchange(mut items[first], second: mut items[second])\n\
+          }\n"));
+  test "parallel branches that change elements must change different ones" (fun () ->
+      not_proven
+        "fn f(items: mut List[Int64], first: USize, second: USize)\n\
+        \  requires first < items.length() && second < items.length()\n\
+         {\n\
+        \  parallel {\n\
+        \    items[first] = 1\n\
+        \    items[second] = 2\n\
+        \  }\n\
+         }\n"
+        "prover.disjoint")
 
 (* What a loop changes *)
 
@@ -1480,6 +1548,34 @@ let () =
       not_proven "type Debt(owed: Int64)\n  cost potential owed\n" "prover.cost");
   test "a potential its invariant keeps at or above zero" (fun () ->
       proven "type Debt(owed: Int64)\n  invariant owed >= 0\n  cost potential owed\n")
+
+(* Holes *)
+
+(* The number of holes in a file's proofs. *)
+let holes text =
+  let database = Support.setup [ ("app::main", text) ] in
+  List.length (Prover.holes database (Support.module_of "app::main"))
+
+let () =
+  test "a todo in a theorem is a hole, not a failure" (fun () ->
+      let text = "theorem t(count: Int64)\n  ensures count > count\n{\n  todo\n}\n" in
+      proven text;
+      if holes text <> 1 then fail "%d holes" (holes text));
+  test "a todo in a proof block leaves what follows on its path to it" (fun () ->
+      let text =
+        "fn f(items: List[Int64], index: USize) -> Int64 {\n\
+        \  proof {\n\
+        \    todo\n\
+        \  }\n\
+        \  items[index]\n\
+         }\n"
+      in
+      proven text;
+      if holes text <> 1 then fail "%d holes" (holes text));
+  test "a todo in code is no hole" (fun () ->
+      let text = "fn f(value: Int64) -> Int64\n  ensures result > value\n{\n  todo\n}\n" in
+      not_proven text "prover.ensures";
+      if holes text <> 0 then fail "%d holes" (holes text))
 
 (* What is not proven yet *)
 

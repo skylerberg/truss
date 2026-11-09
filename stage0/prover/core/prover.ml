@@ -143,6 +143,7 @@ let prove database (key : Names.key) =
               {
                 obligations =
                   List.concat_map (fun (o : Translate.outcome) -> o.obligations) outcomes;
+                holes = List.concat_map (fun (o : Translate.outcome) -> o.holes) outcomes;
               }
         | Type_definition { clauses; _ } -> (
             match
@@ -343,6 +344,25 @@ let definition_diagnostics database solver (key : Names.key) =
                   ^ " The solver ran out of steps, so it may hold but needs help: a `proof` block \
                      or a theorem.")))
         (answers solver outcome.obligations)
+
+(* Each hole in a file's proofs, in the file's offsets and in order. A
+   hole in a law's proof is found where an [impl] uses the proof, and shown
+   in the proof's own file. *)
+let holes database module_ =
+  List.concat_map
+    (fun declaration ->
+      match Query.demand database proof (Names.key_of declaration) with
+      | Obligations outcome ->
+          List.filter_map
+            (fun ((key : Names.key), (span : span)) ->
+              match Query.demand database Names.base key with
+              | Some (in_module, base) when in_module = module_ ->
+                  Some (Source.span (base + span.start) (base + span.stop))
+              | _ -> None)
+            outcome.holes
+      | Unsupported _ | Not_proven_here -> [])
+    (Query.demand database Names.declarations module_)
+  |> List.sort_uniq compare
 
 let diagnostics database solver module_ =
   Names.per_definition database module_ (definition_diagnostics database solver)

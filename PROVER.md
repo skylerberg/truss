@@ -125,7 +125,7 @@ Every fact the prover must show, and where it comes from:
 | `assert` holds | Each `assert` in a theorem or a proof |
 | A specification is well defined | Each call's `requires`, index, and division inside a specification |
 | An `Integer` fits where a built-in integer is expected | Recorded by the type checker |
-| Two indexes or ranges do not overlap | Recorded by the type checker |
+| Two indexes or ranges do not overlap | Recorded by the ownership check, for places lent together and for `parallel` branches |
 | A function value's costs imply the expected costs | Recorded by the type checker |
 | Map literal keys are distinct | Each map literal |
 
@@ -780,6 +780,15 @@ tools can list them as tasks. A build of a program refuses one that can
 reach a hole, as it refuses one that can reach a `todo` in code. Tests run
 regardless, with their run-time checks.
 
+- **What a hole was to prove is everything after it on its path.** A proof
+  cannot say which later obligations its steps were for, so the path
+  through a hole ends there for the prover, as an `assume false` would,
+  and the obligations after it hold trivially. That is sound because a
+  hole is never in a program that is built.
+- **Holes are not errors.** Truss has no warnings, so a hole is not a
+  diagnostic: the prover lists each one, and `truss prove` shows them
+  after its errors and fails while any remain.
+
 ## Diagnostics
 
 Each obligation the prover could not prove is an error, with the shared
@@ -924,9 +933,11 @@ It proves, with one canonical, numbered, hashed query per obligation:
   lending method reads its contract with `yielded` holding the part as the
   caller's statement left it; and a `for` loop over an `each` reads the
   method's contract for each part and for how it ends, with `yielded` a
-  ghost sequence its invariants can name. Inside a yielding method's body,
-  a nested loop's invariants cannot yet name what the method has handed
-  out, and pulled cursors are not read yet.
+  ghost sequence its invariants can name. `yielded` in a loop's clauses
+  names what the nearest loop or method hands out: a `for` loop's own
+  parts, which for a range are its indexes so far, or else, in a lending
+  or yielding method, what the method has handed out. Pulled cursors are
+  not read yet.
 - functional bodies as definitions: a pure function with a `time` clause
   and a functional body is unfolded once at each call, where its
   `requires` holds, unless its body reads what the prover cannot
@@ -993,6 +1004,13 @@ It proves, with one canonical, numbered, hashed query per obligation:
   of `Map`, `Set`, and `String` are not built yet.
 - the type checker's `Integer_fits` obligations, and its `Guards_cover`,
   which the `_ => unreachable` arm it is about shows
+- the ownership check's `Disjoint` obligations, under `prover.disjoint`:
+  two elements of one collection lent together, or one changed by a
+  `parallel` branch and used by another, are at different indexes, read as
+  each is evaluated. A slice is some elements of its collection, so two
+  slices lent together are obligations too, which wait for slices to be
+  read.
+- holes, as [Holes](#holes) describes
 - pruning: each query keeps only the facts that share a symbol with its
   goal, directly or through other kept facts
 - a cache of answers on disk, by each query's key, which `truss prove`

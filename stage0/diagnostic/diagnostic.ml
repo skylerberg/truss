@@ -190,6 +190,7 @@ module Code = struct
     | Assertion
     | Law
     | Cost
+    | Disjoint
     | Unreachable
     | Unsupported
 
@@ -429,6 +430,7 @@ module Code = struct
     | Assertion -> "assertion"
     | Law -> "law"
     | Cost -> "cost"
+    | Disjoint -> "disjoint"
     | Unreachable -> "unreachable"
     | Unsupported -> "unsupported"
 

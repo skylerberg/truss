@@ -151,5 +151,19 @@ let () =
               modules
           in
           List.iter prerr_string found;
-          if found <> [] then exit 1)
+          (* Holes are not errors, but what reaches one is not proven. *)
+          let holes =
+            List.concat_map
+              (fun module_ ->
+                let source = (Query.demand database Workspace.file module_).source in
+                List.map
+                  (fun (span : Source.span) ->
+                    let line, column = Source.position source span.start in
+                    Printf.sprintf "%s:%d:%d: hole: this `todo` leaves the proof unfinished.\n"
+                      (Source.path source) line column)
+                  (Prover.holes database module_))
+              modules
+          in
+          List.iter prerr_string holes;
+          if found <> [] || holes <> [] then exit 1)
   | _ -> usage ()

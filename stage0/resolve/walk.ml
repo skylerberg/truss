@@ -786,7 +786,12 @@ and loop_clause ?(for_loop = false) state scope (written : loop_clause) =
     if for_loop then { scope with specification = { scope.specification with yielded = true } }
     else scope
   in
-  let specification = { scope with specification = { in_specification with yielded = for_loop } } in
+  (* [yielded] names what the nearest loop or method hands out: a [for]
+     loop's own parts, or else, in a lending or yielding method, the
+     method's. *)
+  let specification =
+    { scope with specification = { in_specification with yielded = for_loop || scope.hands_out } }
+  in
   match written.kind with
   | Invariant value -> expression state specification value
   | Loop_decreases measures -> List.iter (expression state specification) measures

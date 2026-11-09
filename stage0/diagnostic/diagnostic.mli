@@ -198,6 +198,7 @@ module Code : sig
     | Assertion
     | Law
     | Cost
+    | Disjoint
     | Unreachable
     | Unsupported
 
