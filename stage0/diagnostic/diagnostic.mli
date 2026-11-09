@@ -172,6 +172,13 @@ module Code : sig
     | Not_pullable
     | Parallel_conflict
 
+  type capabilities =
+    | Not_available
+    | Lambda_uses
+    | Not_granted
+    | Provide_mark
+    | Not_an_implementation
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
   type t =
     | Lexer of lexer
@@ -181,6 +188,7 @@ module Code : sig
     | Patterns of patterns
     | Usage of usage
     | Ownership of ownership
+    | Capabilities of capabilities
     | Too_many_diagnostics
 
   val name : t -> string
