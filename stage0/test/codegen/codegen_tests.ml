@@ -1803,4 +1803,43 @@ test "options" {
 }
 |}
 
+let () =
+  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
+  passes "lists are built, pushed onto, indexed, and looped over"
+    {|fn total(items: List[Int64]) -> Int64 {
+  var sum = 0
+  for item in items {
+    sum += item
+  }
+  sum
+}
+
+test "lists" {
+  var items: List[Int64] = [1, 2, 3]
+  mut items.push(4)
+  assert items.length() == 4
+  assert items[0] == 1
+  assert items[3] == 4
+  assert total(items) == 10
+}
+|};
+  passes "a question mark returns an error early"
+    {|type ParseError = Empty | TooLarge
+  derives Equal
+
+fn check(value: Int64) -> Result[Int64, ParseError] {
+  if value > 100 { Err(ParseError.TooLarge) } else { Ok(value) }
+}
+
+fn doubled(value: Int64) -> Result[Int64, ParseError] {
+  let checked = check(value)?
+  Ok(checked * 2)
+}
+
+test "results" {
+  assert doubled(4) == Ok(8)
+  assert doubled(400) == Err(ParseError.TooLarge)
+}
+|}
+
 let () = Harness.finish ()

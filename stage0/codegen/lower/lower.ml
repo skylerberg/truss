@@ -147,7 +147,20 @@ let self_substitution context (impl : T.impl_interface) =
 
 let rec signature_of context (path : Path.t) =
   match demand context Environment.signature path with
-  | Some signature -> signature
+  | Some signature -> (
+      (* An [impl]'s method is an instance of the [impl]'s parameters as well
+         as its own, which come first. *)
+      match path with
+      | Method { owner = Impl _ as owner; _ } ->
+          let impl = impl_interface context owner in
+          let missing =
+            List.filter
+              (fun (g : T.generic) ->
+                not (List.exists (fun (h : T.generic) -> h.generic = g.generic) signature.generics))
+              impl.impl_generics
+          in
+          { signature with generics = missing @ signature.generics }
+      | _ -> signature)
   | None -> (
       match path with
       | Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
@@ -641,7 +654,7 @@ and place_expression st (e : S.expression) : Lir.place option =
             :: List.filter_map (function S.Item e -> Some e | Item_constraint _ -> None) items
           in
           let arguments =
-            if call_.arguments <> [] then call_.arguments
+            if call_.arguments <> [] then with_receiver st call_ ~expressions call_.arguments
             else
               List.mapi
                 (fun i (e : S.expression) ->
@@ -654,7 +667,9 @@ and place_expression st (e : S.expression) : Lir.place option =
       match st.frame.code.checked.calls.(e.id) with
       | Some ({ callee = Function _ | Trait_method _; _ } as call_) when lends st call_ ->
           let expressions = call_expressions call_ callee arguments in
-          Some (lend st call_ ~expressions ~arguments:call_.arguments)
+          Some
+            (lend st call_ ~expressions
+               ~arguments:(with_receiver st call_ ~expressions call_.arguments))
       | _ -> None)
   | _ -> None
 
@@ -687,6 +702,20 @@ and call_expressions (call_ : C.call) (callee : S.expression) (arguments : S.arg
   | Function { path = Method { receiver = Read | Mut | Own; _ }; _ }, Member (receiver, _) ->
       receiver :: expressions
   | _ -> expressions
+
+(* A call's arguments with its receiver, which the checked form does not
+   list: the first expression, in the mode the method takes [self] in. *)
+and with_receiver st (call_ : C.call) ~(expressions : S.expression list)
+    (arguments : C.argument list) =
+  let receiver : Path.receiver =
+    match resolve_callee st call_ with Some (Method { receiver; _ }, _) -> receiver | _ -> Static
+  in
+  match (receiver, expressions) with
+  | (Read | Mut | Own), first :: _
+    when not (List.exists (fun (a : C.argument) -> a.parameter = 0) arguments) ->
+      let mode : T.mode = match receiver with Mut -> Mut | Own -> Own | _ -> Read in
+      { C.expression = first.id; parameter = 0; mode; conversion = None } :: arguments
+  | _ -> arguments
 
 (* The arguments of a call as places, in parameter order. *)
 and evaluate_arguments st ~(expressions : S.expression list) ~(arguments : C.argument list) =
@@ -730,6 +759,10 @@ and inline st path type_arguments ~arguments ~on_yield =
       exit = Some (exit, List.length st.scopes);
     }
   in
+  if List.length code.parameter_types <> List.length arguments then
+    bug "%s takes %d parameters and is given %d arguments" (Path.show path)
+      (List.length code.parameter_types)
+      (List.length arguments);
   st.frame <- frame;
   in_scope st (fun () ->
       List.iter2
@@ -861,9 +894,14 @@ and into st (e : S.expression) (destination : Lir.place) =
   | Echo inner ->
       into st inner destination;
       echo st destination (ty ()) e.span
+  | List elements -> list_into st (ty ()) elements destination ~span:e.span
+  | Try inner -> try_ st inner destination
   | String _ -> bug "interpolated and tagged strings are not lowered yet"
-  | Bracket _ | Try _ | With _ | Any _ | Range _ | Quantified _ | List _ | Map _ | Lambda _
-  | Provide _ ->
+  | Bracket _ -> (
+      match place_expression st e with
+      | Some place -> assign (Use (owned st place (ty ())))
+      | None -> bug "an index with no meaning")
+  | With _ | Any _ | Range _ | Quantified _ | Map _ | Lambda _ | Provide _ ->
       bug "this expression is not lowered yet: %s" (source st e.span)
   | Self_type_value -> bug "Self as a value"
   | Expression_error -> bug "an expression that did not parse"
@@ -874,6 +912,87 @@ and negated_literal st ty (inner : S.expression) =
   match literal st inner.id with
   | Integer_value value -> constant_of st ty (Integer_value (Z.neg value))
   | Float_value value -> constant_of st ty (Float_value (Float.neg value))
+
+(* A [[...]] literal: an [Array], filled in place, or a [List], with storage
+   of exactly its length, which costs the one allocation DESIGN.md counts. *)
+and list_into st ty (elements : S.expression list) destination ~span =
+  match Monomorphic.shape st.context.monomorphic ty with
+  | Array _ ->
+      List.iteri (fun i (e : S.expression) -> into st e (destination / Index (usize i))) elements
+  | Record [ (field, Typed storage) ] -> (
+      match Monomorphic.kind st.context.monomorphic storage with
+      | Storage element ->
+          let storage_place = destination / Field field in
+          let lower operation arguments destination =
+            ignore
+              (Intrinsics.lower st.context.env st.b st.context.types operation
+                 ~type_arguments:[ element ] arguments ~destination ~site:(site st span))
+          in
+          lower Storage_with_capacity [ Value (usize (List.length elements)) ] (Some storage_place);
+          List.iter
+            (fun (e : S.expression) ->
+              let value = new_local st element in
+              into st e value;
+              lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
+            elements
+      | _ -> bug "a list literal of %s" (Ground.to_string ty))
+  | _ -> bug "a list literal of %s, which is not lowered yet" (Ground.to_string ty)
+
+(* [?]: the error, or [None], returned at once, as the function's own
+   result type; otherwise the value inside. *)
+and try_ st (inner : S.expression) destination =
+  let ty = type_of st inner.id in
+  let value = expression st inner in
+  let variants =
+    match Monomorphic.shape st.context.monomorphic ty with
+    | Sum v -> v
+    | _ -> bug "? on %s" (Ground.to_string ty)
+  in
+  let success, failure =
+    match List.map (fun (v : Memory_layout.variant_shape) -> v.name) variants with
+    | [ "Ok"; "Err" ] -> ("Ok", "Err")
+    | [ "Some"; "None" ] -> ("Some", "None")
+    | _ -> bug "? on %s" (Ground.to_string ty)
+  in
+  let fields name =
+    (List.find (fun (v : Memory_layout.variant_shape) -> v.name = name) variants).fields
+  in
+  let failed = local st.b (Raw Bool) in
+  emit st.b (Assign (at failed, Is_variant (value, failure)));
+  let leave = block st.b and stay = block st.b in
+  finish st.b (Switch { value = Copy (at failed); cases = [ (Z.one, leave) ]; default = Some stay });
+  start st.b leave;
+  let result_ty =
+    match st.frame.code.result with
+    | Returns t -> ground st t
+    | _ -> bug "? in a method that yields"
+  in
+  let returned =
+    List.map
+      (fun (name, member) ->
+        match member with
+        | Memory_layout.Typed field_ty ->
+            (name, owned st (value / Variant_field { variant = failure; field = name }) field_ty)
+        | Raw _ -> bug "a raw field")
+      (fields failure)
+  in
+  let built = new_local st result_ty in
+  emit st.b (Assign (built, Build { ty = result_ty; variant = Some failure; fields = returned }));
+  (match (st.return_, st.result_local) with
+  | Some pointer, _ -> emit st.b (Assign (pointer, Use (Move built)))
+  | None, Some local -> emit st.b (Assign (at local, Use (Move built)))
+  | None, None -> ());
+  leave_to st 0;
+  finish st.b
+    (Return (match st.result_local with Some local -> Some (Move (at local)) | None -> None));
+  start st.b stay;
+  match fields success with
+  | [ (name, Typed field_ty) ] ->
+      emit st.b
+        (Assign
+           ( destination,
+             Use (owned st (value / Variant_field { variant = success; field = name }) field_ty) ))
+  | _ -> bug "? on a variant with more than one field"
 
 and is_built_in st (e : S.expression) =
   match st.frame.code.checked.calls.(e.id) with
@@ -992,7 +1111,9 @@ and call st (e : S.expression) ~callee ~arguments destination =
             receiver :: expressions
         | _ -> expressions
       in
-      call_with st call_ ~expressions ~arguments:call_.arguments destination ~span:e.span
+      call_with st call_ ~expressions
+        ~arguments:(with_receiver st call_ ~expressions call_.arguments)
+        destination ~span:e.span
   | None -> bug "a call with no meaning: %s" (source st e.span)
 
 (* A call whose arguments are [expressions], which the checked form's
@@ -1351,7 +1472,7 @@ and for_ st (s : S.statement) ~pattern ~iterable ~body =
         | _ -> [ iterable ]
       in
       let arguments =
-        if call_.arguments <> [] then call_.arguments
+        if call_.arguments <> [] then with_receiver st call_ ~expressions call_.arguments
         else [ { C.expression = iterable.id; parameter = 0; mode; conversion = None } ]
       in
       match resolve_callee st call_ with
