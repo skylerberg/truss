@@ -3562,25 +3562,26 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
   | Qualified_constant constant -> qualified_constant state written.id written.span constant type_
   | Literal literal -> literal_pattern state written.id written.span literal type_
   | Pattern_range { start; stop; _ } -> (
-      List.iter
-        (fun (end_ : range_end) ->
-          match end_.kind with
-          | End_literal literal -> literal_pattern state end_.id end_.span literal type_
-          | End_constant constant -> qualified_constant state end_.id end_.span constant type_
-          | End_name bound -> (
-              match target state bound with
-              | Some (Definition path) -> constant_pattern state end_.id end_.span path type_
-              | _ -> ()))
-        [ start; stop ];
       (* Only integers and characters are ordered so that a range of them
-         can be matched. *)
+         can be matched; a range of anything else is one error, and its ends
+         are not checked against the type. *)
       match resolve state type_ with
-      | T.Error | T.Hole | T.Variable _ | T.Literal _ -> ()
-      | resolved when T.is_integer_type resolved || T.is_builtin Character resolved -> ()
-      | resolved ->
+      | (T.Named _ | T.Function _ | T.Any _ | T.Cursor _ | T.Parameter _) as resolved
+        when not (T.is_integer_type resolved || T.is_builtin Character resolved) ->
           report state Mismatch written.span
             (Printf.sprintf "A range pattern matches an integer or a `Character`, not `%s`."
-               (show state resolved)))
+               (show state resolved))
+      | _ ->
+          List.iter
+            (fun (end_ : range_end) ->
+              match end_.kind with
+              | End_literal literal -> literal_pattern state end_.id end_.span literal type_
+              | End_constant constant -> qualified_constant state end_.id end_.span constant type_
+              | End_name bound -> (
+                  match target state bound with
+                  | Some (Definition path) -> constant_pattern state end_.id end_.span path type_
+                  | _ -> ()))
+            [ start; stop ])
   | Variant { name = variant_name; fields } -> (
       match type_ with
       | T.Named { path; arguments } -> (
@@ -3798,13 +3799,16 @@ and literal_pattern state id (span : span) literal type_ =
         | _ -> ())
   | Literal_true | Literal_false ->
       if not (unify state type_ T.bool) then mismatch state span ~expected:type_ ~found:T.bool
-  | Literal_string tagged when Option.is_some (character_tag state tagged) ->
-      let builtin = Option.get (character_tag state tagged) in
-      character_value state id tagged builtin;
-      if not (unify state type_ (T.builtin builtin)) then
-        mismatch state span ~expected:type_ ~found:(T.builtin builtin)
-  | Literal_string _ ->
-      if not (is_named string_path type_ || is_named string_slice_path type_ || type_ = T.Error)
-      then
-        report state Mismatch span
-          (Printf.sprintf "A string pattern matches a string, not `%s`." (T.show type_))
+  | Literal_string tagged -> (
+      match character_tag state tagged with
+      | Some builtin ->
+          character_value state id tagged builtin;
+          if not (unify state type_ (T.builtin builtin)) then
+            mismatch state span ~expected:type_ ~found:(T.builtin builtin)
+      | None -> string_pattern state span type_)
+
+(* A string literal in a pattern matches a string. *)
+and string_pattern state span type_ =
+  if not (is_named string_path type_ || is_named string_slice_path type_ || type_ = T.Error) then
+    report state Mismatch span
+      (Printf.sprintf "A string pattern matches a string, not `%s`." (T.show type_))

@@ -629,6 +629,10 @@ let () =
       one_diagnostic
         "fn f(ready: Bool) -> Int64 {\n  match ready {\n    true..=false => 1\n    _ => 2\n  }\n}\n"
         "types.mismatch");
+  test "an integer range on a type that is not ordered is one error" (fun () ->
+      one_diagnostic
+        "fn f(ready: Bool) -> Int64 {\n  match ready {\n    1..=2 => 1\n    _ => 2\n  }\n}\n"
+        "types.mismatch");
   test "a range pattern on Character is fine" (fun () ->
       fine
         "fn f(letter: Character) -> Int64 {\n\
