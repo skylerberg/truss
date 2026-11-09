@@ -122,14 +122,14 @@ type t = {
   meanings : meaning option array;
       (** By the id of each [Name], [Member], or [Bracket] expression. *)
   calls : call option array;
-      (** By the id of each call: a [Call], an operator, an index, a compound assignment, and a [?].
-      *)
+      (** By the id of each call: a [Call], an operator, an index, and a compound assignment. *)
   literals : literal option array;  (** By the id of each literal expression or pattern. *)
   patterns : pattern option array;  (** By the id of each pattern. *)
   loops : loop option array;  (** By the id of each [for] statement. *)
   templates : template option array;  (** By the id of each string literal. *)
   captures : local list option array;
-      (** By the id of each lambda: the outer locals it reads, in order. *)
+      (** By the id of each lambda: the outer locals it reads, in order, with [self] named by the
+          definition's own id. *)
   own_operator : bool array;
       (** By the id of each compound assignment: whether [own self]'s version was chosen. *)
   obligations : obligation list;
