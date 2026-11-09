@@ -704,6 +704,10 @@ Hylo also keep accessors apart from sequences, and Python's
   write `zip`, merge, `peek`, or pause and resume. Pulling a yielding method
   through a cursor gives those, as C#'s iterators and Python's generators
   do. The same rule covers both uses: a method may end at any `yield`.
+- **A pull hands out an owned value.** So a read-only yield of a place,
+  such as a list's element, is pulled only where the element is `Plain`.
+  Anything else would be copied unasked, and is looped over with `for`
+  instead, or pulled from a method that yields owned values.
 - **`mut` yields cannot be pulled.** A cursor would hold `mut` access between
   pulls, which is a stored mutable reference. Changing two collections in
   lockstep goes through indexes.

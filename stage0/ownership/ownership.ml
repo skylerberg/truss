@@ -108,24 +108,27 @@ let plain context type_ = Properties.plain context.database ~bounds:context.boun
 let copyable context type_ = Properties.copyable context.database ~bounds:context.bounds type_
 let is_view context type_ = Properties.is_view context.database ~bounds:context.bounds type_
 
-let rec place_of context (value : expression) : place option =
+(* The place an expression names, from a definition's resolved and checked
+   forms alone. *)
+let rec place_in (resolved : Resolve.resolved) (checked : C.t) (value : expression) : place option =
+  let place_of () = place_in resolved checked in
   match value.kind with
   | Name path -> (
-      match context.resolved.names.(path.last.id) with
+      match resolved.names.(path.last.id) with
       | Some (Local id) -> Some { root = Local id; steps = [] }
       | _ -> None)
   | Self_value -> Some { root = Self_root; steps = [] }
   | Member (base, member) -> (
-      match context.checked.meanings.(value.id) with
+      match checked.meanings.(value.id) with
       | Some (Field_read _) ->
           Option.map
             (fun place -> { place with steps = place.steps @ [ Field member.text ] })
-            (place_of context base)
+            (place_of () base)
       | _ -> None)
   | Bracket (base, [ Item key ])
-    when context.resolved.brackets.(value.id) = Some Index
+    when resolved.brackets.(value.id) = Some Index
          ||
-         match context.checked.calls.(value.id) with
+         match checked.calls.(value.id) with
          | Some { callee = Trait_method { name = "at"; _ }; _ } -> true
          | _ -> false -> (
       match key.kind with
@@ -133,9 +136,11 @@ let rec place_of context (value : expression) : place option =
       | _ ->
           Option.map
             (fun place -> { place with steps = place.steps @ [ Element key.id ] })
-            (place_of context base))
-  | Parenthesized inner -> place_of context inner
+            (place_of () base))
+  | Parenthesized inner -> place_of () inner
   | _ -> None
+
+let place_of context value = place_in context.resolved context.checked value
 
 let kind_of context = function
   | Local id -> Option.value ~default:Owned (Hashtbl.find_opt context.kinds id)
@@ -334,6 +339,14 @@ let moved_out state (flow : flow) (place : place) (value : expression) =
         context.moves <- value.id :: context.moves;
         Option.map (fun moved -> (place, value.span) :: moved) flow
 
+(* Names a pattern binds afresh, so whatever was moved out of them before,
+   as on an earlier time round a loop, is theirs again. *)
+let rebound (flow : flow) ids =
+  Option.map
+    (List.filter (fun ((moved : place), _) ->
+         match moved.root with Local id -> not (List.mem id ids) | Self_root -> true))
+    flow
+
 let assigned state (flow : flow) (place : place) (span : span) =
   (match flow with
   | Some moved -> (
@@ -528,6 +541,7 @@ and compound state flow (value : expression) : flow =
           let flow =
             match arm.guard with Some guard -> expression state flow guard | None -> flow
           in
+          let flow = rebound flow (List.concat_map bound_names arm.patterns) in
           join joined (statement state flow arm.body))
         None arms
   | Lambda { body; _ } ->
@@ -550,7 +564,8 @@ and compound state flow (value : expression) : flow =
       in
       block state flow body
   | Block written -> block state flow written
-  | Is { value = tested; _ } -> expression state flow tested
+  | Is { value = tested; pattern; _ } ->
+      rebound (expression state flow tested) (bound_names pattern)
   | Prefix (_, inner) | Any inner | Echo inner | Parenthesized inner | Mode (_, inner) ->
       expression state flow inner
   | Range { start; stop; _ } -> (
@@ -735,7 +750,7 @@ and statement state (flow : flow) (written : statement) : flow =
       if viewed_places <> [] then
         state.views <- List.map (fun id -> (id, viewed_places)) holders @ state.views;
       (match else_ with Some block_ -> ignore (block state flow block_) | None -> ());
-      flow
+      rebound flow holders
   | Assignment { target; operator; value } -> (
       let flow =
         match operator with
@@ -772,7 +787,7 @@ and statement state (flow : flow) (written : statement) : flow =
       let before = state.parallel_bodies in
       if parallel then state.parallel_bodies <- (body.span.start, bound_names pattern) :: before;
       let flow =
-        loop state flow body ~held:(Option.to_list held)
+        loop state flow body ~bound:(bound_names pattern) ~held:(Option.to_list held)
           ~held_mode:(match iterable.kind with Mode (Mut, _) -> T.Mut | _ -> T.Read)
           ()
       in
@@ -788,7 +803,7 @@ and statement state (flow : flow) (written : statement) : flow =
 
 (* A loop's body runs until the moved places stop changing. A loop over a
    place lends it for the whole loop. *)
-and loop state flow body ~held ~held_mode ?condition () =
+and loop state flow body ?(bound = []) ~held ~held_mode ?condition () =
   let frame = { breaks = None; continues = None } in
   state.loop_frames <- frame :: state.loop_frames;
   let views_before = state.views in
@@ -798,7 +813,7 @@ and loop state flow body ~held ~held_mode ?condition () =
   state.loans <- List.map (fun lent -> { lent; lent_mode = held_mode }) held @ loans_before;
   let rec iterate entry count =
     frame.continues <- None;
-    let after = block state entry body in
+    let after = block state (rebound entry bound) body in
     let after = join after frame.continues in
     let after =
       match condition with Some condition -> expression state after condition | None -> after
@@ -916,6 +931,17 @@ and parallel state flow (body : block) =
 
 let prepare context =
   let paths = context.paths and loops = context.loops in
+  (* What a pattern binds follows the matched value's mode, in a [match],
+     an [is], and a [let] alike: an owned value's parts are owned, a place's
+     are views of it, and a [mut] place's are [mut] access to it. A mark on
+     a method call's receiver, as in [mut file.read_line()], leaves the
+     call's result, which is owned. *)
+  let matched (value : expression) =
+    match value.kind with
+    | Mode (Mut, inner) when place_of context inner <> None -> Mut_access
+    | Mode (_, _) -> Owned
+    | _ -> if place_of context value <> None then Viewing else Owned
+  in
   let rec expression ~path ~loop_ids (value : expression) =
     Hashtbl.replace paths value.span.start path;
     Hashtbl.replace loops value.span.start loop_ids;
@@ -938,29 +964,19 @@ let prepare context =
           else_
     | Match { scrutinees; arms } ->
         List.iter (expression ~path ~loop_ids) scrutinees;
-        (* What a pattern binds follows the matched value's mode: an owned
-           value's parts are owned, a place's are views of it. *)
-        let kinds =
-          List.map
-            (fun (scrutinee : expression) ->
-              match scrutinee.kind with
-              | Mode (Own, _) -> Owned
-              | Mode (Mut, _) -> Mut_access
-              | _ -> if place_of context scrutinee <> None then Viewing else Owned)
-            scrutinees
-        in
+        let kinds = List.map matched scrutinees in
         List.iteri
           (fun index (arm : arm) ->
             let path = (value.id, index) :: path in
             if List.length arm.patterns = List.length kinds then
-              List.iter2 (fun kind written -> bind ~kind written) kinds arm.patterns
+              List.iter2 (fun kind written -> bind ~kind ~path ~loop_ids written) kinds arm.patterns
             else List.iter (pattern ~path ~loop_ids) arm.patterns;
             Option.iter (expression ~path ~loop_ids) arm.guard;
             statement ~path ~loop_ids arm.body)
           arms
     | Is { value = tested; pattern = written; _ } ->
         expression ~path ~loop_ids tested;
-        pattern ~path ~loop_ids written
+        bind ~kind:(matched tested) ~path ~loop_ids written
     | Lambda { parameters; body } ->
         List.iter (pattern ~path ~loop_ids) parameters;
         block ~path ~loop_ids body
@@ -974,14 +990,7 @@ let prepare context =
     | Let { mutable_; pattern = written_pattern; value; else_; _ } ->
         expression ~path ~loop_ids value;
         Option.iter (block ~path ~loop_ids) else_;
-        let kind =
-          if mutable_ then Owned
-          else
-            match value.kind with
-            | Mode (Own, _) -> Owned
-            | _ -> if place_of context value <> None then Viewing else Owned
-        in
-        bind ~kind written_pattern
+        bind ~kind:(if mutable_ then Owned else matched value) ~path ~loop_ids written_pattern
     | For { pattern = written_pattern; iterable; body; _ } ->
         expression ~path ~loop_ids iterable;
         let loop_ids = written.id :: loop_ids in
@@ -991,7 +1000,7 @@ let prepare context =
           | Mode (Own, _) -> Owned
           | _ -> Viewing
         in
-        bind ~kind written_pattern;
+        bind ~kind ~path ~loop_ids written_pattern;
         block ~path ~loop_ids body
     | While { condition; body; _ } ->
         let loop_ids = written.id :: loop_ids in
@@ -1002,8 +1011,12 @@ let prepare context =
           ~statement:(statement ~path ~loop_ids) written
   and block ~path ~loop_ids (written : block) =
     List.iter (statement ~path ~loop_ids) written.statements
-  and pattern ~path ~loop_ids written = bind ~kind:Viewing written
-  and bind ~kind (written : pattern) =
+  and pattern ~path ~loop_ids written = bind ~kind:Viewing ~path ~loop_ids written
+  (* A binding is declared where its pattern starts, in the branches and
+     loops around it, so a binding inside a loop is a new one each time. *)
+  and bind ~kind ~path ~loop_ids (written : pattern) =
+    Hashtbl.replace paths written.span.start path;
+    Hashtbl.replace loops written.span.start loop_ids;
     List.iter
       (fun id ->
         if not (Hashtbl.mem context.kinds id) then Hashtbl.replace context.kinds id kind;
@@ -1122,9 +1135,18 @@ let yields_through =
           | None -> [])
       | _ -> [])
 
-(* A [yields] method in its own cycle of yielding through, as a tree's
-   [each] that loops over its subtrees, cannot be pulled: its cursor would
-   need a stack of its own. *)
+(* Whether a [yields] method can be pulled as a cursor, and if not, why. *)
+type pulling =
+  | Pullable
+  | Yields_mut  (** A cursor would store [mut] access between pulls. *)
+  | Recursive
+      (** In its own cycle of yielding through, as a tree's [each] that loops over its subtrees, so
+          its cursor would need a stack of its own. *)
+  | Yields_places
+      (** It yields read-only views of places, such as [self[index]], which a pull hands out as
+          owned values: only a [Plain] element can be pulled, since anything else would be copied
+          unasked. *)
+
 let pullable =
   Query.query ~name:"pullable" ~show:Path.show (fun database (path : Path.t) ->
       let rec reaches visited = function
@@ -1134,36 +1156,89 @@ let pullable =
             else if List.exists (Path.equal next) visited then reaches visited rest
             else reaches (next :: visited) (Query.demand database yields_through next @ rest)
       in
-      not (reaches [] (Query.demand database yields_through path)))
+      let yields_places () =
+        match Interface.Summary.definition database path with
+        | Some (key, { kind = Function { body; _ }; _ }) -> (
+            match
+              (Query.demand database Resolve.resolved key, Query.demand database Infer.checked key)
+            with
+            | Some resolved, Some result ->
+                let found = ref false in
+                let rec statement (written : statement) =
+                  (match written.kind with
+                  | Yield value when place_in resolved result.checked value <> None -> found := true
+                  | _ -> ());
+                  Syntax_walk.statement_parts ~expression ~statement written
+                and expression value = Syntax_walk.expression_parts ~expression ~statement value in
+                List.iter statement body.statements;
+                !found
+            | _ -> false)
+        | _ -> false
+      in
+      match
+        Option.map
+          (fun (signature : T.signature) -> signature.output)
+          (Query.demand database Interface.Environment.signature path)
+      with
+      | Some (Yields (Mut, _)) -> Yields_mut
+      | _ when reaches [] (Query.demand database yields_through path) -> Recursive
+      | Some (Yields (Read, _)) when yields_places () -> Yields_places
+      | _ -> Pullable)
 
-(* A pull, [next()] on a cursor, of a method that cannot be pulled. *)
+(* A pull of a method that cannot be pulled: [next()] on its cursor, or a
+   [for] loop over a cursor held in a variable. [element] is the type a
+   pull hands out. *)
+let check_pull context (span : span) method_ element =
+  let report_it message = report context Not_pullable span message in
+  match Query.demand context.database pullable method_ with
+  | Pullable -> ()
+  | Yields_mut ->
+      report_it
+        "A method that yields `mut` access cannot be pulled, since a cursor would store that \
+         access."
+  | Recursive ->
+      report_it
+        (Printf.sprintf
+           "`%s` yields through a recursive loop, so it can drive a `for` loop but cannot be \
+            pulled. A cursor over it is a type with its own stack."
+           (Path.show method_))
+  | Yields_places ->
+      if not (plain context element) then
+        report_it
+          (Printf.sprintf
+             "`%s` yields views of its elements, and pulling one would copy a `%s` unasked. Loop \
+              over it with `for`, or pull from a method that yields owned values."
+             (Path.show method_) (T.show element))
+
 let check_pulls context =
   Array.iteri
     (fun id call ->
       match call with
       | Some
-          { C.callee = Trait_method { name = "next"; self_type = T.Cursor { method_; _ }; _ }; _ }
-        ->
-          (match Query.demand context.database Interface.Environment.signature method_ with
-          | Some { output = Yields (Mut, _); _ } ->
-              Option.iter
-                (fun (value : expression) ->
-                  report context Not_pullable value.span
-                    "A method that yields `mut` access cannot be pulled, since a cursor would \
-                     store that access.")
-                (find_expression context id)
-          | _ -> ());
-          if not (Query.demand context.database pullable method_) then
-            Option.iter
-              (fun (value : expression) ->
-                report context Not_pullable value.span
-                  (Printf.sprintf
-                     "`%s` yields through a recursive loop, so it can drive a `for` loop but \
-                      cannot be pulled. A cursor over it is a type with its own stack."
-                     (Path.show method_)))
-              (find_expression context id)
+          {
+            C.callee = Trait_method { name = "next"; self_type = T.Cursor { method_; _ }; _ };
+            result;
+            _;
+          } ->
+          let element =
+            match result with
+            | T.Named { arguments = [ T.Type element ]; _ } -> element
+            | _ -> T.Error
+          in
+          Option.iter
+            (fun (value : expression) -> check_pull context value.span method_ element)
+            (find_expression context id)
       | _ -> ())
-    context.checked.calls
+    context.checked.calls;
+  let rec statement (written : statement) =
+    (match (written.kind, context.checked.loops.(written.id)) with
+    | For { iterable; pattern; _ }, Some (Pulled { cursor = T.Cursor { method_; _ } }) ->
+        check_pull context iterable.span method_
+          (Option.value ~default:T.Error context.checked.pattern_types.(pattern.id))
+    | _ -> ());
+    Syntax_walk.statement_parts ~expression ~statement written
+  and expression value = Syntax_walk.expression_parts ~expression ~statement value in
+  Syntax_walk.definition ~statement (fun _ -> ()) context.definition
 
 (* The check *)
 

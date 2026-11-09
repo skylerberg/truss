@@ -367,4 +367,124 @@ let () =
       fine
         "fn make() -> List[Int64] { [1, 2, 3] }\n\nfn f() -> USize {\n  make()[1..2].length()\n}\n")
 
+(* Pulling views of places *)
+
+let () =
+  test "pulling a view of a String element is an error" (fun () ->
+      one_diagnostic
+        "fn f(names: List[String]) -> Option[String] {\n\
+        \  var each = names.each()\n\
+        \  mut each.next()\n\
+         }\n"
+        "ownership.not_pullable");
+  test "a for loop over a held cursor of String elements is an error too" (fun () ->
+      one_diagnostic
+        "fn f(names: List[String]) {\n\
+        \  var each = names.each()\n\
+        \  for name in mut each {\n\
+        \    let _ = name\n\
+        \  }\n\
+         }\n"
+        "ownership.not_pullable");
+  test "a method that yields owned values can be pulled whatever its element" (fun () ->
+      fine
+        "fn greetings() yields String {\n\
+        \  yield \"hello\"\n\
+        \  yield \"hi\"\n\
+         }\n\n\
+         fn f() -> Option[String] {\n\
+        \  var each = greetings()\n\
+        \  mut each.next()\n\
+         }\n");
+  test "a for loop over a marked call drives the method, not a cursor" (fun () ->
+      fine
+        "fn f(names: mut List[String]) {\n\
+        \  for name in mut names.each() {\n\
+        \    let _ = name\n\
+        \  }\n\
+         }\n");
+  test "a recursive mut walk may loop over itself" (fun () ->
+      fine
+        "type Tree(value: Int64, children: List[Tree])\n\n\
+         fn Tree.each(mut self) yields mut Int64 {\n\
+        \  yield mut self.value\n\
+        \  for child in mut self.children {\n\
+        \    for value in mut child.each() {\n\
+        \      yield mut value\n\
+        \    }\n\
+        \  }\n\
+         }\n");
+  test "looping over a method that yields views of String elements is fine" (fun () ->
+      fine
+        "fn f(names: List[String]) -> USize {\n\
+        \  var count: USize = 0\n\
+        \  for name in names {\n\
+        \    count = count + name.length()\n\
+        \  }\n\
+        \  count\n\
+         }\n")
+
+let () =
+  test "is on a temporary binds its parts as owned, as match does" (fun () ->
+      fine
+        "fn make() -> Option[String] { todo }\n\n\
+         fn keep(text: own String) {}\n\n\
+         fn f() {\n\
+        \  if make() is Some(text) {\n\
+        \    keep(own text)\n\
+        \  }\n\
+         }\n");
+  test "a let of a marked call's result binds it owned" (fun () ->
+      fine
+        "fn keep(found: own Option[List[Int64]]) {}\n\n\
+         fn f(source: mut List[List[Int64]]) {\n\
+        \  let last = mut source.pop()\n\
+        \  keep(own last)\n\
+         }\n");
+  test "is on a place binds views of its parts" (fun () ->
+      one_diagnostic
+        "fn keep(text: own String) {}\n\n\
+         fn f(found: Option[String]) {\n\
+        \  if found is Some(text) {\n\
+        \    keep(own text)\n\
+        \  }\n\
+         }\n"
+        "ownership.not_owned")
+
+let () =
+  let make = "fn make() -> Option[String] { todo }\n\nfn keep(text: own String) {}\n\n" in
+  test "a binding inside a loop is a new one each time, so it may be moved" (fun () ->
+      fine
+        (make
+       ^ "fn f(ready: Bool) {\n\
+         \  while ready {\n\
+         \    let found = make()\n\
+         \    keep_found(own found)\n\
+         \  }\n\
+          }\n\n\
+          fn keep_found(found: own Option[String]) {}\n"));
+  test "a while loop's is binding may be moved each time round" (fun () ->
+      fine (make ^ "fn f() {\n  while make() is Some(text) {\n    keep(own text)\n  }\n}\n"));
+  test "an is binding in an if inside a loop may be moved" (fun () ->
+      fine
+        (make
+       ^ "fn f(ready: Bool) {\n\
+         \  while ready {\n\
+         \    if make() is Some(text) {\n\
+         \      keep(own text)\n\
+         \    }\n\
+         \  }\n\
+          }\n"));
+  test "a let-else binding inside a loop may be moved" (fun () ->
+      fine
+        (make
+       ^ "fn f(ready: Bool) {\n\
+         \  while ready {\n\
+         \    let Some(text) = make() else {\n\
+         \      return\n\
+         \    }\n\
+         \    keep(own text)\n\
+         \  }\n\
+          }\n"))
+
 let () = finish ()

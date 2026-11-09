@@ -303,6 +303,13 @@ let rec marked_call state (value : expression) =
   | Member (base, _) | Bracket (base, _) | Try base -> marked_call state base
   | _ -> None
 
+(* The call an expression is, under a mark and parentheses. *)
+let rec called (value : expression) =
+  match value.kind with
+  | Call _ -> Some value
+  | Mode (_, inner) | Parenthesized inner -> called inner
+  | _ -> None
+
 (* Static references: an expression that names a type or a trait rather
    than a value, before a [.] or a [(]. *)
 type static_ = Static_type of T.ty | Static_trait of Path.t | Static_capability of Path.t
@@ -3365,9 +3372,13 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
       | _ -> T.Error)
   | _ -> (
       let type_ = normalize state (expression state env iterable) in
-      match (type_, state.tables.calls.(iterable.id)) with
-      | T.Cursor _, Some call when match iterable.kind with Call _ -> true | _ -> false -> (
-          (* A call to a [yields] method drives the loop directly. *)
+      let call =
+        Option.bind (called iterable) (fun (inner : expression) -> state.tables.calls.(inner.id))
+      in
+      match (type_, call) with
+      | T.Cursor _, Some call -> (
+          (* A call to a [yields] method drives the loop directly, with its
+             mark, as in [for x in mut items.each()]. *)
           state.tables.loops.(written.id) <- Some (Yielding { call; mode });
           match function_output state call with
           | Some (T.Yields (_, element)) -> element

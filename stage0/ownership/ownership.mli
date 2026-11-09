@@ -13,9 +13,19 @@ type result = {
 val ownership : (Resolve.Names.key, result option) Query.query
 (** A definition's ownership, or [None] if there is no such definition or it has no checked form. *)
 
-val pullable : (Path.t, bool) Query.query
-(** Whether a [yields] method can be pulled as a cursor: one whose yields go through a recursive
-    call cannot, and drives only [for] loops. *)
+(** Whether a [yields] method can be pulled as a cursor, and if not, why. *)
+type pulling =
+  | Pullable
+  | Yields_mut  (** A cursor would store [mut] access between pulls. *)
+  | Recursive
+      (** In its own cycle of yielding through, as a tree's [each] that loops over its subtrees, so
+          its cursor would need a stack of its own. *)
+  | Yields_places
+      (** It yields read-only views of named places, such as [self[index]] or a local, which a pull
+          hands out as owned values: only a [Plain] element can be pulled, since anything else would
+          be copied unasked. A pull of a non-[Plain] element is reported where it happens. *)
+
+val pullable : (Path.t, pulling) Query.query
 
 val diagnostics : Query.database -> Path.module_ -> Diagnostic.t list
 (** Every ownership error of a file, in its offsets and in order. *)
