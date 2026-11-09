@@ -5,26 +5,7 @@
    Fuzzing and benchmarks are tools in stage0/tools, not tests. *)
 
 open Token
-
-(* Running tests *)
-
-let failures = ref 0
-let count = ref 0
-let current_test = ref ""
-
-let fail format =
-  Printf.ksprintf
-    (fun message ->
-      incr failures;
-      Printf.printf "FAIL %s: %s\n" !current_test message)
-    format
-
-let test name body =
-  incr count;
-  current_test := name;
-  match body () with
-  | () -> ()
-  | exception exception_ -> fail "raised %s" (Printexc.to_string exception_)
+open Harness
 
 let equal_lists show name expected actual =
   if expected <> actual then
@@ -561,9 +542,4 @@ let () =
     |> List.filter (fun name -> Filename.check_suffix name ".md")
     |> List.sort compare)
 
-let () =
-  if !failures > 0 then begin
-    Printf.printf "%d failures in %d tests\n" !failures !count;
-    exit 1
-  end
-  else Printf.printf "%d tests pass\n" !count
+let () = finish ()

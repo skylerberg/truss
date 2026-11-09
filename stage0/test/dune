@@ -1,6 +1,7 @@
 (tests
- (names lexer_tests parser_tests)
+ (names lexer_tests parser_tests hashing_tests query_tests)
  (libraries
+  harness
   source
   diagnostic
   token
@@ -12,6 +13,9 @@
   syntax
   syntax_print
   parser
-  reference)
+  reference
+  cbor
+  blake3
+  query)
  (deps
   (glob_files %{workspace_root}/*.md)))
