@@ -13,8 +13,8 @@
      diagnostic and adds no other;
    - valid tokens printed with spaces between them lex back to the same
      tokens;
-   - the parser never raises, and every span in a tree is in bounds and
-     inside the node around it;
+   - the parser never raises, every span in a tree is in bounds and inside
+     the node around it, and no two expressions share an id;
    - for one mistake inserted into an example, every fix of the lexer's or
      the parser's removes its diagnostic and adds no other;
    - the parser and the reference grammar accept and reject the same pieces
@@ -90,9 +90,13 @@ let check_tree text (item : Syntax.definition Syntax.item) =
   let within (outer : Syntax.span) (inner : Syntax.span) =
     outer.start <= inner.start && inner.stop <= outer.stop
   in
+  let ids = Hashtbl.create 64 in
   let rec expression (outer : Syntax.span) (value : Syntax.expression) =
     if not (within outer value.span) then
       fail "an expression's span is outside its parent in %s" quoted;
+    if Hashtbl.mem ids value.id then fail "an id repeats in %s" quoted;
+    Hashtbl.replace ids value.id ();
+    if value.id >= item.value.id then fail "an id is not before its definition's in %s" quoted;
     let previous = ref value.span.start in
     Syntax_walk.children
       (fun (inner : Syntax.expression) ->

@@ -12,7 +12,13 @@ open Syntax
 (* [recovered] is filled in by [Parser.definition], once the checks that run
    after parsing have run too. *)
 let finish cursor start visibility kind : definition =
-  { visibility; kind; span = Cursor.span_from cursor start; recovered = [] }
+  {
+    visibility;
+    kind;
+    span = Cursor.span_from cursor start;
+    recovered = [];
+    id = Cursor.fresh cursor;
+  }
 
 (* [public], [public opaque], or [internal], with the tokens that spelled
    it, and, for [public opaque], both of its tokens. *)
@@ -54,7 +60,7 @@ let type_head cursor : type_head =
   let start = cursor.Cursor.index in
   let path = Atoms.upper_path cursor "a type name" in
   let generics = Parse_expression.generics cursor in
-  { path; generics; span = Cursor.span_from cursor start }
+  { path; generics; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
 
 (* A function's name, or a constant's: [length], or [List[Element].length]
    under a type. *)
@@ -85,14 +91,15 @@ let parameter cursor : parameter =
         in
         Named_parameter { name; mode; type_; default }
   in
-  { kind; span = Cursor.span_from cursor start }
+  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
 
 (* [self] may only be the first parameter, and only of a method. *)
 let parameters cursor ~method_ =
   if not (Cursor.is_punctuation cursor (Open Paren)) then
     Cursor.fail cursor "`(` to start the parameters";
   let parameters =
-    Cursor.bracketed cursor ~item:parameter ~recover:(fun span -> { kind = Parameter_error; span })
+    Cursor.bracketed cursor ~item:parameter ~recover:(fun span ->
+        { kind = Parameter_error; span; id = Cursor.fresh cursor })
   in
   List.iteri
     (fun index (parameter : parameter) ->
@@ -156,7 +163,7 @@ let clauses cursor =
                   skip ()
             in
             skip ();
-            { kind = Clause_error; span = Cursor.span_from cursor start }
+            { kind = Clause_error; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
       in
       (* Each kind that appears at most once, and how to write all of it in
          the one clause. *)
@@ -217,8 +224,17 @@ let body cursor ~signature =
            error where the body should be. *)
         let at = Syntax.Span.make (Cursor.relative cursor stop) (Cursor.relative cursor stop) in
         {
-          statements = [ { kind = Statement_error; span = at; blank_line_before = false } ];
+          statements =
+            [
+              {
+                kind = Statement_error;
+                span = at;
+                blank_line_before = false;
+                id = Cursor.fresh cursor;
+              };
+            ];
           span = at;
+          id = Cursor.fresh cursor;
         }
       end
       else Cursor.fail cursor "`{` to start the body"
@@ -265,9 +281,15 @@ let members cursor ~member ~error =
         kind;
         span = Cursor.span_from cursor start;
         blank_line_before = Cursor.blank_line_before cursor start;
+        id = Cursor.fresh cursor;
       })
     ~recover:(fun start span ->
-      { kind = error; span; blank_line_before = Cursor.blank_line_before cursor start })
+      {
+        kind = error;
+        span;
+        blank_line_before = Cursor.blank_line_before cursor start;
+        id = Cursor.fresh cursor;
+      })
 
 (* [type Key], or [type Element: Ordered], in a trait. *)
 let trait_member cursor =
@@ -333,9 +355,14 @@ let fields cursor : field list =
       if Cursor.accept_punctuation cursor Equal then Some (Parse_expression.expression cursor)
       else None
     in
-    { kind = Field_declaration { name; type_; default }; span = Cursor.span_from cursor start }
+    {
+      kind = Field_declaration { name; type_; default };
+      span = Cursor.span_from cursor start;
+      id = Cursor.fresh cursor;
+    }
   in
-  Cursor.bracketed cursor ~item:field ~recover:(fun span -> { kind = Field_error; span })
+  Cursor.bracketed cursor ~item:field ~recover:(fun span ->
+      { kind = Field_error; span; id = Cursor.fresh cursor })
 
 let variants cursor =
   ignore (Cursor.accept_punctuation cursor Bar);
@@ -344,7 +371,7 @@ let variants cursor =
     let indirect = Cursor.accept_keyword cursor Indirect in
     let name = Atoms.upper cursor "the name of a variant" in
     let fields = if Cursor.is_punctuation cursor (Open Paren) then Some (fields cursor) else None in
-    { indirect; name; fields; span = Cursor.span_from cursor start }
+    { indirect; name; fields; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
   in
   let rec loop variants =
     let variants = variant cursor :: variants in
@@ -355,7 +382,11 @@ let variants cursor =
 let type_clauses cursor =
   let rec loop clauses =
     let start = cursor.Cursor.index in
-    let clause kind = loop ({ kind; span = Cursor.span_from cursor start } :: clauses) in
+    let clause kind =
+      loop
+        (({ kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor } : type_clause)
+        :: clauses)
+    in
     match Cursor.peek_kind cursor with
     | Keyword Invariant ->
         Cursor.advance cursor;

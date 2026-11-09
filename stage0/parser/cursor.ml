@@ -21,6 +21,9 @@ type t = {
   diagnostics : Diagnostic.Collector.t;
   mutable index : int;
   mutable depth : int;  (** Expressions, types, patterns, and prefix operators being parsed. *)
+  next_id : int ref;
+      (** The id the next node built gets, counted across the definition's interpolations and its
+          header read again, so that ids are unique within the definition. *)
   recoveries : Source.span list ref;
       (** Where the parser recovered, in this definition and its interpolations, newest first. *)
   mutable cut_off : bool;
@@ -68,6 +71,7 @@ let create ~source ~diagnostics ~base tokens ~first ~stop =
     diagnostics;
     index = first;
     depth = 0;
+    next_id = ref 0;
     recoveries = ref [];
     cut_off = false;
     cut_off_end = false;
@@ -84,13 +88,22 @@ let over ?stop cursor tokens =
       ~stop
   in
   inner.depth <- cursor.depth;
-  { inner with recoveries = cursor.recoveries }
+  { inner with recoveries = cursor.recoveries; next_id = cursor.next_id }
 
 (* A cursor over the same slice from its start, whose diagnostics are thrown
    away, for reading again what an error left unparsed. *)
 let reread cursor =
-  create ~source:cursor.source ~diagnostics:(Diagnostic.Collector.create ()) ~base:cursor.base
-    cursor.tokens ~first:cursor.first ~stop:cursor.stop
+  let again =
+    create ~source:cursor.source ~diagnostics:(Diagnostic.Collector.create ()) ~base:cursor.base
+      cursor.tokens ~first:cursor.first ~stop:cursor.stop
+  in
+  { again with next_id = cursor.next_id }
+
+(* A new node's id. *)
+let fresh cursor =
+  let id = !(cursor.next_id) in
+  cursor.next_id := id + 1;
+  id
 
 (* The end of the slice reads as an End_of_file token, zero-width, just after
    the slice's last token. *)

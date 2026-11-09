@@ -4,7 +4,7 @@
 open Token
 
 let name cursor (token : Token.t) text : Syntax.name =
-  { text; span = Cursor.span cursor token.span }
+  { text; span = Cursor.span cursor token.span; id = Cursor.fresh cursor }
 
 let lower cursor what =
   match Cursor.peek_kind cursor with
@@ -46,7 +46,7 @@ let string_literal cursor ~start ~modules (literal : Token.string_literal) ~inte
   let tag =
     Option.map
       (fun (text, span) : Syntax.path ->
-        { modules; last = { text; span = Cursor.span cursor span } })
+        { modules; last = { text; span = Cursor.span cursor span; id = Cursor.fresh cursor } })
       literal.tag
   in
   {
@@ -56,4 +56,5 @@ let string_literal cursor ~start ~modules (literal : Token.string_literal) ~inte
       Array.to_list
         (Array.map (fun (inner, piece) -> (interpolation inner, text cursor piece)) literal.rest);
     span = Cursor.span_from cursor start;
+    id = Cursor.fresh cursor;
   }
