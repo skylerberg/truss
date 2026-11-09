@@ -434,6 +434,13 @@ let () =
         \    keep(own text)\n\
         \  }\n\
          }\n");
+  test "a let of a marked call's result binds it owned" (fun () ->
+      fine
+        "fn keep(found: own Option[List[Int64]]) {}\n\n\
+         fn f(source: mut List[List[Int64]]) {\n\
+        \  let last = mut source.pop()\n\
+        \  keep(own last)\n\
+         }\n");
   test "is on a place binds views of its parts" (fun () ->
       one_diagnostic
         "fn keep(text: own String) {}\n\n\

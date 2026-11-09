@@ -923,11 +923,13 @@ let prepare context =
   let paths = context.paths and loops = context.loops in
   (* What a pattern binds follows the matched value's mode, in a [match],
      an [is], and a [let] alike: an owned value's parts are owned, a place's
-     are views of it, and a [mut] place's are [mut] access to it. *)
+     are views of it, and a [mut] place's are [mut] access to it. A mark on
+     a method call's receiver, as in [mut file.read_line()], leaves the
+     call's result, which is owned. *)
   let matched (value : expression) =
     match value.kind with
-    | Mode (Own, _) -> Owned
-    | Mode (Mut, _) -> Mut_access
+    | Mode (Mut, inner) when place_of context inner <> None -> Mut_access
+    | Mode (_, _) -> Owned
     | _ -> if place_of context value <> None then Viewing else Owned
   in
   let rec expression ~path ~loop_ids (value : expression) =
