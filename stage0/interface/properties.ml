@@ -115,12 +115,16 @@ let rec has database ~bounds ?(visiting = []) property (type_ : T.ty) =
          a [self] method views it. *)
       match (property, method_) with
       | View, Method { receiver = Own; _ } ->
-          List.exists (function T.Type type_ -> recurse type_ | T.Value _ -> false) arguments
+          List.exists
+            (function T.Type type_ -> recurse type_ | T.Value _ | T.Capabilities _ -> false)
+            arguments
       | View, _ -> true
       | (Copyable | Plain), _ -> false)
   | T.Named { path; arguments } -> (
       let argument_types =
-        List.filter_map (function T.Type type_ -> Some type_ | T.Value _ -> None) arguments
+        List.filter_map
+          (function T.Type type_ -> Some type_ | T.Value _ | T.Capabilities _ -> None)
+          arguments
       in
       match Intrinsic.builtin_of_path path with
       | Some Storage -> (

@@ -35,7 +35,7 @@ public fn Hasher.new() -> Hasher {
 }
 
 public fn Hasher.write(mut self, value: UInt64) {
-  self.state = intrinsic::wrapping_multiply(intrinsic::bit_xor(self.state, value), 1099511628211)
+  self.state = intrinsic::wrapping_multiply(intrinsic::bit_xor(self.state, right: value), right: 1099511628211)
 }
 
 public fn Hasher.finish(self) -> UInt64 {

@@ -30,7 +30,10 @@ type ty =
   | Hole  (** The type of a [todo] with nothing expected. *)
   | Error  (** After an error, to stop cascades. Unifies with everything. *)
 
-and argument = Type of ty | Value of value
+and argument =
+  | Type of ty
+  | Value of value
+  | Capabilities of capability list  (** What a [capability] parameter stands for, sorted. *)
 
 and value =
   | Known of Z.t

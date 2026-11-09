@@ -75,6 +75,14 @@ type operation =
   | To_bits
   | From_bits
   | Is_nan
+  | Leading_zeros
+  | Trailing_zeros
+  | Count_ones
+  | Swap_bytes
+  | Rotate_left
+  | Rotate_right
+  | Multiply_high
+  | Compare_bytes
   | Storage_empty
   | Storage_with_capacity
   | Storage_length

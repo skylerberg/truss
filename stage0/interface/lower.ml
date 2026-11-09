@@ -369,7 +369,9 @@ let generics context owner (written : generic_parameter list) : T.generic list =
 let rec mentions_integer = function
   | T.Integer -> true
   | T.Named { arguments; _ } | T.Cursor { arguments; _ } ->
-      List.exists (function T.Type type_ -> mentions_integer type_ | T.Value _ -> false) arguments
+      List.exists
+        (function T.Type type_ -> mentions_integer type_ | T.Value _ | T.Capabilities _ -> false)
+        arguments
   | T.Function { inputs; output; _ } -> (
       List.exists (fun (_, type_) -> mentions_integer type_) inputs
       ||

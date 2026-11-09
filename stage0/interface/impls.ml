@@ -148,7 +148,7 @@ let rec match_type ~variables (substitution : T.substitution) pattern type_ =
       match List.assoc_opt parameter substitution with
       | Some (T.Type bound) ->
           if T.equal bound type_ || open_type type_ then Some substitution else None
-      | Some (T.Value _) -> None
+      | Some (T.Value _ | T.Capabilities _) -> None
       | None -> Some ((parameter, T.Type type_) :: substitution))
   | _, t when open_type t -> Some substitution
   | T.Named left, T.Named right when Path.equal left.path right.path ->
