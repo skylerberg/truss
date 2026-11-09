@@ -6,6 +6,7 @@
   types
   checked
   syntax
+  syntax_walk
   query
   resolve
   interface

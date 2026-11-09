@@ -19,12 +19,15 @@ type context = {
   bool : Ground.ty;
   cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
       (** The fields of a pulled method's cursor, which the driver gives from its pulled lowering *)
+  checks : bool;
+      (** Whether the program checks at run time what the prover would prove: [requires] clauses,
+          integer overflow, and division *)
   evaluate : (Path.t -> Ground.ty -> Lir.static_value) ref;
       (** A constant's value, worked out by running its [Evaluator], which the driver builds and
           runs, for a constant whose value is not folded while compiling *)
 }
 
-val context : Query.database -> Memory_layout.target -> context
+val context : ?checks:bool -> Query.database -> Memory_layout.target -> context
 
 (* The LIR of an instance of a function, a method, an [impl]'s method, or a
    test, before drop elaboration. Raises [Invalid_argument] for an instance

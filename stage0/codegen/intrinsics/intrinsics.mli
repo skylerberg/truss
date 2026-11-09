@@ -24,6 +24,7 @@ type types = { usize : Ground.ty; isize : Ground.ty; string_slice : Ground.ty }
    An operation that never returns, [crash], leaves the builder in a new
    block that nothing reaches. *)
 val lower :
+  ?checks:bool ->
   Memory_layout.env ->
   Lir_builder.t ->
   types ->

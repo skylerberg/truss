@@ -138,6 +138,28 @@ defined would cost a test per division, so they are the one place where a
 prover bug could still reach undefined behavior. `--check-proofs` catches it
 (see [Testing](#testing)).
 
+**Stage0 checks instead of proving.** Stage0 has no prover, so it cannot
+refuse a program whose obligations are unproven, as DESIGN.md's builds do.
+It builds every program with the checks `--check-proofs` describes
+instead, which makes a broken contract a panic rather than a wrong answer
+or a memory error:
+- Each `requires` clause that can run is tested on entry to its function,
+  and to each inlined lending or yielding body, with the parameters bound.
+  It panics with "requirement not met: requires ...". That is how an index
+  past a `List`'s end is caught. A clause runs unless it uses the
+  mathematical `Integer`, a quantifier, a conversion to or from one, or a
+  comparison of integers of two types.
+- Integer `+`, `-`, and `*` panic with "arithmetic overflow", through
+  `__builtin_*_overflow`. The `wrapping_` operations still wrap.
+- Integer division panics on a zero divisor, and on the least value over
+  -1.
+
+The position a check reports is the clause's or the operator's own, which
+for an index or an operator is in the standard library. Reporting the
+caller's position is left for later; Rust's `#[track_caller]` does it by
+passing the caller's location. `Compile.create ~checks:false` builds
+without the checks, for when the prover exists.
+
 Other flags: `-std=c11 -fno-common -fvisibility=hidden -fno-exceptions
 -fno-asynchronous-unwind-tables`, since nothing unwinds, and
 `-fno-math-errno`, so `sqrt` is one instruction rather than a call that

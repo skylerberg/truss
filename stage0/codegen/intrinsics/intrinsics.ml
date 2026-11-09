@@ -20,7 +20,7 @@ let integer_range (integer : Memory_layout.integer) bytes =
       (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
   | UInt8 | UInt16 | UInt32 | UInt64 | USize -> (Z.zero, Z.pred (Z.shift_left Z.one bits))
 
-let lower env b types operation ~type_arguments arguments ~destination ~site =
+let lower ?(checks = false) env b types operation ~type_arguments arguments ~destination ~site =
   let set rvalue = Option.iter (fun d -> emit b (Assign (d, rvalue))) destination in
   let argument i = List.nth arguments i in
   let value i = operand (argument i) in
@@ -80,13 +80,73 @@ let lower env b types operation ~type_arguments arguments ~destination ~site =
       lent (element_at (place (argument 0)) (value 1))
   | View_at -> lent (place (argument 0) / Field "elements" / Index (value 1))
   | _ ->
+      let integer_argument () =
+        match (Memory_layout.of_type env (type_argument 0)).form with
+        | Scalar (Integer integer) -> Some integer
+        | _ -> None
+      in
+      (* In a checked build, ends the run with a panic where [failed] holds. *)
+      let panic_when failed message =
+        let fail = block b and go_on = block b in
+        finish b (Switch { value = failed; cases = [ (Z.one, fail) ]; default = Some go_on });
+        start b fail;
+        finish b
+          (Fail
+             {
+               failure = Panic;
+               message = Constant (Bytes message);
+               length = usize (String.length message);
+               site;
+             });
+        start b go_on
+      in
+      (* Integer arithmetic that panics on overflow in a checked build; it wraps
+     otherwise, which the prover shows never happens. *)
+      let checked_arithmetic op overflow =
+        match integer_argument () with
+        | Some _ when checks ->
+            let result = local b (Value (type_argument 0)) in
+            let over = local b (Raw Bool) in
+            call ~result:(at over) overflow
+              [ value 0; value 1; Address { place = at result; writable = true } ];
+            panic_when (Copy (at over)) "arithmetic overflow";
+            set (Use (Copy (at result)))
+        | _ -> binary op
+      in
+      (* Integer division that panics on a zero divisor, and on the one quotient
+     that does not fit, the least value over -1, in a checked build. *)
+      let checked_division op =
+        match integer_argument () with
+        | Some integer when checks ->
+            let zero = local b (Raw Bool) in
+            emit b (Assign (at zero, Binary (Equal, value 1, Constant (Integer (integer, Z.zero)))));
+            panic_when (Copy (at zero)) "division by zero";
+            (match integer with
+            | Int8 | Int16 | Int32 | Int64 | ISize ->
+                let bits = 8 * Memory_layout.integer_size (Memory_layout.target env) integer in
+                let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
+                let by_minus_one = local b (Raw Bool) and of_least = local b (Raw Bool) in
+                let both = local b (Raw Bool) in
+                emit b
+                  (Assign
+                     ( at by_minus_one,
+                       Binary (Equal, value 1, Constant (Integer (integer, Z.minus_one))) ));
+                emit b
+                  (Assign (at of_least, Binary (Equal, value 0, Constant (Integer (integer, least)))));
+                emit b
+                  (Assign (at both, Binary (Bit_and, Copy (at by_minus_one), Copy (at of_least))));
+                panic_when (Copy (at both)) "arithmetic overflow"
+            | _ -> ());
+            binary op
+        | _ -> binary op
+      in
       (match (operation : Intrinsic.operation) with
       | Storage_at | Storage_at_mut | View_at -> ()
-      | Add -> binary Add
-      | Subtract -> binary Subtract
-      | Multiply -> binary Multiply
-      | Divide -> binary Divide
-      | Remainder -> binary Remainder
+      | Add -> checked_arithmetic Add Add_overflow
+      | Subtract -> checked_arithmetic Subtract Subtract_overflow
+      | Multiply -> checked_arithmetic Multiply Multiply_overflow
+      | Divide -> checked_division Divide
+      | Remainder -> checked_division Remainder
       | Negate -> unary Negate
       | Wrapping_add -> binary Add
       | Wrapping_subtract -> binary Subtract

@@ -247,11 +247,11 @@ let evaluate t path ty =
         (Printf.sprintf "Compile: working out %s ended with status %d: %s" (Path.show path) status
            errors)
 
-let create database target toolchain cache settings =
+let create ?(checks = true) database target toolchain cache settings =
   let t =
     {
       database;
-      context = Lower.context database target;
+      context = Lower.context ~checks database target;
       toolchain;
       cache;
       settings;

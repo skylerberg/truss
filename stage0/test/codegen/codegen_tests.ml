@@ -2506,6 +2506,50 @@ test "once" {
 }
 |}
 
+(* Checks a build makes in place of proofs *)
+
+let () =
+  test "a build checks requires clauses, overflow, and division, which stage0 cannot prove"
+    (fun () ->
+      let output =
+        run_source
+          {|test "overflow" {
+  let big: Int64 = 9223372036854775807
+  let _ = big + 1
+}
+
+test "division" {
+  let zero: Int64 = 0
+  let _ = 5 / zero
+}
+
+test "index" {
+  let items: List[Int64] = [1, 2]
+  let _ = items[2]
+}
+
+test "fine" {
+  let items: List[Int64] = [1, 2]
+  assert items[1] + 1 == 3
+}
+|}
+      in
+      let contains text =
+        let n = String.length text and m = String.length output in
+        let rec go i = i + n <= m && (String.sub output i n = text || go (i + 1)) in
+        if not (go 0) then fail "%S is not in the output:\n%s" text output
+      in
+      List.iter contains
+        [
+          "test 0 panicked\n";
+          "arithmetic overflow\n";
+          "test 1 panicked\n";
+          "division by zero\n";
+          "test 2 panicked\n";
+          "requirement not met: requires key < self.length()\n";
+          "test 3 passed\n";
+        ])
+
 (* Programs *)
 
 (* Compiles a module with a [main] and runs it with the arguments. *)

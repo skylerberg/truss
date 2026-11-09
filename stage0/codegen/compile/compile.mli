@@ -5,8 +5,18 @@
 
 type t
 
+(* With [checks], the default, the program checks at run time what the
+   prover would prove: [requires] clauses that can run, integer overflow,
+   and division. Stage0 has no prover, so its builds check, as CODEGEN.md's
+   [--check-proofs] does. *)
 val create :
-  Query.database -> Memory_layout.target -> Toolchain.t -> Build.cache -> Build.settings -> t
+  ?checks:bool ->
+  Query.database ->
+  Memory_layout.target ->
+  Toolchain.t ->
+  Build.cache ->
+  Build.settings ->
+  t
 
 (* What an instance compiles to: its LIR, lowered or generated, with its
    drops elaborated, in canonical form, or a constant's static data. Each

@@ -16,6 +16,9 @@ type context = {
   bool : Ground.ty;
   cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
       (** The fields of a pulled method's cursor, which the driver gives from its pulled lowering *)
+  checks : bool;
+      (** Whether the program checks at run time what the prover would prove: [requires] clauses,
+          integer overflow, and division *)
   evaluate : (Path.t -> Ground.ty -> Lir.static_value) ref;
       (** A constant's value, worked out by running its [Evaluator], which the driver builds and
           runs, for a constant whose value is not folded while compiling *)
@@ -28,7 +31,7 @@ let standard_text name : Ground.ty =
       arguments = [];
     }
 
-let context database target =
+let context ?(checks = false) database target =
   let cursor_fields = ref (fun _ -> bug "no driver gives cursors their fields") in
   let monomorphic : Monomorphic.context =
     {
@@ -50,6 +53,7 @@ let context database target =
     types = { usize; isize = Monomorphic.builtin ISize; string_slice = standard_text "StringSlice" };
     bool = Monomorphic.builtin Bool;
     cursor_fields;
+    checks;
     evaluate = ref (fun path _ -> bug "no driver works out %s" (Path.show path));
   }
 
@@ -75,6 +79,7 @@ type code = {
   substitution : T.substitution;
   uses : T.capability list;
   has_defaults : bool;
+  requires : S.expression list;  (** The [requires] clauses, which a checked build tests on entry *)
 }
 
 let demand context query key = Query.demand context.database query key
@@ -245,6 +250,10 @@ let code_of context (path : Path.t) type_arguments : code =
       substitution;
       uses = interface.uses;
       has_defaults = List.exists (fun (p : T.parameter_info) -> p.has_default) interface.parameters;
+      requires =
+        List.filter_map
+          (fun (clause : S.clause) -> match clause.kind with Requires e -> Some e | _ -> None)
+          signature.clauses;
     }
   in
   match path with
@@ -264,6 +273,7 @@ let code_of context (path : Path.t) type_arguments : code =
             substitution = [];
             uses = [];
             has_defaults = false;
+            requires = [];
           }
       | _ -> bug "%s is not a test" (Path.show path))
   | Method { owner = (Impl _ | Derived _) as impl; name; receiver } -> (
@@ -895,8 +905,8 @@ and place_expression st (e : S.expression) : Lir.place option =
                 if parameter = 0 then Intrinsics.Place (expression st e)
                 else Intrinsics.Value (operand st e))
           in
-          Intrinsics.lower st.context.env st.b st.context.types operation ~type_arguments values
-            ~destination:None ~site:(site st e.span)
+          Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types operation
+            ~type_arguments values ~destination:None ~site:(site st e.span)
       | _ -> None)
   | Call (callee, arguments) -> (
       match st.frame.code.checked.calls.(e.id) with
@@ -1071,6 +1081,7 @@ and inline st path type_arguments ~arguments ~on_yield =
           | Parameter_error -> ());
           if mode = T.Own && not (trivial st ty) then own_in_scope st place)
         code.parameter_types arguments;
+      check_requires st;
       block_into st code.body None);
   finish st.b (Goto exit);
   start st.b exit;
@@ -1251,8 +1262,8 @@ and list_of st ty destination ~span fills =
           let storage_place = destination / Field field in
           let lower operation arguments destination =
             ignore
-              (Intrinsics.lower st.context.env st.b st.context.types operation
-                 ~type_arguments:[ element ] arguments ~destination ~site:(site st span))
+              (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types
+                 operation ~type_arguments:[ element ] arguments ~destination ~site:(site st span))
           in
           lower Storage_with_capacity [ Value (usize (List.length fills)) ] (Some storage_place);
           List.iter
@@ -1923,7 +1934,24 @@ and operator st (e : S.expression) operands destination =
           call_with st call_ ~expressions:operands ~arguments equal ~span:e.span;
           emit st.b (Assign (destination, Unary (Not, Copy equal)))
       | _ -> call_with st call_ ~expressions:operands ~arguments destination ~span:e.span)
-  | None -> bug "an operator with no call: %s" (source st e.span)
+  | None -> (
+      (* A specification's comparison of built-in integers, which is of
+         their values, with no call: exact when both are of one type, the
+         only case [executable] lets run. *)
+      match (e.kind, operands) with
+      | Binary { operator; _ }, [ left; right ] ->
+          let compare : Lir.binary =
+            match operator with
+            | Equal -> Equal
+            | Not_equal -> Not_equal
+            | Less -> Less
+            | Less_equal -> Less_equal
+            | Greater -> Greater
+            | Greater_equal -> Greater_equal
+            | _ -> bug "an operator with no call: %s" (source st e.span)
+          in
+          emit st.b (Assign (destination, Binary (compare, operand st left, operand st right)))
+      | _ -> bug "an operator with no call: %s" (source st e.span))
 
 and call st (e : S.expression) ~callee ~arguments destination =
   match st.frame.code.checked.calls.(e.id) with
@@ -2092,8 +2120,8 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
             in_order
         in
         match
-          Intrinsics.lower st.context.env st.b st.context.types operation ~type_arguments
-            intrinsic_arguments ~destination:(Some destination) ~site:(site st span)
+          Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types operation
+            ~type_arguments intrinsic_arguments ~destination:(Some destination) ~site:(site st span)
         with
         | Some lent -> emit st.b (Assign (destination, Use (Copy lent)))
         | None -> ())
@@ -2103,8 +2131,9 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
         match in_order with
         | [ (_, _, _, message) ] ->
             ignore
-              (Intrinsics.lower st.context.env st.b st.context.types Crash ~type_arguments:[]
-                 [ Intrinsics.Place message ] ~destination:None ~site:(site st span))
+              (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types Crash
+                 ~type_arguments:[] [ Intrinsics.Place message ] ~destination:None
+                 ~site:(site st span))
         | _ -> bug "Panic.crash takes one message")
     | Capability_method { capability; name } ->
         let slot, signature = capability_method st.context capability name in
@@ -2704,6 +2733,63 @@ and branch st (e : S.expression) ~yes ~no =
       let value = operand st e in
       finish st.b (Switch { value; cases = [ (Z.one, yes) ]; default = Some no })
 
+(* Whether a clause can run: none of it is the mathematical [Integer] of
+   specifications, a quantifier, or a conversion to or from one. *)
+and executable st (e : S.expression) =
+  let runs = ref true in
+  let rec visit (e : S.expression) =
+    (match e.kind with Quantified _ -> runs := false | _ -> ());
+    (match raw_type_of st e.id with Some T.Integer -> runs := false | _ -> ());
+    (match e.kind with
+    | Binary { left; right; _ } when st.frame.code.checked.calls.(e.id) = None ->
+        (* A comparison of the values of two integers runs only when they are
+           of one type. *)
+        let built_in = function Some (T.Named _ as ty) -> T.is_integer_type ty | _ -> false in
+        if
+          not (built_in (raw_type_of st left.id) && raw_type_of st left.id = raw_type_of st right.id)
+        then runs := false
+    | _ -> ());
+    (match st.frame.code.checked.calls.(e.id) with
+    | Some call_ ->
+        if
+          List.exists
+            (fun (a : C.argument) ->
+              match a.conversion with Some (To_integer | From_integer) -> true | _ -> false)
+            call_.arguments
+        then runs := false
+    | None -> ());
+    if !runs then Syntax_walk.children visit e
+  in
+  visit e;
+  !runs
+
+(* In a checked build, tests each [requires] clause that can run on entry
+   to the code, its parameters bound, and panics with the clause when one
+   does not hold. Stage0 has no prover, so this is how a call that breaks a
+   contract is caught. *)
+and check_requires st =
+  if st.context.checks then
+    List.iter
+      (fun (clause : S.expression) ->
+        if executable st clause then begin
+          let holds = block st.b and broken = block st.b in
+          let scope = open_scope st in
+          branch st clause ~yes:holds ~no:broken;
+          start st.b broken;
+          let message = "requirement not met: requires " ^ source st clause.span in
+          finish st.b
+            (Fail
+               {
+                 failure = Panic;
+                 message = Constant (Bytes message);
+                 length = usize (String.length message);
+                 site = site st clause.span;
+               });
+          start st.b holds;
+          close_scope st scope
+        end)
+      st.frame.code.requires
+
 (* Patterns *)
 
 (* A constant's static data, as a place. *)
@@ -3120,6 +3206,7 @@ and constant_state context path =
       substitution = [];
       uses = [];
       has_defaults = false;
+      requires = [];
     }
   in
   let st =
@@ -3242,6 +3329,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
       substitution = bind signature.generics type_arguments;
       uses = [];
       has_defaults = false;
+      requires = [];
     }
   in
   let b = Lir_builder.create () in
@@ -3453,6 +3541,7 @@ let generated_state context ~anchor ~substitution =
       substitution;
       uses = [];
       has_defaults = false;
+      requires = [];
     }
   in
   {
@@ -3653,7 +3742,8 @@ let program_main context (key : Instance.key) main_path : Lir.t =
   let list = new_local st list_ty in
   let lower operation type_arguments arguments destination =
     ignore
-      (Intrinsics.lower context.env b context.types operation ~type_arguments arguments ~destination
+      (Intrinsics.lower ~checks:context.checks context.env b context.types operation ~type_arguments
+         arguments ~destination
          ~site:{ definition = main_path; line = 0; column = 1 })
   in
   let wanted = local b (Value context.types.usize) in
@@ -3974,6 +4064,7 @@ let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list
   in
   st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
   start b (block b);
+  check_requires st;
   block_into st code.body None;
   drop_scope st (List.hd st.scopes);
   finish b (Return None);
@@ -4122,6 +4213,7 @@ let instance context (key : Instance.key) : Lir.t =
         | None, Some local -> Some (at local)
         | None, None -> None
       in
+      check_requires st;
       block_into st code.body destination;
       drop_scope st (List.hd st.scopes);
       finish b
