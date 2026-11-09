@@ -126,6 +126,12 @@ impl Processes for SystemProcesses {
   }
 }
 
+internal type SystemTasks()
+
+impl Tasks for SystemTasks {
+  fn yield_now(self) {}
+}
+
 internal type SystemClock()
 
 impl Clock for SystemClock {
