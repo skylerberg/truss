@@ -14,7 +14,7 @@ type t
 val create :
   ?checks:bool ->
   ?file_name:(Path.module_ -> string) ->
-  Query.database ->
+  Query.context ->
   Memory_layout.target ->
   Toolchain.t ->
   Build.cache ->
@@ -60,15 +60,19 @@ type progress =
   | Started of { test : int }
   | Ended of { test : int; record : record }
 
+(* Where test results are kept, by the key of the code each test can run.
+   The database keeps them in its store. *)
+type results = { find : string -> string option; add : string -> string -> unit }
+
 (* Builds a program that runs the tests, each named by its path, runs it,
-   and returns each test's record in the order given. With [results], a
-   directory, each test that passes with nothing to show is kept there
+   and returns each test's record in the order given. With [results], each
+   test that passes with nothing to show is kept there
    under the key of the code it can run, as CODEGEN.md's "Test results"
    says, and is not built or run again until that code changes; with
    [rerun], every test runs, and passes are kept again. [progress] is told
    of each step as it happens. *)
 val run_tests :
-  ?results:string ->
+  ?results:results ->
   ?rerun:bool ->
   ?progress:(progress -> unit) ->
   t ->
@@ -76,17 +80,10 @@ val run_tests :
   Path.t list ->
   (record list, string) result
 
-(* The definitions whose code a root can run: a test's, as [test_root]
-   gives it, or a program's, as [main_root] gives it, each once, sorted.
-   Lowering only, so nothing is compiled. Raises [Invalid_argument] for code
-   that cannot be lowered, which only code with errors is. *)
-val reached_definitions : t -> Instance.key -> Path.t list
-val test_root : Path.t -> Instance.key
-
-(* Whether a test's result is kept in [results] for the code it can run
-   now. Raises [Invalid_argument] as [reached_definitions] does. *)
-val kept_result : t -> results:string -> Path.t -> bool
-val main_root : Path.t -> Instance.key
+(* Each test's key: the hash of the code it can run, as "Test results"
+   says, which changes exactly when the test's outcome may. A test that
+   cannot be lowered has none. *)
+val test_keys : t -> Path.t list -> (Path.t * string) list
 
 (* A [todo], or an [echo], that a program can reach, which a build that
    ships refuses: its file and position, as the program would report them,

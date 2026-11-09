@@ -9,7 +9,7 @@ open Syntax
 module T = Types
 
 type context = {
-  database : Query.database;
+  database : Query.context;
   resolved : Resolve.resolved;
   parameters : (id, T.parameter) Hashtbl.t;
       (** Generic parameters, by the id of the name that binds them. *)

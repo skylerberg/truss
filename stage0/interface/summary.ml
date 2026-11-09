@@ -13,12 +13,9 @@ module Names = Resolve.Names
 let key =
   Query.query ~name:"key" ~show:Path.show (fun database (path : Path.t) ->
       let find module_ =
-        List.find_map
-          (fun (declaration : Names.declaration) ->
-            if Path.equal declaration.path path && declaration.ordinal = 0 then
-              Some (Names.key_of declaration)
-            else None)
-          (Query.demand database Names.declarations module_)
+        Option.map Names.key_of
+          (Names.Declaration_map.find_opt (path, 0)
+             (Query.demand database Names.declaration_index module_))
       in
       match path with
       | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ } ->

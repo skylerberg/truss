@@ -21,10 +21,10 @@ let declarations database (module_ : Path.module_) =
 let package_modules database package =
   match Workspace.package database package with Some p -> p.modules | None -> []
 
-(* Whether code in [package] can see a definition: anything in its own
-   package, and only what is public elsewhere. *)
-let visible ~package (declaration : Names.declaration) =
-  declaration.module_.package = package
+(* Whether the packages a command is about can see a definition: anything
+   in them, and only what is public elsewhere. *)
+let visible (project : Project.t) (declaration : Names.declaration) =
+  Project.is_own project declaration.module_
   || match declaration.visibility with Public | Public_opaque -> true | _ -> false
 
 let owner_of : Path.t -> Path.t option = function
@@ -47,8 +47,7 @@ let impl_of_type (path : Path.t) name =
 
 (* The definitions a path names, in the order to show them. *)
 let resolve (project : Project.t) text =
-  let database = project.database in
-  let own = project.manifest.name in
+  let database = project.context in
   let parts = String.split_on_char ':' text |> List.filter (( <> ) "") in
   let in_package package =
     List.concat_map (declarations database) (package_modules database package)
@@ -60,7 +59,7 @@ let resolve (project : Project.t) text =
         (fun (d : Names.declaration) ->
           match d.visibility with Public | Public_opaque -> true | _ -> false)
         (in_package package)
-  | _, Some module_ -> List.filter (visible ~package:own) (declarations database module_)
+  | _, Some module_ -> List.filter (visible project) (declarations database module_)
   | _, None -> (
       match List.rev parts with
       | [] -> []
@@ -84,8 +83,8 @@ let resolve (project : Project.t) text =
                          match owner_of d.path with Some o -> Path.equal o path | None -> false)
                        package
                   @ List.filter (fun (d : Names.declaration) -> impl_of_type d.path last) package
-                  |> List.filter (visible ~package:own)
-              | found -> List.filter (visible ~package:own) found)
+                  |> List.filter (visible project)
+              | found -> List.filter (visible project) found)
           | Some module_, Some dot ->
               let type_name = String.sub last 0 dot in
               let member = String.sub last (dot + 1) (String.length last - dot - 1) in
@@ -96,26 +95,22 @@ let resolve (project : Project.t) text =
                   | Method { owner = o; name; _ } | Member_constant { owner = o; name } ->
                       Path.equal o owner && name = member
                   | _ -> false)
-              |> List.filter (visible ~package:own)))
+              |> List.filter (visible project)))
 
 let find (project : Project.t) ~body text =
   List.filter_map
     (fun (declaration : Names.declaration) ->
       let key = Names.key_of declaration in
       let opaque =
-        declaration.visibility = Public_opaque
-        && declaration.module_.package <> project.manifest.name
+        declaration.visibility = Public_opaque && not (Project.is_own project declaration.module_)
       in
-      match Signatures.text project.database ~body ~opaque key with
+      match Signatures.text project.context ~body ~opaque key with
       | None -> None
       | Some signature ->
           let file, line =
-            match Query.demand project.database Names.base key with
+            match Query.demand project.context Names.base key with
             | Some (module_, base) ->
-                let source =
-                  if List.mem_assoc module_ project.files then Project.source project module_
-                  else (Query.demand project.database Workspace.file module_).source
-                in
+                let source = Project.source project module_ in
                 (Source.path source, fst (Source.position source base))
             | None -> ("", 0)
           in
@@ -154,12 +149,12 @@ let run ~directory ~paths ~body ~json =
       (fun (_, found) ->
         List.iter
           (fun f ->
-            if not !first then print_newline ();
+            if not !first then Output.print_line "";
             first := false;
-            Printf.printf "%s:%d\n%s\n" f.file f.line f.text)
+            Output.printf "%s:%d\n%s\n" f.file f.line f.text)
           found)
       found;
-    List.iter (fun (path, _) -> Printf.eprintf "Nothing named `%s` is visible here.\n" path) missing
+    List.iter (fun (path, _) -> Output.eprintf "Nothing named `%s` is visible here.\n" path) missing
   end;
   (* A path that names nothing is a bad argument, not a problem in the code. *)
   if missing = [] then 0 else 2

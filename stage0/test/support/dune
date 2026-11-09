@@ -1,3 +1,12 @@
 (library
  (name support)
- (libraries harness query path workspace diagnostic source type_checker))
+ (libraries
+  harness
+  query
+  engine
+  database
+  path
+  workspace
+  diagnostic
+  source
+  type_checker))

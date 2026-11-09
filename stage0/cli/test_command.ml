@@ -22,15 +22,14 @@ let select (project : Project.t) ~paths ~match_ =
                  && match match_ with Some text -> contains name text | None -> true ->
               let line =
                 match
-                  Query.demand project.database Resolve.Names.base
-                    (Resolve.Names.key_of declaration)
+                  Query.demand project.context Resolve.Names.base (Resolve.Names.key_of declaration)
                 with
                 | Some (_, base) -> fst (Source.position source base)
                 | None -> 0
               in
               Some { path = declaration.path; module_; name; file = Source.path source; line }
           | _ -> None)
-        (Query.demand project.database Resolve.Names.declarations module_))
+        (Query.demand project.context Resolve.Names.declarations module_))
     (Project.selected project paths)
 
 let label test = Path.show_module test.module_ ^ " " ^ Diagnostic.quote test.name
@@ -47,7 +46,7 @@ let now_microseconds () = int_of_float (Unix.gettimeofday () *. 1e6)
 let indented text =
   String.split_on_char '\n' text
   |> List.filter (( <> ) "")
-  |> List.iter (fun line -> print_endline ("    " ^ line))
+  |> List.iter (fun line -> Output.print_line ("    " ^ line))
 
 (* How many tests ended each way, in the order the runner names outcomes,
    leaving out those that none did. *)
@@ -75,12 +74,12 @@ let print_report tests (records : Compile.record list) ~timings:show_timings tim
   List.iter2
     (fun test (record : Compile.record) ->
       if record.outcome <> Passed then begin
-        Printf.printf "%s: %s\n" (label test) (Compile.show_outcome record.outcome);
+        Output.printf "%s: %s\n" (label test) (Compile.show_outcome record.outcome);
         Option.iter indented record.message;
         Option.iter indented record.echo
       end)
     tests records;
-  if List.exists (fun (r : Compile.record) -> r.outcome <> Passed) records then print_newline ();
+  if List.exists (fun (r : Compile.record) -> r.outcome <> Passed) records then Output.print_line "";
   if show_timings then begin
     let rows =
       List.combine tests records
@@ -91,12 +90,12 @@ let print_report tests (records : Compile.record list) ~timings:show_timings tim
     let width = List.fold_left (fun w s -> max w (String.length s)) 0 shown in
     List.iter2
       (fun (test, (record : Compile.record)) text ->
-        Printf.printf "%*s  %s%s\n" width text (label test)
+        Output.printf "%*s  %s%s\n" width text (label test)
           (if record.cached then "  cached" else ""))
       rows shown;
-    print_newline ()
+    Output.print_line ""
   end;
-  Printf.printf "%s in %s (check %s, build %s, tests %s)\n%!"
+  Output.printf "%s in %s (check %s, build %s, tests %s)\n"
     (if records = [] then "No tests" else summary records)
     (seconds timings.total) (seconds timings.check) (seconds timings.build) (seconds timings.tests)
 
@@ -181,18 +180,55 @@ let on_progress progress ~build_ended (event : Compile.progress) =
       if record.outcome <> Passed then progress.not_passed <- progress.not_passed + 1;
       draw progress
 
+(* Runs each package's tests with its own time limit, one test program a
+   package, and reports each test by its place among them all. *)
+let run_all (project : Project.t) compile ~results ~rerun ~progress tests =
+  let offset = ref 0 in
+  List.fold_left
+    (fun outcome (package : Project.package) ->
+      match outcome with
+      | Error _ -> outcome
+      | Ok done_ -> (
+          let own = List.filter (fun t -> t.module_.package = package.name) tests in
+          let base = !offset in
+          offset := base + List.length own;
+          let shifted : Compile.progress -> Compile.progress = function
+            | Started { test } -> Started { test = test + base }
+            | Ended { test; record } -> Ended { test = test + base; record }
+            | other -> other
+          in
+          if own = [] then outcome
+          else
+            match
+              Compile.run_tests ?results ~rerun
+                ~progress:(fun event -> progress (shifted event))
+                compile
+                ~time_limit:(package.manifest.time_limit * 1000)
+                (List.map (fun t -> t.path) own)
+            with
+            | Ok records -> Ok (done_ @ records)
+            | Error message -> Error message))
+    (Ok []) project.packages
+
 let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
   let started = now_microseconds () in
   let project = Project.load directory in
-  let files = Report.gather project in
+  let report = Report.gather project in
   let checked = now_microseconds () in
-  let tests = select project ~paths ~match_ in
-  if files <> [] then begin
+  (* In the packages' order, so each package's tests are together. *)
+  let tests =
+    let selected = select project ~paths ~match_ in
+    List.concat_map
+      (fun (package : Project.package) ->
+        List.filter (fun t -> t.module_.package = package.name) selected)
+      project.packages
+  in
+  if not (Report.clean report) then begin
     if json then
       Json.print
-        (Json.document ~diagnostics:(Report.to_json files)
+        (Report.document report
            [ ("tests", Json.List (List.map (fun t -> test_json t None) tests)) ])
-    else Report.print files;
+    else Report.print report;
     1
   end
   else
@@ -210,15 +246,12 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
     let build_ended = ref None in
     (* A sanitized run keeps no results, since it checks what a plain one
        does not. *)
-    let results = if sanitize then None else Some (Cache.results ()) in
+    let results = if sanitize then None else Some (Database.test_results ()) in
     let outcome =
-      Compile.run_tests ?results ~rerun
-        ~progress:(on_progress progress ~build_ended)
-        compile
-        ~time_limit:(project.manifest.time_limit * 1000)
-        (List.map (fun t -> t.path) tests)
+      run_all project compile ~results ~rerun ~progress:(on_progress progress ~build_ended) tests
     in
     Status_line.clear progress.line;
+    Database.flush_store ();
     match outcome with
     | Error message -> Project.cannot_run "%s" message
     | Ok records ->

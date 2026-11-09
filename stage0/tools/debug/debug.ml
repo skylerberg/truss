@@ -1,6 +1,9 @@
-(* [truss debug tokens] and [truss debug tree], for working on the compiler:
-   a file's tokens, or its syntax trees as S-expressions, and its
-   diagnostics. See CLI.md, "For working on the compiler". *)
+(* debug tokens|tree [--json] FILE: for working on the compiler, a file's
+   tokens, one a line, or each definition's syntax tree as an S-expression,
+   with its diagnostics on standard error, or with --json, only the
+   diagnostics, on standard output. It exits with 1 when there are
+   diagnostics. Run it with [dune exec stage0/tools/debug/debug.exe]. It is
+   a tool of this repository, and not part of the [truss] command. *)
 
 open Token
 
@@ -69,7 +72,10 @@ let show_diagnostics ~json source diagnostics =
   if diagnostics = [] then 0 else 1
 
 let read file =
-  if not (Sys.file_exists file) then Project.cannot_run "%s does not exist." file;
+  if not (Sys.file_exists file) then begin
+    prerr_endline (file ^ " does not exist.");
+    exit 2
+  end;
   Source.read_file file
 
 (* Lexes one file and prints its tokens, one per line, unless [json], when
@@ -93,3 +99,13 @@ let tree ~file ~json =
   in
   if not json then print_endline (Syntax_print.file tree);
   show_diagnostics ~json source diagnostics
+
+let () =
+  match List.tl (Array.to_list Sys.argv) with
+  | [ "tokens"; file ] -> exit (tokens ~file ~json:false)
+  | [ "tokens"; "--json"; file ] | [ "tokens"; file; "--json" ] -> exit (tokens ~file ~json:true)
+  | [ "tree"; file ] -> exit (tree ~file ~json:false)
+  | [ "tree"; "--json"; file ] | [ "tree"; file; "--json" ] -> exit (tree ~file ~json:true)
+  | _ ->
+      prerr_endline "usage: debug tokens|tree [--json] FILE";
+      exit 2

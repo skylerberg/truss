@@ -1,15 +1,16 @@
-(* Finding and loading the package a command acts on. See CLI.md, "Finding
-   the package".
+(* The packages a command acts on, from the code database's session for the
+   worktree it is run in. See CLI.md, "Finding the package".
 
-   A command looks for [truss.toml] in the current directory and each
-   directory above it. The package's modules are the [.truss] files under
-   its directory, except in directories that hold their own [truss.toml],
-   which are other packages, and in directories whose names start with
-   [.]. *)
+   A command is about the packages at or under the directory it is run
+   from, or else the one that directory is in: a package's directory and
+   everything below it, apart from directories that hold their own
+   [truss.toml], which are other packages, and those whose names start with
+   [.]. The session reads the worktree's files and keeps what was computed
+   about them, so a command after a small edit does little work. *)
 
 exception Cannot_run of string
-(** The command cannot do its job: no manifest, a malformed one, a file that cannot be read. It
-    exits with status 2. *)
+(** The command cannot do its job: no manifest, a session another process holds, a file that cannot
+    be read. It exits with status 2. *)
 
 let cannot_run format = Printf.ksprintf (fun message -> raise (Cannot_run message)) format
 let manifest_name = "truss.toml"
@@ -41,97 +42,95 @@ let relative ~from path =
   let up, down = drop (split from) (split path) in
   match List.map (fun _ -> "..") up @ down with [] -> "." | parts -> String.concat "/" parts
 
-let shown path = relative ~from:(Sys.getcwd ()) (normalize path)
+let real path = try Unix.realpath path with Unix.Unix_error _ -> normalize path
+let shown path = relative ~from:(real (Sys.getcwd ())) (normalize path)
 
-(* The nearest directory holding a manifest, from [start] up. *)
-let find start =
-  let rec up directory =
-    if Sys.file_exists (Filename.concat directory manifest_name) then directory
-    else
-      let parent = Filename.dirname directory in
-      if parent = directory then
-        cannot_run "No %s here or in any directory above %s." manifest_name (shown start)
-      else up parent
-  in
-  up (normalize start)
-
-(* Each module of the package in [root], with its file, in order. *)
-let module_files ~package root =
-  let rec walk relative =
-    let directory =
-      if relative = [] then root else Filename.concat root (String.concat "/" relative)
-    in
-    let entries =
-      try Array.to_list (Sys.readdir directory)
-      with Sys_error message -> cannot_run "Cannot read %s: %s" (shown directory) message
-    in
-    List.sort compare entries
-    |> List.concat_map (fun entry ->
-        let path = Filename.concat directory entry in
-        if String.starts_with ~prefix:"." entry then []
-        else if Sys.is_directory path then
-          if Sys.file_exists (Filename.concat path manifest_name) then []
-          else walk (relative @ [ entry ])
-        else if Filename.check_suffix entry ".truss" then
-          [
-            ( ({ package; modules = relative @ [ Filename.chop_suffix entry ".truss" ] }
-                : Path.module_),
-              path );
-          ]
-        else [])
-  in
-  walk []
+type package = {
+  name : string;
+  directory : string;  (** Absolute *)
+  manifest : Type_checker.Manifest.t;
+}
 
 type t = {
-  root : string;  (** The package's directory, absolute *)
-  manifest : Type_checker.Manifest.t;
-  database : Query.database;
+  session : Database.session;
+  context : Query.context;
+  packages : package list;  (** The packages the command is about *)
   mutable files : (Path.module_ * string) list;
-      (** Each module, with its file, absolute, in order *)
+      (** Each of their modules, with its file, absolute, in order *)
 }
+
+(* The sessions commands opened, which the command line saves once the
+   command is done. *)
+let opened : Database.session list ref = ref []
 
 let read_text path =
   try In_channel.with_open_bin path In_channel.input_all
   with Sys_error message -> cannot_run "Cannot read %s: %s" (shown path) message
 
-let read_manifest root =
-  let path = Filename.concat root manifest_name in
-  try Type_checker.Manifest.parse (read_text path)
-  with Type_checker.Manifest.Malformed (line, expected) ->
-    cannot_run "%s:%d: expected %s." (shown path) line expected
+let module_files session packages =
+  let root = Database.root session in
+  List.concat_map
+    (fun package ->
+      List.map
+        (fun module_ -> (module_, Filename.concat root (Database.module_file session module_)))
+        (Database.package_modules session package.name))
+    packages
 
-(* Sets the package's modules and their text as the database's inputs. *)
-let set_inputs t =
-  Type_checker.load_package t.database ~name:t.manifest.name ~dependencies:t.manifest.dependencies
-    (List.map (fun (module_, path) -> (module_, read_text path)) t.files)
+let load directory =
+  let directory = real directory in
+  match Database.open_session directory with
+  | Error message -> raise (Cannot_run message)
+  | Ok (session, targets) ->
+      if not (List.memq session !opened) then opened := session :: !opened;
+      let root = Database.root session in
+      let packages =
+        List.map
+          (fun (relative, name) ->
+            let directory = if relative = "" then root else Filename.concat root relative in
+            let manifest =
+              try Type_checker.Manifest.parse (read_text (Filename.concat directory manifest_name))
+              with Type_checker.Manifest.Malformed (line, expected) ->
+                cannot_run "%s:%d: expected %s."
+                  (shown (Filename.concat directory manifest_name))
+                  line expected
+            in
+            { name; directory; manifest })
+          targets
+      in
+      if packages = [] && Database.problems session = [] then
+        cannot_run "No %s in %s or any directory above it, within its worktree." manifest_name
+          (shown directory);
+      {
+        session;
+        context = Database.context session;
+        packages;
+        files = module_files session packages;
+      }
 
-let load_root root =
-  let manifest = read_manifest root in
-  let t =
-    { root; manifest; database = Query.create (); files = module_files ~package:manifest.name root }
-  in
-  Type_checker.load_standard t.database;
-  set_inputs t;
-  t
+(* The one package a command that needs one is about. *)
+let package t =
+  match t.packages with
+  | [ package ] -> package
+  | [] -> cannot_run "No package here."
+  | several ->
+      cannot_run "This is about %d packages: %s. Run the command in one's directory."
+        (List.length several)
+        (String.concat ", " (List.map (fun p -> p.name) several))
 
-let load directory = load_root (find directory)
+let is_own t (module_ : Path.module_) = List.exists (fun p -> p.name = module_.package) t.packages
 
-(* Reads the package's files again, after a command changed some, so only
-   what changed is checked again. *)
+(* Reads the files again after a command changed some, so only what
+   changed is checked again. *)
 let reload t =
-  t.files <- module_files ~package:t.manifest.name t.root;
-  set_inputs t
+  Database.refresh t.session;
+  t.files <- module_files t.session t.packages
 
 let modules t = List.map fst t.files
 
 let file t module_ =
   match List.assoc_opt module_ t.files with
   | Some path -> path
-  | None -> invalid_arg ("Project.file: no module " ^ Path.show_module module_)
-
-let module_of_file t path =
-  let path = normalize path in
-  List.find_map (fun (module_, file) -> if file = path then Some module_ else None) t.files
+  | None -> Filename.concat (Database.root t.session) (Database.module_file t.session module_)
 
 (* The modules in each of [paths], files or directories, or every module
    when there are none. *)
@@ -142,9 +141,9 @@ let selected t paths =
       let wanted =
         List.map
           (fun path ->
-            let path = normalize path in
-            if not (Sys.file_exists path) then cannot_run "%s does not exist." (shown path);
-            path)
+            if not (Sys.file_exists (normalize path)) then
+              cannot_run "%s does not exist." (shown path);
+            real path)
           paths
       in
       List.filter_map
@@ -158,17 +157,21 @@ let selected t paths =
         t.files
 
 (* A module's parsed file. *)
-let parsed t module_ = Query.demand t.database Workspace.file module_
+let parsed t module_ = Query.demand t.context Workspace.file module_
 
 (* A module's text as a source named by its file as the current directory
    reaches it, which is how every command shows positions. Offsets are the
-   same as in the database's own source. *)
+   same as in the database's own source. A module of another package, such
+   as the standard library's, keeps its own name. *)
 let source t module_ =
-  Source.create ~path:(shown (file t module_)) (Source.text (parsed t module_).source)
+  let text = Source.text (parsed t module_).source in
+  if is_own t module_ || List.mem_assoc module_ t.files then
+    Source.create ~path:(shown (file t module_)) text
+  else (parsed t module_).source
 
 (* The file a position the compiled program reports names, such as
    [weather/forecast.truss], as the current directory reaches it, if it is
-   one of this package's. *)
+   one of these packages'. *)
 let shown_workspace_path t workspace_path =
   match
     List.find_opt (fun (module_, _) -> Workspace.file_path module_ = workspace_path) t.files

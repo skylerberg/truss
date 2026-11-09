@@ -108,8 +108,8 @@ let all (project : Project.t) =
   List.concat_map
     (fun module_ ->
       List.concat_map
-        (fun declaration -> of_definition project.database (Names.key_of declaration))
-        (Query.demand project.database Names.declarations module_))
+        (fun declaration -> of_definition project.context (Names.key_of declaration))
+        (Query.demand project.context Names.declarations module_))
     (Project.modules project)
 
 (* The [use] lines that name a module: each file's, with the span of the

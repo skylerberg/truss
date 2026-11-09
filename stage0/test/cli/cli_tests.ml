@@ -50,27 +50,27 @@ let manifest = ("truss.toml", "[package]\nname = \"demo\"\n")
 let package files = directory (manifest :: files)
 let read root path = In_channel.with_open_bin (Filename.concat root path) In_channel.input_all
 
-(* Runs [f] with its standard output and error sent nowhere, so a command
-   under test prints nothing. *)
-let quietly f =
-  let null = Unix.openfile "/dev/null" [ O_WRONLY ] 0 in
-  let saved_out = Unix.dup Unix.stdout and saved_err = Unix.dup Unix.stderr in
-  flush stdout;
-  flush stderr;
-  Unix.dup2 null Unix.stdout;
-  Unix.dup2 null Unix.stderr;
-  Fun.protect
-    ~finally:(fun () ->
-      flush stdout;
-      flush stderr;
-      Unix.dup2 saved_out Unix.stdout;
-      Unix.dup2 saved_err Unix.stderr;
-      Unix.close null;
-      Unix.close saved_out;
-      Unix.close saved_err)
-    f
+(* Runs [f] as a command would, with what it writes kept, and returns its
+   result and its output, then saves the sessions it opened, as the command
+   line does after each command. *)
+let captured f =
+  let out = Buffer.create 256 and err = Buffer.create 256 in
+  let result =
+    Output.with_
+      { out = Buffer.add_string out; err = Buffer.add_string err; terminal = false; columns = None }
+      f
+  in
+  List.iter Database.save_session !Project.opened;
+  Project.opened := [];
+  (result, Buffer.contents out ^ Buffer.contents err)
 
-let module_ modules : Path.module_ = { package = "demo"; modules }
+let quietly f = fst (captured f)
+
+(* The tests' sessions are in a store of their own, apart from the user's. *)
+let () =
+  Unix.putenv "TRUSS_CACHE"
+    (Filename.concat (Filename.get_temp_dir_name ())
+       (Printf.sprintf "truss-cli-tests-store-%d" (Unix.getpid ())))
 
 (* Arguments *)
 
@@ -89,16 +89,28 @@ let () =
 
 (* Finding the package *)
 
+let names (project : Project.t) =
+  List.sort compare (List.map (fun (p : Project.package) -> p.name) project.packages)
+
 let () =
   test "the package is found from a directory below its manifest" (fun () ->
       let root = package [ ("forecast/hourly.truss", "") ] in
-      expect_string ~expected:root (Project.find (Filename.concat root "forecast")));
-  test "a directory with no manifest above it cannot run a command" (fun () ->
+      expect_strings ~expected:[ "demo" ] (names (Project.load (Filename.concat root "forecast"))));
+  test "a directory with no manifest at or above it cannot run a command" (fun () ->
       let root = directory [ ("main.truss", "") ] in
       (* The temporary directory is not inside a package. *)
-      match Project.find root with
+      match Project.load root with
       | exception Project.Cannot_run _ -> ()
-      | found -> fail "found %s" found);
+      | _ -> fail "found a package");
+  test "a directory above several packages is about all of them" (fun () ->
+      let root =
+        directory
+          [
+            ("one/truss.toml", "[package]\nname = \"one\"\n");
+            ("two/truss.toml", "[package]\nname = \"two\"\n");
+          ]
+      in
+      expect_strings ~expected:[ "one"; "two" ] (names (Project.load root)));
   test "a directory with its own manifest is another package's, not modules of this one" (fun () ->
       let root =
         package
@@ -108,8 +120,9 @@ let () =
             ("vendor/x.truss", "");
           ]
       in
-      expect_strings ~expected:[ "demo::main" ]
-        (List.map Path.show_module (Project.modules (Project.load root))));
+      let project = Project.load root in
+      expect_strings ~expected:[ "demo::main"; "other::x" ]
+        (List.sort compare (List.map Path.show_module (Project.modules project))));
   test "a directory whose name starts with a dot is not read" (fun () ->
       let root = package [ ("main.truss", ""); (".hidden/x.truss", "") ] in
       expect_strings ~expected:[ "demo::main" ]
@@ -286,7 +299,7 @@ let () =
           if hole.type_ <> Some "String" then fail "the type is not String";
           expect_strings
             ~expected:[ "count: Int64"; "header: String"; "title: String" ]
-            (List.map (fun (name, ty) -> name ^ ": " ^ Option.value ty ~default:"?") hole.in_scope)
+            (List.map (fun (name, ty) -> name ^ ": " ^ ty) hole.in_scope)
       | holes -> fail "found %d holes" (List.length holes));
   test "a hole blocks the tests that can reach it, and only those" (fun () ->
       let project = Project.load (package [ ("main.truss", unfinished) ]) in
@@ -311,6 +324,13 @@ let () =
 
 (* Building *)
 
+(* Lowers code and compiles nothing, so it needs no C compiler. *)
+let lowering (project : Project.t) =
+  Compile.create project.context Memory_layout.target_64
+    { compiler = "cc"; identity = "lowering only" }
+    (Build.cache (Database.objects_directory ()))
+    { build = Development; optimization = O1; extra = [] }
+
 let () =
   test "a todo main can reach is refused, with the way from main to it" (fun () ->
       let project =
@@ -327,7 +347,7 @@ let () =
              ])
       in
       match
-        Compile.unshippable (Compiler.lowering_only project)
+        Compile.unshippable (lowering project)
           ~main:(List.hd (Program_command.mains project))
           ~echo:false
       with
@@ -347,7 +367,7 @@ let () =
              ])
       in
       let main = List.hd (Program_command.mains project) in
-      let compile = Compiler.lowering_only project in
+      let compile = lowering project in
       match
         (Compile.unshippable compile ~main ~echo:false, Compile.unshippable compile ~main ~echo:true)
       with
@@ -419,63 +439,163 @@ let () =
       if not (contains text "fn Point.value(self)" && contains text "Point(x: 1).value()") then
         fail "wrote %s" text)
 
-(* Impact *)
+(* Comparing with a commit, and other worktrees *)
 
-(* A database of the package with these files in place of its own, as the
-   package was at an earlier revision. *)
-let earlier files =
-  let database = Query.create () in
-  Type_checker.load_standard database;
-  Type_checker.load_package database ~name:"demo" ~dependencies:[]
-    (List.map (fun (name, text) -> (module_ [ Filename.chop_suffix name ".truss" ], text)) files);
-  database
+let git root arguments =
+  let command =
+    String.concat " "
+      (List.map Filename.quote
+         ([ "git"; "-C"; root; "-c"; "user.name=test"; "-c"; "user.email=test@example.com" ]
+         @ arguments))
+  in
+  if Sys.command (command ^ " >/dev/null 2>&1") <> 0 then
+    fail "git %s failed" (String.concat " " arguments)
+
+let doubling =
+  {|internal fn double(value: Int64) -> Int64 {
+  value * 2
+}
+
+fn four() -> Int64 {
+  double(2)
+}
+
+test "doubles" {
+  assert double(2) == 4
+}
+|}
+
+(* A repository whose one commit holds the package. *)
+let repository text =
+  let root = package [ ("main.truss", text) ] in
+  git root [ "init"; "-q"; "-b"; "main" ];
+  git root [ "add"; "-A" ];
+  git root [ "commit"; "-q"; "-m"; "base" ];
+  root
+
+(* The text with its one occurrence of [part] replaced. *)
+let replace text part by =
+  let n = String.length part in
+  let rec at i = if String.sub text i n = part then i else at (i + 1) in
+  let i = at 0 in
+  String.sub text 0 i ^ by ^ String.sub text (i + n) (String.length text - i - n)
+
+let rewrite root path text =
+  Out_channel.with_open_bin (Filename.concat root path) (fun out -> output_string out text);
+  (* A rewrite within one second must still look changed. *)
+  let now = Unix.gettimeofday () in
+  Unix.utimes (Filename.concat root path) now (now +. 10.)
+
+let impact root =
+  let project = Project.load root in
+  match Database.base_commit project.session None with
+  | None ->
+      fail "no base";
+      []
+  | Some commit -> (
+      match Database.open_commit_of project.session commit with
+      | Ok base -> Impact_command.changes project base
+      | Error message ->
+          fail "%s" message;
+          [])
 
 let () =
-  test "a change to a body alone is a change of the body" (fun () ->
-      let before = [ ("main.truss", "fn double(value: Int64) -> Int64 {\n  value * 2\n}\n") ] in
-      let project =
-        Project.load
-          (package [ ("main.truss", "fn double(value: Int64) -> Int64 {\n  value + value\n}\n") ])
-      in
-      match Impact_command.compare_with project (earlier before) with
-      | [ { status = `Changed [ Body ]; read_by = []; _ } ] -> ()
-      | changes -> fail "found %d changes" (List.length changes));
-  test "a changed interface lists what reads it" (fun () ->
-      let before =
-        [
-          ( "main.truss",
-            "fn double(value: Int64) -> Int64 {\n\
-            \  value * 2\n\
-             }\n\n\
-             fn four() -> Int64 {\n\
-            \  double(2)\n\
-             }\n" );
-        ]
-      in
-      let project =
-        Project.load
-          (package
-             [
-               ( "main.truss",
-                 "fn double(value: Int64, by: Int64 = 2) -> Int64 {\n\
-                 \  value * by\n\
-                  }\n\n\
-                  fn four() -> Int64 {\n\
-                 \  double(2)\n\
-                  }\n" );
-             ])
-      in
-      match Impact_command.compare_with project (earlier before) with
-      | [ { status = `Changed kinds; read_by; _ } ] ->
-          if not (List.mem Impact_command.Interface kinds) then fail "not an interface change";
-          expect_strings ~expected:[ "demo::main::four" ] (List.map Path.show read_by)
-      | changes -> fail "found %d changes" (List.length changes));
+  test "a change to a body alone is a change of the body, which nothing reads" (fun () ->
+      let root = repository doubling in
+      rewrite root "main.truss" (replace doubling "value * 2" "value + value");
+      match impact root with
+      | [ { status = `Changed parts; read_by = []; _ } ] when not (List.mem "signature" parts) ->
+          if not (List.mem "body" parts) then fail "parts [%s]" (String.concat "; " parts)
+      | changes ->
+          fail "found [%s]"
+            (String.concat "; "
+               (List.map
+                  (fun (c : Impact_command.change) ->
+                    Path.show c.path ^ " "
+                    ^ match c.status with `Changed parts -> String.concat "," parts | _ -> "?")
+                  changes)));
+  test "a changed signature is shown before and after, with what reads it" (fun () ->
+      let root = repository doubling in
+      rewrite root "main.truss"
+        (replace doubling "fn double(value: Int64) -> Int64"
+           "fn double(value: Int64, by: Int64 = 2) -> Int64");
+      match
+        List.find_opt
+          (fun (c : Impact_command.change) -> Path.show c.path = "demo::main::double")
+          (impact root)
+      with
+      | Some { before = Some before; after = Some after; read_by; _ } ->
+          if not (contains before "(value: Int64)" && contains after "by: Int64 = 2") then
+            fail "signatures %s, %s" before after;
+          if not (List.exists (fun (reader, _, _) -> Path.show reader = "demo::main::four") read_by)
+          then fail "four does not read it"
+      | _ -> fail "double did not change its signature");
   test "moving a definition within its file changes nothing" (fun () ->
       let one = "fn one() -> Int64 {\n  1\n}\n" and two = "fn two() -> Int64 {\n  2\n}\n" in
-      let project = Project.load (package [ ("main.truss", two ^ "\n" ^ one) ]) in
-      match Impact_command.compare_with project (earlier [ ("main.truss", one ^ "\n" ^ two) ]) with
-      | [] -> ()
-      | changes -> fail "found %d changes" (List.length changes))
+      let root = repository (one ^ "\n" ^ two) in
+      rewrite root "main.truss" (two ^ "\n" ^ one);
+      match impact root with [] -> () | changes -> fail "found %d changes" (List.length changes))
+
+(* What reads what, and positions *)
+
+let () =
+  test "references list what reads a definition, part by part" (fun () ->
+      let root = package [ ("main.truss", doubling) ] in
+      let status, output =
+        captured (fun () ->
+            Graph_command.run ~directory:root ~direction:References ~name:"double" ~json:false)
+      in
+      if status <> 0 then fail "status %d" status;
+      if
+        not (contains output "demo::main::four: its body reads the signature of demo::main::double")
+      then fail "wrote %s" output);
+  test "a position's line and column count characters, as diagnostics do" (fun () ->
+      if Explain_command.offset_of "ab\ncé x" ~line:2 ~column:4 <> 7 then fail "wrong offset");
+  test "explaining a name gives its meaning and the signature it refers to" (fun () ->
+      let root = package [ ("main.truss", doubling) ] in
+      let status, output =
+        captured (fun () ->
+            Explain_command.run ~directory:root
+              ~position:(Filename.concat root "main.truss" ^ ":6:3")
+              ~json:false)
+      in
+      if status <> 0 then fail "status %d" status;
+      if
+        not
+          (contains output "means the definition demo::main::double"
+          && contains output "internal fn double(value: Int64) -> Int64")
+      then fail "wrote %s" output);
+  test "an overlap is told as a sentence about the parts that meet" (fun () ->
+      let place path part : Database.place =
+        {
+          path =
+            Some (Path.Top { module_ = { package = "demo"; modules = [ "main" ] }; name = path });
+          part = Some part;
+          label = "";
+        }
+      in
+      expect_string
+        ~expected:
+          "this worktree's change to the body of demo::main::four reads the signature of \
+           demo::main::double, which the other changes"
+        (Overlap_command.sentence
+           (Reads
+              {
+                this_worktree = true;
+                change = place "four" "body";
+                reads = place "double" "signature";
+              })))
+
+(* The command line as a whole *)
+
+let () =
+  test "a command line is parsed and run as the client would run it" (fun () ->
+      let root = package [ ("main.truss", doubling) ] in
+      let outcome, _ = captured (fun () -> Main.evaluate [ "check"; "-C"; root ]) in
+      if outcome <> Outcome.Exit 0 then fail "did not succeed");
+  test "an unknown command is a bad argument" (fun () ->
+      let outcome, _ = captured (fun () -> Main.evaluate [ "bogus" ]) in
+      if outcome <> Outcome.Exit 2 then fail "did not exit with 2")
 
 (* Making a package *)
 
@@ -491,6 +611,6 @@ let () =
       if quietly (fun () -> New_command.run ~directory:root ~name:"weather") <> 0 then
         fail "not made";
       let project = Project.load (Filename.concat root "weather") in
-      if Report.gather project <> [] then fail "has diagnostics")
+      if not (Report.clean (Report.gather project)) then fail "has diagnostics")
 
 let () = Harness.finish ()

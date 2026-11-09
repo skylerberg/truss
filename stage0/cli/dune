@@ -1,27 +1,26 @@
-; The truss command line's commands, apart from parsing arguments, so that
-; tests can drive them. See CLI.md.
+; The truss command line: its commands, apart from starting the program, so
+; that tests can drive them. See CLI.md.
 
 (library
  (name cli)
  (libraries
   unix
+  cmdliner
   zarith
   source
   diagnostic
-  token
-  lexer
   syntax
   syntax_walk
-  syntax_print
-  parser
   path
   query
+  engine
   workspace
   resolve
   hash
   types
   checked
   infer
+  inspect
   interface
   type_checker
   memory_layout
@@ -29,6 +28,6 @@
   build
   instance
   lir
-  reachable
-  lower
-  compile))
+  unicode
+  compile
+  database))

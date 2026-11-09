@@ -10,6 +10,8 @@ module C = Checked
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Lower = Interface.Lower
+open State
+open Statements
 open Expressions
 
 type result = { checked : C.t; diagnostics : Diagnostic.t list }
@@ -430,7 +432,10 @@ let check database (key : Names.key) =
         }
   | _ -> None
 
-let checked = Query.query ~name:"checked" ~show:Names.show_key check
+let checked =
+  Query.query ~name:"checked" ~show:Names.show_key ~saved:true
+    ~about:(fun (key : Names.key) -> Some { Query.path = key.path; part = Some "body" })
+    check
 
 (* Every body error of a file, in its offsets and in order. *)
 let diagnostics database module_ =

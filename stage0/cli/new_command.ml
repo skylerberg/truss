@@ -29,5 +29,5 @@ let run ~directory ~name =
    with Sys_error message -> Project.cannot_run "Cannot make %s: %s" (Project.shown path) message);
   Project.write_file (Filename.concat path Project.manifest_name) (manifest name);
   Project.write_file (Filename.concat path "main.truss") main;
-  Printf.printf "Made the package %s in %s.\n" name (Project.shown path);
+  Output.printf "Made the package %s in %s.\n" name (Project.shown path);
   0

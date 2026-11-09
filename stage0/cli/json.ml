@@ -48,4 +48,4 @@ let option f = function Some value -> f value | None -> Null
 let document ~diagnostics fields =
   Object (("format", Int 1) :: ("diagnostics", List diagnostics) :: fields)
 
-let print value = print_endline (to_string value)
+let print value = Output.print_line (to_string value)

@@ -2,8 +2,8 @@
 
     Resolution turns a definition's tree into its resolved form: tables, keyed by the tree's node
     ids, of what every name refers to and how each [name[...]] reads. The tree is unchanged. A
-    definition reads other definitions only through the queries of {!Names}, each recorded in its
-    trace. *)
+    definition reads other definitions only through the queries of {!Names}, so the database knows
+    every one it read. *)
 
 module Names = Names
 module Parts = Parts
@@ -54,7 +54,7 @@ val file_diagnostics : (Path.module_, Diagnostic.t list) Query.query
     imports with one last name, [standard::intrinsic] outside the standard library, and an import
     nothing uses, with a fix that deletes it. *)
 
-val diagnostics : Query.database -> Path.module_ -> Diagnostic.t list
+val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
 (** Every resolution error of a file, in its offsets and in order, including each definition's. *)
 
 val closest : string -> string list -> string option

@@ -17,10 +17,19 @@ let () =
            { package = "json"; capabilities = [] };
            { package = "http"; capabilities = [ "NetworkClient"; "Clock" ] };
          ];
+       usize_bits = 32;
        time_limit = 10;
       } ->
           ()
       | _ -> fail "read differently");
+  test "a package says it runs only on 64-bit targets with usize_bits" (fun () ->
+      match Manifest.parse "[package]\nname = \"a\"\nusize_bits = 64\n" with
+      | { usize_bits = 64; _ } -> ()
+      | _ -> fail "read differently");
+  test "usize_bits other than 32 or 64 is malformed, at its line" (fun () ->
+      match Manifest.parse "[package]\nname = \"a\"\nusize_bits = 16\n" with
+      | exception Manifest.Malformed (3, _) -> ()
+      | _ -> fail "accepted");
   test "a manifest without a name is malformed" (fun () ->
       match Manifest.parse "[package]\nversion = \"1.0\"\n" with
       | exception Manifest.Malformed (1, _) -> ()

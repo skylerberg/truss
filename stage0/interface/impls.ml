@@ -59,16 +59,32 @@ let index =
                 (Query.demand database Names.declarations module_))
             package.modules)
 
+module Path_map = Map.Make (Path)
+
+(* A package's impls by the type they are for: each with its trait. *)
+let by_type =
+  Query.query ~name:"impls_by_type" ~show:Fun.id (fun database package ->
+      List.fold_left
+        (fun table ((trait, type_), impl) ->
+          Path_map.update type_
+            (fun found -> Some ((trait, impl) :: Option.value ~default:[] found))
+            table)
+        Path_map.empty
+        (Query.demand database index package)
+      |> Path_map.map List.rev)
+
+(* The impls of a package for a type, each with its trait. *)
+let impls_for database (type_ : Path.t) package =
+  Option.value ~default:[] (Path_map.find_opt type_ (Query.demand database by_type package))
+
 let impls_in =
   Query.query ~name:"impls"
     ~show:(fun (trait, type_, package) ->
       Printf.sprintf "%s for %s in %s" (Path.show trait) (Path.show type_) package)
     (fun database ((trait : Path.t), (type_ : Path.t), package) ->
       List.filter_map
-        (fun ((indexed_trait, indexed_type), impl) ->
-          if Path.equal indexed_trait trait && Path.equal indexed_type type_ then Some impl
-          else None)
-        (Query.demand database index package))
+        (fun (indexed_trait, impl) -> if Path.equal indexed_trait trait then Some impl else None)
+        (impls_for database type_ package))
 
 (* The interface of a derived [impl]: the type's generic parameters, each
    bound by the trait, as [impl Equal for Option[Value: Equal]], and the

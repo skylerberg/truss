@@ -2,8 +2,12 @@
  (names
   lexer_tests
   parser_tests
+  parser_rules_tests
+  parser_documents_tests
   hashing_tests
   query_tests
+  store_tests
+  database_tests
   resolve_tests
   standard_library_tests
   interface_tests
@@ -32,12 +36,17 @@
   cbor
   blake3
   query
+  engine
+  database
+  store
+  unix
   path
   workspace
   resolve
   hash
   standard_library
   support
+  parse_support
   types
   intrinsic
   interface
@@ -50,4 +59,5 @@
   syntax_walk
   type_checker)
  (deps
-  (glob_files %{workspace_root}/*.md)))
+  (glob_files %{workspace_root}/*.md)
+  (glob_files_rec %{workspace_root}/stage0/**dune)))

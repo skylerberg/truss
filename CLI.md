@@ -5,19 +5,22 @@ on Truss code: checking, testing, running, building, formatting, and the
 tools that let an agent see what a change touches. It follows
 [GOALS.md](GOALS.md) and the decisions in [DESIGN.md](DESIGN.md), and drives
 the stages that [TYPECHECKER.md](TYPECHECKER.md) and
-[CODEGEN.md](CODEGEN.md) describe. It is built in
-[`stage0/cli/`](stage0/cli), with the arguments parsed in
-[`stage0/bin/truss.ml`](stage0/bin/truss.ml), except `truss fmt`, `truss
-lsp`, and the background process, which wait for the formatter, the
-language server, and file watching. The prover is not built either, so what
+[CODEGEN.md](CODEGEN.md) describe, through the code database that
+[DATABASE.md](DATABASE.md) designs. It is built in
+[`stage0/cli/`](stage0/cli), which [`stage0/bin/truss.ml`](stage0/bin/truss.ml)
+only starts, except `truss fmt` and `truss lsp`, which wait for the
+formatter and the language server. The prover is not built either, so what
 the commands will do with proofs is stated where it matters.
 
 ## Principles
 
-- **One program.** Every tool is a subcommand of `truss`, as with `go` and
-  `cargo`, so there is one thing to install, one version to report, and one
-  place to load a package. The tools for working on the compiler are
-  `truss debug tokens` and `truss debug tree`, left out of `truss --help`.
+- **One program.** Every tool a user of Truss runs is a subcommand of
+  `truss`, as with `go` and `cargo`, so there is one thing to install, one
+  version to report, and one place to load a package. The other parts of the
+  compiler, the code database among them, are libraries with no command line
+  of their own: they answer with data, and every command, report, and exit
+  status is this program's. Tools for working on the compiler itself, which
+  are not shipped, are separate programs in `stage0/tools/`.
 - **Every command is O(change).** Each command asks the same query database
   for what it needs, so running the whole package's checks and tests after a
   small edit does a small amount of work. Commands therefore act on the whole
@@ -44,18 +47,22 @@ the commands will do with proofs is stated where it matters.
 
 | Command | Does |
 |---|---|
-| `truss check` | Reports every diagnostic in the package; `--fix` applies the fixes that have no alternative |
-| `truss test` | Checks the package, then runs the tests whose results are not cached |
+| `truss check` | Reports every diagnostic in the packages, and where the worktree's changes meet other worktrees'; `--fix` applies the fixes that have no alternative |
+| `truss test` | Checks the packages, then runs the tests whose results are not kept |
 | `truss run` | Checks the package, builds its program for development, and runs it |
 | `truss build` | Checks the package and builds its program for release, refusing any `todo` or `echo` `main` can reach |
-| `truss fmt` | Formats the package's files (not built yet) |
+| `truss fmt` | Formats the packages' files (not built yet) |
 | `truss holes` | Lists every `todo`, with its type, the names in scope, and what it blocks |
-| `truss show` | Prints the signatures of a module, type, or definition |
-| `truss impact` | Lists what changed since a revision, or what depends on a definition |
-| `truss rename` | Renames a definition, method, or module, and every reference to it in the package |
+| `truss show` | Prints the signatures of a package, module, type, or definition |
+| `truss impact` | Lists what the worktree's changes from a base commit change, and what they reach |
+| `truss references`, `truss dependencies` | Lists what reads a definition, or what it reads, part by part |
+| `truss explain` | Says what is at a position: what a name means, its type, and the signature it refers to |
+| `truss overlap` | Lists where the worktree's changes meet other worktrees', or a branch's |
+| `truss rename` | Renames a definition, method, or module, and every reference to it in the worktree |
 | `truss new` | Makes a new package |
+| `truss sync`, `truss status`, `truss stop` | Brings a worktree's session up to date, lists the background process's sessions, and stops it |
 | `truss lsp` | Runs the language server on standard input and output (not built yet) |
-| `truss clean` | Deletes the cache |
+| `truss clean` | Stops the background process and deletes the store |
 
 `truss --version` prints the version of each stage that has one: the hash
 format, code generation, and the Unicode tables. Those are the versions in
@@ -63,22 +70,33 @@ cache keys, so a report of a stale result can say which stage it came from.
 The parser, the type checker, and the prover, with its solver, are to have
 their own as DESIGN.md's "Incremental builds" asks.
 
-### Finding the package
+### Finding the packages
 
-A command finds its package the way Cargo and Go do: it looks for
-`truss.toml` in the current directory and then in each directory above it,
-and uses the first one found. `-C DIRECTORY`, as in `git` and `make`, runs
-as if from that directory, written before the command or after it. The
-positional arguments are free for what each command acts on.
+A command acts on the packages of the worktree it is run in, through that
+worktree's session in the code database, as DATABASE.md's "Sessions"
+describes. The worktree is the top of the git worktree, or outside git, the
+nearest directory at or above the current one that holds a `truss.toml`,
+the way Cargo and Go find a package. The command is about the packages at
+or under the current directory, or else the one it is in, so running in a
+package's directory, or any directory below it, is about that package, and
+running at the top of a repository of several packages is about all of
+them. `run` and `build` need exactly one, and say so when there are more.
+`-C DIRECTORY`, as in `git` and `make`, runs as if from that directory,
+written before the command or after it. The positional arguments are free
+for what each command acts on.
 
-The package's modules are the `.truss` files under its directory, as
+A package's modules are the `.truss` files under its directory, as
 SYNTAX.md says, with two exceptions:
 
 - **A directory with its own `truss.toml` is another package,** and none of
   its files are modules of this one, as with Cargo's and Go's nested
   modules.
-- **Directories whose names start with `.` are skipped,** so `.git` and an
-  editor's hidden directories are never read.
+- **Directories whose names start with `.`, and `_build` and
+  `node_modules`, are skipped,** so `.git` and an editor's hidden
+  directories are never read.
+
+A manifest that cannot be read, or a package name used twice, is a problem
+in the code, reported with the diagnostics, and the exit status is 1.
 
 ### Common options
 
@@ -88,9 +106,13 @@ SYNTAX.md says, with two exceptions:
   Its fields are listed with each command. Every document has
   `"format": 1`, which changes only when a field is removed or changes
   meaning, and `"diagnostics"`, an array of diagnostics as
-  `Diagnostic.to_json_object` writes them, with each one's file. A command
-  that stops at diagnostics still writes its document.
+  `Diagnostic.to_json_object` writes them, with each one's file; a command
+  that reads code adds `"problems"`, the manifests that could not be read. A
+  command that stops at diagnostics still writes its document.
 - **`-C DIRECTORY`**, above.
+- **`--no-server`,** before or after the command, or `TRUSS_NO_SERVER=1`,
+  runs the command in its own process, not in the background process (see
+  [The background process](#the-background-process)).
 
 There is no `--quiet` or `--verbose` beyond what a command lists. Reports
 for people are plain text. Color, when it comes, belongs only on a
@@ -156,6 +178,12 @@ fix's edits from the JSON itself. This follows `ruff check --fix` and
 Cargo's separate `cargo fix`; a separate command would load and check the
 package exactly as `check` does. The JSON document adds `"fixed"`, the
 diagnostics whose fixes were applied.
+
+A check also lists, on standard output, where the worktree's changes meet
+those of other worktrees of the repository that the background process has
+open, as [`truss overlap`](#truss-overlap) does. Overlaps are not
+diagnostics: nothing is wrong with either worktree's code, so they do not
+change the exit status. The JSON document has them as `"overlaps"`.
 
 ## Testing
 
@@ -231,9 +259,10 @@ whose result is kept is not built or run again. External tests, those with
   new ones, as `go test -count=1` does. Results are deterministic, so this
   is only for doubting the cache, after a suspected compiler bug, or for
   timing every test on this machine now.
-- **The time limit** for each test is the project's, set in the manifest as
+- **The time limit** for each test is its package's, set in the manifest as
   `[test] time_limit = 10`, in seconds, with 10 as the default. It is not a
-  flag, so that every machine and CI run uses the same limit.
+  flag, so that every machine and CI run uses the same limit. A run over
+  several packages builds one test program for each.
 - **The JSON document** is `{"format", "diagnostics", "tests", "timings"}`,
   where each test is `{"module", "name", "file", "line", "outcome",
   "cached", "microseconds", "message", "echo"}`, for every selected test,
@@ -255,7 +284,9 @@ with several has a problem in its code, so they stop with 1.
 
 **`truss run`** builds a development program, as CODEGEN.md's "C files and
 optimization" describes, and runs it on the terminal with the arguments, so
-it can prompt and read, then exits with its status. `echo` writes to
+it can prompt and read, then exits with its status. When the background
+process builds it, it builds it in the store and the command runs it on its
+own terminal, since the process has none. `echo` writes to
 standard error, as SYNTAX.md says. A `todo` that `main` can reach is
 refused, as in `build`: DESIGN.md rules out a `todo` that panics when
 reached, since that would be a failure the signature does not show, and that
@@ -327,9 +358,10 @@ render.truss:12:14: hole of type String
 
 A `todo` whose type nothing fixes, such as one inside an interpolation, is
 listed as "not decided yet". Name resolution records the names in scope at
-each `todo`, and the checked form gives their types. What a hole blocks
-comes from lowering the code that `main` and each test can run, so it is
-listed only for a package without diagnostics. The JSON document is
+each `todo`, and the checked form gives their types, through the `Inspect`
+library. What a hole blocks is every test, and `main`, that reaches the
+hole's definition through what each definition reads, which the code
+database keeps. The JSON document is
 `{"format", "diagnostics", "holes"}`, each with its definition, file, line,
 and column, its kind, `value` or `type`, its type, its names in scope with
 their types, and what it blocks. Listing holes is not a failure, so the
@@ -367,48 +399,88 @@ each with its path, its kind, its file and line, and its text.
 ### `truss impact`
 
 ```text
-truss impact [--since REVISION] [--json]
-truss impact [--json] PATH...
+truss impact [--base REVISION] [--json]
 ```
 
-**With no path,** it compares the package as it is with the package at a
-git revision, `HEAD` by default, so that uncommitted changes are what it
-shows. For each definition that was added, removed, or changed, it says
-which of its hashes changed, as DESIGN.md splits them: its interface, its
-contract, a default, or its body. Then it lists what the change reaches:
+Compares the worktree as it is with a base commit: the one `--base` names,
+or else where the worktree's branch left the default branch, so that a
+branch's every change is what it shows, uncommitted ones included. The code
+database compares the two sessions, as its "Impact" section describes:
+every result a changed file can reach is brought up to date in both and
+compared, so a part checked again that came out the same is told apart
+from one that changed, and reformatting, or moving a definition within its
+file, changes nothing. For each definition that was added, removed, or
+changed, it shows:
 
-- **For an interface or a contract,** the old and new signature, since those
-  are what a reviewer must read closely, and every definition whose check
-  read it, which are the callers to review.
-- **For every change,** the tests that can reach it, which must run again,
-  with how many already have a kept result for the code as it is now, so an
-  agent knows the cost of its change before running anything. Once the
-  prover exists, the proofs to check again are listed the same way.
+- **The parts that changed,** such as its tree, its signature, or its body.
+- **For a changed signature,** the old and new one, since those are what a
+  reviewer must read closely, and every definition that reads it, which are
+  the callers to review.
+
+Then it lists the tests whose code changed, which are the only tests the
+change can affect, each with whether its result is already kept, so an
+agent knows the cost of its change before running anything. Once the
+prover exists, the proofs to check again are listed the same way.
+
+```text
+Changed since 3f2a9c1e04b7:
+  weather::forecast::parse: tree, signature, body
+    was: public fn parse(text: String) -> Forecast
+    now: public fn parse(text: String) -> Result[Forecast, ParseError]
+    read by: weather::main::main, weather::forecast::test "parses a day"
+
+Tests whose code changed: 1
+  weather::forecast::test "parses a day"
+```
 
 A definition is matched with its earlier self by its path, so a renamed
-definition is listed as removed and added, and one moved within its file is
-not listed at all, since its hashes do not change.
+definition is listed as removed and added. Two agents on the same
+repository can each run it and compare what they reach, and `truss overlap`
+does that for them. The JSON document is `{"format", "diagnostics",
+"problems", "base", "changes", "tests"}`, where each change has its path,
+`added`, `removed`, or `changed`, the parts that changed, its signature
+before and after, and what reads it, with the parts on each side.
 
-`--since main` shows everything a branch changes. Two agents on the same
-package can each run it and compare the definitions they reach, which is
-GOALS.md's "find exactly where and how their work overlapped". The revision
-is read with `git show`, so this form needs the package to be in a git
-repository.
+### `truss references` and `truss dependencies`
 
-**With paths,** it lists what depends on each definition now: every
-definition whose code names it, and every test that can reach it, which
-serves as finding references.
+```text
+truss references [--json] NAME
+truss dependencies [--json] NAME
+```
 
-What reads a definition comes from what resolution and type checking
-decided each name in the package's code means; which tests reach a
-definition comes from lowering the code each test can run, so tests are
-listed only for a package without diagnostics. Both look through the whole
-package, which costs O(package); the background process is to keep the
-reverse index of the traces queries record, which makes it O(change). The
-JSON document is `{"format", "diagnostics", "changes", "tests"}` without
-paths, where each change has its path, `added`, `removed`, or `changed`,
-the parts that changed, its signature before and after, and what reads it,
-and `{"format", "diagnostics", "dependents", "not_found"}` with paths.
+List what reads a definition, or what a definition reads, part by part,
+such as `weather::main::main: its body reads the signature of
+weather::forecast::parse`. `NAME` is a full path or the end of one, such
+as `parse` or `Forecast.summary`, and names every definition it matches.
+The answers come from the graph the code database keeps, so they are
+exact: a read through a method chosen by type checking, or through an
+`impl`, is found as well as one written by name.
+
+### `truss explain`
+
+```text
+truss explain [--json] FILE:LINE:COLUMN
+```
+
+Says what is at a position, as diagnostics give positions: the name or
+expression there, what a name means, its type, and the signature of the
+definition it refers to, so an agent can ask about one name without
+reading the file around it.
+
+### `truss overlap`
+
+```text
+truss overlap [--with BRANCH] [--merge] [--json]
+```
+
+Lists where the worktree's changes from its common commit with another
+meet the other's, as DATABASE.md's "Parallel work" describes: a part both
+change, or a change of one that reads what the other changes, such as a
+new call to a function whose signature the other changes, which git merges
+cleanly and which breaks once merged. It compares with every other worktree
+of the repository that the background process has open, or with `--with`,
+a branch. **`--merge`** also checks a merge of the two, without making it,
+and lists the diagnostics the merge would have that neither side has.
 
 ### `truss rename`
 
@@ -417,20 +489,22 @@ truss rename [--json] FROM TO
 ```
 
 Renames a definition, every version of a method, or a module, and rewrites
-every reference to it in the package. `TO` is a new name, as in `truss
+every reference to it in every package of the worktree, whichever directory
+it is run from. `TO` is a new name, as in `truss
 rename weather::forecast::parse read`, or a full path that keeps the
 definition in its module and a method with its type. Renaming a module, as
 in `truss rename weather::forecast weather::outlook`, moves its file, and
 every `use` of it and every full path to it changes. Renaming a field or a
-variant is not built yet. The rename is made in memory and the package
-checked first; it is refused, changing nothing, if it would cause any
+variant is not built yet. The rename is made in a fork of the worktree's
+session and checked there first, which checks again only what the rename
+changes; it is refused, changing nothing, if it would cause any
 diagnostic, such as for a name that is taken, breaks a naming rule, or
 would hide another, which are the diagnostics a hand-made rename would
-cause. A package that already has diagnostics is refused too, since its
-references are found through checked code. References in other packages
-cannot be changed, so renaming a public definition changes the package's
-public interface, which `truss impact` reports like any other changed
-interface. Each edit replaces the name's tokens alone, so the files need no
+cause. A worktree that already has diagnostics is refused too, since its
+references are found through checked code. References in packages outside
+the worktree cannot be changed, so renaming a public definition changes the
+package's public interface, which `truss impact` reports like any other
+changed signature. Each edit replaces the name's tokens alone, so the files need no
 formatting afterward. Renaming changes callers'
 hashes but not their proofs or test results, since those are keyed with
 names replaced by numbers, so a rename re-proves and re-runs nothing.
@@ -461,44 +535,41 @@ part of every module path.
 
 IMPLEMENTATION.md notes that starting fresh costs O(files), because a fresh
 process must at least read every file to learn which changed, and that a
-long-running process that watches the files and keeps the query database in
-memory makes each command O(change). The language server and the commands
-share it.
+long-running process that watches the files and keeps the query results in
+memory makes each command O(change). The code database's background
+process is that process, as DATABASE.md's "The background process"
+describes, and the command line is its client:
 
-- **Commands start it without being asked,** as Bazel and Gradle do, and
-  talk to it over a socket in the cache directory named by the package's
-  absolute path and the toolchain's version. A command from another toolchain
-  version starts its own. Anything that can be done without it is done the
-  same way in the command's own process, so the process only makes commands
-  faster: their output is the same either way.
-- **It ends after three hours without a command,** as Gradle's daemon does,
-  and `TRUSS_NO_SERVER=1` runs every command in its own process, for CI,
-  where a process that lives past the job only gets in the way.
-- **Each package directory has its own,** so agents working in different git
-  worktrees of one repository each have one, and they share the cache of
-  objects and test results, whose writes are atomic renames.
+- **A command that reads code starts it if it is not running,** as Bazel
+  and Gradle do, sends it the command line and the current directory, and
+  shows what it answers. It runs the command line's own code, from that
+  directory, so the answer is the same as in the command's own process.
+  What a command writes to standard error, such as the status line, comes
+  to the command as it is written, and its output and exit status when it is
+  done.
+- **It ends after three hours without a command,** or on `truss stop`, and
+  `truss status` lists its sessions. `truss sync` brings a worktree's
+  session up to date and does nothing else.
+- **`--no-server` and `TRUSS_NO_SERVER=1` run a command in its own
+  process,** against the same store, for CI, where a process that lives past
+  the job only gets in the way. Such a command is refused, saying why, while
+  the background process has the worktree's session open.
+- **`truss new` and `truss clean` always run in the command's own
+  process,** since they read no code.
 
-Stage0 runs every command in its own process and has no background process
-yet. The commands do not change when it comes.
+### The store
 
-## The cache
-
-Results are kept under `$TRUSS_CACHE`, or else `$XDG_CACHE_HOME/truss`, or
-else `~/.cache/truss`: object files in `objects`, test results in
-`results`, and later checked forms and proofs. Every entry is named by a key
-of what it was made from, so entries never go stale, and nothing in the
-cache is ever needed for a correct answer. **`truss clean`** deletes it all,
-which only costs time. Removing old entries on its own, by last use, is
-left for later.
+Sessions, test results, object files, and programs built to run are kept in
+the code database's store, under `$TRUSS_CACHE`, or else
+`$XDG_CACHE_HOME/truss`, or else `~/.cache/truss`, as DATABASE.md's
+"Content hashes and the store" describes. Every entry is named by a key of
+what it was made from, so entries never go stale, the store collects old
+entries itself to keep within its budget, and nothing in it is ever needed
+for a correct answer. **`truss clean`** stops the background process and
+deletes the store, which only costs time.
 
 ## For working on the compiler
 
-These are left out of `truss --help` and listed by `truss debug --help`:
-
-- **`truss debug tokens FILE`** and **`truss debug tree FILE`** print a
-  file's tokens, one a line, and each definition's syntax tree as an
-  S-expression, with its diagnostics on standard error, or with `--json`,
-  only the diagnostics, on standard output.
 - **`--sanitize`,** on `test` and `run`, builds with AddressSanitizer and
   UndefinedBehaviorSanitizer and keeps no test results, as CODEGEN.md's
   "Testing" describes. It is left out of each command's help.
@@ -506,16 +577,20 @@ These are left out of `truss --help` and listed by `truss debug --help`:
   check for every proven obligation once the prover exists. Stage0 has no
   prover, so all its builds check what a prover would prove, and the flag
   comes with the prover.
+- **`stage0/tools/debug`** prints a file's tokens, one a line, or each
+  definition's syntax tree as an S-expression, with its diagnostics, as
+  `dune exec stage0/tools/debug/debug.exe -- tokens FILE` or `tree FILE`.
+  It is a tool of this repository, like the fuzzer and the benchmarks, and
+  not part of `truss`.
 
 ## Left out
 
 - **`truss explain CODE`,** which rustc has. A diagnostic's message, notes,
   and fixes are meant to say everything needed to act on it, and a second
   text for each code would be a second place to keep up to date.
-- **A watch mode,** such as `cargo watch` or `vitest --watch`. The language
-  server checks as files change, and with the background process each
-  command is already fast, so running a command again does what a watch
-  would.
+- **A watch mode,** such as `cargo watch` or `vitest --watch`. The
+  background process already checks every open worktree as its files
+  change, so running a command again does what a watch would, at once.
 - **`truss add`, `truss publish`, and a lock file.** There is no package
   registry yet. Adding a dependency is a manifest edit that grants
   capabilities, which is the change DESIGN.md wants reviewers to see, so a
@@ -526,27 +601,29 @@ These are left out of `truss --help` and listed by `truss debug --help`:
 
 ## Implementation in stage0
 
+- **`stage0/bin/truss.ml` only starts the command line,** as the command a
+  person or agent runs, or with `__serve`, as the background process. All
+  of it is the `cli` library, so tests drive commands directly.
 - **Arguments are parsed with Cmdliner,** the usual OCaml library, which
   gives every command `--help` and a manual page from the same
-  definitions. Before parsing, `Cli.Arguments` moves a leading `-C
+  definitions. `Cli.Main.evaluate` parses a command line and runs it, in
+  either process. Before parsing, `Cli.Arguments` moves a leading `-C
   DIRECTORY` after the command and marks where `run`'s program arguments
   start, which Cmdliner's own rules would read differently.
-- **The commands are the `cli` library,** apart from parsing arguments, so
-  tests drive them directly. `Project` finds and loads a package and shows
-  paths, `Report` writes diagnostics for people or as JSON, and each command
-  has a module of its own. `References`, which finds every place a
-  definition or module is named from resolution's names and the checked
-  form's calls and members, serves `rename` and `impact`; `Signatures`,
-  which cuts the bodies out of a definition's text, serves `show` and
-  `impact`.
+- **Commands write through `Output`,** which is the process's own standard
+  output and error, or in the background process, a buffer for the output
+  and the client's progress for the errors.
+- **`Project` is the packages a command is about,** from the database's
+  session, with their files and manifests and how paths are shown; `Report`
+  writes diagnostics for people or as JSON; and each command has a module
+  of its own. `References`, which finds every place a definition or module
+  is named from resolution's names and the checked form's calls and
+  members, gives `rename` its edits; `Signatures`, which cuts the bodies
+  out of a definition's text, serves `show`, `impact`, and `explain`.
 - **The test program reports each test as it starts and ends,** with its
   duration, as CODEGEN.md's "The test program" describes, and
   `Compile.run_tests` reads those records while the program runs, handing
   each to `truss test` for the status line.
-- **What code reaches comes from lowering,** with `Compile.reached_definitions`
-  and `Compile.unshippable`, which walk the instances a root reaches as a
-  build would and never compile them, so `holes` and `impact` need no C
-  compiler.
 - **The tests** are in [`stage0/test/cli/`](stage0/test/cli): each makes a
-  small package in a temporary directory and states one fact about what a
-  command does with it.
+  small package, or a git repository, in a temporary directory, with a store
+  of its own, and states one fact about what a command does with it.

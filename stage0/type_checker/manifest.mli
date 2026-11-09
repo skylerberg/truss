@@ -4,6 +4,7 @@
 type t = {
   name : string;
   dependencies : Workspace.dependency list;
+  usize_bits : int;  (** 64 when [[package]] says [usize_bits = 64], and 32 otherwise *)
   time_limit : int;  (** Each test's, in seconds: [[test]]'s [time_limit], or 10 *)
 }
 
@@ -14,5 +15,5 @@ exception Malformed of int * string
 
 val parse : string -> t
 (** Raises {!Malformed}. Comments, sections other than [[package]], [[dependencies]], and [[test]],
-    keys of [[package]] other than [name], such as [version], keys of a dependency other than
-    [capabilities], and keys of [[test]] other than [time_limit] are read past. *)
+    keys of [[package]] other than [name] and [usize_bits], such as [version], keys of a dependency
+    other than [capabilities], and keys of [[test]] other than [time_limit] are read past. *)

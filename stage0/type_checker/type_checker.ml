@@ -21,11 +21,7 @@ let diagnostics database module_ =
     @ Ownership.diagnostics database module_
     @ Package_checks.diagnostics database module_)
 
-(* Sets a package's modules and manifest as inputs. *)
-let load_package database ~name ~dependencies (modules : (Path.module_ * string) list) =
-  List.iter (fun (module_, text) -> Query.set database Workspace.file_text module_ text) modules;
-  Query.set database Workspace.packages name
-    { Workspace.name; dependencies; modules = List.map fst modules }
-
-let load_standard database =
-  load_package database ~name:Standard_library.package ~dependencies:[] Standard_library.modules
+(* The same, as a query, which the database keeps current for each file of
+   a worktree and saves, so that a check after a restart finds it done. *)
+let file_diagnostics =
+  Query.query ~name:"all_diagnostics" ~show:Path.show_module ~saved:true diagnostics

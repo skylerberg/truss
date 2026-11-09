@@ -45,7 +45,7 @@ let fix (project : Project.t) =
     let applied =
       List.concat_map
         (fun module_ ->
-          let diagnostics = Type_checker.diagnostics project.database module_ in
+          let diagnostics = Database.diagnostics project.session module_ in
           match chosen diagnostics with
           | [] -> []
           | chosen ->
@@ -68,17 +68,27 @@ let fix (project : Project.t) =
   in
   round 1 []
 
+(* A check also lists where this worktree's changes meet those of other
+   open worktrees of the repository, as DATABASE.md's "Parallel work" asks.
+   Overlaps are not diagnostics: nothing is wrong with either worktree's
+   code, so they do not change the exit status. *)
 let run ~directory ~fix:fixing ~json =
   let project = Project.load directory in
   let fixed = if fixing then fix project else [] in
-  let files = Report.gather project in
+  let report = Report.gather project in
+  let overlaps = Overlap_command.with_other_worktrees project.session in
   if json then
     Json.print
-      (Json.document ~diagnostics:(Report.to_json files)
-         (if fixing then [ ("fixed", Json.List (List.map (fun d -> Json.Raw d) fixed)) ] else []))
+      (Report.document report
+         ((if fixing then [ ("fixed", Json.List (List.map (fun d -> Json.Raw d) fixed)) ] else [])
+         @ [ ("overlaps", Overlap_command.to_json overlaps) ]))
   else begin
     if fixed <> [] then
-      Printf.eprintf "Fixed %s.\n%!" (Report.plural (List.length fixed) "error" "errors");
-    Report.print files
+      Output.eprintf "Fixed %s.\n" (Report.plural (List.length fixed) "error" "errors");
+    Report.print report;
+    if overlaps <> [] then begin
+      Output.print_line "Overlaps with other worktrees:";
+      Overlap_command.print overlaps
+    end
   end;
-  if files = [] then 0 else 1
+  if Report.clean report then 0 else 1

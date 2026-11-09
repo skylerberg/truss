@@ -39,19 +39,6 @@ let create ?(sanitize = false) (project : Project.t) build =
     | Development, Some file -> Project.shown file
     | _ -> Workspace.file_path module_
   in
-  Compile.create ~file_name project.database Memory_layout.target_64 toolchain
-    (Build.cache (Cache.objects ()))
+  Compile.create ~file_name project.context Memory_layout.target_64 toolchain
+    (Build.cache (Database.objects_directory ()))
     settings
-
-(* For finding what code can reach, which lowers but compiles nothing, so it
-   needs no C compiler. *)
-let lowering_only (project : Project.t) =
-  Compile.create project.database Memory_layout.target_64
-    { compiler = "cc"; identity = "lowering only" }
-    (Build.cache (Cache.objects ()))
-    { build = Development; optimization = O1; extra = [] }
-
-(* The definitions each root can run, or [None] for a root whose code
-   cannot be lowered. *)
-let reached compile root =
-  try Some (Compile.reached_definitions compile root) with Invalid_argument _ -> None

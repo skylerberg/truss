@@ -5,18 +5,12 @@
 
 type t = { enabled : bool; mutable drawn : bool }
 
-let create ~enabled =
-  {
-    enabled = enabled && Unix.isatty Unix.stderr && Sys.getenv_opt "TERM" <> Some "dumb";
-    drawn = false;
-  }
+let create ~enabled = { enabled = enabled && Output.terminal (); drawn = false }
 
 (* The terminal's width, from [COLUMNS] when the shell exports it. A line
    that wrapped could not be erased, so it is cut to fit. *)
 let width () =
-  match Option.bind (Sys.getenv_opt "COLUMNS") int_of_string_opt with
-  | Some columns when columns > 10 -> columns - 1
-  | _ -> 79
+  match Output.columns () with Some columns when columns > 10 -> columns - 1 | _ -> 79
 
 (* The text cut to [limit] characters, counting each UTF-8 sequence once. *)
 let cut text limit =
@@ -32,14 +26,12 @@ let erase_line = "\r\027[K"
 
 let show t text =
   if t.enabled then begin
-    prerr_string (erase_line ^ cut text (width ()));
-    flush stderr;
+    Output.eprint (erase_line ^ cut text (width ()));
     t.drawn <- true
   end
 
 let clear t =
   if t.drawn then begin
-    prerr_string erase_line;
-    flush stderr;
+    Output.eprint erase_line;
     t.drawn <- false
   end

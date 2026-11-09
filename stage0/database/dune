@@ -1,0 +1,15 @@
+(library
+ (name database)
+ (libraries
+  unix
+  blake3
+  engine
+  query
+  store
+  path
+  workspace
+  diagnostic
+  standard_library
+  type_checker
+  resolve
+  compile))

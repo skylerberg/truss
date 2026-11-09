@@ -747,7 +747,7 @@ let definition_parts context (definition : definition) =
   | Definition_error _ -> [ (Interface, node "error" []) ]
 
 let parts =
-  Query.query ~name:"hash" ~show:Resolve.Names.show_key (fun database key ->
+  Query.query ~name:"hash" ~show:Resolve.Names.show_key ~saved:true (fun database key ->
       match
         ( Query.demand database Resolve.Names.definition key,
           Query.demand database Resolve.resolved key )
@@ -781,6 +781,9 @@ let parts =
 let part =
   Query.query ~name:"hash_part"
     ~show:(fun (key, part) -> Resolve.Names.show_key key ^ " " ^ show_part part)
+    ~saved:true
+    ~about:(fun ((key : Resolve.Names.key), part) ->
+      Some { Query.path = key.path; part = Some (show_part part) })
     (fun database (key, wanted) ->
       match Query.demand database parts key with
       | Some parts -> List.assoc_opt wanted parts

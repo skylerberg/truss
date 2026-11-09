@@ -3,4 +3,4 @@
 (executable
  (name truss)
  (public_name truss)
- (libraries cmdliner cli hash lir unicode))
+ (libraries cli))
