@@ -211,7 +211,13 @@ let body cursor ~signature =
                     (Printf.sprintf " {\n%s  todo\n%s}" indentation indentation);
                 ];
             ];
-        raise Cursor.Failed
+        (* The signature parsed, so it is kept, with a body that is an
+           error where the body should be. *)
+        let at = Syntax.Span.make (Cursor.relative cursor stop) (Cursor.relative cursor stop) in
+        {
+          statements = [ { kind = Statement_error; span = at; blank_line_before = false } ];
+          span = at;
+        }
       end
       else Cursor.fail cursor "`{` to start the body"
 
@@ -455,6 +461,22 @@ let law_proof cursor =
   Cursor.expect_keyword cursor For;
   let type_ = Parse_expression.type_expression cursor in
   Law_proof { trait_; law; type_; body = Parse_expression.body cursor }
+
+(* The keyword and the name of a definition whose header did not parse,
+   read again from its start with [cursor], whose diagnostics are thrown
+   away, so that later stages know the definition is there. *)
+let header cursor =
+  ignore (visibility cursor);
+  let keyword = match Cursor.peek_kind cursor with Keyword keyword -> Some keyword | _ -> None in
+  Cursor.advance cursor;
+  let name () : definition_name option =
+    match keyword with
+    | Some (Fn | Let) -> Some (definition_name cursor)
+    | Some (Type | Trait | Capability) -> Some (Plain_name (Atoms.upper cursor "a name"))
+    | Some Theorem -> Some (Plain_name (Atoms.lower cursor "a name"))
+    | _ -> None
+  in
+  (keyword, match name () with name -> name | exception Cursor.Failed -> None)
 
 type empty = |
 

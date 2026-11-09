@@ -255,4 +255,4 @@ let definition cursor (definition : definition) =
   | Law_proof { type_; body; _ } ->
       types cursor plain type_;
       block cursor (proof plain) body
-  | Definition_error -> ()
+  | Definition_error _ -> ()

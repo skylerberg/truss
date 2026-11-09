@@ -83,6 +83,12 @@ let over ?stop cursor tokens =
   inner.depth <- cursor.depth;
   inner
 
+(* A cursor over the same slice from its start, whose diagnostics are thrown
+   away, for reading again what an error left unparsed. *)
+let reread cursor =
+  create ~source:cursor.source ~diagnostics:(Diagnostic.Collector.create ()) ~base:cursor.base
+    cursor.tokens ~first:cursor.first ~stop:cursor.stop
+
 (* The end of the slice reads as an End_of_file token, zero-width, just after
    the slice's last token. *)
 let end_token cursor =

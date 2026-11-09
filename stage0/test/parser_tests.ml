@@ -146,6 +146,22 @@ let () =
         ~fixed:"use c::d\nfn f() {}\n");
   test "a statement at the top level is one error" (fun () ->
       error "fn f() {}\nx = 1\nfn g() {}" ~code:Statement_at_top_level ~at:"x");
+  test "a definition whose header did not parse keeps its keyword and name" (fun () ->
+      let file, _ = parse "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn f() {}" in
+      let printed =
+        List.map
+          (fun (item : Syntax.definition Syntax.item) -> Syntax_print.definition item.value)
+          file.definitions
+      in
+      if printed <> [ "(error fn List[Element].sort)"; "(error type Point)"; "(fn f () (block))" ]
+      then fail "got [%s]" (String.concat "; " printed));
+  test "a function without a body keeps its signature" (fun () ->
+      let file, _ = parse "fn f(x: Int64) -> Int64\nfn g() {}" in
+      match file.definitions with
+      | first :: _ ->
+          if Syntax_print.definition first.value <> "(fn f ((x: Int64)) -> Int64 (block error))"
+          then fail "got %s" (Syntax_print.definition first.value)
+      | [] -> fail "no definitions");
   test "the definition after a broken one parses" (fun () ->
       let file, diagnostics = parse "fn f() -> {\n}\nfn g() {}" in
       if List.length diagnostics <> 1 then

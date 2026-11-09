@@ -388,7 +388,9 @@ type definition_kind =
       body : block;
     }
   | Law_proof of { trait_ : path_type; law : name; type_ : type_expression; body : block }
-  | Definition_error
+  | Definition_error of { keyword : Token.keyword option; name : definition_name option }
+      (** A definition whose header did not parse, with its keyword and its name when those were
+          read, so that later stages can still know it is there. *)
 
 type definition = { visibility : visibility; kind : definition_kind; span : span }
 

@@ -243,4 +243,4 @@ let definition f (definition : definition) =
       path_type f trait_;
       type_expression f type_;
       block f body
-  | Definition_error -> ()
+  | Definition_error _ -> ()

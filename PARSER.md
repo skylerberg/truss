@@ -544,16 +544,26 @@ added once the compiler works:
 - **The lexer** gives the parser one token array per file. The parser reads
   the source bytes only through spans, to build fixes and to keep each
   definition's source text.
-- **Name resolution** gets one tree per definition that parsed without an
-  error, and annotates its nodes. A definition with a parser diagnostic
-  stops at the parser: its tree holds `Error` nodes, and nodes built for a
-  habit as if its fix had been applied, which serve the language server and
-  recovery, but checking them would report errors whose cause is the one
-  the parser already reported. Each error then has one diagnostic, as
-  TYPECHECKER.md asks. The definitions around it are checked as usual.
+- **Name resolution** gets one tree per definition and annotates its nodes.
   It decides `Bracket`, `Binding_or_constant`, and `Name` nodes. Type
   checking then reports bare arguments that name no parameter. Both are
   designed in [TYPECHECKER.md](TYPECHECKER.md).
+- **A broken definition keeps what the parser read,** so that a mistake in
+  one definition does not make every use of its name an error elsewhere:
+  - a definition whose header did not parse is a `Definition_error` with its
+    keyword and its name, when those were read
+  - any other keeps its whole tree, with an `Error` node for each part that
+    did not parse. A function whose body is missing keeps its signature,
+    with an `Error` statement for the body.
+  - its signature is as written when all of its diagnostics lie in its
+    body, which is the usual case
+
+  Nodes built for a habit, as if its fix had been applied, lie in the same
+  signature or body as the habit's diagnostic, so a later stage that skips
+  a signature or a body with a diagnostic never reports an error on code
+  the parser made up.
+  TYPECHECKER.md decides how resolution registers a broken definition and
+  which of its parts it checks.
 - **Hashing** walks the tree and ignores spans, `Parenthesized` nodes, blank
   lines, and how literals were written, as DESIGN.md's hash format says.
 - **`truss fmt`** prints the tree, taking literals from the definition's

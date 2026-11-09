@@ -442,7 +442,8 @@ let definition (definition : definition) =
     | Law_proof { trait_; law; type_; body } ->
         form "proof"
           [ path_type_text trait_ ^ "." ^ law.text; "for"; type_expression type_; block body ]
-    | Definition_error -> "error"
+    | Definition_error { keyword; name } ->
+        form "error" [ optional Token.keyword_spelling keyword; optional definition_name name ]
   in
   match visibility definition.visibility with "" -> body | written -> form written [ body ]
 
