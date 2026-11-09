@@ -824,28 +824,39 @@ incremental is deferred.
 
 ## Testing
 
-- **Golden LIR.** Small programs with their expected LIR, compared with
-  dune's `diff` actions, as the lexer's tests are.
-- **The generated C is checked strictly.** The compiler's own test suite
-  compiles generated C with `-Wall -Wextra -Werror` and a list of warnings
-  known not to apply to generated code, which catches emitter bugs that a C
-  compiler would otherwise accept quietly.
-- **Sanitizers.** The test suite also builds test programs with
-  AddressSanitizer and UndefinedBehaviorSanitizer. A memory error in Truss
-  code can only come from a bug in the compiler or the prover, so any report
-  is one. Being able to do this is one benefit of emitting C.
-- **`--check-proofs`.** A compiler flag, for testing the compiler only, that
-  emits a run-time check for every proven obligation: indexes, overflow,
-  division, shifts, and `unreachable`. A failed check reports a prover bug
-  with the obligation's position. Running the compiler's own corpus with it
-  checks the prover against real executions.
-- **Development and release agree.** Every corpus program runs in both, and
-  their outputs must be identical. Later, the compiler written in Truss is
-  checked against stage0 the same way.
-- **Deterministic output.** Building the corpus twice must give byte-identical
-  LIR and C.
-- **The documents as a corpus.** Every complete program in the design
-  documents is built and run.
+The tests follow IMPLEMENTATION.md's rules for testing: each states one
+fact about a small input, and there are no golden files.
+
+- **Focused tests.** A test gives a small definition and asserts exact facts
+  about what code generation makes of it, rather than comparing a dump of
+  its whole LIR. For example: a `for` over a range of `Int64` lowers to a
+  loop with no call; a field moved out with `own` is dropped exactly once,
+  on every path; `Option[List[Int64]]` has no tag; a `mut` parameter becomes
+  a `restrict` pointer. A test that runs a small program asserts its output
+  and exit status.
+- **The generated C is checked strictly.** Every focused test that emits C
+  compiles it with `-Wall -Wextra -Werror` and a list of warnings known not
+  to apply to generated code, which catches emitter bugs that a C compiler
+  would otherwise accept quietly.
+- **Output is deterministic.** A test lowers and emits the same definition
+  twice and checks that the LIR and C are byte-identical.
+- **The documents' complete programs build and run,** each as a test of its
+  own.
+- **Tools, run by hand, in `stage0/tools/`:**
+  - **Sanitizers.** Build programs with AddressSanitizer and
+    UndefinedBehaviorSanitizer. A memory error in Truss code can only come
+    from a bug in the compiler or the prover, so any report is one. Being
+    able to do this is one benefit of emitting C.
+  - **`--check-proofs`.** A compiler flag, for testing the compiler only,
+    that emits a run-time check for every proven obligation: indexes,
+    overflow, division, shifts, and `unreachable`. A failed check reports a
+    prover bug with the obligation's position, which checks the prover
+    against real executions.
+  - **Development and release agree.** Run programs built both ways and
+    compare their outputs. Later, the compiler written in Truss is checked
+    against stage0 the same way.
+
+  Each problem a tool finds becomes a focused test of its own.
 
 ## Open questions
 
