@@ -145,6 +145,14 @@ let signature (operation : Intrinsic.operation) : T.signature =
           input "name" (view (T.builtin UInt8));
           input ~mode:Mut "buffer" (storage (T.builtin UInt8));
         ]
+  | Run_process ->
+      make
+        ~output:(Returns (T.builtin Int32))
+        [
+          input "program" (view (T.builtin UInt8));
+          input "arguments" (view (T.builtin UInt8));
+          input ~mode:Mut "error" (T.builtin Int32);
+        ]
   | Clock_now -> make ~output:(Returns (T.builtin Int64)) []
   | Random_fill ->
       make [ input ~mode:Mut "buffer" (storage (T.builtin UInt8)); input "count" usize ]

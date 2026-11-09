@@ -14,6 +14,7 @@ let headers =
 #include <signal.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <spawn.h>
 #include <poll.h>
 #include <time.h>
 #include <unistd.h>
@@ -312,6 +313,48 @@ int32_t t_runtime_open(const uint8_t *path, t_usize length, int32_t flags, int32
 
 void t_runtime_close(int32_t descriptor) {
   if (descriptor >= 0) close(descriptor);
+}
+
+/* Runs a program, found on the PATH as a shell finds it, with the
+   arguments, each ending in a zero byte, and waits for it. It returns the
+   exit status, or 128 and the signal that ended it; on failure to start it,
+   -1 with the error number written. */
+int32_t t_runtime_run(const uint8_t *program, t_usize length, const uint8_t *arguments, t_usize arguments_length,
+                      int32_t *error) {
+  t_usize count = 0;
+  for (t_usize i = 0; i < arguments_length; i++)
+    if (arguments[i] == 0) count += 1;
+  char **argv = malloc((count + 2) * sizeof(char *));
+  char *name = malloc(length + 1);
+  char *copied = malloc(arguments_length + 1);
+  if (argv == NULL || name == NULL || copied == NULL) t_out_of_memory();
+  memcpy(name, program, length);
+  name[length] = 0;
+  if (arguments_length > 0) memcpy(copied, arguments, arguments_length);
+  argv[0] = name;
+  t_usize at = 0;
+  for (t_usize k = 0; k < count; k++) {
+    argv[k + 1] = copied + at;
+    while (copied[at] != 0) at += 1;
+    at += 1;
+  }
+  argv[count + 1] = NULL;
+  pid_t pid;
+  extern char **environ;
+  int failed = posix_spawnp(&pid, name, NULL, NULL, argv, environ);
+  int status = 0;
+  if (failed == 0) {
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+  }
+  free(argv);
+  free(name);
+  free(copied);
+  if (failed != 0) {
+    *error = failed;
+    return -1;
+  }
+  *error = 0;
+  return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
 }
 
 /* An environment variable's value and its length, or null when it is

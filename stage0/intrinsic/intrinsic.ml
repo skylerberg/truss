@@ -144,6 +144,7 @@ type operation =
   | Handle_read
   | Handle_write
   | Environment_variable
+  | Run_process
   | Clock_now
   | Random_fill
 
@@ -214,6 +215,7 @@ let operations =
     Handle_read;
     Handle_write;
     Environment_variable;
+    Run_process;
     Clock_now;
     Random_fill;
   ]
@@ -284,6 +286,7 @@ let operation_name = function
   | Handle_read -> "handle_read"
   | Handle_write -> "handle_write"
   | Environment_variable -> "environment_variable"
+  | Run_process -> "run_process"
   | Clock_now -> "clock_now"
   | Random_fill -> "random_fill"
 

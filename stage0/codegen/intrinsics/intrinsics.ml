@@ -477,6 +477,16 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
               emit b (Assign (at read, Convert (Copy (at got), Integer USize)));
               add_to_length storage (Copy (at read)));
           set (Use (Copy (at got)))
+      | Run_process ->
+          let program = place (argument 0) and packed = place (argument 1) in
+          call ?result:destination System_run
+            [
+              Copy (program / Field "elements");
+              Copy (program / Field "length");
+              Copy (packed / Field "elements");
+              Copy (packed / Field "length");
+              Address { place = place (argument 2); writable = true };
+            ]
       | Environment_variable ->
           let name = place (argument 0) in
           let storage = place (argument 1) in

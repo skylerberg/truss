@@ -132,6 +132,8 @@ type intrinsic =
       (** [(path, path length, flags, error's address) -> Int32]: a descriptor, -1 with the error
           number written when it fails *)
   | System_close  (** [(descriptor)] *)
+  | System_run
+      (** [(program, length, arguments, length, error's address) -> Int32]: as [run_process] *)
   | Float_text
       (** [(value, bytes) -> USize]: writes the shortest decimal that reads back as the float, at
           most [float_text_limit] bytes, as [Display] shows it *)

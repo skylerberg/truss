@@ -96,6 +96,36 @@ impl Environment for SystemEnvironment {
   }
 }
 
+internal type SystemProcesses()
+
+impl Processes for SystemProcesses {
+  fn run(self, program: Path, arguments: List[String]) -> Result[ExitCode, FileError] {
+    var packed: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+    for argument in arguments {
+      let bytes = argument.slice().bytes
+      for index in 0..intrinsic::view_length(bytes) {
+        intrinsic::storage_push(mut packed, value: intrinsic::view_at(bytes, index: index))
+      }
+      intrinsic::storage_push(mut packed, value: 0)
+    }
+    var error: Int32 = 0
+    let status = intrinsic::run_process(
+      program.text.slice().bytes,
+      arguments: intrinsic::storage_view(packed),
+      error: mut error,
+    )
+    if error == 0 {
+      Ok(ExitCode(code: intrinsic::convert(status)))
+    } else if error == 2 {
+      Err(FileError.NotFound)
+    } else if error == 13 {
+      Err(FileError.PermissionDenied)
+    } else {
+      Err(FileError.Other(code: error))
+    }
+  }
+}
+
 internal type SystemClock()
 
 impl Clock for SystemClock {

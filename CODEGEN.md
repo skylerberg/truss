@@ -942,8 +942,11 @@ operating system to release them, such as `close`. Stage0 has the first:
 `Plain`, with `open_file`, `handle_read`, and `handle_write`. The standard
 library's `SystemFileRead` and `SystemFileWrite`, and its `FileReader` and
 `FileWriter`, are written on them, as `SystemEnvironment` is on
-`environment_variable`, `SystemClock` on `clock_now`, and `SystemRandom` on
-`random_fill`. They are the only drops
+`environment_variable`, `SystemProcesses` on `run_process`, which spawns
+a program found on the `PATH` and waits for it, `SystemClock` on
+`clock_now`, and `SystemRandom` on `random_fill`. `NetworkClient`,
+`NetworkServer`, and `Tasks` have no real implementation yet, and a `main`
+that uses one is refused with a message saying so. They are the only drops
 that do more than free memory, and they run no Truss code, as DESIGN.md
 requires. Standard-library types such as `File` hold one in a field, so
 their drop functions release the resource by dropping that field.

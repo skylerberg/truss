@@ -2701,6 +2701,26 @@ let () =
       expect_string ~expected:"22 bytes\nfirst\nsecond line\nmissing\n" output)
 
 let () =
+  test "a program runs other programs and reads their exit status" (fun () ->
+      let status, output, _ =
+        run_main
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes
+{
+  if Processes.run(Path.new("sh".slice()), arguments: ["-c", "exit 7"]) is Ok(code) {
+    Console.print_line("exited ${code.code}".slice())
+  }
+  if Processes.run(Path.new("truss-no-such-program".slice()), arguments: []) is Err(NotFound) {
+    Console.print_line("missing".slice())
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"exited 7\nmissing\n" output)
+
+let () =
   test "a program reads environment variables" (fun () ->
       Unix.putenv "TRUSS_TEST_VARIABLE" "caf\xc3\xa9";
       let status, output, _ =

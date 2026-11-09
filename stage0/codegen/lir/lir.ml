@@ -122,6 +122,8 @@ type intrinsic =
       (** [(path, path length, flags, error's address) -> Int32]: a descriptor, -1 with the error
           number written when it fails *)
   | System_close  (** [(descriptor)] *)
+  | System_run
+      (** [(program, length, arguments, length, error's address) -> Int32]: as [run_process] *)
   | Float_text
       (** [(value, bytes) -> USize]: writes the shortest decimal that reads back as the float, at
           most [float_text_limit] bytes, as [Display] shows it *)
@@ -504,7 +506,7 @@ let canonical (f : function_) =
   }
 
 let canonical_instance t = { t with main = canonical t.main; nested = Array.map canonical t.nested }
-let version = 9
+let version = 10
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -663,6 +665,7 @@ let intrinsic_tag = function
   | System_environment -> 45
   | System_open -> 46
   | System_close -> 47
+  | System_run -> 48
 
 let encode_rvalue instance rvalue =
   let operand = encode_operand instance in
@@ -942,6 +945,7 @@ let intrinsic_name = function
   | System_environment -> "system_environment"
   | System_open -> "system_open"
   | System_close -> "system_close"
+  | System_run -> "system_run"
   | Clock_now -> "clock_now"
   | Random_fill -> "random_fill"
   | Debug_begin -> "debug_begin"
