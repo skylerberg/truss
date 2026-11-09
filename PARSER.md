@@ -70,10 +70,13 @@ The parser is one dune library, which depends on `Token`, `Source`,
 |---|---|
 | `Split` | Finds the `use` lines and each definition's token slice |
 | `Cursor` | Reads a token slice: the current token, lookahead, reporting errors, and the jumps recovery makes |
-| `Atoms` | Names, module prefixes, and string literals, which every part of the grammar uses |
-| `Cost_word` | The words of `cost` clauses, with the one table of their spellings |
+| `Atoms` | Tree nodes, names, module prefixes, string literals, what can start an expression or a statement, and modes, which every part of the grammar uses |
+| `Cost_word` | The words of `cost` clauses, with the one table of their spellings, and reading one, with a fix for a misspelling |
 | `Parse_pattern` | Patterns |
-| `Parse_expression` | Types, clauses, expressions, statements, and blocks |
+| `Parse_type` | Types, generic parameters and bounds, and clauses |
+| `Parse_expression` | Expressions, with the operators' levels |
+| `Parse_statement` | Blocks and statements |
+| `Parse_hooks` | The entry points an earlier part calls in a later one, since types, clauses, expressions, and statements contain each other; `Parse_statement` sets them |
 | `Parse_definition` | Definitions, and the members of traits, `impl`s, and capabilities |
 | `Operators` | The check for combinations of operators that need parentheses |
 | `Habits` | The messages and fixes for syntax from other languages |

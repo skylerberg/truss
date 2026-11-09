@@ -59,7 +59,7 @@ let remove_visibility cursor code (tokens : Token.t list) message =
 let type_head cursor : type_head =
   let start = cursor.Cursor.index in
   let path = Atoms.upper_path cursor "a type name" in
-  let generics = Parse_expression.generics cursor in
+  let generics = Parse_type.generics cursor in
   { path; generics; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
 
 (* A function's name, or a constant's: [length], or [List[Element].length]
@@ -77,14 +77,14 @@ let parameter cursor : parameter =
   let kind =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
     | Keyword Self_value, _ | Keyword (Mut | Own), Keyword Self_value ->
-        let mode = Parse_expression.mode cursor in
+        let mode = Atoms.mode cursor in
         Cursor.advance cursor;
         Self_parameter mode
     | _ ->
         let name = Atoms.lower cursor "a parameter name" in
         Cursor.expect_punctuation cursor Colon;
-        let mode = Parse_expression.mode cursor in
-        let type_ = Parse_expression.type_expression cursor in
+        let mode = Atoms.mode cursor in
+        let type_ = Parse_type.type_expression cursor in
         let default =
           if Cursor.accept_punctuation cursor Equal then Some (Parse_expression.expression cursor)
           else None
@@ -118,15 +118,14 @@ let parameters cursor ~method_ =
   parameters
 
 let result cursor =
-  if Cursor.accept_punctuation cursor Arrow then
-    Some (Returns (Parse_expression.type_expression cursor))
+  if Cursor.accept_punctuation cursor Arrow then Some (Returns (Parse_type.type_expression cursor))
   else if Cursor.accept_keyword cursor Yields then
-    let mode = Parse_expression.mode cursor in
-    Some (Yields (mode, Parse_expression.type_expression cursor))
+    let mode = Atoms.mode cursor in
+    Some (Yields (mode, Parse_type.type_expression cursor))
   else if Cursor.accept_keyword cursor Lends then begin
     (* A lent part stays with [self], so it is never handed over. *)
     let own = Cursor.peek cursor in
-    let mode = Parse_expression.mode cursor in
+    let mode = Atoms.mode cursor in
     if mode = Some Own then
       Cursor.report cursor Lends_own own.span
         "A part a `lends` method lends stays with `self`, so it cannot be `own`; a method that \
@@ -136,7 +135,7 @@ let result cursor =
             Diagnostic.fix "Remove `own`"
               [ Diagnostic.delete (Source.span own.span.start (Cursor.peek cursor).span.start) ];
           ];
-    Some (Lends (mode, Parse_expression.type_expression cursor))
+    Some (Lends (mode, Parse_type.type_expression cursor))
   end
   else None
 
@@ -147,15 +146,15 @@ let result cursor =
 let clauses cursor =
   let rec loop clauses =
     let start = cursor.Cursor.index in
-    if not (Parse_expression.is_clause_keyword (Cursor.peek_kind cursor)) then List.rev clauses
+    if not (Parse_type.is_clause_keyword (Cursor.peek_kind cursor)) then List.rev clauses
     else
       let clause =
-        match Parse_expression.clause cursor with
+        match Parse_type.clause cursor with
         | clause -> clause
         | exception Cursor.Failed ->
             let rec skip () =
               match Cursor.peek_kind cursor with
-              | kind when Parse_expression.is_clause_keyword kind -> ()
+              | kind when Parse_type.is_clause_keyword kind -> ()
               | Punctuation (Open Curly) | End_of_file -> ()
               | Newline when Cursor.peek_ahead cursor 1 = Punctuation (Open Curly) -> ()
               | _ ->
@@ -189,7 +188,7 @@ let clauses cursor =
 
 (* A body after a signature, if there is one. *)
 let optional_body cursor =
-  if Parse_expression.opens_body cursor then Some (Parse_expression.body cursor) else None
+  if Parse_statement.opens_body cursor then Some (Parse_statement.body cursor) else None
 
 (* A body that must come after the signature that starts at the token
    [signature]. A missing one gets the body of unwritten code, [{ todo }],
@@ -241,7 +240,7 @@ let body cursor ~signature =
 
 (* [fn name[...](...) -> Result clauses], after [fn]. *)
 let signature cursor ~name ~method_ : signature =
-  let generics = Parse_expression.generics cursor in
+  let generics = Parse_type.generics cursor in
   let parameters = parameters cursor ~method_ in
   let result = result cursor in
   let clauses = clauses cursor in
@@ -272,7 +271,7 @@ let member_signature cursor : signature =
 
 (* The members of a trait, an [impl], or a capability, one per line. *)
 let members cursor ~member ~error =
-  Parse_expression.body_opening cursor;
+  Parse_statement.body_opening cursor;
   Cursor.lines cursor
     ~item:(fun cursor ->
       let start = cursor.Cursor.index in
@@ -301,7 +300,7 @@ let trait_member cursor =
       Cursor.advance cursor;
       let name = Atoms.upper cursor "the name of an associated type" in
       Associated_type
-        (name, if Cursor.accept_punctuation cursor Colon then Parse_expression.bounds cursor else [])
+        (name, if Cursor.accept_punctuation cursor Colon then Parse_type.bounds cursor else [])
   | Keyword Law ->
       Cursor.advance cursor;
       let name = Atoms.lower cursor "the name of a law" in
@@ -312,7 +311,7 @@ let trait_member cursor =
         else List.rev list
       in
       let requires = premises [] in
-      Law { name; parameters; requires; body = Parse_expression.body cursor }
+      Law { name; parameters; requires; body = Parse_statement.body cursor }
   | _ -> Cursor.fail cursor "`fn`, `type`, or `law` to start a member of the trait"
 
 let impl_member cursor =
@@ -325,7 +324,7 @@ let impl_member cursor =
       Cursor.advance cursor;
       let name = Atoms.upper cursor "the name of an associated type" in
       Cursor.expect_punctuation cursor Equal;
-      Associated_definition (name, Parse_expression.type_expression cursor)
+      Associated_definition (name, Parse_type.type_expression cursor)
   | _ -> Cursor.fail cursor "`fn` or `type` to start a member of the `impl`"
 
 let capability_member cursor =
@@ -350,7 +349,7 @@ let fields cursor : field list =
     let start = cursor.Cursor.index in
     let name = Atoms.lower cursor "a field name" in
     Cursor.expect_punctuation cursor Colon;
-    let type_ = Parse_expression.type_expression cursor in
+    let type_ = Parse_type.type_expression cursor in
     let default =
       if Cursor.accept_punctuation cursor Equal then Some (Parse_expression.expression cursor)
       else None
@@ -393,11 +392,11 @@ let type_clauses cursor =
         clause (Type_invariant (Parse_expression.expression cursor))
     | Keyword Derives ->
         Cursor.advance cursor;
-        clause (Derives (Parse_expression.capability_list cursor))
+        clause (Derives (Parse_type.capability_list cursor))
     | Keyword Cost ->
         Cursor.advance cursor;
         ignore
-          (Parse_expression.cost_word cursor ~accepted:[ Potential ]
+          (Cost_word.expect cursor ~accepted:[ Potential ]
              ~what:"`potential`; a type's only cost clause is `cost potential expression`"
              ~expected:"`potential`; a type's only cost clause is `cost potential expression`");
         clause (Potential (Parse_expression.expression cursor))
@@ -408,7 +407,7 @@ let type_clauses cursor =
 let type_definition cursor =
   Cursor.advance cursor;
   let name = Atoms.upper cursor "the name of the type" in
-  let generics = Parse_expression.generics cursor in
+  let generics = Parse_type.generics cursor in
   let body =
     if Cursor.is_punctuation cursor (Open Paren) then Fields (fields cursor)
     else if Cursor.accept_punctuation cursor Equal then
@@ -420,10 +419,8 @@ let type_definition cursor =
 let trait cursor =
   Cursor.advance cursor;
   let name = Atoms.upper cursor "the name of the trait" in
-  let generics = Parse_expression.generics cursor in
-  let requires =
-    if Cursor.accept_punctuation cursor Colon then Parse_expression.bounds cursor else []
-  in
+  let generics = Parse_type.generics cursor in
+  let requires = if Cursor.accept_punctuation cursor Colon then Parse_type.bounds cursor else [] in
   Trait
     {
       name;
@@ -434,12 +431,10 @@ let trait cursor =
 
 let impl cursor =
   Cursor.advance cursor;
-  let trait_ = Parse_expression.path_type cursor in
+  let trait_ = Parse_type.path_type cursor in
   Cursor.expect_keyword cursor For;
   let type_ = type_head cursor in
-  let uses =
-    if Cursor.accept_keyword cursor Uses then Parse_expression.capability_list cursor else []
-  in
+  let uses = if Cursor.accept_keyword cursor Uses then Parse_type.capability_list cursor else [] in
   Impl
     { trait_; type_; uses; members = members cursor ~member:impl_member ~error:Impl_member_error }
 
@@ -454,7 +449,7 @@ let constant cursor =
   Cursor.advance cursor;
   let name = definition_name cursor in
   Cursor.expect_punctuation cursor Colon;
-  let type_ = Parse_expression.type_expression cursor in
+  let type_ = Parse_type.type_expression cursor in
   Cursor.expect_punctuation cursor Equal;
   Constant { name; type_; value = Parse_expression.expression cursor }
 
@@ -472,28 +467,26 @@ let test cursor =
     | String _ -> Cursor.fail cursor "a plain string, with no tag, to name the test"
     | _ -> Cursor.fail cursor "a string to name the test"
   in
-  let uses =
-    if Cursor.accept_keyword cursor Uses then Parse_expression.capability_list cursor else []
-  in
-  Test { name; uses; body = Parse_expression.body cursor }
+  let uses = if Cursor.accept_keyword cursor Uses then Parse_type.capability_list cursor else [] in
+  Test { name; uses; body = Parse_statement.body cursor }
 
 let theorem cursor =
   Cursor.advance cursor;
   let name = Atoms.lower cursor "the name of the theorem" in
-  let generics = Parse_expression.generics cursor in
+  let generics = Parse_type.generics cursor in
   let parameters = parameters cursor ~method_:false in
   let clauses = clauses cursor in
-  Theorem { name; generics; parameters; clauses; body = Parse_expression.body cursor }
+  Theorem { name; generics; parameters; clauses; body = Parse_statement.body cursor }
 
 (* [proof Monoid.associative for Int64 { ... }]. *)
 let law_proof cursor =
   Cursor.advance cursor;
-  let trait_ = Parse_expression.path_type cursor in
+  let trait_ = Parse_type.path_type cursor in
   Cursor.expect_punctuation cursor Dot;
   let law = Atoms.lower cursor "the name of a law" in
   Cursor.expect_keyword cursor For;
-  let type_ = Parse_expression.type_expression cursor in
-  Law_proof { trait_; law; type_; body = Parse_expression.body cursor }
+  let type_ = Parse_type.type_expression cursor in
+  Law_proof { trait_; law; type_; body = Parse_statement.body cursor }
 
 (* The keyword and the name of a definition whose header did not parse,
    read again from its start with [cursor], whose diagnostics are thrown
@@ -545,7 +538,7 @@ let top_level cursor ~function_ =
     | Keyword Proof ->
         no_visibility "A law's proof";
         Left (law_proof cursor)
-    | kind when visibility = Private && Parse_expression.begins_statement kind ->
+    | kind when visibility = Private && Atoms.begins_statement kind ->
         Cursor.report cursor Statement_at_top_level (Cursor.peek cursor).span
           "Statements must be inside a function, a test, or another definition with a body.";
         raise Cursor.Failed
