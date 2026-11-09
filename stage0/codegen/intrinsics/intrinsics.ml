@@ -30,6 +30,7 @@ let lower env b types operation ~type_arguments arguments ~destination ~site =
   let binary op = set (Binary (op, value 0, value 1)) in
   let unary op = set (Unary (op, value 0)) in
   let call ?result intrinsic arguments =
+    let result = match result with Some place -> Lir.Returned place | None -> Discarded in
     emit b (Call { target = Intrinsic intrinsic; arguments; result })
   in
   let into intrinsic = call ?result:destination intrinsic (List.map operand arguments) in

@@ -320,7 +320,8 @@ let rec viewed state (value : expression) : place list =
                 (fun (argument : C.argument) ->
                   match find_expression context argument.expression with
                   | Some expression
-                    when argument.mode = T.Read || is_view context (type_of context expression) ->
+                    when (argument.mode = T.Read && not (plain context (type_of context expression)))
+                         || is_view context (type_of context expression) ->
                       viewed state expression
                   | _ -> [])
                 call.arguments

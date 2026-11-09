@@ -230,7 +230,7 @@ let call name ?(result = Some (value int32)) ?(parameters = []) arguments place 
         Direct
           { function_ = Instance (key name); signature = { parameters; result; returns = true } };
       arguments;
-      result = place;
+      result = (match place with Some place -> Returned place | None -> Discarded);
     }
 
 (* Compiling and running generated C *)
@@ -542,7 +542,7 @@ let () =
                     {
                       target = Indirect { value = copy 2; signature };
                       arguments = [ constant_int32 1 ];
-                      result = Some (at 3);
+                      result = Returned (at 3);
                     };
                 ]
                 (Return (Some (copy 3)));
@@ -618,7 +618,7 @@ let () =
                       constant_int32 1;
                       Address { place = at 0; writable = true };
                     ];
-                  result = Some (at 1);
+                  result = Returned (at 1);
                 };
             ];
         ]);
@@ -984,7 +984,7 @@ let loop_program go_on =
               {
                 target = Direct { function_ = Instance (key "count_to"); signature };
                 arguments = [ constant_int32 4; copy 2 ];
-                result = None;
+                result = Discarded;
               };
           ]
           (Return (Some (copy 0)));
@@ -1027,7 +1027,7 @@ let () =
               Direct
                 { function_ = Instance (Cursor_next yielding); signature = Lir.signature next.main };
             arguments = [ Address { place = at 0; writable = true } ];
-            result = Some place;
+            result = Returned place;
           }
       in
       let pulled = at 1 in
@@ -1104,7 +1104,7 @@ let fill_storage ~target ~buffer values =
     {
       target = Intrinsic Allocate;
       arguments = [ usize_constant (4 * count); usize_constant 4 ];
-      result = Some (at buffer);
+      result = Returned (at buffer);
     }
   :: List.mapi
        (fun i v ->
@@ -1135,7 +1135,7 @@ let copy_call glue ty ~destination ~source =
           Address { place = at destination; writable = true };
           Address { place = at source; writable = false };
         ];
-      result = None;
+      result = Discarded;
     }
 
 let () =
@@ -1242,7 +1242,7 @@ let () =
                       {
                         target = Intrinsic Allocate;
                         arguments = [ usize_constant 48; usize_constant 8 ];
-                        result = Some (at 4);
+                        result = Returned (at 4);
                       };
                     Assign (at ~projections:[ Index (usize_constant 0) ] 4, Use (Move (at 0)));
                     Assign (at ~projections:[ Index (usize_constant 1) ] 4, Use (Move (at 2)));
@@ -1337,7 +1337,8 @@ let () =
 (* The test runner *)
 
 let () =
-  test "the test runner reports each test's outcome, message, and echo output in order" (fun () ->
+  test "the test runner reports each test's outcome, message, and echo output in order, and a leak"
+    (fun () ->
       let site : Lir.site = { definition = definition "suite"; line = 2; column = 3 } in
       let text value = Lir.Constant (Bytes value) in
       let length value = Lir.Constant (Integer (USize, Z.of_int (String.length value))) in
@@ -1354,6 +1355,22 @@ let () =
             [ block [ Echo { text = text "42"; length = length "42"; site } ] (Return None) ];
           suite "never_ends" [ block [] (Goto 0) ];
           suite "unfinished" [ block [] (ending Todo "hole of type Int64") ];
+          suite "leaks"
+            [
+              block
+                [
+                  Call
+                    {
+                      target = Intrinsic Allocate;
+                      arguments =
+                        [
+                          Constant (Integer (USize, Z.of_int 8)); Constant (Integer (USize, Z.one));
+                        ];
+                      result = Discarded;
+                    };
+                ]
+                (Return None);
+            ];
         ]
       in
       incr counter;
@@ -1386,6 +1403,7 @@ let () =
                    "test 3 passed\necho 21\nsuite.truss:12:3: 42\n\n";
                    "test 4 timed_out\nmessage 23\nran past the time limit\n";
                    "test 5 incomplete\nmessage 40\nhole of type Int64\n  at suite.truss:12:3\n";
+                   "test 6 panicked\nmessage 45\ncompiler bug: the test left 1 block allocated\n";
                  ])
             out)
 
@@ -1577,7 +1595,7 @@ let () =
       in
       let site : Lir.site = { definition = definition "entry"; line = 0; column = 1 } in
       let echo b ty place =
-        emit b (Call { target = Intrinsic Debug_begin; arguments = []; result = None });
+        emit b (Call { target = Intrinsic Debug_begin; arguments = []; result = Discarded });
         emit b
           (Call
              {
@@ -1585,12 +1603,14 @@ let () =
                  Direct
                    { function_ = Instance (Debug ty); signature = Glue.debug_signature glue ty };
                arguments = [ Address { place; writable = false } ];
-               result = None;
+               result = Discarded;
              });
         let bytes = local b (Raw (Pointer Opaque))
         and length = local b (Value (Monomorphic.builtin USize)) in
-        emit b (Call { target = Intrinsic Debug_bytes; arguments = []; result = Some (at bytes) });
-        emit b (Call { target = Intrinsic Debug_length; arguments = []; result = Some (at length) });
+        emit b
+          (Call { target = Intrinsic Debug_bytes; arguments = []; result = Returned (at bytes) });
+        emit b
+          (Call { target = Intrinsic Debug_length; arguments = []; result = Returned (at length) });
         emit b (Echo { text = Copy (at bytes); length = Copy (at length); site })
       in
       let main =
@@ -1740,8 +1760,10 @@ test "squares wrongly" {
          assert square(3) == 10\n\
         \  at example/main.truss:10:3\n")
 
+(* A test of a module whose one test passes. *)
+let passes name source = test name (fun () -> expect_output source "test 0 passed\n")
+
 let () =
-  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
   passes "loops, variables, and comparisons run"
     {|fn sum_to(limit: Int64) -> Int64 {
   var total = 0
@@ -1820,7 +1842,6 @@ test "options" {
 |}
 
 let () =
-  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
   passes "lists are built, pushed onto, indexed, and looped over"
     {|fn total(items: List[Int64]) -> Int64 {
   var sum = 0
@@ -1859,7 +1880,6 @@ test "results" {
 |}
 
 let () =
-  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
   passes "a string interpolates its parts"
     {|test "interpolation" {
   let count = 3
@@ -1889,7 +1909,6 @@ test "lambdas" {
 |}
 
 let () =
-  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
   passes "integers display in decimal, negative ones too"
     {|test "display" {
   let small: Int8 = -128
@@ -1908,7 +1927,6 @@ let () =
 |}
 
 let () =
-  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
   passes "constants are static data, worked out exactly"
     {|type Point(x: Int64, y: Int64)
   derives Equal
@@ -1929,7 +1947,6 @@ test "constants" {
 |}
 
 let () =
-  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
   passes "a named function is passed as a function value"
     {|fn double(value: Int64) -> Int64 {
   value * 2
@@ -1996,7 +2013,6 @@ test "any" {
 |}
 
 let () =
-  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
   passes "a pulled cursor yields each value and then None"
     {|fn count_to(limit: Int64) yields Int64 {
   var i = 1
@@ -2010,12 +2026,85 @@ test "cursors" {
   var first = count_to(3)
   var second = count_to(2)
   var total = 0
-  while first.next() is Some(left) && second.next() is Some(right) {
+  while mut first.next() is Some(left) && mut second.next() is Some(right) {
     total += left * right
   }
   assert total == 5
-  assert first.next() == Some(3)
-  assert first.next() == None
+  assert mut first.next() == None
+  var third = count_to(1)
+  assert mut third.next() == Some(1)
+  assert mut third.next() == None
+}
+|};
+  passes "a cursor dropped before it ends drops what it holds"
+    {|fn words(prefix: String) yields String {
+  yield "${prefix} one"
+  yield "${prefix} two"
+}
+
+test "dropped early" {
+  var each = words("a")
+  assert mut each.next() == Some("a one")
+  var never = words("b")
+}
+|};
+  passes "names an is test binds are used where it holds"
+    {|fn describe(found: Option[String], limit: USize) -> String {
+  if found is Some(text) && text.length() > limit {
+    text
+  } else if !(found is Some(_)) || limit == 0 {
+    "nothing"
+  } else {
+    "short"
+  }
+}
+
+fn longer(found: Option[String]) -> Bool {
+  found is Some(text) && text.length() > 3
+}
+
+test "is" {
+  assert describe(Some("long enough"), limit: 3) == "long enough"
+  assert describe(Some("ab"), limit: 3) == "short"
+  assert describe(None, limit: 3) == "nothing"
+  assert longer(Some("four"))
+  assert !longer(Some("abc"))
+  assert !longer(None)
+}
+|};
+  passes "a guard that fails leaves the value for the next arm"
+    {|fn classify(found: Option[String]) -> String {
+  match found {
+    Some(text) if text.length() > 3 => text
+    Some(text) => "short ${text}"
+    None => "none"
+  }
+}
+
+test "guards" {
+  assert classify(Some("lengthy")) == "lengthy"
+  assert classify(Some("ab")) == "short ab"
+  assert classify(None) == "none"
+}
+|};
+  passes "an expression a pattern looks into is evaluated once"
+    {|fn next_index(counter: mut USize) -> USize {
+  counter += 1
+  counter - 1
+}
+
+test "once" {
+  var counter: USize = 0
+  let items = [Some(10), Some(20), None]
+  let Some(first) = items[next_index(mut counter)] else {
+    return
+  }
+  assert first == 10
+  assert counter == 1
+  if items[next_index(mut counter)] is Some(second) {
+    assert second == 20
+  }
+  assert counter == 2
 }
 |}
 

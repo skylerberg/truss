@@ -18,6 +18,14 @@ type result =
 
 val result : Memory_layout.env -> Ground.ty -> result
 
+(* The C signature of code that takes these parameters and gives a result
+   passed as it is: a result's pointer comes before the parameters. *)
+val signature : ?returns:bool -> Lir.ty list -> result -> Lir.signature
+
+(* Where a call writes a result, passed as it is, to a place: through a
+   pointer to it when the result is too large to return. *)
+val destination : result -> Lir.place -> Lir.destination
+
 (* The C signature of the code behind a function value of a type: its
    environment first, then its parameters, then one evidence pointer for
    each capability in its [uses]. *)

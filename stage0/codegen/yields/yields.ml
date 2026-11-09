@@ -22,7 +22,7 @@ let loop_form env ~(body : Ground.function_type) (f : Lir.function_) =
                 {
                   target = Indirect { value = Copy (local_place body_local); signature };
                   arguments = [ value ];
-                  result = Some (local_place go_on);
+                  result = Returned (local_place go_on);
                 }
             in
             let terminator : Lir.terminator =
@@ -84,15 +84,10 @@ let statement_uses_defines (statement : Lir.statement) =
       let reads, defined = written place in
       (rvalue_reads rvalue @ reads, defined)
   | Call { target; arguments; result } ->
-      let target_reads =
-        match target with
-        | Indirect { value; _ }
-        | Evidence_call { evidence = value; _ }
-        | Table_call { table = value; _ } ->
-            operand_reads value
-        | Direct _ | Intrinsic _ -> []
+      let target_reads = List.concat_map operand_reads (Lir.target_operands target) in
+      let reads, defined =
+        match result with Returned place | Written place -> written place | Discarded -> ([], None)
       in
-      let reads, defined = match result with Some place -> written place | None -> ([], None) in
       (target_reads @ List.concat_map operand_reads arguments @ reads, defined)
   | Drop place | Free_block { place; _ } -> (place_reads place, None)
   | Echo { text; length; _ } -> (operand_reads text @ operand_reads length, None)

@@ -19,14 +19,29 @@ let pulled t yielding =
       let f, owned = Lower.pulled t.context yielding in
       let glue = t.context.glue in
       let made =
-        (Drops.elaborate t.context.env ~needs_drop:(fun ty -> not (Glue.trivial glue ty)) ~environment:(fun _ -> []) f, owned)
+        ( Drops.elaborate t.context.env
+            ~needs_drop:(fun ty -> not (Glue.trivial glue ty))
+            ~environment:(fun _ -> [])
+            f,
+          owned )
       in
       t.pulled <- (yielding, made) :: t.pulled;
       made
 
 let create database target toolchain cache settings =
-  let t = { database; context = Lower.context database target; toolchain; cache; settings; done_ = []; pulled = [] } in
-  t.context.cursor_fields := (fun yielding -> Yields.cursor_fields t.context.env (fst (pulled t yielding)));
+  let t =
+    {
+      database;
+      context = Lower.context database target;
+      toolchain;
+      cache;
+      settings;
+      done_ = [];
+      pulled = [];
+    }
+  in
+  (t.context.cursor_fields :=
+     fun yielding -> Yields.cursor_fields t.context.env (fst (pulled t yielding)));
   t
 
 let environment (instance : Lir.t) n = instance.nested.(n).environment
@@ -61,7 +76,9 @@ let make t (key : Instance.key) : Lir.compiled =
       let f, _ = pulled t yielding in
       let cursor = Ground.Cursor yielding in
       let result = Lower.cursor_result t.context yielding in
-      Code (Lir.canonical_instance { key; main = Yields.cursor_next t.context.env ~cursor ~result f; nested = [||] })
+      Code
+        (Lir.canonical_instance
+           { key; main = Yields.cursor_next t.context.env ~cursor ~result f; nested = [||] })
   | Drop ty -> code (Glue.drop glue ty)
   | Copy ty -> code (Glue.copy glue ty)
   | Debug ty -> code (Glue.debug glue ty)

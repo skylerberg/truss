@@ -139,12 +139,12 @@ type intrinsic =
 type target =
   | Direct of { function_ : function_ref; signature : signature }
   | Indirect of { value : operand; signature : signature }
-      (** A call through a function value: its code with its environment first *)
+      (** A call through a function value: its code, given its environment first *)
   | Intrinsic of intrinsic
   | Evidence_call of { evidence : operand; slot : int; signature : signature }
       (** A capability's method: entry [slot] of the evidence's table, given the evidence first *)
-  | Table_call of { table : operand; slot : int; signature : signature }
-      (** Entry [slot] of a table of code, such as an [any] value's *)
+  | Table_call of { table : operand; value : operand; slot : int; signature : signature }
+      (** Entry [slot] of a table of code, such as an [any] value's, given the value first *)
 
 type rvalue =
   | Use of operand
@@ -169,9 +169,19 @@ type site = { definition : Path.t; line : int; column : int }
    [todo] that was reached. *)
 type failure = Panic | Assertion | Todo
 
+(* Where a call's result goes. A target that is given something first, such
+   as a function value's environment, is given it before the result's
+   pointer. *)
+type destination =
+  | Discarded  (** There is no result, or nothing reads it *)
+  | Returned of place  (** Returned by value, and written to the place *)
+  | Written of place
+      (** Written by the callee through a pointer to the place, the call's first argument, for a
+          result too large to return *)
+
 type statement =
   | Assign of place * rvalue
-  | Call of { target : target; arguments : operand list; result : place option }
+  | Call of { target : target; arguments : operand list; result : destination }
   | Drop of place  (** Runs the type's drop code *)
   | Echo of { text : operand; length : operand; site : site }
       (** Records the debug output of a value: a pointer to UTF-8 bytes and their length *)
@@ -251,6 +261,9 @@ val map_terminator : place:(place -> place) -> block:(block -> block) -> termina
 
 (* The blocks a terminator may go to, in order. *)
 val successors : terminator -> block list
+
+(* The operands a call's target reads, beyond its arguments. *)
+val target_operands : target -> operand list
 
 (* The same function in canonical form: blocks in reverse postorder from
    the entry, with unreachable blocks removed, and locals numbered with the

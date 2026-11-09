@@ -229,6 +229,11 @@ void t_runtime_install(void) {
 
 let allocation =
   {|
+/* How many blocks are allocated and not yet freed. A test must end with as
+   many as it started with: Truss frees every block it allocates, so a test
+   that leaves one is a compiler bug. */
+static t_usize t_live_blocks = 0;
+
 void *t_runtime_allocate(t_usize size, t_usize alignment) {
   void *pointer = NULL;
   if (size == 0) size = 1;
@@ -238,7 +243,13 @@ void *t_runtime_allocate(t_usize size, t_usize alignment) {
     pointer = NULL;
   }
   if (pointer == NULL) t_out_of_memory();
+  t_live_blocks += 1;
   return pointer;
+}
+
+void t_runtime_free(void *pointer) {
+  t_live_blocks -= 1;
+  free(pointer);
 }
 
 void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usize alignment) {
@@ -250,12 +261,8 @@ void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usiz
   }
   void *moved = t_runtime_allocate(size, alignment);
   memcpy(moved, pointer, old_size < size ? old_size : size);
-  free(pointer);
+  t_runtime_free(pointer);
   return moved;
-}
-
-void t_runtime_free(void *pointer) {
-  free(pointer);
 }
 
 /* Gives storage room for at least [minimum] elements, at least doubling it
@@ -482,7 +489,16 @@ static void t_worker_main(const t_test *tests, int commands) {
       got += (size_t)n;
     }
     t_current_test = index;
+    t_usize live = t_live_blocks;
     tests[index]();
+    if (t_live_blocks != live) {
+      t_text_length = 0;
+      t_usize left = t_live_blocks - live;
+      t_text_string("compiler bug: the test left ");
+      t_text_number((uint64_t)left);
+      t_text_string(left == 1 ? " block allocated" : " blocks allocated");
+      t_end(t_panicked, "", 101);
+    }
     t_text_length = 0;
     t_record(t_passed);
   }

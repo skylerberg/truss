@@ -863,11 +863,16 @@ let call_c context fc (target : Lir.target) arguments =
       Printf.sprintf "%s.f_code(%s)" value
         (String.concat ", " ((value ^ ".f_environment") :: List.map fst arguments))
   | Intrinsic intrinsic -> intrinsic_c context intrinsic arguments
-  | Table_call { table; slot; signature } ->
+  | Table_call { table; value; slot; signature } ->
       let table =
         match operand_c context fc table with
         | Some (text, _) -> text
         | None -> bug "a table of zero size"
+      in
+      let texts =
+        match operand_c context fc value with
+        | Some (value, _) -> String.concat ", " (value :: List.map fst arguments)
+        | None -> bug "an any value of zero size"
       in
       let result =
         match signature.result with None -> "void" | Some ty -> c_ty context fc.symbol ty
@@ -886,7 +891,8 @@ let call_c context fc (target : Lir.target) arguments =
       in
       Printf.sprintf "((%s (*)(%s))((const struct t_evidence *)%s)->table[%d])(%s)" result
         (signature_parameters context fc.symbol signature.parameters None)
-        evidence slot texts
+        evidence slot
+        (String.concat ", " (evidence :: List.map fst arguments))
 
 let anchor_c context definition =
   let symbol = anchor_symbol definition in
@@ -913,11 +919,16 @@ let statement_c context fc buffer (statement : Lir.statement) =
               line "  *block = %s;" fill;
               line "  %s = %s;" target (value "block");
               line "}"))
+  | Call { target; arguments; result = Written place } ->
+      line "%s;" (call_c context fc target (Address { place; writable = true } :: arguments))
   | Call { target; arguments; result } -> (
       let call = call_c context fc target arguments in
-      match Option.bind result (place_c context fc) with
-      | Some (place, _) -> line "%s = %s;" place call
-      | None -> line "%s;" call)
+      match result with
+      | Returned place -> (
+          match place_c context fc place with
+          | Some (place, _) -> line "%s = %s;" place call
+          | None -> line "%s;" call)
+      | Discarded | Written _ -> line "%s;" call)
   | Drop place -> (
       match place_c context fc place with
       | None -> ()

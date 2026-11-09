@@ -386,14 +386,8 @@ let lir_signature context substitution ~(parameters : (T.mode * T.ty) list) ~has
       parameters
   in
   let mask = if has_defaults then [ Lir.Raw (Integer UInt64) ] else [] in
-  let parameters, result =
-    match result_ty with
-    | Through_pointer pointer -> (pointer :: written, None)
-    | Returned ty -> (written, Some ty)
-    | Nothing -> (written, None)
-  in
   let evidence = List.map (fun _ -> Convention.evidence) (evidence_for substitution uses) in
-  ({ parameters = parameters @ mask @ evidence; result; returns }, result_ty)
+  (Convention.signature ~returns (written @ mask @ evidence) result_ty, result_ty)
 
 let has_defaults (signature : T.signature) =
   List.exists (fun (p : T.parameter_info) -> p.has_default) signature.parameters
@@ -495,12 +489,23 @@ let leave_to st depth =
     (fun i scope -> if List.length st.scopes - i > depth then drop_scope st scope)
     st.scopes
 
-let in_scope st f =
+(* A scope opened here and closed, with its drops, by [close_scope], for a
+   condition's names, whose scope ends on more than one path. *)
+let open_scope st =
   let scope = { owned = [] } in
   st.scopes <- scope :: st.scopes;
-  let result = f () in
+  scope
+
+let close_scope st scope =
   drop_scope st scope;
-  st.scopes <- List.tl st.scopes;
+  match st.scopes with
+  | top :: rest when top == scope -> st.scopes <- rest
+  | _ -> bug "a scope closed out of order"
+
+let in_scope st f =
+  let scope = open_scope st in
+  let result = f () in
+  close_scope st scope;
   result
 
 let unreachable_block st =
@@ -663,17 +668,8 @@ let call_instance st key ~(signature : T.signature) ~substitution
     @ List.map (evidence_of st) (evidence_for substitution signature.uses)
   in
   let target = Lir.Direct { function_ = Instance key; signature = lir_signature } in
-  (match result with
-  | Through_pointer _ ->
-      emit st.b
-        (Call
-           {
-             target;
-             arguments = Address { place = destination; writable = true } :: (passed @ mask);
-             result = None;
-           })
-  | Returned _ -> emit st.b (Call { target; arguments = passed @ mask; result = Some destination })
-  | Nothing -> emit st.b (Call { target; arguments = passed @ mask; result = None }));
+  emit st.b
+    (Call { target; arguments = passed @ mask; result = Convention.destination result destination });
   if not lir_signature.returns then unreachable_block st
 
 (* Expressions *)
@@ -715,7 +711,8 @@ let string_value st ty text =
 let cursor_element context (yielding : Ground.yielding) =
   let signature = signature_of context yielding.method_ in
   match signature.output with
-  | Yields (_, ty) -> Monomorphic.ground context.monomorphic (bind signature.generics yielding.type_arguments) ty
+  | Yields (_, ty) ->
+      Monomorphic.ground context.monomorphic (bind signature.generics yielding.type_arguments) ty
   | _ -> bug "%s does not yield" (Path.show yielding.method_)
 
 (* What a cursor's [next] returns: an [Option] of what it yields. *)
@@ -840,9 +837,7 @@ and place_expression st (e : S.expression) : Lir.place option =
               checked
             |> List.sort (fun (a, _) (b, _) -> Int.compare a b)
             |> List.map (fun (parameter, e) ->
-                if parameter = 0 then
-                  Intrinsics.Place
-                    (match place_expression st e with Some p -> p | None -> expression st e)
+                if parameter = 0 then Intrinsics.Place (expression st e)
                 else Intrinsics.Value (operand st e))
           in
           Intrinsics.lower st.context.env st.b st.context.types operation ~type_arguments values
@@ -883,7 +878,7 @@ and lends st (call_ : C.call) =
 (* The instance a call to a function or a trait method reaches. *)
 and resolve_callee st (call_ : C.call) =
   match call_.callee with
-  | Trait_method { evidence = Dynamic; _ } -> None
+  | Trait_method { evidence = Dynamic | Built_in; _ } -> None
   | Function { path; type_arguments } ->
       Some
         ( path,
@@ -973,8 +968,7 @@ and evaluate_arguments st ~(expressions : S.expression list) ~(arguments : C.arg
     let ty = type_of st e.id in
     let place =
       match argument.mode with
-      | Mut | Read -> (
-          match place_expression st e with Some place -> place | None -> expression st e)
+      | Mut | Read -> expression st e
       | Own -> (
           match place_expression st e with
           | Some place ->
@@ -1071,26 +1065,18 @@ and into st (e : S.expression) (destination : Lir.place) =
       | Some place -> assign (Use (owned st place (ty ())))
       | None -> name_value st e destination)
   | Call (callee, arguments) -> call st e ~callee ~arguments destination
-  | Binary { operator = (And | Or) as operator; left; right; _ } ->
-      let on_left = operand st left in
-      let decide = block st.b and other = block st.b and after = block st.b in
-      ignore decide;
-      let short_value = match operator with And -> false | _ -> true in
-      let short = block st.b in
-      finish st.b
-        (Switch
-           {
-             value = on_left;
-             cases = [ (Z.one, if operator = And then other else short) ];
-             default = Some (if operator = And then short else other);
-           });
-      start st.b short;
-      assign (Use (Constant (Bool short_value)));
-      finish st.b (Goto after);
-      start st.b other;
-      into st right destination;
-      finish st.b (Goto after);
-      start st.b after
+  | Binary { operator = And | Or; _ } | Is _ ->
+      (* A condition's value: whether its jumps reach [yes]. *)
+      in_scope st (fun () ->
+          let yes = block st.b and no = block st.b and after = block st.b in
+          branch st e ~yes ~no;
+          start st.b yes;
+          assign (Use (Constant (Bool true)));
+          finish st.b (Goto after);
+          start st.b no;
+          assign (Use (Constant (Bool false)));
+          finish st.b (Goto after);
+          start st.b after)
   | Binary { left; right; _ } -> operator st e [ left; right ] destination
   | Prefix (Negate, ({ kind = Integer _; _ } as inner))
     when st.frame.code.checked.calls.(e.id) = None ->
@@ -1101,17 +1087,6 @@ and into st (e : S.expression) (destination : Lir.place) =
   | Block block -> block_into st block (Some destination)
   | If { condition; then_; else_ } -> if_ st ~condition ~then_ ~else_ (Some destination)
   | Match { scrutinees; arms } -> match_ st ~scrutinees ~arms (Some destination)
-  | Is { value; pattern; _ } ->
-      let scrutinee = expression st value in
-      let yes = block st.b and no = block st.b and after = block st.b in
-      test_pattern st pattern scrutinee (type_of st value.id) ~matched:yes ~failed:no;
-      start st.b yes;
-      assign (Use (Constant (Bool true)));
-      finish st.b (Goto after);
-      start st.b no;
-      assign (Use (Constant (Bool false)));
-      finish st.b (Goto after);
-      start st.b after
   | Return value ->
       return_ st value;
       ()
@@ -1278,17 +1253,13 @@ and call_function_value st ~(callee : S.expression) ~(arguments : S.argument lis
   let target = Lir.Indirect { value = Copy value; signature } in
   match f.result with
   | Returns ty ->
-      (match Convention.result st.context.env ty with
-      | Through_pointer _ ->
-          emit st.b
-            (Call
-               {
-                 target;
-                 arguments = Address { place = destination; writable = true } :: passed;
-                 result = None;
-               })
-      | Returned _ -> emit st.b (Call { target; arguments = passed; result = Some destination })
-      | Nothing -> emit st.b (Call { target; arguments = passed; result = None }));
+      emit st.b
+        (Call
+           {
+             target;
+             arguments = passed;
+             result = Convention.(destination (result st.context.env ty)) destination;
+           });
       if ty = Never then unreachable_block st
   | Yields _ | Lends _ -> bug "a function value that yields"
 
@@ -1489,9 +1460,7 @@ and interpolate st (literal : S.string_literal) destination =
   List.iter
     (fun ((part : S.expression), (text : S.text)) ->
       let ty = type_of st part.id in
-      let place =
-        match place_expression st part with Some place -> place | None -> expression st part
-      in
+      let place = expression st part in
       trait_call st
         ~trait:(Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Display" })
         ~name:"display" ~receiver:Read ~self:ty
@@ -1543,11 +1512,11 @@ and any_value st (e : S.expression) (inner : S.expression) destination =
          {
            target = Intrinsic Allocate;
            arguments = [ usize layout.size; usize layout.alignment ];
-           result = Some (at block);
+           result = Returned (at block);
          });
     let typed = local st.b (Pointer { target = Value inner_ty; writable = true }) in
     emit st.b (Assign (at typed, Use (Copy (at block))));
-    let value = match place_expression st inner with Some p -> p | None -> expression st inner in
+    let value = expression st inner in
     emit st.b
       (Assign ({ root = Local typed; projections = [ Deref ] }, Use (owned st value inner_ty)))
   end;
@@ -1571,7 +1540,7 @@ and is_built_in st (e : S.expression) =
   | _ -> false
 
 and echo st place ty span =
-  emit st.b (Call { target = Intrinsic Debug_begin; arguments = []; result = None });
+  emit st.b (Call { target = Intrinsic Debug_begin; arguments = []; result = Discarded });
   let arguments = if zero_size st ty then [] else [ Lir.Address { place; writable = false } ] in
   emit st.b
     (Call
@@ -1583,12 +1552,13 @@ and echo st place ty span =
                signature = Glue.debug_signature st.context.glue ty;
              };
          arguments;
-         result = None;
+         result = Discarded;
        });
   let bytes = local st.b (Raw (Pointer Opaque))
   and length = local st.b (Value st.context.types.usize) in
-  emit st.b (Call { target = Intrinsic Debug_bytes; arguments = []; result = Some (at bytes) });
-  emit st.b (Call { target = Intrinsic Debug_length; arguments = []; result = Some (at length) });
+  emit st.b (Call { target = Intrinsic Debug_bytes; arguments = []; result = Returned (at bytes) });
+  emit st.b
+    (Call { target = Intrinsic Debug_length; arguments = []; result = Returned (at length) });
   emit st.b (Echo { text = Copy (at bytes); length = Copy (at length); site = site st span })
 
 (* A name that is not a place: a variant with no fields, or a constant. *)
@@ -1757,9 +1727,14 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
         emit st.b
           (Assign
              ( destination,
-               Build { ty = cursor; variant = None; fields = ("state", Constant (Integer (UInt32, Z.zero))) :: fields } ))
+               Build
+                 {
+                   ty = cursor;
+                   variant = None;
+                   fields = ("state", Constant (Integer (UInt32, Z.zero))) :: fields;
+                 } ))
     | Trait_method { name = "next"; self_type; evidence = Built_in; _ }
-      when (match ground st self_type with Cursor _ -> true | _ -> false) -> (
+      when match ground st self_type with Cursor _ -> true | _ -> false -> (
         match (ground st self_type, in_order) with
         | Cursor yielding, (_, _, _, cursor) :: _ -> call_next st yielding cursor destination
         | _ -> bug "next with no cursor")
@@ -1785,28 +1760,22 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
         | (_, _, _, any) :: rest ->
             let passed = List.filter_map (fun (_, mode, ty, place) -> pass st mode ty place) rest in
             let evidence = List.map (evidence_of st) (evidence_for [] signature.uses) in
-            let value = Lir.Copy (any / Field "value") in
             let target =
               Lir.Table_call
-                { table = Copy (any / Field "vtable"); slot; signature = lir_signature }
+                {
+                  table = Copy (any / Field "vtable");
+                  value = Copy (any / Field "value");
+                  slot;
+                  signature = lir_signature;
+                }
             in
-            (match result with
-            | Through_pointer _ ->
-                emit st.b
-                  (Call
-                     {
-                       target;
-                       arguments =
-                         (value :: Address { place = destination; writable = true } :: passed)
-                         @ evidence;
-                       result = None;
-                     })
-            | Returned _ ->
-                emit st.b
-                  (Call
-                     { target; arguments = (value :: passed) @ evidence; result = Some destination })
-            | Nothing ->
-                emit st.b (Call { target; arguments = (value :: passed) @ evidence; result = None }));
+            emit st.b
+              (Call
+                 {
+                   target;
+                   arguments = passed @ evidence;
+                   result = Convention.destination result destination;
+                 });
             if not lir_signature.returns then unreachable_block st
         | [] -> bug "a call through any with no receiver")
     | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } ->
@@ -1873,19 +1842,8 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
         let passed = List.filter_map (fun (_, mode, ty, place) -> pass st mode ty place) in_order in
         let evidence = evidence_of st capability in
         let target = Lir.Evidence_call { evidence; slot; signature = lir_signature } in
-        (match result with
-        | Through_pointer _ ->
-            emit st.b
-              (Call
-                 {
-                   target;
-                   arguments =
-                     evidence :: Address { place = destination; writable = true } :: passed;
-                   result = None;
-                 })
-        | Returned _ ->
-            emit st.b (Call { target; arguments = evidence :: passed; result = Some destination })
-        | Nothing -> emit st.b (Call { target; arguments = evidence :: passed; result = None }));
+        emit st.b
+          (Call { target; arguments = passed; result = Convention.destination result destination });
         if not lir_signature.returns then unreachable_block st
     | Built_in_operator -> bug "a built-in operator called as a function"
 
@@ -1903,12 +1861,10 @@ and with_placeholders st (signature : T.signature) substitution in_order =
     (interface_parameters signature)
 
 and yields_cursor st (call_ : C.call) =
-  match call_.callee with
-  | Trait_method { evidence = Dynamic | Built_in; _ } -> false
-  | _ -> (
-      match resolve_callee st call_ with
-      | Some (path, _) -> ( match (signature_of st.context path).output with Yields _ -> true | _ -> false)
-      | None -> false)
+  match resolve_callee st call_ with
+  | Some (path, _) -> (
+      match (signature_of st.context path).output with Yields _ -> true | _ -> false)
+  | None -> false
 
 (* [next()] on a cursor: the pulled method's state machine. *)
 and call_next st (yielding : Ground.yielding) cursor destination =
@@ -1916,24 +1872,14 @@ and call_next st (yielding : Ground.yielding) cursor destination =
   let cursor_pointer = Lir.Pointer { target = Value (Cursor yielding); writable = true } in
   let target signature = Lir.Direct { function_ = Instance (Cursor_next yielding); signature } in
   let self = Lir.Address { place = cursor; writable = true } in
-  match Convention.result st.context.env option with
-  | Through_pointer pointer ->
-      emit st.b
-        (Call
-           {
-             target = target { parameters = [ pointer; cursor_pointer ]; result = None; returns = true };
-             arguments = [ Address { place = destination; writable = true }; self ];
-             result = None;
-           })
-  | Returned ty ->
-      emit st.b
-        (Call
-           {
-             target = target { parameters = [ cursor_pointer ]; result = Some ty; returns = true };
-             arguments = [ self ];
-             result = Some destination;
-           })
-  | Nothing -> bug "a cursor's next with no result"
+  let convention = Convention.result st.context.env option in
+  emit st.b
+    (Call
+       {
+         target = target (Convention.signature [ cursor_pointer ] convention);
+         arguments = [ self ];
+         result = Convention.destination convention destination;
+       })
 
 and default_mask (signature : T.signature) (call_ : C.call) =
   let defaulted = List.filter (fun (p : T.parameter_info) -> p.has_default) signature.parameters in
@@ -2077,14 +2023,14 @@ and statement st (s : S.statement) =
   | Expression e -> ignore (expression st e)
   | Let { mutable_; pattern; value; else_ = None; _ } -> let_ st ~mutable_ pattern value
   | Let { pattern; value; else_ = Some else_; _ } ->
-      let scrutinee = expression st value in
+      let place, temporary = scrutinee st value in
       let matched = block st.b and failed = block st.b in
-      test_pattern st pattern scrutinee (type_of st value.id) ~matched ~failed;
+      test_pattern st pattern place (type_of st value.id) ~matched ~failed;
       start st.b failed;
       block_into st else_ None;
       unreachable_block st;
       start st.b matched;
-      bind_pattern st pattern scrutinee (type_of st value.id) ~owned:(is_temporary st value)
+      bind_pattern st pattern place (type_of st value.id) ~owned:temporary
   | Assignment { target; operator = Assign; value } -> (
       match place_expression st target with
       | Some place -> into st value place
@@ -2109,20 +2055,30 @@ and statement st (s : S.statement) =
           emit st.b (Assign (place, Use (owned st result ty)))
       | _ -> bug "a compound assignment that is not lowered: %s" (source st s.span))
   | While { condition; body; _ } ->
-      let test = block st.b and inside = block st.b and after = block st.b in
+      (* Each test's temporaries end before the body or the exit; the names
+         it binds live until the body ends. *)
+      let test = block st.b and inside = block st.b and failed = block st.b in
+      let after = block st.b in
+      let depth = List.length st.scopes in
       finish st.b (Goto test);
       start st.b test;
+      let scope = open_scope st in
       st.temporaries <- [] :: st.temporaries;
-      let value = operand st condition in
-      end_statement st;
-      finish st.b (Switch { value; cases = [ (Z.one, inside) ]; default = Some after });
+      branch st condition ~yes:inside ~no:failed;
+      let temporaries = List.hd st.temporaries in
+      st.temporaries <- List.tl st.temporaries;
+      start st.b failed;
+      drop_temporaries st temporaries;
+      drop_scope st scope;
+      finish st.b (Goto after);
       start st.b inside;
-      let depth = List.length st.scopes in
+      drop_temporaries st temporaries;
       st.loops <-
         { continue_ = test; continue_depth = depth; break_ = after; break_depth = depth }
         :: st.loops;
       block_into st body None;
       st.loops <- List.tl st.loops;
+      close_scope st scope;
       finish st.b (Goto test);
       start st.b after
   | For { pattern; iterable; body; parallel = _; _ } -> for_ st s ~pattern ~iterable ~body
@@ -2148,9 +2104,7 @@ and statement st (s : S.statement) =
   | Yield value -> (
       match st.frame.on_yield with
       | Some on_yield ->
-          let place =
-            match place_expression st value with Some place -> place | None -> expression st value
-          in
+          let place = expression st value in
           let resume = block st.b and stop = block st.b in
           on_yield place ~resume ~stop;
           (* The [stop] path: what the method owns is dropped as the loop
@@ -2166,7 +2120,7 @@ and statement st (s : S.statement) =
           (* In a pulled method, a [yield] stays, for yield lowering to make a
              state of. Its [stop] path drops what the method owns. *)
           let ty = type_of st value.id in
-          let place = match place_expression st value with Some place -> place | None -> expression st value in
+          let place = expression st value in
           let resume = block st.b and stop = block st.b in
           finish st.b (Yield { value = owned st place ty; resume; stop = Some stop });
           start st.b stop;
@@ -2177,23 +2131,36 @@ and statement st (s : S.statement) =
   | Statement_error -> bug "a statement that did not parse");
   end_statement st
 
-and is_temporary st (e : S.expression) = place_expression st e = None
+(* Evaluates an expression once, for a pattern to look into: the place it
+   names, or a temporary holding its value, and whether it is a temporary,
+   whose parts the pattern's names then own. *)
+and scrutinee st (e : S.expression) =
+  match place_expression st e with Some place -> (place, false) | None -> (expression st e, true)
 
 and let_ st ~mutable_ (pattern : S.pattern) (value : S.expression) =
   let ty = type_of st value.id in
-  match (pattern.kind, place_expression st value) with
-  | Binding_or_constant name, Some place when (not mutable_) && not (trivial st ty) ->
-      (* A [let] of a place views it. *)
-      Hashtbl.replace st.frame.bindings name.id (snapshot st place)
-  | Binding_or_constant name, _ ->
-      let local = at (local st.b ~name:name.text (Value ty)) in
-      into st value local;
-      Hashtbl.replace st.frame.bindings name.id local;
-      if not (trivial st ty) then own_in_scope st local
-  | Wildcard, _ -> ignore (expression st value)
-  | _, _ ->
-      let scrutinee = expression st value in
-      bind_pattern st pattern scrutinee ty ~owned:(is_temporary st value || mutable_)
+  match pattern.kind with
+  | Wildcard -> ignore (expression st value)
+  | Binding_or_constant name -> (
+      let bind place =
+        Hashtbl.replace st.frame.bindings name.id place;
+        if not (trivial st ty) then own_in_scope st place
+      in
+      match place_expression st value with
+      | Some place when (not mutable_) && not (trivial st ty) ->
+          (* A [let] of a place views it. *)
+          Hashtbl.replace st.frame.bindings name.id (snapshot st place)
+      | Some place ->
+          let local = at (local st.b ~name:name.text (Value ty)) in
+          emit st.b (Assign (local, Use (owned st place ty)));
+          bind local
+      | None ->
+          let local = at (local st.b ~name:name.text (Value ty)) in
+          into st value local;
+          bind local)
+  | _ ->
+      let place, temporary = scrutinee st value in
+      bind_pattern st pattern place ty ~owned:(temporary || mutable_)
 
 (* A place whose indexes are fixed now, so a view of it means the same
    element however the index variables change later. *)
@@ -2309,7 +2276,7 @@ and for_ st (s : S.statement) ~pattern ~iterable ~body =
   | Some (Pulled { cursor }) -> (
       (* A cursor, pulled until it ends. *)
       let cursor_ty = ground st cursor in
-      let cursor_place = match place_expression st iterable with Some p -> p | None -> expression st iterable in
+      let cursor_place = expression st iterable in
       match cursor_ty with
       | Cursor yielding ->
           let option = cursor_result st.context yielding in
@@ -2320,13 +2287,23 @@ and for_ st (s : S.statement) ~pattern ~iterable ~body =
           call_next st yielding cursor_place next;
           let more = local st.b (Raw Bool) in
           emit st.b (Assign (at more, Is_variant (next, "Some")));
-          finish st.b (Switch { value = Copy (at more); cases = [ (Z.one, inside) ]; default = Some after });
+          finish st.b
+            (Switch { value = Copy (at more); cases = [ (Z.one, inside) ]; default = Some after });
           start st.b inside;
           in_scope st (fun () ->
               let element = cursor_element st.context yielding in
-              bind_pattern st pattern (next / Variant_field { variant = "Some"; field = "value" }) element ~owned:true;
+              bind_pattern st pattern
+                (next / Variant_field { variant = "Some"; field = "value" })
+                element ~owned:true;
               let depth = List.length st.scopes in
-              st.loops <- { continue_ = test; continue_depth = depth; break_ = after; break_depth = depth - 1 } :: st.loops;
+              st.loops <-
+                {
+                  continue_ = test;
+                  continue_depth = depth;
+                  break_ = after;
+                  break_depth = depth - 1;
+                }
+                :: st.loops;
               block_into st body None;
               st.loops <- List.tl st.loops);
           finish st.b (Goto test);
@@ -2343,13 +2320,17 @@ and yielded_type st path type_arguments =
   | Returns _ -> bug "%s does not yield" (Path.show path)
 
 and if_ st ~condition ~then_ ~else_ destination =
-  let value = operand st condition in
   let yes = block st.b and no = block st.b and after = block st.b in
-  finish st.b (Switch { value; cases = [ (Z.one, yes) ]; default = Some no });
+  (* The names the condition binds are in the [then] block, not the
+     [else]. *)
+  let scope = open_scope st in
+  branch st condition ~yes ~no;
   start st.b yes;
   block_into st then_ destination;
+  close_scope st scope;
   finish st.b (Goto after);
   start st.b no;
+  drop_scope st scope;
   (match else_ with
   | None -> ()
   | Some (S.Else block) -> block_into st block destination
@@ -2357,6 +2338,37 @@ and if_ st ~condition ~then_ ~else_ destination =
       match destination with Some d -> into st e d | None -> ignore (expression st e)));
   finish st.b (Goto after);
   start st.b after
+
+(* Lowers a condition as jumps: to [yes] when it holds, and to [no] when it
+   does not. The names its [is] tests bind are bound on the way to [yes],
+   owned in the current scope, which the caller has opened to cover where
+   they can be used and drops on every path out. *)
+and branch st (e : S.expression) ~yes ~no =
+  match e.kind with
+  | Parenthesized inner -> branch st inner ~yes ~no
+  | Binary { operator = And; left; right; _ } ->
+      let middle = block st.b in
+      branch st left ~yes:middle ~no;
+      start st.b middle;
+      branch st right ~yes ~no
+  | Binary { operator = Or; left; right; _ } ->
+      let middle = block st.b in
+      branch st left ~yes ~no:middle;
+      start st.b middle;
+      branch st right ~yes ~no
+  | Prefix (Not, inner) when st.frame.code.checked.calls.(e.id) = None || is_built_in st e ->
+      branch st inner ~yes:no ~no:yes
+  | Is { value; pattern; _ } ->
+      let ty = type_of st value.id in
+      let place, temporary = scrutinee st value in
+      let matched = block st.b in
+      test_pattern st pattern place ty ~matched ~failed:no;
+      start st.b matched;
+      bind_pattern st pattern place ty ~owned:temporary;
+      finish st.b (Goto yes)
+  | _ ->
+      let value = operand st e in
+      finish st.b (Switch { value; cases = [ (Z.one, yes) ]; default = Some no })
 
 (* Patterns *)
 
@@ -2494,7 +2506,11 @@ and owned_operand st place ty = owned st place ty
 
 and match_ st ~scrutinees ~arms destination =
   let values =
-    List.map (fun e -> (expression st e, type_of st e.S.id, is_temporary st e)) scrutinees
+    List.map
+      (fun e ->
+        let place, temporary = scrutinee st e in
+        (place, type_of st e.S.id, temporary))
+      scrutinees
   in
   let after = block st.b in
   List.iter
@@ -2511,17 +2527,27 @@ and match_ st ~scrutinees ~arms destination =
         | _ -> bug "a match arm with the wrong number of patterns"
       in
       test arm.patterns values;
+      let bind ~owned =
+        List.iter2
+          (fun pattern (place, ty, temporary) ->
+            bind_pattern st pattern place ty ~owned:(owned && temporary))
+          arm.patterns values
+      in
       in_scope st (fun () ->
-          List.iter2
-            (fun pattern (place, ty, owned) -> bind_pattern st pattern place ty ~owned)
-            arm.patterns values;
           (match arm.guard with
           | Some guard ->
-              let value = operand st guard in
-              let body = block st.b in
-              finish st.b (Switch { value; cases = [ (Z.one, body) ]; default = Some next });
-              start st.b body
-          | None -> ());
+              (* The guard sees views of what the arm binds, so a guard that
+                 fails leaves the values whole for the next arm; the body
+                 then owns the parts. *)
+              bind ~owned:false;
+              let body = block st.b and failed = block st.b in
+              branch st guard ~yes:body ~no:failed;
+              start st.b failed;
+              drop_scope st (List.hd st.scopes);
+              finish st.b (Goto next);
+              start st.b body;
+              bind ~owned:true
+          | None -> bind ~owned:true);
           match (arm.body.kind, destination) with
           | Expression e, Some d -> into st e d
           | _, _ -> statement st arm.body);
@@ -3069,7 +3095,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
          {
            target = Intrinsic Evidence_implementation;
            arguments = [ Copy (at evidence) ];
-           result = Some (at implementation);
+           result = Returned (at implementation);
          });
   st.evidence <-
     List.mapi
@@ -3080,7 +3106,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
              {
                target = Intrinsic Evidence_outer;
                arguments = [ Copy (at evidence); Constant (Integer (Int32, Z.of_int i)) ];
-               result = Some (at outer);
+               result = Returned (at outer);
              });
         (capability, Lir.Copy (at outer)))
       captured;
@@ -3220,7 +3246,7 @@ let program_main context (key : Instance.key) main_path : Lir.t =
              Copy (at index);
              Address { place = at length; writable = true };
            ];
-         result = Some (at bytes);
+         result = Returned (at bytes);
        });
   let text = new_local st string_ty in
   (match Monomorphic.shape context.monomorphic string_ty with
@@ -3458,7 +3484,15 @@ let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list
   let st =
     {
       context;
-      frame = { code; bindings = Hashtbl.create 16; self_place = None; on_yield = None; inlined = [ yielding.method_ ]; exit = None };
+      frame =
+        {
+          code;
+          bindings = Hashtbl.create 16;
+          self_place = None;
+          on_yield = None;
+          inlined = [ yielding.method_ ];
+          exit = None;
+        };
       b;
       scopes = [ { owned = [] } ];
       loops = [];
@@ -3496,16 +3530,20 @@ let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list
         local)
       code.parameter_types
   in
-  if code.has_defaults then bug "%s has defaults, which pulled methods do not take yet" (Path.show yielding.method_);
+  if code.has_defaults then
+    bug "%s has defaults, which pulled methods do not take yet" (Path.show yielding.method_);
   let evidence =
-    List.map (fun capability -> (capability, local b ~name:"evidence" Convention.evidence)) (evidence_for code.substitution code.uses)
+    List.map
+      (fun capability -> (capability, local b ~name:"evidence" Convention.evidence))
+      (evidence_for code.substitution code.uses)
   in
   st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
   start b (block b);
   block_into st code.body None;
   drop_scope st (List.hd st.scopes);
   finish b (Return None);
-  (Lir_builder.build b ~parameters:(parameters @ List.map snd evidence) ~result:None, List.rev !owned)
+  ( Lir_builder.build b ~parameters:(parameters @ List.map snd evidence) ~result:None,
+    List.rev !owned )
 
 let instance context (key : Instance.key) : Lir.t =
   match key with

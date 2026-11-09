@@ -22,6 +22,15 @@ let result env (ty : Ground.ty) =
       else if layout.size <= by_value_limit then Returned (Value ty)
       else Through_pointer (Pointer { target = Value ty; writable = true })
 
+let signature ?(returns = true) parameters result : Lir.signature =
+  match result with
+  | Nothing -> { parameters; result = None; returns }
+  | Returned ty -> { parameters; result = Some ty; returns }
+  | Through_pointer pointer -> { parameters = pointer :: parameters; result = None; returns }
+
+let destination result place : Lir.destination =
+  match result with Through_pointer _ -> Written place | Returned _ | Nothing -> Returned place
+
 let evidence = Lir.Raw (Pointer Opaque)
 
 let function_value env (f : Ground.function_type) : Lir.signature =
@@ -34,11 +43,8 @@ let function_value env (f : Ground.function_type) : Lir.signature =
   let written = List.filter_map (fun (mode, ty) -> parameter env mode ty) f.parameters in
   let evidence = List.map (fun _ -> evidence) f.uses in
   let environment = Lir.Raw (Nullable_pointer Opaque) in
-  match result_ty with
-  | Nothing -> { parameters = (environment :: written) @ evidence; result = None; returns }
-  | Returned ty -> { parameters = (environment :: written) @ evidence; result = Some ty; returns }
-  | Through_pointer ty ->
-      { parameters = (environment :: ty :: written) @ evidence; result = None; returns }
+  let signature = signature ~returns (written @ evidence) result_ty in
+  { signature with parameters = environment :: signature.parameters }
 
 let function_value_shape f : Memory_layout.shape =
   Record [ ("code", Raw (Pointer (Code f))); ("environment", Raw (Nullable_pointer Opaque)) ]

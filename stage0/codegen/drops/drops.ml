@@ -59,12 +59,7 @@ let rvalue_moves (rvalue : Lir.rvalue) =
   | Is_variant (place, _) -> place_index_moves place
   | Function_value { environment; _ } -> Option.fold ~none:[] ~some:operand_moves environment
 
-let target_moves (target : Lir.target) =
-  match target with
-  | Indirect { value; _ } | Evidence_call { evidence = value; _ } | Table_call { table = value; _ }
-    ->
-      operand_moves value
-  | Direct _ | Intrinsic _ -> []
+let target_moves target = List.concat_map operand_moves (Lir.target_operands target)
 
 (* What a statement does to ownership: the places it moves out of, then the
    place it gives a value, then the place it drops. *)
@@ -77,10 +72,10 @@ let statement_effect (statement : Lir.statement) =
   | Call { target; arguments; result } ->
       {
         moves =
-          target_moves target
+          (target_moves target
           @ List.concat_map operand_moves arguments
-          @ Option.fold ~none:[] ~some:place_index_moves result;
-        init = result;
+          @ match result with Returned p | Written p -> place_index_moves p | Discarded -> []);
+        init = (match result with Returned p | Written p -> Some p | Discarded -> None);
         dropped = None;
       }
   | Drop place -> { moves = place_index_moves place; init = None; dropped = Some place }
@@ -111,6 +106,16 @@ type analysis = {
 let path_type a path = Lir.place_type a.env ~environment:a.environment a.f (place_of_path path)
 let owns a path = match path_type a path with Some (Value ty) -> a.needs_drop ty | _ -> false
 
+let fields_of (layout : Memory_layout.t) =
+  match layout.form with Struct fields -> fields | _ -> []
+
+(* An element written gives its whole array a value: lowering writes every
+   element of a new array before anything reads it, and elements are never
+   moved out. *)
+let before_index (place : Lir.place) : Lir.place =
+  let rec take = function [] | Lir.Index _ :: _ -> [] | p :: rest -> p :: take rest in
+  { place with projections = take place.projections }
+
 (* Tracks every path that is moved, given a value, or dropped, whose type
    has something to drop, and every path around one that holds a value. *)
 let analyse env ~needs_drop ~environment (f : Lir.function_) =
@@ -133,7 +138,7 @@ let analyse env ~needs_drop ~environment (f : Lir.function_) =
         (fun statement ->
           let ownership = statement_effect statement in
           List.iter consider ownership.moves;
-          Option.iter consider ownership.init;
+          Option.iter (fun place -> consider (before_index place)) ownership.init;
           Option.iter consider ownership.dropped)
         block.statements;
       List.iter consider (terminator_moves block.terminator))
@@ -198,12 +203,38 @@ let set_uninit a s place =
       s.maybe_uninit.(i) <- true)
     (affected a place)
 
+let definitely_init s i = s.maybe_init.(i) && not s.maybe_uninit.(i)
+
+(* A record holds a value once every part of it with something to drop
+   does, however it was given them: lowering may fill a new record's fields
+   one by one. *)
+let rec promote a s path =
+  match List.rev path.steps with
+  | Field _ :: rest -> (
+      let parent = { path with steps = List.rev rest } in
+      match (index a parent, path_type a parent) with
+      | Some p, Some (Value ty) when not (definitely_init s p) ->
+          let given (field : Memory_layout.field) =
+            let inner = { parent with steps = parent.steps @ [ Field field.name ] } in
+            (not (owns a inner))
+            || match index a inner with Some j -> definitely_init s j | None -> false
+          in
+          if List.for_all given (fields_of (Memory_layout.of_type a.env ty)) then begin
+            s.maybe_init.(p) <- true;
+            s.maybe_uninit.(p) <- false;
+            promote a s parent
+          end
+      | _ -> ())
+  | _ -> ()
+
 let set_init a s place =
+  let place = before_index place in
   List.iter
     (fun i ->
       s.maybe_init.(i) <- true;
       s.maybe_uninit.(i) <- false)
-    (affected a place)
+    (affected a place);
+  Option.iter (promote a s) (path_of_place place)
 
 let apply a s statement =
   let ownership = statement_effect statement in
@@ -264,9 +295,6 @@ type op =
   | Statement of Lir.statement
   | If_flag of int * op list  (** Runs the ops when the path's flag is set *)
   | Switch_on of Lir.place * (string * op list) list * op list
-
-let fields_of (layout : Memory_layout.t) =
-  match layout.form with Struct fields -> fields | _ -> []
 
 let variant_fields a sum variant =
   let block () = fields_of (Memory_layout.block a.env sum variant) in
@@ -463,7 +491,11 @@ let elaborate env ~needs_drop ~environment (f : Lir.function_) =
                     emit_ops builder (drop_ops a s ~flag path);
                     apply a s statement;
                     update before s
-                | _ -> ())
+                | Some _ -> ()
+                | None ->
+                    (* An element reached through an index, which always
+                       holds a value, since elements are never moved out. *)
+                    push builder statement)
             | Assign _ | Call _ -> (
                 let moved = copy_state s in
                 List.iter (set_uninit a moved) ownership.moves;
@@ -478,7 +510,12 @@ let elaborate env ~needs_drop ~environment (f : Lir.function_) =
                         (match statement with
                         | Assign (_, rvalue) -> push builder (Assign (temporary_place, rvalue))
                         | Call call ->
-                            push builder (Call { call with result = Some temporary_place })
+                            let result : Lir.destination =
+                              match call.result with
+                              | Written _ -> Written temporary_place
+                              | _ -> Returned temporary_place
+                            in
+                            push builder (Call { call with result })
                         | _ -> ());
                         update before moved;
                         emit_ops builder (drop_ops a moved ~flag path);

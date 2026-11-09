@@ -129,12 +129,12 @@ type intrinsic =
 type target =
   | Direct of { function_ : function_ref; signature : signature }
   | Indirect of { value : operand; signature : signature }
-      (** A call through a function value: its code with its environment first *)
+      (** A call through a function value: its code, given its environment first *)
   | Intrinsic of intrinsic
   | Evidence_call of { evidence : operand; slot : int; signature : signature }
       (** A capability's method: entry [slot] of the evidence's table, given the evidence first *)
-  | Table_call of { table : operand; slot : int; signature : signature }
-      (** Entry [slot] of a table of code, such as an [any] value's *)
+  | Table_call of { table : operand; value : operand; slot : int; signature : signature }
+      (** Entry [slot] of a table of code, such as an [any] value's, given the value first *)
 
 type rvalue =
   | Use of operand
@@ -156,9 +156,19 @@ type site = { definition : Path.t; line : int; column : int }
    [todo] that was reached. *)
 type failure = Panic | Assertion | Todo
 
+(* Where a call's result goes. A target that is given something first, such
+   as a function value's environment, is given it before the result's
+   pointer. *)
+type destination =
+  | Discarded  (** There is no result, or nothing reads it *)
+  | Returned of place  (** Returned by value, and written to the place *)
+  | Written of place
+      (** Written by the callee through a pointer to the place, the call's first argument, for a
+          result too large to return *)
+
 type statement =
   | Assign of place * rvalue
-  | Call of { target : target; arguments : operand list; result : place option }
+  | Call of { target : target; arguments : operand list; result : destination }
   | Drop of place  (** Runs the type's drop code *)
   | Echo of { text : operand; length : operand; site : site }
       (** Records the debug output of a value: a pointer to UTF-8 bytes and their length *)
@@ -299,6 +309,11 @@ let place_type env ~environment (f : function_) (place : place) =
         Option.bind ty (fun ty -> projection_type env ~environment ty projection))
       (Some root) place.projections
 
+let target_operands = function
+  | Indirect { value; _ } | Evidence_call { evidence = value; _ } -> [ value ]
+  | Table_call { table; value; _ } -> [ table; value ]
+  | Direct _ | Intrinsic _ -> []
+
 let successors = function
   | Goto block -> [ block ]
   | Switch { cases; default; _ } -> List.map snd cases @ Option.to_list default
@@ -353,9 +368,20 @@ let map_target ~place ~block = function
   | Indirect { value; signature } -> Indirect { value = map_operand ~place ~block value; signature }
   | Evidence_call { evidence; slot; signature } ->
       Evidence_call { evidence = map_operand ~place ~block evidence; slot; signature }
-  | Table_call { table; slot; signature } ->
-      Table_call { table = map_operand ~place ~block table; slot; signature }
+  | Table_call { table; value; slot; signature } ->
+      Table_call
+        {
+          table = map_operand ~place ~block table;
+          value = map_operand ~place ~block value;
+          slot;
+          signature;
+        }
   | (Direct _ | Intrinsic _) as target -> target
+
+let map_destination ~place ~block = function
+  | Discarded -> Discarded
+  | Returned p -> Returned (map_place ~place ~block p)
+  | Written p -> Written (map_place ~place ~block p)
 
 let map_statement ~place ~block = function
   | Assign (p, rvalue) -> Assign (map_place ~place ~block p, map_rvalue ~place ~block rvalue)
@@ -364,7 +390,7 @@ let map_statement ~place ~block = function
         {
           target = map_target ~place ~block target;
           arguments = List.map (map_operand ~place ~block) arguments;
-          result = Option.map (map_place ~place ~block) result;
+          result = map_destination ~place ~block result;
         }
   | Drop p -> Drop (map_place ~place ~block p)
   | Free_block { place = p; variant } -> Free_block { place = map_place ~place ~block p; variant }
@@ -442,7 +468,7 @@ let canonical (f : function_) =
   { f with parameters = List.map map_local f.parameters; locals; blocks }
 
 let canonical_instance t = { t with main = canonical t.main; nested = Array.map canonical t.nested }
-let version = 1
+let version = 2
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -620,8 +646,14 @@ let encode_target instance = function
   | Evidence_call { evidence; slot; signature } ->
       tagged 3
         [ encode_operand instance evidence; Cbor.int slot; encode_signature instance signature ]
-  | Table_call { table; slot; signature } ->
-      tagged 4 [ encode_operand instance table; Cbor.int slot; encode_signature instance signature ]
+  | Table_call { table; value; slot; signature } ->
+      tagged 4
+        [
+          encode_operand instance table;
+          encode_operand instance value;
+          Cbor.int slot;
+          encode_signature instance signature;
+        ]
 
 let encode_statement instance = function
   | Assign (place, rvalue) ->
@@ -631,7 +663,10 @@ let encode_statement instance = function
         [
           encode_target instance target;
           list (encode_operand instance) arguments;
-          option (encode_place instance) result;
+          (match result with
+          | Discarded -> tagged 0 []
+          | Returned place -> tagged 1 [ encode_place instance place ]
+          | Written place -> tagged 2 [ encode_place instance place ]);
         ]
   | Drop place -> tagged 2 [ encode_place instance place ]
   | Free_block { place; variant } -> tagged 3 [ encode_place instance place; Text variant ]
@@ -890,14 +925,17 @@ let target_to_string = function
   | Intrinsic intrinsic -> "intrinsic " ^ intrinsic_name intrinsic
   | Evidence_call { evidence; slot; _ } ->
       Printf.sprintf "(%s table %d)" (operand_to_string evidence) slot
-  | Table_call { table; slot; _ } -> Printf.sprintf "(%s[%d])" (operand_to_string table) slot
+  | Table_call { table; value; slot; _ } ->
+      Printf.sprintf "(%s[%d] %s)" (operand_to_string table) slot (operand_to_string value)
 
 let statement_to_string = function
   | Assign (place, rvalue) -> place_to_string place ^ " = " ^ rvalue_to_string rvalue
   | Call { target; arguments; result } ->
-      (match result with None -> "" | Some place -> place_to_string place ^ " = ")
+      (match result with Returned place -> place_to_string place ^ " = " | _ -> "")
       ^ "call " ^ target_to_string target ^ "("
-      ^ String.concat ", " (List.map operand_to_string arguments)
+      ^ String.concat ", "
+          ((match result with Written place -> [ "out " ^ place_to_string place ] | _ -> [])
+          @ List.map operand_to_string arguments)
       ^ ")"
   | Drop place -> "drop " ^ place_to_string place
   | Free_block { place; variant } -> "free " ^ place_to_string place ^ "." ^ variant

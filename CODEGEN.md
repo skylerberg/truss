@@ -225,7 +225,7 @@ parameter. The emitter only prints.
 | Statement | Meaning |
 |---|---|
 | `place = rvalue` | Write a value to a place. A drop flag is a `Bool` local written this way. |
-| `call(target, arguments, result place)` | A call. The target is an instance or nested function with its C signature, a function value, or an intrinsic |
+| `call(target, arguments, destination)` | A call. The target is an instance or nested function with its C signature, a function value, a capability's entry through its evidence, an entry of an `any` value's table, or an intrinsic. The destination is where the result goes: nowhere, returned into a place, or written by the callee into a place through a pointer, which the emitter passes before the arguments. A function value's environment, an evidence pointer, and an `any` value's pointer are part of the target, which the emitter passes first, before any result pointer |
 | `drop(place)` | Run the type's drop code. Before drop elaboration: drop whatever the place still owns |
 | `free_block(place, variant)` | Free the block of an `indirect` variant whose fields have all been moved out or dropped |
 | `echo(text, length, site)` | Record a value's debug output, with its position |
@@ -414,6 +414,12 @@ generation only decides how each Truss parameter becomes C parameters.
   pointer for each capability in `uses`, ordered by the capability's path;
   and the loop body, for a yielding method.
 - **Parameters of zero size disappear.**
+- **What a call goes through comes first.** A function value's environment,
+  a capability entry's evidence, and an `any` value's pointer come before
+  the result's pointer and the written parameters.
+- **A call names the place its result goes,** however the result travels,
+  so that drop elaboration sees every call that gives a place a value,
+  including one written through a pointer.
 
 ### Defaults
 
@@ -461,6 +467,14 @@ and which fields of places, may own a value and which may not. Then each
   not others, as after `if ready { consume(own item) }`. A flag is a `Bool`
   local, set where the place is given a value and cleared where it is moved
   or dropped.
+
+A place can also be given a value in parts. A record holds a value once
+every field with something to drop does, as when a `List` literal fills
+its storage in place. Writing an element gives the whole array a value,
+because lowering writes every element of a new array before anything reads
+it. A drop of an element reached through an index stays as it is, since
+elements are never moved out, which is how a `Storage`'s drop drops each
+element.
 
 An assignment to a place that may still own a value drops that value first,
 after the assignment's own moves, so `items = rebuild(own items)` drops
@@ -558,8 +572,21 @@ and its siblings. Full-width multiplication, used by hashing and
   the method. The tree is built deterministically from the arms in order.
 - **`?`** is a tag test and an early return, with the drops elaboration
   inserted.
-- **`is`** is the same test as a `match` arm, binding into locals that are
-  only live on the true branch.
+- **Conditions are lowered as jumps.** `if`, `while`, a guard, and a
+  boolean built with `&&`, `||`, `!`, and `is` all go through one lowering
+  that branches to a true block and a false one. `&&` and `||` short-circuit
+  by branching, and `!` swaps the two.
+- **`is`** is the same test as a `match` arm. The names it binds are bound
+  on the way to the true block, in a scope that covers the rest of the `&&`
+  chain and the `if`'s or `while`'s block and is closed, with its drops, on
+  every way out, the false one included. A `while`'s condition temporaries
+  end before its body and before its exit.
+- **A value is evaluated once for a pattern.** A pattern looks into the
+  place an expression names, or into a temporary holding its value, whose
+  parts its names then own.
+- **A guard sees views** of what its arm binds, so a guard that fails leaves
+  the value whole for the next arm. The body then binds the parts again,
+  owning them.
 - **`while` and `for`** become blocks and gotos. A `for` over anything but a
   range of built-in integers calls `each` (see
   [Lending and yielding methods](#lending-and-yielding-methods)).
@@ -941,6 +968,13 @@ worker and carries on, so a new process starts only after a failure. Ending
 the worker is also what lets an `assert` inside a lambda end its test, which
 an early return could not. The runner kills a worker whose test exceeds the
 project's time limit.
+
+A test must free every block it allocates. The runtime counts the blocks
+that are allocated and not yet freed, and a test that ends with more than it
+started with panics with a compiler-bug message saying how many it left.
+Truss has no garbage collector and no way to leak a value on purpose, so a
+leak is a bug in code generation, most likely in drop elaboration. Every
+test that compiles Truss is therefore also a check of its drops.
 
 Results are printed in the order of the tests, however the tests were spread
 over workers, each as `test N outcome`, where the outcome is `passed`,

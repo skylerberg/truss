@@ -35,18 +35,19 @@ let references env (instance : Lir.t) =
             (fun keys (statement : Lir.statement) ->
               match statement with
               | Assign (place, rvalue) -> rvalue_keys rvalue (place_keys place keys)
-              | Call { target; arguments; result } ->
+              | Call { target; arguments; result } -> (
                   let keys =
                     match target with
                     | Direct { function_; _ } -> function_ref_keys function_ keys
-                    | Indirect { value; _ }
-                    | Evidence_call { evidence = value; _ }
-                    | Table_call { table = value; _ } ->
-                        operand_keys value keys
-                    | Intrinsic _ -> keys
+                    | _ ->
+                        List.fold_left
+                          (fun keys o -> operand_keys o keys)
+                          keys (Lir.target_operands target)
                   in
                   let keys = List.fold_left (fun keys o -> operand_keys o keys) keys arguments in
-                  Option.fold ~none:keys ~some:(fun p -> place_keys p keys) result
+                  match result with
+                  | Returned p | Written p -> place_keys p keys
+                  | Discarded -> keys)
               | Drop place -> (
                   let keys = place_keys place keys in
                   match Lir.place_type env ~environment f place with

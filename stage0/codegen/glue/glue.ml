@@ -82,16 +82,21 @@ let drop t ty =
                Table_call
                  {
                    table = Copy (value / Field "vtable");
+                   value = Copy (value / Field "value");
                    slot = 0;
                    signature =
                      { parameters = [ Raw (Pointer Opaque) ]; result = None; returns = true };
                  };
-             arguments = [ Copy (value / Field "value") ];
-             result = None;
+             arguments = [];
+             result = Discarded;
            });
       emit b
         (Call
-           { target = Intrinsic Free; arguments = [ Copy (value / Field "value") ]; result = None })
+           {
+             target = Intrinsic Free;
+             arguments = [ Copy (value / Field "value") ];
+             result = Discarded;
+           })
   | _, Storage element ->
       if not (trivial t element) then
         loop t b
@@ -105,7 +110,11 @@ let drop t ty =
       start b free;
       emit b
         (Call
-           { target = Intrinsic Free; arguments = [ Copy (value / Field "buffer") ]; result = None });
+           {
+             target = Intrinsic Free;
+             arguments = [ Copy (value / Field "buffer") ];
+             result = Discarded;
+           });
       finish b (Goto after);
       start b after
   | _, Shape (Record fields) ->
@@ -144,11 +153,9 @@ let drop t ty =
 (* Copy *)
 
 let copy_signature t ty : Lir.signature =
-  let parameter = Option.to_list (Convention.parameter t.env Read ty) in
-  match Convention.result t.env ty with
-  | Nothing -> { parameters = parameter; result = None; returns = true }
-  | Returned result -> { parameters = parameter; result = Some result; returns = true }
-  | Through_pointer pointer -> { parameters = pointer :: parameter; result = None; returns = true }
+  Convention.signature
+    (Option.to_list (Convention.parameter t.env Read ty))
+    (Convention.result t.env ty)
 
 (* Copies [source] into [destination], both of type [ty]. *)
 let copy_into t b ~destination ~source ty =
@@ -162,17 +169,13 @@ let copy_into t b ~destination ~source ty =
       | None -> []
     in
     let target = Lir.Direct { function_ = Instance (Copy ty); signature } in
-    match Convention.result t.env ty with
-    | Through_pointer _ ->
-        emit b
-          (Call
-             {
-               target;
-               arguments = Address { place = destination; writable = true } :: argument;
-               result = None;
-             })
-    | Returned _ | Nothing ->
-        emit b (Call { target; arguments = argument; result = Some destination })
+    emit b
+      (Call
+         {
+           target;
+           arguments = argument;
+           result = Convention.(destination (result t.env ty)) destination;
+         })
 
 (* The operand for a copy of a field, through a temporary when the field's
    type is not trivial. *)
@@ -249,7 +252,7 @@ let copy t ty =
               {
                 target = Intrinsic Allocate;
                 arguments = [ Copy (at bytes); usize layout.alignment ];
-                result = Some (at buffer);
+                result = Returned (at buffer);
               });
          if trivial t element then
            emit b
@@ -257,7 +260,7 @@ let copy t ty =
                 {
                   target = Intrinsic Copy_bytes;
                   arguments = [ Copy (at buffer); Copy (self / Field "buffer"); Copy (at bytes) ];
-                  result = None;
+                  result = Discarded;
                 })
          else
            loop t b
@@ -347,7 +350,7 @@ let text b value =
          {
            target = Intrinsic Debug_text;
            arguments = [ Constant (Bytes value); usize (String.length value) ];
-           result = None;
+           result = Discarded;
          })
 
 let debug_call t b ty (place : Lir.place) =
@@ -357,12 +360,12 @@ let debug_call t b ty (place : Lir.place) =
        {
          target = Direct { function_ = Instance (Debug ty); signature = debug_signature t ty };
          arguments;
-         result = None;
+         result = Discarded;
        })
 
 let scalar_debug t b (scalar : Memory_layout.scalar) (place : Lir.place) =
   let call intrinsic operand =
-    emit b (Call { target = Intrinsic intrinsic; arguments = [ operand ]; result = None })
+    emit b (Call { target = Intrinsic intrinsic; arguments = [ operand ]; result = Discarded })
   in
   match scalar with
   | Integer (Int8 | Int16 | Int32 | Int64 | ISize) ->
@@ -411,7 +414,7 @@ let debug t ty =
            {
              target = Intrinsic Debug_string;
              arguments = [ Copy buffer; Copy (place / Field "length") ];
-             result = None;
+             result = Discarded;
            })
     else
       list_of element ~element_at:(fun i -> buffer / Index i) ~count:(Copy (place / Field "length"))
