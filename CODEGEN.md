@@ -154,9 +154,11 @@ or a memory error:
 - Integer division panics on a zero divisor, and on the least value over
   -1.
 
-The position a check reports is the clause's or the operator's own, which
-for an index or an operator is in the standard library. Reporting the
-caller's position is left for later; Rust's `#[track_caller]` does it by
+An overflow or division check reports the operator's position in the
+code that wrote it, since operators on built-in types are lowered where
+they are written. A `requires` check reports the clause's own position,
+which for an index is in the standard library. Reporting the caller's
+position there is left for later; Rust's `#[track_caller]` does it by
 passing the caller's location. `Compile.create ~checks:false` builds
 without the checks, for when the prover exists.
 

@@ -473,6 +473,32 @@ let raw_type_of st (id : S.id) = st.frame.code.checked.types.(id)
 let trivial st ty = Glue.trivial st.context.glue ty
 let zero_size st ty = (Memory_layout.of_type st.context.env ty).size = 0
 
+(* Whether a type is one of the built-in numbers, [Bool], or [Character],
+   whose operators are primitive operations, never calls. See CODEGEN.md,
+   "Primitive operations". *)
+let primitive_methods =
+  [
+    ("add", "Add");
+    ("subtract", "Subtract");
+    ("multiply", "Multiply");
+    ("divide", "Divide");
+    ("remainder", "Remainder");
+    ("negate", "Negate");
+    ("equal", "Equal");
+    ("compare", "Ordered");
+  ]
+
+let primitive (ty : Ground.ty) =
+  match ty with
+  | Named { path; arguments = [] } -> (
+      match Intrinsic.builtin_of_path path with
+      | Some
+          ( Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
+          | Float32 | Float64 | Bool | Character ) ->
+          true
+      | _ -> false)
+  | _ -> false
+
 let site st (span : S.span) : Lir.site =
   let text = st.frame.code.text in
   let line = ref 0 and column = ref 1 in
@@ -1908,6 +1934,27 @@ and operator st (e : S.expression) operands destination =
         | _ -> bug "a built-in operator"
       in
       match e.kind with _ -> emit st.b (Assign (destination, rvalue)))
+  | Some _
+    when match (e.kind, operands) with
+         | ( Binary { operator = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal; _ },
+             [ left; _ ] ) ->
+             primitive (type_of st left.id)
+         | _ -> false -> (
+      (* A comparison of built-in values is a primitive operation, with the
+         lawful rules for floats. *)
+      match (e.kind, operands) with
+      | Binary { operator; _ }, [ left; right ] ->
+          let compare : Lir.binary =
+            match operator with
+            | Equal -> Equal
+            | Not_equal -> Not_equal
+            | Less -> Less
+            | Less_equal -> Less_equal
+            | Greater -> Greater
+            | _ -> Greater_equal
+          in
+          emit st.b (Assign (destination, Binary (compare, operand st left, operand st right)))
+      | _ -> bug "a comparison")
   | Some call_ -> (
       let arguments =
         List.mapi
@@ -2044,6 +2091,12 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
                    variant = None;
                    fields = ("state", Constant (Integer (UInt32, Z.zero))) :: fields;
                  } ))
+    | Trait_method { trait; name; self_type; _ }
+      when primitive (ground st self_type)
+           && List.mem_assoc name primitive_methods
+           && Path.equal trait.trait (core (List.assoc name primitive_methods)) ->
+        primitive_method st name (ground st self_type) in_order destination ~span
+          ~result:(ground st call_.result)
     | Trait_method { name = "copy"; self_type; evidence = Built_in; _ } -> (
         (* [copy()] from [Copyable], which the compiler implements: the
            type's generated copy. *)
@@ -2165,6 +2218,52 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
           (Call { target; arguments = passed; result = Convention.destination result destination });
         if not lir_signature.returns then unreachable_block st
     | Built_in_operator -> bug "a built-in operator called as a function"
+
+(* A trait method of a built-in type that is a primitive operation, written
+   where it is called: arithmetic through its intrinsic, so a checked
+   build's overflow and division checks report the caller's position, and
+   [equal] and [compare] as the comparisons the standard library's bodies
+   make. *)
+and primitive_method st name ty in_order destination ~span ~result =
+  let values = List.map (fun (_, _, _, place) -> Lir.Copy place) in_order in
+  let arithmetic operation =
+    ignore
+      (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types operation
+         ~type_arguments:[ ty ]
+         (List.map (fun v -> Intrinsics.Value v) values)
+         ~destination:(Some destination) ~site:(site st span))
+  in
+  match (name, values) with
+  | "add", _ -> arithmetic Add
+  | "subtract", _ -> arithmetic Subtract
+  | "multiply", _ -> arithmetic Multiply
+  | "divide", _ -> arithmetic Divide
+  | "remainder", _ -> arithmetic Remainder
+  | "negate", _ -> arithmetic Negate
+  | "equal", [ left; right ] -> emit st.b (Assign (destination, Binary (Equal, left, right)))
+  | "compare", [ left; right ] ->
+      let ordering variant = Lir.Build { ty = result; variant = Some variant; fields = [] } in
+      let less = local st.b (Raw Bool) and equal = local st.b (Raw Bool) in
+      let is_less = block st.b and not_less = block st.b in
+      let is_equal = block st.b and greater = block st.b and after = block st.b in
+      emit st.b (Assign (at less, Binary (Less, left, right)));
+      finish st.b
+        (Switch { value = Copy (at less); cases = [ (Z.one, is_less) ]; default = Some not_less });
+      start st.b is_less;
+      emit st.b (Assign (destination, ordering "Less"));
+      finish st.b (Goto after);
+      start st.b not_less;
+      emit st.b (Assign (at equal, Binary (Equal, left, right)));
+      finish st.b
+        (Switch { value = Copy (at equal); cases = [ (Z.one, is_equal) ]; default = Some greater });
+      start st.b is_equal;
+      emit st.b (Assign (destination, ordering "Equal"));
+      finish st.b (Goto after);
+      start st.b greater;
+      emit st.b (Assign (destination, ordering "Greater"));
+      finish st.b (Goto after);
+      start st.b after
+  | _ -> bug "%s is not a primitive operation" name
 
 (* Every parameter's argument, in order: a parameter left to its default
    gets a placeholder, which the function overwrites from its default. *)
