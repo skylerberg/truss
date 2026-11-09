@@ -28,7 +28,7 @@ type constructor =
 type space = Wild | Constructed of constructor * space list | Alternatives of space list
 
 type context = {
-  database : Query.database;
+  database : Query.context;
   package : string;
   checked : C.t;
   mutable diagnostics : Diagnostic.t list;
@@ -210,7 +210,7 @@ and constant_value context (resolved : Resolve.resolved) type_ seen (value : exp
   | False -> Some (Constructed (Boolean false, []))
   | String { tag = None; rest = []; first; _ } -> Some (Constructed (Text first.value, []))
   | Integer _ | Prefix (Negate, _) | Binary _ -> (
-      match Interface.Constants.expression context.database resolved value with
+      match Interface.Constants.expression context.database ~visiting:[] resolved value with
       | Some number -> Some (Constructed (Interval (number, number), []))
       | None -> None)
   | Name path -> (

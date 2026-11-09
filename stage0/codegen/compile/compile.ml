@@ -1,7 +1,7 @@
 module Names = Resolve.Names
 
 type t = {
-  database : Query.database;
+  database : Query.context;
   context : Lower.context;
   toolchain : Toolchain.t;
   cache : Build.cache;

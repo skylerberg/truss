@@ -28,7 +28,7 @@ type file = {
 val file : (Path.module_, file) Query.query
 (** A module's file, lexed and parsed. Raises [Not_found] if the module has no text. *)
 
-val package : Query.database -> string -> package option
+val package : Query.context -> string -> package option
 (** A package, or [None] if there is no such package. *)
 
 val module_exists : (Path.module_, bool) Query.query

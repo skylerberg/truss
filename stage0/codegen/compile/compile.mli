@@ -11,7 +11,7 @@ type t
    [--check-proofs] does. *)
 val create :
   ?checks:bool ->
-  Query.database ->
+  Query.context ->
   Memory_layout.target ->
   Toolchain.t ->
   Build.cache ->

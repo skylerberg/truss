@@ -32,6 +32,8 @@
   cbor
   blake3
   query
+  engine
+  database
   path
   workspace
   resolve

@@ -420,10 +420,10 @@ let () =
       let database = setup [ ("app::main", text "1") ] in
       let module_ = module_of "app::main" in
       ignore (Infer.diagnostics database module_);
-      Query.set database Workspace.file_text module_ (text "2");
-      Query.clear_log database;
+      Engine.set (Engine.of_context database) Workspace.file_text module_ (text "2");
+      Engine.clear_log (Engine.of_context database);
       ignore (Infer.diagnostics database module_);
-      if List.mem "checked(app::main::caller)" (Query.executed database) then
+      if List.mem "checked(app::main::caller)" (Engine.executed (Engine.of_context database)) then
         fail "the caller was checked again");
   test "checking twice gives the same checked form" (fun () ->
       let text =

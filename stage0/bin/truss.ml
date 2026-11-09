@@ -26,10 +26,10 @@ let load directory =
     with Type_checker.Manifest.Malformed (line, expected) ->
       fail "%s:%d: expected %s." manifest_path line expected
   in
-  let database = Query.create () in
-  let modules = Type_checker.read_directory ~package:manifest.name directory in
-  Type_checker.load_standard database;
-  Type_checker.load_package database ~name:manifest.name ~dependencies:manifest.dependencies modules;
+  let engine = Engine.create ~shared:(Database.standard_layer ()) () in
+  let modules = Database.read_directory ~package:manifest.name directory in
+  Database.load_package engine ~name:manifest.name ~dependencies:manifest.dependencies modules;
+  let database = Engine.context engine in
   (database, List.map fst modules)
 
 (* Every diagnostic in the package, each an error, which stops the build. *)

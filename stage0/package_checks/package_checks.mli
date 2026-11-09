@@ -7,5 +7,5 @@ type placed = { module_ : Path.module_; diagnostic : Diagnostic.t }
 val check : (string, placed list) Query.query
 (** A package's errors, by its name. *)
 
-val diagnostics : Query.database -> Path.module_ -> Diagnostic.t list
+val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
 (** The package's errors in one file, in order. *)

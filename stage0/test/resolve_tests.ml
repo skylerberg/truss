@@ -24,19 +24,19 @@ let standard =
   ]
 
 let setup files =
-  let database = Query.create ~log:true () in
+  let database = Engine.context (Engine.create ~log:true ()) in
   let all = standard @ files in
   let by_package = Hashtbl.create 4 in
   List.iter
     (fun (name, text) ->
       let module_ = module_of name in
-      Query.set database Workspace.file_text module_ text;
+      Engine.set (Engine.of_context database) Workspace.file_text module_ text;
       Hashtbl.replace by_package module_.package
         (module_ :: Option.value ~default:[] (Hashtbl.find_opt by_package module_.package)))
     all;
   Hashtbl.iter
     (fun package modules ->
-      Query.set database Workspace.packages package
+      Engine.set (Engine.of_context database) Workspace.packages package
         { Workspace.name = package; dependencies = []; modules = List.rev modules })
     by_package;
   database
@@ -471,13 +471,13 @@ let () =
       let database = setup [ ("app::main", text "2") ] in
       let module_ = module_of "app::main" in
       ignore (Resolve.diagnostics database module_);
-      Query.set database Workspace.file_text module_ (text "3");
-      Query.clear_log database;
+      Engine.set (Engine.of_context database) Workspace.file_text module_ (text "3");
+      Engine.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
       let resolved =
         List.filter
           (fun label -> String.length label > 9 && String.sub label 0 9 = "resolved(")
-          (Query.executed database)
+          (Engine.executed (Engine.of_context database))
       in
       if resolved <> [ "resolved(app::main::second)" ] then
         fail "resolved again: %s" (String.concat "; " resolved));
@@ -485,10 +485,12 @@ let () =
       let database = setup [ ("app::main", "fn first() -> Int64 { 1 }\n") ] in
       let module_ = module_of "app::main" in
       ignore (Resolve.diagnostics database module_);
-      Query.set database Workspace.file_text module_ "\n\nfn first() -> Int64 { 1 }\n";
-      Query.clear_log database;
+      Engine.set (Engine.of_context database) Workspace.file_text module_
+        "\n\nfn first() -> Int64 { 1 }\n";
+      Engine.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
-      if List.mem "resolved(app::main::first)" (Query.executed database) then fail "resolved again")
+      if List.mem "resolved(app::main::first)" (Engine.executed (Engine.of_context database)) then
+        fail "resolved again")
 
 (* Hashing *)
 
@@ -554,7 +556,8 @@ let () =
       let others = "public trait Ordered {}\n" in
       let database text =
         let database = setup [ ("app::main", text) ] in
-        Query.set database Workspace.file_text (module_of "standard::core") others;
+        Engine.set (Engine.of_context database) Workspace.file_text (module_of "standard::core")
+          others;
         database
       in
       let hash text =
@@ -594,14 +597,14 @@ let () =
       in
       let module_ = module_of "app::main" in
       ignore (Resolve.diagnostics database module_);
-      Query.set database Workspace.file_text module_
+      Engine.set (Engine.of_context database) Workspace.file_text module_
         "fn z() {}\n\nfn a() -> Int64 { 1 }\n\nfn f() -> Int64 { a() }\n";
-      Query.clear_log database;
+      Engine.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
       let resolved =
         List.filter
           (fun label -> String.length label > 9 && String.sub label 0 9 = "resolved(")
-          (Query.executed database)
+          (Engine.executed (Engine.of_context database))
       in
       if resolved <> [ "resolved(app::main::z)" ] then
         fail "resolved again: %s" (String.concat "; " resolved));
@@ -677,9 +680,9 @@ let () =
           (fun database () -> Query.demand database Hash.part (key, Interface))
       in
       ignore (Query.demand database reader ());
-      Query.set database Workspace.file_text (module_of "app::main") (text "2");
-      Query.clear_log database;
+      Engine.set (Engine.of_context database) Workspace.file_text (module_of "app::main") (text "2");
+      Engine.clear_log (Engine.of_context database);
       ignore (Query.demand database reader ());
-      if List.mem "reader()" (Query.executed database) then fail "ran again")
+      if List.mem "reader()" (Engine.executed (Engine.of_context database)) then fail "ran again")
 
 let () = finish ()

@@ -176,7 +176,7 @@ let () =
               "public fn stamp() -> Instant\n  uses Clock\n{\n  Clock.now()\n}\n" );
           ]
       in
-      Query.set database Workspace.packages "app"
+      Engine.set (Engine.of_context database) Workspace.packages "app"
         {
           name = "app";
           dependencies = [ { package = "clock_library"; capabilities = [] } ];
@@ -189,7 +189,7 @@ let () =
 let () =
   let with_grant files granted =
     let database = setup files in
-    Query.set database Workspace.packages "app"
+    Engine.set (Engine.of_context database) Workspace.packages "app"
       {
         name = "app";
         dependencies = [ { package = "clock_library"; capabilities = granted } ];

@@ -44,7 +44,7 @@ type frame = {
 }
 
 type state = {
-  database : Query.database;
+  database : Query.context;
   key : Names.key;
   package : string;
   definition : definition;

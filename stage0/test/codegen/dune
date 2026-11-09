@@ -19,6 +19,8 @@
   reachable
   build
   query
+  engine
+  database
   workspace
   standard_library
   interface
