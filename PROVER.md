@@ -1021,6 +1021,13 @@ It proves, with one canonical, numbered, hashed query per obligation:
   of maps and sets, are not built yet.
 - quantifiers over every value of a type, each in its range and meeting
   its type's invariants
+- floats, in the solver's floating-point theory: literals bit for bit, `+`,
+  `-`, `*`, `/`, and negation rounding to nearest, ties to even, as IEEE
+  754 does, and the lawful `==` and ordering, with every NaN equal and
+  last; a float `%` is known only by its type. A derived `Equal` that is
+  not structural, such as a `Point` of floats', is defined field by field,
+  each with its own `==`, unfolded once for each two values compared. A
+  counterexample writes a float as Truss does.
 - the type checker's `Integer_fits` obligations, and its `Guards_cover`,
   which the `_ => unreachable` arm it is about shows
 - the ownership check's `Disjoint` obligations, under `prover.disjoint`:
@@ -1050,8 +1057,8 @@ A call whose callee's contract it cannot read, such as one with errors,
 gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
-definition that uses anything else, such as a string, a float, or a
-cursor, is reported as
+definition that uses anything else, such as a string or a cursor, is
+reported as
 `prover.unsupported` with what stopped it, and none of its obligations
 count as proven.
 

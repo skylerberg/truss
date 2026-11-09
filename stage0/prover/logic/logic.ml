@@ -1,12 +1,13 @@
 (* The solver's logic, and the canonical text of a query. See PROVER.md,
    "The canonical form". *)
 
-type sort = Int | Bool | Uninterpreted of string
+type sort = Int | Bool | Float of int * int | Uninterpreted of string
 
 type term =
   | Symbol of string
   | Integer of Z.t
   | Boolean of bool
+  | Bits of int * Z.t
   | Apply of string * term list
   | Forall of (string * sort) list * term
   | Exists of (string * sort) list * term
@@ -75,7 +76,7 @@ let truncated_remainder left right =
 
 let rec mentions symbols = function
   | Symbol name -> List.mem name symbols
-  | Integer _ | Boolean _ -> false
+  | Integer _ | Boolean _ | Bits _ -> false
   | Apply (name, arguments) -> List.mem name symbols || List.exists (mentions symbols) arguments
   | Forall (bound, body) | Exists (bound, body) ->
       let shadowed = List.map fst bound in
@@ -87,7 +88,7 @@ let rec replace ~from ~into term =
   if term = from then into
   else
     match term with
-    | Symbol _ | Integer _ | Boolean _ -> term
+    | Symbol _ | Integer _ | Boolean _ | Bits _ -> term
     | Apply (name, arguments) -> Apply (name, List.map (replace ~from ~into) arguments)
     | Forall (bound, body) ->
         if mentions (List.map fst bound) from then term else Forall (bound, replace ~from ~into body)
@@ -104,7 +105,7 @@ let declared_symbols declared term =
   let rec walk bound = function
     | Symbol name ->
         if (not (List.mem name bound)) && Hashtbl.mem declared name then found := name :: !found
-    | Integer _ | Boolean _ -> ()
+    | Integer _ | Boolean _ | Bits _ -> ()
     | Apply (name, arguments) ->
         if Hashtbl.mem declared name then found := name :: !found;
         List.iter (walk bound) arguments
@@ -164,6 +165,7 @@ type numbering = {
 let rec sort_name numbering = function
   | Int -> "Int"
   | Bool -> "Bool"
+  | Float (exponent, significand) -> Printf.sprintf "(_ FloatingPoint %d %d)" exponent significand
   | Uninterpreted name -> (
       match Hashtbl.find_opt numbering.sort_names name with
       | Some canonical -> canonical
@@ -211,6 +213,10 @@ let function_name numbering name =
       else canonical
   | None -> ( match symbol_name numbering name with Some canonical -> canonical | None -> name)
 
+(* A bit-vector literal, most significant bit first. *)
+let bits_text width value =
+  "#b" ^ String.init width (fun index -> if Z.testbit value (width - 1 - index) then '1' else '0')
+
 let integer_text value =
   if Z.sign value < 0 then Printf.sprintf "(- %s)" (Z.to_string (Z.neg value))
   else Z.to_string value
@@ -230,6 +236,7 @@ let rec print numbering bound buffer term =
               | None -> invalid_arg ("Logic.text: undeclared symbol " ^ name))))
   | Integer value -> add (integer_text value)
   | Boolean value -> add (if value then "true" else "false")
+  | Bits (width, value) -> add (bits_text width value)
   | Apply (name, []) -> add (function_name numbering name)
   | Apply (name, arguments) ->
       add "(";
@@ -395,12 +402,19 @@ let show_term term =
     | Symbol name -> name
     | Integer value -> integer_text value
     | Boolean value -> if value then "true" else "false"
+    | Bits (width, value) -> bits_text width value
     | Apply (name, []) -> name
     | Apply (name, arguments) -> "(" ^ String.concat " " (name :: List.map show arguments) ^ ")"
     | Forall (bound, body) -> binder "forall" bound body
     | Exists (bound, body) -> binder "exists" bound body
   and binder word bound body =
-    let sort = function Int -> "Int" | Bool -> "Bool" | Uninterpreted name -> name in
+    let sort = function
+      | Int -> "Int"
+      | Bool -> "Bool"
+      | Float (exponent, significand) ->
+          Printf.sprintf "(_ FloatingPoint %d %d)" exponent significand
+      | Uninterpreted name -> name
+    in
     Printf.sprintf "(%s (%s) %s)" word
       (String.concat " " (List.map (fun (name, s) -> Printf.sprintf "(%s %s)" name (sort s)) bound))
       (show body)

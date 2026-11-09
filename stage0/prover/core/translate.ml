@@ -123,6 +123,7 @@ type context = {
           the bound is used. *)
   mutable lambda_captures : (L.term * C.local list) list;  (** What each lambda captures. *)
   mutable potentials : L.term list;  (** Each value's potential whose definition is a fact. *)
+  mutable equalities : L.term list;  (** Each derived [==] whose definition is a fact. *)
   mutable proving : bool;
       (** In a theorem, a [proof] block, or a law's proof, where a [todo] is a hole. *)
   mutable holes : (Names.key * span) list;  (** Reversed. *)
@@ -155,7 +156,7 @@ let made_since context mark term =
   let rec walk = function
     | L.Symbol name -> (
         match Hashtbl.find_opt context.fresh_order name with Some n -> n > mark | None -> false)
-    | L.Integer _ | L.Boolean _ -> false
+    | L.Integer _ | L.Boolean _ | L.Bits _ -> false
     | L.Apply (_, arguments) -> List.exists walk arguments
     | L.Forall (_, body) | L.Exists (_, body) -> walk body
   in
@@ -246,6 +247,38 @@ let width (ty : T.ty) =
   | _ -> None
 
 let is_numeric (ty : T.ty) = match ty with T.Integer -> true | _ -> bounds ty <> None
+
+(* A float type's widths in the solver's floating-point theory: its
+   exponent's, and its significand's, with the hidden bit. *)
+let float_format (ty : T.ty) =
+  match builtin ty with Some Float32 -> Some (8, 24) | Some Float64 -> Some (11, 53) | _ -> None
+
+(* A float literal, bit for bit. *)
+let float_literal (exponent, significand) value =
+  let bits =
+    if exponent = 8 then Z.extract (Z.of_int32 (Int32.bits_of_float value)) 0 32
+    else Z.extract (Z.of_int64 (Int64.bits_of_float value)) 0 64
+  in
+  let fraction = significand - 1 in
+  L.Apply
+    ( "fp",
+      [
+        L.Bits (1, Z.extract bits (exponent + fraction) 1);
+        L.Bits (exponent, Z.extract bits fraction exponent);
+        L.Bits (fraction, Z.extract bits 0 fraction);
+      ] )
+
+(* IEEE 754 arithmetic, rounding to nearest with ties to even, and the
+   lawful [==] and ordering DESIGN.md gives floats: every NaN is equal to
+   every other and ordered after every number, and otherwise IEEE's, so
+   [-0.0 == 0.0]. See DESIGN.md, "Equality, ordering, and deriving". *)
+let float_operation name left right = L.Apply (name, [ L.Apply ("RNE", []); left; right ])
+let is_nan value = L.Apply ("fp.isNaN", [ value ])
+let float_equal left right = L.(Apply ("fp.eq", [ left; right ]) ||| (is_nan left &&& is_nan right))
+
+let float_less left right =
+  L.(not_ (is_nan left) &&& is_nan right ||| Apply ("fp.lt", [ left; right ]))
+
 let is_bool ty = T.is_builtin Bool ty
 
 (* A type's name in the logic, unique across modules, as [T.show] is not. *)
@@ -337,8 +370,9 @@ let rec sort_of context (ty : T.ty) : L.sort =
   if is_numeric ty then Int
   else if is_bool ty then Bool
   else
-    match ty with
-    | Function function_type ->
+    match (ty, float_format ty) with
+    | _, Some (exponent, significand) -> Float (exponent, significand)
+    | Function function_type, _ ->
         (* One sort for each number of inputs, whatever the clauses, so a
            value keeps its sort where a function type is widened. *)
         Uninterpreted (Printf.sprintf "function/%d" (List.length function_type.inputs))
@@ -814,7 +848,10 @@ let resource_of (cost : cost) ~target_of : Costs.resource option =
 let literal_value frame (expression : expression) =
   match frame.source.checked.literals.(expression.id) with
   | Some (Integer_value value) -> Some (L.Integer value)
-  | Some (Float_value _) -> unsupported expression.span "a float"
+  | Some (Float_value value) -> (
+      match Option.bind frame.source.checked.types.(expression.id) float_format with
+      | Some format -> Some (float_literal format value)
+      | None -> unsupported expression.span "a float literal without a float type")
   | None -> None
 
 let comparison operator =
@@ -919,8 +956,12 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
   | Prefix (Negate, inner) ->
       let frame, inner_value = value context frame inner in
       let ty = type_of frame written in
-      let negated = L.Apply ("-", [ inner_value ]) in
-      if bounds ty <> None then
+      let negated =
+        if float_format ty <> None then L.Apply ("fp.neg", [ inner_value ])
+        else L.Apply ("-", [ inner_value ])
+      in
+      if float_format ty <> None then ()
+      else if bounds ty <> None then
         oblige context frame Overflow written.span
           (Printf.sprintf "`%s` may overflow `%s`." (quote source written.span) (T.show ty))
           (in_range ty negated)
@@ -985,7 +1026,10 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
   | List items -> Some (list_literal context frame written items)
   | Map _ -> unsupported written.span "a map literal"
   | String _ -> unsupported written.span "a string"
-  | Float _ -> unsupported written.span "a float"
+  | Float _ -> (
+      match literal_value frame written with
+      | Some term -> Some (frame, term)
+      | None -> unsupported written.span "a float literal without a value")
   | Range _ -> unsupported written.span "a range outside a `for` loop or a quantifier"
   | Any _ -> unsupported written.span "`any`"
   | Provide _ -> unsupported written.span "`provide`"
@@ -1050,6 +1094,81 @@ and name context frame (written : expression) (path : path) =
           Some (frame, variant_value context written type_ variant)
       | _ -> unsupported written.span "this name")
 
+(* [a == b] on a type: the solver's equality where it is structural, the
+   lawful equality of floats, and otherwise the type's [Equal] as a
+   function of the two, which a derived [Equal] defines field by field
+   with each field's own [==], unfolded once for each two it compares.
+   See PROVER.md, "Equality". *)
+and equal_of context frame (ty : T.ty) a b =
+  if structural context ty then L.equal a b
+  else if float_format ty <> None then float_equal a b
+  else
+    let sort = sort_of context ty in
+    let symbol = "equal." ^ type_key ty in
+    declare context (L.Function (symbol, [ sort; sort ], L.Bool));
+    let equal = L.Apply (symbol, [ a; b ]) in
+    (match (visible_type context ty, constructors context ty) with
+    | Some (interface, _), Some shape
+      when List.exists is_standard_equal interface.derives
+           && (not (List.mem equal context.equalities))
+           && not (L.mentions frame.bound equal) ->
+        context.equalities <- equal :: context.equalities;
+        let fields_equal (variant, fields) =
+          L.conjunction
+            (List.map
+               (fun (field, field_type) ->
+                 let selector = selector_name ty variant field in
+                 let a = L.Apply (selector, [ a ]) and b = L.Apply (selector, [ b ]) in
+                 if structural context field_type then L.equal a b
+                 else if float_format field_type <> None then float_equal a b
+                 else
+                   (* Unfolded only when it is compared itself. *)
+                   let symbol = "equal." ^ type_key field_type in
+                   declare context
+                     (L.Function
+                        (symbol, [ sort_of context field_type; sort_of context field_type ], L.Bool));
+                   L.Apply (symbol, [ a; b ]))
+               fields)
+        in
+        let defined =
+          match shape with
+          | [ ((None, _) as record) ] -> fields_equal record
+          | variants ->
+              L.disjunction
+                (List.map
+                   (fun ((variant, _) as one) ->
+                     let is_variant term =
+                       L.Apply (L.tester (constructor_name ty variant), [ term ])
+                     in
+                     L.(is_variant a &&& is_variant b &&& fields_equal one))
+                   variants)
+        in
+        fact context frame (L.equal equal defined)
+    | _ -> ());
+    equal
+
+(* An operator on two floats, as IEEE 754 and DESIGN.md's lawful [==] and
+   ordering give it. A remainder, which IEEE defines differently from
+   Truss, is known only by its type. *)
+and float_binary context frame (written : expression) operator left right =
+  let frame, a = value context frame left in
+  let frame, b = value context frame right in
+  let result =
+    match operator with
+    | Equal -> float_equal a b
+    | Not_equal -> L.not_ (float_equal a b)
+    | Less -> float_less a b
+    | Less_equal -> L.( ||| ) (float_less a b) (float_equal a b)
+    | Greater -> float_less b a
+    | Greater_equal -> L.( ||| ) (float_less b a) (float_equal a b)
+    | Add -> float_operation "fp.add" a b
+    | Subtract -> float_operation "fp.sub" a b
+    | Multiply -> float_operation "fp.mul" a b
+    | Divide -> float_operation "fp.div" a b
+    | _ -> arrive context frame "operator" (type_of frame written)
+  in
+  Some (frame, result)
+
 (* An operation the solver knows only by the range of its result. *)
 and opaque_operation context frame ty name arguments =
   let sorts = List.map (fun _ -> L.Int) arguments in
@@ -1063,95 +1182,97 @@ and binary context frame (written : expression) operator left right =
   let source = frame.source in
   let operand_type = type_of frame left in
   let result_type = type_of frame written in
-  let primitive =
-    (is_numeric operand_type || is_bool operand_type || T.is_builtin Character operand_type)
-    && (is_numeric result_type || is_bool result_type)
-  in
-  let structural_equality =
-    (operator = Equal || operator = Not_equal) && structural context operand_type
-  in
-  if structural_equality then begin
-    let frame, left_value = value context frame left in
-    let frame, right_value = value context frame right in
-    let equal = L.equal left_value right_value in
-    Some (frame, if operator = Equal then equal else L.not_ equal)
-  end
-  else if not primitive then
-    (* An operator on another type is a call of its trait's method:
+  if float_format operand_type <> None && float_format (type_of frame right) <> None then
+    float_binary context frame written operator left right
+  else
+    let primitive =
+      (is_numeric operand_type || is_bool operand_type || T.is_builtin Character operand_type)
+      && (is_numeric result_type || is_bool result_type)
+    in
+    let structural_equality =
+      (operator = Equal || operator = Not_equal) && structural context operand_type
+    in
+    if structural_equality then begin
+      let frame, left_value = value context frame left in
+      let frame, right_value = value context frame right in
+      let equal = L.equal left_value right_value in
+      Some (frame, if operator = Equal then equal else L.not_ equal)
+    end
+    else if not primitive then
+      (* An operator on another type is a call of its trait's method:
        [compare] for an ordering, whose result is tested, [equal] for
        [==], and the arithmetic traits' methods. *)
-    begin match (operator, source.checked.calls.(written.id)) with
-    | (Equal | Not_equal | Less | Less_equal | Greater | Greater_equal), Some call_ ->
-        (* [==] and the orderings are functions of their operands in the
+      begin match (operator, source.checked.calls.(written.id)) with
+      | (Equal | Not_equal | Less | Less_equal | Greater | Greater_equal), Some call_ ->
+          (* [==] and the orderings are functions of their operands in the
            logic, whatever the [impl]: [Equal] and [Ordered] use no
            capabilities, so a call that returns always gives the same
            answer, which is what their laws state. *)
-        let frame, left_value = value context frame left in
-        let frame, right_value = value context frame right in
-        let sort = sort_of context operand_type in
-        let key = type_key operand_type in
-        if operator = Equal || operator = Not_equal then begin
-          let symbol = "equal." ^ key in
-          declare context (L.Function (symbol, [ sort; sort ], L.Bool));
-          let equal = L.Apply (symbol, [ left_value; right_value ]) in
-          Some (frame, if operator = Equal then equal else L.not_ equal)
-        end
-        else begin
-          let ordering = substituted frame call_.result in
-          ignore (sort_of context ordering);
-          let symbol = "compare." ^ key in
-          declare context (L.Function (symbol, [ sort; sort ], sort_of context ordering));
-          let compared = L.Apply (symbol, [ left_value; right_value ]) in
-          let is variant =
-            L.Apply (L.tester (constructor_name ordering (Some variant)), [ compared ])
-          in
-          if constructors context ordering = None then
-            Some (frame, arrive context frame "operator" result_type)
-          else
-            Some
-              ( frame,
-                match operator with
-                | Less -> is "Less"
-                | Less_equal -> L.not_ (is "Greater")
-                | Greater -> is "Greater"
-                | _ -> L.not_ (is "Less") )
-        end
-    | _, None ->
-        let frame, _ = value context frame left in
-        let frame, _ = value context frame right in
-        Some (frame, arrive context frame "operator" result_type)
-    | _, Some call_ ->
-        (* Arithmetic on another type: its trait's method, by its contract. *)
-        resolved_call context frame written call_
-    end
-  else
-    let frame, left_value = value context frame left in
-    let frame, right_value = value context frame right in
-    match (comparison operator, operator) with
-    | Some symbol, _ -> Some (frame, L.Apply (symbol, [ left_value; right_value ]))
-    | None, Not_equal -> Some (frame, L.not_ (L.equal left_value right_value))
-    | None, (Add | Subtract | Multiply | Divide | Remainder) ->
-        Some (frame, arithmetic context frame written result_type operator left_value right_value)
-    | None, (Shift_left | Shift_right) ->
-        (match width result_type with
-        | Some bits ->
-            oblige context frame Shift right.span
-              (Printf.sprintf "The shift amount `%s` may not be less than %d."
-                 (quote source right.span) bits)
-              L.(Apply ("<", [ right_value; int bits ]))
-        | None -> unsupported written.span "a shift of `%s`" (T.show result_type));
-        let name = match operator with Shift_left -> "shift_left" | _ -> "shift_right" in
-        Some (frame, opaque_operation context frame result_type name [ left_value; right_value ])
-    | None, (Bit_and | Bit_or | Bit_xor) ->
-        let name = match operator with Bit_and -> "and" | Bit_or -> "or" | _ -> "xor" in
-        let term = opaque_operation context frame result_type name [ left_value; right_value ] in
-        (match (operator, bounds result_type) with
-        | Bit_and, Some (low, _) when Z.equal low Z.zero ->
-            assume context frame
-              L.(Apply ("<=", [ term; left_value ]) &&& Apply ("<=", [ term; right_value ]))
-        | _ -> ());
-        Some (frame, term)
-    | None, _ -> unsupported written.span "this operator"
+          let frame, left_value = value context frame left in
+          let frame, right_value = value context frame right in
+          let sort = sort_of context operand_type in
+          let key = type_key operand_type in
+          if operator = Equal || operator = Not_equal then begin
+            let equal = equal_of context frame operand_type left_value right_value in
+            ignore (sort, key);
+            Some (frame, if operator = Equal then equal else L.not_ equal)
+          end
+          else begin
+            let ordering = substituted frame call_.result in
+            ignore (sort_of context ordering);
+            let symbol = "compare." ^ key in
+            declare context (L.Function (symbol, [ sort; sort ], sort_of context ordering));
+            let compared = L.Apply (symbol, [ left_value; right_value ]) in
+            let is variant =
+              L.Apply (L.tester (constructor_name ordering (Some variant)), [ compared ])
+            in
+            if constructors context ordering = None then
+              Some (frame, arrive context frame "operator" result_type)
+            else
+              Some
+                ( frame,
+                  match operator with
+                  | Less -> is "Less"
+                  | Less_equal -> L.not_ (is "Greater")
+                  | Greater -> is "Greater"
+                  | _ -> L.not_ (is "Less") )
+          end
+      | _, None ->
+          let frame, _ = value context frame left in
+          let frame, _ = value context frame right in
+          Some (frame, arrive context frame "operator" result_type)
+      | _, Some call_ ->
+          (* Arithmetic on another type: its trait's method, by its contract. *)
+          resolved_call context frame written call_
+      end
+    else
+      let frame, left_value = value context frame left in
+      let frame, right_value = value context frame right in
+      match (comparison operator, operator) with
+      | Some symbol, _ -> Some (frame, L.Apply (symbol, [ left_value; right_value ]))
+      | None, Not_equal -> Some (frame, L.not_ (L.equal left_value right_value))
+      | None, (Add | Subtract | Multiply | Divide | Remainder) ->
+          Some (frame, arithmetic context frame written result_type operator left_value right_value)
+      | None, (Shift_left | Shift_right) ->
+          (match width result_type with
+          | Some bits ->
+              oblige context frame Shift right.span
+                (Printf.sprintf "The shift amount `%s` may not be less than %d."
+                   (quote source right.span) bits)
+                L.(Apply ("<", [ right_value; int bits ]))
+          | None -> unsupported written.span "a shift of `%s`" (T.show result_type));
+          let name = match operator with Shift_left -> "shift_left" | _ -> "shift_right" in
+          Some (frame, opaque_operation context frame result_type name [ left_value; right_value ])
+      | None, (Bit_and | Bit_or | Bit_xor) ->
+          let name = match operator with Bit_and -> "and" | Bit_or -> "or" | _ -> "xor" in
+          let term = opaque_operation context frame result_type name [ left_value; right_value ] in
+          (match (operator, bounds result_type) with
+          | Bit_and, Some (low, _) when Z.equal low Z.zero ->
+              assume context frame
+                L.(Apply ("<=", [ term; left_value ]) &&& Apply ("<=", [ term; right_value ]))
+          | _ -> ());
+          Some (frame, term)
+      | None, _ -> unsupported written.span "this operator"
 
 and arithmetic context frame (written : expression) ty operator left right =
   let source = frame.source in
@@ -3774,7 +3895,7 @@ and mentions_potential term =
     | L.Apply (name, arguments) ->
         String.starts_with ~prefix:"potential." name || List.exists walk arguments
     | L.Forall (_, body) | L.Exists (_, body) -> walk body
-    | L.Symbol _ | L.Integer _ | L.Boolean _ -> false
+    | L.Symbol _ | L.Integer _ | L.Boolean _ | L.Bits _ -> false
   in
   walk term
 
@@ -4265,7 +4386,17 @@ and assignment context frame (written : statement) target operator assigned =
           | Shift_left_assign -> Shift_left
           | _ -> Shift_right
         in
-        if not (is_numeric ty) then (
+        if float_format ty <> None then
+          let combined =
+            match binary_operator with
+            | Add -> float_operation "fp.add" current right
+            | Subtract -> float_operation "fp.sub" current right
+            | Multiply -> float_operation "fp.mul" current right
+            | Divide -> float_operation "fp.div" current right
+            | _ -> arrive context frame "operator" ty
+          in
+          (frame, combined)
+        else if not (is_numeric ty) then (
           ignore source;
           (frame, arrive context frame "operator" ty))
         else
@@ -4829,6 +4960,7 @@ let new_context database ~home ~current ~terminates ~measures checked =
     lambda_times = [];
     lambda_captures = [];
     potentials = [];
+    equalities = [];
     proving = false;
     holes = [];
     call_targets = [];

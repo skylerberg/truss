@@ -168,6 +168,40 @@ let proof = Query.query ~name:"proof" ~show:Names.show_key prove
 (* A value from the solver's model, written as Truss writes it: a negative
    number with its sign, and a datatype's value as its variant or record,
    with its fields in parentheses. *)
+(* A float from the solver's model, as Truss writes it: the shortest
+   decimal that reads back as the same bits, with a point. *)
+let float_text bits =
+  let shortest digits_for read =
+    let rec go digits =
+      let text = Printf.sprintf "%.*g" digits read in
+      if digits >= 17 || float_of_string text = read then text else go (digits + 1)
+    in
+    go digits_for
+  in
+  let text =
+    match String.length bits with
+    | 64 -> shortest 1 (Int64.float_of_bits (Int64.of_string ("0b" ^ bits)))
+    | 32 ->
+        let value = Int32.float_of_bits (Int32.of_string ("0b" ^ bits)) in
+        let rec go digits =
+          let text = Printf.sprintf "%.*g" digits value in
+          if digits >= 9 || Int32.bits_of_float (float_of_string text) = Int32.bits_of_float value
+          then text
+          else go (digits + 1)
+        in
+        go 1
+    | _ -> "a float"
+  in
+  if text = "nan" || text = "-nan" then "NaN"
+  else if text = "inf" then "infinity"
+  else if text = "-inf" then "-infinity"
+  else
+    (* A Truss float has digits on both sides of its point. *)
+    match String.index_opt text 'e' with
+    | _ when String.contains text '.' -> text
+    | Some at -> String.sub text 0 at ^ ".0" ^ String.sub text at (String.length text - at)
+    | None -> text ^ ".0"
+
 let truss_value members text =
   let tokens =
     let buffer = Buffer.create 16 and found = ref [] in
@@ -211,7 +245,33 @@ let truss_value members text =
     | Some _ -> true
     | None -> false
   in
+  (* A bit-vector the solver writes in binary, [#b...], or in hex, [#x...]. *)
+  let bits atom =
+    if String.length atom > 2 && String.sub atom 0 2 = "#b" then
+      Some (String.sub atom 2 (String.length atom - 2))
+    else if String.length atom > 2 && String.sub atom 0 2 = "#x" then
+      Some
+        (String.concat ""
+           (List.map
+              (fun digit ->
+                let value = int_of_string ("0x" ^ String.make 1 digit) in
+                String.init 4 (fun index -> if value land (8 lsr index) <> 0 then '1' else '0'))
+              (List.of_seq (String.to_seq (String.sub atom 2 (String.length atom - 2))))))
+    else None
+  in
   let rec one = function
+    | `Open :: `Atom "fp" :: `Atom sign :: `Atom exponent :: `Atom fraction :: `Close :: rest -> (
+        match (bits sign, bits exponent, bits fraction) with
+        | Some sign, Some exponent, Some fraction -> (float_text (sign ^ exponent ^ fraction), rest)
+        | _ -> ("a float", rest))
+    | `Open :: `Atom "_" :: `Atom special :: `Atom _ :: `Atom _ :: `Close :: rest ->
+        ( (match special with
+          | "+zero" -> "0.0"
+          | "-zero" -> "-0.0"
+          | "+oo" -> "infinity"
+          | "-oo" -> "-infinity"
+          | _ -> "NaN"),
+          rest )
     | `Atom atom :: rest when opaque atom -> ("a value the prover knows nothing more about", rest)
     | `Atom atom :: rest -> (
         match List.assoc_opt atom members with

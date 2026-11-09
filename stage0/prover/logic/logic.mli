@@ -9,12 +9,16 @@
 type sort =
   | Int  (** The mathematical integers, which every built-in integer type is a range of. *)
   | Bool
+  | Float of int * int
+      (** IEEE 754 binary floating point, with its exponent's and significand's widths in bits, the
+          significand counting its hidden bit: [Float (11, 53)] is [Float64]. *)
   | Uninterpreted of string  (** A sort the solver knows nothing about, such as a type parameter. *)
 
 type term =
   | Symbol of string  (** A declared constant, or a bound variable inside its quantifier. *)
   | Integer of Z.t
   | Boolean of bool
+  | Bits of int * Z.t  (** A bit-vector literal: its width, and its value, at or above zero. *)
   | Apply of string * term list
       (** A built-in operation of SMT-LIB, such as ["+"] or ["ite"], or a declared function. *)
   | Forall of (string * sort) list * term

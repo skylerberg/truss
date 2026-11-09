@@ -1018,6 +1018,56 @@ let () =
          }\n"
         "prover.ensures")
 
+(* Floats *)
+
+let () =
+  test "float equality is reflexive, even for NaN" (fun () ->
+      proven "fn f(value: Float64) -> Bool\n  ensures result\n{\n  value == value\n}\n");
+  test "every float is ordered, NaN last" (fun () ->
+      proven "fn f(value: Float64) -> Bool\n  ensures result\n{\n  value <= value\n}\n");
+  test "float arithmetic is exact where IEEE 754 is" (fun () ->
+      proven "fn f() -> Float64\n  ensures result == 0.5\n{\n  0.25 + 0.25\n}\n");
+  test "adding zero keeps a float equal, with -0.0 equal to 0.0" (fun () ->
+      proven "fn f(value: Float64) -> Bool\n  ensures result\n{\n  value + 0.0 == value\n}\n");
+  test "adding one does not always make a float larger" (fun () ->
+      not_proven "fn f(value: Float64) -> Float64\n  ensures result > value\n{\n  value + 1.0\n}\n"
+        "prover.ensures");
+  test "a derived equality over floats compares field by field" (fun () ->
+      proven
+        "type Point(x: Float64, y: Float64)\n\
+        \  derives Equal\n\n\
+         fn f() -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  Point(x: 0.0, y: 1.0) == Point(x: -0.0, y: 1.0)\n\
+         }\n");
+  test "equal points have equal fields" (fun () ->
+      proven
+        "type Point(x: Float64, y: Float64)\n\
+        \  derives Equal\n\n\
+         fn f(a: Point, b: Point) -> Bool\n\
+        \  requires a == b\n\
+        \  ensures result\n\
+         {\n\
+        \  a.x == b.x\n\
+         }\n");
+  test "points equal by their fields are not identical" (fun () ->
+      not_proven
+        "type Point(x: Float64, y: Float64)\n\
+        \  derives Equal\n\n\
+         fn f(a: Point, b: Point) -> Bool\n\
+        \  requires a == b\n\
+        \  ensures result\n\
+         {\n\
+        \  1.0 / a.x == 1.0 / b.x\n\
+         }\n"
+        "prover.ensures");
+  test "a float counterexample is written as Truss writes floats" (fun () ->
+      let found =
+        message "fn f(value: Float32) -> Bool\n  ensures result\n{\n  value * 0.0 == 0.0\n}\n"
+      in
+      if not (contains found "infinity" || contains found "NaN") then fail "message %S" found)
+
 (* Capabilities *)
 
 let dice = "capability Dice {\n  fn roll() -> UInt8\n    ensures result >= 1 && result <= 6\n}\n\n"
