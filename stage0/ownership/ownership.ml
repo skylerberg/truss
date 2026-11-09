@@ -1167,14 +1167,15 @@ let pullable =
             | _ -> false)
         | _ -> false
       in
-      match Query.demand database Interface.Environment.signature path with
-      | Some { output = Yields (Mut, _); _ } -> Yields_mut
-      | _ -> (
-          if reaches [] (Query.demand database yields_through path) then Recursive
-          else
-            match Query.demand database Interface.Environment.signature path with
-            | Some { output = Yields (Read, _); _ } when yields_places () -> Yields_places
-            | _ -> Pullable))
+      match
+        Option.map
+          (fun (signature : T.signature) -> signature.output)
+          (Query.demand database Interface.Environment.signature path)
+      with
+      | Some (Yields (Mut, _)) -> Yields_mut
+      | _ when reaches [] (Query.demand database yields_through path) -> Recursive
+      | Some (Yields (Read, _)) when yields_places () -> Yields_places
+      | _ -> Pullable)
 
 (* A pull of a method that cannot be pulled: [next()] on its cursor, or a
    [for] loop over a cursor held in a variable. [element] is the type a

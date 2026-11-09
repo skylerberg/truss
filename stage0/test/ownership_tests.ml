@@ -396,6 +396,24 @@ let () =
         \  var each = greetings()\n\
         \  mut each.next()\n\
          }\n");
+  test "a for loop over a marked call drives the method, not a cursor" (fun () ->
+      fine
+        "fn f(names: mut List[String]) {\n\
+        \  for name in mut names.each() {\n\
+        \    let _ = name\n\
+        \  }\n\
+         }\n");
+  test "a recursive mut walk may loop over itself" (fun () ->
+      fine
+        "type Tree(value: Int64, children: List[Tree])\n\n\
+         fn Tree.each(mut self) yields mut Int64 {\n\
+        \  yield mut self.value\n\
+        \  for child in mut self.children {\n\
+        \    for value in mut child.each() {\n\
+        \      yield mut value\n\
+        \    }\n\
+        \  }\n\
+         }\n");
   test "looping over a method that yields views of String elements is fine" (fun () ->
       fine
         "fn f(names: List[String]) -> USize {\n\

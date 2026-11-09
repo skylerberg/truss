@@ -21,9 +21,9 @@ type pulling =
       (** In its own cycle of yielding through, as a tree's [each] that loops over its subtrees, so
           its cursor would need a stack of its own. *)
   | Yields_places
-      (** It yields read-only views of places, such as [self[index]], which a pull hands out as
-          owned values: only a [Plain] element can be pulled, since anything else would be copied
-          unasked. A pull of a non-[Plain] element is reported where it happens. *)
+      (** It yields read-only views of named places, such as [self[index]] or a local, which a pull
+          hands out as owned values: only a [Plain] element can be pulled, since anything else would
+          be copied unasked. A pull of a non-[Plain] element is reported where it happens. *)
 
 val pullable : (Path.t, pulling) Query.query
 

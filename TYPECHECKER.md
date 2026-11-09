@@ -983,10 +983,12 @@ with `copy()`, unless it is `Plain`. Otherwise the error offers both fixes.
 - **A pull hands out an owned value.** `next()` returns `Option[Element]`,
   so a method that yields read-only views of places, as `List.each` yields
   `self[index]`, can be pulled only where its element is `Plain`, which is
-  copied implicitly anyway. Anything else would be copied unasked, which
-  DESIGN.md rules out, so pulling it is an error that suggests a `for` loop
-  or a method that yields owned values. A method that yields temporaries
-  yields owned values, which a pull moves.
+  copied implicitly anyway. A named place counts, whether a field, an
+  element, a parameter, or a local. Anything else would be copied unasked,
+  which DESIGN.md rules out, so pulling it is an error that suggests a `for`
+  loop or a method that yields owned values. A method that yields only
+  temporaries, such as calls' results, yields owned values, which a pull
+  moves.
 - **Pullability is worked out from the body,** as DESIGN.md says. A
   `yields` method whose yields reach a recursive call, through a `for` over
   a method in its own call cycle, cannot be pulled, and whether a method
