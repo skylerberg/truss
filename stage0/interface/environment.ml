@@ -33,12 +33,21 @@ let head_type context owner (head : type_head) =
   match Lower.target context head.path.last with
   | Some (Definition type_path) ->
       let generics = Lower.generics context owner head.generics in
+      (match Query.demand context.database Summary.generics_of type_path with
+      | Some expected when List.length expected <> List.length generics ->
+          Lower.report context Arity head.span
+            (Printf.sprintf "`%s` takes %d generic %s, and this head names %d."
+               (Names.spell_path head.path) (List.length expected)
+               (if List.length expected = 1 then "parameter" else "parameters")
+               (List.length generics))
+      | _ -> ());
       let arguments =
         List.map
           (fun (generic : T.generic) ->
             match generic.kind with
             | Value_generic -> T.Value (T.Value_parameter generic.generic)
-            | Type_generic _ | Capability_generic -> T.Type (T.Parameter generic.generic))
+            | Type_generic _ -> T.Type (T.Parameter generic.generic)
+            | Capability_generic -> T.Capabilities [ T.Capability_parameter generic.generic ])
           generics
       in
       let type_ =
@@ -57,7 +66,8 @@ let generic_arguments generics =
     (fun (generic : T.generic) ->
       match generic.kind with
       | Value_generic -> T.Value (T.Value_parameter generic.generic)
-      | Type_generic _ | Capability_generic -> T.Type (T.Parameter generic.generic))
+      | Type_generic _ -> T.Type (T.Parameter generic.generic)
+      | Capability_generic -> T.Capabilities [ T.Capability_parameter generic.generic ])
     generics
 
 let fields context (written : field list) =
@@ -297,21 +307,23 @@ let lower_definition database (key : Names.key) (definition : definition)
       | Law_proof _ -> Law_proof_interface
       | Definition_error _ -> Error_interface
   in
-  {
-    interface;
-    diagnostics = List.rev !(context.diagnostics);
-    named = List.rev !(context.named);
-    bounds =
-      List.sort compare
-        (Hashtbl.fold (fun parameter bounds acc -> (parameter, bounds) :: acc) context.bounds []);
-  }
+  ( {
+      interface;
+      diagnostics = List.rev !(context.diagnostics);
+      named = List.rev !(context.named);
+      bounds =
+        List.sort compare
+          (Hashtbl.fold (fun parameter bounds acc -> (parameter, bounds) :: acc) context.bounds []);
+    },
+    context )
 
 let lowered =
   Query.query ~name:"lowered" ~show:Names.show_key (fun database key ->
       match
         (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
       with
-      | Some definition, Some resolved -> Some (lower_definition database key definition resolved)
+      | Some definition, Some resolved ->
+          Some (fst (lower_definition database key definition resolved))
       | _ -> None)
 
 (* The interface a path names, from its definition with ordinal 0. *)

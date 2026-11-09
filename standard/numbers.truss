@@ -2,15 +2,15 @@ use standard::intrinsic
 
 impl Equal for Int8 {
   fn equal(self, other: Int8) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for Int8 {
   fn compare(self, other: Int8) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -89,34 +89,34 @@ public let Int8.minimum: Int8 = -128
 public let Int8.maximum: Int8 = 127
 
 public fn Int8.checked_add(self, other: Int8) -> Option[Int8] {
-  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
 public fn Int8.checked_subtract(self, other: Int8) -> Option[Int8] {
-  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
 public fn Int8.checked_multiply(self, other: Int8) -> Option[Int8] {
-  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
 public fn Int8.wrapping_add(self, other: Int8) -> Int8 {
-  intrinsic::wrapping_add(self, other)
+  intrinsic::wrapping_add(self, right: other)
 }
 
 public fn Int8.wrapping_subtract(self, other: Int8) -> Int8 {
-  intrinsic::wrapping_subtract(self, other)
+  intrinsic::wrapping_subtract(self, right: other)
 }
 
 public fn Int8.wrapping_multiply(self, other: Int8) -> Int8 {
-  intrinsic::wrapping_multiply(self, other)
+  intrinsic::wrapping_multiply(self, right: other)
 }
 
 public fn Int8.saturating_add(self, other: Int8) -> Int8 {
-  if intrinsic::add_overflows(self, other) {
+  if intrinsic::add_overflows(self, right: other) {
     if other < 0 { Int8.minimum } else { Int8.maximum }
   } else {
-    intrinsic::add(self, other)
+    intrinsic::add(self, right: other)
   }
 }
 
@@ -194,15 +194,15 @@ impl TryFrom[USize] for Int8 {
 
 impl Equal for Int16 {
   fn equal(self, other: Int16) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for Int16 {
   fn compare(self, other: Int16) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -281,34 +281,34 @@ public let Int16.minimum: Int16 = -32768
 public let Int16.maximum: Int16 = 32767
 
 public fn Int16.checked_add(self, other: Int16) -> Option[Int16] {
-  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
 public fn Int16.checked_subtract(self, other: Int16) -> Option[Int16] {
-  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
 public fn Int16.checked_multiply(self, other: Int16) -> Option[Int16] {
-  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
 public fn Int16.wrapping_add(self, other: Int16) -> Int16 {
-  intrinsic::wrapping_add(self, other)
+  intrinsic::wrapping_add(self, right: other)
 }
 
 public fn Int16.wrapping_subtract(self, other: Int16) -> Int16 {
-  intrinsic::wrapping_subtract(self, other)
+  intrinsic::wrapping_subtract(self, right: other)
 }
 
 public fn Int16.wrapping_multiply(self, other: Int16) -> Int16 {
-  intrinsic::wrapping_multiply(self, other)
+  intrinsic::wrapping_multiply(self, right: other)
 }
 
 public fn Int16.saturating_add(self, other: Int16) -> Int16 {
-  if intrinsic::add_overflows(self, other) {
+  if intrinsic::add_overflows(self, right: other) {
     if other < 0 { Int16.minimum } else { Int16.maximum }
   } else {
-    intrinsic::add(self, other)
+    intrinsic::add(self, right: other)
   }
 }
 
@@ -382,15 +382,15 @@ impl TryFrom[USize] for Int16 {
 
 impl Equal for Int32 {
   fn equal(self, other: Int32) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for Int32 {
   fn compare(self, other: Int32) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -469,34 +469,34 @@ public let Int32.minimum: Int32 = -2147483648
 public let Int32.maximum: Int32 = 2147483647
 
 public fn Int32.checked_add(self, other: Int32) -> Option[Int32] {
-  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
 public fn Int32.checked_subtract(self, other: Int32) -> Option[Int32] {
-  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
 public fn Int32.checked_multiply(self, other: Int32) -> Option[Int32] {
-  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
 public fn Int32.wrapping_add(self, other: Int32) -> Int32 {
-  intrinsic::wrapping_add(self, other)
+  intrinsic::wrapping_add(self, right: other)
 }
 
 public fn Int32.wrapping_subtract(self, other: Int32) -> Int32 {
-  intrinsic::wrapping_subtract(self, other)
+  intrinsic::wrapping_subtract(self, right: other)
 }
 
 public fn Int32.wrapping_multiply(self, other: Int32) -> Int32 {
-  intrinsic::wrapping_multiply(self, other)
+  intrinsic::wrapping_multiply(self, right: other)
 }
 
 public fn Int32.saturating_add(self, other: Int32) -> Int32 {
-  if intrinsic::add_overflows(self, other) {
+  if intrinsic::add_overflows(self, right: other) {
     if other < 0 { Int32.minimum } else { Int32.maximum }
   } else {
-    intrinsic::add(self, other)
+    intrinsic::add(self, right: other)
   }
 }
 
@@ -566,15 +566,15 @@ impl TryFrom[USize] for Int32 {
 
 impl Equal for Int64 {
   fn equal(self, other: Int64) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for Int64 {
   fn compare(self, other: Int64) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -653,34 +653,34 @@ public let Int64.minimum: Int64 = -9223372036854775808
 public let Int64.maximum: Int64 = 9223372036854775807
 
 public fn Int64.checked_add(self, other: Int64) -> Option[Int64] {
-  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
 public fn Int64.checked_subtract(self, other: Int64) -> Option[Int64] {
-  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
 public fn Int64.checked_multiply(self, other: Int64) -> Option[Int64] {
-  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
 public fn Int64.wrapping_add(self, other: Int64) -> Int64 {
-  intrinsic::wrapping_add(self, other)
+  intrinsic::wrapping_add(self, right: other)
 }
 
 public fn Int64.wrapping_subtract(self, other: Int64) -> Int64 {
-  intrinsic::wrapping_subtract(self, other)
+  intrinsic::wrapping_subtract(self, right: other)
 }
 
 public fn Int64.wrapping_multiply(self, other: Int64) -> Int64 {
-  intrinsic::wrapping_multiply(self, other)
+  intrinsic::wrapping_multiply(self, right: other)
 }
 
 public fn Int64.saturating_add(self, other: Int64) -> Int64 {
-  if intrinsic::add_overflows(self, other) {
+  if intrinsic::add_overflows(self, right: other) {
     if other < 0 { Int64.minimum } else { Int64.maximum }
   } else {
-    intrinsic::add(self, other)
+    intrinsic::add(self, right: other)
   }
 }
 
@@ -744,15 +744,15 @@ impl TryFrom[USize] for Int64 {
 
 impl Equal for ISize {
   fn equal(self, other: ISize) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for ISize {
   fn compare(self, other: ISize) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -831,34 +831,34 @@ public let ISize.minimum: ISize = -9223372036854775808
 public let ISize.maximum: ISize = 9223372036854775807
 
 public fn ISize.checked_add(self, other: ISize) -> Option[ISize] {
-  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
 public fn ISize.checked_subtract(self, other: ISize) -> Option[ISize] {
-  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
 public fn ISize.checked_multiply(self, other: ISize) -> Option[ISize] {
-  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
 public fn ISize.wrapping_add(self, other: ISize) -> ISize {
-  intrinsic::wrapping_add(self, other)
+  intrinsic::wrapping_add(self, right: other)
 }
 
 public fn ISize.wrapping_subtract(self, other: ISize) -> ISize {
-  intrinsic::wrapping_subtract(self, other)
+  intrinsic::wrapping_subtract(self, right: other)
 }
 
 public fn ISize.wrapping_multiply(self, other: ISize) -> ISize {
-  intrinsic::wrapping_multiply(self, other)
+  intrinsic::wrapping_multiply(self, right: other)
 }
 
 public fn ISize.saturating_add(self, other: ISize) -> ISize {
-  if intrinsic::add_overflows(self, other) {
+  if intrinsic::add_overflows(self, right: other) {
     if other < 0 { ISize.minimum } else { ISize.maximum }
   } else {
-    intrinsic::add(self, other)
+    intrinsic::add(self, right: other)
   }
 }
 
@@ -926,15 +926,15 @@ impl TryFrom[USize] for ISize {
 
 impl Equal for UInt8 {
   fn equal(self, other: UInt8) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for UInt8 {
   fn compare(self, other: UInt8) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -1005,34 +1005,34 @@ public let UInt8.minimum: UInt8 = 0
 public let UInt8.maximum: UInt8 = 255
 
 public fn UInt8.checked_add(self, other: UInt8) -> Option[UInt8] {
-  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
 public fn UInt8.checked_subtract(self, other: UInt8) -> Option[UInt8] {
-  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
 public fn UInt8.checked_multiply(self, other: UInt8) -> Option[UInt8] {
-  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
 public fn UInt8.wrapping_add(self, other: UInt8) -> UInt8 {
-  intrinsic::wrapping_add(self, other)
+  intrinsic::wrapping_add(self, right: other)
 }
 
 public fn UInt8.wrapping_subtract(self, other: UInt8) -> UInt8 {
-  intrinsic::wrapping_subtract(self, other)
+  intrinsic::wrapping_subtract(self, right: other)
 }
 
 public fn UInt8.wrapping_multiply(self, other: UInt8) -> UInt8 {
-  intrinsic::wrapping_multiply(self, other)
+  intrinsic::wrapping_multiply(self, right: other)
 }
 
 public fn UInt8.saturating_add(self, other: UInt8) -> UInt8 {
-  if intrinsic::add_overflows(self, other) {
+  if intrinsic::add_overflows(self, right: other) {
     UInt8.maximum
   } else {
-    intrinsic::add(self, other)
+    intrinsic::add(self, right: other)
   }
 }
 
@@ -1110,15 +1110,15 @@ impl TryFrom[USize] for UInt8 {
 
 impl Equal for UInt16 {
   fn equal(self, other: UInt16) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for UInt16 {
   fn compare(self, other: UInt16) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -1189,34 +1189,34 @@ public let UInt16.minimum: UInt16 = 0
 public let UInt16.maximum: UInt16 = 65535
 
 public fn UInt16.checked_add(self, other: UInt16) -> Option[UInt16] {
-  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
 public fn UInt16.checked_subtract(self, other: UInt16) -> Option[UInt16] {
-  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
 public fn UInt16.checked_multiply(self, other: UInt16) -> Option[UInt16] {
-  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
 public fn UInt16.wrapping_add(self, other: UInt16) -> UInt16 {
-  intrinsic::wrapping_add(self, other)
+  intrinsic::wrapping_add(self, right: other)
 }
 
 public fn UInt16.wrapping_subtract(self, other: UInt16) -> UInt16 {
-  intrinsic::wrapping_subtract(self, other)
+  intrinsic::wrapping_subtract(self, right: other)
 }
 
 public fn UInt16.wrapping_multiply(self, other: UInt16) -> UInt16 {
-  intrinsic::wrapping_multiply(self, other)
+  intrinsic::wrapping_multiply(self, right: other)
 }
 
 public fn UInt16.saturating_add(self, other: UInt16) -> UInt16 {
-  if intrinsic::add_overflows(self, other) {
+  if intrinsic::add_overflows(self, right: other) {
     UInt16.maximum
   } else {
-    intrinsic::add(self, other)
+    intrinsic::add(self, right: other)
   }
 }
 
@@ -1292,15 +1292,15 @@ impl TryFrom[USize] for UInt16 {
 
 impl Equal for UInt32 {
   fn equal(self, other: UInt32) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for UInt32 {
   fn compare(self, other: UInt32) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -1371,34 +1371,34 @@ public let UInt32.minimum: UInt32 = 0
 public let UInt32.maximum: UInt32 = 4294967295
 
 public fn UInt32.checked_add(self, other: UInt32) -> Option[UInt32] {
-  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
 public fn UInt32.checked_subtract(self, other: UInt32) -> Option[UInt32] {
-  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
 public fn UInt32.checked_multiply(self, other: UInt32) -> Option[UInt32] {
-  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
 public fn UInt32.wrapping_add(self, other: UInt32) -> UInt32 {
-  intrinsic::wrapping_add(self, other)
+  intrinsic::wrapping_add(self, right: other)
 }
 
 public fn UInt32.wrapping_subtract(self, other: UInt32) -> UInt32 {
-  intrinsic::wrapping_subtract(self, other)
+  intrinsic::wrapping_subtract(self, right: other)
 }
 
 public fn UInt32.wrapping_multiply(self, other: UInt32) -> UInt32 {
-  intrinsic::wrapping_multiply(self, other)
+  intrinsic::wrapping_multiply(self, right: other)
 }
 
 public fn UInt32.saturating_add(self, other: UInt32) -> UInt32 {
-  if intrinsic::add_overflows(self, other) {
+  if intrinsic::add_overflows(self, right: other) {
     UInt32.maximum
   } else {
-    intrinsic::add(self, other)
+    intrinsic::add(self, right: other)
   }
 }
 
@@ -1472,15 +1472,15 @@ impl TryFrom[USize] for UInt32 {
 
 impl Equal for UInt64 {
   fn equal(self, other: UInt64) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for UInt64 {
   fn compare(self, other: UInt64) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -1551,34 +1551,34 @@ public let UInt64.minimum: UInt64 = 0
 public let UInt64.maximum: UInt64 = 18446744073709551615
 
 public fn UInt64.checked_add(self, other: UInt64) -> Option[UInt64] {
-  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
 public fn UInt64.checked_subtract(self, other: UInt64) -> Option[UInt64] {
-  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
 public fn UInt64.checked_multiply(self, other: UInt64) -> Option[UInt64] {
-  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
 public fn UInt64.wrapping_add(self, other: UInt64) -> UInt64 {
-  intrinsic::wrapping_add(self, other)
+  intrinsic::wrapping_add(self, right: other)
 }
 
 public fn UInt64.wrapping_subtract(self, other: UInt64) -> UInt64 {
-  intrinsic::wrapping_subtract(self, other)
+  intrinsic::wrapping_subtract(self, right: other)
 }
 
 public fn UInt64.wrapping_multiply(self, other: UInt64) -> UInt64 {
-  intrinsic::wrapping_multiply(self, other)
+  intrinsic::wrapping_multiply(self, right: other)
 }
 
 public fn UInt64.saturating_add(self, other: UInt64) -> UInt64 {
-  if intrinsic::add_overflows(self, other) {
+  if intrinsic::add_overflows(self, right: other) {
     UInt64.maximum
   } else {
-    intrinsic::add(self, other)
+    intrinsic::add(self, right: other)
   }
 }
 
@@ -1648,15 +1648,15 @@ impl From[USize] for UInt64 {
 
 impl Equal for USize {
   fn equal(self, other: USize) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for USize {
   fn compare(self, other: USize) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -1727,34 +1727,34 @@ public let USize.minimum: USize = 0
 public let USize.maximum: USize = 18446744073709551615
 
 public fn USize.checked_add(self, other: USize) -> Option[USize] {
-  if intrinsic::add_overflows(self, other) { None } else { Some(intrinsic::add(self, other)) }
+  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
 public fn USize.checked_subtract(self, other: USize) -> Option[USize] {
-  if intrinsic::subtract_overflows(self, other) { None } else { Some(intrinsic::subtract(self, other)) }
+  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
 public fn USize.checked_multiply(self, other: USize) -> Option[USize] {
-  if intrinsic::multiply_overflows(self, other) { None } else { Some(intrinsic::multiply(self, other)) }
+  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
 public fn USize.wrapping_add(self, other: USize) -> USize {
-  intrinsic::wrapping_add(self, other)
+  intrinsic::wrapping_add(self, right: other)
 }
 
 public fn USize.wrapping_subtract(self, other: USize) -> USize {
-  intrinsic::wrapping_subtract(self, other)
+  intrinsic::wrapping_subtract(self, right: other)
 }
 
 public fn USize.wrapping_multiply(self, other: USize) -> USize {
-  intrinsic::wrapping_multiply(self, other)
+  intrinsic::wrapping_multiply(self, right: other)
 }
 
 public fn USize.saturating_add(self, other: USize) -> USize {
-  if intrinsic::add_overflows(self, other) {
+  if intrinsic::add_overflows(self, right: other) {
     USize.maximum
   } else {
-    intrinsic::add(self, other)
+    intrinsic::add(self, right: other)
   }
 }
 
@@ -1826,15 +1826,15 @@ impl TryFrom[UInt64] for USize {
 
 impl Equal for Float32 {
   fn equal(self, other: Float32) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for Float32 {
   fn compare(self, other: Float32) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -1902,6 +1902,20 @@ impl Negate for Float32 {
   }
 }
 
+impl Hash for Float32 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(intrinsic::to_bits[Float32, UInt32](self)))
+  }
+}
+
+public fn Float32.ieee_equal(self, other: Float32) -> Bool {
+  intrinsic::ieee_equal(self, right: other)
+}
+
+public fn Float32.ieee_less(self, other: Float32) -> Bool {
+  intrinsic::ieee_less(self, right: other)
+}
+
 public fn Float32.is_nan(self) -> Bool {
   intrinsic::is_nan(self)
 }
@@ -1912,15 +1926,15 @@ public fn Float32.square_root(self) -> Float32 {
 
 impl Equal for Float64 {
   fn equal(self, other: Float64) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for Float64 {
   fn compare(self, other: Float64) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -1988,6 +2002,20 @@ impl Negate for Float64 {
   }
 }
 
+impl Hash for Float64 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(intrinsic::to_bits[Float64, UInt64](self)))
+  }
+}
+
+public fn Float64.ieee_equal(self, other: Float64) -> Bool {
+  intrinsic::ieee_equal(self, right: other)
+}
+
+public fn Float64.ieee_less(self, other: Float64) -> Bool {
+  intrinsic::ieee_less(self, right: other)
+}
+
 public fn Float64.is_nan(self) -> Bool {
   intrinsic::is_nan(self)
 }
@@ -2000,7 +2028,7 @@ public type ConversionError()
 
 impl Equal for Bool {
   fn equal(self, other: Bool) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
@@ -2012,15 +2040,15 @@ impl Hash for Bool {
 
 impl Equal for Character {
   fn equal(self, other: Character) -> Bool {
-    intrinsic::equal(self, other)
+    intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for Character {
   fn compare(self, other: Character) -> Ordering {
-    if intrinsic::less(self, other) {
+    if intrinsic::less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, other) {
+    } else if intrinsic::equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater

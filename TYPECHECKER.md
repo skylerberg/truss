@@ -6,8 +6,10 @@ generation read. It follows the decisions in [DESIGN.md](DESIGN.md),
 [SYNTAX.md](SYNTAX.md), and [GRAMMAR.md](GRAMMAR.md), reads the trees
 described in [PARSER.md](PARSER.md), and produces what
 [CODEGEN.md](CODEGEN.md) expects. The prover is not designed yet, so this
-document states what it hands to it. Name resolution, hashing, and checking
-interfaces are built, in [`stage0/`](stage0); the rest is not built yet.
+document states what it hands to it. Name resolution, hashing, checking
+interfaces, and checking bodies are built, in [`stage0/`](stage0); exhaustiveness,
+ownership, capabilities, the rules on use, and the package checks are not
+built yet.
 
 ## What the type checker does
 
@@ -77,7 +79,8 @@ syntax tree ──▶ Resolve ──▶ Hash ──▶ Interface ──▶ Body 
 | `Constants` | The exact values of integer constants that types use |
 | `Interface` | Checking signatures, type definitions, traits, `impl`s, and capabilities |
 | `Environment` | Every query a definition makes about others, each recorded in its trace |
-| `Infer` | Bidirectional checking of bodies, one statement at a time |
+| `Infer` | Bidirectional checking of bodies, one statement at a time: `Unify` for a statement's inference variables, `Members` for lookups after a dot, `Expressions` for expressions, statements, patterns, and calls, and `Body` for each definition's bodies |
+| `Intrinsic_signatures` | The signatures of `standard::intrinsic`'s operations, which code generation reads too |
 | `Literals` | The types of literals, defaults, range checks, and float rounding |
 | `Members` | Method, field, and variant lookup, and choosing among receiver modes |
 | `Impls` | Finding the `impl` for a trait and types, and normalizing associated types |

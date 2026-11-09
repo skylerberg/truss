@@ -442,3 +442,14 @@ let base =
       | Some (module_, declaration) ->
           let file = Query.demand database Workspace.file module_ in
           Some (module_, (List.nth file.definitions declaration.index).base))
+
+(* A definition's source text, which fixes quote, apart from the rest of
+   its file, so that editing another definition changes nothing that reads
+   it. *)
+let text =
+  Query.query ~name:"text" ~show:show_key (fun database key ->
+      match Query.demand database locate key with
+      | None -> None
+      | Some (module_, declaration) ->
+          let file = Query.demand database Workspace.file module_ in
+          Some (List.nth file.definitions declaration.index).text)

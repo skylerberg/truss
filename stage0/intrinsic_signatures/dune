@@ -1,0 +1,3 @@
+(library
+ (name intrinsic_signatures)
+ (libraries path intrinsic types))

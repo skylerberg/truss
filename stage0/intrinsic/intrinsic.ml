@@ -90,6 +90,8 @@ type operation =
   | Multiply_overflows
   | Equal
   | Less
+  | Ieee_equal
+  | Ieee_less
   | Bit_and
   | Bit_or
   | Bit_xor
@@ -107,6 +109,14 @@ type operation =
   | To_bits
   | From_bits
   | Is_nan
+  | Leading_zeros
+  | Trailing_zeros
+  | Count_ones
+  | Swap_bytes
+  | Rotate_left
+  | Rotate_right
+  | Multiply_high
+  | Compare_bytes
   | Storage_empty
   | Storage_with_capacity
   | Storage_length
@@ -145,6 +155,8 @@ let operations =
     Multiply_overflows;
     Equal;
     Less;
+    Ieee_equal;
+    Ieee_less;
     Bit_and;
     Bit_or;
     Bit_xor;
@@ -162,6 +174,14 @@ let operations =
     To_bits;
     From_bits;
     Is_nan;
+    Leading_zeros;
+    Trailing_zeros;
+    Count_ones;
+    Swap_bytes;
+    Rotate_left;
+    Rotate_right;
+    Multiply_high;
+    Compare_bytes;
     Storage_empty;
     Storage_with_capacity;
     Storage_length;
@@ -200,6 +220,8 @@ let operation_name = function
   | Multiply_overflows -> "multiply_overflows"
   | Equal -> "equal"
   | Less -> "less"
+  | Ieee_equal -> "ieee_equal"
+  | Ieee_less -> "ieee_less"
   | Bit_and -> "bit_and"
   | Bit_or -> "bit_or"
   | Bit_xor -> "bit_xor"
@@ -217,6 +239,14 @@ let operation_name = function
   | To_bits -> "to_bits"
   | From_bits -> "from_bits"
   | Is_nan -> "is_nan"
+  | Leading_zeros -> "leading_zeros"
+  | Trailing_zeros -> "trailing_zeros"
+  | Count_ones -> "count_ones"
+  | Swap_bytes -> "swap_bytes"
+  | Rotate_left -> "rotate_left"
+  | Rotate_right -> "rotate_right"
+  | Multiply_high -> "multiply_high"
+  | Compare_bytes -> "compare_bytes"
   | Storage_empty -> "storage_empty"
   | Storage_with_capacity -> "storage_with_capacity"
   | Storage_length -> "storage_length"

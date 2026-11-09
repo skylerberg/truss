@@ -65,7 +65,28 @@ let rec type_ context (written : type_expression) : T.ty =
       | Some parameter -> associated context (T.Parameter parameter) parameter key
       | None -> T.Error)
   | Any_type path -> (
-      match trait_reference context path with Some trait -> T.Any trait | None -> T.Error)
+      match trait_reference context path with
+      | Some trait ->
+          (* A method that mentions an associated type could not be called
+             through [any] otherwise. *)
+          let open_names =
+            List.concat_map
+              (fun trait_path ->
+                match Query.demand context.database Summary.trait_header trait_path with
+                | Some header ->
+                    List.filter
+                      (fun name -> not (List.mem_assoc name trait.associated))
+                      header.associated
+                | None -> [])
+              (Summary.trait_closure context.database trait.trait)
+          in
+          if open_names <> [] then
+            report context Associated_type_not_fixed path.span
+              (Printf.sprintf
+                 "`any %s` must fix every associated type of its trait, such as `%s[%s = ...]`."
+                 (show_path path.path) (show_path path.path) (List.hd open_names));
+          T.Any trait
+      | None -> T.Error)
   | Function_type function_type -> T.Function (function_type_ context function_type)
   | Type_error -> T.Error
 
@@ -77,15 +98,21 @@ and self_associated context (key : name) =
       | Some self, Some trait -> (
           match List.assoc_opt key.text trait.associated with
           | Some fixed -> fixed
-          | None ->
-              if declares context trait.trait key.text then
-                T.Projection { base = self; trait; name = key.text }
-              else begin
-                report context Unknown_associated_type key.span
-                  (Printf.sprintf "`%s` declares no associated type `%s`." (T.show_trait trait)
-                     key.text);
-                T.Error
-              end)
+          | None -> (
+              (* The projection goes through the trait that declares the
+                 name, which may be one this trait requires. *)
+              match declaring context trait.trait key.text with
+              | Some declaring_trait ->
+                  let trait =
+                    if Path.equal declaring_trait trait.trait then trait
+                    else { T.trait = declaring_trait; trait_arguments = []; associated = [] }
+                  in
+                  T.Projection { base = self; trait; name = key.text }
+              | None ->
+                  report context Unknown_associated_type key.span
+                    (Printf.sprintf "`%s` declares no associated type `%s`." (T.show_trait trait)
+                       key.text);
+                  T.Error))
       | _ -> T.Error)
 
 (* Whether a trait, or a trait it requires, declares the associated type. *)
@@ -141,9 +168,21 @@ and count_name context (name : name) : T.argument =
       | Some parameter -> T.Value (T.Value_parameter parameter)
       | None -> T.Type T.Error)
   | Some (Definition path) -> (
-      match Query.demand context.database Constants.value_of path with
-      | Some value -> T.Value (T.Known value)
-      | None -> T.Type T.Error)
+      if not (Constants.is_usize context.database path) then begin
+        report context Arity name.span
+          (Printf.sprintf "`%s` in a type argument must be a constant of type `USize`." name.text);
+        T.Type T.Error
+      end
+      else
+        match Query.demand context.database Constants.value_of path with
+        | Some value -> T.Value (T.Known value)
+        | None ->
+            report context Arity name.span
+              (Printf.sprintf
+                 "The value of `%s` cannot be worked out: a constant used in a type cannot refer \
+                  to itself, and is made of literals, arithmetic, and other such constants."
+                 name.text);
+            T.Type T.Error)
   | _ -> T.Type T.Error
 
 and check_arity context (path : path_type) shown expected =
@@ -159,6 +198,22 @@ and check_arity context (path : path_type) shown expected =
              (if List.length expected = 1 then "argument" else "arguments")
              given
              (if given = 1 then "is" else "are"))
+      else
+        (* Each argument must be of its parameter's kind: a type, or a
+           [USize] value. *)
+        let written = List.filter (function Constraint _ -> false | _ -> true) path.arguments in
+        List.iter2
+          (fun argument (name, kind) ->
+            let is_value = match argument with Count _ | Count_name _ -> true | _ -> false in
+            match (kind, is_value) with
+            | Summary.Value_kind, false ->
+                report context Arity path.span
+                  (Printf.sprintf "`%s`'s parameter `%s` is a `USize` value, not a type." shown name)
+            | (Summary.Type_kind | Summary.Capability_kind), true ->
+                report context Arity path.span
+                  (Printf.sprintf "`%s`'s parameter `%s` is a type, not a value." shown name)
+            | _ -> ())
+          written expected
 
 and path_type context (path : path_type) : T.ty =
   let shown = show_path path.path in
@@ -229,7 +284,14 @@ and capability context (path : path_type) : T.capability option =
   match target context path.path.last with
   | Some (Generic id) -> (
       match Hashtbl.find_opt context.parameters id with
-      | Some parameter -> Some (T.Capability_parameter parameter)
+      | Some parameter when not (Hashtbl.mem context.bounds parameter) ->
+          Some (T.Capability_parameter parameter)
+      | Some parameter ->
+          report context Not_a_capability path.span
+            (Printf.sprintf
+               "`%s` is a type parameter. A capability parameter is declared `capability %s`."
+               parameter.name parameter.name);
+          None
       | None -> None)
   | Some (Definition path_) when Summary.kind_of context.database path_ = Some Capability ->
       Some (T.Capability path_)
@@ -307,7 +369,9 @@ let generics context owner (written : generic_parameter list) : T.generic list =
 let rec mentions_integer = function
   | T.Integer -> true
   | T.Named { arguments; _ } | T.Cursor { arguments; _ } ->
-      List.exists (function T.Type type_ -> mentions_integer type_ | T.Value _ -> false) arguments
+      List.exists
+        (function T.Type type_ -> mentions_integer type_ | T.Value _ | T.Capabilities _ -> false)
+        arguments
   | T.Function { inputs; output; _ } -> (
       List.exists (fun (_, type_) -> mentions_integer type_) inputs
       ||

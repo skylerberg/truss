@@ -24,7 +24,6 @@ public capability NetworkServer {
 
 public capability Clock {
   fn now() -> Instant
-  fn sleep(duration: Duration)
 }
 
 public capability Random {

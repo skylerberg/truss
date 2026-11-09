@@ -47,3 +47,7 @@ val file_diagnostics : (Path.module_, Diagnostic.t list) Query.query
 
 val diagnostics : Query.database -> Path.module_ -> Diagnostic.t list
 (** Every resolution error of a file, in its offsets and in order, including each definition's. *)
+
+val closest : string -> string list -> string option
+(** The candidate nearest to a name, if one is near enough to be a typo, for fixes that write the
+    closest name. *)

@@ -180,3 +180,5 @@ let diagnostics database module_ =
     (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
       compare (left.span, left.code) (right.span, right.code))
     (Query.demand database file_diagnostics module_ @ definitions)
+
+let closest = Walk.closest

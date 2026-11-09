@@ -47,3 +47,13 @@ and value_of =
          | _ -> None))
 
 let value_of = Lazy.force value_of
+
+(* Whether a constant is declared a [USize], as a type argument needs. *)
+let is_usize database path =
+  match Summary.definition database path with
+  | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) -> (
+      match Query.demand database Resolve.resolved key with
+      | Some resolved ->
+          resolved.names.(written.path.last.id) = Some (Definition (Intrinsic.builtin_path USize))
+      | None -> false)
+  | _ -> false
