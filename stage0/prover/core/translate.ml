@@ -52,6 +52,26 @@ type outcome = {
 (* A definition whose tables are being read: the one proven, or a callee
    whose clauses are translated at a call. *)
 type source = { key : Names.key; checked : C.t; resolved : Resolve.resolved; text : string }
+type parameter_binding = Self_binding | Parameter_binding of name
+
+(* One tree's clauses about a callee: its own, or, for a method of an
+   [impl], its trait's. *)
+type part = {
+  callee : source;
+  binding : parameter_binding list;  (** In the order a call's arguments are numbered. *)
+  defaults : (int * expression) list;
+  requires : expression list;
+  ensures : expression list;
+  decreases : expression list;
+  costs : (cost * span) list;  (** Its cost clauses, but [cost time finite]. *)
+}
+
+type contract = {
+  parts : part list;  (** The callee's own first. *)
+  pure : bool;  (** Pure and terminating, so a function in the logic. *)
+  result_kind : [ `Returns | `Lends | `Yields ];
+  definition : (part * block) option;  (** A functional body, which is the callee's definition. *)
+}
 
 type loop_exits = { mutable breaks : frame list; mutable continues : frame list }
 
@@ -80,6 +100,33 @@ and frame = {
   spent : (string * L.term) list;
       (** Each counter's value here, by its key: what the code proven has spent since it began. *)
 }
+
+(* What a loop's body may change. *)
+type changed = { changed_locals : C.local list; changes_self : bool }
+
+(* How a loop bounds a counter: by its [cost] clause about it, or by its
+   iterations times a bound on one, and, where the values it changes hold
+   potential, also with that potential, from what it held on entry. *)
+type loop_rule =
+  | Clause_bound of loop_clause * cost * Costs.constants option
+  | Per_iteration of { per : L.term; per_held : (L.term * L.term) option }
+
+type loop_cost = {
+  counter : Costs.counter;
+  key : string;
+  entry : L.term;  (** The counter on entry to the loop. *)
+  rule : loop_rule;
+  held : (frame -> L.term) option;  (** The potential of what the loop changes. *)
+}
+
+(* Where a cursor came from: a call to a yielding method, whose clauses
+   each pull meets, read in [method_frame] with the call's arguments. *)
+type cursor = { method_frame : frame; own : part; element : T.ty }
+
+(* What one iteration of a loop that receives parts receives: whether
+   there is another part, the part, the parts received through it, and how
+   the loop's own state moves on, as a cursor does when pulled. *)
+type received = { another : L.term; element : L.term; through : L.term; advance : frame -> frame }
 
 type context = {
   database : Query.database;
@@ -124,6 +171,7 @@ type context = {
   mutable lambda_captures : (L.term * C.local list) list;  (** What each lambda captures. *)
   mutable potentials : L.term list;  (** Each value's potential whose definition is a fact. *)
   mutable equalities : L.term list;  (** Each derived [==] whose definition is a fact. *)
+  mutable cursors : (L.term * cursor) list;  (** Where each cursor value came from. *)
   mutable proving : bool;
       (** In a theorem, a [proof] block, or a law's proof, where a [todo] is a hole. *)
   mutable holes : (Names.key * span) list;  (** Reversed. *)
@@ -546,45 +594,6 @@ let join_frames context frames =
   Option.map fst (join context (List.map (fun frame -> (frame, None)) frames))
 
 (* Calls: what a callee promises *)
-
-type parameter_binding = Self_binding | Parameter_binding of name
-
-(* One tree's clauses about a callee: its own, or, for a method of an
-   [impl], its trait's. *)
-type part = {
-  callee : source;
-  binding : parameter_binding list;  (** In the order a call's arguments are numbered. *)
-  defaults : (int * expression) list;
-  requires : expression list;
-  ensures : expression list;
-  decreases : expression list;
-  costs : (cost * span) list;  (** Its cost clauses, but [cost time finite]. *)
-}
-
-type contract = {
-  parts : part list;  (** The callee's own first. *)
-  pure : bool;  (** Pure and terminating, so a function in the logic. *)
-  result_kind : [ `Returns | `Lends | `Yields ];
-  definition : (part * block) option;  (** A functional body, which is the callee's definition. *)
-}
-
-(* What a loop's body may change. *)
-type changed = { changed_locals : C.local list; changes_self : bool }
-
-(* How a loop bounds a counter: by its [cost] clause about it, or by its
-   iterations times a bound on one, and, where the values it changes hold
-   potential, also with that potential, from what it held on entry. *)
-type loop_rule =
-  | Clause_bound of loop_clause * cost * Costs.constants option
-  | Per_iteration of { per : L.term; per_held : (L.term * L.term) option }
-
-type loop_cost = {
-  counter : Costs.counter;
-  key : string;
-  entry : L.term;  (** The counter on entry to the loop. *)
-  rule : loop_rule;
-  held : (frame -> L.term) option;  (** The potential of what the loop changes. *)
-}
 
 let callee_source database (key : Names.key) =
   match
@@ -1567,11 +1576,11 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
       (Call_graph.impls_used context.database impls call_)
   end;
   let with_contract ?(substitution_of = fun _ -> []) ?(instance = "") path = function
-    | Some contract when contract.result_kind <> `Yields ->
+    | Some contract ->
+        (* A yielding method called outside a [for] loop makes a cursor. *)
         Some
           (contract_call ~lent_final context frame written call_ path contract values ~havoc_mut
              ~substitution_of ~instance)
-    | Some _ -> unsupported written.span "a call to a yielding method outside a `for` loop"
     | None ->
         let frame = havoc_mut frame in
         let frame = spend context frame (step_amount context frame call_ values) in
@@ -1585,6 +1594,25 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
         ~substitution_of:(fun _ -> substitution)
         ~instance:(instance_of arguments) path
         (function_contract context.database path)
+  | Trait_method { trait; name = "next"; self_type = T.Cursor _ as cursor_type; _ }
+    when Path.equal trait.trait cursor_trait
+         && List.assoc_opt (argument_at_index values 0) context.cursors <> None ->
+      (* A pull of a cursor whose method the prover knows. *)
+      let cursor = argument_at_index values 0 in
+      let made = List.assoc cursor context.cursors in
+      let pulled, later =
+        pull context frame made cursor ~cursor_type:(substituted frame cursor_type)
+      in
+      let receiver =
+        List.find_map
+          (fun ((argument : C.argument), (expression_ : expression), _) ->
+            if argument.parameter = 0 then Some expression_ else None)
+          values
+      in
+      let frame =
+        match receiver with Some place -> store context frame place later | None -> frame
+      in
+      Some (spend context frame one_step, pulled)
   | Trait_method { trait; name; receiver; evidence; self_type; type_arguments } ->
       let arguments = arguments_of type_arguments in
       let self_type = substituted frame self_type in
@@ -2273,6 +2301,76 @@ and model_of context (ty : T.ty) term ~element =
         (L.Function (symbol, [ sort_of context ty ], sort_of context (sequence_type element)));
       Some (L.Apply (symbol, [ term ]))
   | [] -> None
+
+(* Cursors. A cursor carries what it has handed out and whether it has
+   ended as ghost parts of its value. See PROVER.md, "Lending and yielding
+   methods". *)
+and cursor_trait : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Cursor" }
+
+and cursor_yielded context cursor_type element cursor =
+  let sort = sort_of context cursor_type in
+  let symbol = "cursor.yielded." ^ type_key cursor_type in
+  declare context (L.Function (symbol, [ sort ], sort_of context (sequence_type element)));
+  L.Apply (symbol, [ cursor ])
+
+and cursor_ended context cursor_type cursor =
+  let symbol = "cursor.ended." ^ type_key cursor_type in
+  declare context (L.Function (symbol, [ sort_of context cursor_type ], L.Bool));
+  L.Apply (symbol, [ cursor ])
+
+(* A pull: [Some] of a part that meets the method's clauses for each part,
+   after which the cursor has handed it out too and the method's other
+   clauses hold, as where it may stop; or [None], once the method has
+   ended, after which its other clauses hold with [finished] true. The
+   cursor that is left is a new value, from the same call. *)
+and pull context frame (made : cursor) cursor ~cursor_type =
+  let element = made.element in
+  let option_type = T.Named { path = option_path; arguments = [ T.Type element ] } in
+  ignore (sort_of context option_type);
+  let later = arrive context frame "cursor" cursor_type in
+  context.cursors <- (later, made) :: context.cursors;
+  let pulled = arrive context frame "pulled" option_type in
+  let some = L.Apply (L.tester (constructor_name option_type (Some "Some")), [ pulled ]) in
+  let part = L.Apply (selector_name option_type (Some "Some") "value", [ pulled ]) in
+  let before = cursor_yielded context cursor_type element cursor in
+  let clauses (at : frame) ~each ~result ~yielded ~finished =
+    let inside =
+      {
+        made.method_frame with
+        condition = at.condition;
+        bound = at.bound;
+        result;
+        yielded = Some yielded;
+        finished;
+      }
+    in
+    List.iter
+      (fun (clause : expression) ->
+        if mentions_result made.own.callee clause = each then
+          assume context at (snd (value context inside clause)))
+      made.own.ensures
+  in
+  assume context frame (L.( ==> ) (cursor_ended context cursor_type cursor) (L.not_ some));
+  let handed = restrict frame some in
+  assume_valid context handed element part;
+  clauses handed ~each:true ~result:(Some part) ~yielded:before ~finished:None;
+  let through = appended context handed element before part in
+  assume context handed
+    L.(
+      equal (cursor_yielded context cursor_type element later) through
+      &&& not_ (cursor_ended context cursor_type later));
+  clauses handed ~each:false ~result:None ~yielded:through ~finished:(Some (L.Boolean false));
+  let none = restrict frame (L.not_ some) in
+  assume context none
+    L.(
+      equal (cursor_yielded context cursor_type element later) before
+      &&& cursor_ended context cursor_type later);
+  clauses none ~each:false ~result:None ~yielded:before ~finished:(Some (L.Boolean true));
+  (pulled, later)
+
+and option_path : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "option" ] }; name = "Option" }
 
 (* A sequence of parts with nothing in it. *)
 and empty_parts context frame element =
@@ -3179,7 +3277,10 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
   in
   let own_arguments = List.filter_map snd (bindings own) in
   let result =
-    if contract.pure && List.length own_arguments = List.length values then begin
+    if
+      contract.pure && contract.result_kind <> `Yields
+      && List.length own_arguments = List.length values
+    then begin
       let symbol = "function." ^ Path.show path ^ instance in
       declare context
         (L.Function
@@ -3193,9 +3294,13 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
       assume context after (in_range (substituted frame call_.result) term);
       term
     end
+    else if contract.result_kind = `Yields then
+      (* A cursor, of the call's own type. *)
+      arrive context after "cursor" (type_of frame written)
     else arrive context after "result" (substituted frame call_.result)
   in
-  assume_valid context after (substituted frame call_.result) result;
+  if contract.result_kind <> `Yields then
+    assume_valid context after (substituted frame call_.result) result;
   let helper = updating_helper context call_ in
   List.iter
     (fun ((argument : C.argument), (expression_ : expression), _) ->
@@ -3271,9 +3376,28 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
             match value context frame_for_clause clause with
             | _, term -> assume context after (L.( ==> ) required term))
           part.ensures)
-      contract.parts;
+      (* A yielding method's clauses are about each part it hands out and
+         how it ends, which each pull of the cursor it makes meets. *)
+      (if contract.result_kind = `Yields then [] else contract.parts);
     context.instantiating <- List.tl context.instantiating
   end;
+  (if contract.result_kind = `Yields then
+     match type_of frame written with
+     | T.Cursor _ as cursor_type -> (
+         match Query.demand context.database Interface.Environment.signature path with
+         | Some { output = Yields (_, element); _ } ->
+             let element = T.substitute (substitution_of own) element in
+             let made = { method_frame = entry_frame own; own; element } in
+             context.cursors <- (result, made) :: context.cursors;
+             assume context after
+               L.(
+                 equal
+                   (sequence_length context element
+                      (cursor_yielded context cursor_type element result))
+                   (int 0)
+                 &&& not_ (cursor_ended context cursor_type result))
+         | _ -> ())
+     | _ -> ());
   (* What the call spends, by the callee's cost clauses, read with the
      arguments as passed and [result]. *)
   (* How much the potential of what the call changed grew: what it returns
@@ -3294,7 +3418,8 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
             | None -> total)
         | T.Own -> Costs.minus total (potential context frame ty before)
         | T.Read -> total)
-      (potential context after (substituted frame call_.result) result)
+      (if contract.result_kind = `Yields then Costs.zero
+       else potential context after (substituted frame call_.result) result)
       values
   in
   let after =
@@ -4738,7 +4863,10 @@ and for_ context frame (written : statement) pattern iterable clauses body =
           { joined with locals = Ids.filter (fun id _ -> Ids.mem id frame.locals) joined.locals })
   | Some (Yielding { call = driven; mode }), _, _ ->
       each_loop context frame written pattern iterable clauses body driven mode
-  | _ -> unsupported written.span "a `for` loop over a cursor"
+  | Some (Pulled { cursor = T.Cursor { method_; _ } as cursor_type }), _, _ ->
+      pulled_loop context frame written pattern iterable clauses body
+        ~cursor_type:(substituted frame cursor_type) ~method_
+  | _ -> unsupported written.span "a `for` loop over a cursor of a type's own `Cursor`"
 
 (* A [for] loop over a yielding method: each element is a fresh value
    that meets the method's clauses for each part, and the loop ends when
@@ -4847,8 +4975,6 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
              ~call_:driven ~values ~change:None)
     | _ -> spend context frame (unknown_amount context frame)
   in
-  let entry = { frame with yielded = Some (empty_parts context frame element_type) } in
-  check_invariants context entry clauses ~when_:"on entry to the loop";
   (* A loop over a collection [mut] changes the collection too. *)
   let changed =
     let in_body = changed_places frame body in
@@ -4861,6 +4987,72 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
       | _, None -> unsupported iterable.span "looping over this place `mut`"
     else in_body
   in
+  receiving_loop context frame written pattern clauses body ~element_type ~changed
+    ~start:(fun head -> some_parts context head element_type)
+    ~receive:(fun head before ->
+      (* Each time round, the method either hands out another part or ends. *)
+      let another = fresh context "another" L.Bool in
+      let element = arrive context head "element" element_type in
+      let inside = restrict head another in
+      assume_valid context inside element_type element;
+      method_clauses inside ~each:true ~result:(Some element) ~yielded:before ~finished:None;
+      let through = appended context inside element_type before element in
+      method_clauses inside ~each:false ~result:None ~yielded:through
+        ~finished:(Some (L.Boolean false));
+      method_clauses
+        (restrict head (L.not_ another))
+        ~each:false ~result:None ~yielded:before ~finished:(Some (L.Boolean true));
+      { another; element; through; advance = Fun.id })
+
+(* A [for] loop over a cursor pulls it until it ends, putting the cursor
+   that is left back where it was. Its [yielded] is everything the cursor
+   has handed out, before the loop too. *)
+and pulled_loop context frame (written : statement) pattern iterable clauses body ~cursor_type
+    ~method_ =
+  let frame, cursor = value context frame iterable in
+  let made =
+    match List.assoc_opt cursor context.cursors with
+    | Some made -> made
+    | None -> unsupported iterable.span "a loop over a cursor whose method the prover does not know"
+  in
+  let id =
+    match place_local frame (root_of iterable) with
+    | Some (id, _) -> id
+    | None -> unsupported iterable.span "a loop over a cursor that is not in a local"
+  in
+  if context.terminates && not (signature_terminates context method_) then
+    oblige context frame Termination written.span
+      "This loop may not end: the method its cursor comes from has no `time` clause."
+      (L.Boolean false);
+  let in_body = changed_places frame body in
+  let changed =
+    { in_body with changed_locals = List.sort_uniq compare (id :: in_body.changed_locals) }
+  in
+  let at_head = ref cursor in
+  receiving_loop context frame written pattern clauses body ~element_type:made.element ~changed
+    ~start:(fun head ->
+      let cursor = Ids.find id head.locals in
+      context.cursors <- (cursor, made) :: context.cursors;
+      at_head := cursor;
+      cursor_yielded context cursor_type made.element cursor)
+    ~receive:(fun head _ ->
+      let pulled, later = pull context head made !at_head ~cursor_type in
+      let option_type = T.Named { path = option_path; arguments = [ T.Type made.element ] } in
+      {
+        another = L.Apply (L.tester (constructor_name option_type (Some "Some")), [ pulled ]);
+        element = L.Apply (selector_name option_type (Some "Some") "value", [ pulled ]);
+        through = cursor_yielded context cursor_type made.element later;
+        advance = (fun (frame : frame) -> { frame with locals = Ids.add id later frame.locals });
+      })
+
+(* A [for] loop that receives parts one at a time: from a yielding method
+   it calls, or from a cursor it pulls. [start] is what was received before
+   an iteration, at the head, and [receive] is what an iteration receives,
+   having assumed what the method says of it. *)
+and receiving_loop context frame (written : statement) pattern clauses body ~element_type ~changed
+    ~start ~receive =
+  let entry = { frame with yielded = Some (empty_parts context frame element_type) } in
+  check_invariants context entry clauses ~when_:"on entry to the loop";
   let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
   loop_entry context entry costs;
   let mark = context.fresh and facts_mark = List.length context.facts in
@@ -4868,26 +5060,22 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
   let head =
     if contains_yield body then { head with handed_out = havoc_parts context head } else head
   in
-  let before = some_parts context head element_type in
+  let before = start head in
   let iterations = sequence_length context element_type before in
   let head =
     loop_head context { head with yielded = Some before } costs ~iterations:(Some iterations)
   in
   assume_invariants context head clauses;
-  (* Each time round, the method either hands out another part or ends. *)
-  let another = fresh context "another" L.Bool in
-  let element = arrive context head "element" element_type in
-  let inside = restrict head another in
-  assume_valid context inside element_type element;
-  method_clauses inside ~each:true ~result:(Some element) ~yielded:before ~finished:None;
-  let through = appended context inside element_type before element in
-  method_clauses inside ~each:false ~result:None ~yielded:through ~finished:(Some (L.Boolean false));
+  let ended_mark = List.length context.facts in
+  let received = receive head before in
+  let through = received.through in
+  let inside = received.advance (restrict head received.another) in
   let exits = { breaks = []; continues = [] } in
   let inside = spend context inside one_step in
   let _, inside =
     pattern_match context
       { inside with loop = Some exits; yielded = frame.yielded }
-      pattern element element_type
+      pattern received.element element_type
   in
   let finished = block_value context inside body in
   let ends = (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues in
@@ -4900,9 +5088,7 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
     (fun (end_ : frame) ->
       check_invariants context (with_through end_) clauses ~when_:"after an iteration")
     ends;
-  let ended_mark = List.length context.facts in
-  let ended = restrict head (L.not_ another) in
-  method_clauses ended ~each:false ~result:None ~yielded:before ~finished:(Some (L.Boolean true));
+  let ended = received.advance (restrict head (L.not_ received.another)) in
   let varies = made_since context mark in
   let ended_facts = facts_since context ended_mark @ facts_since context facts_mark in
   let exit_ =
@@ -4976,6 +5162,7 @@ let new_context database ~home ~current ~terminates ~measures checked =
     lambda_captures = [];
     potentials = [];
     equalities = [];
+    cursors = [];
     proving = false;
     holes = [];
     call_targets = [];

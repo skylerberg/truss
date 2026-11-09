@@ -762,6 +762,57 @@ let () =
         \    next += 1\n\
         \  }\n\
          }\n");
+  test "a pull of a cursor meets its method's clauses for each part" (fun () ->
+      proven
+        (couple
+       ^ "fn f(couple: Couple) -> Int64\n\
+         \  requires couple.first == 1 && couple.second == 1\n\
+         \  ensures result == 1\n\
+          {\n\
+         \  var cursor = couple.each()\n\
+         \  match mut cursor.next() {\n\
+         \    Some(value) => value\n\
+         \    None => 1\n\
+         \  }\n\
+          }\n"));
+  test "a cursor ends where its method says it has handed out all it will" (fun () ->
+      proven
+        (couple
+       ^ "fn f(couple: Couple) -> Bool\n\
+         \  ensures result\n\
+          {\n\
+         \  var cursor = couple.each()\n\
+         \  let _ = mut cursor.next()\n\
+         \  let _ = mut cursor.next()\n\
+         \  mut cursor.next() is None\n\
+          }\n"));
+  test "a cursor's next pull is not known to end early" (fun () ->
+      not_proven
+        (couple
+       ^ "fn f(couple: Couple) -> Bool\n\
+         \  ensures result\n\
+          {\n\
+         \  var cursor = couple.each()\n\
+         \  let _ = mut cursor.next()\n\
+         \  mut cursor.next() is None\n\
+          }\n")
+        "prover.ensures");
+  test "a loop over a cursor gets its method's facts" (fun () ->
+      proven
+        (couple
+       ^ "fn f(couple: Couple) -> USize\n\
+         \  ensures result <= 2\n\
+          {\n\
+         \  var cursor = couple.each()\n\
+         \  var seen: USize = 0\n\
+         \  for value in cursor\n\
+         \    invariant seen <= yielded.length()\n\
+         \  {\n\
+         \    let _ = value\n\
+         \    seen += 1\n\
+         \  }\n\
+         \  seen\n\
+          }\n"));
   test "assigning an element changes only that element" (fun () ->
       proven
         "fn f(items: mut List[Int64])\n\

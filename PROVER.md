@@ -949,8 +949,15 @@ It proves, with one canonical, numbered, hashed query per obligation:
   ghost sequence its invariants can name. `yielded` in a loop's clauses
   names what the nearest loop or method hands out: a `for` loop's own
   parts, which for a range are its indexes so far, or else, in a lending
-  or yielding method, what the method has handed out. Pulled cursors are
-  not read yet.
+  or yielding method, what the method has handed out.
+- cursors: a yielding method called outside a `for` loop makes a cursor,
+  which meets the method's `requires` and spends its whole cost there, and
+  carries what it has handed out and whether it has ended as ghost parts
+  of its value. `next()` gives `Some` of a part that meets the method's
+  clauses for each part, or `None` once it has ended, as [Lending and
+  yielding methods](#lending-and-yielding-methods) describes, and a `for`
+  loop over a cursor pulls it so, with `yielded` everything the cursor
+  has handed out. A loop over a type's own `Cursor` is not read yet.
 - functional bodies as definitions: a pure function with a `time` clause
   and a functional body is unfolded once at each call, where its
   `requires` holds, unless its body reads what the prover cannot
@@ -1062,8 +1069,7 @@ A call whose callee's contract it cannot read, such as one with errors,
 gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
-definition that uses anything else, such as a string or a cursor, is
-reported as
+definition that uses anything else, such as a string, is reported as
 `prover.unsupported` with what stopped it, and none of its obligations
 count as proven.
 
