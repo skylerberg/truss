@@ -66,14 +66,15 @@ checked definitions
 | `Build` | Emitting, compiling through the object cache, and linking |
 | `Memory_layout` | Sizes, alignment, field placement, tags, and niches for every ground type |
 | `Lir` | The lowered IR's types, and printing and hashing it canonically |
-| `Lower` | Checked form to LIR: expressions, patterns, calls, capabilities, defaults |
+| `Lower` | Checked form to LIR: expressions, conditions, patterns, calls, capabilities and `provide`, defaults, derived traits, constants and their evaluators, and the checks in place of proofs |
 | `Drops` | Drop elaboration: what each drop lowering wrote still owns, with flags for conditional moves and field-by-field drops for partial ones |
 | `Yields` | Yielding methods to continuation calls, and pulled cursors to state machines |
-| `Glue` | Generated drop, copy, debug-output, and derived-trait code for each type |
+| `Glue` | Generated code for each type: drop, copy, debug output, the binary form code run while compiling writes, and an `any` table's drop |
 | `Emit_c` | LIR to C text |
 | `Toolchain` | Finding and identifying the C compiler and linker, and running them |
 | `Positions` | The table from definitions to files and lines, built at link time |
-| `Startup` | The generated C `main` for programs, test runners, and code run while compiling |
+| `Startup` | The runtime, and the generated C `main` for programs, test runners, and code run while compiling |
+| `Compile` | The driver: what each instance compiles to, made once, with its drops elaborated; running constants' evaluators; building and running tests and programs; and keeping test results |
 
 Each is its own dune library, like the lexer's modules, under
 `stage0/codegen/`. `Memory_layout` is not called `Layout`, which is the
