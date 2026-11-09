@@ -6,7 +6,9 @@
 let attempt source ~recovery =
   let diagnostics = Diagnostic.Collector.create () in
   let scanner = Scanner.create source diagnostics in
-  let tokens, open_at_end = Layout.file ~source ~diagnostics ~recovery (fun () -> Scanner.next scanner) in
+  let tokens, open_at_end =
+    Layout.file ~source ~diagnostics ~recovery (fun () -> Scanner.next scanner)
+  in
   (tokens, Diagnostic.Collector.to_list diagnostics, open_at_end)
 
 let lex source =

@@ -41,7 +41,8 @@ let punctuation cursor current =
   | '?' -> take Question 1
   | '~' -> take Tilde 1
   | ':' -> first_of [ (':', Colon_colon, 2) ] Colon
-  | '.' -> if is 1 '.' then if is 2 '=' then take Dot_dot_equal 3 else take Dot_dot 2 else take Dot 1
+  | '.' ->
+      if is 1 '.' then if is 2 '=' then take Dot_dot_equal 3 else take Dot_dot 2 else take Dot 1
   | '-' ->
       if is 1 '-' then begin
         cursor.position <- start + 2;
@@ -63,16 +64,26 @@ let punctuation cursor current =
   (* JavaScript's `===` and `!==`, as a whole: a longer run of `=` is not
      that habit, and lexes as `==`s for the parser to report. *)
   | ('=' | '!') when is 1 '=' && is 2 '=' && not (is 3 '=') ->
-      let written, replacement, kind = if current = '=' then ("===", "==", Equal_equal) else ("!==", "!=", Not_equal) in
+      let written, replacement, kind =
+        if current = '=' then ("===", "==", Equal_equal) else ("!==", "!=", Not_equal)
+      in
       report cursor ~code:Strict_equality
-        ~fixes:[ Diagnostic.fix ("Write `" ^ replacement ^ "`") [ Diagnostic.replace (span start (start + 3)) replacement ] ]
+        ~fixes:
+          [
+            Diagnostic.fix
+              ("Write `" ^ replacement ^ "`")
+              [ Diagnostic.replace (span start (start + 3)) replacement ];
+          ]
         (span start (start + 3))
-        (Printf.sprintf "Truss has no `%s`. `%s` already compares values of the same type." written replacement);
+        (Printf.sprintf "Truss has no `%s`. `%s` already compares values of the same type." written
+           replacement);
       take kind 3
   | '=' when is 1 '=' && is 2 '>' -> take Implies 3
   | '=' -> first_of [ ('=', Equal_equal, 2); ('>', Fat_arrow, 2) ] Equal
   | '!' -> first_of [ ('=', Not_equal, 2) ] Bang
-  | '<' -> if is 1 '<' then if is 2 '=' then take Shift_left_equal 3 else take Shift_left 2 else first_of [ ('=', Less_equal, 2) ] Less
+  | '<' ->
+      if is 1 '<' then if is 2 '=' then take Shift_left_equal 3 else take Shift_left 2
+      else first_of [ ('=', Less_equal, 2) ] Less
   | '>' ->
       if is 1 '>' then if is 2 '=' then take Shift_right_equal 3 else take Shift_right 2
       else first_of [ ('=', Greater_equal, 2) ] Greater
@@ -97,7 +108,8 @@ let number cursor =
       report cursor ~code:problem.code
         ~fixes:
           (List.map
-             (fun (title, replacement) -> Diagnostic.fix title [ Diagnostic.replace (span start stop) replacement ])
+             (fun (title, replacement) ->
+               Diagnostic.fix title [ Diagnostic.replace (span start stop) replacement ])
              checked.fixes)
         (span (start + problem.start) (start + problem.stop))
         problem.message
@@ -138,7 +150,8 @@ let rec scan cursor ~inline ~nesting =
       if Unicode.is_forbidden value then forbidden ()
       else if Unicode.is_xid_start value then name cursor ~nesting
       else
-        reject (Unicode.decoded_length packed) (Printf.sprintf "%s is not used in Truss." (show_character cursor start))
+        reject (Unicode.decoded_length packed)
+          (Printf.sprintf "%s is not used in Truss." (show_character cursor start))
   end
   else if current < 0x20 || current = 0x7F then forbidden ()
   else
@@ -147,8 +160,8 @@ let rec scan cursor ~inline ~nesting =
     | '$' when Trivia.opens_raw_string cursor start -> string cursor ~tag:None ~nesting ~start
     | '$' ->
         reject (run_length cursor start dollar)
-          "`$` is used only in strings: `${...}` inside a string interpolates, and `$`s before a raw \
-           string's `\"\"\"` choose how it interpolates."
+          "`$` is used only in strings: `${...}` inside a string interpolates, and `$`s before a \
+           raw string's `\"\"\"` choose how it interpolates."
     | '\'' -> (
         match Trivia.character_literal_end cursor start with
         | Some stop -> token (Strings.character_literal cursor ~stop)
@@ -185,12 +198,12 @@ and name cursor ~nesting =
   let start = cursor.position in
   let rec loop () =
     let current = byte cursor cursor.position in
-    if current >= 0 && current < 0x80 then begin
-      if is_ascii_name_byte current then begin
+    if current >= 0 && current < 0x80 then
+      begin if is_ascii_name_byte current then begin
         cursor.position <- cursor.position + 1;
         loop ()
       end
-    end
+      end
     else
       let packed = decode cursor cursor.position in
       if packed >= 0 && Unicode.is_xid_continue (Unicode.decoded_code_point packed) then begin
@@ -212,7 +225,12 @@ and name cursor ~nesting =
           | Some (code, message) ->
               let fixes =
                 match checked.fix with
-                | Some fixed -> [ Diagnostic.fix ("Write `" ^ fixed ^ "`") [ Diagnostic.replace (span start stop) fixed ] ]
+                | Some fixed ->
+                    [
+                      Diagnostic.fix
+                        ("Write `" ^ fixed ^ "`")
+                        [ Diagnostic.replace (span start stop) fixed ];
+                    ]
                 | None -> []
               in
               report cursor ~code ~fixes (span start stop) message
@@ -221,7 +239,9 @@ and name cursor ~nesting =
   in
   (* An UpperCamelCase name touching a string is the string's tag. *)
   match kind with
-  | Upper tag when byte cursor stop = quote || (byte cursor stop = dollar && Trivia.opens_raw_string cursor stop) ->
+  | Upper tag
+    when byte cursor stop = quote
+         || (byte cursor stop = dollar && Trivia.opens_raw_string cursor stop) ->
       string cursor ~tag:(Some (tag, span start stop)) ~nesting ~start
   | kind -> Token { kind; start; ending = Closed }
 
@@ -245,4 +265,11 @@ let rec next cursor =
       cursor.first_line_break <- None;
       cursor.blank_line <- false;
       cursor.line_is_blank <- false;
-      Layout.Next { kind; span = span start cursor.position; first_line_break; blank_line; cut_off = ending = Cut_off }
+      Layout.Next
+        {
+          kind;
+          span = span start cursor.position;
+          first_line_break;
+          blank_line;
+          cut_off = ending = Cut_off;
+        }

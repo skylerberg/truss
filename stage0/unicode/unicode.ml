@@ -24,15 +24,12 @@ let decode text offset =
       if (first = 0xE0 && second < 0xA0) || (first = 0xED && second >= 0xA0) then -1
       else
         let value =
-          ((first land 0x0F) lsl 12)
-          lor ((second land 0x3F) lsl 6)
-          lor (byte (offset + 2) land 0x3F)
+          ((first land 0x0F) lsl 12) lor ((second land 0x3F) lsl 6) lor (byte (offset + 2) land 0x3F)
         in
         (value lsl 3) lor 3
     else -1
   else if first < 0xF5 then
-    if continuation (offset + 1) && continuation (offset + 2) && continuation (offset + 3)
-    then
+    if continuation (offset + 1) && continuation (offset + 2) && continuation (offset + 3) then
       let second = byte (offset + 1) in
       if (first = 0xF0 && second < 0x90) || (first = 0xF4 && second >= 0x90) then -1
       else
@@ -86,8 +83,7 @@ type property = { ascii : Bytes.t; ranges : int array }
 
 let property ranges =
   let ascii =
-    Bytes.init 128 (fun value ->
-        if find_range ranges ~stride:2 value >= 0 then '\001' else '\000')
+    Bytes.init 128 (fun value -> if find_range ranges ~stride:2 value >= 0 then '\001' else '\000')
   in
   { ascii; ranges }
 

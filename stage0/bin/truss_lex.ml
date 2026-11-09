@@ -56,7 +56,8 @@ let print_tokens source tokens =
         match token.kind with
         | String literal ->
             Array.iter
-              (fun (interpolation : Token.interpolation) -> print (indent ^ "    ") interpolation.tokens)
+              (fun (interpolation : Token.interpolation) ->
+                print (indent ^ "    ") interpolation.tokens)
               (Token.interpolations literal)
         | _ -> ())
       tokens

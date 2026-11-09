@@ -16,6 +16,27 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
 ## Notes for stage0
 
+### Building
+
+- **Dependencies** are declared in `dune-project`, which generates
+  `truss.opam`. Install them with
+  `opam install . --deps-only --with-test --with-dev-setup`. On macOS, Zarith
+  also needs GMP and `pkgconf` from Homebrew.
+- **`dune build`** builds everything, **`dune test`** runs the tests, and
+  **`dune fmt`** formats the code with the ocamlformat version that
+  `.ocamlformat` pins.
+- **CI** (`.github/workflows/ci.yml`) builds, checks formatting, checks that
+  `truss.opam` matches `dune-project`, and runs the tests, on every pull
+  request and every push to `main`.
+
+### Documents
+
+A design document describes the design as it is. How it got there belongs in
+version control, in commit messages and pull request descriptions. A
+document has no sections that list what changed, what an earlier version
+did, or which review settled what; when the design changes, the document is
+rewritten to describe the new design.
+
 ### Testing
 
 Every stage of stage0 is tested the same way:

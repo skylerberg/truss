@@ -600,8 +600,8 @@ pattern_field    = LOWER_NAME ":" pattern | pattern | ".." ;
 ## Checking the grammar
 
 [`grammar/truss.mly`](grammar/truss.mly) is this grammar written for the
-Menhir parser generator. Running `menhir --explain truss.mly` in that
-directory checks it. Two shift/reduce conflicts remain, and both are resolved
+Menhir parser generator, and `dune test` checks it: Menhir must find exactly
+the conflicts listed here. Two shift/reduce conflicts remain, and both are resolved
 by shifting, which is the intended reading:
 
 - **`else` after `let pattern = if ... { } else { }`.** Shifting attaches the

@@ -41,7 +41,8 @@ let truss_blocks text =
     | line :: rest ->
         let trimmed = String.trim line in
         if inside then
-          if String.starts_with ~prefix:"```" trimmed then loop false [] (String.concat "\n" (List.rev current) :: blocks) rest
+          if String.starts_with ~prefix:"```" trimmed then
+            loop false [] (String.concat "\n" (List.rev current) :: blocks) rest
           else loop true (line :: current) blocks rest
         else loop (trimmed = "```truss") [] blocks rest
   in
@@ -56,7 +57,8 @@ let rec check_tokens text ~start ~stop (tokens : Token.t array) =
   let stack = ref [] and previous = ref start in
   Array.iter
     (fun (token : Token.t) ->
-      if token.span.start < start || token.span.stop > stop then fail "span out of bounds in %s" quoted;
+      if token.span.start < start || token.span.stop > stop then
+        fail "span out of bounds in %s" quoted;
       if token.span.start < !previous then fail "tokens out of order in %s" quoted;
       previous := token.span.start;
       match token.kind with
@@ -68,7 +70,8 @@ let rec check_tokens text ~start ~stop (tokens : Token.t array) =
       | String literal ->
           Array.iter
             (fun (interpolation : interpolation) ->
-              check_tokens text ~start:interpolation.span.start ~stop:interpolation.span.stop interpolation.tokens)
+              check_tokens text ~start:interpolation.span.start ~stop:interpolation.span.stop
+                interpolation.tokens)
             (interpolations literal)
       | _ -> ())
     tokens;
@@ -76,12 +79,14 @@ let rec check_tokens text ~start ~stop (tokens : Token.t array) =
 
 let check_robust text =
   match lex text with
-  | exception exception_ -> fail "raised %s on %s" (Printexc.to_string exception_) (Diagnostic.quote text)
+  | exception exception_ ->
+      fail "raised %s on %s" (Printexc.to_string exception_) (Diagnostic.quote text)
   | tokens, diagnostics ->
       check_tokens text ~start:0 ~stop:(String.length text) tokens;
       List.iter
         (fun (d : Diagnostic.t) ->
-          if d.span.stop > String.length text then fail "diagnostic out of bounds in %s" (Diagnostic.quote text))
+          if d.span.stop > String.length text then
+            fail "diagnostic out of bounds in %s" (Diagnostic.quote text))
         diagnostics
 
 (* Fixes for single mistakes *)
@@ -89,13 +94,18 @@ let check_robust text =
 (* Applying a fix removes its diagnostic and adds no other: what is left is
    the other diagnostics, or fewer. *)
 let check_fixes_work text =
-  let codes text = List.sort compare (List.map (fun (d : Diagnostic.t) -> d.code) (snd (lex text))) in
+  let codes text =
+    List.sort compare (List.map (fun (d : Diagnostic.t) -> d.code) (snd (lex text)))
+  in
   let before = codes text in
   List.iter
     (fun (diagnostic : Diagnostic.t) ->
       List.iter
         (fun (fix : Diagnostic.fix) ->
-          let rec remove_one = function [] -> [] | code :: rest -> if code = diagnostic.code then rest else code :: remove_one rest in
+          let rec remove_one = function
+            | [] -> []
+            | code :: rest -> if code = diagnostic.code then rest else code :: remove_one rest
+          in
           let rec contained smaller larger =
             match (smaller, larger) with
             | [], _ -> true
@@ -106,69 +116,123 @@ let check_fixes_work text =
                 else false
           in
           match Diagnostic.apply_fix text fix with
-          | exception Invalid_argument _ -> fail "the fix %S has overlapping edits in %s" fix.title (Diagnostic.quote text)
+          | exception Invalid_argument _ ->
+              fail "the fix %S has overlapping edits in %s" fix.title (Diagnostic.quote text)
           | fixed ->
               if not (contained (codes fixed) (remove_one before)) then
                 fail "the fix %S for %s leaves or adds an error in %s" fix.title
-                  (Diagnostic.Code.name diagnostic.code) (Diagnostic.quote text))
+                  (Diagnostic.Code.name diagnostic.code)
+                  (Diagnostic.quote text))
         diagnostic.fixes)
     (snd (lex text))
 
 let mistakes =
-  [| "\""; "\"\"\""; "$"; "${"; "}"; "{"; "("; ")"; "["; "]"; "\n"; "\r"; "\\"; "'"; "/*"; "//"; "#"; ";"; "0x";
-     "1e"; "_"; "\xe2\x80\xae"; "\xe2\x80\x8b"; "\xff"; "\x01"; "===" ; "++"; "@"; "aB"; "A_b" |]
+  [|
+    "\"";
+    "\"\"\"";
+    "$";
+    "${";
+    "}";
+    "{";
+    "(";
+    ")";
+    "[";
+    "]";
+    "\n";
+    "\r";
+    "\\";
+    "'";
+    "/*";
+    "//";
+    "#";
+    ";";
+    "0x";
+    "1e";
+    "_";
+    "\xe2\x80\xae";
+    "\xe2\x80\x8b";
+    "\xff";
+    "\x01";
+    "===";
+    "++";
+    "@";
+    "aB";
+    "A_b";
+  |]
 
 (* Round trips *)
 
 let round_trip random =
   let pick array = array.(Random.State.int random (Array.length array)) in
-  let names = [| ("count", Lower "count"); ("user_name", Lower "user_name"); ("Point", Upper "Point"); ("O", Upper "O") |] in
+  let names =
+    [|
+      ("count", Lower "count");
+      ("user_name", Lower "user_name");
+      ("Point", Upper "Point");
+      ("O", Upper "O");
+    |]
+  in
   let others =
     Array.of_list
       (List.map (fun (spelling, keyword) -> (spelling, Keyword keyword)) Token.keywords
       @ List.map (fun (spelling, reserved) -> (spelling, Reserved reserved)) Token.reserved_words
       @ List.filter_map
           (fun (spelling, punctuation) ->
-            match punctuation with Open _ | Close _ -> None | _ -> Some (spelling, Punctuation punctuation))
+            match punctuation with
+            | Open _ | Close _ -> None
+            | _ -> Some (spelling, Punctuation punctuation))
           Token.punctuation)
   in
-  let items = List.init (1 + Random.State.int random 30) (fun _ ->
-      if Random.State.bool random then pick names
-      else if Random.State.int random 4 = 0 then
-        let value = Z.of_int (Random.State.bits random) in
-        (Z.to_string value, Integer value)
-      else pick others)
+  let items =
+    List.init
+      (1 + Random.State.int random 30)
+      (fun _ ->
+        if Random.State.bool random then pick names
+        else if Random.State.int random 4 = 0 then
+          let value = Z.of_int (Random.State.bits random) in
+          (Z.to_string value, Integer value)
+        else pick others)
   in
   let text = String.concat " " (List.map fst items) in
   let tokens, diagnostics = lex text in
   if diagnostics <> [] then fail "diagnostics for valid tokens %s" (Diagnostic.quote text);
   let kinds =
-    Array.to_list tokens |> List.map (fun (t : Token.t) -> t.kind) |> List.filter (fun kind -> kind <> Newline && kind <> End_of_file)
+    Array.to_list tokens
+    |> List.map (fun (t : Token.t) -> t.kind)
+    |> List.filter (fun kind -> kind <> Newline && kind <> End_of_file)
   in
-  if kinds <> List.map snd items then fail "the tokens of %s do not round-trip" (Diagnostic.quote text)
+  if kinds <> List.map snd items then
+    fail "the tokens of %s do not round-trip" (Diagnostic.quote text)
 
 let () =
   let seed = ref 0 and count = ref 10_000 and files = ref [] in
   Arg.parse
-    [ ("--seed", Arg.Set_int seed, " The random seed"); ("--count", Arg.Set_int count, " How many inputs of each kind") ]
+    [
+      ("--seed", Arg.Set_int seed, " The random seed");
+      ("--count", Arg.Set_int count, " How many inputs of each kind");
+    ]
     (fun file -> files := file :: !files)
     "fuzz [--seed N] [--count N] FILE...";
   let random = Random.State.make [| !seed |] in
   let examples = Array.of_list (List.concat_map (fun file -> truss_blocks (read file)) !files) in
-  if Array.length examples = 0 then (prerr_endline "fuzz: give Markdown files with ```truss blocks"; exit 2);
+  if Array.length examples = 0 then (
+    prerr_endline "fuzz: give Markdown files with ```truss blocks";
+    exit 2);
   let example () = examples.(Random.State.int random (Array.length examples)) in
   let insert text piece =
     let at = Random.State.int random (String.length text + 1) in
     String.sub text 0 at ^ piece ^ String.sub text at (String.length text - at)
   in
   for _ = 1 to !count do
-    check_robust (String.init (Random.State.int random 120) (fun _ -> Char.chr (Random.State.int random 256)));
+    check_robust
+      (String.init (Random.State.int random 120) (fun _ -> Char.chr (Random.State.int random 256)));
     let several = ref (example ()) in
     for _ = 1 to 1 + Random.State.int random 4 do
-      several := insert !several (mistakes.(Random.State.int random (Array.length mistakes)))
+      several := insert !several mistakes.(Random.State.int random (Array.length mistakes))
     done;
     check_robust !several;
-    check_fixes_work (insert (example ()) mistakes.(Random.State.int random (Array.length mistakes)));
+    check_fixes_work
+      (insert (example ()) mistakes.(Random.State.int random (Array.length mistakes)));
     round_trip random
   done;
   if !failures > 0 then begin

@@ -12,7 +12,11 @@ let line_comment cursor =
   cursor.position <- stop;
   cursor.line_is_blank <- false;
   report cursor ~code:Comment
-    ~fixes:[ Diagnostic.fix "Remove the comment" [ Source_text.remove_trivia cursor ~start ~stop ~line_break:false ] ]
+    ~fixes:
+      [
+        Diagnostic.fix "Remove the comment"
+          [ Source_text.remove_trivia cursor ~start ~stop ~line_break:false ];
+      ]
     (span start stop) comment_message
 
 let block_comment cursor =
@@ -23,7 +27,8 @@ let block_comment cursor =
     if current < 0 then (position, false)
     else if current = Char.code '*' && byte cursor (position + 1) = Char.code '/' then
       if depth = 1 then (position + 2, true) else loop (depth - 1) (position + 2)
-    else if current = Char.code '/' && byte cursor (position + 1) = Char.code '*' then loop (depth + 1) (position + 2)
+    else if current = Char.code '/' && byte cursor (position + 1) = Char.code '*' then
+      loop (depth + 1) (position + 2)
     else begin
       if is_line_break current && !first_line_break = None then
         first_line_break := Some (span position (position + line_break_length cursor position));
@@ -37,7 +42,8 @@ let block_comment cursor =
   (* A comment that spans lines separates the tokens around it like a line
      break. *)
   (match !first_line_break with
-  | Some line_break when cursor.first_line_break = None -> cursor.first_line_break <- Some line_break
+  | Some line_break when cursor.first_line_break = None ->
+      cursor.first_line_break <- Some line_break
   | _ -> ());
   (* An unterminated comment runs to the end of the file. Removing it would
      remove the rest of the file, and where its `*/` was meant to go cannot
@@ -65,7 +71,8 @@ let semicolon cursor =
   let next = next_code (start + 1) in
   (* Mid-line, the next token starts a new statement, unless it is a `}`. *)
   let line_break = not (is_end_of_line (byte cursor next) || byte cursor next = Char.code '}') in
-  if line_break && cursor.first_line_break = None then cursor.first_line_break <- Some (span start (start + 1));
+  if line_break && cursor.first_line_break = None then
+    cursor.first_line_break <- Some (span start (start + 1));
   report cursor ~code:Semicolon
     ~fixes:
       [
@@ -94,26 +101,28 @@ let character_literal_end cursor start =
   in
   if start > 0 && touches_name (start - 1) then None
   else
-  let content = start + 1 in
-  let current = byte cursor content in
-  let close =
-    if current = Char.code '\\' then
-      let escaped = byte cursor (content + 1) in
-      if escaped = Char.code 'u' && byte cursor (content + 2) = Char.code '{' then
-        match String.index_from_opt cursor.text (content + 3) '}' with
-        | Some brace when brace - content <= 10 -> Some (brace + 1)
-        | _ -> None
-      else if List.mem escaped (List.map Char.code [ 'n'; 't'; 'r'; '0'; '\\'; '"'; '\'' ]) then Some (content + 2)
-      else None
-    else if is_end_of_line current || current = Char.code '\'' then None
-    else
-      let packed = decode cursor content in
-      if packed < 0 || Unicode.is_forbidden (Unicode.decoded_code_point packed) then None
-      else Some (content + Unicode.decoded_length packed)
-  in
-  match close with
-  | Some close when byte cursor close = Char.code '\'' && not (touches_name (close + 1)) -> Some (close + 1)
-  | _ -> None
+    let content = start + 1 in
+    let current = byte cursor content in
+    let close =
+      if current = Char.code '\\' then
+        let escaped = byte cursor (content + 1) in
+        if escaped = Char.code 'u' && byte cursor (content + 2) = Char.code '{' then
+          match String.index_from_opt cursor.text (content + 3) '}' with
+          | Some brace when brace - content <= 10 -> Some (brace + 1)
+          | _ -> None
+        else if List.mem escaped (List.map Char.code [ 'n'; 't'; 'r'; '0'; '\\'; '"'; '\'' ]) then
+          Some (content + 2)
+        else None
+      else if is_end_of_line current || current = Char.code '\'' then None
+      else
+        let packed = decode cursor content in
+        if packed < 0 || Unicode.is_forbidden (Unicode.decoded_code_point packed) then None
+        else Some (content + Unicode.decoded_length packed)
+    in
+    match close with
+    | Some close when byte cursor close = Char.code '\'' && not (touches_name (close + 1)) ->
+        Some (close + 1)
+    | _ -> None
 
 (* Whether a run of `$` at [index] opens a raw string. *)
 let opens_raw_string cursor index =

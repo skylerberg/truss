@@ -89,7 +89,9 @@ let delete span = { span; replacement = "" }
 
 let apply_fix text fix =
   (* Edits at the same offset apply in the order they are listed. *)
-  let edits = List.stable_sort (fun (a : edit) (b : edit) -> compare a.span.start b.span.start) fix.edits in
+  let edits =
+    List.stable_sort (fun (a : edit) (b : edit) -> compare a.span.start b.span.start) fix.edits
+  in
   let buffer = Buffer.create (String.length text) in
   let position =
     List.fold_left
@@ -177,7 +179,8 @@ let quote text =
 let render source diagnostic =
   let buffer = Buffer.create 256 in
   let text = Source.text source in
-  Printf.bprintf buffer "%s: error[%s]: %s\n" (location source diagnostic.span.start)
+  Printf.bprintf buffer "%s: error[%s]: %s\n"
+    (location source diagnostic.span.start)
     (Code.name diagnostic.code) diagnostic.message;
   (* The line holding the start of the span, with the part of the span on that
      line marked. *)
@@ -249,8 +252,7 @@ let json_string value =
 let json_span source span =
   let line, column = Source.position source span.start in
   let end_line, end_column = Source.position source span.stop in
-  Printf.sprintf
-    {|{"start":%d,"stop":%d,"line":%d,"column":%d,"end_line":%d,"end_column":%d}|}
+  Printf.sprintf {|{"start":%d,"stop":%d,"line":%d,"column":%d,"end_line":%d,"end_column":%d}|}
     span.start span.stop line column end_line end_column
 
 let to_json source diagnostics =
@@ -277,7 +279,9 @@ let to_json source diagnostics =
         diagnostic.fixes
     in
     Printf.sprintf {|{"path":%s,"code":%s,"message":%s,"span":%s,"notes":[%s],"fixes":[%s]}|} path
-      (json_string (Code.name diagnostic.code)) (json_string diagnostic.message)
-      (json_span source diagnostic.span) (String.concat "," notes) (String.concat "," fixes)
+      (json_string (Code.name diagnostic.code))
+      (json_string diagnostic.message)
+      (json_span source diagnostic.span)
+      (String.concat "," notes) (String.concat "," fixes)
   in
   "[" ^ String.concat ",\n" (List.map one diagnostics) ^ "]\n"
