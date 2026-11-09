@@ -61,7 +61,9 @@ let rvalue_moves (rvalue : Lir.rvalue) =
 
 let target_moves (target : Lir.target) =
   match target with
-  | Indirect { value; _ } | Evidence_call { evidence = value; _ } -> operand_moves value
+  | Indirect { value; _ } | Evidence_call { evidence = value; _ } | Table_call { table = value; _ }
+    ->
+      operand_moves value
   | Direct _ | Intrinsic _ -> []
 
 (* What a statement does to ownership: the places it moves out of, then the

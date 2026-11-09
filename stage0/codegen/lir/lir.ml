@@ -133,6 +133,8 @@ type target =
   | Intrinsic of intrinsic
   | Evidence_call of { evidence : operand; slot : int; signature : signature }
       (** A capability's method: entry [slot] of the evidence's table, given the evidence first *)
+  | Table_call of { table : operand; slot : int; signature : signature }
+      (** Entry [slot] of a table of code, such as an [any] value's *)
 
 type rvalue =
   | Use of operand
@@ -351,6 +353,8 @@ let map_target ~place ~block = function
   | Indirect { value; signature } -> Indirect { value = map_operand ~place ~block value; signature }
   | Evidence_call { evidence; slot; signature } ->
       Evidence_call { evidence = map_operand ~place ~block evidence; slot; signature }
+  | Table_call { table; slot; signature } ->
+      Table_call { table = map_operand ~place ~block table; slot; signature }
   | (Direct _ | Intrinsic _) as target -> target
 
 let map_statement ~place ~block = function
@@ -616,6 +620,8 @@ let encode_target instance = function
   | Evidence_call { evidence; slot; signature } ->
       tagged 3
         [ encode_operand instance evidence; Cbor.int slot; encode_signature instance signature ]
+  | Table_call { table; slot; signature } ->
+      tagged 4 [ encode_operand instance table; Cbor.int slot; encode_signature instance signature ]
 
 let encode_statement instance = function
   | Assign (place, rvalue) ->
@@ -884,6 +890,7 @@ let target_to_string = function
   | Intrinsic intrinsic -> "intrinsic " ^ intrinsic_name intrinsic
   | Evidence_call { evidence; slot; _ } ->
       Printf.sprintf "(%s table %d)" (operand_to_string evidence) slot
+  | Table_call { table; slot; _ } -> Printf.sprintf "(%s[%d])" (operand_to_string table) slot
 
 let statement_to_string = function
   | Assign (place, rvalue) -> place_to_string place ^ " = " ^ rvalue_to_string rvalue

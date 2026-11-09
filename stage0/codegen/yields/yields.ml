@@ -86,7 +86,10 @@ let statement_uses_defines (statement : Lir.statement) =
   | Call { target; arguments; result } ->
       let target_reads =
         match target with
-        | Indirect { value; _ } | Evidence_call { evidence = value; _ } -> operand_reads value
+        | Indirect { value; _ }
+        | Evidence_call { evidence = value; _ }
+        | Table_call { table = value; _ } ->
+            operand_reads value
         | Direct _ | Intrinsic _ -> []
       in
       let reads, defined = match result with Some place -> written place | None -> ([], None) in

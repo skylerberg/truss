@@ -29,21 +29,24 @@ let rec trivial t ty =
          or storage, so it is not trivial, which is the answer a cycle
          gets. *)
       t.trivial_types <- Types.add ty false t.trivial_types;
+      let any = match ty with Ground.Any _ -> true | _ -> false in
       let member : Memory_layout.member -> bool = function
         | Typed ty -> trivial t ty
         | Raw _ -> true
       in
       let answer =
-        match t.kind_of ty with
-        | Storage _ -> false
-        | Shape (Scalar _) -> true
-        | Shape (Record fields) -> List.for_all (fun (_, m) -> member m) fields
-        | Shape (Array (element, _)) -> trivial t element
-        | Shape (Sum variants) ->
-            List.for_all
-              (fun (v : Memory_layout.variant_shape) ->
-                (not v.indirect) && List.for_all (fun (_, m) -> member m) v.fields)
-              variants
+        if any then false
+        else
+          match t.kind_of ty with
+          | Storage _ -> false
+          | Shape (Scalar _) -> true
+          | Shape (Record fields) -> List.for_all (fun (_, m) -> member m) fields
+          | Shape (Array (element, _)) -> trivial t element
+          | Shape (Sum variants) ->
+              List.for_all
+                (fun (v : Memory_layout.variant_shape) ->
+                  (not v.indirect) && List.for_all (fun (_, m) -> member m) v.fields)
+                variants
       in
       t.trivial_types <- Types.add ty answer t.trivial_types;
       answer
@@ -69,8 +72,27 @@ let drop t ty =
   let pointer = local b ~name:"value" (Pointer { target = Value ty; writable = true }) in
   let value : Lir.place = { root = Local pointer; projections = [ Deref ] } in
   start b (block b);
-  (match t.kind_of ty with
-  | Storage element ->
+  (match (ty, t.kind_of ty) with
+  | Any _, _ ->
+      (* The value's own drop, from slot 0 of its table, then its block. *)
+      emit b
+        (Call
+           {
+             target =
+               Table_call
+                 {
+                   table = Copy (value / Field "vtable");
+                   slot = 0;
+                   signature =
+                     { parameters = [ Raw (Pointer Opaque) ]; result = None; returns = true };
+                 };
+             arguments = [ Copy (value / Field "value") ];
+             result = None;
+           });
+      emit b
+        (Call
+           { target = Intrinsic Free; arguments = [ Copy (value / Field "value") ]; result = None })
+  | _, Storage element ->
       if not (trivial t element) then
         loop t b
           ~count:(Copy (value / Field "length"))
@@ -86,14 +108,14 @@ let drop t ty =
            { target = Intrinsic Free; arguments = [ Copy (value / Field "buffer") ]; result = None });
       finish b (Goto after);
       start b after
-  | Shape (Record fields) ->
+  | _, Shape (Record fields) ->
       List.iter
         (fun (name, member) -> if droppable t member then emit b (Drop (value / Field name)))
         fields
-  | Shape (Array (element, count)) ->
+  | _, Shape (Array (element, count)) ->
       if not (trivial t element) then
         loop t b ~count:(usize count) (fun index -> emit b (Drop (value / Index (Copy (at index)))))
-  | Shape (Sum variants) ->
+  | _, Shape (Sum variants) ->
       let after = block b in
       let cases =
         List.filter_map
@@ -115,7 +137,7 @@ let drop t ty =
       in
       finish b (Switch_variant { place = value; cases; default = Some after });
       start b after
-  | Shape (Scalar _) -> ());
+  | _, Shape (Scalar _) -> ());
   finish b (Return None);
   instance (Drop ty) (build b ~parameters:[ pointer ] ~result:None)
 

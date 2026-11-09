@@ -46,7 +46,10 @@ let compile_one toolchain cache settings (name, text) =
     with
     | Ok () ->
         Sys.rename partial output;
-        Sys.remove source;
+        (* [TRUSS_KEEP_C] keeps each C file beside its object, for reading
+           what was emitted. *)
+        if Sys.getenv_opt "TRUSS_KEEP_C" = None then Sys.remove source
+        else Sys.rename source (Filename.concat cache.directory (key ^ ".c"));
         Ok output
     | Error message ->
         Error (Printf.sprintf "%s does not compile (kept as %s):\n%s" name source message)

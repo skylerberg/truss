@@ -1928,6 +1928,73 @@ test "constants" {
 }
 |}
 
+let () =
+  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
+  passes "a named function is passed as a function value"
+    {|fn double(value: Int64) -> Int64 {
+  value * 2
+}
+
+fn apply(value: Int64, transform: fn(Int64) -> Int64) -> Int64 {
+  transform(value)
+}
+
+test "named functions" {
+  assert apply(21, transform: double) == 42
+}
+|};
+  passes "a field left out takes its default"
+    {|type Request(path: String, retries: Int64 = 3, secure: Bool = true)
+
+test "defaults" {
+  let request = Request(path: "/")
+  assert request.retries == 3
+  assert request.secure
+  let other = Request(path: "/", retries: 5)
+  assert other.retries == 5
+}
+|};
+  passes "a parameter left out takes its default"
+    {|fn connect(port: Int64 = 443, secure: Bool = true) -> Int64 {
+  if secure { port } else { 0 }
+}
+
+test "parameter defaults" {
+  assert connect() == 443
+  assert connect(port: 80) == 80
+  assert connect(secure: false) == 0
+}
+|};
+  passes "an any value calls its implementation's method"
+    {|trait Shape {
+  fn area(self) -> Int64
+}
+
+type Square(side: Int64)
+type Rectangle(width: Int64, height: Int64)
+
+impl Shape for Square {
+  fn area(self) -> Int64 { self.side * self.side }
+}
+
+impl Shape for Rectangle {
+  fn area(self) -> Int64 { self.width * self.height }
+}
+
+fn total(shapes: List[any Shape]) -> Int64 {
+  var sum = 0
+  for shape in shapes {
+    sum += shape.area()
+  }
+  sum
+}
+
+test "any" {
+  let shapes: List[any Shape] = [any Square(side: 2), any Rectangle(width: 3, height: 4)]
+  assert total(shapes) == 16
+}
+|}
+
 (* Programs *)
 
 (* Compiles a module with a [main] and runs it with the arguments. *)

@@ -503,7 +503,9 @@ and constant_c context : Lir.constant -> string * Lir.ty = function
   | Symbol_address key ->
       let symbol = Instance.symbol key in
       declare_prototype context symbol
-        (Printf.sprintf "extern const struct t_evidence %s;\n" symbol);
+        (match key with
+        | Table _ | Any_table _ -> Printf.sprintf "extern const void *const %s[];\n" symbol
+        | _ -> Printf.sprintf "extern const struct t_evidence %s;\n" symbol);
       ("((void *)&" ^ symbol ^ ")", Raw (Pointer Opaque))
 
 (* The scalar a value of a type is, for operators. *)
@@ -861,6 +863,18 @@ let call_c context fc (target : Lir.target) arguments =
       Printf.sprintf "%s.f_code(%s)" value
         (String.concat ", " ((value ^ ".f_environment") :: List.map fst arguments))
   | Intrinsic intrinsic -> intrinsic_c context intrinsic arguments
+  | Table_call { table; slot; signature } ->
+      let table =
+        match operand_c context fc table with
+        | Some (text, _) -> text
+        | None -> bug "a table of zero size"
+      in
+      let result =
+        match signature.result with None -> "void" | Some ty -> c_ty context fc.symbol ty
+      in
+      Printf.sprintf "((%s (*)(%s))((const void *const *)%s)[%d])(%s)" result
+        (signature_parameters context fc.symbol signature.parameters None)
+        table slot texts
   | Evidence_call { evidence; slot; signature } ->
       let evidence =
         match operand_c context fc evidence with

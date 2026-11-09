@@ -39,7 +39,9 @@ let references env (instance : Lir.t) =
                   let keys =
                     match target with
                     | Direct { function_; _ } -> function_ref_keys function_ keys
-                    | Indirect { value; _ } | Evidence_call { evidence = value; _ } ->
+                    | Indirect { value; _ }
+                    | Evidence_call { evidence = value; _ }
+                    | Table_call { table = value; _ } ->
                         operand_keys value keys
                     | Intrinsic _ -> keys
                   in

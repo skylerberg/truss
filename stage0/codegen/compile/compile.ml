@@ -38,10 +38,11 @@ let make t (key : Instance.key) : Lir.compiled =
   | Drop ty -> code (Glue.drop glue ty)
   | Copy ty -> code (Glue.copy glue ty)
   | Debug ty -> code (Glue.debug glue ty)
-  | Entry _ | Program_main _ -> code (Lower.instance t.context key)
+  | Entry _ | Program_main _ | Any_entry _ | Adapter _ -> code (Lower.instance t.context key)
+  | Any_table _ -> Table (Lower.any_table t.context key)
   | Table _ -> Table (Lower.table t.context key)
   | Real_evidence capability -> Evidence (Lower.real_evidence t.context capability)
-  | Cursor_next _ | Adapter _ -> invalid_arg ("Compile: not built yet: " ^ Instance.to_string key)
+  | Cursor_next _ -> invalid_arg ("Compile: not built yet: " ^ Instance.to_string key)
 
 let compiled t key =
   match List.find_opt (fun (k, _) -> Instance.equal k key) t.done_ with

@@ -15,7 +15,7 @@ type key =
   | Cursor_next of Ground.yielding
       (** The state machine of a pulled yielding method. Its drop is the [Drop] of its cursor type.
       *)
-  | Adapter of key
+  | Adapter of { function_ : key; ty : Ground.function_type }
   | Entry of key
       (** The entry for an [impl]'s method of a capability: takes the evidence, then calls the
           method on its implementation with the evidence that implementation captured *)
@@ -25,6 +25,11 @@ type key =
       (** The evidence for the real implementation of a standard capability, which a program's
           [main] is given *)
   | Program_main of Path.t  (** The C [main]'s Truss side: it calls the program's [main] *)
+  | Any_entry of key
+      (** The entry for an [impl]'s method in an [any] table: takes a pointer to the value *)
+  | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
+      (** The table of an [any] value of a type and trait: the type's drop, then an entry for each
+          of the trait's methods *)
 
 val compare : key -> key -> int
 val equal : key -> key -> bool

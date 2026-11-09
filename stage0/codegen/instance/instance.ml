@@ -5,7 +5,7 @@ type key =
   | Copy of Ground.ty
   | Debug of Ground.ty
   | Cursor_next of Ground.yielding
-  | Adapter of key
+  | Adapter of { function_ : key; ty : Ground.function_type }
   | Entry of key
       (** The entry for an [impl]'s method of a capability: takes the evidence, then calls the
           method on its implementation with the evidence that implementation captured *)
@@ -15,6 +15,11 @@ type key =
       (** The evidence for the real implementation of a standard capability, which a program's
           [main] is given *)
   | Program_main of Path.t  (** The C [main]'s Truss side: it calls the program's [main] *)
+  | Any_entry of key
+      (** The entry for an [impl]'s method in an [any] table: takes a pointer to the value *)
+  | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
+      (** The table of an [any] value of a type and trait: the type's drop, then an entry for each
+          of the trait's methods *)
 
 let rank = function
   | Code _ -> 0
@@ -28,6 +33,8 @@ let rank = function
   | Table _ -> 8
   | Real_evidence _ -> 9
   | Program_main _ -> 10
+  | Any_entry _ -> 11
+  | Any_table _ -> 12
 
 let ( >>= ) c next = if c <> 0 then c else next ()
 
@@ -39,7 +46,12 @@ let rec compare a b =
   | Constant a, Constant b -> Path.compare a b
   | Drop a, Drop b | Copy a, Copy b | Debug a, Debug b -> Ground.compare a b
   | Cursor_next a, Cursor_next b -> Ground.compare (Cursor a) (Cursor b)
-  | Adapter a, Adapter b | Entry a, Entry b -> compare a b
+  | Adapter a, Adapter b ->
+      compare a.function_ b.function_ >>= fun () -> Ground.compare (Function a.ty) (Function b.ty)
+  | Entry a, Entry b | Any_entry a, Any_entry b -> compare a b
+  | Any_table a, Any_table b ->
+      Path.compare a.impl b.impl >>= fun () ->
+      Ground.compare_arguments a.type_arguments b.type_arguments
   | Table a, Table b ->
       Path.compare a.impl b.impl >>= fun () ->
       Ground.compare_arguments a.type_arguments b.type_arguments
@@ -59,7 +71,10 @@ let rec encode ?(path = Ground.encode_path) key =
   | Copy t -> tagged 3 [ ty t ]
   | Debug t -> tagged 4 [ ty t ]
   | Cursor_next yielding -> tagged 5 [ ty (Cursor yielding) ]
-  | Adapter key -> tagged 6 [ encode ~path key ]
+  | Adapter { function_; ty } ->
+      tagged 6 [ encode ~path function_; Ground.encode ~path (Function ty) ]
+  | Any_entry key -> tagged 11 [ encode ~path key ]
+  | Any_table { impl; type_arguments } -> tagged 12 [ path impl; arguments type_arguments ]
   | Entry key -> tagged 7 [ encode ~path key ]
   | Table { impl; type_arguments } -> tagged 8 [ path impl; arguments type_arguments ]
   | Real_evidence capability -> tagged 9 [ path capability ]
@@ -152,7 +167,11 @@ let rec mangle = function
   | Copy ty -> marker "Copy" ^ mangle_ty ty
   | Debug ty -> marker "Debug" ^ mangle_ty ty
   | Cursor_next yielding -> marker "Next" ^ mangle_yielding yielding
-  | Adapter key -> marker "Adapter" ^ mangle key
+  | Adapter { function_; ty } ->
+      marker "Adapter" ^ mangle function_ ^ marker "As" ^ mangle_ty (Function ty)
+  | Any_entry key -> marker "Dynamic" ^ mangle key
+  | Any_table { impl; type_arguments } ->
+      marker "Vtable" ^ path impl ^ mangle_arguments type_arguments
   | Entry key -> marker "Entry" ^ mangle key
   | Table { impl; type_arguments } -> marker "Table" ^ path impl ^ mangle_arguments type_arguments
   | Real_evidence capability -> marker "Evidence" ^ path capability
@@ -178,7 +197,10 @@ let rec to_string = function
   | Copy ty -> "copy " ^ Ground.to_string ty
   | Debug ty -> "debug " ^ Ground.to_string ty
   | Cursor_next yielding -> "next " ^ Ground.to_string (Cursor yielding)
-  | Adapter key -> "adapter " ^ to_string key
+  | Adapter { function_; _ } -> "adapter " ^ to_string function_
+  | Any_entry key -> "any entry " ^ to_string key
+  | Any_table { impl; type_arguments } ->
+      "any table " ^ Path.show impl ^ arguments_to_string type_arguments
   | Entry key -> "entry " ^ to_string key
   | Table { impl; type_arguments } -> "table " ^ Path.show impl ^ arguments_to_string type_arguments
   | Real_evidence capability -> "real evidence " ^ Path.show capability

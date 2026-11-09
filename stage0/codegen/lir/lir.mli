@@ -143,6 +143,8 @@ type target =
   | Intrinsic of intrinsic
   | Evidence_call of { evidence : operand; slot : int; signature : signature }
       (** A capability's method: entry [slot] of the evidence's table, given the evidence first *)
+  | Table_call of { table : operand; slot : int; signature : signature }
+      (** Entry [slot] of a table of code, such as an [any] value's *)
 
 type rvalue =
   | Use of operand

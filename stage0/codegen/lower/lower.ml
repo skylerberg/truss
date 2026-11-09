@@ -601,6 +601,45 @@ let entry_signature context (signature : T.signature) =
   in
   ({ lir with parameters = Convention.evidence :: lir.parameters }, result)
 
+(* Whether a trait's method can be called through [any]: it has no generic
+   parameters of its own, and neither takes nor returns [Self]. *)
+let callable_through_any trait (m : T.trait_method) =
+  let self = T.Parameter { owner = trait; name = "Self" } in
+  let mentions ty = T.equal ty self in
+  m.method_receiver <> Static
+  && List.for_all
+       (fun (g : T.generic) -> Path.equal g.generic.owner trait)
+       m.method_signature.generics
+  && List.for_all
+       (fun (p : T.parameter_info) -> not (mentions p.type_))
+       m.method_signature.parameters
+  && match m.method_signature.output with Returns ty -> not (mentions ty) | _ -> false
+
+(* The methods of a trait an [any] table has an entry for, in order. *)
+let any_methods context trait =
+  match demand context Environment.trait_interface trait with
+  | Some i -> List.filter (callable_through_any trait) i.methods
+  | None -> bug "no interface for %s" (Path.show trait)
+
+(* A method's slot in an [any] table, after the drop in slot 0. *)
+let dynamic_slot context trait name =
+  let rec find i = function
+    | [] -> bug "%s cannot be called through any" name
+    | (m : T.trait_method) :: rest ->
+        if m.method_name = name then (i, m.method_signature) else find (i + 1) rest
+  in
+  find 1 (any_methods context trait)
+
+(* The C signature of an entry in an [any] table: the value's pointer, then
+   the method's own, with the evidence for what it uses. *)
+let any_entry_signature context (signature : T.signature) =
+  let lir, result =
+    lir_signature context []
+      ~parameters:(interface_parameters { signature with receiver = None })
+      ~has_defaults:false ~uses:signature.uses signature.output
+  in
+  ({ lir with parameters = Lir.Raw (Pointer Opaque) :: lir.parameters }, result)
+
 (* The evidence for a capability, where the code being lowered has it. *)
 let evidence_of st capability =
   match List.find_opt (fun (path, _) -> Path.equal path capability) st.evidence with
@@ -704,7 +743,8 @@ let rec expression st (e : S.expression) : Lir.place =
       let nowhere = new_local st (Monomorphic.builtin Unit) in
       into st e nowhere;
       nowhere
-  | Name _ | Member _ | Self_value -> (
+  | Name _ | Member _ | Self_value | Bracket _ | Call _ -> (
+      (* An index or a lending call names a place, as a name does. *)
       match place_expression st e with
       | Some place -> place
       | None ->
@@ -754,6 +794,40 @@ and place_expression st (e : S.expression) : Lir.place option =
           in
           Some (lend st call_ ~expressions ~arguments)
       | None -> None)
+  | Call (_, arguments) when lending_intrinsic st e -> (
+      (* [storage_at], [storage_at_mut], and [view_at] lend an element's
+         place itself. *)
+      match st.frame.code.checked.calls.(e.id) with
+      | Some { callee = Intrinsic { operation; type_arguments }; arguments = checked; _ } ->
+          let type_arguments =
+            List.filter_map
+              (fun a ->
+                match
+                  Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution a
+                with
+                | Type ty -> Some ty
+                | _ -> None)
+              type_arguments
+          in
+          let expressions = List.map (fun (a : S.argument) -> a.value) arguments in
+          let values =
+            List.map
+              (fun (argument : C.argument) ->
+                let e =
+                  List.find (fun (x : S.expression) -> x.id = argument.expression) expressions
+                in
+                (argument.parameter, e))
+              checked
+            |> List.sort (fun (a, _) (b, _) -> Int.compare a b)
+            |> List.map (fun (parameter, e) ->
+                if parameter = 0 then
+                  Intrinsics.Place
+                    (match place_expression st e with Some p -> p | None -> expression st e)
+                else Intrinsics.Value (operand st e))
+          in
+          Intrinsics.lower st.context.env st.b st.context.types operation ~type_arguments values
+            ~destination:None ~site:(site st e.span)
+      | _ -> None)
   | Call (callee, arguments) -> (
       match st.frame.code.checked.calls.(e.id) with
       | Some ({ callee = Function _ | Trait_method _; _ } as call_) when lends st call_ ->
@@ -774,6 +848,11 @@ and constant_place st (e : S.expression) =
       | None -> None)
   | _ -> None
 
+and lending_intrinsic st (e : S.expression) =
+  match st.frame.code.checked.calls.(e.id) with
+  | Some { callee = Intrinsic { operation = Storage_at | Storage_at_mut | View_at; _ }; _ } -> true
+  | _ -> false
+
 (* Whether a call is to a lending method. *)
 and lends st (call_ : C.call) =
   match resolve_callee st call_ with
@@ -784,6 +863,7 @@ and lends st (call_ : C.call) =
 (* The instance a call to a function or a trait method reaches. *)
 and resolve_callee st (call_ : C.call) =
   match call_.callee with
+  | Trait_method { evidence = Dynamic; _ } -> None
   | Function { path; type_arguments } ->
       Some
         ( path,
@@ -809,7 +889,12 @@ and call_expressions (call_ : C.call) (callee : S.expression) (arguments : S.arg
 and with_receiver st (call_ : C.call) ~(expressions : S.expression list)
     (arguments : C.argument list) =
   let receiver : Path.receiver =
-    match resolve_callee st call_ with Some (Method { receiver; _ }, _) -> receiver | _ -> Static
+    match call_.callee with
+    | Trait_method { receiver; evidence = Dynamic; _ } -> receiver
+    | _ -> (
+        match resolve_callee st call_ with
+        | Some (Method { receiver; _ }, _) -> receiver
+        | _ -> Static)
   in
   match (receiver, expressions) with
   | (Read | Mut | Own), first :: _
@@ -1049,7 +1134,8 @@ and into st (e : S.expression) (destination : Lir.place) =
       match place_expression st e with
       | Some place -> assign (Use (owned st place (ty ())))
       | None -> bug "an index with no meaning")
-  | Any _ | Range _ | Quantified _ | Map _ | Provide _ ->
+  | Any inner -> any_value st e inner destination
+  | Range _ | Quantified _ | Map _ | Provide _ ->
       bug "this expression is not lowered yet: %s" (source st e.span)
   | Self_type_value -> bug "Self as a value"
   | Expression_error -> bug "an expression that did not parse"
@@ -1395,6 +1481,70 @@ and interpolate st (literal : S.string_literal) destination =
     literal.rest;
   call (method_ "finish" Own) [ (Own, builder_ty, builder) ] destination
 
+(* [any value]: the value moved into a block of its own, the one
+   allocation an [any] costs, with the table for its type and trait. *)
+and any_value st (e : S.expression) (inner : S.expression) destination =
+  let any_ty = type_of st e.id in
+  let inner_ty = type_of st inner.id in
+  let trait, arguments, associated =
+    match any_ty with
+    | Any { trait; arguments; associated } -> (trait, arguments, associated)
+    | _ -> bug "any of %s" (Ground.to_string any_ty)
+  in
+  let impl, substitution =
+    match
+      Interface.Impls.implements st.context.database
+        ~bounds:(fun _ -> [])
+        (back inner_ty)
+        {
+          trait;
+          trait_arguments = List.map back_argument arguments;
+          associated = List.map (fun (name, ty) -> (name, back ty)) associated;
+        }
+    with
+    | Some (From_impl { impl; substitution }) -> (impl, substitution)
+    | _ -> bug "%s has no impl of %s" (Ground.to_string inner_ty) (Path.show trait)
+  in
+  let interface = impl_interface st.context impl in
+  let type_arguments =
+    List.map
+      (fun (g : T.generic) ->
+        match List.assoc_opt g.generic substitution with
+        | Some a -> Monomorphic.ground_argument st.context.monomorphic [] a
+        | None -> bug "an unbound parameter of %s" (Path.show impl))
+      interface.impl_generics
+  in
+  let layout = Memory_layout.of_type st.context.env inner_ty in
+  let block = local st.b (Raw (Pointer Opaque)) in
+  if layout.size = 0 then emit st.b (Assign (at block, Use (Constant (Bytes ""))))
+  else begin
+    emit st.b
+      (Call
+         {
+           target = Intrinsic Allocate;
+           arguments = [ usize layout.size; usize layout.alignment ];
+           result = Some (at block);
+         });
+    let typed = local st.b (Pointer { target = Value inner_ty; writable = true }) in
+    emit st.b (Assign (at typed, Use (Copy (at block))));
+    let value = match place_expression st inner with Some p -> p | None -> expression st inner in
+    emit st.b
+      (Assign ({ root = Local typed; projections = [ Deref ] }, Use (owned st value inner_ty)))
+  end;
+  emit st.b
+    (Assign
+       ( destination,
+         Build
+           {
+             ty = any_ty;
+             variant = None;
+             fields =
+               [
+                 ("value", Copy (at block));
+                 ("vtable", Constant (Symbol_address (Any_table { impl; type_arguments })));
+               ];
+           } ))
+
 and is_built_in st (e : S.expression) =
   match st.frame.code.checked.calls.(e.id) with
   | Some { callee = Built_in_operator; _ } -> true
@@ -1427,6 +1577,27 @@ and name_value st (e : S.expression) destination =
   | Some (Variant_value { type_; variant }) ->
       emit st.b
         (Assign (destination, Build { ty = ground st type_; variant = Some variant; fields = [] }))
+  | Some (Global { path; type_arguments }) -> (
+      (* A named function as a value: an adapter that takes the
+         environment, and ignores it. *)
+      match type_of st e.id with
+      | Function ty ->
+          let function_ =
+            Instance.Code
+              {
+                path;
+                type_arguments =
+                  List.map
+                    (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
+                    type_arguments;
+              }
+          in
+          emit st.b
+            (Assign
+               ( destination,
+                 Function_value { code = Instance (Adapter { function_; ty }); environment = None }
+               ))
+      | ty -> bug "a global of %s" (Ground.to_string ty))
   | Some meaning -> bug "this name is not lowered yet: %s" (C.show_meaning meaning)
   | None -> bug "a name with no meaning: %s" (source st e.span)
 
@@ -1549,7 +1720,6 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
     in
     let evaluated = List.map evaluate arguments in
     let in_order = List.sort (fun (a, _, _, _) (b, _, _, _) -> Int.compare a b) evaluated in
-    let as_arguments = List.map (fun (_, mode, ty, place) -> (mode, ty, place)) in
     match call_.callee with
     | Function { path; type_arguments } ->
         let signature = signature_of st.context path in
@@ -1562,7 +1732,41 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
         let mask = default_mask signature call_ in
         call_instance st
           (Code { path; type_arguments = ground_arguments })
-          ~signature ~substitution ~arguments:(as_arguments in_order) ~mask ~destination
+          ~signature ~substitution
+          ~arguments:(with_placeholders st signature substitution in_order)
+          ~mask ~destination
+    | Trait_method { trait; name; evidence = Dynamic; _ } -> (
+        (* Through an [any] value: the entry in its table. *)
+        let slot, signature = dynamic_slot st.context trait.trait name in
+        let lir_signature, result = any_entry_signature st.context signature in
+        match in_order with
+        | (_, _, _, any) :: rest ->
+            let passed = List.filter_map (fun (_, mode, ty, place) -> pass st mode ty place) rest in
+            let evidence = List.map (evidence_of st) (evidence_for [] signature.uses) in
+            let value = Lir.Copy (any / Field "value") in
+            let target =
+              Lir.Table_call
+                { table = Copy (any / Field "vtable"); slot; signature = lir_signature }
+            in
+            (match result with
+            | Through_pointer _ ->
+                emit st.b
+                  (Call
+                     {
+                       target;
+                       arguments =
+                         (value :: Address { place = destination; writable = true } :: passed)
+                         @ evidence;
+                       result = None;
+                     })
+            | Returned _ ->
+                emit st.b
+                  (Call
+                     { target; arguments = (value :: passed) @ evidence; result = Some destination })
+            | Nothing ->
+                emit st.b (Call { target; arguments = (value :: passed) @ evidence; result = None }));
+            if not lir_signature.returns then unreachable_block st
+        | [] -> bug "a call through any with no receiver")
     | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } ->
         let key = trait_method_key st ~trait ~name ~receiver ~self_type ~type_arguments ~evidence in
         let path = match key with Code { path; _ } -> path | _ -> bug "a trait method's key" in
@@ -1571,7 +1775,8 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
         in
         let signature = signature_of st.context path in
         let substitution = bind signature.generics type_arguments in
-        call_instance st key ~signature ~substitution ~arguments:(as_arguments in_order)
+        call_instance st key ~signature ~substitution
+          ~arguments:(with_placeholders st signature substitution in_order)
           ~mask:(default_mask signature call_) ~destination
     | Constructor { type_ = _; variant; _ } ->
         let ty = ground st call_.result in
@@ -1582,8 +1787,7 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
               (List.nth names parameter, owned st place field_ty))
             in_order
         in
-        if call_.defaults_left_out <> [] then
-          bug "fields left to their defaults are not lowered yet";
+        let fields = fields @ field_defaults st ty variant call_.defaults_left_out in
         emit st.b (Assign (destination, Build { ty; variant; fields }))
     | Intrinsic { operation; type_arguments } -> (
         let type_arguments =
@@ -1659,6 +1863,19 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
         if not lir_signature.returns then unreachable_block st
     | Built_in_operator -> bug "a built-in operator called as a function"
 
+(* Every parameter's argument, in order: a parameter left to its default
+   gets a placeholder, which the function overwrites from its default. *)
+and with_placeholders st (signature : T.signature) substitution in_order =
+  List.mapi
+    (fun index (mode, ty) ->
+      match List.find_opt (fun (parameter, _, _, _) -> parameter = index) in_order with
+      | Some (_, mode, ty, place) -> (mode, ty, place)
+      | None ->
+          ( mode,
+            Monomorphic.ground st.context.monomorphic substitution ty,
+            new_local st (Monomorphic.ground st.context.monomorphic substitution ty) ))
+    (interface_parameters signature)
+
 and default_mask (signature : T.signature) (call_ : C.call) =
   let defaulted = List.filter (fun (p : T.parameter_info) -> p.has_default) signature.parameters in
   let bits =
@@ -1668,6 +1885,74 @@ and default_mask (signature : T.signature) (call_ : C.call) =
       defaulted
   in
   List.fold_left ( lor ) 0 bits
+
+(* The values of the fields left to their defaults: each default lowered
+   where the type writes it, with the type's own tables. *)
+and field_defaults st ty variant left_out =
+  if left_out = [] then []
+  else
+    let path =
+      match ty with Named { path; _ } -> path | _ -> bug "defaults of %s" (Ground.to_string ty)
+    in
+    let key = key_of st.context path in
+    let declared =
+      match (demand st.context Names.definition key, variant) with
+      | Some { kind = Type_definition { body = Fields fields; _ }; _ }, None -> fields
+      | Some { kind = Type_definition { body = Variants variants; _ }; _ }, Some name -> (
+          match List.find_opt (fun (v : S.variant) -> v.name.text = name) variants with
+          | Some { fields = Some fields; _ } -> fields
+          | _ -> [])
+      | _ -> bug "the definition of %s" (Path.show path)
+    in
+    let shape =
+      match (Monomorphic.shape st.context.monomorphic ty, variant) with
+      | Record fields, None -> fields
+      | Sum variants, Some name ->
+          (List.find (fun (v : Memory_layout.variant_shape) -> v.name = name) variants).fields
+      | _ -> []
+    in
+    let caller = st.frame in
+    let type_args = match ty with Named { arguments; _ } -> arguments | _ -> [] in
+    let interface =
+      match demand st.context Environment.type_interface path with
+      | Some i -> i
+      | None -> bug "no interface for %s" (Path.show path)
+    in
+    let code =
+      {
+        caller.code with
+        definition_key = key;
+        anchor = path;
+        text = text_of st.context key;
+        checked = checked_of st.context key;
+        substitution = bind interface.type_generics type_args;
+      }
+    in
+    st.frame <- { caller with code; bindings = Hashtbl.create 1; self_place = None };
+    let values =
+      List.map
+        (fun name ->
+          let default =
+            List.find_map
+              (fun (field : S.field) ->
+                match field.kind with
+                | Field_declaration { name = n; default = Some d; _ } when n.text = name -> Some d
+                | _ -> None)
+              declared
+          in
+          let field_ty =
+            match List.assoc_opt name shape with Some (Typed t) -> t | _ -> bug "no field %s" name
+          in
+          match default with
+          | Some d ->
+              let value = new_local st field_ty in
+              into st d value;
+              (name, owned st value field_ty)
+          | None -> bug "no default for %s" name)
+        left_out
+    in
+    st.frame <- caller;
+    values
 
 (* The fields of a record or a variant, in declaration order, which a
    constructor's parameters are numbered by. *)
@@ -2889,6 +3174,169 @@ let program_main context (key : Instance.key) main_path : Lir.t =
     nested = [||];
   }
 
+(* A named function as a value of a function type. *)
+let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Ground.function_type) :
+    Lir.t =
+  let path, type_arguments =
+    match function_ with
+    | Code { path; type_arguments } -> (path, type_arguments)
+    | _ -> bug "an adapter"
+  in
+  let signature = signature_of context path in
+  let substitution = bind signature.generics type_arguments in
+  let st = generated_state context ~anchor:path ~substitution in
+  let b = st.b in
+  let environment = local b ~name:"environment" (Raw (Nullable_pointer Opaque)) in
+  let result_ty =
+    match ty.result with Returns t -> t | _ -> bug "an adapter for a function that yields"
+  in
+  let result = Convention.result context.env result_ty in
+  let result_pointer =
+    match result with Through_pointer pointer -> Some (local b ~name:"result" pointer) | _ -> None
+  in
+  let parameters =
+    List.map
+      (fun ((mode : Ground.mode), ty) ->
+        let types_mode : T.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
+        match Convention.parameter context.env mode ty with
+        | Some (Pointer _ as pointer) ->
+            let l = local b pointer in
+            (Some l, (types_mode, ty, ({ Lir.root = Local l; projections = [ Deref ] } : Lir.place)))
+        | Some lir_ty ->
+            let l = local b lir_ty in
+            (Some l, (types_mode, ty, at l))
+        | None -> (None, (types_mode, ty, new_local st ty)))
+      ty.parameters
+  in
+  let evidence =
+    List.map (fun capability -> (capability, local b ~name:"evidence" Convention.evidence)) ty.uses
+  in
+  start b (block b);
+  st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
+  let destination =
+    match result_pointer with
+    | Some p -> { Lir.root = Local p; projections = [ Deref ] }
+    | None -> new_local st result_ty
+  in
+  call_instance st function_ ~signature ~substitution ~arguments:(List.map snd parameters) ~mask:0
+    ~destination;
+  finish b (Return (match result with Returned _ -> Some (Lir.Move destination) | _ -> None));
+  let main =
+    Lir_builder.build b
+      ~parameters:
+        ((environment :: Option.to_list result_pointer)
+        @ List.filter_map fst parameters @ List.map snd evidence)
+      ~result:(match result with Returned t -> Some t | _ -> None)
+  in
+  { key; main = { main with returns = result_ty <> Never }; nested = [||] }
+
+(* An entry in an [any] table: the value's pointer as [self], then the
+   method's arguments. *)
+let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
+  let path, type_arguments =
+    match method_key with
+    | Code { path; type_arguments } -> (path, type_arguments)
+    | _ -> bug "an entry's method"
+  in
+  let impl, name, receiver =
+    match path with
+    | Method { owner; name; receiver } -> (owner, name, receiver)
+    | _ -> bug "an any entry"
+  in
+  let interface = impl_interface context impl in
+  let trait = interface.implements.trait in
+  let _, trait_signature = dynamic_slot context trait name in
+  let method_signature = signature_of context path in
+  let substitution = bind method_signature.generics type_arguments in
+  let _, result = any_entry_signature context trait_signature in
+  let st = generated_state context ~anchor:impl ~substitution in
+  let b = st.b in
+  let value = local b ~name:"value" (Raw (Pointer Opaque)) in
+  let result_pointer =
+    match result with Through_pointer pointer -> Some (local b ~name:"result" pointer) | _ -> None
+  in
+  let parameters =
+    List.map
+      (fun (info : T.parameter_info) ->
+        let ty = Monomorphic.ground context.monomorphic substitution info.type_ in
+        match Convention.parameter context.env (Monomorphic.mode info.mode) ty with
+        | Some (Pointer _ as pointer) ->
+            let l = local b pointer in
+            (Some l, (info.mode, ty, ({ Lir.root = Local l; projections = [ Deref ] } : Lir.place)))
+        | Some lir_ty ->
+            let l = local b lir_ty in
+            (Some l, (info.mode, ty, at l))
+        | None -> (None, (info.mode, ty, new_local st ty)))
+      method_signature.parameters
+  in
+  let evidence =
+    List.map
+      (fun capability -> (capability, local b ~name:"evidence" Convention.evidence))
+      (evidence_for [] trait_signature.uses)
+  in
+  start b (block b);
+  st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
+  let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
+  let typed = local b (Pointer { target = Value self_ty; writable = true }) in
+  if not (zero_size st self_ty) then emit b (Assign (at typed, Use (Copy (at value))));
+  let self_mode : T.mode = match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read in
+  let result_ty =
+    match method_signature.output with
+    | Returns t -> Monomorphic.ground context.monomorphic substitution t
+    | _ -> bug "an any method that yields"
+  in
+  let destination =
+    match result_pointer with
+    | Some p -> { Lir.root = Local p; projections = [ Deref ] }
+    | None -> new_local st result_ty
+  in
+  call_instance st method_key ~signature:method_signature ~substitution
+    ~arguments:
+      ((self_mode, self_ty, { Lir.root = Local typed; projections = [ Deref ] })
+      :: List.map snd parameters)
+    ~mask:0 ~destination;
+  finish b (Return (match result with Returned _ -> Some (Lir.Move destination) | _ -> None));
+  let main =
+    Lir_builder.build b
+      ~parameters:
+        ((value :: Option.to_list result_pointer)
+        @ List.filter_map fst parameters @ List.map snd evidence)
+      ~result:(match result with Returned t -> Some t | _ -> None)
+  in
+  { key; main = { main with returns = method_signature.output <> Returns Never }; nested = [||] }
+
+(* An [any] table: the type's drop in slot 0, then an entry for each method
+   that can be called through [any]. *)
+let any_table context (key : Instance.key) : Lir.table =
+  match key with
+  | Any_table { impl; type_arguments } ->
+      let interface = impl_interface context impl in
+      let trait = interface.implements.trait in
+      let substitution = bind interface.impl_generics type_arguments in
+      let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
+      let drop_signature : Lir.signature =
+        { parameters = [ Raw (Pointer Opaque) ]; result = None; returns = true }
+      in
+      let entries =
+        List.map
+          (fun (m : T.trait_method) ->
+            let receiver =
+              match
+                List.find_opt (fun (name, _, _) -> name = m.method_name) interface.impl_methods
+              with
+              | Some (_, receiver, _) -> receiver
+              | None -> m.method_receiver
+            in
+            let method_key =
+              Instance.Code
+                { path = Method { owner = impl; name = m.method_name; receiver }; type_arguments }
+            in
+            (Instance.Any_entry method_key, fst (any_entry_signature context m.method_signature)))
+          (any_methods context trait)
+      in
+      { table_key = key; entries = (Instance.Drop self_ty, drop_signature) :: entries }
+  | _ -> bug "not an any table: %s" (Instance.to_string key)
+
 (* Whether a method of a derived [impl] is the trait's own, written in the
    trait, rather than one the derivation writes. *)
 let trait_provides context ~trait ~name ~receiver =
@@ -2906,6 +3354,8 @@ let trait_provides context ~trait ~name ~receiver =
 let instance context (key : Instance.key) : Lir.t =
   match key with
   | Entry method_key -> entry context key method_key
+  | Any_entry method_key -> any_entry context key method_key
+  | Adapter { function_; ty } -> adapter context key ~function_ ~ty
   | Program_main main -> program_main context key main
   | Code
       {

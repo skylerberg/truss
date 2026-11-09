@@ -33,6 +33,9 @@ val constant : context -> Path.t -> Lir.data
 (* A capability [impl]'s table of entries. *)
 val table : context -> Instance.key -> Lir.table
 
+(* The table of an [any] value of a type and trait. *)
+val any_table : context -> Instance.key -> Lir.table
+
 (* The evidence for the real implementation of a standard capability. *)
 val real_evidence : context -> Path.t -> Lir.evidence
 
