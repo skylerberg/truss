@@ -1850,7 +1850,7 @@ impl Default for Float32 {
 
 impl Display for Float32 {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_float(self)
   }
 }
 
@@ -1950,7 +1950,7 @@ impl Default for Float64 {
 
 impl Display for Float64 {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_float(self)
   }
 }
 

@@ -741,6 +741,9 @@ let cursor_result context yielding : Ground.ty =
 
 (* Calls a trait's method on a value of a ground type, through the [impl]
    the type has, with arguments that are places. *)
+(* A trait of the standard library's [core] module. *)
+let core name : Path.t = Top { module_ = { package = "standard"; modules = [ "core" ] }; name }
+
 let trait_call st ~trait ~name ~(receiver : Path.receiver) ~self ~arguments ~destination =
   match
     Interface.Impls.implements st.context.database
@@ -2438,6 +2441,42 @@ and branch st (e : S.expression) ~yes ~no =
 
 (* Patterns *)
 
+(* A constant's static data, as a place. *)
+and static_constant st path : Lir.place =
+  match demand st.context Environment.constant_type path with
+  | Some ty -> { root = Static { key = Constant path; ty = ground st ty }; projections = [] }
+  | None -> bug "no type for the constant %s" (Path.show path)
+
+(* A [String] or [StringSlice] of a literal's text, in a new local. *)
+and string_place st ty text =
+  let place = new_local st ty in
+  (match ty with
+  | Named { path = Top { name = "String"; _ }; _ } ->
+      let field, storage_ty, storage = string_value st ty text in
+      let built = new_local st storage_ty in
+      emit st.b (Assign (built, storage));
+      emit st.b (Assign (place, Build { ty; variant = None; fields = [ (field, Move built) ] }))
+  | _ -> (
+      match Monomorphic.shape st.context.monomorphic ty with
+      | Record [ (field, Typed view) ] ->
+          let bytes = new_local st view in
+          emit st.b
+            (Assign
+               ( bytes,
+                 Build
+                   {
+                     ty = view;
+                     variant = None;
+                     fields =
+                       [
+                         ("elements", Constant (Bytes text)); ("length", usize (String.length text));
+                       ];
+                   } ));
+          emit st.b
+            (Assign (place, Build { ty; variant = None; fields = [ (field, Lir.Copy bytes) ] }))
+      | _ -> bug "a string pattern on %s" (Ground.to_string ty)));
+  place
+
 (* Branches to [matched] if the value at [place] of type [ty] matches the
    pattern, and to [failed] otherwise, binding nothing. *)
 and test_pattern st (pattern : S.pattern) place ty ~matched ~failed =
@@ -2447,23 +2486,40 @@ and test_pattern st (pattern : S.pattern) place ty ~matched ~failed =
     finish st.b
       (Switch { value = Copy (at ok); cases = [ (Z.one, matched) ]; default = Some failed })
   in
+  (* A value matches a constant or a string when it is equal to it. *)
+  let equal_to other =
+    let ok = new_local st st.context.bool in
+    trait_call st ~trait:(core "Equal") ~name:"equal" ~receiver:Read ~self:ty
+      ~arguments:[ (Read, ty, place); (Read, ty, other) ]
+      ~destination:ok;
+    check (Use (Copy ok))
+  in
+  let constant () =
+    match st.frame.code.checked.patterns.(pattern.id) with
+    | Some (Constant_pattern path) -> equal_to (static_constant st path)
+    | _ -> bug "a constant pattern with no constant"
+  in
   match pattern.kind with
   | Wildcard -> finish st.b (Goto matched)
   | Binding_or_constant _ -> (
       match st.frame.code.checked.patterns.(pattern.id) with
-      | Some (Constant_pattern path) ->
-          bug "constant patterns are not lowered yet: %s" (Path.show path)
+      | Some (Constant_pattern _) -> constant ()
       | _ -> finish st.b (Goto matched))
+  | Qualified_constant _ -> constant ()
   | Literal (Literal_integer _) ->
       check (Binary (Equal, Copy place, constant_of st ty (literal st pattern.id)))
   | Literal Literal_true -> check (Use (Copy place))
   | Literal Literal_false -> check (Unary (Not, Copy place))
-  | Literal (Literal_string _) -> bug "string patterns are not lowered yet"
+  | Literal (Literal_string literal) -> equal_to (string_place st ty literal.first.value)
   | Pattern_range { start; stop; inclusive } ->
       let bound (e : S.range_end) =
         match e.kind with
-        | End_literal (Literal_integer _) -> constant_of st ty (literal st e.id)
-        | _ -> bug "range ends other than literals are not lowered yet"
+        | End_literal (Literal_integer value) -> constant_int (integer_of st ty) value
+        | End_constant _ | End_name _ -> (
+            match st.frame.code.checked.patterns.(e.id) with
+            | Some (Constant_pattern path) -> Copy (static_constant st path)
+            | _ -> bug "a range end with no constant")
+        | End_literal _ -> bug "a range end that is not a number"
       in
       let low = local st.b (Raw Bool) and high = local st.b (Raw Bool) in
       emit st.b (Assign (at low, Binary (Greater_equal, Copy place, bound start)));
@@ -2487,7 +2543,6 @@ and test_pattern st (pattern : S.pattern) place ty ~matched ~failed =
       start st.b inside;
       test_fields st (Option.value fields ~default:[]) place ty (Some variant) ~matched ~failed
   | Record fields -> test_fields st fields place ty None ~matched ~failed
-  | Qualified_constant _ -> bug "constant patterns are not lowered yet"
   | Pattern_error -> bug "a pattern that did not parse"
 
 and field_patterns st (fields : S.pattern_field list) ty variant =
@@ -2815,8 +2870,6 @@ and constant_data context path : Lir.data =
 let constant context path = constant_data context path
 
 (* Derived implementations *)
-
-let core name : Path.t = Top { module_ = { package = "standard"; modules = [ "core" ] }; name }
 
 (* The fields of a variant, or of a record, with their ground types. *)
 let shape_fields st ty variant =

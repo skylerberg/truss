@@ -88,6 +88,10 @@ internal fn TextBuilder.write_byte(mut self, byte: UInt8) {
   intrinsic::storage_push(mut self.text.storage, value: byte)
 }
 
+internal fn TextBuilder.write_float[Value](mut self, value: Value) {
+  intrinsic::write_float(mut self.text.storage, value: value)
+}
+
 internal fn TextBuilder.write_unsigned(mut self, value: UInt64) {
   if value >= 10 {
     mut self.write_unsigned(value / 10)

@@ -351,17 +351,32 @@ void t_runtime_debug_unsigned(uint64_t value) {
 /* The shortest decimal that reads back as the same value, written so that
    it reads as a float: with a point or an exponent. Both C libraries round
    correctly, so this is the same text on every platform. */
-static void t_debug_real(double value, int float32) {
+static t_usize t_real_text(double value, int float32, uint8_t *bytes) {
   char text[40];
-  if (value != value) { t_debug_c("NaN"); return; }
-  if (value == 1.0 / 0.0) { t_debug_c("infinity"); return; }
-  if (value == -1.0 / 0.0) { t_debug_c("-infinity"); return; }
-  for (int digits = 1; digits <= 17; digits++) {
-    snprintf(text, sizeof text, "%.*g", digits, value);
-    if (float32 ? (float)strtod(text, NULL) == (float)value : strtod(text, NULL) == value) break;
+  if (value != value) {
+    strcpy(text, "NaN");
+  } else if (value == 1.0 / 0.0) {
+    strcpy(text, "infinity");
+  } else if (value == -1.0 / 0.0) {
+    strcpy(text, "-infinity");
+  } else {
+    for (int digits = 1; digits <= 17; digits++) {
+      snprintf(text, sizeof text, "%.*g", digits, value);
+      if (float32 ? (float)strtod(text, NULL) == (float)value : strtod(text, NULL) == value) break;
+    }
+    if (strpbrk(text, ".e") == NULL) strcat(text, ".0");
   }
-  t_debug_c(text);
-  if (strpbrk(text, ".e") == NULL) t_debug_c(".0");
+  t_usize length = strlen(text);
+  memcpy(bytes, text, length);
+  return length;
+}
+
+t_usize t_runtime_float32_text(float value, uint8_t *bytes) { return t_real_text(value, 1, bytes); }
+t_usize t_runtime_float64_text(double value, uint8_t *bytes) { return t_real_text(value, 0, bytes); }
+
+static void t_debug_real(double value, int float32) {
+  uint8_t text[40];
+  t_runtime_debug_text(text, t_real_text(value, float32, text));
 }
 
 void t_runtime_debug_float32(float value) { t_debug_real(value, 1); }

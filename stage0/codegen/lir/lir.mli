@@ -120,6 +120,9 @@ type intrinsic =
           length is static, and is copied to the heap, never freed. *)
   | System_write  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
   | System_read  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
+  | Float_text
+      (** [(value, bytes) -> USize]: writes the shortest decimal that reads back as the float, at
+          most [float_text_limit] bytes, as [Display] shows it *)
   | Clock_now  (** [() -> Int64], nanoseconds since the Unix epoch *)
   | Random_fill  (** [(bytes, count)] *)
   | Debug_begin  (** Empties the debug output buffer *)
@@ -138,6 +141,9 @@ type intrinsic =
   | Program_argument
       (** [(arguments, index, length pointer) -> bytes]: a program argument as UTF-8, with bad
           sequences replaced by U+FFFD *)
+
+(* The most bytes [Float_text] writes. *)
+val float_text_limit : int
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }

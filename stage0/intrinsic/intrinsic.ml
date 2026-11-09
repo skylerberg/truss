@@ -136,6 +136,7 @@ type operation =
   | Crash
   | Write_bytes
   | Read_bytes
+  | Write_float
   | Clock_now
   | Random_fill
 
@@ -201,6 +202,7 @@ let operations =
     Crash;
     Write_bytes;
     Read_bytes;
+    Write_float;
     Clock_now;
     Random_fill;
   ]
@@ -266,6 +268,7 @@ let operation_name = function
   | Crash -> "crash"
   | Write_bytes -> "write_bytes"
   | Read_bytes -> "read_bytes"
+  | Write_float -> "write_float"
   | Clock_now -> "clock_now"
   | Random_fill -> "random_fill"
 

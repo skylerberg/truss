@@ -110,6 +110,9 @@ type intrinsic =
           length is static, and is copied to the heap, never freed. *)
   | System_write  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
   | System_read  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
+  | Float_text
+      (** [(value, bytes) -> USize]: writes the shortest decimal that reads back as the float, at
+          most [float_text_limit] bytes, as [Display] shows it *)
   | Clock_now  (** [() -> Int64], nanoseconds since the Unix epoch *)
   | Random_fill  (** [(bytes, count)] *)
   | Debug_begin  (** Empties the debug output buffer *)
@@ -128,6 +131,8 @@ type intrinsic =
   | Program_argument
       (** [(arguments, index, length pointer) -> bytes]: a program argument as UTF-8, with bad
           sequences replaced by U+FFFD *)
+
+let float_text_limit = 32
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
@@ -472,7 +477,7 @@ let canonical (f : function_) =
   { f with parameters = List.map map_local f.parameters; locals; blocks }
 
 let canonical_instance t = { t with main = canonical t.main; nested = Array.map canonical t.nested }
-let version = 3
+let version = 4
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -623,6 +628,7 @@ let intrinsic_tag = function
   | Evidence_implementation -> 40
   | Evidence_outer -> 41
   | Program_argument -> 42
+  | Float_text -> 43
 
 let encode_rvalue instance rvalue =
   let operand = encode_operand instance in
@@ -891,6 +897,7 @@ let intrinsic_name = function
   | Grow -> "grow"
   | System_write -> "system_write"
   | System_read -> "system_read"
+  | Float_text -> "float_text"
   | Clock_now -> "clock_now"
   | Random_fill -> "random_fill"
   | Debug_begin -> "debug_begin"

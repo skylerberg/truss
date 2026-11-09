@@ -2065,6 +2065,49 @@ test "dropped early" {
   assert empty.length() == 0
 }
 |};
+  passes "strings, constants, and ranges of constants are patterns"
+    {|let limit: Int64 = 10
+let origin: Int64 = 0
+
+fn command(text: String) -> Int64 {
+  match text {
+    "quit" => 0
+    "help" => 1
+    _ => 2
+  }
+}
+
+fn sized(value: Int64) -> String {
+  match value {
+    origin => "origin"
+    1..limit => "small"
+    _ => "large"
+  }
+}
+
+fn word(text: StringSlice) -> Bool {
+  text is "yes" | "y"
+}
+
+test "patterns" {
+  assert command("quit") == 0
+  assert command("help") == 1
+  assert command("${1}") == 2
+  assert sized(0) == "origin"
+  assert sized(5) == "small"
+  assert sized(10) == "large"
+  assert word("y".slice())
+  assert !word("no".slice())
+}
+|};
+  passes "floats display as the shortest decimal that reads back"
+    {|test "floats" {
+  let half: Float64 = 0.5
+  let third: Float32 = 0.25
+  let big: Float64 = 1e300
+  assert "${half} ${third} ${big} ${2.0}" == "0.5 0.25 1e+300 2.0"
+}
+|};
   passes "names an is test binds are used where it holds"
     {|fn describe(found: Option[String], limit: USize) -> String {
   if found is Some(text) && text.length() > limit {

@@ -601,6 +601,11 @@ and its siblings. Full-width multiplication, used by hashing and
   `TextBuilder` with that much room reserved, and returns the `String`. It
   never builds a `Template` or its lists. A `TextBuilder` grows only if a
   part writes more than its first estimate.
+- **Numbers display as their debug output does.** Integers are written in
+  decimal by the standard library. A float is written by the
+  `write_float` intrinsic, the shortest decimal that reads back as the same
+  value, which is the runtime's function behind debug output too, so
+  `"${x}"` and `echo x` agree.
 - **Other tags build a `Template`** with the literal text as constant data,
   which costs nothing, and the parts in a list that the tag usually keeps,
   as `SqlQuery` does.

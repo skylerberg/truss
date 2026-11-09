@@ -72,6 +72,8 @@ let runtime_declarations (target : Memory_layout.target) =
        t_usize alignment, t_usize minimum);\n";
       "t_isize t_runtime_write(int32_t descriptor, const uint8_t *bytes, t_usize count);\n";
       "t_isize t_runtime_read(int32_t descriptor, uint8_t *bytes, t_usize count);\n";
+      "t_usize t_runtime_float32_text(float value, uint8_t *bytes);\n";
+      "t_usize t_runtime_float64_text(double value, uint8_t *bytes);\n";
       "int64_t t_runtime_clock_now(void);\n";
       "void t_runtime_random_fill(uint8_t *bytes, t_usize count);\n";
       "void t_runtime_debug_begin(void);\n";
@@ -827,6 +829,9 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
   | Grow -> Printf.sprintf "t_runtime_storage_grow((void **)%s)" all
   | System_write -> "t_runtime_write(" ^ all ^ ")"
   | System_read -> "t_runtime_read(" ^ all ^ ")"
+  | Float_text ->
+      (if scalar 0 = Float32 then "t_runtime_float32_text(" else "t_runtime_float64_text(")
+      ^ all ^ ")"
   | Clock_now -> "t_runtime_clock_now()"
   | Random_fill -> "t_runtime_random_fill(" ^ all ^ ")"
   | Debug_begin -> "t_runtime_debug_begin(" ^ all ^ ")"

@@ -352,6 +352,15 @@ let lower env b types operation ~type_arguments arguments ~destination ~site =
               emit b (Assign (at count, Convert (Copy (at got), Integer USize)));
               add_to_length storage (Copy (at count)));
           set (Use (Copy (at got)))
+      | Write_float ->
+          let storage = place (argument 0) in
+          let wanted = usize_local "wanted" in
+          emit b (Assign (at wanted, Binary (Add, length storage, usize Lir.float_text_limit)));
+          grow_when Greater storage (Copy (at wanted));
+          let count = usize_local "count" in
+          call ~result:(at count) Float_text
+            [ value 1; Address { place = element_at storage (length storage); writable = true } ];
+          add_to_length storage (Copy (at count))
       | Clock_now -> call ?result:destination Clock_now []
       | Random_fill ->
           let storage = place (argument 0) in

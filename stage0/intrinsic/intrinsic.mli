@@ -102,6 +102,7 @@ type operation =
   | Crash
   | Write_bytes
   | Read_bytes
+  | Write_float  (** [(buffer, value)]: appends the shortest decimal that reads back as the float *)
   | Clock_now
   | Random_fill
 
