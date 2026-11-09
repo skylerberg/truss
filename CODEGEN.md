@@ -1160,7 +1160,8 @@ ARGUMENTS` builds the package's program from its `main` and runs it with
 the arguments, on the terminal's own input and output, so it can prompt and
 read, and exits with its status. A package is a directory with a `truss.toml` naming it, and
 each `.truss` file under it is one of its modules. Object files are cached
-in `~/.cache/truss/objects`.
+in `~/.cache/truss/objects`. [CLI.md](CLI.md) designs the full command line
+these commands are part of.
 
 ### Linking
 

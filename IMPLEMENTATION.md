@@ -148,6 +148,21 @@ The full design is in [TYPECHECKER.md](TYPECHECKER.md). In short:
   traces in memory makes each command O(change). The language server and the
   command line can share it.
 
+### Command line
+
+The full design is in [CLI.md](CLI.md). In short:
+
+- **One `truss` program** with a subcommand for each tool: `check`, `test`,
+  `run`, `build`, `fmt`, and the agents' tools `holes`, `show`, `impact`,
+  and `rename`. It finds its package by looking upward for `truss.toml`.
+- **Whole-package by default,** since every command is O(change) through the
+  query database and the caches, so there are few flags for choosing what to
+  look at.
+- **`--json` on every command that reports,** one document on standard
+  output, with diagnostics carrying stable codes and fixes as byte ranges.
+  Exit status 0 means success, 1 a problem in the code, and 2 that the
+  command could not run.
+
 ### Code generation through C
 
 The full design is in [CODEGEN.md](CODEGEN.md). In short:
