@@ -124,11 +124,18 @@ The full design is in [TYPECHECKER.md](TYPECHECKER.md). In short:
 
 - **Deterministic CBOR** (RFC 8949, section 4.2) is small enough to write
   directly, which keeps the exact byte format under the project's control. The
-  same encoder must later be written in Truss and produce the same bytes.
-- **BLAKE3** for content hashes. `digestif` provides BLAKE2 but, as far as I
-  know, not BLAKE3, so stage0 needs a binding or its own implementation. Every
-  hash carries a prefix naming the format version and algorithm, so this can
-  change.
+  same encoder must later be written in Truss and produce the same bytes. It
+  is in `stage0/cbor`, as an encoder only, since hashing is all that reads it
+  so far.
+- **BLAKE3** for content hashes, implemented in `stage0/blake3` from the
+  specification, since `digestif` provides BLAKE2 but not BLAKE3. It is
+  tested against the official test vectors. Every hash carries a prefix
+  naming the format version and algorithm, so this can change.
+- **Queries** are `stage0/query`: inputs the driver sets, and queries whose
+  results are stored with a trace of what they read, checked again by
+  revision and cut off early when a result comes out the same, as in Salsa.
+  The store is in memory, which the background process keeps alive between
+  commands.
 - **A content-addressed store** of results, each with the trace of what it
   depended on, can start as files in a cache directory named by hash.
   Each compiler stage has its own version in the key.

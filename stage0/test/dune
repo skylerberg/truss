@@ -1,6 +1,7 @@
 (tests
- (names lexer_tests parser_tests codegen_tests)
+ (names lexer_tests parser_tests hashing_tests query_tests codegen_tests)
  (libraries
+  harness
   source
   diagnostic
   token
@@ -13,6 +14,9 @@
   syntax_print
   parser
   reference
+  cbor
+  blake3
+  query
   ground
   memory_layout
   instance

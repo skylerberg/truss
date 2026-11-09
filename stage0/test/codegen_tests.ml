@@ -2,23 +2,8 @@
    fact about what code generation makes of it. See IMPLEMENTATION.md,
    "Testing", and CODEGEN.md, "Testing". *)
 
-let failures = ref 0
-let count = ref 0
-let current_test = ref ""
-
-let fail format =
-  Printf.ksprintf
-    (fun message ->
-      incr failures;
-      Printf.printf "FAIL %s: %s\n" !current_test message)
-    format
-
-let test name body =
-  incr count;
-  current_test := name;
-  match body () with
-  | () -> ()
-  | exception exception_ -> fail "raised %s" (Printexc.to_string exception_)
+let test = Harness.test
+let fail = Harness.fail
 
 let expect_string ~expected actual =
   if not (String.equal expected actual) then fail "expected %S, got %S" expected actual
@@ -693,9 +678,4 @@ let () =
         (Lir.function_to_string (Lir.canonical f)));
   ()
 
-let () =
-  if !failures > 0 then begin
-    Printf.printf "%d failures in %d tests\n" !failures !count;
-    exit 1
-  end
-  else Printf.printf "%d tests pass\n" !count
+let () = Harness.finish ()
