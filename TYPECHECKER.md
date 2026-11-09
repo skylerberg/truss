@@ -10,7 +10,7 @@ described in [PARSER.md](PARSER.md), and produces what
 [`stage0/`](stage0), and `truss-check` runs them over a package's
 directory. Not built yet: storing checked forms in CBOR, and these rules
 that came with the prover's design: structural equality for constants in
-patterns, `yielded` and `finished`, the error for `==>` or a quantifier
+patterns, the error for `==>` or a quantifier
 over a type in a compiled body, and the condition on replacing a provided
 method.
 
