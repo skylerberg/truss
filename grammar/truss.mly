@@ -27,7 +27,7 @@
 %token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE COMMA COLON COLONCOLON
 %token DOT DOTDOT DOTDOTEQ ARROW FATARROW QUESTION BAR
 %token EQ PLUSEQ MINUSEQ STAREQ SLASHEQ PERCENTEQ AMPEQ BAREQ CARETEQ SHLEQ SHREQ
-%token PLUS MINUS STAR SLASH PERCENT EQEQ NEQ LT LE GT GE ANDAND OROR
+%token PLUS MINUS STAR SLASH PERCENT EQEQ NEQ LT LE GT GE ANDAND OROR IMPLIES
 %token BANG AMP CARET TILDE SHL SHR
 
 %start <unit> file
@@ -280,10 +280,13 @@ trait_member:
   | signature block { () }
   | TYPE UPPER { () }
   | TYPE UPPER COLON bound_list { () }
-  | LAW LOWER parameters block { () }
+  | LAW LOWER parameters list(law_requires) newline_opt block { () }
+
+law_requires:
+  | REQUIRES expression { () }
 
 impl_definition:
-  | IMPL path_type FOR type_head list(impl_uses) newline_opt
+  | IMPL path_type FOR type_head option(impl_uses) newline_opt
     LBRACE newline_separated(impl_item) RBRACE { () }
 
 impl_uses:
@@ -294,7 +297,7 @@ impl_item:
   | TYPE UPPER EQ type_expression { () }
 
 capability_definition:
-  | CAPABILITY UPPER generics_opt LBRACE newline_separated(signature) RBRACE { () }
+  | CAPABILITY UPPER LBRACE newline_separated(signature) RBRACE { () }
 
 /* Constants, tests, theorems, and proofs */
 
@@ -356,10 +359,31 @@ expression:
   | ECHO expression { () }
   | RETURN { () }
   | RETURN expression { () }
+  | implication { () }
+  | bitwise { () }
+
+/* A quantifier's body runs to the end of the expression, so a quantifier can
+   only be the last operand of `&&`, `||`, or `==>`. Keeping `quantified`
+   apart from `logical` stops anything from following a quantifier, so the
+   body is never cut short. */
+implication:
+  | implication_operand { () }
+  | logical IMPLIES implication_operand { () }
+
+implication_operand:
+  | logical { () }
+  | quantified { () }
+
+quantified:
+  | quantifier { () }
+  | comparison ANDAND quantifier { () }
+  | and_chain ANDAND quantifier { () }
+  | comparison OROR quantifier { () }
+  | or_chain OROR quantifier { () }
+
+quantifier:
   | FORALL binder FATARROW expression { () }
   | EXISTS binder FATARROW expression { () }
-  | logical { () }
-  | bitwise { () }
 
 binder:
   | pattern IN expression { () }
@@ -468,7 +492,7 @@ update_path:
   | update_path DOT LOWER { () }
 
 primary:
-  | INTEGER { () } | FLOAT { () } | STRING { () } | TAGGED { () }
+  | INTEGER { () } | FLOAT { () } | STRING { () } | tagged_string { () }
   | TRUE { () } | FALSE { () } | TODO { () } | UNREACHABLE { () }
   | BREAK { () } | CONTINUE { () } | SELF { () } | SELF_TYPE { () }
   | LOWER { () }
@@ -505,7 +529,7 @@ match_expression:
     LBRACE newline_separated(arm) RBRACE { () }
 
 arm:
-  | separated_nonempty_list(COMMA, pattern) guard_opt FATARROW expression { () }
+  | separated_nonempty_list(COMMA, pattern) guard_opt FATARROW statement { () }
 
 guard_opt:
   | { () }
@@ -514,6 +538,10 @@ guard_opt:
 provide_expression:
   | PROVIDE separated_nonempty_list(COMMA, expression) newline_opt block { () }
 
+tagged_string:
+  | TAGGED { () }
+  | module_path COLONCOLON TAGGED { () }
+
 /* Patterns */
 
 pattern:
@@ -521,15 +549,23 @@ pattern:
 
 pattern_primary:
   | UNDERSCORE { () }
-  | LOWER { () }
-  | literal_pattern { () }
-  | literal_pattern DOTDOT literal_pattern { () }
-  | literal_pattern DOTDOTEQ literal_pattern { () }
+  | range_end { () }
+  | range_end DOTDOT range_end { () }
+  | range_end DOTDOTEQ range_end { () }
   | qualified_upper { () }
   | qualified_upper pattern_fields { () }
-  | qualified_upper DOT LOWER { () }
-  | module_path COLONCOLON LOWER { () }
   | pattern_fields { () }
+
+range_end:
+  | literal_pattern { () }
+  | constant_reference { () }
+
+/* A bare LOWER is a constant if one is in scope and otherwise a binding;
+   name resolution decides, so the parser builds the same node for both. */
+constant_reference:
+  | LOWER { () }
+  | module_path COLONCOLON LOWER { () }
+  | qualified_upper DOT LOWER { () }
 
 literal_pattern:
   | INTEGER { () }
@@ -537,7 +573,7 @@ literal_pattern:
   | TRUE { () }
   | FALSE { () }
   | STRING { () }
-  | TAGGED { () }
+  | tagged_string { () }
 
 pattern_fields:
   | LPAREN comma_list(pattern_field) RPAREN { () }

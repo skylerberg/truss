@@ -215,7 +215,7 @@ interpolation = "${" expression "}" ;
 ```text
 (  )  [  ]  {  }  ,  :  ::  .  ..  ..=  ->  =>  ?  |
 =  +=  -=  *=  /=  %=  &=  |=  ^=  <<=  >>=
-+  -  *  /  %  ==  !=  <  <=  >  >=  &&  ||  !  &  ^  ~  <<  >>
++  -  *  /  %  ==  !=  <  <=  >  >=  &&  ||  ==>  !  &  ^  ~  <<  >>
 ```
 
 The lexer uses the longest match.
@@ -397,10 +397,10 @@ trait        = "trait" UPPER_NAME [ generics ] [ ":" bound ]
                "{" lines(trait_member) "}" ;
 trait_member = signature [ body ]
              | "type" UPPER_NAME [ ":" bound ]
-             | "law" LOWER_NAME parameters block ;
+             | "law" LOWER_NAME parameters { "requires" expression } block ;
 signature    = "fn" LOWER_NAME [ generics ] parameters [ result ] { clause } ;
 
-impl         = "impl" path_type "for" type_head { "uses" capability_list }
+impl         = "impl" path_type "for" type_head [ "uses" capability_list ]
                "{" lines(impl_member) "}" ;
 impl_member  = function_member | "type" UPPER_NAME "=" type ;
 function_member = signature body ;
@@ -466,11 +466,14 @@ parentheses.
 ```ebnf
 expression = "echo" expression
            | "return" [ expression ]
-           | "forall" binder "=>" expression
-           | "exists" binder "=>" expression
-           | logical
+           | implication
            | bitwise ;
 
+implication = [ logical "==>" ] ( logical | quantified ) ;
+quantified = quantifier
+           | comparison { "&&" comparison } "&&" quantifier
+           | comparison { "||" comparison } "||" quantifier ;
+quantifier = ( "forall" | "exists" ) binder "=>" expression ;
 binder     = pattern "in" expression | LOWER_NAME ":" type ;
 
 logical    = comparison { "&&" comparison }
@@ -500,7 +503,11 @@ prefix     = ( "-" | "!" | "~" ) prefix
   `is`, and ranges do not chain.
 - `return` and `echo` take everything after them. A `{` right after
   `return`, on the same line, starts the value being returned.
-- `forall` and `exists` are allowed only in specifications.
+- `forall`, `exists`, and `==>` are allowed only in specifications.
+- A quantifier's body runs to the end of the expression, so a quantifier can
+  only be the last operand of `&&`, `||`, or `==>`. In
+  `a && forall x in s => p || q`, the body is `p || q`.
+- `==>` does not chain: `a ==> b ==> c` needs parentheses.
 
 ```ebnf
 postfix    = primary { "." LOWER_NAME
@@ -532,11 +539,11 @@ update     = LOWER_NAME { "." LOWER_NAME } ":" expression
   (with an optional mode) that matches a parameter or field.
 
 ```ebnf
-primary    = INTEGER | FLOAT | STRING | TAGGED_STRING
+primary    = INTEGER | FLOAT | STRING | [ module_path "::" ] TAGGED_STRING
            | "true" | "false" | "todo" | "unreachable" | "break" | "continue"
            | "self" | "Self"
            | LOWER_NAME
-           | [ module_path "::" ] UPPER_NAME [ type_arguments ]
+           | [ module_path "::" ] UPPER_NAME
            | module_path "::" LOWER_NAME
            | "(" expression ")"
            | "[" list(expression) "]"
@@ -553,13 +560,16 @@ lambda     = "fn" "(" list(pattern) ")" block ;
 if         = "if" expression block [ "else" ( if | block ) ] ;
 match      = "match" expression { "," expression }
              "{" lines(arm) "}" ;
-arm        = pattern { "," pattern } [ "if" expression ] "=>" expression ;
+arm        = pattern { "," pattern } [ "if" expression ] "=>" statement ;
 provide    = "provide" expression { "," expression } block ;
 ```
 
 - `break` and `continue` are allowed only in loops. They, `return`, and
   `unreachable` have type `Never`, so they can be the body of a `match` arm.
 - A `match` arm has one pattern for each value after `match`.
+- An arm's body is a statement, as a line of a block is, so it can be an
+  assignment, a `yield`, an `assert`, or a loop. When the `match` is used as
+  a value, an arm whose body is not an expression has type `Unit`.
 - `[]` is an empty list, array, or set, and `[:]` is an empty map, depending
   on the expected type.
 
@@ -568,19 +578,25 @@ provide    = "provide" expression { "," expression } block ;
 ```ebnf
 pattern          = pattern_primary { "|" pattern_primary } ;
 pattern_primary  = "_"
-                 | LOWER_NAME
-                 | literal_pattern [ ( ".." | "..=" ) literal_pattern ]
+                 | range_end [ ( ".." | "..=" ) range_end ]
                  | [ module_path "::" ] UPPER_NAME [ pattern_fields ]
-                 | [ module_path "::" ] UPPER_NAME "." LOWER_NAME
-                 | module_path "::" LOWER_NAME
                  | pattern_fields ;
+range_end        = literal_pattern | constant ;
 literal_pattern  = [ "-" ] INTEGER | "true" | "false" | plain_string
-                 | TAGGED_STRING ;
+                 | [ module_path "::" ] TAGGED_STRING ;
+constant         = LOWER_NAME
+                 | module_path "::" LOWER_NAME
+                 | [ module_path "::" ] UPPER_NAME "." LOWER_NAME ;
 pattern_fields   = "(" list(pattern_field) ")" ;
 pattern_field    = LOWER_NAME ":" pattern | pattern | ".." ;
 ```
 
 - `..` may only be the last field.
+- A bare `LOWER_NAME` on its own is a constant if one with that name is in
+  scope, and otherwise binds. As the end of a range, a name must be a
+  constant, as in `0..=max_port` or `UInt16.minimum..=UInt16.maximum`.
+- A range pattern needs both ends. Open-ended ranges appear only in
+  brackets.
 - A pattern with no type name, as in `(index, element)`, matches a record.
 - Float literals are not patterns.
 

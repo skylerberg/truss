@@ -230,8 +230,8 @@ and interpolation = { tokens : token array; span : span }
 - **A tag is only the name.** In `database::SqlQuery"..."`, `database` and
   `::` are ordinary tokens before the string, and the parser joins them.
 - **`line_break_before` drives the layout pass.** `blank_line_before` lets
-  `truss fmt` keep a blank line between statements, if the formatter is
-  meant to keep them. Hashes ignore both.
+  `truss fmt` keep blank lines, which it does, collapsing a run of them to
+  one, as Go, Rust, and Gleam do. Hashes ignore both.
 - **`keyword`, `reserved`, `punctuation`, and `foreign` have one constructor
   per item,** each built from a single list in `Token`. A test reads the
   keyword and punctuation blocks in GRAMMAR.md and checks them against these
@@ -496,10 +496,9 @@ each sequence is already an error. Habits fall into two groups:
   `—` become `-`; `≤ ≥ ≠ → ⇒` become `<= >= != -> =>`; and `∀ ∃` become
   `forall` and `exists`. These come from pasted documents, input methods, and
   habits from Lean and Agda. A curly-quoted `“text”` lexes as a string.
-- **`...` in documentation.** The examples in SYNTAX.md and DESIGN.md use
-  `{ ... }` as a placeholder. It lexes as `..` and `.`, which the parser
-  rejects, so the examples should use `{ todo }`, as SYNTAX.md already
-  recommends for unwritten bodies, before they become a parser test corpus.
+- **`...` in documentation.** `...` lexes as `..` and `.`, which the parser
+  rejects, so the examples in the documents write `todo` for code that is
+  left out, as SYNTAX.md recommends for unwritten bodies.
 - **Parser-level habits.** Some foreign habits, such as `|x| x + 1`, `&x`,
   `x ? a : b`, `Shape::Circle`, and `a ?? b`, are made of valid tokens. The
   parser reports them, not the lexer.
@@ -640,8 +639,7 @@ type t = {
   library.
 - **The documents as a corpus.** Every ` ```truss ` block in SYNTAX.md,
   DESIGN.md, and GRAMMAR.md must lex with no diagnostics. This keeps the
-  examples honest, and is one more reason to replace the `...` placeholders
-  with `todo`.
+  examples honest.
 - **The documents agree with the code.** Tests read the keyword lists, the
   punctuation list, and the line-break sets from GRAMMAR.md and compare them
   with `Token` and `Layout`.

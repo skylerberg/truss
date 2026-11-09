@@ -3,9 +3,9 @@
 # Truss Implementation
 
 The stage0 compiler is written in OCaml and is compiled to a static binary. When
-the Truss compiler builds a program it uses QBE as its backend. Truss programs
-do not link to a separate runtime, they use libc. Truss packages compile to a
-single binary or library.
+the Truss compiler builds a program it emits C code as its backend. Truss
+programs do not link to a separate runtime, they use libc. Truss packages
+compile to a single binary or library.
 
 ## Modular Design
 
@@ -35,19 +35,21 @@ The full design is in [LEXER.md](LEXER.md). In short:
 
 ### Parser
 
-- **A hand-written recursive-descent parser,** with the operator levels from
-  GRAMMAR.md and an explicit check for operators that may not be combined.
-  This gives better error messages and fixes than a generated parser, which
-  matters because agents act on them.
-- **`grammar/truss.mly` as a reference.** Menhir can build a parser from it, so
-  a corpus of example files can be parsed by both, and any file one accepts
-  and the other rejects points at a bug in one of them.
-- **Recovery at definitions.** Every top-level definition parses on its own,
-  and `truss fmt` starts each in the first column, so after an error the
-  parser can skip to the next line that begins with a definition keyword.
-- **Diagnostics in a structured format,** such as JSON, with exact text
-  replacements for fixes, so tools and agents can apply them without parsing
-  messages.
+The full design is in [PARSER.md](PARSER.md). In short:
+
+- **A hand-written recursive-descent parser** that never backtracks. It parses
+  operators with a total order and then reports the combinations Truss's
+  partial order leaves out, with exact parentheses as fixes.
+- **One tree per definition, with positions relative to it.** The lexer's
+  balanced brackets let a file be split into definitions before parsing, so
+  each definition parses on its own, and one that only moved gives the same
+  tree.
+- **An abstract tree, not a lossless one.** Truss has no comments, so the
+  formatter needs only spans, blank lines, and parentheses from the source.
+- **`grammar/truss.mly` as a reference.** A Menhir parser built from it, for
+  tests only, must accept and reject the same files as the real one.
+- **Diagnostics in a structured format,** with exact text replacements for
+  fixes, shared with the lexer.
 
 ### Hashing and caching
 
@@ -70,16 +72,33 @@ The full design is in [LEXER.md](LEXER.md). In short:
   traces in memory makes each command O(change). The language server and the
   command line can share it.
 
-### Code generation with QBE
+### Code generation through C
 
-- **No overflow intrinsics.** `checked_add` and the other checked operations
-  need explicit comparisons around the arithmetic. Proven-safe arithmetic
-  needs none.
-- **No debug information.** Locations for panics, `echo`, and failed asserts
-  come from the position table built at the end of the build, which records
-  positions relative to each definition.
-- **Assembly output.** QBE produces assembly, so the build needs an assembler
-  and a linker.
+- **Why C rather than QBE.** Truss has no foreign code, so the standard
+  library's hashing, crypto, and text handling run on Truss's own generated
+  code, and nothing can drop to C for speed. QBE has no inliner, no 128-bit
+  multiply, no bit-counting, rotate, or byte-swap instructions, no `sqrt`, no
+  SIMD, no atomics, and no way to say that pointers do not alias. C compilers
+  have all of these. Truss proves no aliasing, which C expresses with
+  `restrict`. Linking libc already needs the platform's C toolchain, so
+  emitting C adds almost no dependency.
+- **A lowered IR in front of C.** Monomorphization, drops, yield lowering, and
+  cursor state machines happen in the compiler's own IR. Early cutoff compares
+  that IR, never object code, so a different C compiler version invalidates no
+  proofs or test results. The compile-time evaluator interprets the same IR,
+  which keeps it matching compiled code.
+- **Generated C avoids undefined behavior by construction.** Wrapping
+  arithmetic is emitted as unsigned. Shifts, indexes, and other checked
+  operations are always proven. The compiler passes `-fno-strict-aliasing`,
+  `-fno-finite-loops`, because a pure loop without a `time` clause may
+  legitimately never end, and `-ffp-contract=off` with no fast-math, so floats
+  follow IEEE 754 bit for bit.
+- **Overflow checks use compiler builtins,** such as
+  `__builtin_add_overflow`. Proven-safe arithmetic needs none.
+- **Positions stay relative to each definition.** Locations for panics,
+  `echo`, and failed asserts come from the position table built at the end of
+  the build. Release builds may also emit `#line` directives for debuggers and
+  profilers.
 - **Linking is O(program).** It is the one step of an everyday edit whose cost
   grows with the whole program. Options: a fast linker such as mold or lld; or,
   for development and tests, a long-running test runner that loads only the

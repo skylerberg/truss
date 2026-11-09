@@ -151,7 +151,7 @@ the line before can end a statement and the next line can begin one:
      `with`, `is`, `in`, `|`, `=>`, `->`, `yields`, a clause keyword (`uses`,
      `requires`, `ensures`, `cost`, `invariant`, `decreases`, `derives`), a
      binary operator that cannot begin an expression
-     (`+ * / % == != < <= > >= & ^ << >> && || .. ..=`), `=` or a compound
+     (`+ * / % == != < <= > >= & ^ << >> && || ==> .. ..=`), `=` or a compound
      assignment, or a closing `)`, `]`, or `}`.
 3. The `{` that opens a body may start the next line.
 
@@ -430,17 +430,17 @@ receiver. A record pattern is written without the type name, because a record
 type has only one shape:
 
 ```truss
-for (index, element) in scores.enumerate() { ... }
+for (index, element) in scores.enumerate() { todo }
 
 match items.split_first() {
-  Some((first, rest)) => ...
-  None => ...
+  Some((first, rest)) => todo
+  None => todo
 }
 
 match shape {
-  Circle(radius, ..) => ...
-  Rectangle(corner, opposite_corner) => ...
-  Empty => ...
+  Circle(radius, ..) => todo
+  Rectangle(corner, opposite_corner) => todo
+  Empty => todo
 }
 ```
 
@@ -463,12 +463,12 @@ Patterns can also match values directly:
 
 ```truss
 match status_code {
-  http::ok => ...
-  301 | 302 | 307 => ...
-  not_modified => ...
-  500..=599 => ...
-  code if code >= 400 => ...
-  _ => ...
+  http::ok => todo
+  301 | 302 | 307 => todo
+  not_modified => todo
+  500..=599 => todo
+  code if code >= 400 => todo
+  _ => todo
 }
 ```
 
@@ -476,7 +476,7 @@ match status_code {
 |---|---|
 | `200`, `-1`, `true`, `"GET"`, `Character"a"`, `UInt8"\n"` | A value equal to the literal |
 | `http::ok`, `Status.teapot`, `not_modified` | A value equal to the constant |
-| `500..=599`, `Character"a"..=Character"z"`, `0..10` | A value in the range, for integers and characters |
+| `500..=599`, `Character"a"..=Character"z"`, `0..=max_port` | A value in the range, for integers and characters |
 | `301 \| 302 \| 307`, `Some(Low \| Normal)` | A value matching any of the alternatives |
 | `_` | Anything, without binding it |
 | `code` | Anything, binding it to `code` |
@@ -485,6 +485,9 @@ match status_code {
   appears in a pattern. Any other bare name binds a new variable. Constants
   from other modules and constants under a type are qualified, as everywhere
   else: `http::ok`, `Status.teapot`.
+- The ends of a range are literals or constants, as in `0..=max_port` or
+  `http::informational_first..=http::informational_last`. A name there must
+  be a constant. Both ends are needed.
 - Float literals cannot be patterns. A float `==` treats `-0.0` and `0.0` as
   equal, so a pattern such as `0.0` would match both without saying so. Use a
   guard: `value if value == 0.0`.
@@ -494,6 +497,10 @@ match status_code {
   when the pattern matches and the condition is true.
 - Each arm of a `match` goes on its own line, with no comma between arms. An
   arm's body can continue on the next line after `=>`, or be a block.
+- An arm's body is a statement, like a line of a block, so it can be an
+  assignment, a `yield`, an `assert`, or a loop: `Click => clicks += 1`.
+  When the `match` is used as a value, an arm whose body is not an expression
+  has type `Unit`.
 - `match` must cover every case. An arm with a guard never counts toward
   covering its pattern. When the guards cover everything, end with
   `_ => unreachable`, which the prover checks.
@@ -515,10 +522,10 @@ pattern per value, in the same order:
 
 ```truss
 match state, event {
-  Idle, Start => ...
-  Running, Stop => ...
-  Idle | Paused, Tick if elapsed > limit => ...
-  _, Reset => ...
+  Idle, Start => todo
+  Running, Stop => todo
+  Idle | Paused, Tick if elapsed > limit => todo
+  _, Reset => todo
 }
 ```
 
@@ -654,11 +661,11 @@ fn DateRange.new(start: Date, end: Date) -> Option[DateRange]
 
 impl TryFrom[UInt16] for Port {
   type Error = PortError
-  fn try_from(value: own UInt16) -> Result[Port, PortError] { ... }
+  fn try_from(value: own UInt16) -> Result[Port, PortError] { todo }
 }
 
 impl From[List[Element]] for SortedList[Element: Ordered] {
-  fn from(value: own List[Element]) -> SortedList[Element] { ... }
+  fn from(value: own List[Element]) -> SortedList[Element] { todo }
 }
 ```
 
@@ -767,7 +774,7 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
   cost time O(log(sorted.length()))
   cost allocations == 0
 {
-  ...
+  todo
 }
 ```
 
@@ -822,14 +829,14 @@ fn search(sorted: Slice[Int64], target: Int64, low: USize, high: USize) -> Optio
   decreases high - low
   cost time O(log(high - low))
 {
-  ...
+  todo
 }
 
 fn merge(first: Slice[Int64], second: Slice[Int64]) -> List[Int64]
   decreases first.length(), second.length()
   cost time O(first.length() + second.length())
 {
-  ...
+  todo
 }
 ```
 
@@ -1430,7 +1437,7 @@ while low < high
   invariant high <= sorted.length()
   decreases high - low
 {
-  ...
+  todo
 }
 ```
 
@@ -1444,7 +1451,7 @@ The set of operators is fixed:
 
 - Arithmetic: `+ - * / %`, and `-` for negation
 - Comparison: `== != < <= > >=`
-- Logic: `&& || !`
+- Logic: `&& || !`, and `==>` for implication in specifications
 - Bitwise: `& | ^ << >>`, and `~` for bitwise NOT
 
 `!` works only on `Bool`, and `~` only on integers. Negation works only on
@@ -1472,7 +1479,7 @@ different types:
 ```truss
 impl Add[Duration] for Instant {
   type Output = Instant
-  fn add(self, right: Duration) -> Instant { ... }
+  fn add(self, right: Duration) -> Instant { todo }
 }
 
 let deadline = now + timeout
@@ -1496,13 +1503,14 @@ Operators bind in this order, tightest first:
 | Operators | Notes |
 |---|---|
 | `.` `()` `[]` `?` `with (...)` | `a.b()?.c()`. `with` applies to the expression directly before it. |
+| `mut` `own` `any` | Apply to the whole postfix expression after them, such as `mut config.servers.sort()`. See [Parameter modes](#parameter-modes) for which place they mark. |
 | `-` `!` `~` | `-x.abs()` is `-(x.abs())`. `!is_ready == expected` is `(!is_ready) == expected`. |
-| `mut` `own` `any` | Apply to everything after them up to the next binary operator. See [Parameter modes](#parameter-modes) for which place they mark. |
 | `*` `/` `%` | |
 | `+` `-` | |
 | `..` `..=` | `0..count - 1` is `0..(count - 1)`. |
 | `==` `!=` `<` `<=` `>` `>=` `is` | `response is Ok(body)` tests a pattern. See [Testing a pattern](#testing-a-pattern-with-is). |
 | `&&`, `\|\|` | |
+| `==>` | Only in specifications. `a && b ==> c` is `(a && b) ==> c`. |
 | `echo`, and the body after `=>` in `forall` or `exists` | `echo player.wins * 3` shows the product. |
 
 Some combinations have no precedence at all and need parentheses:
@@ -1511,7 +1519,7 @@ Some combinations have no precedence at all and need parentheses:
   only with themselves: `a | b | c` is fine, but `(flags & 0xFF) | extra`,
   `a << (b + 1)`, and `(flags & mask) != 0` need their parentheses.
 - **`&&` and `||`** cannot be mixed: `(is_ready && is_valid) || is_forced`.
-- **Comparisons, `is`, and ranges** cannot be chained: `a < b < c`,
+- **Comparisons, `is`, ranges, and `==>`** cannot be chained: `a < b < c`,
   `a == b == c`, and `0..10..20` are errors.
 
 Leaving the parentheses out is a compile error with a fix that adds them.
@@ -1727,7 +1735,7 @@ capability ReadDatabase {
 impl ReadDatabase for PostgresReader
   uses NetworkClient
 {
-  fn query(self, statement: SqlQuery) -> Result[Rows, DatabaseError] { ... }
+  fn query(self, statement: SqlQuery) -> Result[Rows, DatabaseError] { todo }
 }
 ```
 
@@ -1937,7 +1945,7 @@ impl FromTemplate for Regex {
   fn from_template(template: Template[RegexPart]) -> Regex
     requires is_valid_pattern(template.literals)
   {
-    ...
+    todo
   }
 }
 ```
@@ -1990,6 +1998,9 @@ impl Monoid for Int64 {
 A `law` is a property every implementation must satisfy. A trait bound on a
 generic parameter is written `[Element: Ordered]`.
 
+A law can have `requires` clauses, as a theorem can. They are its premises:
+the law must hold for every set of values that meets them.
+
 ### Required traits
 
 A trait can require other traits, written like a bound. `+` joins several,
@@ -2005,6 +2016,13 @@ trait Ordered: Equal {
 
   law agrees_with_equal(first: Self, second: Self) {
     (first.compare(second) == Ordering.Equal) == (first == second)
+  }
+
+  law transitive(first: Self, second: Self, third: Self)
+    requires first <= second
+    requires second <= third
+  {
+    first <= third
   }
 }
 
@@ -2046,7 +2064,7 @@ trait Ordered: Equal {
 }
 
 impl Ordered for Int64 {
-  fn compare(self, other: Int64) -> Ordering { ... }
+  fn compare(self, other: Int64) -> Ordering { todo }
   fn max(own self, other: own Int64) -> Int64 { Int64.maximum_of(self, other) }
 }
 ```
@@ -2064,11 +2082,11 @@ as a method does:
 
 ```truss
 impl Display for List[Element: Display] {
-  fn display(self, output: mut TextBuilder) { ... }
+  fn display(self, output: mut TextBuilder) { todo }
 }
 
 impl Equal for Option[Value: Equal] {
-  fn equal(self, other: Option[Value]) -> Bool { ... }
+  fn equal(self, other: Option[Value]) -> Bool { todo }
 }
 ```
 
@@ -2086,8 +2104,13 @@ trait From[Source] {
   fn from(value: own Source) -> Self
 }
 
-impl From[Int32] for Int64 { ... }
-impl From[UInt32] for Int64 { ... }
+impl From[Int32] for Int64 {
+  fn from(value: own Int32) -> Int64 { todo }
+}
+
+impl From[UInt32] for Int64 {
+  fn from(value: own UInt32) -> Int64 { todo }
+}
 
 let total = Int64.from(count)
 ```
@@ -2117,8 +2140,8 @@ trait Index {
 impl Index for Grid {
   type Key = Position
   type Output = Cell
-  fn at(self, key: Position) yields Cell { ... }
-  fn at(mut self, key: Position) yields mut Cell { ... }
+  fn at(self, key: Position) yields Cell { todo }
+  fn at(mut self, key: Position) yields mut Cell { todo }
 }
 
 fn total[Items: Iterable[Element = Int64]](items: Items) -> Int64
@@ -2334,9 +2357,10 @@ proof Monoid.associative for Int64 {
 
 ### Writing specifications
 
-In specifications, `&&`, `||`, and `if` are read from left to right, so the
-right side can rely on the left: in `index < items.length() && items[index] > 0`,
-`items[index]` is in bounds because `index < items.length()` is true there.
+In specifications, `&&`, `||`, `==>`, and `if` are read from left to right,
+so the right side can rely on the left: in
+`index < items.length() && items[index] > 0`, `items[index]` is in bounds
+because `index < items.length()` is true there.
 
 These forms can be used in `requires`, `ensures`, invariants, laws, and proofs:
 
@@ -2345,8 +2369,18 @@ These forms can be used in `requires`, `ensures`, invariants, laws, and proofs:
 | `forall index in 0..items.length() => items[index] >= 0` | True for every value in a range or collection. |
 | `forall value: Int64 => value + 0 == value` | True for every value of a type. |
 | `exists item in items => item == target` | True for at least one value. |
+| `index < split ==> items[index] < pivot` | Implication: when the left side is true, so is the right. |
 | `old(self.items)` | A value as it was when the function was called. |
 | `assert condition` | Inside a proof: a fact the prover must show, which can then be used. |
+
+- `a ==> b` binds more loosely than `&&` and `||`, so `a && b ==> c` means
+  `(a && b) ==> c` and `a ==> b || c` means `a ==> (b || c)`, as in Dafny and
+  Verus. It does not chain: `a ==> b ==> c` needs parentheses. Outside
+  specifications, write `!a || b`.
+- The body of `forall` or `exists` runs to the end of the expression. A
+  quantifier can be the last operand of `&&`, `||`, or `==>`, as in
+  `requires count > 0 && forall i in 0..count => items[i] > 0`, whose body is
+  `items[i] > 0`.
 
 Integer arithmetic in specifications is exact and never overflows. Float
 arithmetic in specifications follows IEEE 754, the same as in code.
@@ -2466,7 +2500,7 @@ the type is named with its module:
 ```truss
 use weather::forecast::hourly
 
-fn hourly::Forecast.summary(self) -> String { ... }
+fn hourly::Forecast.summary(self) -> String { todo }
 ```
 
 The type must be visible there, so a type that is private to its file has

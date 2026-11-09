@@ -89,7 +89,12 @@ use them.
 - **Optimizations record the bodies they read.** Inlining one definition into
   another makes the caller's code depend on the callee's body, so it is
   recorded in the caller's trace. Development builds do not inline across
-  definitions, which keeps rebuilds narrow; release builds accept wider ones.
+  definitions of the packages being worked on, which keeps rebuilds narrow.
+  They do inline from the standard library and from dependencies, whose
+  bodies change only with a new toolchain or a new version in the manifest,
+  so this never widens a rebuild while editing. Cargo users get the same
+  effect by hand, by optimizing dependencies in development profiles.
+  Release builds inline across everything.
 - **Each stage of the compiler is versioned on its own:** the parser, the type
   checker, the prover with its pinned solver, code generation, and each rule
   for deriving. A release that changes code generation leaves every proof
@@ -1234,6 +1239,17 @@ can reach unfinished code. Otherwise a missing proof that an addition cannot
 overflow would allow a failure the signature does not show. If a function
 claims something in its signature, the claim must be proven before it ships;
 a claim that is not ready can simply be left out.
+
+**Specifications have implication, `a ==> b`,** as Dafny, Verus, Prusti,
+and ACSL write it. "If this holds, then that holds" is the most common shape
+of a specification, and writing it as `!a || b` hides what it says. It binds
+more loosely than `&&` and `||`, the reading every one of those languages
+shares, and it does not chain, like comparisons. It exists only in
+specifications, because code already has `if` and `!a || b`, and two
+spellings there would buy nothing. Laws take `requires` premises, as
+theorems and Dafny's lemmas do, so `transitive` reads as its definition. A
+quantifier can be the last operand of `&&`, `||`, or `==>`, as in Dafny,
+since its body runs to the end of the expression anyway.
 
 **Specifications use exact integer arithmetic.** In `requires`, `ensures`,
 invariants, laws, and cost clauses, integer arithmetic never overflows, so a
