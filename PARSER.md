@@ -555,15 +555,21 @@ added once the compiler works:
   - any other keeps its whole tree, with an `Error` node for each part that
     did not parse. A function whose body is missing keeps its signature,
     with an `Error` statement for the body.
-  - its signature is as written when all of its diagnostics lie in its
-    body, which is the usual case
+  - every definition lists where the parser recovered, in `recovered`:
+    each failure, reported or silent, that led to an `Error` node, each
+    closer the lexer inserted that it consumed, and each diagnostic whose
+    code means the source is not valid Truss as written, such as a habit,
+    whose nodes are built as if its fix had been applied. A part of the
+    definition, such as a signature, a body, or a member, is exactly as
+    written when no recovery lies in its span, whatever other diagnostics
+    it has.
 
-  Nodes built for a habit, as if its fix had been applied, lie in the same
-  signature or body as the habit's diagnostic, so a later stage that skips
-  a signature or a body with a diagnostic never reports an error on code
-  the parser made up.
-  TYPECHECKER.md decides how resolution registers a broken definition and
-  which of its parts it checks.
+  A diagnostic for valid syntax that breaks a rule checked after parsing,
+  such as a misplaced `assert`, is not a recovery: the tree there is as
+  written. Which codes recover is one exhaustive match in `Cursor`, so a new
+  code cannot be added without deciding. TYPECHECKER.md decides how
+  resolution registers a broken definition and which of its parts it
+  checks.
 - **Hashing** walks the tree and ignores spans, `Parenthesized` nodes, blank
   lines, and how literals were written, as DESIGN.md's hash format says.
 - **`truss fmt`** prints the tree, taking literals from the definition's

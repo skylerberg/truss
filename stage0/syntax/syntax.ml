@@ -392,7 +392,17 @@ type definition_kind =
       (** A definition whose header did not parse, with its keyword and its name when those were
           read, so that later stages can still know it is there. *)
 
-type definition = { visibility : visibility; kind : definition_kind; span : span }
+(* [recovered] lists where the parser recovered from an error in the
+   definition, in order: wherever it built a node the source does not say
+   as written, such as an [Error] node or a node for a habit as if its fix
+   had been applied. A part of the definition is as written exactly when
+   none of these lies in its span. *)
+type definition = {
+  visibility : visibility;
+  kind : definition_kind;
+  span : span;
+  recovered : span list;
+}
 
 (* A top-level item: a [use] line or a definition, with its base, the
    absolute offset of its first token, and its source text, from its first

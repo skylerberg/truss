@@ -146,6 +146,21 @@ let () =
         ~fixed:"use c::d\nfn f() {}\n");
   test "a statement at the top level is one error" (fun () ->
       error "fn f() {}\nx = 1\nfn g() {}" ~code:Statement_at_top_level ~at:"x");
+  test "a definition records where the parser recovered" (fun () ->
+      let recovered text =
+        match (fst (parse text)).definitions with
+        | [ item ] ->
+            List.map
+              (fun (span : Syntax.span) -> String.sub item.text span.start (span.stop - span.start))
+              item.value.recovered
+        | _ -> [ "wrong definitions" ]
+      in
+      if recovered "fn f() {\n  x as Int64\n}" <> [ "as" ] then fail "the habit is not recorded";
+      if recovered "fn f() {\n  let x = (1 +\n}" = [] then
+        fail "the inserted closer is not recorded";
+      if recovered "fn f() {\n  assert true\n}" <> [] then
+        fail "a rule checked after parsing is recorded";
+      if recovered "fn f(x: Int64) -> Int64" = [] then fail "the missing body is not recorded");
   test "a definition whose header did not parse keeps its keyword and name" (fun () ->
       let file, _ = parse "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn f() {}" in
       let printed =

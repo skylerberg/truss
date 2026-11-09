@@ -21,6 +21,8 @@ type t = {
   diagnostics : Diagnostic.Collector.t;
   mutable index : int;
   mutable depth : int;  (** Expressions, types, patterns, and prefix operators being parsed. *)
+  recoveries : Source.span list ref;
+      (** Where the parser recovered, in this definition and its interpolations, newest first. *)
   mutable cut_off : bool;
       (** The current item has consumed a closer the lexer inserted, so what follows in it is not
           what the author wrote, and no more syntax errors are reported in it. *)
@@ -66,6 +68,7 @@ let create ~source ~diagnostics ~base tokens ~first ~stop =
     diagnostics;
     index = first;
     depth = 0;
+    recoveries = ref [];
     cut_off = false;
     cut_off_end = false;
     line_ended = false;
@@ -81,7 +84,7 @@ let over ?stop cursor tokens =
       ~stop
   in
   inner.depth <- cursor.depth;
-  inner
+  { inner with recoveries = cursor.recoveries }
 
 (* A cursor over the same slice from its start, whose diagnostics are thrown
    away, for reading again what an error left unparsed. *)
@@ -111,7 +114,9 @@ let advance cursor =
   if cursor.index < cursor.stop then begin
     let token = cursor.tokens.(cursor.index) in
     (match token.kind with
-    | Punctuation (Close _) when token.span.start = token.span.stop -> cursor.cut_off <- true
+    | Punctuation (Close _) when token.span.start = token.span.stop ->
+        cursor.cut_off <- true;
+        cursor.recoveries := token.span :: !(cursor.recoveries)
     | _ -> ());
     cursor.index <- cursor.index + 1
   end
@@ -168,7 +173,24 @@ let inserted_closer (token : Token.t) =
 
 (* Diagnostics *)
 
+(* Whether a diagnostic means the parser recovered: that the source is not
+   valid Truss as written, so the tree there is the parser's guess, rather
+   than valid syntax that breaks a rule checked after parsing. *)
+let recovers : Diagnostic.Code.parser -> bool = function
+  | Unexpected_token | Needs_parentheses | Reserved_word | Statement_at_top_level | Missing_body
+  | Open_range | Interpolation_not_allowed | Float_pattern | Nesting_too_deep | Cost_word
+  | Misplaced_potential | Increment | Double_negation | Match_arm_comma | Conditional_operator
+  | Let_mut | Address_of | Closure_bars | Brace_record | Turbofish | Trailing_lambda | As_conversion
+  | Elif ->
+      true
+  | Use_after_definition | Let_else_brace | Misplaced_opaque | Misplaced_visibility | Misplaced_self
+  | Lends_own | Repeated_clause | Finite_not_time | Specification_only | Misplaced_assert
+  | Misplaced_proof | Misplaced_yield | Misplaced_loop_exit | Leaves_parallel
+  | Echo_in_specification | Reserved_name ->
+      false
+
 let report cursor ?notes ?fixes code span message =
+  if recovers code then cursor.recoveries := span :: !(cursor.recoveries);
   Diagnostic.Collector.add cursor.diagnostics
     (Diagnostic.make ?notes ?fixes ~code:(Diagnostic.Code.Parser code) span message)
 
@@ -189,6 +211,9 @@ let describe (token : Token.t) =
    is a closer the lexer inserted, and raises [Failed]. *)
 let fail cursor expected =
   let token = peek cursor in
+  (* Silent or not, a failure leaves the parser to recover. *)
+  if inserted_closer token || cursor.cut_off || (token.kind = End_of_file && cursor.cut_off_end)
+  then cursor.recoveries := token.span :: !(cursor.recoveries);
   (match token.kind with
   | _ when inserted_closer token || cursor.cut_off -> ()
   | End_of_file when cursor.cut_off_end -> ()

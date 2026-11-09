@@ -9,8 +9,10 @@
 open Token
 open Syntax
 
+(* [recovered] is filled in by [Parser.definition], once the checks that run
+   after parsing have run too. *)
 let finish cursor start visibility kind : definition =
-  { visibility; kind; span = Cursor.span_from cursor start }
+  { visibility; kind; span = Cursor.span_from cursor start; recovered = [] }
 
 (* [public], [public opaque], or [internal], with the tokens that spelled
    it, and, for [public opaque], both of its tokens. *)

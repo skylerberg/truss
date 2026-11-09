@@ -44,17 +44,24 @@ let check cursor definition =
 let definition source tokens piece =
   let value, cursor, diagnostics =
     with_cursor source tokens piece (fun cursor ->
-        match Parse_definition.definition cursor with
-        | definition ->
-            check cursor definition;
-            definition
-        | exception Cursor.Failed ->
-            let keyword, name = Parse_definition.header (Cursor.reread cursor) in
-            {
-              visibility = Private;
-              kind = Definition_error { keyword; name };
-              span = Cursor.span_from cursor cursor.first;
-            })
+        let definition : Syntax.definition =
+          match Parse_definition.definition cursor with
+          | definition ->
+              check cursor definition;
+              definition
+          | exception Cursor.Failed ->
+              let keyword, name = Parse_definition.header (Cursor.reread cursor) in
+              {
+                visibility = Private;
+                kind = Definition_error { keyword; name };
+                span = Cursor.span_from cursor cursor.first;
+                recovered = [];
+              }
+        in
+        let recovered =
+          List.sort_uniq compare (List.map (Cursor.span cursor) !(cursor.recoveries))
+        in
+        { definition with recovered })
   in
   parsed cursor value diagnostics
 

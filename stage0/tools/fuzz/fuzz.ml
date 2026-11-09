@@ -103,6 +103,10 @@ let check_tree text (item : Syntax.definition Syntax.item) =
   in
   if item.value.span.start <> 0 || item.value.span.stop > String.length item.text then
     fail "a definition's span is out of bounds in %s" quoted;
+  List.iter
+    (fun (span : Syntax.span) ->
+      if span.stop > String.length item.text then fail "a recovery is out of bounds in %s" quoted)
+    item.value.recovered;
   Syntax_walk.definition (expression item.value.span) item.value
 
 let check_parse_robust text =
