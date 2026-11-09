@@ -434,12 +434,5 @@ let checked = Query.query ~name:"checked" ~show:Names.show_key check
 
 (* Every body error of a file, in its offsets and in order. *)
 let diagnostics database module_ =
-  List.concat_map
-    (fun (declaration : Names.declaration) ->
-      let key = Names.key_of declaration in
-      match (Query.demand database checked key, Query.demand database Names.base key) with
-      | Some result, Some (_, base) -> List.map (Diagnostic.move base) result.diagnostics
-      | _ -> [])
-    (Query.demand database Names.declarations module_)
-  |> List.sort (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
-      compare (left.span, left.code) (right.span, right.code))
+  Names.per_definition database module_ (fun key ->
+      match Query.demand database checked key with Some result -> result.diagnostics | None -> [])

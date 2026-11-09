@@ -36,18 +36,23 @@ let minus left right = List.filter (fun capability -> not (List.mem capability r
    (inside a lambda, what it uses is collected instead, for its [uses]). *)
 type scope = { available : T.capability list; collecting : bool }
 
-(* The [impl]s of capabilities for a type, which providing it provides. *)
+(* The capabilities a type implements, each with the [impl] that provides
+   it, its generic arguments, and its interface. *)
 let capability_impls (state : state) (type_ : T.ty) =
   match type_ with
   | T.Named { path; _ } ->
       List.filter_map
-        (fun ((trait, head), impl) ->
+        (fun ((trait, head), _) ->
           if
             Path.equal head path && Interface.Summary.kind_of state.database trait = Some Capability
           then
-            Option.map
-              (fun interface -> (trait, impl, interface))
-              (Interface.Impls.impl_interface state.database impl)
+            match implements state type_ (trait_reference trait) with
+            | Some (Interface.Impls.From_impl { impl; substitution }) ->
+                Option.map
+                  (fun interface ->
+                    ({ C.capability = trait; impl; arguments = substitution }, interface))
+                  (Interface.Impls.impl_interface state.database impl)
+            | _ -> None
           else None)
         (Query.demand state.database Interface.Impls.index (Path.package path))
   | _ -> []
@@ -308,7 +313,7 @@ and provide state scope (value : expression) implementations body =
             (Printf.sprintf "`%s` implements no capability, so it provides nothing." (T.show type_));
         let changes =
           List.exists
-            (fun (_, _, (interface : T.impl_interface)) ->
+            (fun (_, (interface : T.impl_interface)) ->
               List.exists (fun (_, receiver, _) -> receiver = Path.Mut) interface.impl_methods)
             impls
         in
@@ -337,7 +342,7 @@ and provide state scope (value : expression) implementations body =
             "This implementation never changes its own state, so the place is provided without \
              `mut`.";
         List.iter
-          (fun (_, _, (interface : T.impl_interface)) ->
+          (fun (_, (interface : T.impl_interface)) ->
             used := union !used interface.impl_uses;
             if not scope.collecting then
               List.iter
@@ -348,8 +353,10 @@ and provide state scope (value : expression) implementations body =
                          (show_capability capability)))
                 interface.impl_uses)
           impls;
-        provided := union !provided (List.map (fun (trait, _, _) -> T.Capability trait) impls);
-        (implementation.id, List.map (fun (trait, impl, _) -> (trait, impl)) impls))
+        provided :=
+          union !provided
+            (List.map (fun ((provided : C.provided), _) -> T.Capability provided.capability) impls);
+        (implementation.id, List.map fst impls))
       implementations
   in
   state.tables.provides.(value.id) <- Some { implementations = evidence };

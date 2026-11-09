@@ -466,7 +466,7 @@ let check =
           @ check_instantiation database package
           @ check_tests database package)
 
-let file_diagnostics database (module_ : Path.module_) =
+let diagnostics database (module_ : Path.module_) =
   List.filter_map
     (fun placed -> if placed.module_ = module_ then Some placed.diagnostic else None)
     (Query.demand database check module_.package)

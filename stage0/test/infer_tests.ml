@@ -148,6 +148,25 @@ let () =
       match checked.calls.(value.id) with
       | Some { defaults_left_out = [ "port" ]; _ } -> ()
       | _ -> fail "the default left out is not recorded");
+  test "a String passed where a StringSlice is expected is viewed" (fun () ->
+      let text = "fn greet(text: StringSlice) {}\n\nfn f(name: String) {\n  greet(name)\n}\n" in
+      let value, checked = expression_at text "greet(name)" 1 in
+      match checked.calls.(value.id) with
+      | Some { arguments = [ { conversion = Some Owned_to_view; _ } ]; _ } -> ()
+      | _ -> fail "no conversion recorded");
+  test "a capability's method views a String argument too" (fun () ->
+      let text = "fn f(name: String)\n  uses Console\n{\n  Console.print_line(name)\n}\n" in
+      let value, checked = expression_at text "Console.print_line(name)" 1 in
+      match checked.calls.(value.id) with
+      | Some { arguments = [ { conversion = Some Owned_to_view; _ } ]; _ } -> ()
+      | _ -> fail "no conversion recorded");
+  test "a string literal is a String, viewed where a StringSlice is expected" (fun () ->
+      let text = "fn f()\n  uses Console\n{\n  Console.print_line(\"hello\")\n}\n" in
+      has_type text "\"hello\"" "String";
+      let value, checked = expression_at text "Console.print_line(\"hello\")" 1 in
+      match checked.calls.(value.id) with
+      | Some { arguments = [ { conversion = Some Owned_to_view; _ } ]; _ } -> ()
+      | _ -> fail "no conversion recorded");
   test "an unknown label is an error with a fix to the closest" (fun () ->
       one_diagnostic
         (functions ^ "fn f() {\n  copy_file(1, destinaton: 2)\n}\n")

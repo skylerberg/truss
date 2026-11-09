@@ -45,6 +45,40 @@ let () =
         \    stamp()\n\
         \  }\n\
          }\n");
+  test "provide records each capability's impl with its generic arguments" (fun () ->
+      let text =
+        "type Fixed[Tag](time: Instant, tag: Tag)\n\n\
+         impl Clock for Fixed[Tag] {\n\
+        \  fn now(self) -> Instant { self.time }\n\
+         }\n\n\
+         fn f() -> Instant {\n\
+        \  provide Fixed(time: Instant.epoch, tag: true) {\n\
+        \    Clock.now()\n\
+        \  }\n\
+         }\n"
+      in
+      let database = setup [ ("app::main", text) ] in
+      let key : Resolve.Names.key =
+        {
+          module_ = module_of "app::main";
+          path = Top { module_ = module_of "app::main"; name = "f" };
+          ordinal = 0;
+        }
+      in
+      match Query.demand database Infer.checked key with
+      | Some result -> (
+          match List.filter_map Fun.id (Array.to_list result.checked.provides) with
+          | [
+           {
+             implementations =
+               [ (_, [ { capability; impl = Impl _; arguments = [ (_, Type tag) ] } ]) ];
+           };
+          ]
+            when Path.show capability = "standard::capabilities::Clock" && Types.show tag = "Bool"
+            ->
+              ()
+          | _ -> fail "not recorded")
+      | None -> fail "not checked");
   test "a specification has only Panic" (fun () ->
       one_diagnostic
         "fn stamp() -> Bool\n\

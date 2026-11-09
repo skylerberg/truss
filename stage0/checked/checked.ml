@@ -79,7 +79,8 @@ type obligation =
     }
   | Guards_cover of { match_ : Syntax.id }
 
-type provide = { implementations : (Syntax.id * (Path.t * Path.t) list) list }
+type provided = { capability : Path.t; impl : Path.t; arguments : Types.substitution }
+type provide = { implementations : (Syntax.id * provided list) list }
 
 type t = {
   types : Types.ty option array;

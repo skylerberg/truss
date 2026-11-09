@@ -167,18 +167,13 @@ let file_diagnostics =
       List.rev !diagnostics)
 
 let diagnostics database module_ =
-  let definitions =
-    List.concat_map
-      (fun (declaration : Names.declaration) ->
-        let key = Names.key_of declaration in
-        match (Query.demand database resolved key, Query.demand database Names.base key) with
-        | Some resolved, Some (_, base) -> List.map (Diagnostic.move base) resolved.diagnostics
-        | _ -> [])
-      (Query.demand database Names.declarations module_)
-  in
   List.sort
     (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
       compare (left.span, left.code) (right.span, right.code))
-    (Query.demand database file_diagnostics module_ @ definitions)
+    (Query.demand database file_diagnostics module_
+    @ Names.per_definition database module_ (fun key ->
+        match Query.demand database resolved key with
+        | Some resolved -> resolved.diagnostics
+        | None -> []))
 
 let closest = Walk.closest

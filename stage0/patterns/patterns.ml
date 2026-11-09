@@ -567,7 +567,7 @@ let check_definition context ~text (definition : definition) =
   in
   Syntax_walk.definition ~statement expression definition
 
-let diagnostics =
+let definition_diagnostics =
   Query.query ~name:"pattern_diagnostics" ~show:Resolve.Names.show_key (fun database key ->
       match
         ( Query.demand database Resolve.Names.definition key,
@@ -584,12 +584,5 @@ let diagnostics =
             context.diagnostics
       | _ -> [])
 
-let file_diagnostics database module_ =
-  List.concat_map
-    (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.key_of declaration in
-      match Query.demand database Resolve.Names.base key with
-      | Some (_, base) -> List.map (Diagnostic.move base) (Query.demand database diagnostics key)
-      | None -> [])
-    (Query.demand database Resolve.Names.declarations module_)
-  |> List.sort (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span right.span)
+let diagnostics database module_ =
+  Resolve.Names.per_definition database module_ (Query.demand database definition_diagnostics)

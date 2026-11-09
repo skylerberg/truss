@@ -1238,12 +1238,8 @@ let check database (key : Resolve.Names.key) =
 
 let ownership = Query.query ~name:"ownership" ~show:Resolve.Names.show_key check
 
-let file_diagnostics database module_ =
-  List.concat_map
-    (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.key_of declaration in
-      match (Query.demand database ownership key, Query.demand database Resolve.Names.base key) with
-      | Some result, Some (_, base) -> List.map (Diagnostic.move base) result.diagnostics
-      | _ -> [])
-    (Query.demand database Resolve.Names.declarations module_)
-  |> List.sort (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span right.span)
+let diagnostics database module_ =
+  Resolve.Names.per_definition database module_ (fun key ->
+      match Query.demand database ownership key with
+      | Some result -> result.diagnostics
+      | None -> [])

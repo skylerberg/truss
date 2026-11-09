@@ -7,7 +7,7 @@ open Support
 let check database module_ =
   Resolve.diagnostics database module_
   @ Interface.diagnostics database module_
-  @ Package_checks.file_diagnostics database module_
+  @ Package_checks.diagnostics database module_
 
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]

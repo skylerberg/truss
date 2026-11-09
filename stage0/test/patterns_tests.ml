@@ -8,7 +8,7 @@ let check database module_ =
   Resolve.diagnostics database module_
   @ Interface.diagnostics database module_
   @ Infer.diagnostics database module_
-  @ Patterns.file_diagnostics database module_
+  @ Patterns.diagnostics database module_
 
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]

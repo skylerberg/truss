@@ -1391,7 +1391,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 {
   let text = FileRead.read_text(file).map_error(ConfigError.Unreadable)?
   let config = toml::parse(text).map_error(ConfigError.Malformed)?
-  Ok(config)
+  Ok(own config)
 }
 ```
 
@@ -1728,7 +1728,7 @@ fn first_line(path: Path) -> Result[String, FileError]
 {
   var file = FileRead.open(path)?
   let line = mut file.read_line()?
-  Ok(line)
+  Ok(own line)
 }
 ```
 
@@ -2075,7 +2075,7 @@ so `text.graphemes()` gives those as `StringSlice`s.
 ## Traits and laws
 
 ```truss
-trait Monoid {
+trait Monoid: Equal {
   fn empty() -> Self
   fn combine(self, other: Self) -> Self
 

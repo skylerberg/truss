@@ -13,7 +13,8 @@
   ownership_tests
   capabilities_tests
   package_checks_tests
-  documents_tests)
+  documents_tests
+  manifest_tests)
  (libraries
   harness
   source

@@ -16,10 +16,10 @@ let diagnostics database module_ =
     @ Resolve.diagnostics database module_
     @ Interface.diagnostics database module_
     @ Infer.diagnostics database module_
-    @ Patterns.file_diagnostics database module_
-    @ Usage.file_diagnostics database module_
-    @ Ownership.file_diagnostics database module_
-    @ Package_checks.file_diagnostics database module_)
+    @ Patterns.diagnostics database module_
+    @ Usage.diagnostics database module_
+    @ Ownership.diagnostics database module_
+    @ Package_checks.diagnostics database module_)
 
 (* Sets a package's modules and manifest as inputs. *)
 let load_package database ~name ~dependencies (modules : (Path.module_ * string) list) =
