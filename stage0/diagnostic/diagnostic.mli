@@ -39,8 +39,47 @@ module Code : sig
     | Unclosed_bracket
     | Unmatched_closing_bracket
 
+  type parser =
+    | Unexpected_token
+    | Needs_parentheses
+    | Reserved_word
+    | Use_after_definition
+    | Statement_at_top_level
+    | Missing_body
+    | Open_range
+    | Interpolation_not_allowed
+    | Let_else_brace
+    | Nesting_too_deep
+    | Misplaced_opaque
+    | Misplaced_visibility
+    | Misplaced_self
+    | Repeated_clause
+    | Cost_word
+    | Finite_not_time
+    | Misplaced_potential
+    | Increment
+    | Double_negation
+    | Match_arm_comma
+    | Conditional_operator
+    | Let_mut
+    | Address_of
+    | Closure_bars
+    | Brace_record
+    | Turbofish
+    | Trailing_lambda
+    | As_conversion
+    | Elif
+    | Specification_only
+    | Misplaced_assert
+    | Misplaced_proof
+    | Misplaced_yield
+    | Misplaced_loop_exit
+    | Leaves_parallel
+    | Echo_in_proof
+    | Reserved_name
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
-  type t = Lexer of lexer | Too_many_diagnostics
+  type t = Lexer of lexer | Parser of parser | Too_many_diagnostics
 
   val name : t -> string
 end

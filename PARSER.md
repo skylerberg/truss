@@ -4,7 +4,7 @@ This document designs the stage0 parser. It implements the syntactic grammar
 in [GRAMMAR.md](GRAMMAR.md), reads the tokens described in
 [LEXER.md](LEXER.md), and follows the rules in [SYNTAX.md](SYNTAX.md) and
 [DESIGN.md](DESIGN.md). Where this design departs from those documents, it
-says so. Nothing is built yet.
+says so. The parser is built, in [`stage0/`](stage0).
 
 ## What the parser does
 
@@ -54,22 +54,38 @@ token array ──▶ Split ──one token slice per definition──▶ Parse 
                   └──────────────────▶ diagnostics ◀────────┴──────────┘
 ```
 
-| OCaml module | Job |
+The tree has libraries of its own, so that name resolution, the formatter,
+and the language server depend on it without depending on the parser:
+
+| Library | Job |
 |---|---|
 | `Syntax` | The tree types, shared by every later stage |
-| `Split` | Finds the `use` lines and each definition's token slice |
-| `Cursor` | Reads a token slice: the current token, lookahead, and `NEWLINE` helpers |
-| `Parse_type`, `Parse_pattern`, `Parse_expression`, `Parse_definition` | Recursive descent, one module per part of the grammar |
-| `Operators` | The operator table and the check for combinations that need parentheses |
-| `Habits` | Recognizers and fixes for syntax from other languages |
-| `Check` | Rules that need the whole tree of a definition |
+| `Syntax_walk` | Visits the expressions of a tree, for checks that look at every one |
 | `Syntax_print` | Prints a tree as a compact S-expression, for tests and `truss-parse --tree` |
+
+The parser is one dune library, which depends on `Token`, `Source`,
+`Diagnostic`, and the tree, and holds:
+
+| Module | Job |
+|---|---|
+| `Split` | Finds the `use` lines and each definition's token slice |
+| `Cursor` | Reads a token slice: the current token, lookahead, reporting errors, and the jumps recovery makes |
+| `Atoms` | Names, module prefixes, and string literals, which every part of the grammar uses |
+| `Parse_pattern` | Patterns |
+| `Parse_expression` | Types, clauses, expressions, statements, and blocks |
+| `Parse_definition` | Definitions, and the members of traits, `impl`s, and capabilities |
+| `Operators` | The check for combinations of operators that need parentheses |
+| `Habits` | The messages and fixes for syntax from other languages |
+| `Check` | Rules that need the whole tree of a definition |
 | `Parser` | The entry point: `Parser.parse : Source.t -> Token.t array -> Syntax.file * Diagnostic.t list` |
 
-The parser is one dune library that depends on `Token`, `Source`, and
-`Diagnostic`. `Syntax` is its own library, so that name resolution, the
-formatter, and the language server depend on the tree without depending on
-the parser.
+Types, clauses, and expressions are one module because they contain each
+other: a statement has a type annotation, a function type in parentheses can
+carry a `cost` clause, and a clause holds expressions. Patterns contain none
+of them, and are their own module.
+
+`stage0/bin/truss_parse.ml` builds `truss-parse`, which prints a file's
+diagnostics, as JSON with `--json`, and its tree with `--tree`.
 
 ### Splitting a file into definitions
 
@@ -109,7 +125,7 @@ Each definition is parsed from its own token slice, with a fresh `Cursor`.
   LEXER.md describes, and the spans are relative to this text.
 - **Interpolations are parsed from their own token arrays.** Each one is
   parsed as an expression by a fresh `Cursor` over the interpolation's tokens,
-  as LEXER.md planned. The spans of those tokens are absolute, and are made
+  as LEXER.md describes. The spans of those tokens are absolute, and are made
   relative with the same base.
 
 ### Recursive descent with no backtracking
@@ -166,50 +182,10 @@ lexer already gives it.
 
 ### Shape
 
-The tree types follow GRAMMAR.md closely. A sketch of the main ones:
-
-```ocaml
-type span = { start : int; stop : int }   (* relative to the definition's base *)
-type name = { text : string; span : span }
-type path = { modules : name list; last : name }   (* standard::json::parse *)
-
-type expression = { kind : expression_kind; span : span }
-and expression_kind =
-  | Integer of Z.t
-  | Float of { significand : Z.t; exponent : Z.t }
-  | String of string_literal                (* tagged or not *)
-  | True | False | Todo | Unreachable | Break | Continue
-  | Self_value | Self_type
-  | Name of path                            (* items, json::parse, Point, geometry::Shape *)
-  | Member of expression * name             (* config.port, Shape.Circle, Self.Key *)
-  | Bracket of expression * bracket_item list   (* an index or type arguments *)
-  | Call of expression * argument list
-  | Try of expression                       (* ? *)
-  | With of expression * update list
-  | Prefix of prefix * expression           (* - ! ~ *)
-  | Mode of mode * expression               (* mut own *)
-  | Any of expression
-  | Binary of binary * expression * expression   (* includes ==> *)
-  | Is of expression * pattern
-  | Range of { start : expression option; stop : expression option; inclusive : bool }
-  | Quantifier of { kind : quantifier; binder : binder; body : expression }
-  | Echo of expression
-  | Return of expression option
-  | Parenthesized of expression
-  | List of expression list
-  | Map of (expression * expression) list   (* [:] is Map [] *)
-  | Lambda of { parameters : pattern list; body : block }
-  | If of { condition : expression; then_ : block; else_ : else_branch option }
-  | Match of { scrutinees : expression list; arms : arm list }
-  | Provide of { implementations : expression list; body : block }
-  | Block of block
-  | Error                                   (* a part that did not parse *)
-
-and argument = { label : name option; value : expression }
-and bracket_item =
-  | Item of expression                      (* 0, String, ..3 *)
-  | Constraint of name * type_expression    (* Element = Int64 *)
-```
+The tree types, in [`stage0/syntax/syntax.ml`](stage0/syntax/syntax.ml),
+follow GRAMMAR.md closely: an expression, a pattern, a type, a statement,
+and a clause are each a record of a `kind` and a `span`, and a definition is
+a record of its visibility, its kind, and its span.
 
 - **Constructs that parse the same are one node.** `Bracket` is an index or
   type arguments, `Name` is a variable, a constant, a function, a type, or a
@@ -220,17 +196,28 @@ and bracket_item =
   `List[String].with_capacity(64)`, `List[String]` is a `Bracket` over two
   `Name`s. Name resolution reads it as a type. Type positions, such as
   annotations and signatures, have their own `type_expression` nodes.
-- **Patterns have one node for a bare name.** `Binding_or_constant of name`
-  is decided by name resolution, as the grammar says. Range ends are their
-  own `Constant` nodes, since a name there can only be a constant.
+- **Patterns have one node for a bare name.** `Binding_or_constant` is
+  decided by name resolution, as the grammar says. The ends of a range are
+  their own `range_end` nodes, since a name there can only be a constant.
 - **Clauses are typed, not generic.** A function's clauses are kept as a
   list in the order written, since the order of clauses of one kind matters,
   but each is a specific constructor: `Uses`, `Requires`, `Ensures`,
   `Decreases`, or `Cost` with a parsed resource and bound. The hash sorts them
   by kind and keeps the order within each kind.
-- **Every definition, statement, member, arm, expression, pattern, and type
-  has an `Error` case.** A part that did not parse becomes an `Error` node with
-  the span it covered, and the rest of the tree is built around it.
+- **Types rule out trees that cannot be written.** A trait's members, an
+  `impl`'s members, and a capability's methods have a type each, so an `impl`
+  cannot hold a law. A function's body is optional only because a trait may
+  declare a method without one, and a document's example may show only a
+  signature.
+- **Every part that can fail to parse has an `Error` case:** definitions,
+  members, statements, arms, clauses, parameters, generic parameters,
+  expressions, patterns, and types. A part that did not parse becomes an
+  `Error` node with the span it covered, and the rest of the tree is built
+  around it.
+- **Each item records its base and its source text.** A file is its `use`
+  lines and its definitions, each an `item` with the absolute offset of its
+  first token, the bytes from its first token to the end of its last, and
+  whether a blank line came before it.
 
 ### Strings
 
@@ -277,8 +264,8 @@ The parser does the second. The total order it parses with, tightest first:
 
 The levels Truss defines are Truss's own. The order among the shift and
 bitwise levels, which Truss does not define, is Rust's, the reading C, Go,
-Rust, and Swift most often share. Then `Operators.check` walks each
-`Binary`, `Range`, and `Is` node, and reports:
+Rust, and Swift most often share. Then `Operators` walks every expression,
+checks each operation against each of its operands, and reports:
 
 | Written | Error and fixes |
 |---|---|
@@ -292,8 +279,21 @@ Rust, and Swift most often share. Then `Operators.check` walks each
 
 When the readings of other languages disagree, the diagnostic offers each as
 a separate fix, so an agent picks the one it meant instead of trusting a
-table it may misremember. Each fix inserts only parentheses, so applying it
-never changes anything else.
+table it may misremember. The readings come from a table of how tightly
+Rust, C, Go, and Swift bind each operator.
+
+- **Each fix inserts only parentheses,** except the one for a chained
+  comparison, so applying it never changes anything else.
+- **A fix leaves no new combination behind.** A reading that changes which
+  operator applies last can give an operator that the one around the whole
+  expression cannot take, as `a & (b == c)` would inside `&& d`. That fix
+  puts the whole expression in parentheses too: `(a & (b == c)) && d`.
+- **A reading that cannot be written is not offered.** In `x is P & y`, the
+  other reading would put `& y` inside the pattern, which has no grouping
+  parentheses, so the only fix is `(x is P) & y`.
+- **Every combination is reported,** so a chain such as `a < b < c < d` gets
+  one error for each `<` after the first. Applying any one fix removes its
+  error and leaves the others as they were.
 
 ### The forms at the lowest level
 
@@ -301,11 +301,12 @@ never changes anything else.
   after `return` starts the value only when no `NEWLINE` comes between them,
   which the lexer already decides: `return` can end a statement and `{` can
   begin one, so a line break between them is a `NEWLINE`.
-- **Quantifiers** may also be the last operand of `&&`, `||`, or `==>`. When
-  the operand parser finds `forall` or `exists`, it parses the binder and the
-  body at the lowest level, and the body takes everything up to the end of
-  the expression. `Operators.check` then reports a quantifier anywhere else,
-  such as `count + forall ...`, with a fix that puts it in parentheses.
+- **Quantifiers** may also be the last operand of `&&`, `||`, or `==>`.
+- **The parser finds these forms where an operand begins,** like any
+  operand, and parses each one's body at the lowest level, so the body takes
+  everything up to the end of the expression. `Operators` then reports one
+  anywhere else, such as `count + echo x` or `count + forall ...`, with a fix
+  that puts it in parentheses.
 - **`if`, `match`, `provide`, blocks, and lambdas** are primaries, so they
   combine with operators like any other operand.
 
@@ -315,8 +316,14 @@ Brackets after an expression hold a list of items, each an expression or an
 associated-type constraint. Inside them, and only there, a range may leave
 out its start or its end: the parser passes a flag to the range level that
 allows a missing operand when the next token is `]` or `,`. A range with a
-missing end anywhere else is an error that says open-ended ranges are only
-for brackets.
+missing start or end anywhere else is an error that says open-ended ranges
+are only for brackets.
+
+- **Brackets hold at least one item,** so `items[]` is an error.
+- **`for i in 0.. {}` is reported at the `..`.** The grammar reads the `{}`
+  as the end of the range, which leaves the loop without a body. When a `for`
+  loop's collection is a range that ends with a block and no body follows,
+  the error is the open-ended range.
 
 ### Statements
 
@@ -338,11 +345,20 @@ assignment. A `match` arm's body uses the same function.
 ## Definitions
 
 Each definition is chosen by its first token, after an optional `public`,
-`public opaque`, or `internal`. The rules that the grammar leaves to a check,
-such as `opaque` only before `type`, `self` only as a method's first
-parameter, `uses` and `decreases` at most once, and `finite` only for `time`,
+`public opaque`, or `internal`. The rules that the grammar leaves to a check
 are checked as the definition is parsed, where the tokens and their spans are
-at hand.
+at hand:
+
+- `opaque` only before `type`, with a fix that removes it
+- no visibility on an `impl`, a test, or a law's proof, with a fix that
+  removes it
+- `self` only as a method's first parameter. A method is written
+  `fn Type.name`, or is in a trait or an `impl`; a capability declares its
+  methods without `self`.
+- `uses` and `decreases` at most once
+- no function named `old`
+- a body for every function outside a trait or a capability. A missing one
+  gets the fix `{ todo }`, the body of unwritten code.
 
 ### Cost clauses
 
@@ -350,7 +366,10 @@ The words of a `cost` clause are names to the lexer. The parser reads
 `cost [amortized] resource bound`, where `amortized`, `time`,
 `allocations`, `allocated_bytes`, `calls`, `O`, and `finite` must be spelled
 exactly. A misspelling gets a fix when one word is close, such as `allocation`
-for `allocations`. `cost potential expression` is accepted only on a type.
+for `allocations`, and parsing goes on as if that word had been written, so
+the rest of the clause is checked too. `finite` for a resource other than
+`time` is an error, and parsing goes on. `cost potential expression` is
+accepted only on a type.
 Inside a bound, `time(...)`, `calls(...)`, `log(...)`, and `power(...)` parse
 as ordinary calls; name resolution gives them their meaning, as GRAMMAR.md
 says.
@@ -364,13 +383,14 @@ branch, and a method that yields or lends. It reports:
 - `forall`, `exists`, and `==>` outside specifications. Specifications are
   `requires`, `ensures`, `invariant`, `decreases`, `cost`, laws, theorems, and
   `proof` blocks.
-- `assert` outside tests, theorems, and proofs, and `proof` blocks outside
-  function bodies
+- `assert` outside tests, theorems, and proofs, including in a lambda there,
+  and `proof` blocks outside function bodies
 - `yield` outside a method whose signature `yields` or `lends`
 - `break` and `continue` outside a loop, or inside a lambda in that loop
 - `return`, `break`, `continue`, and `?` that would leave a `parallel` block,
   and `break`, `return`, and `?` in a `parallel for`
 - `echo` inside a proof
+- a parameter named `result`
 
 These need only the one definition's tree, so they belong to the parse stage
 and are cached with it. They are a separate walk, not part of each parsing
@@ -382,8 +402,9 @@ and each rule can be tested on its own.
 ### Diagnostics
 
 Diagnostics use the shared `Diagnostic` type from LEXER.md, with codes such
-as `parser.unexpected_token` and `parser.needs_parentheses`. Every diagnostic
-is an error. When the parser knows what was meant, it gives an exact fix;
+as `parser.unexpected_token` and `parser.needs_parentheses`. Each habit from
+another language has a code of its own, such as `parser.increment`, so tools
+and agents can match on it. Every diagnostic is an error. When the parser knows what was meant, it gives an exact fix;
 otherwise the message says what it expected, such as "expected `=>` after
 the patterns of a `match` arm".
 
@@ -416,33 +437,38 @@ To avoid cascades:
   region that was skipped.
 - A zero-width closer that the lexer inserted (see
   [LEXER.md](LEXER.md#brackets)) already has its error, so the parser does not
-  report what is missing before it.
+  report what is missing before it. Once a statement, member, or arm has
+  consumed such a closer, what follows in it is not what the author wrote,
+  so no more syntax errors are reported in it.
+- An empty interpolation already has the lexer's error, so the parser
+  reports nothing for it.
 - A file reports at most 200 diagnostics, as in the lexer.
 
 ### Syntax from other languages
 
 SYNTAX.md's rule is that each common habit gets its own error and an exact
 fix. The lexer handles the habits it can fix from the tokens alone. The rest
-need the tokens around them, so `Habits` recognizes them where the parser
-fails. A recognizer is tried only after the ordinary grammar has rejected a
-token, so it can never change what valid code means.
-
-The first version handles the habits SYNTAX.md lists that reach the parser:
+need the tokens around them, so the parsing functions recognize each one at
+the point where the ordinary grammar has already rejected a token, which
+means a recognizer can never change what valid code means. Each then calls
+`Habits`, which holds every message and fix in one place, and parsing goes on
+as if the code had been fixed.
 
 | Written | Recognized by | Fix |
 |---|---|---|
-| `i++`, `i--` | A `Foreign` token after an expression | `i += 1`, `i -= 1` |
+| `i++`, `i--` | A `Foreign` token after an expression, at the end of its line | `i += 1`, `i -= 1` |
 | `--x` | A `Foreign` token before an expression | `-(-x)` |
 | `A => 1,` | `,` after a `match` arm's body | Remove the `,` |
-| `x ? a : b` | `?` followed by an expression and `:` | `if x { a } else { b }` |
+| `x ? a : b` | `?` followed by a token that starts an expression but cannot follow `?` | `if x { a } else { b }` |
 | `let mut x` | `mut` right after `let` | `var x` |
 | `&x`, `&mut x` | `&` where an expression must begin | `x`, `mut x` |
-| `\|x\| x + 1` | `\|` where an expression must begin | `fn(x) { x + 1 }` |
-| `Point { x: 1.0, y: 2.0 }` | An `UPPER` name, then `{`, a name, and `:`, on one line | `Point(x: 1.0, y: 2.0)` |
+| `\|x\| x + 1`, `\|\| x` | `\|` or `\|\|` where an expression must begin | `fn(x) { x + 1 }`, `fn() { x }` |
+| `Point { x: 1.0, y: 2.0 }` | An `UPPER` name, then `{`, a name, and `:`, on one line; no block starts with a label | `Point(x: 1.0, y: 2.0)` |
 | `parse::<Int64>(text)` | `::` followed by `<` | `parse[Int64](text)` |
-| `items.map { it.name }` | A call with no parentheses, followed by a block that uses `it` | `items.map(fn(item) { item.name })` |
+| `items.map { it.name }` | A statement that ends with a name or a member, followed on its line by a block that uses `it` | `items.map(fn(item) { item.name })` |
 | `x as Int64` | The reserved word `as` after an expression | `Int64.from(x)` |
-| `loop {`, `const`, `static`, `where`, and the other reserved words | A `Reserved` token | A fix for each, such as `while true {` for `loop` |
+| `loop {`, `const`, `static` | A `Reserved` token where a statement or a definition starts | `while true {`, `let` |
+| `where` and the other reserved words | A `Reserved` token anywhere else | None; the message says the word is reserved |
 | `elif` | The name `elif` starting a statement right after an `if` | `else if` |
 
 Habits that are names, such as `null`, `nil`, and a second argument without a
@@ -498,17 +524,26 @@ about a small input, and there are no golden files.
   body to focus on it, so these tests use a snippet entry point that splits a
   block into definitions, signatures without bodies, and statements. That
   entry point exists only for these tests.
-- **Both parsers agree on the documents.** A parser built by Menhir from
-  `grammar/truss.mly`, only for tests, parses each piece of each example with
-  the entry point for its kind, and must accept exactly what the hand-written
-  parser accepts. A disagreement points at a bug in one of them, or at a
-  difference between the code and GRAMMAR.md.
+- **Both parsers agree on the documents.** The `Reference` library is a
+  parser built by Menhir from `grammar/truss.mly`, only for tests and tools.
+  It parses each piece of each example with the grammar's entry point for its
+  kind, and must accept every piece the hand-written parser accepts. A
+  disagreement points at a bug in one of them, or at a difference between
+  the code and GRAMMAR.md.
 - **The documents agree with the code.** A test checks GRAMMAR.md's list of
   words the parser recognizes by spelling against the parser's own list.
 - **Moving a definition changes nothing.** Adding lines above a definition
   gives an identical tree for it.
 - **The fuzzer**, `stage0/tools/fuzz`, is run by hand. It also checks that
   mutated examples never make the parser raise, that every tree's spans are
-  in bounds and in order, that every fix removes its diagnostic and adds no
-  other, and that both parsers accept and reject the same mutated inputs.
-  Each problem it finds becomes a focused test.
+  in bounds and inside the node around them, that every fix removes its
+  diagnostic and adds no other, and that both parsers accept and reject the
+  same mutated pieces. A lexer's fix is judged by the lexer's diagnostics
+  alone, since closing a bracket can bring back a parser error the inserted
+  closer was hiding. The reference grammar cannot judge everything: it
+  accepts any name where a cost word goes, and reads a string as one token,
+  so a piece whose error is in a `cost` clause or is about an interpolation
+  is not compared, nor is one holding a closer the lexer inserted. Each
+  problem the fuzzer finds becomes a focused test.
+- **The benchmark**, `stage0/tools/benchmark`, measures how fast files lex
+  and parse.

@@ -1,0 +1,3 @@
+(library
+ (name parser)
+ (libraries source diagnostic token syntax syntax_walk zarith))

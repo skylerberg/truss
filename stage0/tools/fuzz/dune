@@ -1,3 +1,13 @@
 (executable
  (name fuzz)
- (libraries source diagnostic token lexer zarith))
+ (libraries
+  source
+  diagnostic
+  token
+  lexer
+  zarith
+  documents
+  syntax
+  syntax_walk
+  parser
+  reference))

@@ -622,6 +622,11 @@ Every other construct, including labels against values that begin with a
 name, list literals against map literals, and lambdas against function types,
 is decided by the next token.
 
+Besides a whole `file`, the grammar has an entry point for each kind of piece
+the documents' examples are made of: a `use` line, a definition, a function's
+signature without a body, and a statement. The tests check every example
+against it, piece by piece (see [PARSER.md](PARSER.md#testing)).
+
 ## What the grammar leaves to later stages
 
 The parser builds the same tree for some constructs that mean different
