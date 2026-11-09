@@ -14,7 +14,9 @@ let test name body =
   current_test := name;
   match body () with
   | () -> ()
-  | exception exception_ -> fail "raised %s" (Printexc.to_string exception_)
+  | exception exception_ ->
+      (* With OCAMLRUNPARAM=b, the backtrace says where. *)
+      fail "raised %s%s" (Printexc.to_string exception_) (Printexc.get_backtrace ())
 
 let finish () =
   if !failures > 0 then begin

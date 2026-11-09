@@ -1,0 +1,3 @@
+(library
+ (name workspace)
+ (libraries query path source diagnostic token lexer syntax parser))
