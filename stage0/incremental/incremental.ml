@@ -82,6 +82,8 @@ type t = {
   unsaved : (int, node) Hashtbl.t;  (** Saved nodes made or changed since the last write *)
   mutable gone : (string * string) list;  (** Written nodes dropped since the last write *)
   mutable chain : string option;  (** The artifact last written, or opened from *)
+  mutable on_whole : bool;
+      (** Whether the engine's bases hold the whole state its chain starts from *)
   mutable whole : int;  (** How many nodes the chain's whole state holds *)
   mutable differences : int;  (** How many the differences after it hold *)
   mutable depth : int;  (** How many differences there are *)
@@ -108,6 +110,7 @@ and node = {
   mutable fingerprint : string option;  (** The name of its value in the store *)
   mutable identity : string option;
   mutable written : bool;  (** In the chain of artifacts *)
+  mutable superseding : bool;  (** In one of the chain's differences *)
 }
 
 and cell =
@@ -240,6 +243,7 @@ let create ?(log = false) ?(bases = []) () =
       unsaved = Hashtbl.create 256;
       gone = [];
       chain = None;
+      on_whole = false;
       whole = 0;
       differences = 0;
       depth = 0;
@@ -338,6 +342,7 @@ let new_node engine ~phase ~below =
       fingerprint = None;
       identity = None;
       written = false;
+      superseding = false;
     }
   in
   Hashtbl.replace engine.own node.id node;
@@ -1057,7 +1062,10 @@ let input ~name ~show ?(equal = ( = )) ?(about = fun _ -> None) () =
           let key = unmarshal key in
           match find_input engine input key with
           | Some cell -> cell.input_node
-          | None -> (make_input engine input key ~below:None).input_node);
+          | None ->
+              let cell = make_input engine input key ~below:None in
+              Hashtbl.replace engine.unsaved cell.input_node.id cell.input_node;
+              cell.input_node);
       find =
         (fun engine ~key ->
           Option.map (fun cell -> cell.input_node) (find_input engine input (unmarshal key)));
@@ -1074,8 +1082,9 @@ let read (context : context) (input : ('key, 'value) input) (key : 'key) : 'valu
   | None ->
       if engine.frozen then None
       else begin
-        (* A read that found nothing is read too. *)
+        (* A read that found nothing is read too, and is part of the state. *)
         let cell = make_input engine input key ~below:None in
+        Hashtbl.replace engine.unsaved cell.input_node.id cell.input_node;
         record context cell.input_node;
         None
       end
@@ -1453,9 +1462,19 @@ let write ?(full = false) engine =
     end
     else unsaved_nodes engine
   in
+  (* A node that is written must find what it read when the state is
+     opened, so a node of the engine's own that the chain does not hold yet
+     is written with the first node that read it. *)
+  let scheduled = Hashtbl.create 256 in
+  List.iter (fun (node : node) -> Hashtbl.replace scheduled node.id ()) candidates;
+  let more = Queue.create () in
   let places = Hashtbl.create 256 in
   let table = ref [] in
   let place (read : node) =
+    if read.engine == engine && (not read.written) && not (Hashtbl.mem scheduled read.id) then begin
+      Hashtbl.replace scheduled read.id ();
+      Queue.add read more
+    end;
     match Hashtbl.find_opt places read.id with
     | Some place -> place
     | None ->
@@ -1466,6 +1485,7 @@ let write ?(full = false) engine =
   in
   let written (node : node) saved_value saved_reads =
     node.written <- true;
+    node.superseding <- not full;
     Some
       {
         saved_name = name node;
@@ -1475,43 +1495,49 @@ let write ?(full = false) engine =
         saved_kept = kept node;
       }
   in
-  let saved =
-    List.filter_map
-      (fun (node : node) ->
-        if Hashtbl.mem engine.unsaved node.id then record_fact engine store node;
-        (* A copy that came out as the base's node, reading the same, is the
-           base's node, and is not written. *)
-        let as_below () =
-          (not full)
-          &&
-          match node.below with
-          | Some base ->
-              base.fingerprint = node.fingerprint
-              && base.kept = kept node
-              && same_reads engine node base
-          | None -> false
-        in
-        match node.cell with
-        | Input (_, { slot = Unset; _ }) -> (
-            match node.below with
-            | Some { cell = Input (_, { slot = Unset; _ }); _ } when not full -> None
-            | _ -> written node None [])
-        | Input _ -> (
-            match fingerprint engine node with
-            | Some value when not (as_below ()) -> written node (Some value) []
-            | _ -> None)
-        | Result _ -> (
-            match fingerprint engine node with
-            | Some value ->
-                if as_below () then None
-                else written node (Some value) (List.map place (traced_reads engine node))
-            | None ->
-                (* A result with no fingerprint takes the place of an earlier
+  let save (node : node) =
+    if Hashtbl.mem engine.unsaved node.id then record_fact engine store node;
+    (* A copy that came out as the base's node, reading the same, is the
+           base's node, and is not written, unless an earlier difference
+           holds another result for it, which this one takes the place of. *)
+    let as_base = (not full) && engine.on_whole && not node.superseding in
+    let as_below () =
+      as_base
+      &&
+      match node.below with
+      | Some base ->
+          base.fingerprint = node.fingerprint
+          && base.kept = kept node
+          && same_reads engine node base
+      | None -> false
+    in
+    match node.cell with
+    | Input (_, { slot = Unset; _ }) -> (
+        match node.below with
+        | Some { cell = Input (_, { slot = Unset; _ }); _ } when as_base -> None
+        | _ -> written node None [])
+    | Input _ -> (
+        match fingerprint engine node with
+        | Some value when not (as_below ()) -> written node (Some value) []
+        | _ -> None)
+    | Result _ -> (
+        match fingerprint engine node with
+        | Some value ->
+            if as_below () then None
+            else written node (Some value) (List.map place (traced_reads engine node))
+        | None ->
+            (* A result with no fingerprint takes the place of an earlier
                    one the chain holds. *)
-                if node.written && not full then written node None [] else None)
-        | Unfilled -> None)
-      candidates
+            if node.written && not full then written node None [] else None)
+    | Unfilled -> None
   in
+  let first = List.filter_map save candidates in
+  let rec rest found =
+    match Queue.take_opt more with
+    | Some node -> rest (match save node with Some saved -> saved :: found | None -> found)
+    | None -> List.rev found
+  in
+  let saved = first @ rest [] in
   let count = List.length saved in
   let artifact =
     {
@@ -1525,6 +1551,7 @@ let write ?(full = false) engine =
     }
   in
   let name = store.put (Marshal.to_string artifact []) in
+  if full then engine.on_whole <- false;
   engine.chain <- Some name;
   engine.whole <- artifact.whole_size;
   engine.differences <- artifact.difference_size;
@@ -1572,16 +1599,41 @@ let values_in store name =
 let fill engine (artifacts : artifact list) =
   let last : (string * string, saved_node * artifact) Hashtbl.t = Hashtbl.create 1024 in
   let order = ref [] in
+  let gone = Hashtbl.create 16 in
   List.iter
     (fun (artifact : artifact) ->
-      List.iter (Hashtbl.remove last) artifact.dropped;
+      List.iter
+        (fun key ->
+          Hashtbl.remove last key;
+          Hashtbl.replace gone key ())
+        artifact.dropped;
       List.iter
         (fun (node : saved_node) ->
           let key = (node.saved_name, node.saved_key) in
           if not (Hashtbl.mem last key) then order := key :: !order;
+          Hashtbl.remove gone key;
           Hashtbl.replace last key (node, artifact))
         artifact.saved)
     artifacts;
+  (* A node that was dropped is not in the state. Where a base holds it, the
+     engine holds its place with nothing in it, so that it is computed if it
+     is asked for, and the base's result, which is of an earlier state, is
+     never read. *)
+  Hashtbl.iter
+    (fun (name, key) () ->
+      match Hashtbl.find_opt restorers name with
+      | Some restorer -> (
+          match restorer.find engine ~key with
+          | Some (found : node) when found.engine != engine -> (
+              match restorer.restore engine ~key with
+              | node ->
+                  node.written <- true;
+                  node.superseding <- true;
+                  node.kept <- false
+              | exception _ -> ())
+          | _ | (exception _) -> ())
+      | None -> ())
+    gone;
   let made =
     List.filter_map
       (fun key ->
@@ -1597,6 +1649,7 @@ let fill engine (artifacts : artifact list) =
                     node.fingerprint <- saved.saved_value;
                     node.kept <- saved.saved_kept;
                     node.written <- true;
+                    node.superseding <- true;
                     (match node.cell with
                     | Input (_, cell) ->
                         cell.slot <- (if saved.saved_value = None then Unset else Stored)
@@ -1622,16 +1675,26 @@ let fill engine (artifacts : artifact list) =
         List.iter (fun read -> add_reader engine read node) reads
       end)
     made;
-  (* What cannot be checked is left out, with what reads it. *)
+  (* What cannot be checked is left out, with what reads it. One that a base
+     also holds keeps its place, with nothing in it, so that the base's
+     result, which is of an earlier state, is not read in its stead. *)
+  let emptied = Hashtbl.create 8 in
   let rec remove (node : node) =
-    if node.alive then begin
-      node.alive <- false;
+    if node.alive && not (Hashtbl.mem emptied node.id) then begin
+      Hashtbl.replace emptied node.id ();
       let readers = Hashtbl.fold (fun _ reader found -> reader :: found) node.readers [] in
-      forget engine node;
-      Hashtbl.remove engine.own node.id;
-      Option.iter (fun (base : node) -> Hashtbl.remove engine.shadows base.id) node.below;
       List.iter (fun read -> remove_reader engine read node) node.reads;
       node.reads <- [];
+      node.fingerprint <- None;
+      (match node.cell with
+      | Input (_, cell) -> cell.slot <- Unset
+      | Result (_, cell) -> cell.outcome <- None
+      | Unfilled -> ());
+      if node.below = None then begin
+        node.alive <- false;
+        forget engine node;
+        Hashtbl.remove engine.own node.id
+      end;
       List.iter remove readers
     end
   in
@@ -1686,6 +1749,7 @@ let open_ ?log store ~bases name =
       fill engine (List.map snd differences);
       let last = match List.rev differences with (_, last) :: _ -> last | [] -> whole in
       engine.chain <- Some name;
+      engine.on_whole <- true;
       engine.whole <- last.whole_size;
       engine.differences <- last.difference_size;
       engine.depth <- last.difference_count;

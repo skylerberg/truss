@@ -16,6 +16,8 @@
   yields
   lower
   reachable
+  cbor
+  blake3
   emit_c
   toolchain
   startup

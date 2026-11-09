@@ -375,11 +375,12 @@ let body_context (context : Lower.context) (interface : Environment.interface) k
 
 let check database (key : Names.key) =
   match
-    ( Query.demand database Names.definition key,
-      Query.demand database Resolve.resolved key,
-      Query.demand database Names.base key )
+    (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
   with
-  | Some definition, Some resolved, Some (module_, _) ->
+  | Some definition, Some resolved ->
+      (* The definition's module is in its key. Where it starts in its file
+         is not read, so a definition that only moved is not checked again. *)
+      let module_ = key.module_ in
       let lowered, context = Environment.lower_definition database key definition resolved in
       let text = Option.value ~default:"" (Query.demand database Names.text key) in
       let binding_spans = Hashtbl.create 64 in

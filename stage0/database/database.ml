@@ -651,6 +651,15 @@ let test_results () : Compile.results =
 
 let flush_store () = Store.flush (current ()).store
 
+(* The roots code generation searches from are an input, which only the
+   database sets. *)
+let want_in engine lowering wanted =
+  let old = Option.value (read (Engine.context engine) Compile.roots lowering) ~default:[] in
+  let all = List.sort_uniq Instance.compare (wanted @ old) in
+  if all <> old then Engine.set engine Compile.roots lowering all
+
+let want session lowering wanted = want_in session.engine lowering wanted
+
 let sessions () =
   match !state with
   | None -> []

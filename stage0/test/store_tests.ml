@@ -290,6 +290,76 @@ let () =
       let value = Engine.get engine reads_through () in
       if value <> 100 then fail "result %d after the change" value)
 
+(* What fuzzing the engine found *)
+
+let switch_input = Query.input ~name:"saved_switch" ~show:(fun () -> "") ()
+
+let leaf =
+  unit_query "saved_leaf" ~saved:true (fun database () -> Query.get database value_input ())
+
+let top =
+  unit_query "saved_top" ~saved:true ~phase:Bodies (fun database () ->
+      if Query.get database switch_input () then Query.demand database leaf () else 0)
+
+let maybe_input = Query.input ~name:"saved_maybe" ~show:(fun () -> "") ()
+
+let defaulted =
+  unit_query "saved_defaulted" ~saved:true (fun database () ->
+      Option.value (Query.find database maybe_input ()) ~default:7)
+
+let () =
+  test "a result dropped since the whole state was written is not read from it" (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let engine = attached store in
+      Engine.set engine switch_input () true;
+      Engine.set engine value_input () 1;
+      if Engine.get engine top () <> 1 then fail "another result";
+      ignore (Engine.write engine);
+      (* The leaf is dropped, and the input it read changes after. *)
+      Engine.set engine switch_input () false;
+      if Engine.get engine top () <> 0 then fail "another result without the leaf";
+      Engine.set engine value_input () 5;
+      let again = opened store (Engine.write engine) in
+      Engine.set again switch_input () true;
+      let value = Engine.get again top () in
+      if value <> 5 then fail "read the leaf of the earlier state: %d" value);
+  test "an input that was read and is not set is part of a written difference" (fun () ->
+      let store, artifact = written () in
+      let engine = opened store artifact in
+      if Engine.get engine defaulted () <> 7 then fail "another result";
+      let again = opened store (Engine.write engine) in
+      if Engine.get again defaulted () <> 7 then fail "another result when opened";
+      if Engine.executed again <> [] then
+        fail "computed [%s]" (String.concat "; " (Engine.executed again));
+      Engine.set again maybe_input () 3;
+      if Engine.get again defaulted () <> 3 then fail "setting the input did not reach it");
+  test "a node the chain does not hold is written with the first node that reads it" (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let engine = attached store in
+      Engine.set engine value_input () 4;
+      ignore (Engine.get engine doubled ());
+      (* An input that is set and removed is held, and not written, since
+         nothing reads it yet. *)
+      Engine.set engine maybe_input () 1;
+      Engine.remove engine maybe_input ();
+      ignore (Engine.write engine);
+      if Engine.get engine defaulted () <> 7 then fail "another result";
+      let again = opened store (Engine.write engine) in
+      if Engine.get again defaulted () <> 7 then fail "another result when opened";
+      if Engine.executed again <> [] then
+        fail "computed [%s]" (String.concat "; " (Engine.executed again)));
+  test "a result that returns to the whole state's takes the place of a difference's" (fun () ->
+      let store, artifact = written () in
+      let engine = opened store artifact in
+      Engine.set engine value_input () 5;
+      if Engine.get engine doubled () <> 10 then fail "another result";
+      ignore (Engine.write engine);
+      Engine.set engine value_input () 4;
+      if Engine.get engine doubled () <> 8 then fail "another result after going back";
+      let again = opened store (Engine.write engine) in
+      let value = Engine.get again doubled () in
+      if value <> 8 then fail "read the earlier difference's result: %d" value)
+
 let layer_value = Query.input ~name:"layer_input" ~show:(fun () -> "") ()
 let own_value = Query.input ~name:"own_input" ~show:(fun () -> "") ()
 

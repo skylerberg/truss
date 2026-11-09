@@ -5,15 +5,28 @@
 
 type t
 
+(* How instances are lowered: for which target, and whether the program
+   checks what the prover would prove. *)
+type lowering
+
+(* The instances whose keys have been asked for, for each way of lowering.
+   Finding the instances that reach each other starts from these, so a
+   driver's [want] adds to this input before a key is asked for. Only the
+   database sets it. *)
+val roots : (lowering, Instance.key list) Query.input
+
 (* With [checks], the default, the program checks at run time what the
    prover would prove: [requires] clauses that can run, integer overflow,
    and division. Stage0 has no prover, so its builds check, as CODEGEN.md's
    [--check-proofs] does. [file_name] names the file of each position the
    program reports, by its module, and is [Workspace.file_path] unless a
-   driver shows files another way. *)
+   driver shows files another way. [want] is told which instances' keys are
+   about to be asked for, and adds them to [roots]; without it, asking for
+   a key is an error. *)
 val create :
   ?checks:bool ->
   ?file_name:(Path.module_ -> string) ->
+  ?want:(lowering -> Instance.key list -> unit) ->
   Query.context ->
   Memory_layout.target ->
   Toolchain.t ->

@@ -53,6 +53,13 @@ val programs_directory : unit -> string
 val test_results : unit -> Compile.results
 (** Kept test results, in the store. *)
 
+val want : session -> Compile.lowering -> Instance.key list -> unit
+(** Adds to the instances whose keys a session has been asked for, which is how code generation is
+    given the roots it searches from, as {!Compile.create}'s [want]. *)
+
+val want_in : Engine.t -> Compile.lowering -> Instance.key list -> unit
+(** The same, for an engine that is not a session's, as tests have. *)
+
 val flush_store : unit -> unit
 (** Writes what the store holds in memory. *)
 

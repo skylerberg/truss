@@ -213,7 +213,10 @@ let load text =
   | diagnostics ->
       fail "the source has diagnostics:\n%s"
         (String.concat "" (List.map (Diagnostic.render source) diagnostics)));
-  (database, Compile.create database target_64 (Lazy.force compiler) (Lazy.force cache) settings)
+  ( database,
+    Compile.create
+      ~want:(Database.want_in (Engine.of_context database))
+      database target_64 (Lazy.force compiler) (Lazy.force cache) settings )
 
 (* The paths of a module's tests, in order. *)
 let tests_of database =

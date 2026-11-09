@@ -100,17 +100,13 @@ let reached env ~lookup roots =
 
 let reachable env ~lookup roots = List.map fst (reached env ~lookup roots)
 
-let test_key env ~lookup root =
-  let instances = reachable env ~lookup [ root ] in
-  let number_of_instance key =
-    let rec find i = function
-      | [] ->
-          invalid_arg ("Reachable.test_key: an unreachable reference to " ^ Instance.to_string key)
-      | compiled :: rest ->
-          if Instance.equal (compiled_key compiled) key then i else find (i + 1) rest
-    in
-    find 0 instances
-  in
+(* The hash of what an instance compiles to, by itself: its encoding with
+   each instance it refers to written as that instance's place among
+   [references], itself as a mark, and each path as a number given in the
+   order paths are first met. So the hash holds no name, and renaming or
+   moving a definition changes no hash. *)
+let own_hash ~references compiled =
+  let self = compiled_key compiled in
   let paths = ref [] in
   let path p =
     let rec find i = function
@@ -121,26 +117,141 @@ let test_key env ~lookup root =
     in
     Cbor.int (find 0 !paths)
   in
-  let instance key = Cbor.Array [ Text "instance"; Cbor.int (number_of_instance key) ] in
-  let encoded =
-    List.map
-      (function
-        | Lir.Code i -> Lir.encode ~path ~instance (Lir.canonical_instance i)
-        | Data d -> Lir.encode_data ~path ~instance d
-        | Table t -> Lir.encode_table ~path ~instance t
-        | Evidence e -> Lir.encode_evidence ~path ~instance e)
-      instances
+  let instance key =
+    if Instance.equal key self then Cbor.Array [ Text "self" ]
+    else
+      let rec find i = function
+        | [] ->
+            invalid_arg
+              ("Reachable.own_hash: a reference that was not collected, to "
+             ^ Instance.to_string key)
+        | other :: rest -> if Instance.equal other key then i else find (i + 1) rest
+      in
+      Cbor.Array [ Text "instance"; Cbor.int (find 0 references) ]
   in
-  (* The target is in the key because [USize] is a [typedef] in the C, so
-     the LIR is the same for every width while results such as
-     [USize.maximum] are not. *)
-  let target = Memory_layout.target env in
-  Blake3.hash
-    (Cbor.encode
-       (Cbor.Array
-          [
-            Text "truss test";
-            Cbor.int Lir.version;
-            Cbor.Array [ Cbor.int target.pointer_bytes; Cbor.int target.usize_bytes ];
-            Cbor.Array encoded;
-          ]))
+  let encoded =
+    match compiled with
+    | Lir.Code i -> Lir.encode ~path ~instance (Lir.canonical_instance i)
+    | Data d -> Lir.encode_data ~path ~instance d
+    | Table t -> Lir.encode_table ~path ~instance t
+    | Evidence e -> Lir.encode_evidence ~path ~instance e
+  in
+  Blake3.hash (Cbor.encode encoded)
+
+module Keys = Map.Make (struct
+  type t = Instance.key
+
+  let compare = Instance.compare
+end)
+
+module Table = Hashtbl.Make (struct
+  type t = Instance.key
+
+  let equal = Instance.equal
+  let hash key = Hashtbl.hash_param 64 256 key
+end)
+
+(* The groups of instances that reach each other, among everything the
+   roots reach: for each instance of such a group, the group's instances in
+   order. An instance that refers only to itself is no group, since its own
+   hash marks that. Tarjan's algorithm, with a stack of its own in place of
+   recursion, so that a long chain of calls is no deeper than a short one. *)
+let groups ~edges roots =
+  let counter = ref 0 in
+  let number = Table.create 1024 and low = Table.create 1024 in
+  let waiting = Table.create 1024 in
+  let stack = ref [] in
+  let found = ref Keys.empty in
+  let work = Stack.create () in
+  let enter key =
+    Table.replace number key !counter;
+    Table.replace low key !counter;
+    incr counter;
+    stack := key :: !stack;
+    Table.replace waiting key ();
+    Stack.push (key, ref (edges key)) work
+  in
+  let lower key to_ = if to_ < Table.find low key then Table.replace low key to_ in
+  let leave key =
+    if Table.find low key = Table.find number key then begin
+      let rec pop members =
+        match !stack with
+        | [] -> members
+        | top :: rest ->
+            stack := rest;
+            Table.remove waiting top;
+            let members = top :: members in
+            if Instance.equal top key then members else pop members
+      in
+      match pop [] with
+      | [] | [ _ ] -> ()
+      | members ->
+          let members = List.sort Instance.compare members in
+          found := List.fold_left (fun found member -> Keys.add member members found) !found members
+    end
+  in
+  List.iter
+    (fun root ->
+      if not (Table.mem number root) then begin
+        enter root;
+        while not (Stack.is_empty work) do
+          let key, rest = Stack.top work in
+          match !rest with
+          | next :: more ->
+              rest := more;
+              if not (Table.mem number next) then enter next
+              else if Table.mem waiting next then lower key (Table.find number next)
+          | [] ->
+              ignore (Stack.pop work);
+              if not (Stack.is_empty work) then lower (fst (Stack.top work)) (Table.find low key);
+              leave key
+        done
+      end)
+    roots;
+  !found
+
+let key_of parts = Blake3.hash (Cbor.encode (Cbor.Array parts))
+
+(* The key of everything an instance that is in no group can reach: its own
+   hash, and the key of each instance it refers to, in order. *)
+let unit_key ~own reached =
+  key_of [ Text "unit"; Bytes own; Cbor.Array (List.map (fun key -> Cbor.Bytes key) reached) ]
+
+(* The key of everything an instance of a group can reach. The group's
+   instances are numbered in the order a walk from the instance first
+   reaches them, and each is written as its own hash and what it refers to:
+   a number for an instance of the group, and the key of everything it can
+   reach for any other. [link] gives an instance's own hash and what it
+   refers to, and [deep] the key of an instance outside the group. *)
+let group_key ~link ~deep ~members start =
+  let inside key = List.exists (Instance.equal key) members in
+  let order = Table.create 8 in
+  let rec walk found = function
+    | [] -> List.rev found
+    | key :: queue ->
+        if Table.mem order key then walk found queue
+        else begin
+          Table.replace order key (Table.length order);
+          let own, references = link key in
+          walk ((own, references) :: found) (queue @ List.filter inside references)
+        end
+  in
+  let walked = walk [] [ start ] in
+  key_of
+    [
+      Text "group";
+      Cbor.Array
+        (List.map
+           (fun (own, references) ->
+             Cbor.Array
+               [
+                 Bytes own;
+                 Cbor.Array
+                   (List.map
+                      (fun key ->
+                        if inside key then Cbor.Array [ Text "in"; Cbor.int (Table.find order key) ]
+                        else Cbor.Array [ Text "out"; Bytes (deep key) ])
+                      references);
+               ])
+           walked);
+    ]
