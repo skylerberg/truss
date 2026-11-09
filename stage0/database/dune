@@ -1,3 +1,19 @@
 (library
  (name database)
- (libraries engine query path workspace source standard_library type_checker))
+ (libraries
+  unix
+  blake3
+  engine
+  query
+  store
+  path
+  workspace
+  source
+  diagnostic
+  standard_library
+  type_checker
+  resolve
+  memory_layout
+  toolchain
+  build
+  compile))

@@ -148,3 +148,7 @@ val restore : t -> saved_node list -> unit
 
 val engine_of : context -> t
 (** The engine a context reads from. *)
+
+val fork : t -> t
+(** A copy of an engine that shares every result with it and diverges from here on, for a new
+    worktree or a commit started from another session's state. *)

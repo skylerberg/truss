@@ -191,31 +191,12 @@ let render_report records =
    the machine, so those tests run again. *)
 let keep record = record.outcome = "passed" && record.message = None && record.echo = None
 
-let rec ensure_directory directory =
-  if not (Sys.file_exists directory) then begin
-    ensure_directory (Filename.dirname directory);
-    try Unix.mkdir directory 0o755 with Unix.Unix_error (EEXIST, _, _) -> ()
-  end
+type results = { find : string -> string option; add : string -> string -> unit }
 
-(* A key, which is a hash's bytes, as a file name. *)
-let file_name key =
-  String.concat ""
-    (List.map (Printf.sprintf "%02x") (List.map Char.code (List.of_seq (String.to_seq key))))
+let stored results key =
+  Option.map (fun outcome -> { outcome; message = None; echo = None }) (results.find key)
 
-let stored directory key =
-  let path = Filename.concat directory (file_name key) in
-  if Sys.file_exists path then
-    Some
-      { outcome = In_channel.with_open_bin path In_channel.input_all; message = None; echo = None }
-  else None
-
-(* Writes a kept result, a pass with nothing to show, whole or not at all. *)
-let store directory key record =
-  ensure_directory directory;
-  let path = Filename.concat directory (file_name key) in
-  let temporary = Printf.sprintf "%s.%d" path (Unix.getpid ()) in
-  Out_channel.with_open_bin temporary (fun channel -> output_string channel record.outcome);
-  Sys.rename temporary path
+let store results key record = results.add key record.outcome
 
 let run_tests ?results t ~time_limit tests =
   let roots = List.map Lower.test_key tests in
@@ -230,7 +211,7 @@ let run_tests ?results t ~time_limit tests =
   in
   match results with
   | None -> run roots
-  | Some directory -> (
+  | Some results -> (
       (* Each test's result is kept under its key, which changes with any
          code it can run, and a test is run again only when it changes. *)
       match
@@ -240,7 +221,7 @@ let run_tests ?results t ~time_limit tests =
       with
       | exception Invalid_argument message -> Error message
       | keyed -> (
-          let known = List.map (fun (root, key) -> (root, key, stored directory key)) keyed in
+          let known = List.map (fun (root, key) -> (root, key, stored results key)) keyed in
           let missing =
             List.filter_map
               (fun (root, key, r) -> if r = None then Some (root, key) else None)
@@ -255,7 +236,7 @@ let run_tests ?results t ~time_limit tests =
                   match parse_report out with
                   | records when List.length records = List.length missing ->
                       List.iter2
-                        (fun (_, key) record -> if keep record then store directory key record)
+                        (fun (_, key) record -> if keep record then store results key record)
                         missing records;
                       Ok records
                   | _ -> Error ("Compile: a test report that is not one record a test:\n" ^ out))

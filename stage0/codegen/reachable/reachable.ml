@@ -125,5 +125,16 @@ let test_key env ~lookup root =
         | Evidence e -> Lir.encode_evidence ~path ~instance e)
       instances
   in
+  (* The target is in the key because [USize] is a [typedef] in the C, so
+     the LIR is the same for every width while results such as
+     [USize.maximum] are not. *)
+  let target = Memory_layout.target env in
   Blake3.hash
-    (Cbor.encode (Cbor.Array [ Text "truss test"; Cbor.int Lir.version; Cbor.Array encoded ]))
+    (Cbor.encode
+       (Cbor.Array
+          [
+            Text "truss test";
+            Cbor.int Lir.version;
+            Cbor.Array [ Cbor.int target.pointer_bytes; Cbor.int target.usize_bytes ];
+            Cbor.Array encoded;
+          ]))

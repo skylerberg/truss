@@ -69,6 +69,7 @@ and ops = {
   counterpart : t -> node option;
   same : node -> bool;
   move_to : t -> unit;
+  copy : t -> node;  (** The same node, with its result, made in another engine *)
 }
 
 and frame = {
@@ -125,6 +126,7 @@ let no_ops =
     counterpart = (fun _ -> None);
     same = (fun _ -> false);
     move_to = ignore;
+    copy = (fun _ -> invalid_arg "Incremental: a node that cannot be copied");
   }
 
 let new_node (engine : t) ~name ~label ~is_input ~saved =
@@ -349,6 +351,12 @@ let rec make_input_cell :
               | None, None -> true
               | _ -> false)
           | _ -> false);
+      copy =
+        (fun target ->
+          let copied = make_input_cell target input key in
+          copied.slot <- cell.slot;
+          copied.input_hash <- cell.input_hash;
+          copied.input_node);
     };
   Hashtbl.replace (table input.input_cells engine) key cell;
   cell
@@ -517,10 +525,15 @@ let rec make_cell : 'key 'value. t -> ('key, 'value) query -> 'key -> ('key, 'va
         (fun () ->
           match (cell.hash, cell.outcome) with
           | Some hash, _ -> Some hash
-          | None, Some (Value value) ->
-              let hash = node.engine.put (Marshal.to_string value []) in
-              cell.hash <- Some hash;
-              Some hash
+          | None, Some (Value value) -> (
+              (* A value that holds functions cannot be saved, and is
+                 computed again after loading instead. *)
+              match Marshal.to_string value [] with
+              | bytes ->
+                  let hash = node.engine.put bytes in
+                  cell.hash <- Some hash;
+                  Some hash
+              | exception Invalid_argument _ -> None)
           | None, (Some (Raised _) | None) -> None);
       counterpart = (fun other -> Option.map (fun c -> c.node) (find_cell other query key));
       same =
@@ -542,6 +555,12 @@ let rec make_cell : 'key 'value. t -> ('key, 'value) query -> 'key -> ('key, 'va
           Hashtbl.replace layer.all node.id node;
           if node.saved then Hashtbl.replace layer.unsaved node.id node;
           Hashtbl.replace (table query.cells layer) key cell);
+      copy =
+        (fun target ->
+          let copied = make_cell target query key in
+          copied.outcome <- cell.outcome;
+          copied.hash <- cell.hash;
+          copied.node);
     };
   Hashtbl.replace (table query.cells engine) key cell;
   cell
@@ -900,3 +919,34 @@ let restore (engine : t) (saved : saved_node list) =
   engine.dropped <- []
 
 let engine_of context = context.engine
+
+let fork (engine : t) =
+  check_can_change engine;
+  let copy = make_engine ~logging:engine.logging ~shared:engine.shared ~is_frozen_layer:false in
+  copy.stamp <- engine.stamp;
+  copy.put <- engine.put;
+  copy.get <- engine.get;
+  let originals = nodes engine in
+  let made = Hashtbl.create (List.length originals) in
+  List.iter (fun (node : node) -> Hashtbl.replace made node.id (node.ops.copy copy)) originals;
+  let mapped (read : node) =
+    match Hashtbl.find_opt made read.id with Some n -> n | None -> read
+  in
+  List.iter
+    (fun (node : node) ->
+      let twin = Hashtbl.find made node.id in
+      twin.reads <- List.map mapped node.reads;
+      List.iter
+        (fun (read : node) ->
+          if not (is_frozen read) then Hashtbl.replace read.readers twin.id twin)
+        twin.reads;
+      twin.height <- node.height;
+      twin.dirty <- node.dirty;
+      twin.changed_at <- node.changed_at;
+      twin.verified_at <- node.verified_at;
+      twin.kept <- node.kept;
+      twin.read_once <- node.read_once;
+      if twin.kept && twin.dirty then Hashtbl.replace copy.dirty_kept twin.id twin;
+      if twin.saved then Hashtbl.replace copy.unsaved twin.id twin)
+    originals;
+  copy

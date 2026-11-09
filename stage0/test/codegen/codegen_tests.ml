@@ -2590,14 +2590,17 @@ test "once" {
 let () =
   test "a passing test's result is kept by its key, and only a changed test runs again" (fun () ->
       incr counter;
-      let results = Filename.concat (Lazy.force scratch) (Printf.sprintf "results%d" !counter) in
+      let table = Hashtbl.create 4 in
+      let results : Compile.results =
+        { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
+      in
       let run text =
         let database, compile = load text in
         match Compile.run_tests ~results compile ~time_limit:2000 (tests_of database) with
         | Ok (status, output) -> (status, output)
         | Error message -> failwith message
       in
-      let kept () = Array.length (Sys.readdir results) in
+      let kept () = Hashtbl.length table in
       let source =
         {|test "passes" {
   assert 1 + 1 == 2

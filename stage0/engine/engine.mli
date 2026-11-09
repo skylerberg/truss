@@ -22,6 +22,10 @@ val get : t -> ('key, 'value) Query.query -> 'key -> 'value
 
 val release : t -> ('key, 'value) Query.query -> 'key -> unit
 
+val fork : t -> t
+(** A copy that shares every result and diverges from here on: the state a new worktree or a commit
+    starts from. *)
+
 type node = Incremental.node
 type change = Incremental.change = { computed : node list; changed : node list }
 
@@ -41,3 +45,24 @@ val reads : node -> node list
 val readers : node -> node list
 val counterpart : node -> t -> node option
 val same_outcome : node -> node -> bool
+
+(** {1 Saving and loading}
+
+    A session's graph is saved as a journal: a base holding every saved node, and a record of the
+    changes since then for each save. Values are put in the store by hash. *)
+
+val attach : t -> Store.t -> unit
+(** Puts and gets the engine's saved values through the store. *)
+
+val save : t -> Store.journal -> unit
+(** Appends what changed since the last save, or writes a new base once the changes outgrow it. *)
+
+val save_all : t -> Store.journal -> unit
+(** Writes a new base holding every saved node. *)
+
+val load : ?log:bool -> ?shared:t -> ?frozen:bool -> Store.t -> Store.journal -> t option
+(** An engine filled from a journal, or [None] if the journal has nothing; with [~frozen:true], a
+    frozen layer. Results are read from the store when first needed. *)
+
+val values_in : Store.journal -> string list
+(** Every value a journal refers to, for collecting the store. *)

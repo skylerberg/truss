@@ -1406,7 +1406,11 @@ let check database (key : Resolve.Names.key) =
         }
   | _ -> None
 
-let ownership = Query.query ~name:"ownership" ~show:Resolve.Names.show_key check
+let ownership =
+  Query.query ~name:"ownership" ~show:Resolve.Names.show_key ~saved:true
+    ~about:(fun (key : Resolve.Names.key) ->
+      Some { Query.path = key.path; part = Some "ownership" })
+    check
 
 let diagnostics database module_ =
   Resolve.Names.per_definition database module_ (fun key ->

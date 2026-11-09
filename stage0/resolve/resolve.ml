@@ -39,7 +39,9 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
   | Impl _ | Test _ | Definition_error _ -> None
 
 let resolved =
-  Query.query ~name:"resolved" ~show:Names.show_key (fun database (key : Names.key) ->
+  Query.query ~name:"resolved" ~show:Names.show_key ~saved:true
+    ~about:(fun (key : Names.key) -> Some { path = key.path; part = Some "resolved" })
+    (fun database (key : Names.key) ->
       match Query.demand database Names.definition key with
       | Some definition ->
           let module_ = key.module_ in
@@ -95,7 +97,7 @@ let resolved =
       | None -> None)
 
 let file_diagnostics =
-  Query.query ~name:"file_diagnostics" ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"file_diagnostics" ~show:Path.show_module ~saved:true (fun database module_ ->
       let file = Query.demand database Workspace.file module_ in
       (* An import is used when a name followed by [::] spells it anywhere
          outside the [use] lines, read from the tokens, so a use inside a part

@@ -20,3 +20,8 @@ let diagnostics database module_ =
     @ Usage.diagnostics database module_
     @ Ownership.diagnostics database module_
     @ Package_checks.diagnostics database module_)
+
+(* The same, as a query, which the database keeps current for each file of
+   a worktree and saves, so that a check after a restart finds it done. *)
+let file_diagnostics =
+  Query.query ~name:"all_diagnostics" ~show:Path.show_module ~saved:true diagnostics

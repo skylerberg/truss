@@ -1,138 +1,111 @@
-(* The [truss] command: [truss test DIRECTORY] builds a package's tests and
-   runs them, and [truss run DIRECTORY ARGUMENTS...] builds its program and
-   runs it. A package is a directory with a [truss.toml] manifest naming
-   it; each [.truss] file under the directory is one of its modules. *)
+(* The [truss] command. Each command is a request to the code database,
+   which the background process for this compiler answers, starting it if
+   it is not running; with [--no-server], this process answers it. See
+   DATABASE.md, "Requests". *)
 
 let usage () =
   prerr_endline
-    "usage: truss test [--sanitize] DIRECTORY\n\
-    \       truss run [--sanitize] DIRECTORY [ARGUMENTS...]";
+    "usage: truss check [DIRECTORY]\n\
+    \       truss test [--sanitize] [DIRECTORY]\n\
+    \       truss build [--sanitize] DIRECTORY OUTPUT\n\
+    \       truss run [--sanitize] DIRECTORY [ARGUMENTS...]\n\
+    \       truss impact [--base COMMIT] [DIRECTORY]\n\
+    \       truss holes [DIRECTORY]\n\
+    \       truss references NAME [DIRECTORY]\n\
+    \       truss dependencies NAME [DIRECTORY]\n\
+    \       truss overlap [--with BRANCH] [--merge] [DIRECTORY]\n\
+    \       truss explain FILE:LINE:COLUMN [DIRECTORY]\n\
+    \       truss sync [DIRECTORY]\n\
+    \       truss status | truss stop\n\
+     Every command takes --no-server, to answer it in this process, and --json, for tools.";
   exit 2
 
-let fail format =
-  Printf.ksprintf
-    (fun message ->
-      prerr_endline message;
-      exit 2)
-    format
-
-(* The package in a directory, loaded with the standard library, and its
-   modules. *)
-let load directory =
-  let manifest_path = Filename.concat directory "truss.toml" in
-  if not (Sys.file_exists manifest_path) then fail "%s: no truss.toml." directory;
-  let manifest =
-    try Type_checker.Manifest.parse (In_channel.with_open_bin manifest_path In_channel.input_all)
-    with Type_checker.Manifest.Malformed (line, expected) ->
-      fail "%s:%d: expected %s." manifest_path line expected
-  in
-  let engine = Engine.create ~shared:(Database.standard_layer ()) () in
-  let modules = Database.read_directory ~package:manifest.name directory in
-  Database.load_package engine ~name:manifest.name ~dependencies:manifest.dependencies modules;
-  let database = Engine.context engine in
-  (database, List.map fst modules)
-
-(* Every diagnostic in the package, each an error, which stops the build. *)
-let check database modules =
-  let found =
-    List.concat_map
-      (fun module_ ->
-        let source = (Query.demand database Workspace.file module_).source in
-        List.map
-          (fun diagnostic -> Diagnostic.render source diagnostic)
-          (Diagnostic.shown (Type_checker.diagnostics database module_)))
-      modules
-  in
-  List.iter prerr_string found;
-  if found <> [] then exit 1
-
-(* [--sanitize], right after the command, builds with AddressSanitizer and
-   UndefinedBehaviorSanitizer, for testing the compiler: a report from
-   either is a bug in it. *)
-let sanitize, arguments =
-  match Array.to_list Sys.argv with
-  | program :: command :: "--sanitize" :: rest -> (true, program :: command :: rest)
-  | all -> (false, all)
-
-let sanitizers =
-  [ "-fsanitize=address,undefined"; "-fno-sanitize-recover=undefined"; "-fno-omit-frame-pointer" ]
-
-let home = Option.value (Sys.getenv_opt "HOME") ~default:(Filename.get_temp_dir_name ())
-
-(* Where test results are kept, by the key of the code each can run. A
-   sanitized build keeps none, since it checks what a plain one does not. *)
-let results = if sanitize then None else Some (Filename.concat home ".cache/truss/results")
-
-let compiler database =
-  match Toolchain.find () with
-  | Error message -> fail "%s" message
-  | Ok toolchain ->
-      let cache = Build.cache (Filename.concat home ".cache/truss/objects") in
-      Compile.create database Memory_layout.target_64 toolchain cache
-        { build = Development; optimization = O1; extra = (if sanitize then sanitizers else []) }
+let absolute directory =
+  if Filename.is_relative directory then Filename.concat (Sys.getcwd ()) directory else directory
 
 let () =
-  match arguments with
-  | _ :: "test" :: [ directory ] -> (
-      let database, modules = load directory in
-      check database modules;
-      let tests =
-        List.concat_map
-          (fun module_ ->
-            List.filter_map
-              (fun (d : Resolve.Names.declaration) ->
-                match d.path with Test _ -> Some d.path | _ -> None)
-              (Query.demand database Resolve.Names.declarations module_))
-          modules
+  match Array.to_list Sys.argv with
+  | [ _; "__serve" ] -> Database.serve ()
+  | _ :: command :: rest ->
+      let flag name = List.mem name rest in
+      let rest =
+        List.filter
+          (fun a -> not (List.mem a [ "--no-server"; "--json"; "--sanitize"; "--merge" ]))
+          rest
       in
-      match Compile.run_tests ?results (compiler database) ~time_limit:10_000 tests with
-      | Error message ->
-          prerr_endline message;
-          exit 1
-      | Ok (status, output) ->
-          (* Each test's name and outcome, with its message and its echo
-             output indented under it, then a count of each outcome. *)
-          let indented text =
-            String.split_on_char '\n' text
-            |> List.filter (( <> ) "")
-            |> List.iter (fun line -> print_endline ("    " ^ line))
-          in
-          let records = Compile.parse_report output in
-          List.iter2
-            (fun test (record : Compile.record) ->
-              Printf.printf "%s: %s\n" (Path.show test) record.outcome;
-              Option.iter indented record.message;
-              Option.iter indented record.echo)
-            tests records;
-          let count outcome =
-            List.length (List.filter (fun (r : Compile.record) -> r.outcome = outcome) records)
-          in
-          let failed = List.length records - count "passed" in
-          Printf.printf "\n%d passed, %d did not pass\n" (count "passed") failed;
-          exit status)
-  | _ :: "run" :: directory :: arguments -> (
-      let database, modules = load directory in
-      check database modules;
-      let main =
-        List.find_map
-          (fun module_ ->
-            List.find_map
-              (fun (d : Resolve.Names.declaration) ->
-                match d.path with Top { name = "main"; _ } -> Some d.path | _ -> None)
-              (Query.demand database Resolve.Names.declarations module_))
-          modules
+      let rec option name = function
+        | key :: value :: _ when key = name -> Some value
+        | _ :: more -> option name more
+        | [] -> None
       in
-      match main with
-      | None -> fail "%s: the package has no main." directory
-      | Some main -> (
+      let rec without name = function
+        | key :: _ :: more when key = name -> without name more
+        | other :: more -> other :: without name more
+        | [] -> []
+      in
+      let positional = without "--with" (without "--base" rest) in
+      let directory_at i = absolute (Option.value (List.nth_opt positional i) ~default:".") in
+      let sanitize = flag "--sanitize" || Sys.getenv_opt "TRUSS_SANITIZE" = Some "1" in
+      let arguments = ref [] in
+      let request command directory : Database.request =
+        { directory; command; json = flag "--json" }
+      in
+      let request =
+        match command with
+        | "check" -> request Check (directory_at 0)
+        | "test" -> request (Test { sanitize }) (directory_at 0)
+        | "build" -> (
+            match positional with
+            | [ directory; output ] ->
+                request (Build { output = absolute output; sanitize }) (absolute directory)
+            | _ -> usage ())
+        | "run" -> (
+            match positional with
+            | directory :: program_arguments ->
+                arguments := program_arguments;
+                request (Run { sanitize }) (absolute directory)
+            | [] -> usage ())
+        | "impact" -> request (Impact { base = option "--base" rest }) (directory_at 0)
+        | "holes" -> request Holes (directory_at 0)
+        | "references" -> (
+            match positional with
+            | name :: _ -> request (References { name }) (directory_at 1)
+            | [] -> usage ())
+        | "dependencies" -> (
+            match positional with
+            | name :: _ -> request (Dependencies { name }) (directory_at 1)
+            | [] -> usage ())
+        | "overlap" ->
+            request
+              (Overlap { other = option "--with" rest; merge = flag "--merge" })
+              (directory_at 0)
+        | "explain" -> (
+            match positional with
+            | place :: _ -> (
+                match String.split_on_char ':' place with
+                | [ file; line; column ] -> (
+                    match (int_of_string_opt line, int_of_string_opt column) with
+                    | Some line, Some column ->
+                        request (Explain { file = absolute file; line; column }) (directory_at 1)
+                    | _ -> usage ())
+                | _ -> usage ())
+            | [] -> usage ())
+        | "sync" -> request Sync (directory_at 0)
+        | "status" -> request Status (absolute ".")
+        | "stop" -> request Stop (absolute ".")
+        | _ -> usage ()
+      in
+      let response =
+        if flag "--no-server" then Database.handle request else Database.call request
+      in
+      print_string response.output;
+      prerr_string response.errors;
+      (match (request.command, response.program) with
+      | Run _, Some program ->
           (* The program runs on this terminal, so it can prompt and read. *)
-          let output = Filename.temp_file "truss-run-" "" in
-          match Compile.build_program (compiler database) ~main ~output with
-          | Error message ->
-              prerr_endline message;
-              exit 1
-          | Ok () ->
-              let status = Toolchain.run_attached output arguments in
-              (try Sys.remove output with Sys_error _ -> ());
-              exit status))
+          let status = Toolchain.run_attached program !arguments in
+          (try Sys.remove program with Sys_error _ -> ());
+          exit status
+      | _ -> ());
+      exit response.status
   | _ -> usage ()

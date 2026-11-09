@@ -55,6 +55,9 @@ val journal : t -> string -> journal
 val lock : journal -> bool
 (** Takes the journal for this process alone, while it lives; [false] if another process has it. *)
 
+val unlock : journal -> unit
+(** Gives up a journal taken with {!lock}. *)
+
 val records : journal -> string list
 (** Every whole record, in the order appended. Reading stops at the first record that is cut short
     or damaged. *)
@@ -64,6 +67,9 @@ val append : journal -> string -> unit
 
 val compact : journal -> string -> unit
 (** Replaces every record with one, written beside the journal and renamed over it. *)
+
+val journal_name : journal -> string
+(** The journal's file, which names it. *)
 
 val journal_size : journal -> int
 val remove_journal : journal -> unit

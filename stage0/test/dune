@@ -4,6 +4,7 @@
   parser_tests
   hashing_tests
   query_tests
+  store_tests
   resolve_tests
   standard_library_tests
   interface_tests
@@ -34,6 +35,8 @@
   query
   engine
   database
+  store
+  unix
   path
   workspace
   resolve
