@@ -958,12 +958,13 @@ public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
 
 A function type is written `fn(Input) -> Output`. As with definitions,
 `-> Unit` is left out. A function type with clauses is written in
-parentheses, with the clauses after its return type, as in a definition:
+parentheses, with the clauses after its return type, as in a definition.
+These parameters have the three forms:
 
 ```truss
-fn(Element, Element) -> Ordering
-(fn(Item) uses Clock, Random)
-(fn(Request) -> Response uses Database, Log cost time finite)
+fn sort_by(items: mut List[Item], compare: fn(Item, Item) -> Ordering)
+fn record_all(items: List[Item], record: (fn(Item) uses Clock, Random))
+fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
 ```
 
 - A function type can have `uses` and `cost` clauses. Its parameters have no
@@ -1518,7 +1519,9 @@ while low < high
 
 `invariant` states a fact that holds at the start of every iteration.
 `decreases` names a value that shrinks on every iteration and never goes below
-zero, which proves the loop ends. Both are optional and may repeat.
+zero, which proves the loop ends. Both are optional. `invariant` may repeat;
+`decreases` appears at most once, and takes a list of measures compared in
+order, as for a function.
 
 ### Operators
 
@@ -2388,7 +2391,6 @@ test "writes the report"
 - Failed tests are never retried automatically.
 - A failed `assert` ends the test as failed. After an `assert`, the rest of the
   test can rely on what it asserted.
-- `assert` is only allowed directly in tests and proofs.
 - A panic fails only the test it happens in. There is no way to expect a
   panic: test error cases as `Result` values instead.
 - A test that does not finish within the project's time limit fails.
@@ -2650,6 +2652,10 @@ changes only with a new language version.
 | *(none)* | The same file only. This is the default. |
 | `internal` | The whole package. |
 | `public` | Everyone, including other packages. |
+
+An `impl`, a test, and a `proof` of a law take no visibility keyword. An
+`impl` applies wherever both its trait and its type are visible, and nothing
+names a test or a law's proof.
 
 A public type can hide its contents with `opaque`:
 

@@ -81,11 +81,11 @@ definition:
   | visibility_opt function_definition { () }
   | visibility_opt type_definition { () }
   | visibility_opt trait_definition { () }
-  | visibility_opt impl_definition { () }
+  | impl_definition { () }
   | visibility_opt capability_definition { () }
   | visibility_opt constant { () }
   | test_definition { () }
-  | theorem_definition { () }
+  | visibility_opt theorem_definition { () }
   | law_proof { () }
 
 visibility_opt:

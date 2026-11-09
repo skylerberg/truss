@@ -269,13 +269,16 @@ file       = { use NEWLINE } { definition NEWLINE } ;
 use        = "use" module_path ;
 module_path = LOWER_NAME { "::" LOWER_NAME } ;
 
-definition = [ visibility ] ( function | type_definition | trait | impl
-                            | capability | constant | test | theorem
-                            | law_proof ) ;
+definition = [ visibility ] ( function | type_definition | trait
+                            | capability | constant | theorem )
+           | impl | test | law_proof ;
 visibility = "public" [ "opaque" ] | "internal" ;
 ```
 
-`opaque` is allowed only before `type`.
+- `opaque` is allowed only before `type`.
+- An `impl`, a test, and a law proof take no visibility. An `impl` applies
+  wherever its trait and type are both visible, since a type has at most one
+  `impl` of each trait; nothing refers to a test or a law proof by name.
 
 ### Functions
 
@@ -447,6 +450,7 @@ assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
 loop_clause = "invariant" expression | "decreases" expression { "," expression } ;
 ```
 
+- A loop has at most one `decreases` clause. `invariant` may repeat.
 - The left side of an assignment must be a place.
 - Every name a `var` pattern binds is mutable.
 - In `let ... else` and `var ... else`, the expression must not end with `}`. Write

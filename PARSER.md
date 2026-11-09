@@ -63,7 +63,7 @@ token array ──▶ Split ──one token slice per definition──▶ Parse 
 | `Operators` | The operator table and the check for combinations that need parentheses |
 | `Habits` | Recognizers and fixes for syntax from other languages |
 | `Check` | Rules that need the whole tree of a definition |
-| `Syntax_print` | Prints a tree as an S-expression for tests, and as Truss for round trips |
+| `Syntax_print` | Prints a tree as a compact S-expression, for tests and `truss-parse --tree` |
 | `Parser` | The entry point: `Parser.parse : Source.t -> Token.t array -> Syntax.file * Diagnostic.t list` |
 
 The parser is one dune library that depends on `Token`, `Source`, and
@@ -485,27 +485,30 @@ added once the compiler works:
 
 ## Testing
 
-- **Golden tests.** Small `.truss` files, each with its tree as an
-  S-expression from `Syntax_print` and its diagnostics, compared with dune's
-  `diff` actions, as for the lexer.
-- **The documents as a corpus.** Every ```` ```truss ```` block in
-  SYNTAX.md, DESIGN.md, and GRAMMAR.md must parse with no diagnostics. Many
-  blocks mix definitions with statements, or show a signature with no body to
-  focus on it, so the corpus test parses each block with a snippet entry
-  point that accepts definitions, signatures without bodies, and statements.
-  That entry point exists only for this test.
-- **Both parsers.** The corpus, and corpus files with random mutations, go to
-  both the hand-written parser and a parser built by Menhir from
-  `grammar/truss.mly`. Any file one accepts and the other rejects points at a
-  bug in one of them, or a disagreement between the code and GRAMMAR.md.
-  The Menhir parser is built only for tests, with the latest Menhir release.
-- **Round trips.** Printing a tree as Truss and parsing the output gives the
-  same tree, apart from spans. This printer is the start of `truss fmt`.
-- **Fixes work.** Every fix in the test corpus is applied, the result is
-  parsed again, and the diagnostic must be gone with no new one in its place.
-  Where a diagnostic offers several fixes, each is tried.
-- **Robustness.** Random token sequences and mutated corpus files never raise
-  an exception, always finish, and always give a tree whose spans are in
-  bounds and in order.
+The tests follow IMPLEMENTATION.md's rules for testing: each states one fact
+about a small input, and there are no golden files.
+
+- **Focused tests** in `stage0/test/parser_tests.ml`, grouped by section of
+  this document. A test gives a small input and asserts its tree, printed
+  compactly by `Syntax_print`, or its one diagnostic: the code, where it
+  starts, and the exact text each fix produces, which must parse cleanly.
+- **The documents' examples parse cleanly.** Each ```` ```truss ```` block in
+  a Markdown document at the root of the repository is a test of its own.
+  Many blocks mix definitions with statements, or show a signature with no
+  body to focus on it, so these tests use a snippet entry point that splits a
+  block into definitions, signatures without bodies, and statements. That
+  entry point exists only for these tests.
+- **Both parsers agree on the documents.** A parser built by Menhir from
+  `grammar/truss.mly`, only for tests, parses each piece of each example with
+  the entry point for its kind, and must accept exactly what the hand-written
+  parser accepts. A disagreement points at a bug in one of them, or at a
+  difference between the code and GRAMMAR.md.
+- **The documents agree with the code.** A test checks GRAMMAR.md's list of
+  words the parser recognizes by spelling against the parser's own list.
 - **Moving a definition changes nothing.** Adding lines above a definition
   gives an identical tree for it.
+- **The fuzzer**, `stage0/tools/fuzz`, is run by hand. It also checks that
+  mutated examples never make the parser raise, that every tree's spans are
+  in bounds and in order, that every fix removes its diagnostic and adds no
+  other, and that both parsers accept and reject the same mutated inputs.
+  Each problem it finds becomes a focused test.

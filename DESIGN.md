@@ -1100,7 +1100,7 @@ files.
   `assert parse(text) == Err(ParseError.Empty)`. To check that a program
   crashes on bad input, an external test runs the built program through the
   `Processes` capability and checks its exit code.
-- **A failed `assert` is not a panic.** `assert` is only allowed directly in
+- **A failed `assert` is not a panic.** `assert` is only allowed in
   tests and proofs, so a failed `assert` simply ends the test as failed, like
   an early return. The prover can rely on an asserted fact for the rest of the
   test.
