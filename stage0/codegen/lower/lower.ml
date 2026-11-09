@@ -900,7 +900,7 @@ and place_expression st (e : S.expression) : Lir.place option =
                   { C.expression = e.id; parameter = i; mode = Read; conversion = None })
                 expressions
           in
-          Some (lend st call_ ~expressions ~arguments)
+          Some (lend st call_ ~expressions ~arguments ~span:e.span)
       | None -> None)
   | Call (_, arguments) when lending_intrinsic st e -> (
       (* [storage_at], [storage_at_mut], and [view_at] lend an element's
@@ -940,7 +940,8 @@ and place_expression st (e : S.expression) : Lir.place option =
           let expressions = call_expressions call_ callee arguments in
           Some
             (lend st call_ ~expressions
-               ~arguments:(with_receiver st call_ ~expressions call_.arguments))
+               ~arguments:(with_receiver st call_ ~expressions call_.arguments)
+               ~span:e.span)
       | _ -> None)
   | _ -> None
 
@@ -1077,7 +1078,7 @@ and evaluate_arguments st ~(expressions : S.expression list) ~(arguments : C.arg
    [arguments], each by its parameter's index, handing each [yield] to
    [on_yield]. A parameter left out is given its default, worked out where
    the method writes it. *)
-and inline st path type_arguments ~arguments ~on_yield =
+and inline st path type_arguments ~arguments ~call_site ~on_yield =
   if List.exists (Path.equal path) st.frame.inlined then
     bug "%s yields through recursion, which stage0 does not lower yet" (Path.show path);
   let code = code_of st.context path type_arguments in
@@ -1118,7 +1119,7 @@ and inline st path type_arguments ~arguments ~on_yield =
           (* A default is the method's own to drop, whatever the mode. *)
           if (mode = T.Own || filled) && not (trivial st ty) then own_in_scope st place)
         code.parameter_types;
-      check_requires st;
+      check_requires st ~call_site;
       block_into st code.body None);
   finish st.b (Goto exit);
   start st.b exit;
@@ -1127,12 +1128,13 @@ and inline st path type_arguments ~arguments ~on_yield =
 (* The place a lending method lends, by inlining it. Its [yield] must be
    its last statement, so nothing it does after lending can run before the
    caller uses the place. *)
-and lend st call_ ~expressions ~arguments =
+and lend st call_ ~expressions ~arguments ~span =
   match resolve_callee st call_ with
   | Some (path, type_arguments) -> (
+      let call_site = site st span in
       let arguments = evaluate_arguments st ~expressions ~arguments in
       let lent = ref None in
-      inline st path type_arguments ~arguments ~on_yield:(fun place ~resume ~stop:_ ->
+      inline st path type_arguments ~arguments ~call_site ~on_yield:(fun place ~resume ~stop:_ ->
           lent := Some place;
           finish st.b (Goto resume));
       match !lent with Some place -> place | None -> bug "a lending method that lends nothing")
@@ -2036,7 +2038,7 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
     emit st.b
       (Assign
          ( destination,
-           Use (owned st (lend st call_ ~expressions ~arguments) (ground st call_.result)) ))
+           Use (owned st (lend st call_ ~expressions ~arguments ~span) (ground st call_.result)) ))
   else
     let by_id id = List.find (fun (e : S.expression) -> e.id = id) expressions in
     let evaluate (argument : C.argument) =
@@ -2679,7 +2681,8 @@ and for_ st (s : S.statement) ~pattern ~iterable ~body =
           let caller = st.frame in
           let depth = List.length st.scopes in
           let after = block st.b in
-          inline st path type_arguments ~arguments ~on_yield:(fun place ~resume ~stop ->
+          let call_site = site st s.span in
+          inline st path type_arguments ~arguments ~call_site ~on_yield:(fun place ~resume ~stop ->
               let inner = st.frame in
               st.frame <- caller;
               let element_ty = yielded_type st path type_arguments in
@@ -2884,9 +2887,10 @@ and executable st (e : S.expression) =
 
 (* In a checked build, tests each [requires] clause that can run on entry
    to the code, its parameters bound, and panics with the clause when one
-   does not hold. Stage0 has no prover, so this is how a call that breaks a
+   does not hold, at [call_site] for inlined code and at the clause
+   otherwise. Stage0 has no prover, so this is how a call that breaks a
    contract is caught. *)
-and check_requires st =
+and check_requires ?call_site st =
   if st.context.checks then
     List.iter
       (fun (clause : S.expression) ->
@@ -2902,7 +2906,7 @@ and check_requires st =
                  failure = Panic;
                  message = Constant (Bytes message);
                  length = usize (String.length message);
-                 site = site st clause.span;
+                 site = (match call_site with Some s -> s | None -> site st clause.span);
                });
           start st.b holds;
           close_scope st scope

@@ -156,10 +156,11 @@ or a memory error:
 
 An overflow or division check reports the operator's position in the
 code that wrote it, since operators on built-in types are lowered where
-they are written. A `requires` check reports the clause's own position,
-which for an index is in the standard library. Reporting the caller's
-position there is left for later; Rust's `#[track_caller]` does it by
-passing the caller's location. `Compile.create ~checks:false` builds
+they are written. A `requires` check of an inlined lending or
+yielding method, such as the `List` index's, reports the call's position,
+and one of a function called reports the clause's own. Reporting the
+caller's position there too is left for later; Rust's `#[track_caller]`
+does it by passing the caller's location. `Compile.create ~checks:false` builds
 without the checks, for when the prover exists.
 
 Other flags: `-std=c11 -fno-common -fvisibility=hidden -fno-exceptions
