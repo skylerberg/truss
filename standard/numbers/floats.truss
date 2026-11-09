@@ -1,0 +1,201 @@
+use standard::intrinsic
+
+impl Equal for Float32 {
+  fn equal(self, other: Float32) -> Bool {
+    intrinsic::equal(self, right: other)
+  }
+}
+
+impl Ordered for Float32 {
+  fn compare(self, other: Float32) -> Ordering {
+    if intrinsic::less(self, right: other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, right: other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for Float32 {
+  fn default() -> Float32 {
+    0.0
+  }
+}
+
+impl Display for Float32 {
+  fn display(self, output: mut TextBuilder) {
+    mut output.write_float(self)
+  }
+}
+
+impl Add[Float32] for Float32 {
+  type Output = Float32
+
+  fn add(self, right: Float32) -> Float32 {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[Float32] for Float32 {
+  type Output = Float32
+
+  fn subtract(self, right: Float32) -> Float32 {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[Float32] for Float32 {
+  type Output = Float32
+
+  fn multiply(self, right: Float32) -> Float32 {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[Float32] for Float32 {
+  type Output = Float32
+
+  fn divide(self, right: Float32) -> Float32 {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[Float32] for Float32 {
+  type Output = Float32
+
+  fn remainder(self, right: Float32) -> Float32 {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Negate for Float32 {
+  type Output = Float32
+
+  fn negate(self) -> Float32 {
+    intrinsic::negate(self)
+  }
+}
+
+impl Hash for Float32 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(intrinsic::to_bits[Float32, UInt32](self)))
+  }
+}
+
+public fn Float32.ieee_equal(self, other: Float32) -> Bool {
+  intrinsic::ieee_equal(self, right: other)
+}
+
+public fn Float32.ieee_less(self, other: Float32) -> Bool {
+  intrinsic::ieee_less(self, right: other)
+}
+
+public fn Float32.is_nan(self) -> Bool {
+  intrinsic::is_nan(self)
+}
+
+public fn Float32.square_root(self) -> Float32 {
+  intrinsic::square_root(self)
+}
+
+impl Equal for Float64 {
+  fn equal(self, other: Float64) -> Bool {
+    intrinsic::equal(self, right: other)
+  }
+}
+
+impl Ordered for Float64 {
+  fn compare(self, other: Float64) -> Ordering {
+    if intrinsic::less(self, right: other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, right: other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Default for Float64 {
+  fn default() -> Float64 {
+    0.0
+  }
+}
+
+impl Display for Float64 {
+  fn display(self, output: mut TextBuilder) {
+    mut output.write_float(self)
+  }
+}
+
+impl Add[Float64] for Float64 {
+  type Output = Float64
+
+  fn add(self, right: Float64) -> Float64 {
+    intrinsic::add(self, right)
+  }
+}
+
+impl Subtract[Float64] for Float64 {
+  type Output = Float64
+
+  fn subtract(self, right: Float64) -> Float64 {
+    intrinsic::subtract(self, right)
+  }
+}
+
+impl Multiply[Float64] for Float64 {
+  type Output = Float64
+
+  fn multiply(self, right: Float64) -> Float64 {
+    intrinsic::multiply(self, right)
+  }
+}
+
+impl Divide[Float64] for Float64 {
+  type Output = Float64
+
+  fn divide(self, right: Float64) -> Float64 {
+    intrinsic::divide(self, right)
+  }
+}
+
+impl Remainder[Float64] for Float64 {
+  type Output = Float64
+
+  fn remainder(self, right: Float64) -> Float64 {
+    intrinsic::remainder(self, right)
+  }
+}
+
+impl Negate for Float64 {
+  type Output = Float64
+
+  fn negate(self) -> Float64 {
+    intrinsic::negate(self)
+  }
+}
+
+impl Hash for Float64 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(intrinsic::to_bits[Float64, UInt64](self)))
+  }
+}
+
+public fn Float64.ieee_equal(self, other: Float64) -> Bool {
+  intrinsic::ieee_equal(self, right: other)
+}
+
+public fn Float64.ieee_less(self, other: Float64) -> Bool {
+  intrinsic::ieee_less(self, right: other)
+}
+
+public fn Float64.is_nan(self) -> Bool {
+  intrinsic::is_nan(self)
+}
+
+public fn Float64.square_root(self) -> Float64 {
+  intrinsic::square_root(self)
+}

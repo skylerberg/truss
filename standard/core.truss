@@ -127,3 +127,59 @@ public type ExitCode(code: UInt8)
 public let ExitCode.success: ExitCode = ExitCode(0)
 
 public let ExitCode.failure: ExitCode = ExitCode(1)
+
+impl Equal for Bool {
+  fn equal(self, other: Bool) -> Bool {
+    intrinsic::equal(self, right: other)
+  }
+}
+
+impl Hash for Bool {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(if self { 1 } else { 0 })
+  }
+}
+
+impl Equal for Character {
+  fn equal(self, other: Character) -> Bool {
+    intrinsic::equal(self, right: other)
+  }
+}
+
+impl Ordered for Character {
+  fn compare(self, other: Character) -> Ordering {
+    if intrinsic::less(self, right: other) {
+      Ordering.Less
+    } else if intrinsic::equal(self, right: other) {
+      Ordering.Equal
+    } else {
+      Ordering.Greater
+    }
+  }
+}
+
+impl Hash for Character {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(self))
+  }
+}
+
+impl Equal for Unit {
+  fn equal(self, other: Unit) -> Bool {
+    true
+  }
+}
+
+public type ConversionError()
+
+impl Display for Bool {
+  fn display(self, output: mut TextBuilder) {
+    if self { mut output.write("true") } else { mut output.write("false") }
+  }
+}
+
+impl Display for Character {
+  fn display(self, output: mut TextBuilder) {
+    mut output.write_character(self)
+  }
+}
