@@ -70,10 +70,13 @@ The parser is one dune library, which depends on `Token`, `Source`,
 |---|---|
 | `Split` | Finds the `use` lines and each definition's token slice |
 | `Cursor` | Reads a token slice: the current token, lookahead, reporting errors, and the jumps recovery makes |
-| `Atoms` | Names, module prefixes, and string literals, which every part of the grammar uses |
-| `Cost_word` | The words of `cost` clauses, with the one table of their spellings |
+| `Atoms` | Tree nodes, names, module prefixes, string literals, what can start an expression or a statement, and modes, which every part of the grammar uses |
+| `Cost_word` | The words of `cost` clauses, with the one table of their spellings, and reading one, with a fix for a misspelling |
 | `Parse_pattern` | Patterns |
-| `Parse_expression` | Types, clauses, expressions, statements, and blocks |
+| `Parse_type` | Types, generic parameters and bounds, and clauses |
+| `Parse_expression` | Expressions, with the operators' levels |
+| `Parse_statement` | Blocks and statements |
+| `Parse_hooks` | The entry points an earlier part calls in a later one, since types, clauses, expressions, and statements contain each other; `Parse_statement` sets them |
 | `Parse_definition` | Definitions, and the members of traits, `impl`s, and capabilities |
 | `Operators` | The check for combinations of operators that need parentheses |
 | `Habits` | The messages and fixes for syntax from other languages |
@@ -618,8 +621,11 @@ added once the compiler works:
 The tests follow IMPLEMENTATION.md's rules for testing: each states one fact
 about a small input, and there are no golden files.
 
-- **Focused tests** in `stage0/test/parser_tests.ml`, grouped by section of
-  this document. A test gives a small input and asserts its tree, printed
+- **Focused tests** in `stage0/test/parser_tests.ml`, for each piece of the
+  grammar, and `parser_rules_tests.ml`, for whole definitions, precedence,
+  checks, recovery, and other languages' habits, grouped by section of this
+  document and sharing `parse_support`. `parser_documents_tests.ml` checks the
+  documents' examples and the reference grammar. A test gives a small input and asserts its tree, printed
   compactly by `Syntax_print`, or its one diagnostic: the code, where it
   starts, and the exact text each fix produces, which must parse cleanly.
 - **The documents' examples parse cleanly.** Each ```` ```truss ```` block in

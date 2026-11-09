@@ -62,8 +62,8 @@ and frame = {
   bound : string list;  (** Symbols bound by quantifiers around this point. *)
   loop : loop_exits option;
   substitution : T.substitution;
-  self_type : T.ty option;  (** The type of [self], whose fields an invariant names directly. *)
       (** The type arguments of the callee whose clauses are read here, for its generic types. *)
+  self_type : T.ty option;  (** The type of [self], whose fields an invariant names directly. *)
 }
 
 type context = {
@@ -735,7 +735,8 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
   | Match { scrutinees; arms } -> match_ context frame written scrutinees arms
   | Try inner -> try_ context frame written inner
   | With (base, updates) -> with_ context frame written base updates
-  | Lambda { parameters; body } -> Some (lambda context frame written parameters body ~facts:(fun _ -> []))
+  | Lambda { parameters; body } ->
+      Some (lambda context frame written parameters body ~facts:(fun _ -> []))
   | List _ | Map _ -> unsupported written.span "a collection literal"
   | String _ -> unsupported written.span "a string"
   | Float _ -> unsupported written.span "a float"
@@ -767,14 +768,15 @@ and name context frame (written : expression) (path : path) =
           match Ids.find_opt id frame.locals with
           | Some term -> Some (frame, term)
           | None -> unsupported written.span "a local the prover did not bind")
-      | _ when (match source.resolved.names.(path.last.id) with Some (Field _) -> true | _ -> false)
+      | _ when match source.resolved.names.(path.last.id) with Some (Field _) -> true | _ -> false
         -> (
           (* A record's field, named directly in its type's invariant. *)
           match (source.resolved.names.(path.last.id), frame.self, frame.self_type) with
           | Some (Field field), Some self, Some self_type ->
               let field_type =
                 match declared_fields context self_type None with
-                | Some fields -> ( match List.assoc_opt field fields with Some ty -> ty | None -> T.Error)
+                | Some fields -> (
+                    match List.assoc_opt field fields with Some ty -> ty | None -> T.Error)
                 | None -> T.Error
               in
               Some (frame, field_of context frame self_type None field field_type self)
@@ -1166,7 +1168,9 @@ and resolved_call context frame (written : expression) (call_ : C.call) =
 and lambda context frame (written : expression) (parameters : pattern list) body ~facts =
   let ty = type_of frame written in
   let function_type =
-    match ty with T.Function function_type -> function_type | _ -> unsupported written.span "a lambda"
+    match ty with
+    | T.Function function_type -> function_type
+    | _ -> unsupported written.span "a lambda"
   in
   if List.length parameters <> List.length function_type.inputs then
     unsupported written.span "a lambda with a different number of parameters";
@@ -1207,14 +1211,17 @@ and callback_requires (parameters : parameter list) index =
       parameters
   in
   let has_self =
-    List.exists (fun (p : parameter) -> match p.kind with Self_parameter _ -> true | _ -> false) parameters
+    List.exists
+      (fun (p : parameter) -> match p.kind with Self_parameter _ -> true | _ -> false)
+      parameters
   in
   match List.nth_opt named (if has_self then index - 1 else index) with
   | Some { kind = Function_type { input_names; clauses; _ }; _ } when input_names <> [] ->
       Some
         ( input_names,
           List.filter_map
-            (fun (clause : clause) -> match clause.kind with Requires value -> Some value | _ -> None)
+            (fun (clause : clause) ->
+              match clause.kind with Requires value -> Some value | _ -> None)
             clauses )
   | _ -> None
 
@@ -1226,7 +1233,9 @@ and callback_facts context frame (call_ : C.call) index evaluated arguments =
   | Function { path; type_arguments } -> (
       match Interface.Summary.definition context.database path with
       | Some (key, { kind = Function { signature; _ }; _ }) -> (
-          match (callback_requires signature.parameters index, callee_source context.database key) with
+          match
+            (callback_requires signature.parameters index, callee_source context.database key)
+          with
           | Some (input_names, requires), Some callee ->
               let part = part_of callee signature.parameters signature.clauses in
               let locals, self =
@@ -1242,7 +1251,9 @@ and callback_facts context frame (call_ : C.call) index evaluated arguments =
               if List.length input_names <> List.length arguments then []
               else
                 let locals =
-                  List.fold_left2 (fun locals (name_ : name) term -> Ids.add name_.id term locals) locals input_names arguments
+                  List.fold_left2
+                    (fun locals (name_ : name) term -> Ids.add name_.id term locals)
+                    locals input_names arguments
                 in
                 let substitution =
                   match Query.demand context.database Interface.Environment.signature path with
@@ -1250,14 +1261,26 @@ and callback_facts context frame (call_ : C.call) index evaluated arguments =
                       let rec pair generics arguments =
                         match (generics, arguments) with
                         | (generic : T.generic) :: generics, argument :: arguments ->
-                            (generic.generic, T.substitute_argument frame.substitution argument) :: pair generics arguments
+                            (generic.generic, T.substitute_argument frame.substitution argument)
+                            :: pair generics arguments
                         | _ -> []
                       in
                       pair signature.generics type_arguments
                   | None -> []
                 in
                 let inside =
-                  { frame with source = callee; locals; old_locals = locals; self; old_self = self; checking = false; loop = None; substitution; result = None }
+                  {
+                    frame with
+                    source = callee;
+                    locals;
+                    old_locals = locals;
+                    self;
+                    old_self = self;
+                    checking = false;
+                    loop = None;
+                    substitution;
+                    result = None;
+                  }
                 in
                 List.map (fun clause -> snd (value context inside clause)) requires
           | _ -> [])
@@ -1268,7 +1291,7 @@ and callback_facts context frame (call_ : C.call) index evaluated arguments =
    must meet it. *)
 and check_callback_requires context frame (written : expression) values =
   match written.kind with
-  | Call ({ kind = Name _; _ } as callee, _) -> (
+  | Call (({ kind = Name _; _ } as callee), _) -> (
       match frame.source.checked.meanings.(callee.id) with
       | Some (Local_value id) -> (
           let index =
@@ -1314,7 +1337,11 @@ and updating_helper context (call_ : C.call) =
 
 and is_updating_helper context path =
   match Interface.Summary.definition context.database path with
-  | Some (_, { visibility = Private; kind = Function { signature = { name = Member_name _; _ }; _ }; _ }) -> true
+  | Some
+      ( _,
+        { visibility = Private; kind = Function { signature = { name = Member_name _; _ }; _ }; _ }
+      ) ->
+      true
   | _ -> false
 
 and signature_terminates context path =
@@ -1354,7 +1381,8 @@ and field_of context frame ty variant field field_type term =
      shown to end. *)
   if constructors context field_type <> None then begin
     let below = rank context field_type part in
-    assume context frame L.(Apply ("<=", [ int 0; below ]) &&& Apply ("<", [ below; rank context ty term ]))
+    assume context frame
+      L.(Apply ("<=", [ int 0; below ]) &&& Apply ("<", [ below; rank context ty term ]))
   end;
   part
 
@@ -1744,7 +1772,8 @@ and validity context frame ~assuming ?(deep = true) ?(seen = []) ty term =
               substitution;
             }
           in
-          try L.conjunction (List.map (fun invariant -> snd (value context inner invariant)) written)
+          try
+            L.conjunction (List.map (fun invariant -> snd (value context inner invariant)) written)
           with Unsupported _ when assuming -> L.Boolean true)
       | None -> L.Boolean true
     in
@@ -1765,7 +1794,9 @@ and validity context frame ~assuming ?(deep = true) ?(seen = []) ty term =
                        match (variant, part) with
                        | _, L.Boolean true -> part
                        | Some name_, _ ->
-                           L.( ==> ) (L.Apply (L.tester (constructor_name ty (Some name_)), [ term ])) part
+                           L.( ==> )
+                             (L.Apply (L.tester (constructor_name ty (Some name_)), [ term ]))
+                             part
                        | None, _ -> part)
                      fields)
                  shape)
@@ -1773,7 +1804,8 @@ and validity context frame ~assuming ?(deep = true) ?(seen = []) ty term =
     in
     L.( &&& ) own fields
 
-and assume_valid context frame ty term = assume context frame (validity context frame ~assuming:true ty term)
+and assume_valid context frame ty term =
+  assume context frame (validity context frame ~assuming:true ty term)
 
 and check_valid context frame span ty term ~deep ~when_ =
   match validity context frame ~assuming:false ~deep ty term with
@@ -1883,11 +1915,15 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
            their ranks decrease, compared in the parameters' order. *)
         let pairs = structural_parameters frame own in
         let before = List.map (fun (ty, entry, _) -> rank context ty entry) pairs in
-        let after = List.map (fun (ty, _, index) -> rank context ty (argument_at_index values index)) pairs in
+        let after =
+          List.map (fun (ty, _, index) -> rank context ty (argument_at_index values index)) pairs
+        in
         oblige context frame Termination written.span
           "This recursive call may not be on a part of its parameters: give the function a \
            `decreases` clause."
-          L.(conjunction (List.map (fun b -> Apply ("<=", [ int 0; b ])) before) &&& smaller before after)
+          L.(
+            conjunction (List.map (fun b -> Apply ("<=", [ int 0; b ])) before)
+            &&& smaller before after)
     | [], _ | _, [] ->
         oblige context frame Termination written.span
           (Printf.sprintf
@@ -2053,12 +2089,15 @@ and structural_parameters frame (own : part) =
              | _ -> []))
        own.binding)
 
-and is_datatype frame ty = (ignore frame; match ty with T.Named _ -> builtin ty = None | _ -> false)
+and is_datatype frame ty =
+  ignore frame;
+  match ty with T.Named _ -> builtin ty = None | _ -> false
 
 and argument_at_index values index =
   match
     List.find_map
-      (fun ((argument : C.argument), _, term) -> if argument.parameter = index then Some term else None)
+      (fun ((argument : C.argument), _, term) ->
+        if argument.parameter = index then Some term else None)
       values
   with
   | Some term -> term

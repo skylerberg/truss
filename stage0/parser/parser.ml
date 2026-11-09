@@ -177,7 +177,7 @@ let example_statement source tokens piece =
   let (), _, diagnostics =
     with_cursor source tokens piece (fun cursor ->
         match
-          let statement = Parse_expression.statement_line cursor ~previous:None in
+          let statement = Parse_statement.statement_line cursor ~previous:None in
           if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the statement";
           statement
         with

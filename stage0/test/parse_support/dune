@@ -1,0 +1,11 @@
+(library
+ (name parse_support)
+ (libraries
+  harness
+  source
+  diagnostic
+  lexer
+  parser
+  syntax
+  syntax_print
+  documents))
