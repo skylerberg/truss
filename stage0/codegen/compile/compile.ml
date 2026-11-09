@@ -20,15 +20,20 @@ let make t (key : Instance.key) : Lir.t =
     match key with
     | Code _ -> (
         try Lower.instance t.context key
-        with Invalid_argument message -> invalid_arg (message ^ ", lowering " ^ Instance.to_string key))
+        with Invalid_argument message ->
+          invalid_arg (message ^ ", lowering " ^ Instance.to_string key))
     | Drop ty -> Glue.drop glue ty
     | Copy ty -> Glue.copy glue ty
     | Debug ty -> Glue.debug glue ty
-    | Constant _ | Cursor_next _ | Adapter _ -> invalid_arg ("Compile: not built yet: " ^ Instance.to_string key)
+    | Constant _ | Cursor_next _ | Adapter _ ->
+        invalid_arg ("Compile: not built yet: " ^ Instance.to_string key)
   in
   let needs_drop ty = not (Glue.trivial glue ty) in
-  let elaborate f = Drops.elaborate t.context.env ~needs_drop ~environment:(environment instance) f in
-  Lir.canonical_instance { instance with main = elaborate instance.main; nested = Array.map elaborate instance.nested }
+  let elaborate f =
+    Drops.elaborate t.context.env ~needs_drop ~environment:(environment instance) f
+  in
+  Lir.canonical_instance
+    { instance with main = elaborate instance.main; nested = Array.map elaborate instance.nested }
 
 let lir t key =
   match List.find_opt (fun (k, _) -> Instance.equal k key) t.done_ with
@@ -43,8 +48,10 @@ let anchored (instance : Lir.t) =
   let of_function (f : Lir.function_) =
     Array.to_list f.blocks
     |> List.concat_map (fun (b : Lir.basic_block) ->
-           List.filter_map (function Lir.Echo { site; _ } -> Some site.definition | _ -> None) b.statements
-           @ match b.terminator with Fail { site; _ } -> [ site.definition ] | _ -> [])
+        List.filter_map
+          (function Lir.Echo { site; _ } -> Some site.definition | _ -> None)
+          b.statements
+        @ match b.terminator with Fail { site; _ } -> [ site.definition ] | _ -> [])
   in
   of_function instance.main @ List.concat_map of_function (Array.to_list instance.nested)
 
@@ -73,7 +80,10 @@ let run_tests t ~time_limit tests =
           ("anchors", Positions.anchors_file target anchors);
         ]
       in
-      let output = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf "truss-tests-%d" (Unix.getpid ())) in
+      let output =
+        Filename.concat (Filename.get_temp_dir_name ())
+          (Printf.sprintf "truss-tests-%d" (Unix.getpid ()))
+      in
       match
         Build.program t.toolchain t.cache t.context.env t.settings
           ~files:(List.map (fun instance -> [ (instance, Emit_c.External) ]) instances)

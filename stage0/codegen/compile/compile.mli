@@ -5,7 +5,8 @@
 
 type t
 
-val create : Query.database -> Memory_layout.target -> Toolchain.t -> Build.cache -> Build.settings -> t
+val create :
+  Query.database -> Memory_layout.target -> Toolchain.t -> Build.cache -> Build.settings -> t
 
 (* An instance's LIR, lowered or generated, with its drops elaborated, in
    canonical form. Each is made once. *)

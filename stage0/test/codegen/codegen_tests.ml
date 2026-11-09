@@ -1675,11 +1675,18 @@ let example : Path.module_ = { package = "example"; modules = [ "main" ] }
    tests, and returns the runner's output. *)
 let run_source text =
   let database = Query.create () in
-  List.iter (fun (module_, text) -> Query.set database Workspace.file_text module_ text) Standard_library.modules;
+  List.iter
+    (fun (module_, text) -> Query.set database Workspace.file_text module_ text)
+    Standard_library.modules;
   Query.set database Workspace.file_text example text;
   Query.set database Workspace.packages Standard_library.package
-    { name = Standard_library.package; dependencies = []; modules = List.map fst Standard_library.modules };
-  Query.set database Workspace.packages "example" { name = "example"; dependencies = []; modules = [ example ] };
+    {
+      name = Standard_library.package;
+      dependencies = [];
+      modules = List.map fst Standard_library.modules;
+    };
+  Query.set database Workspace.packages "example"
+    { name = "example"; dependencies = []; modules = [ example ] };
   let diagnostics = Infer.diagnostics database example in
   List.iter (fun (d : Diagnostic.t) -> fail "the source has a diagnostic: %s" d.message) diagnostics;
   let tests =
@@ -1687,7 +1694,9 @@ let run_source text =
       (fun (d : Resolve.Names.declaration) -> match d.path with Test _ -> Some d.path | _ -> None)
       (Query.demand database Resolve.Names.declarations example)
   in
-  let compile = Compile.create database target_64 (Lazy.force compiler) (Lazy.force cache) settings in
+  let compile =
+    Compile.create database target_64 (Lazy.force compiler) (Lazy.force cache) settings
+  in
   match Compile.run_tests compile ~time_limit:2000 tests with
   | Ok (_, output) -> output
   | Error message -> failwith message
@@ -1709,6 +1718,89 @@ test "squares wrongly" {
   assert square(3) == 10
 }
 |}
-        "test 0 passed\ntest 1 failed\nmessage 36\nassert square(3) == 10\n  at example/main.truss:10:3\n")
+        "test 0 passed\n\
+         test 1 failed\n\
+         message 51\n\
+         assert square(3) == 10\n\
+        \  at example/main.truss:10:3\n")
+
+let () =
+  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
+  passes "loops, variables, and comparisons run"
+    {|fn sum_to(limit: Int64) -> Int64 {
+  var total = 0
+  var i = 1
+  while i <= limit {
+    total += i
+    i += 1
+  }
+  total
+}
+
+test "sums" {
+  assert sum_to(10) == 55
+}
+|};
+  passes "a counted for loop runs once per value"
+    {|fn sum_below(limit: Int64) -> Int64 {
+  var total = 0
+  for i in 0..limit {
+    total += i
+  }
+  total
+}
+
+test "sums" {
+  assert sum_below(5) == 10
+}
+|};
+  passes "records are built and read, and sums matched"
+    {|type Point(x: Int64, y: Int64)
+
+type Shape =
+  | Circle(radius: Int64)
+  | Rectangle(width: Int64, height: Int64)
+  | Empty
+
+fn area(shape: Shape) -> Int64 {
+  match shape {
+    Circle(radius) => 3 * radius * radius
+    Rectangle(width, height) => width * height
+    Empty => 0
+  }
+}
+
+test "areas" {
+  let origin = Point(x: 1, y: 2)
+  assert origin.x + origin.y == 3
+  assert area(Shape.Rectangle(width: 2, height: 5)) == 10
+  assert area(Shape.Circle(radius: 2)) == 12
+  assert area(Shape.Empty) == 0
+}
+|};
+  passes "an if is a value, and a return leaves early"
+    {|fn sign(value: Int64) -> Int64 {
+  if value < 0 {
+    return -1
+  }
+  if value == 0 { 0 } else { 1 }
+}
+
+test "signs" {
+  assert sign(-5) == -1
+  assert sign(0) == 0
+  assert sign(7) == 1
+}
+|};
+  passes "the standard library's Option methods run"
+    {|fn first_positive(a: Int64, b: Int64) -> Option[Int64] {
+  if a > 0 { Some(a) } else if b > 0 { Some(b) } else { None }
+}
+
+test "options" {
+  assert first_positive(-1, b: 4) == Some(4)
+  assert first_positive(-1, b: -2).is_none()
+}
+|}
 
 let () = Harness.finish ()

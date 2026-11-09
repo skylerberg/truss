@@ -1,3 +1,0 @@
-(executable
- (name explore)
- (libraries diagnostic query workspace standard_library interface infer resolve checked types path syntax syntax_print))
