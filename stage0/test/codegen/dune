@@ -17,4 +17,11 @@
   yields
   glue
   reachable
-  build))
+  build
+  query
+  workspace
+  standard_library
+  interface
+  types
+  intrinsic
+  monomorphic))

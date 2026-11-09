@@ -1376,4 +1376,65 @@ let () =
                  ])
             out)
 
+(* Ground types and shapes from the standard library *)
+
+let standard_database =
+  lazy
+    (let database = Query.create () in
+     List.iter
+       (fun (module_, text) -> Query.set database Workspace.file_text module_ text)
+       Standard_library.modules;
+     Query.set database Workspace.packages Standard_library.package
+       {
+         name = Standard_library.package;
+         dependencies = [];
+         modules = List.map fst Standard_library.modules;
+       };
+     database)
+
+let standard_context : Monomorphic.context =
+  {
+    type_interface =
+      (fun path ->
+        Query.demand (Lazy.force standard_database) Interface.Environment.type_interface path);
+    normalize = Fun.id;
+    capabilities = (fun _ -> []);
+    cursor_fields = (fun _ -> []);
+  }
+
+let standard module_ name ?(arguments = []) () =
+  Ground.Named
+    { path = Top { module_ = { package = "standard"; modules = [ module_ ] }; name }; arguments }
+
+let standard_layout ty =
+  Memory_layout.to_string
+    (Memory_layout.of_type (create target_64 ~shape_of:(Monomorphic.shape standard_context)) ty)
+
+let () =
+  let int64 = Monomorphic.builtin Int64 in
+  let bool = Monomorphic.builtin Bool in
+  let list element = standard "list" "List" ~arguments:[ Type element ] () in
+  let option value = standard "option" "Option" ~arguments:[ Type value ] () in
+  test "the standard library's Option of a List has no tag" (fun () ->
+      expect_string ~expected:"24/8 niche-encoded(Some; None=0 at value.storage.buffer)"
+        (standard_layout (option (list int64))));
+  test "the standard library's Option of a Bool is one byte" (fun () ->
+      expect_int ~expected:1
+        (Memory_layout.of_type
+           (create target_64 ~shape_of:(Monomorphic.shape standard_context))
+           (option bool))
+          .size);
+  test "a String is its storage's buffer, length, and capacity" (fun () ->
+      expect_string ~expected:"24/8 struct(storage@0) niche storage.buffer 0+1"
+        (standard_layout (standard "text" "String" ())));
+  test "storage is not trivial, and an Option of an integer is" (fun () ->
+      let glue =
+        Glue.create
+          (create target_64 ~shape_of:(Monomorphic.shape standard_context))
+          ~kind_of:(Monomorphic.kind standard_context)
+          ~usize:(Monomorphic.builtin USize)
+      in
+      if Glue.trivial glue (list int64) then fail "a List is trivial";
+      if not (Glue.trivial glue (option int64)) then fail "an Option of an Int64 is not trivial")
+
 let () = Harness.finish ()
