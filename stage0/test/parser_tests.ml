@@ -83,6 +83,13 @@ let find = Documents.find
 let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
   match snd (parse text) with
   | [ diagnostic ] -> (
+      (* Every message is written in sentences, as Diagnostic.t says. *)
+      let message = diagnostic.message in
+      if
+        message = ""
+        || (not (Char.uppercase_ascii message.[0] = message.[0] && message.[0] <> ' '))
+        || message.[String.length message - 1] <> '.'
+      then fail "the message %S is not written in sentences" message;
       if diagnostic.code <> Parser code then
         fail "expected %s, got %s"
           (Diagnostic.Code.name (Parser code))
@@ -239,13 +246,13 @@ let () =
     let tokens, _ = Lexer.lex source in
     (source, tokens, Parser.split tokens)
   in
-  test "a definition's diagnostics are relative to it" (fun () ->
+  test "a definition's diagnostics are placed in the file by its base" (fun () ->
       match pieces "fn g() {}\nfn f() { x = }" with
       | source, tokens, [ _; second ] -> (
           let parsed = Parser.definition source tokens second in
-          match parsed.diagnostics with
+          match Parser.placed parsed with
           | [ diagnostic ] ->
-              if diagnostic.span.start <> 13 then fail "relative start %d" diagnostic.span.start
+              if diagnostic.span.start <> 23 then fail "start %d" diagnostic.span.start
           | _ -> fail "expected one diagnostic")
       | _ -> fail "expected two pieces");
   test "moving a definition changes neither its tree nor its diagnostics" (fun () ->
@@ -324,6 +331,8 @@ let () =
         "(match (state event) (=> (| Idle Paused) Tick todo))");
   test ".. must be the last field" (fun () ->
       body_error "let (.., x) = value" ~code:Unexpected_token ~at:"..");
+  test "a float literal is not a pattern" (fun () ->
+      body_error "match x {\n  0.0 => todo\n}" ~code:Float_pattern ~at:"0.0");
   test "a range pattern needs both ends" (fun () ->
       body_error "match x {\n  0.. => todo\n}" ~code:Unexpected_token ~at:"=>");
   test "a string in a pattern cannot interpolate" (fun () ->
@@ -411,6 +420,12 @@ let () =
       expression "\"a${b + 1}c\"" "\"a${(+ b 1)}c\"";
       expression "database::SqlQuery\"select ${id}\"" "database::SqlQuery\"select ${id}\"";
       expression "\"${names.join(\", \")}\"" "\"${(call (. names join) \", \")}\"");
+  test "nothing more is reported at the end of an interpolation a line break cut off" (fun () ->
+      let _, diagnostics = parse "fn f() {\n  let x = \"\"\"a ${b ? c\n  \"\"\"\n}" in
+      if
+        List.filter (fun code -> String.starts_with ~prefix:"parser." code) (codes diagnostics)
+        <> []
+      then fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "an error in an interpolation stays there" (fun () ->
       let statements, diagnostics = body_of "let x = \"${a +}\"\nlet y = 1" in
       if codes diagnostics <> [ "parser.unexpected_token" ] then
@@ -516,6 +531,9 @@ let () =
   test "a missing body gets { todo }" (fun () ->
       error "fn f() -> Int64\nfn g() {}" ~code:Missing_body ~at:"\nfn g"
         ~fixed:"fn f() -> Int64 {\n  todo\n}\nfn g() {}");
+  test "a missing body after a visibility is not indented" (fun () ->
+      error "public fn f()\nfn g() {}" ~code:Missing_body ~at:"\nfn g"
+        ~fixed:"public fn f() {\n  todo\n}\nfn g() {}");
   test "self only in a method" (fun () -> error "fn f(self) {}" ~code:Misplaced_self ~at:"self");
   test "self only first" (fun () ->
       error "fn T.f(x: Int64, self) {}" ~code:Misplaced_self ~at:"self");
@@ -578,7 +596,7 @@ let () =
       error "capability Clock {\n  fn now(self) -> Instant\n}" ~code:Misplaced_self ~at:"self");
   test "an impl's methods need bodies" (fun () ->
       error "impl Clock for Fixed {\n  fn now(self) -> Instant\n}" ~code:Missing_body ~at:"\n}"
-        ~fixed:"impl Clock for Fixed {\n  fn now(self) -> Instant {\n  todo\n}\n}");
+        ~fixed:"impl Clock for Fixed {\n  fn now(self) -> Instant {\n    todo\n  }\n}");
   test "constants" (fun () ->
       definition "public let UInt8.maximum: UInt8 = 255" "(public (let UInt8.maximum : UInt8 255))";
       definition "let pi: Float64 = 3.14" "(let pi : Float64 314e-2)");
@@ -687,6 +705,14 @@ let () =
       body_error "yield 1" ~code:Misplaced_yield ~at:"yield";
       definition "fn T.each(self) yields Int64 {\n  yield 1\n}"
         "(fn T.each (self) yields Int64 (block (yield 1)))");
+  test "a method that lends" (fun () ->
+      definition
+        "fn Grid.cell(mut self, position: Position) lends mut Cell {\n  yield mut self.cells[0]\n}"
+        "(fn Grid.cell (mut self (position: Position)) lends mut Cell (block (yield (mut ([] (. \
+         self cells) 0)))))");
+  test "lends own" (fun () ->
+      error "fn T.part(own self) lends own Part {}" ~code:Lends_own ~at:"own Part"
+        ~fixed:"fn T.part(own self) lends Part {}");
   test "yield in a lambda" (fun () ->
       error "fn T.each(self) yields Int64 {\n  f(fn() { yield 1 })\n}" ~code:Misplaced_yield
         ~at:"yield 1");
@@ -711,8 +737,12 @@ let () =
   test "return in a lambda inside a branch" (fun () ->
       statement "parallel {\n  f(fn() { return })\n}"
         "(parallel (block (call f (fn () (block (return))))))");
+  test "echo in a specification" (fun () ->
+      error "fn f(x: Int64) requires echo x > 0 {}" ~code:Echo_in_specification ~at:"echo");
+  test "a statement rule applies in every block" (fun () ->
+      body_error "let x = provide Fixed() {\n  assert true\n}" ~code:Misplaced_assert ~at:"assert");
   test "echo in a proof" (fun () ->
-      body_error "proof {\n  echo x\n}" ~code:Echo_in_proof ~at:"echo")
+      body_error "proof {\n  echo x\n}" ~code:Echo_in_specification ~at:"echo")
 
 (* Recovery *)
 
@@ -723,12 +753,16 @@ let () =
         fail "got [%s]" (String.concat "; " (codes diagnostics));
       if List.map Syntax_print.statement statements <> [ "error"; "(let y 2)" ] then
         fail "wrong statements");
-  test "an error in brackets skips to the closer" (fun () ->
-      let statements, diagnostics = body_of "f(1 +, 2 3)\nlet y = 2" in
-      if codes diagnostics <> [ "parser.unexpected_token" ] then
-        fail "got [%s]" (String.concat "; " (codes diagnostics));
-      if List.map Syntax_print.statement statements <> [ "(call f error)"; "(let y 2)" ] then
-        fail "wrong statements");
+  test "each bad item in brackets gets its own error" (fun () ->
+      let statements, diagnostics = body_of "f(1 +, x, 2 3, g(a b))\nlet y = 2" in
+      if
+        codes diagnostics
+        <> [ "parser.unexpected_token"; "parser.unexpected_token"; "parser.unexpected_token" ]
+      then fail "got [%s]" (String.concat "; " (codes diagnostics));
+      if
+        List.map Syntax_print.statement statements
+        <> [ "(call f error x error (call g error))"; "(let y 2)" ]
+      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "an error in a clause leaves the body parsed" (fun () ->
       let file, diagnostics = parse "fn f() requires + ensures true {\n  x\n}" in
       if codes diagnostics <> [ "parser.unexpected_token" ] then
@@ -762,6 +796,9 @@ let () =
   test "x ? a : b" (fun () ->
       body_error "let y = ready ? first : second" ~code:Conditional_operator ~at:"?"
         ~fixed:"let y = if ready { first } else { second }");
+  test "x ? a : b takes the whole left side as the condition" (fun () ->
+      body_error "let larger = a > b ? a : b" ~code:Conditional_operator ~at:"?"
+        ~fixed:"let larger = if a > b { a } else { b }");
   test "let mut" (fun () ->
       body_error "let mut count = 0" ~code:Let_mut ~at:"mut" ~fixed:"var count = 0");
   test "&x" (fun () -> body_error "f(&x)" ~code:Address_of ~at:"&" ~fixed:"f(x)");
@@ -776,6 +813,9 @@ let () =
   test "|x| with a block" (fun () ->
       body_error "let f = items.map(|item| { item })" ~code:Closure_bars ~at:"|"
         ~fixed:"let f = items.map(fn(item) { item })");
+  test "|x| before let ... else" (fun () ->
+      body_error "let Some(f) = || g() else {\n  return\n}" ~code:Closure_bars ~at:"||"
+        ~fixed:"let Some(f) = (fn() { g() }) else {\n  return\n}");
   test "|| x" (fun () ->
       body_error "let f = run(|| 1)" ~code:Closure_bars ~at:"||" ~fixed:"let f = run(fn() { 1 })");
   test "Point { x: 1.0 }" (fun () ->
@@ -787,6 +827,9 @@ let () =
   test "items.map { it.name }" (fun () ->
       body_error "let names = items.map { it.name }" ~code:Trailing_lambda ~at:"{ it"
         ~fixed:"let names = items.map(fn(item) { item.name })");
+  test "it in an interpolation is renamed too" (fun () ->
+      body_error "let x = items.map { \"${it.name}\" }" ~code:Trailing_lambda ~at:"{ \""
+        ~fixed:"let x = items.map(fn(item) { \"${item.name}\" })");
   test "the lambda's parameter is a plain singular, or element" (fun () ->
       body_error "let x = entries.map { it.key }" ~code:Trailing_lambda ~at:"{ it"
         ~fixed:"let x = entries.map(fn(entry) { entry.key })";
@@ -806,7 +849,8 @@ let () =
       then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "x as Int64" (fun () ->
       body_error "let n = size as Int64" ~code:As_conversion ~at:"as"
-        ~fixed:"let n = Int64.from(size)");
+        ~fixed:"let n = Int64.from(size)"
+        ~alternatives:[ "let n = Int64.try_from(size)" ]);
   test "loop" (fun () ->
       body_error "loop {\n  todo\n}" ~code:Reserved_word ~at:"loop" ~fixed:"while true {\n  todo\n}");
   test "const" (fun () ->

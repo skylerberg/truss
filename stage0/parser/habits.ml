@@ -25,20 +25,20 @@ let increment cursor ~(target : expression) ~(operator : Token.t) =
   in
   let target_text = node_text cursor target.span in
   report cursor Increment operator.span
-    (Printf.sprintf "Truss has no `%s%s`; write `%s %s= 1`" sign sign target_text sign)
+    (Printf.sprintf "Truss has no `%s%s`; write `%s %s= 1`." sign sign target_text sign)
     (Printf.sprintf "Write `%s %s= 1`" target_text sign)
     [ Diagnostic.replace operator.span replacement ]
 
 (* [--x], which Truss rejects rather than reading as two negations. *)
 let double_negation cursor ~(operator : Token.t) ~(operand : expression) =
   let operand_span = Cursor.absolute cursor operand.span in
-  report cursor Double_negation operator.span "Truss has no `--`; to negate twice, write `-(-x)`"
+  report cursor Double_negation operator.span "Truss has no `--`; to negate twice, write `-(-x)`."
     "Write `-(-x)`"
     [ Diagnostic.replace operator.span "-(-"; Diagnostic.insert operand_span.stop ")" ]
 
 (* [A => 1,]: arms are separated by line breaks. *)
 let match_arm_comma cursor ~(comma : Token.t) =
-  report cursor Match_arm_comma comma.span "`match` arms are separated by line breaks, not commas"
+  report cursor Match_arm_comma comma.span "`match` arms are separated by line breaks, not commas."
     "Remove the comma"
     [ Diagnostic.delete comma.span ]
 
@@ -50,7 +50,7 @@ let conditional cursor ~(condition : expression) ~(then_ : expression) ~(else_ :
       (Cursor.absolute cursor else_.span).stop
   in
   report cursor Conditional_operator question.span
-    "Truss has no conditional operator; write `if x { a } else { b }`" "Write an `if` expression"
+    "Truss has no conditional operator; write `if x { a } else { b }`." "Write an `if` expression"
     [
       Diagnostic.replace whole
         (Printf.sprintf "if %s { %s } else { %s }" (node_text cursor condition.span)
@@ -60,30 +60,31 @@ let conditional cursor ~(condition : expression) ~(then_ : expression) ~(else_ :
 (* [let mut x]. *)
 let let_mut cursor ~(let_token : Token.t) ~(mut_token : Token.t) =
   report cursor Let_mut mut_token.span
-    "a variable that can change is declared with `var`, not `let mut`" "Write `var`"
+    "A variable that can change is declared with `var`, not `let mut`." "Write `var`"
     [ Diagnostic.replace (Source.span let_token.span.start mut_token.span.stop) "var" ]
 
 (* [&x] and [&mut x]: arguments are marked with [mut] or [own], never [&]. *)
-let address_of cursor ~(ampersand : Token.t) ~(next : Token.t) =
+let address_of cursor ~(before : Token.t option) ~(ampersand : Token.t) ~(next : Token.t) =
   let marked = match next.kind with Keyword Mut -> "`mut x`" | _ -> "`x`" in
-  (* Between two names, as in [match& x], a space keeps them apart. *)
-  let source = Source.text cursor.Cursor.source in
-  let is_name_byte character =
-    match character with 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true | _ -> false
-  in
+  (* Between two words, as in [match& x], a space keeps them apart. *)
   let separator =
-    if ampersand.span.start > 0 && is_name_byte source.[ampersand.span.start - 1] then " " else ""
+    match before with
+    | Some { kind = Upper _ | Lower _ | Keyword _ | Reserved _ | Integer _ | Float _; span; _ }
+      when span.stop = ampersand.span.start ->
+        " "
+    | _ -> ""
   in
   report cursor Address_of ampersand.span
     (Printf.sprintf
        "Truss has no `&`; write %s, marking a place with `mut` or `own` only when it is changed or \
-        given up"
+        given up."
        marked)
     "Remove the `&`"
     [ Diagnostic.replace (through_next ampersand next) separator ]
 
 (* [|x| x + 1] and [|| x]. *)
-let closure_bars cursor ~(opening : Token.t) ~(closing : Token.t) ~(body : expression) =
+let closure_bars cursor ~(opening : Token.t) ~(closing : Token.t) ~(body : expression) ~before_else
+    =
   let body_span = Cursor.absolute cursor body.span in
   let edits =
     if opening.kind = Punctuation Or_or then
@@ -100,14 +101,21 @@ let closure_bars cursor ~(opening : Token.t) ~(closing : Token.t) ~(body : expre
     | Block _ -> edits
     | _ -> edits @ [ Diagnostic.insert body_span.start "{ "; Diagnostic.insert body_span.stop " }" ]
   in
-  report cursor Closure_bars opening.span "a lambda is written `fn(x) { x + 1 }`"
+  (* Before the [else] of a [let ... else], an expression cannot end with
+     the lambda's [}]. *)
+  let edits =
+    if before_else then
+      (Diagnostic.insert opening.span.start "(" :: edits) @ [ Diagnostic.insert body_span.stop ")" ]
+    else edits
+  in
+  report cursor Closure_bars opening.span "A lambda is written `fn(x) { x + 1 }`."
     "Write `fn(...) { ... }`" edits
 
 (* [Point { x: 1.0 }]: records are built with parentheses. *)
 let brace_record cursor ~(name_stop : int) ~(opening : Token.t) ~(first : Token.t)
     ~(last_stop : int) ~(closing : Token.t) =
   report cursor Brace_record opening.span
-    "records are built with parentheses: `Point(x: 1.0, y: 2.0)`" "Use parentheses"
+    "Records are built with parentheses: `Point(x: 1.0, y: 2.0)`." "Use parentheses"
     [
       Diagnostic.replace (Source.span name_stop first.span.start) "(";
       Diagnostic.replace (Source.span last_stop closing.span.stop) ")";
@@ -115,7 +123,7 @@ let brace_record cursor ~(name_stop : int) ~(opening : Token.t) ~(first : Token.
 
 (* [parse::<Int64>(text)]. *)
 let turbofish cursor ~(colons : Token.t) ~(less : Token.t) ~(greater : Token.t) =
-  report cursor Turbofish less.span "type arguments go in square brackets: `parse[Int64](text)`"
+  report cursor Turbofish less.span "Type arguments go in square brackets: `parse[Int64](text)`."
     "Use square brackets"
     [
       Diagnostic.replace (Source.span colons.span.start less.span.stop) "[";
@@ -154,7 +162,7 @@ let trailing_lambda cursor ~(callee : expression) ~parameter ~(opening : Token.t
   let callee_stop = (Cursor.absolute cursor callee.span).stop in
   report cursor Trailing_lambda opening.span
     (Printf.sprintf
-       "a lambda is passed inside the parentheses, with a named parameter: `fn(%s) { ... }`"
+       "A lambda is passed inside the parentheses, with a named parameter: `fn(%s) { ... }`."
        parameter)
     "Pass a lambda"
     (Diagnostic.replace
@@ -168,26 +176,30 @@ let as_conversion cursor ~(value : expression) ~(as_token : Token.t) ~(target : 
   let whole =
     Source.span (Cursor.absolute cursor value.span).start (Cursor.absolute cursor target.span).stop
   in
-  let target_text = node_text cursor target.span in
-  report cursor As_conversion as_token.span
+  let target_text = node_text cursor target.span and value_text = node_text cursor value.span in
+  (* [from] for a conversion that cannot lose information, and [try_from],
+     which returns a [Result], for one that can, as most casts written with
+     [as] are. Which one the author meant depends on the types. *)
+  let conversion name =
+    Diagnostic.fix
+      (Printf.sprintf "Write `%s.%s(...)`" target_text name)
+      [ Diagnostic.replace whole (Printf.sprintf "%s.%s(%s)" target_text name value_text) ]
+  in
+  Cursor.report cursor As_conversion as_token.span
     (Printf.sprintf
        "Truss has no `as`; write `%s.from(x)`, or `%s.try_from(x)` when the conversion can lose \
-        information"
+        information."
        target_text target_text)
-    (Printf.sprintf "Write `%s.from(...)`" target_text)
-    [
-      Diagnostic.replace whole
-        (Printf.sprintf "%s.from(%s)" target_text (node_text cursor value.span));
-    ]
+    ~fixes:[ conversion "from"; conversion "try_from" ]
 
 (* [elif]: written after the [}] that ends an [if]. *)
 let elif cursor ~(previous_stop : int) ~(elif_token : Token.t) =
-  report cursor Elif elif_token.span "Truss writes `else if`, not `elif`" "Write `else if`"
+  report cursor Elif elif_token.span "Truss writes `else if`, not `elif`." "Write `else if`"
     [ Diagnostic.replace (Source.span previous_stop elif_token.span.stop) " else if" ]
 
 (* [loop {]. *)
 let loop cursor ~(loop_token : Token.t) =
-  report cursor Reserved_word loop_token.span "Truss has no `loop`; write `while true`"
+  report cursor Reserved_word loop_token.span "Truss has no `loop`; write `while true`."
     "Write `while true`"
     [ Diagnostic.replace loop_token.span "while true" ]
 
@@ -195,6 +207,6 @@ let loop cursor ~(loop_token : Token.t) =
 let constant_keyword cursor ~(token : Token.t) =
   let word = Cursor.text cursor token.span in
   report cursor Reserved_word token.span
-    (Printf.sprintf "Truss has no `%s`; a constant is a `let` at the top level" word)
+    (Printf.sprintf "Truss has no `%s`; a constant is a `let` at the top level." word)
     "Write `let`"
     [ Diagnostic.replace token.span "let" ]

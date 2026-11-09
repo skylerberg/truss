@@ -2654,8 +2654,8 @@ changes only with a new language version.
 | `public` | Everyone, including other packages. |
 
 An `impl`, a test, and a `proof` of a law take no visibility keyword. An
-`impl` applies wherever both its trait and its type are visible, and nothing
-names a test or a law's proof.
+`impl` applies wherever its trait and the types it names are visible, and
+nothing names a test or a law's proof.
 
 A public type can hide its contents with `opaque`:
 

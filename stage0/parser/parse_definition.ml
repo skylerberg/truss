@@ -56,12 +56,12 @@ let type_head cursor : type_head =
 
 (* A function's name, or a constant's: [length], or [List[Element].length]
    under a type. *)
-let function_name cursor =
+let definition_name cursor =
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
   | Upper _, _ | Lower _, Punctuation Colon_colon ->
       let head = type_head cursor in
       Cursor.expect_punctuation cursor Dot;
-      Method_name (head, Atoms.lower cursor "a method name after `.`")
+      Member_name (head, Atoms.lower cursor "a method name after `.`")
   | _ -> Plain_name (Atoms.lower cursor "a name")
 
 let parameter cursor : parameter =
@@ -98,11 +98,12 @@ let parameters cursor ~method_ =
       | Self_parameter _ when not method_ ->
           Cursor.report cursor Misplaced_self
             (Cursor.absolute cursor parameter.span)
-            "only a method takes `self`: one written `fn Type.name`, or one in a trait or an `impl`"
+            "Only a method takes `self`: one written `fn Type.name`, or one in a trait or an \
+             `impl`."
       | Self_parameter _ when index > 0 ->
           Cursor.report cursor Misplaced_self
             (Cursor.absolute cursor parameter.span)
-            "`self` must be the first parameter"
+            "`self` must be the first parameter."
       | _ -> ())
     parameters;
   parameters
@@ -113,6 +114,21 @@ let result cursor =
   else if Cursor.accept_keyword cursor Yields then
     let mode = Parse_expression.mode cursor in
     Some (Yields (mode, Parse_expression.type_expression cursor))
+  else if Cursor.accept_keyword cursor Lends then begin
+    (* A lent part stays with [self], so it is never handed over. *)
+    let own = Cursor.peek cursor in
+    let mode = Parse_expression.mode cursor in
+    if mode = Some Own then
+      Cursor.report cursor Lends_own own.span
+        "A part a `lends` method lends stays with `self`, so it cannot be `own`; a method that \
+         hands over owned parts `yields own`."
+        ~fixes:
+          [
+            Diagnostic.fix "Remove `own`"
+              [ Diagnostic.delete (Source.span own.span.start (Cursor.peek cursor).span.start) ];
+          ];
+    Some (Lends (mode, Parse_expression.type_expression cursor))
+  end
   else None
 
 (* The clauses of a signature. An error in one skips to the next clause
@@ -140,31 +156,36 @@ let clauses cursor =
             skip ();
             { kind = Clause_error; span = Cursor.span_from cursor start }
       in
-      let once kind_name same =
+      (* Each kind that appears at most once, and how to write all of it in
+         the one clause. *)
+      let once same message =
         if List.exists (fun (earlier : clause) -> same earlier.kind) clauses then
-          Cursor.report cursor Repeated_clause (Cursor.token_at cursor start).span
-            (Printf.sprintf "a signature has at most one `%s` clause%s" kind_name
-               (if kind_name = "decreases" then
-                  "; list several measures in one, separated by commas"
-                else "; list every capability in one, separated by commas"))
+          Cursor.report cursor Repeated_clause (Cursor.token_at cursor start).span message
       in
       (match clause.kind with
-      | Uses _ -> once "uses" (function Uses _ -> true | _ -> false)
-      | Decreases _ -> once "decreases" (function Decreases _ -> true | _ -> false)
+      | Uses _ ->
+          once
+            (function Uses _ -> true | _ -> false)
+            "A signature has at most one `uses` clause; list every capability in one, separated by \
+             commas."
+      | Decreases _ ->
+          once
+            (function Decreases _ -> true | _ -> false)
+            "A signature has at most one `decreases` clause; list several measures in one, \
+             separated by commas."
       | _ -> ());
       loop (clause :: clauses)
   in
   loop []
 
-(* A body after a signature: required, or optional in a trait. A required
-   body that is missing gets the body of unwritten code, [{ todo }]. *)
 (* A body after a signature, if there is one. *)
 let optional_body cursor =
   if Parse_expression.opens_body cursor then Some (Parse_expression.body cursor) else None
 
-(* A body that must come after a signature. A missing one gets the body of
-   unwritten code, [{ todo }]. *)
-let body cursor =
+(* A body that must come after the signature that starts at the token
+   [signature]. A missing one gets the body of unwritten code, [{ todo }],
+   indented as the signature's line is. *)
+let body cursor ~signature =
   match optional_body cursor with
   | Some body -> body
   | None ->
@@ -175,9 +196,21 @@ let body cursor =
         | _ -> false
       in
       if ends_member && not cursor.cut_off then begin
+        (* The whitespace before the signature on its line, within the
+           definition's own text. *)
+        let signature_start = (Cursor.token_at cursor signature).span.start in
+        let line_start = max cursor.base (Source.line_start cursor.source signature_start) in
+        let indentation = Cursor.text cursor (Source.span line_start signature_start) in
         Cursor.report cursor Missing_body (Source.zero_width stop)
-          "a function needs a body; write `{ todo }` for one that is not written yet"
-          ~fixes:[ Diagnostic.fix "Add `{ todo }`" [ Diagnostic.insert stop " {\n  todo\n}" ] ];
+          "A function needs a body; write `{ todo }` for one that is not written yet."
+          ~fixes:
+            [
+              Diagnostic.fix "Add `{ todo }`"
+                [
+                  Diagnostic.insert stop
+                    (Printf.sprintf " {\n%s  todo\n%s}" indentation indentation);
+                ];
+            ];
         raise Cursor.Failed
       end
       else Cursor.fail cursor "`{` to start the body"
@@ -190,20 +223,20 @@ let signature cursor ~name ~method_ : signature =
   let clauses = clauses cursor in
   { name; generics; parameters; result; clauses }
 
-let check_name cursor (name : function_name) =
-  let name = match name with Plain_name name | Method_name (_, name) -> name in
+let check_name cursor (name : definition_name) =
+  let name = match name with Plain_name name | Member_name (_, name) -> name in
   if name.text = "old" then
     Cursor.report cursor Reserved_name
       (Cursor.absolute cursor name.span)
-      "a function cannot be named `old`, which names a value as it was when a function was called, \
-       in specifications"
+      "A function cannot be named `old`, which names a value as it was when a function was called, \
+       in specifications."
 
 (* A top-level function's signature, after [fn]. *)
 let function_signature cursor =
   Cursor.expect_keyword cursor Fn;
-  let name = function_name cursor in
+  let name = definition_name cursor in
   check_name cursor name;
-  let method_ = match name with Method_name _ -> true | Plain_name _ -> false in
+  let method_ = match name with Member_name _ -> true | Plain_name _ -> false in
   signature cursor ~name ~method_
 
 (* A method declared in a trait, an [impl], or a capability. *)
@@ -255,8 +288,9 @@ let trait_member cursor =
 let impl_member cursor =
   match Cursor.peek_kind cursor with
   | Keyword Fn ->
+      let start = cursor.Cursor.index in
       let signature = member_signature cursor in
-      Impl_method { signature; body = body cursor }
+      Impl_method { signature; body = body cursor ~signature:start }
   | Keyword Type ->
       Cursor.advance cursor;
       let name = Atoms.upper cursor "the name of an associated type" in
@@ -274,8 +308,8 @@ let capability_member cursor =
       | Self_parameter _ ->
           Cursor.report cursor Misplaced_self
             (Cursor.absolute cursor parameter.span)
-            "a capability's methods take no `self`; they are called as `Capability.method(...)`, \
-             and only an implementation's methods take `self`"
+            "A capability's methods take no `self`; they are called as `Capability.method(...)`, \
+             and only an implementation's methods take `self`."
       | _ -> ())
     signature.parameters;
   Capability_method signature
@@ -379,7 +413,7 @@ let capability cursor =
 (* After [let], or after [const] or [static] from another language. *)
 let constant cursor =
   Cursor.advance cursor;
-  let name = function_name cursor in
+  let name = definition_name cursor in
   Cursor.expect_punctuation cursor Colon;
   let type_ = Parse_expression.type_expression cursor in
   Cursor.expect_punctuation cursor Equal;
@@ -394,7 +428,7 @@ let test cursor =
         Parse_expression.string_literal cursor ~start ~modules:[] literal
     | String { tag = None; _ } ->
         Cursor.report cursor Interpolation_not_allowed (Cursor.peek cursor).span
-          "a test's name cannot have interpolations";
+          "A test's name cannot have interpolations.";
         raise Cursor.Failed
     | String _ -> Cursor.fail cursor "a plain string, with no tag, to name the test"
     | _ -> Cursor.fail cursor "a string to name the test"
@@ -432,7 +466,7 @@ let top_level cursor ~function_ =
   let { visibility; tokens = visibility_tokens; opaque } = visibility cursor in
   let no_visibility what =
     remove_visibility cursor Misplaced_visibility visibility_tokens
-      (Printf.sprintf "%s takes no visibility: nothing refers to it by name" what)
+      (Printf.sprintf "%s takes no visibility: nothing refers to it by name." what)
   in
   let kind =
     match Cursor.peek_kind cursor with
@@ -441,8 +475,8 @@ let top_level cursor ~function_ =
     | Keyword Trait -> Left (trait cursor)
     | Keyword Impl ->
         remove_visibility cursor Misplaced_visibility visibility_tokens
-          "an `impl` takes no visibility: it applies wherever its trait and its type are both \
-           visible";
+          "An `impl` takes no visibility: it applies wherever its trait and the types it names are \
+           visible.";
         Left (impl cursor)
     | Keyword Capability -> Left (capability cursor)
     | Keyword Let -> Left (constant cursor)
@@ -450,15 +484,15 @@ let top_level cursor ~function_ =
         Habits.constant_keyword cursor ~token:(Cursor.peek cursor);
         Left (constant cursor)
     | Keyword Test ->
-        no_visibility "a test";
+        no_visibility "A test";
         Left (test cursor)
     | Keyword Theorem -> Left (theorem cursor)
     | Keyword Proof ->
-        no_visibility "a law's proof";
+        no_visibility "A law's proof";
         Left (law_proof cursor)
     | kind when visibility = Private && Parse_expression.begins_statement kind ->
         Cursor.report cursor Statement_at_top_level (Cursor.peek cursor).span
-          "statements must be inside a function, a test, or another definition with a body";
+          "Statements must be inside a function, a test, or another definition with a body.";
         raise Cursor.Failed
     | _ ->
         Cursor.fail cursor
@@ -470,7 +504,7 @@ let top_level cursor ~function_ =
   | Some (public, opaque), _ ->
       (* With the space before it, after [public]. *)
       let before = public.span.stop in
-      Cursor.report cursor Misplaced_opaque opaque.span "only a type can be `opaque`"
+      Cursor.report cursor Misplaced_opaque opaque.span "Only a type can be `opaque`."
         ~fixes:
           [
             Diagnostic.fix "Remove `opaque`"
@@ -483,7 +517,8 @@ let top_level cursor ~function_ =
 let definition cursor : definition =
   let function_ cursor : (definition_kind, empty) Either.t =
     let signature = function_signature cursor in
-    Left (Function { signature; body = body cursor })
+    (* The definition's first token, before its visibility. *)
+    Left (Function { signature; body = body cursor ~signature:cursor.Cursor.first })
   in
   match top_level cursor ~function_ with Left definition -> definition | Right (_, _) -> .
 

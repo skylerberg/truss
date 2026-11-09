@@ -96,7 +96,9 @@ and path_type = { path : path; arguments : type_argument list; span : span }
 and type_argument =
   | Type_argument of type_expression
   | Count of Z.t * span  (** [32] in [Array[UInt8, 32]] *)
-  | Count_parameter of name  (** [count] in [Array[Int64, count]] *)
+  | Count_name of name
+      (** [count] in [Array[Int64, count]], or a constant, such as [digest_size]; name resolution
+          decides *)
   | Constraint of name * type_expression  (** [Element = Int64] *)
 
 (* A function type in parentheses can carry [Uses] and [Cost] clauses. *)
@@ -291,7 +293,7 @@ type visibility = Private | Internal | Public | Public_opaque
 (* The type a method or constant belongs to: [List[Element: Ordered]] in
    [fn List[Element: Ordered].sort], or [hourly::Forecast]. *)
 type type_head = { path : path; generics : generic_parameter list; span : span }
-type function_name = Plain_name of name | Method_name of type_head * name
+type definition_name = Plain_name of name | Member_name of type_head * name
 
 type parameter = parameter_kind node
 
@@ -305,10 +307,15 @@ and parameter_kind =
     }
   | Parameter_error
 
-type result = Returns of type_expression | Yields of mode option * type_expression
+(* [yields] gives out parts of [self] any number of times, and [lends]
+   exactly once. *)
+type result =
+  | Returns of type_expression
+  | Yields of mode option * type_expression
+  | Lends of mode option * type_expression
 
 type signature = {
-  name : function_name;
+  name : definition_name;
   generics : generic_parameter list;
   parameters : parameter list;
   result : result option;
@@ -371,7 +378,7 @@ type definition_kind =
       members : impl_member line list;
     }
   | Capability of { name : name; members : capability_member line list }
-  | Constant of { name : function_name; type_ : type_expression; value : expression }
+  | Constant of { name : definition_name; type_ : type_expression; value : expression }
   | Test of { name : string_literal; uses : path_type list; body : block }
   | Theorem of {
       name : name;

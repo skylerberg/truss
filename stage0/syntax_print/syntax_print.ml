@@ -74,7 +74,7 @@ and path_type_text (path_type : path_type) =
 and type_argument = function
   | Type_argument type_ -> type_expression type_
   | Count (value, _) -> Z.to_string value
-  | Count_parameter name -> name.text
+  | Count_name name -> name.text
   | Constraint (name, type_) -> name.text ^ " = " ^ type_expression type_
 
 and function_type { inputs; output; clauses } =
@@ -300,9 +300,9 @@ let visibility = function
 
 let type_head (head : type_head) = path head.path ^ generics head.generics
 
-let function_name = function
+let definition_name = function
   | Plain_name name -> name.text
-  | Method_name (head, name) -> type_head head ^ "." ^ name.text
+  | Member_name (head, name) -> type_head head ^ "." ^ name.text
 
 let parameter (parameter : parameter) =
   match parameter.kind with
@@ -317,16 +317,17 @@ let parameter (parameter : parameter) =
         ]
   | Parameter_error -> "error"
 
+let moded written type_ =
+  (match written with Some written -> mode written ^ " " | None -> "") ^ type_expression type_
+
 let signature (signature : signature) =
   [
-    function_name signature.name ^ generics signature.generics;
+    definition_name signature.name ^ generics signature.generics;
     form "" (list parameter signature.parameters);
     (match signature.result with
     | Some (Returns type_) -> "-> " ^ type_expression type_
-    | Some (Yields (written, type_)) ->
-        "yields "
-        ^ (match written with Some written -> mode written ^ " " | None -> "")
-        ^ type_expression type_
+    | Some (Yields (written, type_)) -> "yields " ^ moded written type_
+    | Some (Lends (written, type_)) -> "lends " ^ moded written type_
     | None -> "");
   ]
   @ list clause signature.clauses
@@ -425,7 +426,7 @@ let definition (definition : definition) =
                  | Capability_member_error -> "error")
                capability_members)
     | Constant { name; type_; value } ->
-        form "let" [ function_name name; ": " ^ type_expression type_; expression value ]
+        form "let" [ definition_name name; ": " ^ type_expression type_; expression value ]
     | Test { name; uses; body } ->
         form "test"
           [

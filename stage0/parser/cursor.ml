@@ -24,6 +24,9 @@ type t = {
   mutable cut_off : bool;
       (** The current item has consumed a closer the lexer inserted, so what follows in it is not
           what the author wrote, and no more syntax errors are reported in it. *)
+  mutable cut_off_end : bool;
+      (** The tokens are an interpolation that a line break cut off, an error the lexer already
+          reported, so nothing is reported missing at their end. *)
   mutable line_ended : bool;
       (** A habit consumed a token, such as the [,] after a [match] arm, that kept the lexer from
           ending the line, so the next token starts a new item. *)
@@ -64,6 +67,7 @@ let create ~source ~diagnostics ~base tokens ~first ~stop =
     index = first;
     depth = 0;
     cut_off = false;
+    cut_off_end = false;
     line_ended = false;
   }
 
@@ -181,13 +185,14 @@ let fail cursor expected =
   let token = peek cursor in
   (match token.kind with
   | _ when inserted_closer token || cursor.cut_off -> ()
+  | End_of_file when cursor.cut_off_end -> ()
   | Reserved reserved ->
       report cursor Reserved_word token.span
-        (Printf.sprintf "`%s` is reserved for possible later use, and means nothing in Truss yet"
+        (Printf.sprintf "`%s` is reserved for possible later use, and means nothing in Truss yet."
            (reserved_spelling reserved))
   | _ ->
       report cursor Unexpected_token token.span
-        (Printf.sprintf "expected %s, found %s" expected (describe token)));
+        (Printf.sprintf "Expected %s, found %s." expected (describe token)));
   raise Failed
 
 let expect cursor kind expected = if not (accept cursor kind) then fail cursor expected
@@ -203,7 +208,7 @@ let expect_keyword cursor keyword =
 let nested cursor parse =
   if cursor.depth >= nesting_limit then begin
     report cursor Nesting_too_deep (peek cursor).span
-      (Printf.sprintf "this is nested more than %d levels deep" nesting_limit);
+      (Printf.sprintf "This is nested more than %d levels deep." nesting_limit);
     raise Failed
   end;
   cursor.depth <- cursor.depth + 1;
@@ -241,35 +246,38 @@ let skip_line cursor ~limit =
 
 (* A comma-separated list in brackets, which may be empty and may end with a
    comma; the current token is the opener. An error in an item skips to the
-   closer, and [recover] makes the item that stands for the rest, from the
-   span it covered. *)
+   next comma of the list, and [recover] makes the item that stands for it,
+   from the span it covered. *)
 let bracketed cursor ~item ~recover =
-  (fun cursor ->
-    let opener = cursor.index in
-    let closer_index = closer cursor opener in
-    advance cursor;
-    let rec loop items =
-      if cursor.index >= closer_index then List.rev items
-      else
-        let start = cursor.index in
-        match
-          let value = item cursor in
-          if cursor.index < closer_index then expect_punctuation cursor Comma;
-          value
-        with
-        | value -> loop (value :: items)
-        | exception Failed ->
-            let span =
-              span cursor
-                (Source.span (token_at cursor start).span.start
-                   (token_at cursor closer_index).span.start)
-            in
-            List.rev (recover span :: items)
-    in
-    let items = loop [] in
-    skip_to cursor (closer_index + 1);
-    items)
-    cursor
+  let opener = cursor.index in
+  let closer_index = closer cursor opener in
+  advance cursor;
+  let rec loop items =
+    if cursor.index >= closer_index then List.rev items
+    else
+      let start = cursor.index in
+      match
+        let value = item cursor in
+        if cursor.index < closer_index then expect_punctuation cursor Comma;
+        value
+      with
+      | value -> loop (value :: items)
+      | exception Failed ->
+          (* The item becomes [recover] of what it covered, up to the next
+             comma of this list, and the items after that comma are parsed,
+             so that each bad item gets its own error. *)
+          while cursor.index < closer_index && peek_kind cursor <> Punctuation Comma do
+            skip_one cursor
+          done;
+          let span =
+            span cursor (Source.span (token_at cursor start).span.start (peek cursor).span.start)
+          in
+          if cursor.index < closer_index then advance cursor;
+          loop (recover span :: items)
+  in
+  let items = loop [] in
+  skip_to cursor (closer_index + 1);
+  items
 
 (* Items separated by line breaks in braces, as statements, members, and
    arms are; the current token is the [{]. An error in an item skips to the
@@ -282,38 +290,36 @@ let bracketed cursor ~item ~recover =
    lexer inserted. *)
 let lines cursor ~item ~recover =
   let enclosing_cut_off = cursor.cut_off and enclosing_line_ended = cursor.line_ended in
-  (fun cursor ->
-    let opener = cursor.index in
-    let closer_index = closer cursor opener in
-    advance cursor;
-    let rec loop items =
-      if cursor.index >= closer_index then List.rev items
-      else
-        let start = cursor.index in
-        let value =
-          match
-            cursor.line_ended <- false;
-            cursor.cut_off <- false;
-            let value = item cursor in
-            let separated =
-              peek_kind cursor = Newline || (cursor.line_ended && (peek cursor).line_break_before)
-            in
-            if cursor.index < closer_index && not separated then fail cursor "a line break or `}`";
-            value
-          with
-          | value -> value
-          | exception Failed ->
-              skip_line cursor ~limit:closer_index;
-              recover start (span_from cursor start)
-        in
-        if cursor.index < closer_index && peek_kind cursor = Newline then advance cursor;
-        loop (value :: items)
-    in
-    let items = loop [] in
-    cursor.cut_off <- enclosing_cut_off;
-    cursor.line_ended <- enclosing_line_ended;
-    skip_to cursor (closer_index + 1);
-    items)
-    cursor
+  let opener = cursor.index in
+  let closer_index = closer cursor opener in
+  advance cursor;
+  let rec loop items =
+    if cursor.index >= closer_index then List.rev items
+    else
+      let start = cursor.index in
+      let value =
+        match
+          cursor.line_ended <- false;
+          cursor.cut_off <- false;
+          let value = item cursor in
+          let separated =
+            peek_kind cursor = Newline || (cursor.line_ended && (peek cursor).line_break_before)
+          in
+          if cursor.index < closer_index && not separated then fail cursor "a line break or `}`";
+          value
+        with
+        | value -> value
+        | exception Failed ->
+            skip_line cursor ~limit:closer_index;
+            recover start (span_from cursor start)
+      in
+      if cursor.index < closer_index && peek_kind cursor = Newline then advance cursor;
+      loop (value :: items)
+  in
+  let items = loop [] in
+  cursor.cut_off <- enclosing_cut_off;
+  cursor.line_ended <- enclosing_line_ended;
+  skip_to cursor (closer_index + 1);
+  items
 
 let blank_line_before cursor index = (token_at cursor index).blank_line_before

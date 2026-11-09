@@ -15,7 +15,7 @@ let string_literal cursor ~start ~modules literal =
   let string = Cursor.peek cursor in
   let interpolation (_ : Token.interpolation) =
     Cursor.report cursor Interpolation_not_allowed string.span
-      "a string in a pattern cannot have interpolations";
+      "A string in a pattern cannot have interpolations.";
     raise Cursor.Failed
   in
   Atoms.string_literal cursor ~start ~modules literal ~interpolation
@@ -34,6 +34,11 @@ let literal cursor : literal option =
       match Cursor.peek_kind cursor with
       | Integer value -> take (Literal_integer (Z.neg value))
       | _ -> Cursor.fail cursor "a number after `-` in a pattern")
+  | Float _ ->
+      Cursor.report cursor Float_pattern (Cursor.peek cursor).span
+        "A float literal cannot be a pattern, since `==` on floats treats `-0.0` and `0.0` as \
+         equal; match with a guard instead, as in `value if value == 0.0`.";
+      raise Cursor.Failed
   | Keyword True -> take Literal_true
   | Keyword False -> take Literal_false
   | String literal -> Some (Literal_string (string_literal cursor ~start ~modules:[] literal))
@@ -149,7 +154,7 @@ and pattern_fields cursor =
       if field.kind = Rest && index < List.length fields - 1 then
         Cursor.report cursor Unexpected_token
           (Cursor.absolute cursor field.span)
-          "`..` must be the last field of a pattern")
+          "`..` must be the last field of a pattern.")
     fields;
   fields
 

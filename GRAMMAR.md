@@ -277,8 +277,9 @@ visibility = "public" [ "opaque" ] | "internal" ;
 
 - `opaque` is allowed only before `type`.
 - An `impl`, a test, and a law proof take no visibility. An `impl` applies
-  wherever its trait and type are both visible, since a type has at most one
-  `impl` of each trait; nothing refers to a test or a law proof by name.
+  wherever its trait and the types it names are visible, since a type has at
+  most one `impl` of each trait; nothing refers to a test or a law proof by
+  name.
 
 ### Functions
 

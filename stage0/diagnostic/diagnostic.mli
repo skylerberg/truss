@@ -48,11 +48,13 @@ module Code : sig
     | Missing_body
     | Open_range
     | Interpolation_not_allowed
+    | Float_pattern
     | Let_else_brace
     | Nesting_too_deep
     | Misplaced_opaque
     | Misplaced_visibility
     | Misplaced_self
+    | Lends_own
     | Repeated_clause
     | Cost_word
     | Finite_not_time
@@ -75,7 +77,7 @@ module Code : sig
     | Misplaced_yield
     | Misplaced_loop_exit
     | Leaves_parallel
-    | Echo_in_proof
+    | Echo_in_specification
     | Reserved_name
 
   (* Each stage adds its own group; its codes are named "stage.code". *)
@@ -92,6 +94,9 @@ type fix = { title : string; edits : edit list }
 type t = {
   code : Code.t;
   message : string;
+      (** Whole sentences, each starting with a capital letter, or with code in backticks, and
+          ending with a period: "This string is not closed on its line." Every stage writes them the
+          same way. *)
   span : span;
   notes : (span * string) list;
   fixes : fix list;  (** Alternatives. Most diagnostics have at most one. *)

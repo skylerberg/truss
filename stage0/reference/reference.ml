@@ -47,6 +47,7 @@ let token (kind : Token.kind) : Truss.token option =
         | Invariant -> INVARIANT
         | Is -> IS
         | Law -> LAW
+        | Lends -> LENDS
         | Let -> LET
         | Match -> MATCH
         | Mut -> MUT
@@ -170,7 +171,7 @@ module Snippet = struct
           let kind, diagnostics =
             if Parser.is_use tokens piece then
               let parsed = Parser.use_line source tokens piece in
-              (Use, List.map (Diagnostic.move parsed.value.base) parsed.diagnostics)
+              (Use, Parser.placed parsed)
             else if starts_definition tokens piece then
               match Parser.example_definition source tokens piece with
               | Example_definition, diagnostics -> (Definition, diagnostics)

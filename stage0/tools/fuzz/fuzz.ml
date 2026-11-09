@@ -130,16 +130,16 @@ type verdict = Grammar_rejects | Grammar_accepts | Unknown
 let verdict : Diagnostic.Code.t -> verdict = function
   | Parser
       ( Unexpected_token | Needs_parentheses | Reserved_word | Statement_at_top_level | Missing_body
-      | Open_range | Increment | Double_negation | Match_arm_comma | Conditional_operator | Let_mut
-      | Address_of | Closure_bars | Brace_record | Turbofish | Trailing_lambda | As_conversion
-      | Elif ) ->
+      | Open_range | Float_pattern | Increment | Double_negation | Match_arm_comma
+      | Conditional_operator | Let_mut | Address_of | Closure_bars | Brace_record | Turbofish
+      | Trailing_lambda | As_conversion | Elif ) ->
       Grammar_rejects
   | Parser (Cost_word | Misplaced_potential | Interpolation_not_allowed) -> Unknown
   | Parser
       ( Use_after_definition | Let_else_brace | Nesting_too_deep | Misplaced_opaque
-      | Misplaced_visibility | Misplaced_self | Repeated_clause | Finite_not_time
+      | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Finite_not_time
       | Specification_only | Misplaced_assert | Misplaced_proof | Misplaced_yield
-      | Misplaced_loop_exit | Leaves_parallel | Echo_in_proof | Reserved_name )
+      | Misplaced_loop_exit | Leaves_parallel | Echo_in_specification | Reserved_name )
   | Lexer _ | Too_many_diagnostics ->
       Grammar_accepts
 

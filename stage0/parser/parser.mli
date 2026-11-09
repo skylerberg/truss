@@ -13,11 +13,14 @@ val split : Token.t array -> piece list
 
 val is_use : Token.t array -> piece -> bool
 
-type 'value parsed = {
-  value : 'value Syntax.item;
-  diagnostics : Diagnostic.t list;
-      (** Relative to [value.base]: {!Diagnostic.move} by the base gives their place in the file. *)
-}
+type relative_diagnostics
+(** A piece's diagnostics, relative to its base, so that a piece that only moved has the same ones.
+    They cannot be shown until {!placed} puts them in the file's offsets. *)
+
+type 'value parsed = { value : 'value Syntax.item; diagnostics : relative_diagnostics }
+
+val placed : _ parsed -> Diagnostic.t list
+(** A piece's diagnostics, moved by its base to their place in the file. *)
 
 val definition : Source.t -> Token.t array -> piece -> Syntax.definition parsed
 (** A definition, with the checks that need its whole tree. *)

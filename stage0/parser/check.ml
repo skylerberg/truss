@@ -20,9 +20,8 @@ type context = {
   specification : bool;
       (** [requires], [ensures], invariants, [decreases], [cost], laws, theorems, proofs *)
   assert_allowed : bool;  (** Tests, theorems, and proofs, outside lambdas *)
-  proof : bool;  (** Theorem bodies, [proof] blocks, and law proofs *)
   function_body : bool;  (** Where a [proof] block may appear *)
-  yields : bool;  (** In a method whose signature [yields], outside lambdas *)
+  yields : bool;  (** In a method whose signature [yields] or [lends], outside lambdas *)
   loop : loop;
   parallel : bool;
       (** In a [parallel] branch or a [parallel for] body, where [return] and [?] cannot leave *)
@@ -32,7 +31,6 @@ let plain =
   {
     specification = false;
     assert_allowed = false;
-    proof = false;
     function_body = false;
     yields = false;
     loop = Outside;
@@ -40,7 +38,7 @@ let plain =
   }
 
 let specification context = { context with specification = true }
-let proof context = { context with specification = true; assert_allowed = true; proof = true }
+let proof context = { context with specification = true; assert_allowed = true }
 
 let report cursor code (span : span) message =
   Cursor.report cursor code (Cursor.absolute cursor span) message
@@ -54,20 +52,21 @@ let rec expression cursor context (value : expression) =
       report cursor Specification_only value.span
         (Printf.sprintf
            "`%s` is only for specifications: `requires`, `ensures`, invariants, `decreases`, \
-            `cost`, laws, theorems, and proofs"
+            `cost`, laws, theorems, and proofs."
            (match quantifier with Forall -> "forall" | Exists -> "exists"))
   | Binary { operator = Implies; operator_span; _ } when not context.specification ->
       report cursor Specification_only operator_span
-        "`==>` is only for specifications; in code, write `!a || b`"
-  | Echo _ when context.proof ->
-      report cursor Echo_in_proof value.span "`echo` is not allowed in proofs"
+        "`==>` is only for specifications; in code, write `!a || b`."
+  | Echo _ when context.specification ->
+      report cursor Echo_in_specification value.span
+        "`echo` is not allowed in specifications, which never run."
   | Try _ when context.parallel ->
       report cursor Leaves_parallel (last_byte value.span)
         "`?` cannot leave a `parallel` block or a `parallel for`; return a `Result` from the \
-         branch and use `?` after it"
+         branch and use `?` after it."
   | Return _ when context.parallel ->
       report cursor Leaves_parallel value.span
-        "`return` cannot leave a `parallel` block or a `parallel for`"
+        "`return` cannot leave a `parallel` block or a `parallel for`."
   | Break | Continue -> loop_exit cursor context value
   | _ -> ());
   match value.kind with
@@ -76,25 +75,12 @@ let rec expression cursor context (value : expression) =
       block cursor
         { context with assert_allowed = false; yields = false; parallel = false; loop }
         body
-  | If { condition; then_; else_ } -> (
-      expression cursor context condition;
-      block cursor context then_;
-      match else_ with
-      | Some (Else body) -> block cursor context body
-      | Some (Else_if value) -> expression cursor context value
-      | None -> ())
-  | Match { scrutinees; arms } ->
-      List.iter (expression cursor context) scrutinees;
-      List.iter
-        (fun (arm : arm) ->
-          Option.iter (expression cursor context) arm.guard;
-          statement cursor context arm.body)
-        arms
-  | Provide { implementations; body } ->
-      List.iter (expression cursor context) implementations;
-      block cursor context body
-  | Block body -> block cursor context body
-  | _ -> Syntax_walk.children (expression cursor context) value
+  | _ -> parts cursor context value
+
+(* Everything inside an expression whose context does not change it. *)
+and parts cursor context value =
+  Syntax_walk.expression_parts ~expression:(expression cursor context)
+    ~statement:(statement cursor context) value
 
 and loop_exit cursor context (value : expression) =
   let word = match value.kind with Break -> "break" | _ -> "continue" in
@@ -102,16 +88,16 @@ and loop_exit cursor context (value : expression) =
   | Inside, _ | Parallel_body, Continue -> ()
   | Outside, _ ->
       report cursor Misplaced_loop_exit value.span
-        (Printf.sprintf "`%s` is only allowed in a loop" word)
+        (Printf.sprintf "`%s` is only allowed in a loop." word)
   | Across_lambda, _ ->
       report cursor Misplaced_loop_exit value.span
-        (Printf.sprintf "`%s` cannot reach a loop outside the lambda it is in" word)
+        (Printf.sprintf "`%s` cannot reach a loop outside the lambda it is in." word)
   | Parallel_body, _ ->
       report cursor Leaves_parallel value.span
-        "`break` cannot leave a `parallel for`; `continue` can"
+        "`break` cannot leave a `parallel for`; `continue` can."
   | Branch, _ ->
       report cursor Leaves_parallel value.span
-        (Printf.sprintf "`%s` cannot leave a branch of a `parallel` block" word)
+        (Printf.sprintf "`%s` cannot leave a branch of a `parallel` block." word)
 
 and block cursor context (body : block) = List.iter (statement cursor context) body.statements
 
@@ -127,10 +113,6 @@ and statement cursor context (statement : statement) =
       Option.iter (types cursor context) annotation;
       expression cursor context value;
       Option.iter (block cursor context) else_
-  | Expression value -> expression cursor context value
-  | Assignment { target; value; _ } ->
-      expression cursor context target;
-      expression cursor context value
   | For { parallel; iterable; clauses; body; _ } ->
       expression cursor context iterable;
       loop_clauses cursor context clauses;
@@ -149,19 +131,24 @@ and statement cursor context (statement : statement) =
   | Proof body ->
       if not context.function_body then
         report cursor Misplaced_proof statement.span
-          "a `proof` block is only allowed in a function's body";
+          "A `proof` block is only allowed in a function's body.";
       block cursor (proof context) body
-  | Assert value ->
+  | Assert _ ->
       if not context.assert_allowed then
         report cursor Misplaced_assert statement.span
-          "`assert` is only allowed in tests, theorems, and proofs";
-      expression cursor context value
-  | Yield value ->
+          "`assert` is only allowed in tests, theorems, and proofs.";
+      statement_parts cursor context statement
+  | Yield _ ->
       if not context.yields then
         report cursor Misplaced_yield statement.span
-          "`yield` is only allowed in a method whose signature `yields`";
-      expression cursor context value
-  | Statement_error -> ()
+          "`yield` is only allowed in a method whose signature `yields` or `lends`.";
+      statement_parts cursor context statement
+  | Expression _ | Assignment _ | Statement_error -> statement_parts cursor context statement
+
+(* Everything inside a statement whose context does not change it. *)
+and statement_parts cursor context written =
+  Syntax_walk.statement_parts ~expression:(expression cursor context)
+    ~statement:(statement cursor context) written
 
 (* Definitions *)
 
@@ -172,8 +159,8 @@ let parameters cursor (parameters : parameter list) =
       | Named_parameter { name; type_; default; _ } ->
           if name.text = "result" then
             report cursor Reserved_name name.span
-              "a parameter cannot be named `result`, which names the return value in `ensures` and \
-               `cost`";
+              "A parameter cannot be named `result`, which names the return value in `ensures` and \
+               `cost`.";
           types cursor plain type_;
           Option.iter (expression cursor plain) default
       | Self_parameter _ | Parameter_error -> ())
@@ -186,17 +173,17 @@ let generic_parameters cursor generics =
   List.iter (Syntax_walk.generic_parameter (expression cursor (specification plain))) generics
 
 let signature cursor (signature : signature) =
-  Syntax_walk.function_name (expression cursor (specification plain)) signature.name;
+  Syntax_walk.definition_name (expression cursor (specification plain)) signature.name;
   generic_parameters cursor signature.generics;
   parameters cursor signature.parameters;
   (match signature.result with
-  | Some (Returns type_ | Yields (_, type_)) -> types cursor plain type_
+  | Some (Returns type_ | Yields (_, type_) | Lends (_, type_)) -> types cursor plain type_
   | None -> ());
   clauses cursor signature.clauses
 
 let function_ cursor (written : signature) body =
   signature cursor written;
-  let yields = match written.result with Some (Yields _) -> true | _ -> false in
+  let yields = match written.result with Some (Yields _ | Lends _) -> true | _ -> false in
   Option.iter (block cursor { plain with function_body = true; yields }) body
 
 let function_definition cursor (definition : function_definition) =

@@ -1,7 +1,14 @@
-(* Visiting the expressions of a tree. [children] calls a function on each
-   expression directly inside another, including those in the blocks,
-   statements, and types it contains; [definition] calls it on each
-   outermost expression of a definition. *)
+(* Visiting the expressions and statements of a tree.
+
+   [expression_parts] and [statement_parts] visit one level: a node's own
+   expressions, including those in the types and clauses it holds, with
+   [expression], and the statements of the blocks it holds, with
+   [statement]. A walk that needs a context overrides the nodes that change
+   it and leaves every other to these, so a construct added to the tree is
+   walked by every check without the check listing it. [children],
+   [statement], and [block] go all the way down through statements, calling
+   one function on expressions; [definition] calls it on each outermost
+   expression of a definition. *)
 
 open Syntax
 
@@ -19,7 +26,7 @@ and path_type f (path : path_type) = List.iter (type_argument f) path.arguments
 
 and type_argument f = function
   | Type_argument type_ | Constraint (_, type_) -> type_expression f type_
-  | Count _ | Count_parameter _ -> ()
+  | Count _ | Count_name _ -> ()
 
 and clause f (clause : clause) =
   match clause.kind with
@@ -30,29 +37,6 @@ and clause f (clause : clause) =
       match cost.bound with Big_o value | At_most value | Exactly value -> f value | Finite -> ())
   | Clause_error -> ()
 
-and block f (block : block) = List.iter (statement f) block.statements
-
-and statement f (statement : statement) =
-  match statement.kind with
-  | Let { annotation; value; else_; _ } ->
-      Option.iter (type_expression f) annotation;
-      f value;
-      Option.iter (block f) else_
-  | Expression value | Assert value | Yield value -> f value
-  | Assignment { target; value; _ } ->
-      f target;
-      f value
-  | For { iterable; clauses; body; _ } ->
-      f iterable;
-      List.iter (loop_clause f) clauses;
-      block f body
-  | While { condition; clauses; body } ->
-      f condition;
-      List.iter (loop_clause f) clauses;
-      block f body
-  | Parallel body | Proof body -> block f body
-  | Statement_error -> ()
-
 and loop_clause f (clause : loop_clause) =
   match clause.kind with
   | Invariant value -> f value
@@ -60,7 +44,8 @@ and loop_clause f (clause : loop_clause) =
 
 and string_literal f (literal : string_literal) = List.iter (fun (value, _) -> f value) literal.rest
 
-let children f (value : expression) =
+let expression_parts ~expression:f ~statement (value : expression) =
+  let block (block : block) = List.iter statement block.statements in
   match value.kind with
   | Integer _ | Float _ | True | False | Todo | Unreachable | Break | Continue | Self_value
   | Self_type_value | Name _ | Expression_error ->
@@ -108,12 +93,12 @@ let children f (value : expression) =
           f key;
           f value)
         entries
-  | Lambda { body; _ } -> block f body
+  | Lambda { body; _ } -> block body
   | If { condition; then_; else_ } -> (
       f condition;
-      block f then_;
+      block then_;
       match else_ with
-      | Some (Else body) -> block f body
+      | Some (Else body) -> block body
       | Some (Else_if value) -> f value
       | None -> ())
   | Match { scrutinees; arms } ->
@@ -121,12 +106,38 @@ let children f (value : expression) =
       List.iter
         (fun (arm : arm) ->
           Option.iter f arm.guard;
-          statement f arm.body)
+          statement arm.body)
         arms
   | Provide { implementations; body } ->
       List.iter f implementations;
-      block f body
-  | Block body -> block f body
+      block body
+  | Block body -> block body
+
+let statement_parts ~expression:f ~statement (written : statement) =
+  let block (block : block) = List.iter statement block.statements in
+  match written.kind with
+  | Let { annotation; value; else_; _ } ->
+      Option.iter (type_expression f) annotation;
+      f value;
+      Option.iter block else_
+  | Expression value | Assert value | Yield value -> f value
+  | Assignment { target; value; _ } ->
+      f target;
+      f value
+  | For { iterable; clauses; body; _ } ->
+      f iterable;
+      List.iter (loop_clause f) clauses;
+      block body
+  | While { condition; clauses; body } ->
+      f condition;
+      List.iter (loop_clause f) clauses;
+      block body
+  | Parallel body | Proof body -> block body
+  | Statement_error -> ()
+
+let rec statement f written = statement_parts ~expression:f ~statement:(statement f) written
+let block f (block : block) = List.iter (statement f) block.statements
+let children f value = expression_parts ~expression:f ~statement:(statement f) value
 
 let generic_parameter f (parameter : generic_parameter) =
   match parameter.kind with
@@ -135,7 +146,7 @@ let generic_parameter f (parameter : generic_parameter) =
   | Capability_parameter _ | Generic_error -> ()
 
 let type_head f (head : type_head) = List.iter (generic_parameter f) head.generics
-let function_name f = function Plain_name _ -> () | Method_name (head, _) -> type_head f head
+let definition_name f = function Plain_name _ -> () | Member_name (head, _) -> type_head f head
 
 let parameter f (parameter : parameter) =
   match parameter.kind with
@@ -145,11 +156,11 @@ let parameter f (parameter : parameter) =
   | Self_parameter _ | Parameter_error -> ()
 
 let signature f (signature : signature) =
-  function_name f signature.name;
+  definition_name f signature.name;
   List.iter (generic_parameter f) signature.generics;
   List.iter (parameter f) signature.parameters;
   (match signature.result with
-  | Some (Returns type_ | Yields (_, type_)) -> type_expression f type_
+  | Some (Returns type_ | Yields (_, type_) | Lends (_, type_)) -> type_expression f type_
   | None -> ());
   List.iter (clause f) signature.clauses
 
@@ -217,7 +228,7 @@ let definition f (definition : definition) =
           | Capability_member_error -> ())
         members
   | Constant { name; type_; value } ->
-      function_name f name;
+      definition_name f name;
       type_expression f type_;
       f value
   | Test { uses; body; _ } ->

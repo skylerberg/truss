@@ -109,7 +109,7 @@ let edit_distance a b =
    goes on as if it had been written, so that what follows is checked too. *)
 let misspelled_cost_word cursor (token : Token.t) written ~words ~what =
   let message =
-    Printf.sprintf "expected %s, one of %s, found `%s`" what
+    Printf.sprintf "Expected %s, one of %s, found `%s`." what
       (String.concat ", " (List.map (fun word -> "`" ^ Cost_word.spelling word ^ "`") words))
       written
   in
@@ -188,7 +188,7 @@ and type_arguments cursor =
   in
   if arguments = [] then begin
     Cursor.report cursor Unexpected_token (Cursor.token_at cursor start).span
-      "type arguments cannot be empty";
+      "Type arguments cannot be empty.";
     raise Cursor.Failed
   end;
   arguments
@@ -199,7 +199,7 @@ and type_argument cursor =
       let token = Cursor.next cursor in
       Count (value, Cursor.span cursor token.span)
   | Lower text, next when next <> Punctuation Colon_colon ->
-      Count_parameter (Atoms.name cursor (Cursor.next cursor) text)
+      Count_name (Atoms.name cursor (Cursor.next cursor) text)
   | Upper text, Punctuation Equal ->
       let name = Atoms.name cursor (Cursor.next cursor) text in
       Cursor.advance cursor;
@@ -248,7 +248,7 @@ and parenthesized_function_type cursor =
     let function_type = function_type cursor ~clauses:true in
     if function_type.clauses = [] then begin
       Cursor.report cursor Unexpected_token (Cursor.token_at cursor start).span
-        "parentheses around a function type are only for its clauses; remove them";
+        "Parentheses around a function type are only for its clauses; remove them.";
       raise Cursor.Failed
     end;
     if cursor.index < closer then Cursor.fail cursor "`)` after the clauses of the function type";
@@ -279,7 +279,7 @@ and generics cursor : generic_parameter list =
     in
     if parameters = [] then begin
       Cursor.report cursor Unexpected_token (Cursor.token_at cursor start).span
-        "generic parameters cannot be empty";
+        "Generic parameters cannot be empty.";
       raise Cursor.Failed
     end;
     parameters
@@ -346,7 +346,7 @@ and cost cursor =
   in
   if Cost_word.of_token (Cursor.peek_kind cursor) = Some Potential then begin
     Cursor.report cursor Misplaced_potential (Cursor.peek cursor).span
-      "`cost potential` belongs to a type, and states the potential its values hold";
+      "`cost potential` belongs to a type, and states the potential its values hold.";
     raise Cursor.Failed
   end;
   let resource =
@@ -381,7 +381,7 @@ and cost cursor =
             if resource <> Time then
               Cursor.report cursor Finite_not_time bound_token.span
                 "`finite` is a bound only for `time`; a countable resource takes `O(...)`, `<=`, \
-                 or `==`";
+                 or `==`.";
             Finite)
   in
   { amortized; resource; bound }
@@ -424,7 +424,17 @@ and parenthesized_expression cursor =
 (* An expression at the lowest level. Inside brackets, [open_range] lets a
    range leave out its start or its end. *)
 and expression ?(open_range = false) cursor =
-  Cursor.nested cursor (fun cursor -> binary cursor ~level:0 ~open_range)
+  Cursor.nested cursor (fun cursor ->
+      let start = cursor.Cursor.index in
+      let value = binary cursor ~level:0 ~open_range in
+      match Cursor.peek cursor with
+      | { kind = Punctuation Question; _ } as question -> (
+          match conditional_follows (Cursor.peek_ahead cursor 1) with
+          | true ->
+              Cursor.advance cursor;
+              conditional cursor start value question
+          | false -> value)
+      | _ -> value)
 
 and binary cursor ~level ~open_range =
   let start = cursor.Cursor.index in
@@ -476,7 +486,7 @@ and range_stop cursor ~open_range =
       None
 
 and open_range_message part =
-  Printf.sprintf "a range without a%s %s is only allowed directly in brackets, as in `items[2..]`"
+  Printf.sprintf "A range without a%s %s is only allowed directly in brackets, as in `items[2..]`."
     (if part = "end" then "n" else "")
     part
 
@@ -517,8 +527,11 @@ and prefix cursor : expression =
         let inner = expression_node cursor (start + 1) (Prefix (Negate, operand)) in
         expression_node cursor start (Prefix (Negate, inner))
     | Punctuation Ampersand ->
+        let before =
+          if start > cursor.first then Some (Cursor.token_at cursor (start - 1)) else None
+        in
         let ampersand = Cursor.next cursor in
-        Habits.address_of cursor ~ampersand ~next:(Cursor.peek cursor);
+        Habits.address_of cursor ~before ~ampersand ~next:(Cursor.peek cursor);
         prefix cursor
     | Punctuation (Bar | Or_or) -> closure_bars cursor
     | _ -> postfix cursor
@@ -582,7 +595,7 @@ and closure_bars cursor =
   in
   let body_start = cursor.index in
   let body = expression cursor in
-  Habits.closure_bars cursor ~opening ~closing ~body;
+  Habits.closure_bars cursor ~opening ~closing ~body ~before_else:(Cursor.is_keyword cursor Else);
   let block =
     match body.kind with
     | Block block -> block
@@ -628,18 +641,19 @@ and postfix cursor : expression =
                   } ->
                   Cursor.report cursor Open_range
                     (Cursor.absolute cursor operator_span)
-                    "a range without a start or an end must be the only item in its brackets, as \
-                     in `items[2..]`"
+                    "A range without a start or an end must be the only item in its brackets, as \
+                     in `items[2..]`."
               | _ -> ())
             items;
         loop (expression_node cursor start (Bracket (value, items)))
     | Punctuation (Open Paren) ->
         let arguments = arguments cursor in
         loop (expression_node cursor start (Call (value, arguments)))
-    | Punctuation Question ->
-        let question = Cursor.next cursor in
-        if conditional_follows cursor then loop (conditional cursor start value question)
-        else loop (expression_node cursor start (Try value))
+    (* A [?] that starts [x ? a : b] is left for [expression], whose whole
+       left side is the condition, as in the languages it comes from. *)
+    | Punctuation Question when not (conditional_follows (Cursor.peek_ahead cursor 1)) ->
+        Cursor.advance cursor;
+        loop (expression_node cursor start (Try value))
     | Keyword With ->
         Cursor.advance cursor;
         if not (Cursor.is_punctuation cursor (Open Paren)) then
@@ -654,8 +668,7 @@ and postfix cursor : expression =
 
 (* Whether the token after a [?] starts the second part of [x ? a : b]: a
    token that can start an expression but cannot follow a [?] in Truss. *)
-and conditional_follows cursor =
-  match Cursor.peek_kind cursor with
+and conditional_follows = function
   | Punctuation (Open _ | Minus | Dot_dot | Dot_dot_equal) -> false
   | kind -> begins_expression kind
 
@@ -826,7 +839,7 @@ and turbofish cursor start (function_path : path) =
             (function
               | Type_argument argument -> Item (as_expression argument)
               | Count (value, span) -> Item { kind = Integer value; span }
-              | Count_parameter name ->
+              | Count_name name ->
                   Item { kind = Name { modules = []; last = name }; span = name.span }
               | Constraint (name, argument) -> Item_constraint (name, argument))
             arguments
@@ -834,9 +847,9 @@ and turbofish cursor start (function_path : path) =
         { kind = Bracket ({ kind = Name path; span = path.last.span }, items); span }
     | _ -> { kind = Expression_error; span = type_.span }
   in
-  let function_name = expression_node cursor start (Name function_path) in
+  let definition_name = expression_node cursor start (Name function_path) in
   expression_node cursor start
-    (Bracket (function_name, List.map (fun type_ -> Item (as_expression type_)) types))
+    (Bracket (definition_name, List.map (fun type_ -> Item (as_expression type_)) types))
 
 and string_literal cursor ~start ~modules literal =
   Atoms.string_literal cursor ~start ~modules literal ~interpolation:(interpolation cursor)
@@ -847,6 +860,10 @@ and interpolation cursor (inner : Token.interpolation) : expression =
   (* The interpolation's tokens end with its End_of_file. *)
   let stop = Array.length inner.tokens - 1 in
   let nested = Cursor.over cursor inner.tokens ~stop in
+  (* A closed interpolation's span ends with its [}]; one a line break cut
+     off ends without it, and the lexer already reported it. *)
+  let written = Cursor.text cursor inner.span in
+  nested.cut_off_end <- written = "" || written.[String.length written - 1] <> '}';
   (* An empty interpolation, or one a line break cut off before its first
      token, already has the lexer's error. *)
   if stop = 0 then { kind = Expression_error; span = Cursor.span cursor inner.span }
@@ -900,7 +917,7 @@ and collection cursor =
 (* A collection whose elements mix list elements with map entries. *)
 and mixed_collection cursor start ((key : expression), _) =
   Cursor.report cursor Unexpected_token (Cursor.absolute cursor key.span)
-    "a collection holds either list elements or map entries, `key: value`, not both";
+    "A collection holds either list elements or map entries, `key: value`, not both.";
   error_expression cursor start
 
 and lambda cursor =
@@ -1090,6 +1107,35 @@ and replace_trailing (statement : statement) ~replace =
         (rightmost assignment.value)
   | _ -> None
 
+(* The [it] tokens of a block, including those in its interpolations. *)
+and uses_of_it (tokens : Token.t array) =
+  List.concat_map
+    (fun (token : Token.t) ->
+      match token.kind with
+      | Lower "it" -> [ token ]
+      | String literal ->
+          List.concat_map
+            (fun (inner : Token.interpolation) -> uses_of_it inner.tokens)
+            (Array.to_list (Token.interpolations literal))
+      | _ -> [])
+    (Array.to_list tokens)
+
+and rename_it (tokens : Token.t array) ~parameter =
+  Array.map
+    (fun (token : Token.t) ->
+      match token.kind with
+      | Lower "it" -> { token with kind = Lower parameter }
+      | String literal ->
+          let rest =
+            Array.map
+              (fun ((inner : Token.interpolation), text) ->
+                ({ inner with tokens = rename_it inner.tokens ~parameter }, text))
+              literal.rest
+          in
+          { token with kind = String { literal with rest } }
+      | _ -> token)
+    tokens
+
 (* [items.map { it.name }]: a block on the same line after a call without
    parentheses, which uses [it]. It is parsed as the call the fix writes:
    the block becomes a lambda's body, with [it] renamed to the parameter. *)
@@ -1098,18 +1144,11 @@ and trailing_lambda cursor statement =
   let closer = Cursor.closer cursor cursor.index in
   let closing = Cursor.token_at cursor closer in
   let block_tokens = Array.sub cursor.tokens cursor.index (closer - cursor.index + 1) in
-  let uses =
-    List.filter (fun (token : Token.t) -> token.kind = Lower "it") (Array.to_list block_tokens)
-  in
+  let uses = uses_of_it block_tokens in
   let replace (callee : expression) : expression =
     let parameter = Habits.parameter_name callee in
     Habits.trailing_lambda cursor ~callee ~parameter ~opening ~closing ~uses;
-    let renamed =
-      Array.map
-        (fun (token : Token.t) ->
-          if token.kind = Lower "it" then { token with kind = Lower parameter } else token)
-        block_tokens
-    in
+    let renamed = rename_it block_tokens ~parameter in
     let body = block (Cursor.over cursor renamed) in
     Cursor.skip_to cursor (closer + 1);
     let at_start = Syntax.Span.make body.span.start body.span.start in
@@ -1203,8 +1242,8 @@ and binding cursor ~mutable_ =
       if before.kind = Punctuation (Close Curly) then begin
         let span = Cursor.absolute cursor value.span in
         Cursor.report cursor Let_else_brace (Cursor.peek cursor).span
-          "the expression before the `else` of a `let ... else` cannot end with `}`; put it in \
-           parentheses"
+          "The expression before the `else` of a `let ... else` cannot end with `}`; put it in \
+           parentheses."
           ~fixes:
             [
               Diagnostic.fix "Put the expression in parentheses"
@@ -1254,8 +1293,8 @@ and loop_clauses cursor =
             clauses
         then
           Cursor.report cursor Repeated_clause keyword.span
-            "a loop has at most one `decreases` clause; list several measures in one, separated by \
-             commas";
+            "A loop has at most one `decreases` clause; list several measures in one, separated by \
+             commas.";
         let measures = expression_list cursor in
         loop
           (({ kind = Loop_decreases measures; span = Cursor.span_from cursor start } : loop_clause)

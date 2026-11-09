@@ -139,13 +139,13 @@ let problem parent child ~right (operand : expression) =
   | (Comparison | And_group | Or_group | Implies_group), Range_group -> None
   | (And_group | Or_group | Implies_group), Comparison -> None
   | Implies_group, (And_group | Or_group) -> None
-  | Range_group, Range_group -> Some (Chained "ranges do not chain")
-  | Comparison, Comparison -> Some (Chained "comparisons do not chain")
-  | Implies_group, Implies_group -> Some (Chained "`==>` does not chain")
+  | Range_group, Range_group -> Some (Chained "Ranges do not chain.")
+  | Comparison, Comparison -> Some (Chained "Comparisons do not chain.")
+  | Implies_group, Implies_group -> Some (Chained "`==>` does not chain.")
   | And_group, Or_group | Or_group, And_group ->
-      Some (Mixed "`&&` and `||` cannot be mixed without parentheses")
+      Some (Mixed "`&&` and `||` cannot be mixed without parentheses.")
   | _ when bitwise parent || bitwise child -> Some Mixed_bitwise
-  | _ -> Some (Mixed "these operators need parentheses to say which applies first")
+  | _ -> Some (Mixed "These operators need parentheses to say which applies first.")
 
 (* The fix that gives [x _ y _ z] one reading. A reading that changes which
    operator applies last, such as [a & (b == c)] for [a & b == c], may give
@@ -203,8 +203,8 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
   match problem with
   | Lowest_operand ->
       report cursor operand.span
-        "this takes everything after it, so as an operand it must be in parentheses, except that \
-         `forall` and `exists` may be the last operand of `&&`, `||`, or `==>`"
+        "This takes everything after it, so as an operand it must be in parentheses, except that \
+         `forall` and `exists` may be the last operand of `&&`, `||`, or `==>`."
         [ fix cursor operand.span (parentheses cursor operand.span operand.span) ]
   | Mixed message -> report cursor (operator_span whole) message (both ())
   | Mixed_bitwise ->
@@ -224,7 +224,7 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
         | _ -> both ()
       in
       report cursor (operator_span whole)
-        "shifts and bitwise operators combine only with themselves; add parentheses" fixes
+        "Shifts and bitwise operators combine only with themselves; add parentheses." fixes
   | Chained message ->
       let fixes =
         match (whole.kind, operand.kind) with

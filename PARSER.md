@@ -131,9 +131,10 @@ Each definition is parsed from its own token slice, with a fresh `Cursor`.
   the rest of the file's, and `Parser.definition` returns them relative to
   the base, with their notes and fixes, so a definition that only moved
   gives the same diagnostics as well as the same tree, and both can be
-  cached together. `Diagnostic.move` by the base gives their place in the
-  file, which `Parser.parse` does for a whole file, since tools and editors
-  work in file offsets. The one diagnostic that depends on the rest of the
+  cached together. They have a type of their own, so they cannot be shown
+  by mistake where they would point at the wrong text: `Parser.placed`
+  moves them by the base to their place in the file, which `Parser.parse`
+  does for a whole file, since tools and editors work in file offsets. The one diagnostic that depends on the rest of the
   file, a `use` line after a definition, is reported by `Parser.parse`.
 - **The definition keeps its source text,** the bytes from its first token to
   the end of its last token. `truss fmt` prints each literal from its span, as
@@ -390,8 +391,11 @@ at hand:
   methods without `self`.
 - `uses` and `decreases` at most once
 - no function named `old`
+- no `lends own`: a part a `lends` method lends stays with `self`, and a fix
+  removes the `own`
 - a body for every function outside a trait or a capability. A missing one
-  gets the fix `{ todo }`, the body of unwritten code.
+  gets the fix `{ todo }`, the body of unwritten code, indented as its
+  signature is.
 
 ### Cost clauses
 
@@ -423,13 +427,17 @@ branch, and a method that yields or lends. It reports:
 - `break` and `continue` outside a loop, or inside a lambda in that loop
 - `return`, `break`, `continue`, and `?` that would leave a `parallel` block,
   and `break`, `return`, and `?` in a `parallel for`
-- `echo` inside a proof
+- `echo` inside a specification, which never runs
 - a parameter named `result`
 
 These need only the one definition's tree, so they belong to the parse stage
 and are cached with it. They are a separate walk, not part of each parsing
 function, so the parsing code does not thread a context through every call,
-and each rule can be tested on its own.
+and each rule can be tested on its own. The walk handles only the nodes that
+change the context, such as a lambda, a loop, or a `proof` block, and
+leaves every other node to `Syntax_walk`'s one-level walk of a node's
+expressions and statements, so a construct added to the tree is checked by
+every rule without `Check` listing it.
 
 ## Errors and recovery
 
@@ -438,9 +446,11 @@ and each rule can be tested on its own.
 Diagnostics use the shared `Diagnostic` type from LEXER.md, with codes such
 as `parser.unexpected_token` and `parser.needs_parentheses`. Each habit from
 another language has a code of its own, such as `parser.increment`, so tools
-and agents can match on it. Every diagnostic is an error. When the parser knows what was meant, it gives an exact fix;
-otherwise the message says what it expected, such as "expected `=>` after
-the patterns of a `match` arm".
+and agents can match on it. Every diagnostic is an error. Messages are
+written in sentences, as the lexer's are, which `Diagnostic.t` states for
+every stage. When the parser knows what was meant, it gives an exact fix;
+otherwise the message says what it expected, such as "Expected `=>` after
+the patterns of a `match` arm, found a line break."
 
 The expected tokens come from the parsing function that failed, which knows
 what could come next. A generated parser can list them too, but a
@@ -452,9 +462,11 @@ which is what an agent needs to act.
 Brackets are always balanced, which gives the parser exact places to stop
 after an error:
 
-- **Inside brackets,** an error skips to the matching closer. The parser keeps
-  the index of each opener's closer, computed once per definition, so this is
-  a jump, not a search.
+- **Inside brackets,** an error in an item skips to the next comma of the
+  list, jumping over any brackets nested in it, and the items after the
+  comma parse normally, so three bad arguments give three errors. The parser
+  keeps the index of each opener's closer, computed once per definition, so
+  each jump over a nested group is one step, not a search.
 - **In a block, a trait, an `impl`, a capability, or a `match`,** an error
   skips to the next `NEWLINE` at the same depth, or to the closing `}`. The
   statement, member, or arm becomes an `Error` node, and the ones after it
@@ -478,7 +490,8 @@ To avoid cascades:
   is as it was before the block, unless the block's own `}` is one the lexer
   inserted.
 - An empty interpolation already has the lexer's error, so the parser
-  reports nothing for it.
+  reports nothing for it, and nothing missing at the end of one that a line
+  break cut off.
 - A file reports at most 200 diagnostics, as in the lexer.
 
 ### Syntax from other languages
@@ -496,14 +509,15 @@ as if the code had been fixed.
 | `i++`, `i--` | A `Foreign` token after an expression, at the end of its line | `i += 1`, `i -= 1` |
 | `--x` | A `Foreign` token before an expression | `-(-x)` |
 | `A => 1,` | `,` after a `match` arm's body | Remove the `,` |
-| `x ? a : b` | `?` followed by a token that starts an expression but cannot follow `?` | `if x { a } else { b }` |
+| `x ? a : b` | `?` followed by a token that starts an expression but cannot follow `?`. The whole expression before the `?` is the condition, as in C and JavaScript, where `?:` binds most loosely | `if x { a } else { b }` |
 | `let mut x` | `mut` right after `let` | `var x` |
 | `&x`, `&mut x` | `&` where an expression must begin | `x`, `mut x` |
 | `\|x\| x + 1`, `\|\| x` | `\|` or `\|\|` where an expression must begin | `fn(x) { x + 1 }`, `fn() { x }` |
 | `Point { x: 1.0, y: 2.0 }` | An `UPPER` name, then `{`, a name, and `:`, on one line; no block starts with a label | `Point(x: 1.0, y: 2.0)` |
 | `parse::<Int64>(text)` | `::` followed by `<` | `parse[Int64](text)` |
-| `items.map { it.name }` | A statement that ends with a name or a member, followed on its line by a block that uses `it` | `items.map(fn(item) { item.name })`, naming the parameter with the singular of the collection's name where that is plain to work out, as `item` for `items` and `entry` for `entries`, and otherwise `element` |
-| `x as Int64` | The reserved word `as` after an expression, with a type after it on the same line | `Int64.from(x)` |
+| `items.map { it.name }` | A statement that ends with a name or a member, followed on its line by a block that uses `it`, in its code or in its interpolations | `items.map(fn(item) { item.name })`, renaming every `it`, and naming the parameter with the singular of the collection's name where that is plain to work out, as `item` for `items` and `entry` for `entries`, and otherwise `element` |
+| `x as Int64` | The reserved word `as` after an expression, with a type after it on the same line | `Int64.from(x)`, then `Int64.try_from(x)`, for a conversion that can lose information, as most casts can |
+| `0.0 =>` in a pattern | A float literal where a pattern begins | None; the message says to match with a guard, as in `value if value == 0.0` |
 | `loop {`, `const`, `static` | A `Reserved` token where a statement or a definition starts | `while true {`, `let` |
 | `where` and the other reserved words | A `Reserved` token anywhere else | None; the message says the word is reserved |
 | `elif` | The name `elif` starting a statement right after an `if` | `else if` |
@@ -530,7 +544,13 @@ added once the compiler works:
 - **The lexer** gives the parser one token array per file. The parser reads
   the source bytes only through spans, to build fixes and to keep each
   definition's source text.
-- **Name resolution** gets one tree per definition and annotates its nodes.
+- **Name resolution** gets one tree per definition that parsed without an
+  error, and annotates its nodes. A definition with a parser diagnostic
+  stops at the parser: its tree holds `Error` nodes, and nodes built for a
+  habit as if its fix had been applied, which serve the language server and
+  recovery, but checking them would report errors whose cause is the one
+  the parser already reported. Each error then has one diagnostic, as
+  TYPECHECKER.md asks. The definitions around it are checked as usual.
   It decides `Bracket`, `Binding_or_constant`, and `Name` nodes. Type
   checking then reports bare arguments that name no parameter. Both are
   designed in [TYPECHECKER.md](TYPECHECKER.md).

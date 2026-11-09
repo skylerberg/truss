@@ -8,7 +8,10 @@ let split = Split.items
 let is_use (tokens : Token.t array) piece = tokens.(piece.first).kind = Keyword Use
 let spelled_words = List.map fst Cost_word.spellings
 
-type 'value parsed = { value : 'value Syntax.item; diagnostics : Diagnostic.t list }
+type relative_diagnostics = Diagnostic.t list
+type 'value parsed = { value : 'value Syntax.item; diagnostics : relative_diagnostics }
+
+let placed parsed = List.map (Diagnostic.move parsed.value.base) parsed.diagnostics
 
 (* Parses a piece with a cursor of its own, which collects the piece's
    diagnostics apart from the rest of the file's. *)
@@ -84,7 +87,7 @@ let use_after_definition source (line : _ Syntax.item) ~destination =
   let stop = if line_end < String.length text then line_end + 1 else line_end in
   Diagnostic.make ~code:(Parser Use_after_definition)
     (Source.span line.base stop_offset)
-    "`use` lines come before every definition in a file"
+    "`use` lines come before every definition in a file."
     ~fixes:
       [
         Diagnostic.fix "Move it up to the other `use` lines"
@@ -93,8 +96,6 @@ let use_after_definition source (line : _ Syntax.item) ~destination =
             Diagnostic.delete (Source.span start stop);
           ];
       ]
-
-let absolute (parsed : _ parsed) = List.map (Diagnostic.move parsed.value.base) parsed.diagnostics
 
 let parse source tokens =
   let text = Source.text source in
@@ -106,7 +107,7 @@ let parse source tokens =
     | [] -> (List.rev uses, List.rev definitions, List.concat (List.rev diagnostics))
     | piece :: rest when is_use tokens piece ->
         let line = use_line source tokens piece in
-        let line_diagnostics = absolute line in
+        let line_diagnostics = placed line in
         let moved, destination =
           match (definitions, destination) with
           | [], _ ->
@@ -134,7 +135,7 @@ let parse source tokens =
           | _ -> destination
         in
         gather rest ~uses ~definitions:(parsed.value :: definitions)
-          ~diagnostics:(absolute parsed :: diagnostics) ~destination
+          ~diagnostics:(placed parsed :: diagnostics) ~destination
   in
   let uses, definitions, diagnostics =
     gather (split tokens) ~uses:[] ~definitions:[] ~diagnostics:[] ~destination:None
