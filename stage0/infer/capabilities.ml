@@ -13,7 +13,7 @@ module T = Types
 module C = Checked
 module Names = Resolve.Names
 module Environment = Interface.Environment
-open Expressions
+open State
 
 let panic : T.capability =
   Capability

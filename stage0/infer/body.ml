@@ -10,6 +10,9 @@ module C = Checked
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Lower = Interface.Lower
+open State
+open Lookups
+open Statements
 open Expressions
 
 type result = { checked : C.t; diagnostics : Diagnostic.t list }
