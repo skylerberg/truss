@@ -72,8 +72,26 @@ module Code = struct
     | Echo_in_specification
     | Reserved_name
 
+  type resolve =
+    | Unknown_name
+    | Unknown_module
+    | Not_visible
+    | Ambiguous_module
+    | Duplicate_import
+    | Unused_import
+    | Intrinsic_import
+    | Hides_name
+    | Duplicate_definition
+    | Not_a_place
+    | Not_generic
+    | Not_a_constant
+    | Alternative_bindings
+    | Misplaced_self_type
+    | Not_a_generic_parameter
+    | Null
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
-  type t = Lexer of lexer | Parser of parser | Too_many_diagnostics
+  type t = Lexer of lexer | Parser of parser | Resolve of resolve | Too_many_diagnostics
 
   let lexer_name code =
     match code with
@@ -148,9 +166,29 @@ module Code = struct
     | Echo_in_specification -> "echo_in_specification"
     | Reserved_name -> "reserved_name"
 
+  let resolve_name code =
+    match code with
+    | Unknown_name -> "unknown_name"
+    | Unknown_module -> "unknown_module"
+    | Not_visible -> "not_visible"
+    | Ambiguous_module -> "ambiguous_module"
+    | Duplicate_import -> "duplicate_import"
+    | Unused_import -> "unused_import"
+    | Intrinsic_import -> "intrinsic_import"
+    | Hides_name -> "hides_name"
+    | Duplicate_definition -> "duplicate_definition"
+    | Not_a_place -> "not_a_place"
+    | Not_generic -> "not_generic"
+    | Not_a_constant -> "not_a_constant"
+    | Alternative_bindings -> "alternative_bindings"
+    | Misplaced_self_type -> "misplaced_self_type"
+    | Not_a_generic_parameter -> "not_a_generic_parameter"
+    | Null -> "null"
+
   let name = function
     | Lexer code -> "lexer." ^ lexer_name code
     | Parser code -> "parser." ^ parser_name code
+    | Resolve code -> "resolve." ^ resolve_name code
     | Too_many_diagnostics -> "too_many_diagnostics"
 end
 
