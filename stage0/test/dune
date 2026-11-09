@@ -2,6 +2,8 @@
  (names
   lexer_tests
   parser_tests
+  parser_rules_tests
+  parser_documents_tests
   hashing_tests
   query_tests
   resolve_tests
@@ -38,6 +40,7 @@
   hash
   standard_library
   support
+  parse_support
   types
   intrinsic
   interface
