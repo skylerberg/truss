@@ -27,7 +27,20 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `.ocamlformat` pins.
 - **CI** (`.github/workflows/ci.yml`) builds, checks formatting, checks that
   `truss.opam` matches `dune-project`, and runs the tests, on every pull
-  request and every push to `main`.
+  request and every push to `main`. It must stay fast, so:
+  - **Nothing is installed in an ordinary run.** OCaml and every dependency
+    come from a cache of the whole opam root, keyed by the opam and OCaml
+    versions, the runner's image, and `truss.opam`
+    (`.github/actions/opam`). Only a change to one of those builds them. The
+    opam binary is downloaded from its release and checked against a pinned
+    hash, and nothing comes from apt, so a slow package mirror cannot slow a
+    run.
+  - **Dune's cache carries over from `main`,** so a pull request builds only
+    what it changed. Only pushes to `main` save it.
+  - **The build, formatting, the opam file, and the tests are one dune run,**
+    so they overlap, and the tests under sanitizers run beside it on a runner
+    of their own.
+  - **A new push to a pull request cancels the run it replaces.**
 
 ### Documents
 
