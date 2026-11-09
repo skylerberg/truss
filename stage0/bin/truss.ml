@@ -57,11 +57,16 @@ let sanitize, arguments =
 let sanitizers =
   [ "-fsanitize=address,undefined"; "-fno-sanitize-recover=undefined"; "-fno-omit-frame-pointer" ]
 
+let home = Option.value (Sys.getenv_opt "HOME") ~default:(Filename.get_temp_dir_name ())
+
+(* Where test results are kept, by the key of the code each can run. A
+   sanitized build keeps none, since it checks what a plain one does not. *)
+let results = if sanitize then None else Some (Filename.concat home ".cache/truss/results")
+
 let compiler database =
   match Toolchain.find () with
   | Error message -> fail "%s" message
   | Ok toolchain ->
-      let home = Option.value (Sys.getenv_opt "HOME") ~default:(Filename.get_temp_dir_name ()) in
       let cache = Build.cache (Filename.concat home ".cache/truss/objects") in
       Compile.create database Memory_layout.target_64 toolchain cache
         { build = Development; optimization = O1; extra = (if sanitize then sanitizers else []) }
@@ -80,7 +85,7 @@ let () =
               (Query.demand database Resolve.Names.declarations module_))
           modules
       in
-      match Compile.run_tests (compiler database) ~time_limit:10_000 tests with
+      match Compile.run_tests ?results (compiler database) ~time_limit:10_000 tests with
       | Error message ->
           prerr_endline message;
           exit 1

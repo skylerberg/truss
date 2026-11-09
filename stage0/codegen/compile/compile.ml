@@ -134,15 +134,144 @@ let build_and_run ?input t ~roots ~startup ~arguments =
       (try Sys.remove output with Sys_error _ -> ());
       Ok result
 
-let run_tests t ~time_limit tests =
+(* One test's part of the runner's report: its outcome, and the [message]
+   and [echo] blocks after its line, as the runner writes them. *)
+type record = { outcome : string; blocks : string }
+
+let parse_report text =
+  let length = String.length text in
+  let line_at position =
+    match String.index_from_opt text position '\n' with
+    | Some stop -> (String.sub text position (stop - position), stop + 1)
+    | None -> invalid_arg "Compile: a test report that ends in a line"
+  in
+  let rec blocks position acc =
+    if position >= length then (position, acc)
+    else
+      let line, after = line_at position in
+      match String.split_on_char ' ' line with
+      | [ ("message" | "echo"); count ] ->
+          let stop = after + int_of_string count + 1 in
+          blocks stop (acc ^ String.sub text position (stop - position))
+      | _ -> (position, acc)
+  in
+  let rec records position acc =
+    if position >= length then List.rev acc
+    else
+      let line, after = line_at position in
+      match String.split_on_char ' ' line with
+      | [ "test"; _; outcome ] ->
+          let position, blocks = blocks after "" in
+          records position ({ outcome; blocks } :: acc)
+      | _ -> invalid_arg ("Compile: a test report line " ^ line)
+  in
+  records 0 []
+
+let render_report records =
+  String.concat ""
+    (List.mapi (fun i r -> Printf.sprintf "test %d %s\n%s" i r.outcome r.blocks) records)
+
+(* The results that are kept: a pass with nothing to show. A failure's
+   message and any echo give positions, which the key leaves out so that
+   moving code keeps its results, and a time limit or a crash may come from
+   the machine, so those tests run again. *)
+let keep record = record.outcome = "passed" && record.blocks = ""
+
+let rec ensure_directory directory =
+  if not (Sys.file_exists directory) then begin
+    ensure_directory (Filename.dirname directory);
+    try Unix.mkdir directory 0o755 with Unix.Unix_error (EEXIST, _, _) -> ()
+  end
+
+(* A key, which is a hash's bytes, as a file name. *)
+let file_name key =
+  String.concat ""
+    (List.map (Printf.sprintf "%02x") (List.map Char.code (List.of_seq (String.to_seq key))))
+
+let stored directory key =
+  let path = Filename.concat directory (file_name key) in
+  if Sys.file_exists path then
+    let text = In_channel.with_open_bin path In_channel.input_all in
+    match String.index_opt text '\n' with
+    | Some stop ->
+        Some
+          {
+            outcome = String.sub text 0 stop;
+            blocks = String.sub text (stop + 1) (String.length text - stop - 1);
+          }
+    | None -> None
+  else None
+
+let store directory key record =
+  ensure_directory directory;
+  let path = Filename.concat directory (file_name key) in
+  let temporary = Printf.sprintf "%s.%d" path (Unix.getpid ()) in
+  Out_channel.with_open_bin temporary (fun channel ->
+      output_string channel (record.outcome ^ "\n" ^ record.blocks));
+  Sys.rename temporary path
+
+let run_tests ?results t ~time_limit tests =
   let roots = List.map Lower.test_key tests in
-  match
-    build_and_run t ~roots
-      ~startup:(Startup.tests_calling ~time_limit (List.map Instance.symbol roots))
-      ~arguments:[]
-  with
-  | Error message -> Error message
-  | Ok (status, out, _) -> Ok (status, out)
+  let run roots =
+    match
+      build_and_run t ~roots
+        ~startup:(Startup.tests_calling ~time_limit (List.map Instance.symbol roots))
+        ~arguments:[]
+    with
+    | Error message -> Error message
+    | Ok (status, out, _) -> Ok (status, out)
+  in
+  match results with
+  | None -> run roots
+  | Some directory -> (
+      (* Each test's result is kept under its key, which changes with any
+         code it can run, and a test is run again only when it changes. *)
+      match
+        List.map
+          (fun root -> (root, Reachable.test_key t.context.env ~lookup:(compiled t) root))
+          roots
+      with
+      | exception Invalid_argument message -> Error message
+      | keyed -> (
+          let known = List.map (fun (root, key) -> (root, key, stored directory key)) keyed in
+          let missing =
+            List.filter_map
+              (fun (root, key, r) -> if r = None then Some (root, key) else None)
+              known
+          in
+          let fresh =
+            if missing = [] then Ok []
+            else
+              match run (List.map fst missing) with
+              | Error message -> Error message
+              | Ok (_, out) -> (
+                  match parse_report out with
+                  | records when List.length records = List.length missing ->
+                      List.iter2
+                        (fun (_, key) record -> if keep record then store directory key record)
+                        missing records;
+                      Ok records
+                  | _ -> Error ("Compile: a test report that is not one record a test:\n" ^ out))
+          in
+          match fresh with
+          | Error message -> Error message
+          | Ok fresh ->
+              let rest = ref fresh in
+              let records =
+                List.map
+                  (fun (_, _, record) ->
+                    match record with
+                    | Some r -> r
+                    | None -> (
+                        match !rest with
+                        | r :: more ->
+                            rest := more;
+                            r
+                        | [] -> invalid_arg "Compile: fewer results than tests"))
+                  known
+              in
+              let status = if List.for_all (fun r -> r.outcome = "passed") records then 0 else 1 in
+              Ok (status, render_report records)))
 
 let run_program ?input t ~main ~arguments =
   let root = Instance.Program_main main in

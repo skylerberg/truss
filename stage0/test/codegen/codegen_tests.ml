@@ -2558,6 +2558,40 @@ test "once" {
 }
 |}
 
+(* Test results kept by key *)
+
+let () =
+  test "a passing test's result is kept by its key, and only a changed test runs again" (fun () ->
+      incr counter;
+      let results = Filename.concat (Lazy.force scratch) (Printf.sprintf "results%d" !counter) in
+      let run text =
+        let database, compile = load text in
+        match Compile.run_tests ~results compile ~time_limit:2000 (tests_of database) with
+        | Ok (status, output) -> (status, output)
+        | Error message -> failwith message
+      in
+      let kept () = Array.length (Sys.readdir results) in
+      let source =
+        {|test "passes" {
+  assert 1 + 1 == 2
+}
+
+test "fails" {
+  assert 1 + 1 == 3
+}
+|}
+      in
+      let first = run source in
+      expect_int ~expected:1 (kept ());
+      let second = run source in
+      if first <> second then fail "the report changed when kept:\n%s\n%s" (snd first) (snd second);
+      expect_int ~expected:1 (fst second);
+      let _ = run {|test "passes" {
+  assert 2 + 2 == 4
+}
+|} in
+      expect_int ~expected:2 (kept ()))
+
 (* Checks a build makes in place of proofs *)
 
 let () =

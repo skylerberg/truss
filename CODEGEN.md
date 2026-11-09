@@ -1088,6 +1088,13 @@ Two programs that differ only in names give the same key, and any change to
 what the test can run changes it. A layout change appears in the LIR of
 every instance that uses the layout, so it changes the key too.
 
+`truss test` keeps results in `~/.cache/truss/results`, one file per key,
+and builds and runs only the tests without one. Stage0 keeps only a pass
+with nothing to show. A failure's message and an `echo` give positions,
+which the key leaves out so that moving code keeps its results, so those
+tests run again, as do tests that ran out of time or crashed, which the
+machine may have caused. A sanitized run keeps nothing.
+
 ## Building
 
 ### Caching

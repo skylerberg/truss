@@ -26,7 +26,12 @@ val compiled : t -> Instance.key -> Lir.compiled
 (* Builds a program that runs the tests, each named by its path, and runs
    it, returning its exit status and its output, as [Startup.tests_calling]
    describes it. *)
-val run_tests : t -> time_limit:int -> Path.t list -> (int * string, string) result
+(* With [results], a directory, each test that passes with nothing to show
+   is kept there under the key of the code it can run, as CODEGEN.md's "Test
+   results" says, and is not built or run again until that code changes;
+   the report is the same either way. *)
+val run_tests :
+  ?results:string -> t -> time_limit:int -> Path.t list -> (int * string, string) result
 
 (* Builds the program whose [main] is at that path, and runs it with the
    arguments, and [input] as its standard input if given, returning its exit
