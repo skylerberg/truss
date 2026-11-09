@@ -26,7 +26,7 @@ impl Default for Int8 {
 
 impl Display for Int8 {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_signed(intrinsic::convert(self))
   }
 }
 
@@ -218,7 +218,7 @@ impl Default for Int16 {
 
 impl Display for Int16 {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_signed(intrinsic::convert(self))
   }
 }
 
@@ -406,7 +406,7 @@ impl Default for Int32 {
 
 impl Display for Int32 {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_signed(intrinsic::convert(self))
   }
 }
 
@@ -590,7 +590,7 @@ impl Default for Int64 {
 
 impl Display for Int64 {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_signed(intrinsic::convert(self))
   }
 }
 
@@ -768,7 +768,7 @@ impl Default for ISize {
 
 impl Display for ISize {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_signed(intrinsic::convert(self))
   }
 }
 
@@ -950,7 +950,7 @@ impl Default for UInt8 {
 
 impl Display for UInt8 {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_unsigned(intrinsic::convert(self))
   }
 }
 
@@ -1134,7 +1134,7 @@ impl Default for UInt16 {
 
 impl Display for UInt16 {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_unsigned(intrinsic::convert(self))
   }
 }
 
@@ -1316,7 +1316,7 @@ impl Default for UInt32 {
 
 impl Display for UInt32 {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_unsigned(intrinsic::convert(self))
   }
 }
 
@@ -1496,7 +1496,7 @@ impl Default for UInt64 {
 
 impl Display for UInt64 {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_unsigned(intrinsic::convert(self))
   }
 }
 
@@ -1672,7 +1672,7 @@ impl Default for USize {
 
 impl Display for USize {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_unsigned(intrinsic::convert(self))
   }
 }
 
@@ -1850,7 +1850,7 @@ impl Default for Float32 {
 
 impl Display for Float32 {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_float(self)
   }
 }
 
@@ -1950,7 +1950,7 @@ impl Default for Float64 {
 
 impl Display for Float64 {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write_float(self)
   }
 }
 
@@ -2025,6 +2025,18 @@ public fn Float64.square_root(self) -> Float64 {
 }
 
 public type ConversionError()
+
+impl Display for Bool {
+  fn display(self, output: mut TextBuilder) {
+    if self { mut output.write("true") } else { mut output.write("false") }
+  }
+}
+
+impl Display for Character {
+  fn display(self, output: mut TextBuilder) {
+    mut output.write_character(self)
+  }
+}
 
 impl Equal for Bool {
   fn equal(self, other: Bool) -> Bool {

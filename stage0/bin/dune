@@ -1,5 +1,5 @@
 (executables
- (names truss_lex truss_parse truss_check)
+ (names truss_lex truss_parse truss_check truss)
  (libraries
   source
   diagnostic
@@ -8,7 +8,11 @@
   syntax
   syntax_print
   parser
-  query
   path
+  query
   workspace
-  type_checker))
+  type_checker
+  memory_layout
+  toolchain
+  build
+  compile))

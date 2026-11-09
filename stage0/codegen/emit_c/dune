@@ -1,0 +1,3 @@
+(library
+ (name emit_c)
+ (libraries path ground instance memory_layout lir convention zarith))

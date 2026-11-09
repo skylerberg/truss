@@ -1,0 +1,79 @@
+type t = {
+  mutable locals : Lir.local_info list;  (** Most recent first *)
+  mutable blocks : Lir.basic_block array;
+  mutable current : int;
+  mutable statements : Lir.statement list;  (** Of the current block, most recent first *)
+}
+
+let create () = { locals = []; blocks = [||]; current = 0; statements = [] }
+
+let local b ?name ty =
+  b.locals <- { Lir.ty; name } :: b.locals;
+  List.length b.locals - 1
+
+let block b =
+  b.blocks <- Array.append b.blocks [| { Lir.statements = []; terminator = Unreachable } |];
+  Array.length b.blocks - 1
+
+let current b = b.current
+
+let start b block =
+  b.current <- block;
+  b.statements <- []
+
+let emit b statement = b.statements <- statement :: b.statements
+
+let finish b terminator =
+  b.blocks.(b.current) <- { statements = List.rev b.statements; terminator };
+  b.statements <- []
+
+let aside b block f =
+  let current = b.current and statements = b.statements in
+  start b block;
+  f ();
+  b.current <- current;
+  b.statements <- statements
+
+let at local : Lir.place = { root = Local local; projections = [] }
+
+let ( / ) (place : Lir.place) projection : Lir.place =
+  { place with projections = place.projections @ [ projection ] }
+
+let usize n = Lir.Constant (Integer (USize, Z.of_int n))
+
+let when_ b condition then_ =
+  let inside = block b in
+  let after = block b in
+  finish b (Switch { value = condition; cases = [ (Z.one, inside) ]; default = Some after });
+  start b inside;
+  then_ ();
+  finish b (Goto after);
+  start b after
+
+let loop b ~usize:usize_ty ~count body =
+  let index = local b ~name:"index" (Value usize_ty) in
+  let going = local b (Raw Bool) in
+  let test = block b in
+  let inside = block b in
+  let after = block b in
+  emit b (Assign (at index, Use (usize 0)));
+  finish b (Goto test);
+  start b test;
+  emit b (Assign (at going, Binary (Less, Copy (at index), count)));
+  finish b (Switch { value = Copy (at going); cases = [ (Z.one, inside) ]; default = Some after });
+  start b inside;
+  body index;
+  emit b (Assign (at index, Binary (Add, Copy (at index), usize 1)));
+  finish b (Goto test);
+  start b after
+
+let build ?written_result b ~parameters ~result : Lir.function_ =
+  {
+    parameters;
+    written_result;
+    result;
+    returns = true;
+    locals = Array.of_list (List.rev b.locals);
+    blocks = b.blocks;
+    environment = [];
+  }

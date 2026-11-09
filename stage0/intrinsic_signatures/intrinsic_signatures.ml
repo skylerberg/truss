@@ -111,6 +111,48 @@ let signature (operation : Intrinsic.operation) : T.signature =
           input ~mode:Mut "buffer" (storage (T.builtin UInt8));
           input "count" usize;
         ]
+  | Write_float ->
+      make ~generics:[ "Value" ]
+        [ input ~mode:Mut "buffer" (storage (T.builtin UInt8)); input "value" value ]
+  | Open_file ->
+      make
+        ~output:(Returns (T.Named { path = Intrinsic.builtin_path Handle; arguments = [] }))
+        [
+          input "path" (view (T.builtin UInt8));
+          input "flags" (T.builtin Int32);
+          input ~mode:Mut "error" (T.builtin Int32);
+        ]
+  | Handle_read ->
+      make
+        ~output:(Returns (T.builtin ISize))
+        [
+          input ~mode:Mut "handle"
+            (T.Named { path = Intrinsic.builtin_path Handle; arguments = [] });
+          input ~mode:Mut "buffer" (storage (T.builtin UInt8));
+          input "count" usize;
+        ]
+  | Handle_write ->
+      make
+        ~output:(Returns (T.builtin ISize))
+        [
+          input ~mode:Mut "handle"
+            (T.Named { path = Intrinsic.builtin_path Handle; arguments = [] });
+          input "bytes" (view (T.builtin UInt8));
+        ]
+  | Environment_variable ->
+      make ~output:(Returns bool)
+        [
+          input "name" (view (T.builtin UInt8));
+          input ~mode:Mut "buffer" (storage (T.builtin UInt8));
+        ]
+  | Run_process ->
+      make
+        ~output:(Returns (T.builtin Int32))
+        [
+          input "program" (view (T.builtin UInt8));
+          input "arguments" (view (T.builtin UInt8));
+          input ~mode:Mut "error" (T.builtin Int32);
+        ]
   | Clock_now -> make ~output:(Returns (T.builtin Int64)) []
   | Random_fill ->
       make [ input ~mode:Mut "buffer" (storage (T.builtin UInt8)); input "count" usize ]

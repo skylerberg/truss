@@ -230,6 +230,18 @@ let () =
     (fun _ -> option int64)
     Interface.Properties.plain;
   property "a List is Copyable" true "" (fun _ -> list int64) Interface.Properties.copyable;
+  property "a handle is not Copyable" false ""
+    (fun _ -> Types.named (Intrinsic.builtin_path Handle) [])
+    Interface.Properties.copyable;
+  property "a handle is not Plain" false ""
+    (fun _ -> Types.named (Intrinsic.builtin_path Handle) [])
+    Interface.Properties.plain;
+  property "an Option of a handle is not Copyable" false ""
+    (fun _ -> option (Types.named (Intrinsic.builtin_path Handle) []))
+    Interface.Properties.copyable;
+  property "an Option of a handle is not Plain" false ""
+    (fun _ -> option (Types.named (Intrinsic.builtin_path Handle) []))
+    Interface.Properties.plain;
   property "a List is not Plain" false "" (fun _ -> list int64) Interface.Properties.plain;
   property "an Option of a Slice is a view" true ""
     (fun _ -> option (slice int64))

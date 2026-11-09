@@ -1,0 +1,23 @@
+(library
+ (name lower)
+ (libraries
+  path
+  intrinsic
+  types
+  checked
+  syntax
+  syntax_walk
+  query
+  resolve
+  interface
+  infer
+  ground
+  instance
+  memory_layout
+  lir
+  lir_builder
+  convention
+  glue
+  monomorphic
+  intrinsics
+  zarith))

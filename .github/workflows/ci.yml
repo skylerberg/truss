@@ -29,3 +29,13 @@ jobs:
 
       - name: Test
         run: opam exec -- dune test
+
+      # Every codegen test again, with its C built under AddressSanitizer
+      # and UndefinedBehaviorSanitizer: a report is a compiler bug. Leaks
+      # are left to the test runner's own count of live blocks, since the
+      # runner itself frees nothing at exit.
+      - name: Test generated code under sanitizers
+        env:
+          TRUSS_SANITIZE: "1"
+          ASAN_OPTIONS: detect_leaks=0
+        run: opam exec -- dune test --force stage0/test/codegen

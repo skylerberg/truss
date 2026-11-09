@@ -10,6 +10,14 @@ public fn List[Element].with_capacity(capacity: USize) -> List[Element] {
   List(storage: intrinsic::storage_with_capacity(capacity))
 }
 
+internal fn List[Element].from_storage(storage: own intrinsic::Storage[Element]) -> List[Element] {
+  List(storage: own storage)
+}
+
+internal fn List[Element].elements(self) -> intrinsic::View[Element] {
+  intrinsic::storage_view(self.storage)
+}
+
 public fn List[Element].length(self) -> USize
   cost time O(1)
 {
@@ -30,6 +38,29 @@ public fn List[Element].push(mut self, item: own Element)
 
 public fn List[Element].pop(mut self) -> Option[Element] {
   if self.length() == 0 { None } else { Some(intrinsic::storage_pop(mut self.storage)) }
+}
+
+public fn List[Element].insert_at(mut self, position: USize, item: own Element)
+  requires position <= self.length()
+  cost time O(self.length())
+{
+  intrinsic::storage_insert(mut self.storage, index: position, value: own item)
+}
+
+public fn List[Element].partition_point(self, before: fn(Element) -> Bool) -> USize
+  cost time O(log(self.length()))
+{
+  var low: USize = 0
+  var high = self.length()
+  while low < high {
+    let middle = low + (high - low) / 2
+    if before(self[middle]) {
+      low = middle + 1
+    } else {
+      high = middle
+    }
+  }
+  low
 }
 
 public fn List[Element].slice(self) -> Slice[Element]
@@ -108,6 +139,14 @@ impl Index for Slice[Element] {
 
 impl Equal for List[Element: Equal] {
   fn equal(self, other: List[Element]) -> Bool {
-    todo
+    if self.length() != other.length() {
+      return false
+    }
+    for index in 0..self.length() {
+      if self[index] != other[index] {
+        return false
+      }
+    }
+    true
   }
 }

@@ -1,0 +1,38 @@
+(test
+ (name codegen_tests)
+ (libraries
+  harness
+  zarith
+  path
+  ground
+  memory_layout
+  instance
+  lir
+  convention
+  emit_c
+  toolchain
+  startup
+  positions
+  drops
+  yields
+  glue
+  reachable
+  build
+  query
+  workspace
+  standard_library
+  interface
+  types
+  intrinsic
+  monomorphic
+  lir_builder
+  intrinsics
+  infer
+  resolve
+  diagnostic
+  lower
+  compile
+  type_checker
+  documents)
+ (deps
+  (glob_files %{workspace_root}/*.md)))

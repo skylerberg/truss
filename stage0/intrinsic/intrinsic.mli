@@ -30,6 +30,9 @@ type builtin =
           and [String] need no destructor. It is [Copyable] when its elements are, and never
           [Plain]. *)
   | View  (** [View[Element]]: a read-only view of elements, a pointer and a length. A view type. *)
+  | Handle
+      (** An operating system's descriptor for an open file, owned: dropping it closes it, so it is
+          neither [Copyable] nor [Plain]. *)
 
 val builtins : builtin list
 val builtin_name : builtin -> string
@@ -102,6 +105,21 @@ type operation =
   | Crash
   | Write_bytes
   | Read_bytes
+  | Write_float  (** [(buffer, value)]: appends the shortest decimal that reads back as the float *)
+  | Open_file
+      (** [(path, flags, error) -> Handle]: opens a file to read (flags 0), to write from empty (1),
+          or to append to (2), creating it to write; [error] gets 0, or the system's error number,
+          with a handle that is not open *)
+  | Handle_read
+      (** [(handle, buffer, count) -> ISize]: appends up to [count] bytes, as [read_bytes] *)
+  | Handle_write  (** [(handle, bytes) -> ISize]: writes, as [write_bytes] *)
+  | Environment_variable
+      (** [(name, buffer) -> Bool]: appends an environment variable's value; false when it is unset
+      *)
+  | Run_process
+      (** [(program, arguments, error) -> Int32]: runs a program found as a shell finds it, with the
+          arguments, each ending in a zero byte, and waits for it: its exit status, or [128 +] the
+          signal that ended it; [error] gets 0, or the system's error number *)
   | Clock_now
   | Random_fill
 

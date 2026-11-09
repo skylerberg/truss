@@ -10,9 +10,15 @@ public fn Map[Key: Hash + Ordered, Value].length(self) -> USize
 }
 
 public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool {
-  todo
+  let position = self.entries.partition_point(fn(entry) { entry.key < key })
+  position < self.entries.length() && self.entries[position].key == key
 }
 
 public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: own Value) {
-  todo
+  let position = self.entries.partition_point(fn(entry) { entry.key < key })
+  if position < self.entries.length() && self.entries[position].key == key {
+    self.entries[position].value = own value
+  } else {
+    mut self.entries.insert_at(position, item: Entry(key: own key, value: own value))
+  }
 }

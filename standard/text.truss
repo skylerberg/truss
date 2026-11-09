@@ -31,7 +31,10 @@ public fn String.is_empty(self) -> Bool
 }
 
 public fn String.push(mut self, text: StringSlice) {
-  todo
+  intrinsic::storage_reserve(mut self.storage, additional: text.length())
+  for index in 0..text.length() {
+    intrinsic::storage_push(mut self.storage, value: intrinsic::view_at(text.bytes, index: index))
+  }
 }
 
 public fn String.slice(self) -> StringSlice
@@ -41,7 +44,85 @@ public fn String.slice(self) -> StringSlice
 }
 
 public fn String.trim(self) -> StringSlice {
-  todo
+  let bytes = intrinsic::storage_view(self.storage)
+  var start: USize = 0
+  var stop = intrinsic::view_length(bytes)
+  while start < stop && is_space(intrinsic::view_at(bytes, index: start)) {
+    start += 1
+  }
+  while stop > start && is_space(intrinsic::view_at(bytes, index: stop - 1)) {
+    stop -= 1
+  }
+  StringSlice(bytes: intrinsic::view_slice(intrinsic::storage_view(self.storage), start, stop))
+}
+
+internal fn String.from_bytes(bytes: own intrinsic::Storage[UInt8]) -> String {
+  if valid_utf8(intrinsic::storage_view(bytes)) {
+    String(storage: own bytes)
+  } else {
+    String(storage: replaced(intrinsic::storage_view(bytes)))
+  }
+}
+
+fn valid_utf8(bytes: intrinsic::View[UInt8]) -> Bool {
+  var at: USize = 0
+  var valid = true
+  while valid && at < intrinsic::view_length(bytes) {
+    let step = utf8_sequence(bytes, at)
+    if step == 0 {
+      valid = false
+    } else {
+      at += step
+    }
+  }
+  valid
+}
+
+fn replaced(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
+  var fixed: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(intrinsic::view_length(bytes))
+  var at: USize = 0
+  while at < intrinsic::view_length(bytes) {
+    let step = utf8_sequence(bytes, at)
+    if step == 0 {
+      intrinsic::storage_push(mut fixed, value: 239)
+      intrinsic::storage_push(mut fixed, value: 191)
+      intrinsic::storage_push(mut fixed, value: 189)
+      at += 1
+    } else {
+      for index in at..at + step {
+        intrinsic::storage_push(mut fixed, value: intrinsic::view_at(bytes, index: index))
+      }
+      at += step
+    }
+  }
+  fixed
+}
+
+fn utf8_sequence(bytes: intrinsic::View[UInt8], at: USize) -> USize {
+  let first = intrinsic::view_at(bytes, index: at)
+  let length: USize =
+    if first < 128 { 1 } else if (first & 224) == 192 { 2 } else if (first & 240) == 224 { 3 } else if (first & 248) == 240 { 4 } else { 0 }
+  if length == 0 || length > intrinsic::view_length(bytes) - at {
+    0
+  } else {
+    let mask: UInt8 = if length == 1 { 127 } else if length == 2 { 31 } else if length == 3 { 15 } else { 7 }
+    var code: UInt32 = intrinsic::convert(first & mask)
+    var continued = true
+    for index in at + 1..at + length {
+      let byte = intrinsic::view_at(bytes, index: index)
+      if (byte & 192) != 128 {
+        continued = false
+      }
+      let low: UInt32 = intrinsic::convert(byte & 63)
+      code = (code << 6) | low
+    }
+    let overlong = (length == 2 && code < 128) || (length == 3 && code < 2048) || (length == 4 && code < 65536)
+    if !continued || overlong || code > 1114111 || (code >= 55296 && code <= 57343) { 0 } else { length }
+  }
+}
+
+fn is_space(byte: UInt8) -> Bool {
+  byte == 32 || byte == 9 || byte == 10 || byte == 13
 }
 
 public fn StringSlice.length(self) -> USize
@@ -51,7 +132,9 @@ public fn StringSlice.length(self) -> USize
 }
 
 public fn StringSlice.to_string(self) -> String {
-  todo
+  var text = String(storage: intrinsic::storage_with_capacity(self.length()))
+  mut text.push(self)
+  text
 }
 
 public fn TextBuilder.new() -> TextBuilder {
@@ -66,21 +149,71 @@ public fn TextBuilder.finish(own self) -> String {
   self.text
 }
 
+internal fn TextBuilder.write_byte(mut self, byte: UInt8) {
+  intrinsic::storage_push(mut self.text.storage, value: byte)
+}
+
+internal fn TextBuilder.write_float[Value](mut self, value: Value) {
+  intrinsic::write_float(mut self.text.storage, value: value)
+}
+
+internal fn TextBuilder.write_character(mut self, character: Character) {
+  let code: UInt32 = intrinsic::convert(character)
+  if code < 128 {
+    mut self.write_byte(intrinsic::convert(code))
+  } else if code < 2048 {
+    mut self.write_byte(intrinsic::convert(192 | (code >> 6)))
+    mut self.write_byte(intrinsic::convert(128 | (code & 63)))
+  } else if code < 65536 {
+    mut self.write_byte(intrinsic::convert(224 | (code >> 12)))
+    mut self.write_byte(intrinsic::convert(128 | ((code >> 6) & 63)))
+    mut self.write_byte(intrinsic::convert(128 | (code & 63)))
+  } else {
+    mut self.write_byte(intrinsic::convert(240 | (code >> 18)))
+    mut self.write_byte(intrinsic::convert(128 | ((code >> 12) & 63)))
+    mut self.write_byte(intrinsic::convert(128 | ((code >> 6) & 63)))
+    mut self.write_byte(intrinsic::convert(128 | (code & 63)))
+  }
+}
+
+internal fn TextBuilder.write_unsigned(mut self, value: UInt64) {
+  if value >= 10 {
+    mut self.write_unsigned(value / 10)
+  }
+  let digit: UInt8 = intrinsic::convert(value % 10)
+  mut self.write_byte(digit + 48)
+}
+
+internal fn TextBuilder.write_signed(mut self, value: Int64) {
+  if value < 0 {
+    mut self.write_byte(45)
+    let magnitude: UInt64 = intrinsic::convert(intrinsic::negate(value + 1))
+    mut self.write_unsigned(magnitude + 1)
+  } else {
+    let magnitude: UInt64 = intrinsic::convert(value)
+    mut self.write_unsigned(magnitude)
+  }
+}
+
 impl Equal for String {
   fn equal(self, other: String) -> Bool {
-    todo
+    self.slice() == other.slice()
   }
 }
 
 impl Ordered for String {
   fn compare(self, other: String) -> Ordering {
-    todo
+    let order = intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage))
+    if order < 0 { Ordering.Less } else if order > 0 { Ordering.Greater } else { Ordering.Equal }
   }
 }
 
 impl Hash for String {
   fn hash(self, hasher: mut Hasher) {
-    todo
+    let bytes = intrinsic::storage_view(self.storage)
+    for index in 0..intrinsic::view_length(bytes) {
+      mut hasher.write(intrinsic::convert(intrinsic::view_at(bytes, index: index)))
+    }
   }
 }
 
@@ -92,7 +225,7 @@ impl Display for String {
 
 impl Equal for StringSlice {
   fn equal(self, other: StringSlice) -> Bool {
-    todo
+    intrinsic::compare_bytes(self.bytes, right: other.bytes) == 0
   }
 }
 

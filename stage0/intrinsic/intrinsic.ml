@@ -21,6 +21,7 @@ type builtin =
   | Array
   | Storage
   | View
+  | Handle
 
 let builtins =
   [
@@ -44,6 +45,7 @@ let builtins =
     Array;
     Storage;
     View;
+    Handle;
   ]
 
 let builtin_name = function
@@ -67,6 +69,7 @@ let builtin_name = function
   | Array -> "Array"
   | Storage -> "Storage"
   | View -> "View"
+  | Handle -> "Handle"
 
 let builtin_path builtin = Path.Top { module_; name = builtin_name builtin }
 
@@ -136,6 +139,12 @@ type operation =
   | Crash
   | Write_bytes
   | Read_bytes
+  | Write_float
+  | Open_file
+  | Handle_read
+  | Handle_write
+  | Environment_variable
+  | Run_process
   | Clock_now
   | Random_fill
 
@@ -201,6 +210,12 @@ let operations =
     Crash;
     Write_bytes;
     Read_bytes;
+    Write_float;
+    Open_file;
+    Handle_read;
+    Handle_write;
+    Environment_variable;
+    Run_process;
     Clock_now;
     Random_fill;
   ]
@@ -266,6 +281,12 @@ let operation_name = function
   | Crash -> "crash"
   | Write_bytes -> "write_bytes"
   | Read_bytes -> "read_bytes"
+  | Write_float -> "write_float"
+  | Open_file -> "open_file"
+  | Handle_read -> "handle_read"
+  | Handle_write -> "handle_write"
+  | Environment_variable -> "environment_variable"
+  | Run_process -> "run_process"
   | Clock_now -> "clock_now"
   | Random_fill -> "random_fill"
 

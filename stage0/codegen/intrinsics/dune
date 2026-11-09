@@ -1,0 +1,3 @@
+(library
+ (name intrinsics)
+ (libraries intrinsic ground memory_layout lir lir_builder zarith))
