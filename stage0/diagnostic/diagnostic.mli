@@ -194,6 +194,7 @@ module Code : sig
     | Invariant
     | Termination
     | Assertion
+    | Law
     | Unreachable
     | Unsupported
 

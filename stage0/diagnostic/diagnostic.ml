@@ -186,6 +186,7 @@ module Code = struct
     | Invariant
     | Termination
     | Assertion
+    | Law
     | Unreachable
     | Unsupported
 
@@ -421,6 +422,7 @@ module Code = struct
     | Invariant -> "invariant"
     | Termination -> "termination"
     | Assertion -> "assertion"
+    | Law -> "law"
     | Unreachable -> "unreachable"
     | Unsupported -> "unsupported"
 

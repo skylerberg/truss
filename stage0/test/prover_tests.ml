@@ -615,6 +615,51 @@ let () =
         \  if count > 0 { visit(count - 1) } else { 0 }\n\
          }\n")
 
+(* Laws *)
+
+let monoid =
+  "trait Monoid: Equal {\n\
+  \  fn empty() -> Self\n\
+  \    cost time finite\n\
+  \  fn combine(self, other: Self) -> Self\n\
+  \    cost time finite\n\n\
+  \  law left_identity(value: Self) {\n\
+  \    Self.empty().combine(value) == value\n\
+  \  }\n\
+   }\n\n\
+   type Flag(on: Bool)\n\
+  \  derives Equal\n\n"
+
+let flag_impl empty =
+  Printf.sprintf
+    "impl Monoid for Flag {\n\
+    \  fn empty() -> Flag\n\
+    \    cost time finite\n\
+    \  {\n\
+    \    Flag(on: %s)\n\
+    \  }\n\n\
+    \  fn combine(self, other: Flag) -> Flag\n\
+    \    cost time finite\n\
+    \  {\n\
+    \    Flag(on: self.on || other.on)\n\
+    \  }\n\
+     }\n"
+    empty
+
+let () =
+  test "an impl's methods keep its trait's law" (fun () -> proven (monoid ^ flag_impl "false"));
+  test "an impl whose methods break its trait's law" (fun () ->
+      not_proven (monoid ^ flag_impl "true") "prover.law");
+  test "generic code relies on a bound's laws" (fun () ->
+      proven
+        (monoid ^ flag_impl "false"
+       ^ "\n\
+          fn f[Item: Monoid](value: Item) -> Bool\n\
+         \  ensures result\n\
+          {\n\
+         \  Item.empty().combine(value) == value\n\
+          }\n"))
+
 (* Type invariants *)
 
 let span = "type Span(low: Int64, high: Int64)\n  invariant low <= high\n\n"

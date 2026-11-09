@@ -885,6 +885,15 @@ It proves, with one canonical, numbered, hashed query per obligation:
   and each call through a function-typed parameter whose type has a
   `requires`, which must meet it. A function named as a value is not read
   yet.
+- laws: a trait's laws, and those of the traits it requires, are facts,
+  quantified over their parameters, wherever the trait's methods are called
+  on a type; each `impl` written by hand shows each law of its trait, with
+  its methods read as their definitions and the bodies of the `proof`s
+  written for it as hints, under the code `prover.law`; and a call through
+  a bound on `Self`, read where `Self` is a known type, reaches that
+  type's `impl`. `==` and the orderings on a type without structural
+  equality are functions of their operands, which is what their laws are
+  about, and operators on other types are calls of their traits' methods.
 - `assert` in theorems and proofs, assumed in tests
 - quantifiers over ranges and over the integers, in specifications
 - the type checker's `Integer_fits` obligations, and its `Guards_cover`,

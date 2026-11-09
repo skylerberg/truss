@@ -12,5 +12,6 @@
   resolve
   interface
   infer
+  workspace
   diagnostic
   zarith))

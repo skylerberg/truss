@@ -86,6 +86,7 @@ type context = {
   fits : (int * T.ty) list;  (** The type checker's [Integer_fits] obligations, by expression. *)
   mutable output : T.ty option;  (** What the function proven returns, for [?]. *)
   graph : Call_graph.t;  (** The package's call graph, for recursion in cycles. *)
+  mutable laws_assumed : string list;  (** Each trait and type whose laws are facts already. *)
 }
 
 (* Symbols and facts *)
@@ -819,13 +820,54 @@ and binary context frame (written : expression) operator left right =
     let equal = L.equal left_value right_value in
     Some (frame, if operator = Equal then equal else L.not_ equal)
   end
-  else if not primitive then begin
-    (* An operator on another type is a call of its trait's method, known
-       here only by its result's type. *)
-    let frame, _ = value context frame left in
-    let frame, _ = value context frame right in
-    Some (frame, arrive context frame "operator" result_type)
-  end
+  else if not primitive then
+    (* An operator on another type is a call of its trait's method:
+       [compare] for an ordering, whose result is tested, [equal] for
+       [==], and the arithmetic traits' methods. *)
+    begin match (operator, source.checked.calls.(written.id)) with
+    | (Equal | Not_equal | Less | Less_equal | Greater | Greater_equal), Some call_ ->
+        (* [==] and the orderings are functions of their operands in the
+           logic, whatever the [impl]: [Equal] and [Ordered] use no
+           capabilities, so a call that returns always gives the same
+           answer, which is what their laws state. *)
+        let frame, left_value = value context frame left in
+        let frame, right_value = value context frame right in
+        let sort = sort_of context operand_type in
+        let key = type_key operand_type in
+        if operator = Equal || operator = Not_equal then begin
+          let symbol = "equal." ^ key in
+          declare context (L.Function (symbol, [ sort; sort ], L.Bool));
+          let equal = L.Apply (symbol, [ left_value; right_value ]) in
+          Some (frame, if operator = Equal then equal else L.not_ equal)
+        end
+        else begin
+          let ordering = substituted frame call_.result in
+          ignore (sort_of context ordering);
+          let symbol = "compare." ^ key in
+          declare context (L.Function (symbol, [ sort; sort ], sort_of context ordering));
+          let compared = L.Apply (symbol, [ left_value; right_value ]) in
+          let is variant =
+            L.Apply (L.tester (constructor_name ordering (Some variant)), [ compared ])
+          in
+          if constructors context ordering = None then
+            Some (frame, arrive context frame "operator" result_type)
+          else
+            Some
+              ( frame,
+                match operator with
+                | Less -> is "Less"
+                | Less_equal -> L.not_ (is "Greater")
+                | Greater -> is "Greater"
+                | _ -> L.not_ (is "Less") )
+        end
+    | _, None ->
+        let frame, _ = value context frame left in
+        let frame, _ = value context frame right in
+        Some (frame, arrive context frame "operator" result_type)
+    | _, Some call_ ->
+        (* Arithmetic on another type: its trait's method, by its contract. *)
+        resolved_call context frame written call_
+    end
   else
     let frame, left_value = value context frame left in
     let frame, right_value = value context frame right in
@@ -1109,6 +1151,17 @@ and resolved_call context frame (written : expression) (call_ : C.call) =
   | Trait_method { trait; name; receiver; evidence; self_type; type_arguments } ->
       let arguments = arguments_of type_arguments in
       let self_type = substituted frame self_type in
+      (* A bound on [Self], read where [Self] is a known type, as in a law
+         proven for one [impl], reaches that type's [impl]. *)
+      let evidence =
+        match evidence with
+        | Bound _ -> (
+            match concrete_impl context trait.trait self_type with
+            | Some impl -> C.Impl { impl; arguments = [] }
+            | None -> evidence)
+        | _ -> evidence
+      in
+      assume_laws context frame trait.trait self_type;
       let trait_path = Path.Method { owner = trait.trait; name; receiver } in
       (* The trait's clauses are about [Self] and the trait's parameters. *)
       let trait_substitution =
@@ -1343,6 +1396,124 @@ and is_updating_helper context path =
       ) ->
       true
   | _ -> false
+
+(* The [impl] of a trait for a known type, when it has no generic
+   parameters of its own, from the type's package or this one. *)
+and concrete_impl context trait (ty : T.ty) =
+  match ty with
+  | Named { path; _ } ->
+      let packages = List.sort_uniq compare [ Path.package context.current; Path.package path ] in
+      List.find_map
+        (fun package ->
+          List.find_map
+            (fun impl ->
+              match Query.demand context.database Interface.Environment.interface impl with
+              | Some (Interface.Environment.Impl_interface { impl_generics = []; _ }) -> Some impl
+              | _ -> None)
+            (Call_graph.impls_for
+               (Query.demand context.database Call_graph.package_impls package)
+               [ trait ] ty))
+        packages
+  | _ -> None
+
+(* A trait's laws, and those of the traits it requires, as facts about a
+   type, each quantified over its parameters. A law is shown for each
+   [impl] written by hand, by the [impl], so it is a fact wherever the
+   trait's methods are used. See PROVER.md, "Proofs". *)
+and assume_laws context frame trait (ty : T.ty) =
+  let key = Path.show trait ^ " for " ^ type_key ty in
+  if not (List.mem key context.laws_assumed) then begin
+    context.laws_assumed <- key :: context.laws_assumed;
+    List.iter
+      (fun trait ->
+        List.iter
+          (fun (source, (law : law)) ->
+            match law_fact context frame source trait ty law with
+            | Some fact -> assume context frame fact
+            | None -> ())
+          (laws_of context trait))
+      (Call_graph.traits_with_required context.database trait)
+  end
+
+and laws_of context trait =
+  match Interface.Summary.definition context.database trait with
+  | Some (key, { kind = Trait { members; _ }; _ }) -> (
+      match callee_source context.database key with
+      | Some source ->
+          List.filter_map
+            (fun (member : trait_member line) ->
+              match member.kind with Law law -> Some (source, law) | _ -> None)
+            members
+      | None -> [])
+  | _ -> []
+
+(* A law's frame: its parameters as the given terms, with [Self] the type. *)
+and law_frame frame source trait ty (law : law) terms =
+  let locals =
+    List.fold_left2
+      (fun locals (parameter : parameter) term ->
+        match parameter.kind with
+        | Named_parameter { name = name_; _ } -> Ids.add name_.id term locals
+        | _ -> locals)
+      Ids.empty law.parameters terms
+  in
+  {
+    frame with
+    source;
+    locals;
+    old_locals = locals;
+    self = None;
+    old_self = None;
+    result = None;
+    checking = false;
+    loop = None;
+    substitution = [ ({ T.owner = trait; name = "Self" }, T.Type ty) ];
+    self_type = None;
+  }
+
+and law_parameter_types frame source trait ty (law : law) =
+  List.map
+    (fun (parameter : parameter) ->
+      match parameter.kind with
+      | Named_parameter { name = name_; _ } -> (
+          match source.checked.local_types.(name_.id) with
+          | Some declared ->
+              T.substitute [ ({ T.owner = trait; name = "Self" }, T.Type ty) ] declared
+          | None -> T.Error)
+      | _ -> T.Error)
+    law.parameters
+  |> fun types ->
+  ignore frame;
+  types
+
+and law_fact context frame source trait ty (law : law) =
+  let types = law_parameter_types frame source trait ty law in
+  if List.exists (fun ty -> ty = T.Error) types then None
+  else begin
+    context.fresh <- context.fresh + 1;
+    let symbols = List.mapi (fun index _ -> Printf.sprintf "law.%d.%d" context.fresh index) types in
+    let inside =
+      law_frame
+        { frame with bound = symbols @ frame.bound }
+        source trait ty law
+        (List.map (fun s -> L.Symbol s) symbols)
+    in
+    try
+      let premise =
+        L.conjunction (List.map (fun clause -> snd (value context inside clause)) law.requires)
+      in
+      let range =
+        L.conjunction (List.map2 (fun symbol ty -> in_range ty (L.Symbol symbol)) symbols types)
+      in
+      match block_value context inside law.body with
+      | Some (_, holds) ->
+          Some
+            (L.Forall
+               ( List.map2 (fun symbol ty -> (symbol, sort_of context ty)) symbols types,
+                 L.( ==> ) (L.( &&& ) range premise) holds ))
+      | None -> None
+    with Unsupported _ -> None
+  end
 
 and signature_terminates context path =
   match Query.demand context.database Interface.Environment.signature path with
@@ -2493,6 +2664,7 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
 let new_context database ~current ~terminates ~measures checked =
   {
     graph = Query.demand database Call_graph.graph (Path.package current);
+    laws_assumed = [];
     database;
     current;
     terminates;
@@ -2755,6 +2927,70 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
             part.ensures
       | _ -> ())
     returns;
+  outcome context
+
+(* The laws of a trait an [impl] writes by hand, each shown for fresh
+   values of its parameters, after the bodies of the [proof]s written for
+   it. *)
+let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
+  let context = new_context database ~current:impl ~terminates:false ~measures:[] source.checked in
+  let start =
+    {
+      source;
+      locals = Ids.empty;
+      old_locals = Ids.empty;
+      self = None;
+      old_self = None;
+      result = None;
+      condition = L.Boolean true;
+      checking = true;
+      bound = [];
+      loop = None;
+      substitution = [];
+      self_type = None;
+    }
+  in
+  List.iter
+    (fun (law_source, (law : law)) ->
+      let types = law_parameter_types start law_source trait for_type law in
+      if not (List.exists (fun ty -> ty = T.Error) types) then begin
+        (* The other laws are facts here, and this one is not. *)
+        context.laws_assumed <-
+          (Path.show trait ^ " for " ^ type_key for_type) :: context.laws_assumed;
+        let terms =
+          List.map
+            (fun ty ->
+              let term = arrive context start "law" ty in
+              assume_valid context start ty term;
+              term)
+            types
+        in
+        let frame = ref start in
+        (* A [proof]'s statements are hints: its calls' [ensures] are facts
+           where their [requires] hold, which is all a proof needs. *)
+        List.iter
+          (fun ((proof_source : source), (body : block)) ->
+            match
+              block_value context { start with source = proof_source; checking = false } body
+            with
+            | Some (after, _) -> frame := { start with condition = after.condition }
+            | None -> ())
+          (List.filter_map
+             (fun (name_, proof) -> if name_ = law.name.text then Some proof else None)
+             proofs);
+        let inside = law_frame !frame law_source trait for_type law terms in
+        List.iter
+          (fun clause -> assume context !frame (snd (value context inside clause)))
+          law.requires;
+        match block_value context inside law.body with
+        | Some (_, holds) ->
+            oblige context !frame Law at
+              (Printf.sprintf "The law `%s` may not hold for `%s`." law.name.text (T.show for_type))
+              holds
+        | None -> ()
+      end)
+    (let context0 = context in
+     laws_of context0 trait);
   outcome context
 
 let test database (source : source) ~path (body : block) =

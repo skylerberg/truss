@@ -49,6 +49,60 @@ let inherited database impl (signature : signature) name =
       | None -> None)
   | _ -> None
 
+(* The [proof]s written for a trait's laws on a type, in the package: each
+   law's name, with the proof's source and body. *)
+let law_proofs database package trait (for_type : Types.ty) =
+  let head = match for_type with Named { path; _ } -> Some path | _ -> None in
+  match Workspace.package database package with
+  | None -> []
+  | Some { modules; _ } ->
+      List.concat_map
+        (fun module_ ->
+          List.filter_map
+            (fun (declaration : Names.declaration) ->
+              let key = Names.key_of declaration in
+              match
+                ( Query.demand database Names.definition key,
+                  Query.demand database Resolve.resolved key,
+                  Translate.callee_source database key )
+              with
+              | ( Some { kind = Law_proof { trait_; law; type_; body }; _ },
+                  Some resolved,
+                  Some proof_source ) -> (
+                  let named_trait =
+                    match resolved.names.(trait_.path.last.id) with
+                    | Some (Definition path) -> Path.equal path trait
+                    | _ -> false
+                  in
+                  let named_type =
+                    match (type_.kind, head) with
+                    | Path_type written, Some head -> (
+                        match resolved.names.(written.path.last.id) with
+                        | Some (Definition path) -> Path.equal path head
+                        | _ -> false)
+                    | _ -> false
+                  in
+                  match (named_trait, named_type) with
+                  | true, true -> Some (law.text, (proof_source, body))
+                  | _ -> None)
+              | _ -> None)
+            (Query.demand database Names.declarations module_))
+        modules
+
+(* An [impl]'s obligation to keep each law of its trait. *)
+let impl_laws database (key : Names.key) source (definition : definition) =
+  match (Query.demand database Interface.Environment.interface key.path, definition.kind) with
+  | Some (Interface.Environment.Impl_interface interface), Impl { trait_; _ } ->
+      [
+        Translate.laws database source ~impl:key.path ~trait:interface.implements.trait
+          ~for_type:interface.for_type
+          ~proofs:
+            (law_proofs database (Path.package key.path) interface.implements.trait
+               interface.for_type)
+          ~at:trait_.span;
+      ]
+  | _ -> []
+
 let prove database (key : Names.key) =
   match (Query.demand database Names.definition key, Translate.callee_source database key) with
   | Some definition, Some source -> (
@@ -82,6 +136,7 @@ let prove database (key : Names.key) =
                   | _ -> None)
                 members
             in
+            let outcomes = outcomes @ impl_laws database key source definition in
             Obligations
               {
                 obligations =
