@@ -138,7 +138,9 @@ let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list
       (fun capability -> (capability, local b ~name:"evidence" Convention.evidence))
       (evidence_for code.substitution code.uses)
   in
-  st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
+  st.evidence <-
+    List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence
+    @ Generated.real_evidence_of context ~user:(Path.show code.anchor) code.real;
   start b (block b);
   Option.iter (fill_defaults st) mask;
   check_requires st;
@@ -240,7 +242,8 @@ let instance context (key : Instance.key) : Lir.t =
       in
       let st = { st with result_local } in
       st.evidence <-
-        List.map (fun (capability, local) -> (capability, Lir.Copy (at local))) evidence;
+        List.map (fun (capability, local) -> (capability, Lir.Copy (at local))) evidence
+        @ Generated.real_evidence_of context ~user:(Path.show code.anchor) code.real;
       start b (block b);
       Option.iter (fill_defaults st) mask;
       let destination =

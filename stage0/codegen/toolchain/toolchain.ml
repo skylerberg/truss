@@ -32,7 +32,24 @@ let exit_code (status : Unix.process_status) =
       in
       128 + Option.value system ~default:signal
 
-let run ?input program arguments =
+(* Reads a channel to its end, handing each piece to [on_output] as it
+   arrives. *)
+let read_streaming channel on_output =
+  let buffer = Buffer.create 256 in
+  let piece = Bytes.create 65536 in
+  let rec loop () =
+    match input channel piece 0 (Bytes.length piece) with
+    | 0 -> ()
+    | n ->
+        let text = Bytes.sub_string piece 0 n in
+        Buffer.add_string buffer text;
+        on_output text;
+        loop ()
+  in
+  loop ();
+  Buffer.contents buffer
+
+let run ?input ?on_output program arguments =
   let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
   let stderr_read, stderr_write = Unix.pipe ~cloexec:true () in
   let stdin_read, stdin_write =
@@ -68,7 +85,12 @@ let run ?input program arguments =
   (* Read standard error on another domain, so neither pipe fills while the
      other is read. *)
   let errors = Domain.spawn (fun () -> read_all (Unix.in_channel_of_descr stderr_read)) in
-  let output = read_all (Unix.in_channel_of_descr stdout_read) in
+  let output =
+    let channel = Unix.in_channel_of_descr stdout_read in
+    match on_output with
+    | Some on_output -> read_streaming channel on_output
+    | None -> read_all channel
+  in
   let errors = Domain.join errors in
   Option.iter Domain.join writer;
   Unix.close stdout_read;
@@ -109,6 +131,16 @@ let required_flags =
   ]
 
 type optimization = O1 | O2
+
+(* Clang's ThinLTO where the compiler is clang, and otherwise full LTO,
+   which GCC has. *)
+let link_time_optimization t =
+  let contains text part =
+    let n = String.length part in
+    let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
+    at 0
+  in
+  if contains t.identity "clang" then [ "-flto=thin" ] else [ "-flto" ]
 
 let optimization_flag = function O1 -> "-O1" | O2 -> "-O2"
 

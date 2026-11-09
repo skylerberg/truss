@@ -7,12 +7,17 @@ open Syntax
 
 type hole = {
   offset : int;  (** Relative to the definition *)
-  expected : string;  (** The type the hole must have *)
-  scope : (string * string) list;  (** Each name in scope, with its type, in the order bound *)
+  expected : string option;
+      (** The type the hole must have, or [None] for a type defined as [todo] *)
+  scope : (string * string) list;  (** Each name in scope, with its type, by name *)
 }
 
+(* A type as tools show it. The checked form holds no unsolved type, so the
+   type of a [todo] nothing fixes, such as one that is interpolated, is the
+   error type there, and is not decided yet. *)
 let show_type (checked : Checked.t) id =
   match if id < Array.length checked.types then checked.types.(id) else None with
+  | Some (Types.Error | Types.Hole) -> "not decided yet"
   | Some type_ -> Types.show type_
   | None -> "an unknown type"
 
@@ -21,120 +26,44 @@ let local_type (checked : Checked.t) id =
   | Some type_ -> Types.show type_
   | None -> "an unknown type"
 
-(* The names a pattern binds, in order. *)
-let rec bindings (resolved : Resolve.resolved) (pattern : pattern) =
-  match pattern.kind with
-  | Binding_or_constant name -> (
-      match if name.id < Array.length resolved.names then resolved.names.(name.id) else None with
-      | Some Binding -> [ name ]
-      | _ -> [])
-  | Variant { fields = Some fields; _ } | Record fields -> List.concat_map (field resolved) fields
-  | Alternatives (first :: _) -> bindings resolved first
-  | Variant { fields = None; _ }
-  | Alternatives []
-  | Wildcard | Qualified_constant _ | Literal _ | Pattern_range _ | Pattern_error ->
-      []
+(* The span of the expression with that id. *)
+let expression_span (definition : definition) id =
+  let found = ref None in
+  let rec visit (value : expression) =
+    if value.id = id then found := Some value.span else Syntax_walk.children visit value
+  in
+  Syntax_walk.definition visit definition;
+  !found
 
-and field resolved (written : pattern_field) =
-  match written.kind with
-  | Named_field (_, pattern) | Field pattern -> bindings resolved pattern
-  | Rest -> []
-
-(* The bindings an [is] test in a condition makes, which the block it guards
-   can use. *)
-let rec tested resolved (value : expression) =
-  match value.kind with
-  | Is { pattern; _ } -> bindings resolved pattern
-  | Binary { operator = And; left; right; _ } -> tested resolved left @ tested resolved right
-  | Parenthesized inner -> tested resolved inner
-  | _ -> []
-
+(* Each [todo] of a definition, in order: the names in scope come from name
+   resolution, which records them at each [todo] as it walks, and their
+   types from the checked form. *)
 let holes (definition : definition) (resolved : Resolve.resolved) (checked : Checked.t) =
-  let found = ref [] in
-  let named scope names =
-    scope @ List.map (fun (name : name) -> (name.text, local_type checked name.id)) names
+  let values =
+    List.filter_map
+      (fun (id, scope) ->
+        Option.map
+          (fun (span : span) ->
+            {
+              offset = span.start;
+              expected = Some (show_type checked id);
+              scope =
+                List.map
+                  (fun (name, (value : Resolve.value)) ->
+                    ( name,
+                      match value with
+                      | Value_local binding -> local_type checked binding
+                      | Value_generic _ -> "USize"
+                      | Value_field _ -> "a field" ))
+                  scope;
+            })
+          (expression_span definition id))
+      resolved.holes
   in
-  let rec expression scope (value : expression) =
-    match value.kind with
-    | Todo ->
-        found :=
-          { offset = value.span.start; expected = show_type checked value.id; scope } :: !found
-    | Lambda { parameters; body } ->
-        block (named scope (List.concat_map (bindings resolved) parameters)) body
-    | Match { scrutinees; arms } ->
-        List.iter (expression scope) scrutinees;
-        List.iter
-          (fun (arm : arm) ->
-            let inner = named scope (List.concat_map (bindings resolved) arm.patterns) in
-            Option.iter (expression inner) arm.guard;
-            ignore (statement inner arm.body))
-          arms
-    | If { condition; then_; else_ } -> (
-        expression scope condition;
-        block (named scope (tested resolved condition)) then_;
-        match else_ with
-        | Some (Else otherwise) -> block scope otherwise
-        | Some (Else_if next) -> expression scope next
-        | None -> ())
-    | Block inner -> block scope inner
-    | Provide { implementations; body } ->
-        List.iter (expression scope) implementations;
-        block scope body
-    | _ ->
-        Syntax_walk.expression_parts ~expression:(expression scope)
-          ~statement:(fun s -> ignore (statement scope s))
-          value
-  and statement scope (written : statement) =
-    match written.kind with
-    | Let { pattern; annotation = _; value; else_; _ } ->
-        expression scope value;
-        Option.iter (block scope) else_;
-        named scope (bindings resolved pattern)
-    | For { pattern; iterable; body; clauses = _; _ } ->
-        expression scope iterable;
-        block (named scope (bindings resolved pattern)) body;
-        scope
-    | While { condition; body; clauses = _ } ->
-        expression scope condition;
-        block (named scope (tested resolved condition)) body;
-        scope
-    | _ ->
-        Syntax_walk.statement_parts ~expression:(expression scope)
-          ~statement:(fun s -> ignore (statement scope s))
-          written;
-        scope
-  and block scope (written : block) = ignore (List.fold_left statement scope written.statements) in
-  let parameters (list : parameter list) =
-    List.concat_map
-      (fun (parameter : parameter) ->
-        match parameter.kind with
-        | Named_parameter { name; _ } -> [ (name.text, local_type checked name.id) ]
-        | Self_parameter _ -> [ ("self", "the type the method is on") ]
-        | Parameter_error -> [])
-      list
-  in
-  let function_ (f : function_definition) = block (parameters f.signature.parameters) f.body in
-  (match definition.kind with
-  | Function f -> function_ f
-  | Impl { members; _ } ->
-      List.iter
-        (fun (member : impl_member line) ->
-          match member.kind with Impl_method f -> function_ f | _ -> ())
-        members
-  | Trait { members; _ } ->
-      List.iter
-        (fun (member : trait_member line) ->
-          match member.kind with
-          | Trait_method { signature; body = Some body } ->
-              block (parameters signature.parameters) body
-          | Law law -> block (parameters law.parameters) law.body
-          | _ -> ())
-        members
-  | Test { body; _ } | Law_proof { body; _ } -> block [] body
-  | Theorem { parameters = written; body; _ } -> block (parameters written) body
-  | Constant { value; _ } -> expression [] value
-  | Type_definition _ | Capability _ | Definition_error _ -> ());
-  List.rev !found
+  match definition.kind with
+  | Type_definition { name; body = Type_todo; _ } ->
+      { offset = name.span.start; expected = None; scope = [] } :: values
+  | _ -> values
 
 (* What is at a position *)
 

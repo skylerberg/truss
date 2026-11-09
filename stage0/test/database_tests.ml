@@ -1,7 +1,8 @@
-(* The tests of the code database's sessions and requests: what a check
-   finds, what a restart or a new worktree computes again, the questions
-   about dependencies, overlaps between worktrees, and the background
-   process. See DATABASE.md, "Sessions", "Requests", and "Parallel work". *)
+(* The tests of the code database's sessions: what a session finds, what a
+   restart or a new worktree computes again, what reads what, comparing
+   with a commit, overlaps between worktrees, and the background process.
+   See DATABASE.md, "Sessions" and "Parallel work". What the command line
+   shows of these is tested in [stage0/test/cli]. *)
 
 open Harness
 
@@ -56,31 +57,43 @@ let fresh_store () =
   Unix.putenv "TRUSS_CACHE" (fresh "cache");
   Database.logging := true
 
-let request ?(json = false) directory command = Database.handle { directory; command; json }
-
 let package () =
   let directory = fresh "package" in
   write directory "truss.toml" (manifest "app");
   write directory "main.truss" program;
   directory
 
+let session directory =
+  match Database.open_session directory with
+  | Ok (session, packages) -> (session, packages)
+  | Error message -> failwith message
+
+(* A session's diagnostics and problems, as a count, after it is saved, as
+   a command would leave it. *)
+let errors directory =
+  let session, packages = session directory in
+  let found =
+    List.concat_map
+      (fun (_, name) ->
+        List.concat_map (Database.diagnostics session) (Database.package_modules session name))
+      packages
+  in
+  Database.save_session session;
+  List.length found + List.length (Database.problems session)
+
 let computed directory =
   match Database.session_engine directory with Some engine -> Engine.executed engine | None -> []
 
 let clear directory = Option.iter Engine.clear_log (Database.session_engine directory)
-
-let expect_status (response : Database.response) status =
-  if response.status <> status then
-    fail "status %d, expected %d: %s%s" response.status status response.output response.errors
 
 let contains text part =
   let n = String.length part and l = String.length text in
   let rec at i = i + n <= l && (String.sub text i n = part || at (i + 1)) in
   at 0
 
-let expect_contains (response : Database.response) part =
-  let all = response.output ^ response.errors in
-  if not (contains all part) then fail "expected %S in:\n%s" part all
+let expect_errors directory count =
+  let found = errors directory in
+  if found <> count then fail "%d errors, expected %d" found count
 
 (* The background process, first, since a process cannot fork once a
    build has started domains *)
@@ -91,58 +104,75 @@ let () =
       let directory = package () in
       match Unix.fork () with
       | 0 ->
-          Database.serve ();
+          (* A request is a directory, and the answer its count of errors, or
+             [-1] to stop. *)
+          Database.serve ~handle:(fun ~progress directory ->
+              progress "working";
+              if directory = "stop" then begin
+                Database.stop ();
+                -1
+              end
+              else errors directory);
           Unix._exit 0
       | child ->
-          let call command =
-            Database.call ~program:"/nonexistent" { directory; command; json = false }
+          let progressed = ref false in
+          let call request =
+            match
+              Database.call ~program:"/nonexistent"
+                ~progress:(fun text -> if text = "working" then progressed := true)
+                request
+            with
+            | Ok (count : int) -> count
+            | Error message ->
+                fail "%s" message;
+                -2
           in
-          expect_status (call Check) 0;
+          if call directory <> 0 then fail "found errors";
+          if not !progressed then fail "sent no progress";
           write directory "main.truss" "fn broken() -> Int64 {\n  true\n}\n";
-          expect_status (call Check) 1;
-          let busy = request directory Check in
-          expect_status busy 2;
-          expect_status (call Stop) 0;
+          if call directory <> 1 then fail "missed the error";
+          (match Database.open_session directory with
+          | Error _ -> ()
+          | Ok _ -> fail "opened a session the background process holds");
+          ignore (call "stop");
           ignore (Unix.waitpid [] child))
 
 let () =
-  test "a check of a package with no errors succeeds" (fun () ->
+  test "a session of a package with no errors finds none" (fun () ->
       fresh_store ();
-      expect_status (request (package ()) Check) 0);
-  test "a check reports an error, and none once it is fixed" (fun () ->
+      expect_errors (package ()) 0);
+  test "a session finds an error, and none once it is fixed" (fun () ->
       fresh_store ();
       let directory = package () in
       write directory "main.truss" "fn broken() -> Int64 {\n  true\n}\n";
-      let response = request directory Check in
-      expect_status response 1;
-      expect_contains response "main.truss:2:3";
+      expect_errors directory 1;
       write directory "main.truss" program;
-      expect_status (request directory Check) 0);
-  test "a check after a restart computes nothing" (fun () ->
+      expect_errors directory 0);
+  test "a session after a restart computes nothing" (fun () ->
       fresh_store ();
       let directory = package () in
-      expect_status (request directory Check) 0;
+      expect_errors directory 0;
       Database.reset ();
-      expect_status (request directory Check) 0;
+      expect_errors directory 0;
       let again = computed directory in
       if again <> [] then fail "computed [%s]" (String.concat "; " again));
   test "a change made while no process ran is seen after a restart" (fun () ->
       fresh_store ();
       let directory = package () in
-      expect_status (request directory Check) 0;
+      expect_errors directory 0;
       Database.reset ();
       write directory "main.truss" "fn broken() -> Int64 {\n  true\n}\n";
-      expect_status (request directory Check) 1);
+      expect_errors directory 1);
   test "editing one function's body checks only that body again" (fun () ->
       fresh_store ();
       let directory = package () in
       write directory "other.truss" "fn triple(value: Int64) -> Int64 {\n  value * 3\n}\n";
-      expect_status (request directory Check) 0;
+      expect_errors directory 0;
       clear directory;
       write directory "main.truss" (program ^ "\nfn unused() -> Int64 {\n  1\n}\n");
       write directory "main.truss" program;
       write directory "other.truss" "fn triple(value: Int64) -> Int64 {\n  value * 4\n}\n";
-      expect_status (request directory Check) 0;
+      expect_errors directory 0;
       let again = computed directory in
       if List.mem "checked(app::main::double)" again then fail "checked double again";
       if not (List.mem "checked(app::other::triple)" again) then fail "did not check triple");
@@ -150,16 +180,16 @@ let () =
       fresh_store ();
       let directory = package () in
       write directory "broken.truss" "fn broken() -> Int64 {\n  true\n}\n";
-      expect_status (request directory Check) 1;
+      expect_errors directory 1;
       Sys.remove (Filename.concat directory "broken.truss");
-      expect_status (request directory Check) 0);
-  test "a malformed manifest is reported" (fun () ->
+      expect_errors directory 0);
+  test "a malformed manifest is a problem, at its line" (fun () ->
       fresh_store ();
       let directory = package () in
       write directory "truss.toml" "[package]\nname = \n";
-      let response = request directory Check in
-      expect_status response 1;
-      expect_contains response "truss.toml:2");
+      let session, _ = session directory in
+      if not (List.exists (fun p -> contains p "truss.toml:2") (Database.problems session)) then
+        fail "problems: [%s]" (String.concat "; " (Database.problems session)));
   test "a package cannot depend on one that runs only on 64-bit targets unless it does too"
     (fun () ->
       fresh_store ();
@@ -169,110 +199,58 @@ let () =
       write root "app/truss.toml"
         "[package]\nname = \"app\"\n\n[dependencies]\nwide = { version = \"1\" }\n";
       write root "app/main.truss" program;
-      let response = request root Check in
-      expect_status response 1;
-      expect_contains response "wide runs only on 64-bit targets");
-  test "a check in a package's directory checks only that package" (fun () ->
+      let session, _ = session root in
+      if
+        not
+          (List.exists
+             (fun p -> contains p "wide runs only on 64-bit targets")
+             (Database.problems session))
+      then fail "no problem");
+  test "a session opened in a package's directory is about that package alone" (fun () ->
       fresh_store ();
       let root = fresh "worktree" in
       write root "good/truss.toml" (manifest "good");
       write root "good/main.truss" program;
       write root "bad/truss.toml" (manifest "bad");
       write root "bad/main.truss" "fn broken() -> Int64 {\n  true\n}\n";
-      expect_status (request (Filename.concat root "good") Check) 0;
-      expect_status (request (Filename.concat root "bad") Check) 1;
-      expect_status (request root Check) 1);
+      expect_errors (Filename.concat root "good") 0;
+      expect_errors (Filename.concat root "bad") 1;
+      expect_errors root 1);
   test "a new worktree starts from the nearest session" (fun () ->
       fresh_store ();
       let first = package () in
-      expect_status (request first Check) 0;
+      expect_errors first 0;
       let fresh_work = List.length (computed first) in
       let second = package () in
       write second "main.truss" (program ^ "\nfn extra() -> Int64 {\n  1\n}\n");
-      expect_status (request second Check) 0;
+      expect_errors second 0;
       let work = List.length (computed second) in
       if work * 2 >= fresh_work then fail "computed %d of %d" work fresh_work)
 
-let () =
-  test "holes are listed with their type, the names in scope, and what they block" (fun () ->
-      fresh_store ();
-      let directory = package () in
-      write directory "main.truss"
-        "fn parse(text: String) -> Int64 {\n\
-        \  let trimmed = text.trim()\n\
-        \  todo\n\
-         }\n\n\
-         test \"parsing\" {\n\
-        \  assert parse(\"1\") == 1\n\
-         }\n";
-      let response = request directory Holes in
-      expect_status response 0;
-      expect_contains response "main.truss:3:3: a hole of type Int64";
-      expect_contains response "text: String";
-      expect_contains response "trimmed";
-      expect_contains response "blocks: app::main::test \"parsing\"");
-  test "references name what reads a definition" (fun () ->
-      fresh_store ();
-      let response = request (package ()) (References { name = "double" }) in
-      expect_status response 0;
-      expect_contains response
-        "app::main::test \"doubling\": its body reads the signature of app::main::double");
-  test "dependencies name what a definition reads" (fun () ->
-      fresh_store ();
-      let response = request (package ()) (Dependencies { name = "test \"doubling\"" }) in
-      expect_status response 0;
-      expect_contains response "reads the signature of app::main::double");
-  test "explaining a name gives its meaning and the signature it refers to" (fun () ->
-      fresh_store ();
-      let directory = package () in
-      let response =
-        request directory
-          (Explain { file = Filename.concat directory "main.truss"; line = 6; column = 10 })
-      in
-      expect_status response 0;
-      expect_contains response "app::main::double";
-      expect_contains response "fn double(value: Int64) -> Int64")
+let double : Path.t = Top { module_ = { package = "app"; modules = [ "main" ] }; name = "double" }
 
-(* Lowering is kept too *)
-
-let lowered directory =
-  List.filter (fun label -> contains label "lowered_instance(") (computed directory)
+let doubling : Path.t =
+  Test { module_ = { package = "app"; modules = [ "main" ] }; name = "doubling" }
 
 let () =
-  test "a test run after a restart lowers nothing" (fun () ->
+  test "what reads a definition is found part by part" (fun () ->
       fresh_store ();
-      let directory = package () in
-      expect_status (request directory (Test { sanitize = false })) 0;
-      Database.reset ();
-      expect_status (request directory (Test { sanitize = false })) 0;
-      match lowered directory with
-      | [] -> ()
-      | found -> fail "lowered [%s]" (String.concat "; " found));
-  test "editing one function lowers that function again, and not the others" (fun () ->
+      let session, _ = session (package ()) in
+      ignore (errors (Database.root session));
+      let readers = Database.readers (Database.dependencies session) double in
+      if not (List.mem (doubling, "body", "signature") readers) then
+        fail "the test's body does not read double's signature");
+  test "what a definition reads is found part by part" (fun () ->
       fresh_store ();
-      let directory = package () in
-      write directory "other.truss"
-        "internal fn triple(value: Int64) -> Int64 {\n\
-        \  value * 3\n\
-         }\n\n\
-         test \"tripling\" {\n\
-        \  assert triple(1) == 3\n\
-         }\n";
-      expect_status (request directory (Test { sanitize = false })) 0;
-      clear directory;
-      write directory "other.truss"
-        "internal fn triple(value: Int64) -> Int64 {\n\
-        \  value * 4 - value\n\
-         }\n\n\
-         test \"tripling\" {\n\
-        \  assert triple(1) == 3\n\
-         }\n";
-      expect_status (request directory (Test { sanitize = false })) 0;
-      let again = lowered directory in
-      if List.exists (fun label -> contains label "double") again then
-        fail "lowered double again: [%s]" (String.concat "; " again);
-      if not (List.exists (fun label -> contains label "triple") again) then
-        fail "did not lower triple: [%s]" (String.concat "; " again))
+      let session, _ = session (package ()) in
+      ignore (errors (Database.root session));
+      let reads = Database.reads (Database.dependencies session) doubling in
+      if not (List.mem (double, "body", "signature") reads) then
+        fail "the test's body does not read double's signature");
+  test "a name finds the definitions whose path ends with it" (fun () ->
+      fresh_store ();
+      let session, _ = session (package ()) in
+      if Database.find_definitions session "double" <> [ double ] then fail "found otherwise")
 
 (* With git *)
 
@@ -314,17 +292,45 @@ fn quadruple(value: Int64) -> Int64 {
 }
 |})
 
+let base_of session =
+  match Database.base_commit session None with
+  | None ->
+      fail "no base commit";
+      None
+  | Some commit -> (
+      match Database.open_commit_of session commit with
+      | Ok base -> Some base
+      | Error message ->
+          fail "%s" message;
+          None)
+
 let () =
-  test "impact lists what changed since the base, and the signatures to review" (fun () ->
+  test "comparing with the base finds the changed signature" (fun () ->
       fresh_store ();
       let root = repository () in
       change_interface root;
-      let response = request root (Impact { base = None }) in
-      expect_status response 0;
-      expect_contains response "Changed:";
-      expect_contains response "app::main::double";
-      expect_contains response "Signatures to review:";
-      expect_contains response "fn double(value: Int64, times: Int64) -> Int64");
+      let session, _ = session root in
+      match base_of session with
+      | None -> ()
+      | Some base ->
+          if
+            not
+              (List.exists
+                 (fun (path, part, difference) ->
+                   Path.equal path double && part = Some "signature"
+                   && difference = Database.Changed)
+                 (Database.changes session base))
+          then
+            fail "double's signature is not changed: %s"
+              (String.concat "; "
+                 (List.map
+                    (fun (path, part, d) ->
+                      Printf.sprintf "%s %s %s" (Path.show path) (Option.value part ~default:"-")
+                        (match d with
+                        | Database.Changed -> "changed"
+                        | Added -> "added"
+                        | Same -> "same"))
+                    (Database.changes session base))));
   test "overlap finds a new call to a function another worktree changes" (fun () ->
       fresh_store ();
       let root = repository () in
@@ -332,13 +338,32 @@ let () =
       git root [ "worktree"; "add"; "-q"; other; "-b"; "other" ];
       change_interface root;
       add_caller other;
-      expect_status (request root Check) 0;
-      let response = request other Check in
-      expect_status response 0;
-      expect_contains response
-        "this worktree's change to the body of app::main::quadruple reads the signature of \
-         app::main::double, which the other changes");
-  test "overlap with a merge finds the errors the merge would have" (fun () ->
+      let mine, _ = session root in
+      let theirs, _ = session other in
+      match Database.overlap_with theirs mine with
+      | Error message -> fail "%s" message
+      | Ok overlaps ->
+          let quadruple : Path.t =
+            Top { module_ = { package = "app"; modules = [ "main" ] }; name = "quadruple" }
+          in
+          if
+            not
+              (List.exists
+                 (function
+                   | Database.Reads { this_worktree = true; change; reads } ->
+                       change.path = Some quadruple && reads.path = Some double
+                   | _ -> false)
+                 overlaps)
+          then
+            fail "no overlap found: %s"
+              (String.concat "; "
+                 (List.map
+                    (function
+                      | Database.Both_change p -> "both " ^ p.label
+                      | Reads { this_worktree; change; reads } ->
+                          Printf.sprintf "%b %s %s" this_worktree change.label reads.label)
+                    overlaps)));
+  test "a merge preview finds the errors the merge would have" (fun () ->
       fresh_store ();
       let root = repository () in
       let other = Filename.concat (Lazy.force scratch) (Printf.sprintf "merge-%d" !counter) in
@@ -349,11 +374,17 @@ let () =
          fn quadruple(value: Int64) -> Int64 {\n\
         \  main::double(main::double(value))\n\
          }\n";
-      expect_status (request root Check) 0;
-      expect_status (request other Check) 0;
-      let response = request root (Overlap { other = None; merge = true }) in
-      expect_status response 0;
-      expect_contains response "merged: caller.truss: types.missing_argument")
+      let mine, _ = session root in
+      let theirs, _ = session other in
+      match Database.merge_preview mine theirs with
+      | Error message -> fail "%s" message
+      | Ok found ->
+          if
+            not
+              (List.exists
+                 (fun (file, code, _) -> file = "caller.truss" && code = "types.missing_argument")
+                 found)
+          then fail "no error found")
 
 (* The layers stay apart *)
 
@@ -367,7 +398,7 @@ let () =
   test "no compiler stage lists the engine, the store, or the database" (fun () ->
       let root = "../../stage0" in
       let outside_stages =
-        [ "incremental"; "query"; "engine"; "store"; "database"; "bin"; "test"; "tools" ]
+        [ "incremental"; "query"; "engine"; "store"; "database"; "cli"; "bin"; "test"; "tools" ]
       in
       List.iter
         (fun path ->

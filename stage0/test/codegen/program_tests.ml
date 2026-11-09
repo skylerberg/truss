@@ -15,7 +15,9 @@ let () =
       let run text =
         let database, compile = load text in
         match Compile.run_tests ~results compile ~time_limit:2000 (tests_of database) with
-        | Ok (status, output) -> (status, output)
+        | Ok records ->
+            ( (if List.for_all (fun (r : Compile.record) -> r.outcome = Passed) records then 0 else 1),
+              render_records records )
         | Error message -> failwith message
       in
       let kept () = Hashtbl.length table in
@@ -39,6 +41,32 @@ test "fails" {
 }
 |} in
       expect_int ~expected:2 (kept ()))
+
+let () =
+  test "an external test gets the real capabilities it uses, and its result is never kept"
+    (fun () ->
+      let table = Hashtbl.create 4 in
+      let results : Compile.results =
+        { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
+      in
+      let database, compile =
+        load {|test "reads the clock"
+  uses Clock
+{
+  let _ = Clock.now()
+}
+|}
+      in
+      let run () =
+        match Compile.run_tests ~results compile ~time_limit:2000 (tests_of database) with
+        | Ok records -> records
+        | Error message -> failwith message
+      in
+      ignore (run ());
+      match run () with
+      | [ { outcome = Passed; cached = false; _ } ] ->
+          if Hashtbl.length table > 0 then fail "kept a result"
+      | _ -> fail "did not pass, or came from the kept results")
 
 (* Checks a build makes in place of proofs *)
 

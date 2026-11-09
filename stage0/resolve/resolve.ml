@@ -19,9 +19,15 @@ type target = Walk.target =
 
 type bracket = Walk.bracket = Index | Type_arguments | Method_bracket
 
+type value = Walk.value =
+  | Value_local of Syntax.id
+  | Value_generic of Syntax.id
+  | Value_field of string
+
 type resolved = {
   names : target option array;
   brackets : bracket option array;
+  holes : (Syntax.id * (string * value) list) list;
   diagnostics : Diagnostic.t list;
 }
 
@@ -53,6 +59,7 @@ let resolved =
               names = Array.make size None;
               brackets = Array.make size None;
               diagnostics = [];
+              holes = [];
             }
           in
           Walk.definition state definition;
@@ -89,6 +96,7 @@ let resolved =
             {
               names = state.names;
               brackets = state.brackets;
+              holes = List.rev state.holes;
               diagnostics =
                 List.sort
                   (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span right.span)

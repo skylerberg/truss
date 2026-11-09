@@ -1021,7 +1021,10 @@ the top of a file changes no generated code below it:
   counts from 0 at the definition's first line, and the column from 1.
 - **An anchor** is an external constant, one per definition, holding the
   file's path and the definition's first line. The generated code only
-  refers to it, so its own C never changes when the definition moves.
+  refers to it, so its own C never changes when the definition moves. The
+  driver names the file: a development build as the current directory
+  reaches it, as diagnostics name it, and a release build from the
+  package's root, so the program is the same wherever it was built.
 - **The anchors are defined in one C file generated at link time** from the
   position table. Moving a definition changes only that file.
 
@@ -1095,11 +1098,17 @@ Truss has no garbage collector and no way to leak a value on purpose, so a
 leak is a bug in code generation, most likely in drop elaboration. Every
 test that compiles Truss is therefore also a check of its drops.
 
-Results are printed in the order of the tests, however the tests were spread
-over workers, each as `test N outcome`, where the outcome is `passed`,
-`failed`, `panicked`, `incomplete`, `timed_out`, or `crashed`, followed by
-an optional `message` block and an optional `echo` block, each giving its
-length in bytes and then its bytes.
+The runner writes a line as it hands each test to a worker, `start N`, and
+each test's result as soon as the test ends, so that `truss test` can show
+progress. A result is an optional `message` block and an optional `echo`
+block, each giving its length in bytes and then its bytes, then the line
+`test N outcome microseconds`, which ends the record, so a reader knows a
+record is whole when that line arrives. `N` is the test's number in the
+table, the outcome is `passed`, `failed`, `panicked`, `incomplete`,
+`timed_out`, or `crashed`, and the duration is the time from handing the
+test to a worker to its end. Results therefore come in the order tests end,
+which depends on the workers, and `Compile.run_tests` puts them back in the
+order of the tests.
 
 ### Test results
 
@@ -1124,8 +1133,11 @@ every instance that uses the layout, so it changes the key too.
 
 `truss test` keeps results in the code database's store, as
 [DATABASE.md](DATABASE.md#exact-keys) describes, and builds and runs only
-the tests without one. Stage0 keeps only a pass
-with nothing to show. A failure's message and an `echo` give positions,
+the tests without one. Stage0 keeps only a pass with nothing to show, and
+never an external test's, whose result depends on the world, and the
+result holds `passed` and the duration of the run that kept it, which
+`truss test --timings` shows for a cached test. A result in any other form
+counts as none. A failure's message and an `echo` give positions,
 which the key leaves out so that moving code keeps its results, so those
 tests run again, as do tests that ran out of time or crashed, which the
 machine may have caused. A sanitized run keeps nothing.
@@ -1167,8 +1179,11 @@ recompiles objects but invalidates no test result.
   fast to compile and avoids the stack traffic of `-O0`.
 - **The standard library and dependencies compile at `-O2`** and are cached,
   so development builds of a project run them at full speed.
-- **Release builds** put each module's instances in one C file at `-O2` and
-  link with ThinLTO, so the C compiler can inline across every definition.
+- **Release builds** compile at `-O2` and optimize across every file as
+  they are linked, with ThinLTO where the C compiler is clang and LTO
+  otherwise, so the C compiler can inline across every definition. They
+  keep one C file per instance, so each object is still cached on its own
+  and compiled in parallel.
 
 One C file per instance means many small compiler runs on a cold build. If
 that is slow, instances can be grouped by definition later. The change
@@ -1176,13 +1191,14 @@ affects only build speed.
 
 ### The command
 
-`truss test DIRECTORY` checks a package, reporting every diagnostic, then
-builds its tests into one test program and runs it. `truss run DIRECTORY
-ARGUMENTS` builds the package's program from its `main` and runs it with
-the arguments, on the terminal's own input and output, so it can prompt and
-read, and exits with its status. A package is a directory with a `truss.toml` naming it, and
-each `.truss` file under it is one of its modules. Object files are kept in
-the code database's store.
+`truss test`, `truss run`, and `truss build` drive code generation, as
+[CLI.md](CLI.md) describes: a test run builds the tests into one test
+program, `run` builds the package's program from its `main` for
+development, which the command line runs on its own terminal, and `build`
+builds it for release. Both refuse a program whose `main` can reach a
+`todo`, which `Compile.unshippable` finds by walking the instances `main`
+reaches, as a build does, without compiling them, and `build` refuses an
+`echo` too. Object files are kept in the code database's store.
 
 ### Linking
 

@@ -176,6 +176,7 @@ and constant_state context path =
       parameter_types = [];
       substitution = [];
       uses = [];
+      real = [];
       has_defaults = false;
       requires = [];
     }

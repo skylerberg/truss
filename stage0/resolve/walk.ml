@@ -52,6 +52,8 @@ type state = {
   names : target option array;
   brackets : bracket option array;
   mutable diagnostics : Diagnostic.t list;
+  mutable holes : (id * (string * value) list) list;
+      (** Each [todo], by its id, with the values in scope there, by name, latest first *)
 }
 
 let report state ?fixes code (span : span) message =
@@ -463,7 +465,12 @@ and check_place state (marked : expression) (inner : expression) =
 
 and expression state scope (value : expression) =
   match value.kind with
-  | Integer _ | Float _ | True | False | Todo | Unreachable | Break | Continue | Self_value
+  | Todo ->
+      state.holes <-
+        ( value.id,
+          List.map (fun (name, (value, _)) -> (name, value)) (String_map.bindings scope.values) )
+        :: state.holes
+  | Integer _ | Float _ | True | False | Unreachable | Break | Continue | Self_value
   | Self_type_value | Expression_error ->
       ()
   | String literal -> string_literal state scope literal

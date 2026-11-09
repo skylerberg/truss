@@ -18,6 +18,7 @@ let () =
            { package = "http"; capabilities = [ "NetworkClient"; "Clock" ] };
          ];
        usize_bits = 32;
+       time_limit = 10;
       } ->
           ()
       | _ -> fail "read differently");

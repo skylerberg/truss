@@ -156,6 +156,28 @@ The full design is in [DATABASE.md](DATABASE.md). In short:
   where two worktrees' changes overlap. `--no-server` answers a request in the
   command's own process.
 
+### Command line
+
+The full design is in [CLI.md](CLI.md). In short:
+
+- **One `truss` program** with a subcommand for each tool: `check`, `test`,
+  `run`, `build`, `fmt`, and the agents' tools `holes`, `show`, `impact`,
+  `references`, `explain`, `overlap`, and `rename`. The commands are the
+  `cli` library, and Cmdliner parses the arguments. Every other part of the
+  compiler, the code database among them, is a library with no command line
+  of its own; tools for working on the compiler, which are not shipped, are
+  separate programs in `stage0/tools/`.
+- **Commands run on the code database's sessions,** in the background
+  process, which runs the command line's own code, or with `--no-server`,
+  in the command's own process. A command is about the packages at or under
+  the directory it runs in, or the one that directory is in.
+- **Whole-package by default,** since every command is O(change) through the
+  code database, so there are few flags for choosing what to look at.
+- **`--json` on every command that reports,** one document on standard
+  output, with diagnostics carrying stable codes and fixes as byte ranges.
+  Exit status 0 means success, 1 a problem in the code, and 2 that the
+  command could not run.
+
 ### Code generation through C
 
 The full design is in [CODEGEN.md](CODEGEN.md). In short:

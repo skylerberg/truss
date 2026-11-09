@@ -17,6 +17,10 @@ val required_flags : string list
 
 type optimization = O1 | O2
 
+(* The flags for optimizing across object files when they are linked,
+   given when compiling and when linking: ThinLTO for clang, LTO
+   otherwise. *)
+val link_time_optimization : t -> string list
 val optimization_flag : optimization -> string
 
 (* Compiles one C file to an object file. [extra] adds flags, such as the
@@ -39,8 +43,11 @@ val link :
 (* Runs a program and returns its exit status, its standard output, and its
    standard error. A program ended by a signal has status [128 + signal].
    With [input], the program reads that as its standard input; without, it
-   reads this process's. *)
-val run : ?input:string -> string -> string list -> int * string * string
+   reads this process's. With [on_output], each piece of standard output is
+   also handed to it as soon as it is read, for a driver that shows
+   progress. *)
+val run :
+  ?input:string -> ?on_output:(string -> unit) -> string -> string list -> int * string * string
 
 (* Runs a program on this process's standard input, output, and error, and
    returns its exit status, as [run] gives it. *)

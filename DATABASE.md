@@ -9,9 +9,11 @@ depends on what. It follows the decisions in [DESIGN.md](DESIGN.md) and
 [TYPECHECKER.md](TYPECHECKER.md) and [CODEGEN.md](CODEGEN.md).
 
 It is built in [`stage0/`](stage0): the engine in `incremental`, with its
-two views `query` and `engine`, the store in `store`, sessions and requests
-in `database`, and what tools ask of one definition in `inspect`. The
-`truss` command is the database's client. What is not built yet is said
+two views `query` and `engine`, the store in `store`, sessions and the
+questions they answer in `database`, and what tools ask of one definition in
+`inspect`. The `truss` command line, in `cli`, is the database's client, and
+the only program the database serves: the database is a library, and every
+command and report is the command line's. What is not built yet is said
 where it comes up, and listed at the end.
 
 ## What the database does
@@ -56,8 +58,8 @@ The database is three layers, each behind one narrow interface:
         \              |              /
          ▼             ▼             ▼
    ┌──────────────────────────────────────┐
-   │ Database: sessions, requests, graph   │  requests and answers, by definition
-   │ questions, overlap, scheduling        │
+   │ Database: sessions, graph questions,  │  data, by definition and part
+   │ overlap, the background process       │
    └──────────────────────────────────────┘
                      │ Engine
    ┌──────────────────────────────────────┐
@@ -78,7 +80,7 @@ The database is three layers, each behind one narrow interface:
 | `Query` | `query` | Compiler stages | Declaring inputs and queries, and reading them while a query runs |
 | `Engine` | `engine` | `Database` and tests | Setting inputs, keeping results current, saving and loading, and walking the graph |
 | `Store` | `store` | `Engine`, and the exact-key caches in `Database` | Bytes by content hash, results by key, and append-only journals |
-| `Database` | `database` | The command line, and the tools on it | Answering requests about a worktree |
+| `Database` | `database` | The command line, and the tools on it | Sessions of worktrees, and answers about them as data |
 
 `Query` and `Engine` are two views of one implementation, `Incremental`,
 which nothing else names. These rules keep each interface narrow, so that
@@ -96,9 +98,9 @@ each layer can be replaced without touching the others:
   them.** The database knows them only as values it can compare and save.
 - **Code generation does not see the store.** A test run is handed functions
   that find and keep results by key, and the directory object files go in.
-- **Clients see only requests and answers.** Whether the session runs in the
+- **Clients see only sessions and answers.** Whether the session runs in the
   background process or in the client's own process makes no difference to
-  them.
+  them, since the background process runs the client's own code.
 
 ## Pushing changes
 
@@ -309,10 +311,21 @@ val collect : t -> budget:int -> live:(string -> bool) -> unit
 
 ### `Database`, for tools
 
-`Database` is a set of requests, each with an answer. `Database.call` sends
-a request to the background process, starting it if it is not running, and
-`Database.handle` answers it in the caller's own process; the requests and
-answers are the same either way (see [Requests](#requests)).
+`Database` gives tools sessions and answers questions about them with data:
+a session's packages, files, and diagnostics, what reads what, how a
+session compares with another, and where two worktrees' changes meet (see
+[Questions](#questions)). It shows nothing and knows no command. The
+command line, in [`stage0/cli/`](stage0/cli) as [CLI.md](CLI.md) describes,
+is the one program that turns these into commands and reports, and the
+language server is to be another client of the same interface.
+
+`Database.serve` runs the background process with a handler the caller
+gives, and `Database.call` sends it a request, starting it if it is not
+running. The request and the answer are the caller's own types, and the
+handler may send progress, text to show while it works, which the client
+gets as it comes. The command line's handler runs the command line itself,
+so a command's answer is the same in the background process and in the
+command's own process.
 
 ## Inputs
 
@@ -547,8 +560,9 @@ with no graph:
 
 A *session* is one worktree's state: its inputs, its graph, and the results
 its requests have asked for. A worktree is a directory with one or more
-packages in it: the top of the git worktree a request's directory is in, or
-the directory itself outside git. Its packages are the directories under it
+packages in it: the top of the git worktree a command's directory is in, or
+outside git, the nearest directory at or above it that holds a
+`truss.toml`, or else the directory itself. Its packages are the directories under it
 with a `truss.toml`, and each module file belongs to the nearest package
 above it. Directories whose names start with `.`, and `_build` and
 `node_modules`, are passed over.
@@ -568,13 +582,13 @@ it exits after three hours without a request, the default of both.
   store with a long path puts the socket in `/tmp`, named by a hash of where
   it would have been. A lock beside it in the store keeps to one process per
   compiler.
-- **Without the background process,** as in CI, `--no-server` answers a
-  request in the command's own process, against the same store. It takes the
+- **Without the background process,** as in CI, `--no-server` runs a
+  command in its own process, against the same store. It takes the
   session's journal lock first, so a journal never has two writers, and it
   refuses, saying why, while the background process has that session open.
-- **Requests are answered one at a time.** Requests and answers travel as
-  OCaml's marshaled values, which is safe because the socket is named by the
-  compiler's identity, so both ends are the same program.
+- **Requests are answered one at a time.** Requests, progress, and answers
+  travel as OCaml's marshaled values, which is safe because the socket is
+  named by the compiler's identity, so both ends are the same program.
 
 ### Watching files
 
@@ -616,54 +630,47 @@ session, as a new worktree does, and is kept in memory and never saved. This
 is how the database gets the state of a base commit, compares a branch that
 has no worktree, and checks a merge.
 
-## Requests
+## Questions
 
-These are what clients can ask. Every answer names definitions by path and
-part, and positions by file, line, and column, never by node.
+These are what tools can ask a session. Every answer names definitions by
+path and part, and files relative to the worktree's root, never nodes.
 
-| Request | Command | Answer |
+| Question | Asked by | Answer |
 |---|---|---|
-| `Check` | `truss check [DIRECTORY]` | Every diagnostic of the packages at or under the directory, and where the worktree's changes meet those of other open worktrees |
-| `Test` | `truss test [DIRECTORY]` | Each test's outcome, from the store or from running the tests whose keys have no result |
-| `Build`, `Run` | `truss build DIRECTORY OUTPUT`, `truss run DIRECTORY ARGUMENTS` | A program; for `run`, built in the store for the client to run on its own terminal |
-| `Explain` | `truss explain FILE:LINE:COLUMN` | What is at a position: the expression as written, what a name means, its type, and the signature it refers to |
-| `References` | `truss references NAME` | Every definition that reads a definition, with the parts on each side |
-| `Dependencies` | `truss dependencies NAME` | Every definition a definition reads, by part |
-| `Impact` | `truss impact [--base COMMIT]` | What the worktree's changes from a base affected (see below) |
-| `Holes` | `truss holes` | Each `todo`, with its type, the names in scope, and the tests and programs it blocks |
-| `Overlap` | `truss overlap [--with BRANCH] [--merge]` | Where this worktree's changes meet another's (see [Parallel work](#parallel-work)) |
-| `Sync` | `truss sync` | Nothing, once the worktree's changes have been seen |
-| `Status`, `Stop` | `truss status`, `truss stop` | The background process's sessions, and ending it |
+| `open_session`, `diagnostics`, `problems` | `truss check` and every command that reads code | The session for a directory's worktree, current with its files; the packages the directory is about; each file's diagnostics; and the manifests that could not be read |
+| `dependencies`, `reads`, `readers` | `truss references`, `truss dependencies`, `truss holes`, `truss impact` | For every definition, what each of its parts reads of other definitions' parts |
+| `find_definitions` | `truss references`, `truss dependencies` | The definitions a name means: a full path, or the end of one |
+| `base_commit`, `open_commit_of`, `changes` | `truss impact` | A session at a commit, and every part a change between two sessions can reach, with whether it changed |
+| `other_worktrees`, `overlap_with`, `merge_preview` | `truss overlap`, `truss check` | Where two sessions' changes meet, and the diagnostics a merge of the two would have that neither has |
+| `test_results`, `objects_directory`, `programs_directory` | `truss test`, `truss run`, `truss build` | Where test results, object files, and programs to run are kept, in the store |
+| `sessions`, `stop` | `truss status`, `truss stop` | The background process's sessions, and ending it |
 
-Every command takes `--no-server` and `--json`; `check --json` gives the
-diagnostics as `truss-check --json` does, which is `check --no-server`.
-Results asked for through these requests are kept current from then on, and
-each request saves its session when it is done. A test runs only when
+Results asked for are kept current from then on, and the command line saves
+each session it opened when its command is done. A test runs only when
 asked.
 
-A graph question first checks the whole worktree, so that every definition's
-results are there to read. A definition reads another's part when one of its
-nodes reads that part's node, directly or through nodes about no definition,
-such as lookups; the standard library's own lookups are not followed, so a
-definition is not said to read everything they read.
+A question about the graph first checks every package of the sessions it
+reads, so that every definition's results are there to read. A definition
+reads another's part when one of its nodes reads that part's node, directly
+or through nodes about no definition, such as lookups; the standard
+library's own lookups are not followed, so a definition is not said to read
+everything they read.
 
 ### Impact
 
 GOALS.md asks for tools that show agents and reviewers what each change
-affects, and the signatures of what it touched. `impact` compares the
+affects, and the signatures of what it touched. `truss impact` compares the
 worktree with a base, its merge base with the default branch unless another
-commit is named, and answers:
+commit is named, and shows:
 
 - **What changed,** by definition and part, such as the tree, the
   interface, or the body.
-- **What was checked again and came out the same,** listed apart from what
-  changed.
 - **The signatures to review:** every definition whose interface, signature,
-  or shape changed, and every definition that reads one of those, each with
-  its signature, which DESIGN.md says carries everything important about
-  code.
+  or shape changed, before and after, with every definition that reads one
+  of those, since DESIGN.md says a signature carries everything important
+  about code.
 - **The tests whose keys changed,** which are the only tests the change can
-  affect.
+  affect, each with whether its result is already kept.
 
 The comparison starts from the inputs that differ between the two sessions,
 and follows the edges in from readers in the worktree's graph: every node a
@@ -673,10 +680,11 @@ key in the base's session, which is brought up to date there.
 ### Holes and what can ship
 
 A hole's type and the names in scope come from the definition's checked form
-and resolution, through `Inspect`, which walks the tree's scopes: parameters,
-`let` and `var`, `for`, lambdas, `match` arms, and the names an `is` test
-binds in the block it guards. What a hole blocks is every test and `main`
-that reaches its definition through what each definition reads.
+and resolution, through `Inspect`: name resolution records the names in
+scope at each `todo` as it walks the definition, so there is one account of
+scope, and the checked form gives their types. What a hole blocks is every
+test and `main` that reaches its definition through what each definition
+reads.
 
 ## Parallel work
 
@@ -758,15 +766,15 @@ about a small input.
   journals and their locks across processes, collection, and loading a saved
   graph: found done, changed after loading, through unsaved nodes, through
   frozen ones, and with values gone from the store.
-- **Sessions and requests** (`database_tests`): the background process seeing
-  every earlier write and refusing a second writer, checks before and after
-  fixes and restarts, what an edit computes again, removed modules, malformed
-  manifests, packages in one worktree, the `usize_bits` rule between
-  packages, a new worktree starting near another, a test run that lowers
-  nothing after a restart and only what an edit reached after one, holes,
-  references,
-  dependencies, explaining a name, impact, and both kinds of overlap, with a
-  merge, in a git repository.
+- **Sessions and questions** (`database_tests`): the background process
+  passing progress and answers and seeing every earlier write, and a second
+  writer refused, diagnostics before and after fixes and restarts, what an
+  edit computes again, removed modules, malformed manifests, packages in one
+  worktree, the `usize_bits` rule between packages, a new worktree starting
+  near another, what reads what in both directions, comparing with a base
+  commit, and both kinds of overlap, with a merge, in a git repository. What
+  the command line shows of these, and test runs on a session, are tested
+  in `stage0/test/cli`.
 - **Every other stage's tests** run on the same engine, with the standard
   library as a frozen layer shared by every test in an executable.
 

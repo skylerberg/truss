@@ -543,14 +543,17 @@ let runner =
    pipe. A worker reports each test's end, and any echo output, as records
    on another pipe. A worker that fails, panics, reaches a todo, or dies
    ends; the runner records why and starts another. A test that runs past
-   the time limit is killed. Results are printed in the order of the tests,
-   so the output is the same however the tests were spread out. */
+   the time limit is killed. Each result is printed as soon as its test
+   ends, with how long it ran, and a line as each test starts, so a driver
+   can show progress; results come in the order tests end, and each names
+   its test by number. */
 
 typedef void (*t_test)(void);
 
 struct t_result {
   uint8_t outcome;
   uint8_t done;
+  uint64_t microseconds;
   char *message;
   size_t message_length;
   char *echo;
@@ -563,7 +566,7 @@ struct t_worker {
   int reports;
   int64_t test;
   uint8_t ending; /* It reported a failure, so it is about to exit and gets no more tests. */
-  uint64_t started;
+  uint64_t started; /* In microseconds. */
   uint8_t *buffer;
   size_t used;
   size_t capacity;
@@ -571,10 +574,10 @@ struct t_worker {
 
 enum { t_timed_out = 5, t_crashed = 6 };
 
-static uint64_t t_milliseconds(void) {
+static uint64_t t_microseconds(void) {
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
-  return (uint64_t)now.tv_sec * 1000 + (uint64_t)now.tv_nsec / 1000000;
+  return (uint64_t)now.tv_sec * 1000000 + (uint64_t)now.tv_nsec / 1000;
 }
 
 static void *t_runner_allocate(size_t size) {
@@ -647,10 +650,39 @@ static void t_spawn(struct t_worker *workers, uint32_t width, struct t_worker *w
   worker->used = 0;
 }
 
-static void t_finish(struct t_result *result, uint8_t outcome, const char *message, size_t length) {
+static const char *t_outcome_names[] = {"passed", "failed", "panicked", "incomplete", "echoed", "timed_out", "crashed"};
+
+static void t_print_block(const char *label, const char *text, size_t length) {
+  t_text_length = 0;
+  t_text_string(label);
+  t_text_string(" ");
+  t_text_number(length);
+  t_text_string("\n");
+  t_write_all(1, t_text, t_text_length);
+  t_write_all(1, text, length);
+  t_write_all(1, "\n", 1);
+}
+
+/* Records a test's end, and prints it at once: its message and its echo
+   output, then a line with its number, outcome, and duration, which ends
+   the record, so a reader knows a record is whole when its line arrives. */
+static void t_finish(struct t_result *results, uint32_t test, uint64_t started, uint8_t outcome, const char *message, size_t length) {
+  struct t_result *result = &results[test];
   result->outcome = outcome;
   result->done = 1;
+  result->microseconds = t_microseconds() - started;
   if (length > 0) t_append(&result->message, &result->message_length, message, length);
+  if (result->message_length > 0) t_print_block("message", result->message, result->message_length);
+  if (result->echo_length > 0) t_print_block("echo", result->echo, result->echo_length);
+  t_text_length = 0;
+  t_text_string("test ");
+  t_text_number(test);
+  t_text_string(" ");
+  t_text_string(t_outcome_names[outcome]);
+  t_text_string(" ");
+  t_text_number(result->microseconds);
+  t_text_string("\n");
+  t_write_all(1, t_text, t_text_length);
 }
 
 /* Takes the complete records out of a worker's buffer. */
@@ -667,7 +699,7 @@ static void t_take_records(struct t_worker *worker, struct t_result *results, ui
       t_append(&results[test].echo, &results[test].echo_length, text, length);
       t_append(&results[test].echo, &results[test].echo_length, "\n", 1);
     } else if (!results[test].done) {
-      t_finish(&results[test], kind, text, length);
+      t_finish(results, test, worker->started, kind, text, length);
       *finished += 1;
       worker->test = -1;
       if (kind != t_passed) worker->ending = 1;
@@ -696,23 +728,15 @@ static void t_bury(struct t_worker *worker, struct t_result *results, uint32_t *
       t_text_string("ended with status ");
       t_text_number((uint64_t)WEXITSTATUS(status));
     }
-    t_finish(&results[worker->test], outcome, t_text, t_text_length);
+    /* t_finish builds its line in t_text, so the message is copied out first. */
+    char *message = t_runner_allocate(t_text_length);
+    size_t length = t_text_length;
+    memcpy(message, t_text, length);
+    t_finish(results, (uint32_t)worker->test, worker->started, outcome, message, length);
+    free(message);
     *finished += 1;
   }
   worker->pid = -1;
-}
-
-static const char *t_outcome_names[] = {"passed", "failed", "panicked", "incomplete", "echoed", "timed_out", "crashed"};
-
-static void t_print_block(const char *label, const char *text, size_t length) {
-  t_text_length = 0;
-  t_text_string(label);
-  t_text_string(" ");
-  t_text_number(length);
-  t_text_string("\n");
-  t_write_all(1, t_text, t_text_length);
-  t_write_all(1, text, length);
-  t_write_all(1, "\n", 1);
 }
 
 int t_runtime_run_tests(uint32_t count, const t_test *tests, uint32_t time_limit) {
@@ -739,19 +763,24 @@ int t_runtime_run_tests(uint32_t count, const t_test *tests, uint32_t time_limit
       if (workers[w].pid >= 0 && !workers[w].ending && workers[w].test < 0 && next < count) {
         uint32_t index = next++;
         workers[w].test = index;
-        workers[w].started = t_milliseconds();
+        workers[w].started = t_microseconds();
         t_write_all(workers[w].commands, &index, sizeof index);
+        t_text_length = 0;
+        t_text_string("start ");
+        t_text_number(index);
+        t_text_string("\n");
+        t_write_all(1, t_text, t_text_length);
       }
     }
-    uint64_t now = t_milliseconds();
+    uint64_t now = t_microseconds();
     int wait = -1;
     for (uint32_t w = 0; w < width; w++) {
       polls[w].fd = workers[w].pid >= 0 ? workers[w].reports : -1;
       polls[w].events = POLLIN;
       polls[w].revents = 0;
       if (workers[w].pid >= 0 && workers[w].test >= 0) {
-        uint64_t deadline = workers[w].started + time_limit;
-        int left = deadline > now ? (int)(deadline - now) : 0;
+        uint64_t deadline = workers[w].started + (uint64_t)time_limit * 1000;
+        int left = deadline > now ? (int)((deadline - now + 999) / 1000) : 0;
         if (wait < 0 || left < wait) wait = left;
       }
     }
@@ -775,7 +804,7 @@ int t_runtime_run_tests(uint32_t count, const t_test *tests, uint32_t time_limit
           continue;
         }
       }
-      if (worker->test >= 0 && t_milliseconds() - worker->started > time_limit) {
+      if (worker->test >= 0 && t_microseconds() - worker->started > (uint64_t)time_limit * 1000) {
         kill(worker->pid, SIGKILL);
         t_bury(worker, results, &finished, t_timed_out);
       }
@@ -790,15 +819,6 @@ int t_runtime_run_tests(uint32_t count, const t_test *tests, uint32_t time_limit
   }
   int failures = 0;
   for (uint32_t i = 0; i < count; i++) {
-    t_text_length = 0;
-    t_text_string("test ");
-    t_text_number(i);
-    t_text_string(" ");
-    t_text_string(t_outcome_names[results[i].outcome]);
-    t_text_string("\n");
-    t_write_all(1, t_text, t_text_length);
-    if (results[i].message_length > 0) t_print_block("message", results[i].message, results[i].message_length);
-    if (results[i].echo_length > 0) t_print_block("echo", results[i].echo, results[i].echo_length);
     if (results[i].outcome != t_passed) failures += 1;
   }
   return failures > 0 ? 1 : 0;

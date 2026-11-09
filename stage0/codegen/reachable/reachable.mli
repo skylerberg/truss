@@ -17,6 +17,14 @@ val reachable :
   Instance.key list ->
   Lir.compiled list
 
+(* The same instances in the same order, each with the first way the walk
+   reached it: the keys from a root to the instance, both included. *)
+val reached :
+  Memory_layout.env ->
+  lookup:(Instance.key -> Lir.compiled) ->
+  Instance.key list ->
+  (Lir.compiled * Instance.key list) list
+
 (* The key of a test's result: the hash of the LIR of everything the test
    can reach, with every instance and every path replaced by a number given
    in the order it is first reached, and the version of code generation.

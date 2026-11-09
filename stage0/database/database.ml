@@ -20,51 +20,6 @@ let standard_layer ?log () =
   load_standard layer;
   layer
 
-let read_directory ~package directory =
-  let rec walk relative =
-    let absolute =
-      if relative = [] then directory
-      else Filename.concat directory (String.concat Filename.dir_sep relative)
-    in
-    Array.to_list (Sys.readdir absolute)
-    |> List.sort compare
-    |> List.concat_map (fun entry ->
-        let path = Filename.concat absolute entry in
-        if Sys.is_directory path then walk (relative @ [ entry ])
-        else if Filename.check_suffix entry ".truss" then
-          let text = Source.text (Source.read_file path) in
-          [
-            ( ({ package; modules = relative @ [ Filename.chop_suffix entry ".truss" ] }
-                : Path.module_),
-              text );
-          ]
-        else [])
-  in
-  walk []
-
-(* Requests and answers *)
-
-type command =
-  | Check
-  | Test of { sanitize : bool }
-  | Build of { output : string; sanitize : bool }
-  | Run of { sanitize : bool }
-  | Impact of { base : string option }
-  | Holes
-  | References of { name : string }
-  | Dependencies of { name : string }
-  | Overlap of { other : string option; merge : bool }
-  | Explain of { file : string; line : int; column : int }
-  | Sync
-  | Status
-  | Stop
-
-type request = { directory : string; command : command; json : bool }
-type response = { output : string; errors : string; status : int; program : string option }
-
-let answer ?(errors = "") ?(status = 0) ?program output = { output; errors; status; program }
-let refuse message = answer ~errors:(message ^ "\n") ~status:2 ""
-
 (* The database's own inputs: how a worktree's files map to packages, and
    each file's stamp, so that a restart reads only the files that changed. *)
 
@@ -481,13 +436,23 @@ let open_commit state ~repository commit =
           Hashtbl.replace state.sessions name session;
           Ok session)
 
-(* The worktree a request is about: the top of its git worktree, or the
-   directory itself outside git. *)
+(* The worktree a directory is in: the top of its git worktree, or outside
+   git, the nearest directory holding a manifest, or the directory
+   itself. *)
 let root_of directory =
   let directory = try Unix.realpath directory with Unix.Unix_error _ -> directory in
   match Git.toplevel directory with
   | Some top -> ( try Unix.realpath top with Unix.Unix_error _ -> top)
-  | None -> directory
+  | None ->
+      (* Outside git, the nearest directory at or above that holds a
+         manifest, so a package's subdirectory is about the package. *)
+      let rec up path =
+        if Sys.file_exists (Filename.concat path "truss.toml") then Some path
+        else
+          let parent = Filename.dirname path in
+          if parent = path then None else up parent
+      in
+      Option.value (up directory) ~default:directory
 
 let relative_to root directory =
   let directory = try Unix.realpath directory with Unix.Unix_error _ -> directory in
@@ -521,170 +486,76 @@ let package_modules session name =
   | Some package -> package.modules
   | None -> []
 
-(* Rendering *)
+(* Sessions as the command line sees them *)
 
-let file_of session (module_ : Path.module_) =
+let root_of_session session =
+  match session.source with Directory root -> root | Commit c -> c.repository
+
+let root = root_of_session
+let engine session = session.engine
+let context session = Engine.context session.engine
+let problems session = session.problems
+let packages session = (current_layout session.engine).packages
+
+let module_file session (module_ : Path.module_) =
   let lay = current_layout session.engine in
   match List.find_opt (fun (_, name) -> name = module_.package) lay.packages with
   | Some (directory, _) -> Worktree.module_file ~package_directory:directory module_
   | None -> Workspace.file_path module_
 
-let source_of session module_ =
-  let file = Engine.get session.engine Workspace.file module_ in
-  Source.create ~path:(file_of session module_) (Source.text file.source)
+let diagnostics session module_ =
+  try Engine.get session.engine Type_checker.file_diagnostics module_ with Not_found -> []
 
 let diagnostics_of session packages =
   List.concat_map
     (fun (_, name) ->
       List.filter_map
         (fun module_ ->
-          match Engine.get session.engine Type_checker.file_diagnostics module_ with
-          | [] -> None
-          | found -> Some (module_, found)
-          | exception Not_found -> None)
+          match diagnostics session module_ with [] -> None | found -> Some (module_, found))
         (package_modules session name))
     packages
 
-let render_diagnostics ~json session found =
-  if json then
-    "["
-    ^ String.concat ",\n"
-        (List.concat_map
-           (fun (module_, diagnostics) ->
-             let source = source_of session module_ in
-             List.map (Diagnostic.to_json_object source) (Diagnostic.shown diagnostics))
-           found)
-    ^ "]\n"
-  else
-    String.concat ""
-      (List.concat_map
-         (fun (module_, diagnostics) ->
-           let source = source_of session module_ in
-           List.map (Diagnostic.render source) (Diagnostic.shown diagnostics))
-         found)
-
-(* Compiling *)
-
-let sanitizers =
-  [ "-fsanitize=address,undefined"; "-fno-sanitize-recover=undefined"; "-fno-omit-frame-pointer" ]
-
-let compiler state session ~sanitize =
-  match Toolchain.find () with
-  | Error message -> Error message
-  | Ok toolchain ->
-      let cache = Build.cache (Store.files state.store "objects") in
-      Ok
-        (Compile.create (Engine.context session.engine) Memory_layout.target_64 toolchain cache
-           { build = Development; optimization = O1; extra = (if sanitize then sanitizers else []) })
-
-let declarations session packages kind =
-  List.concat_map
-    (fun (_, name) ->
-      List.concat_map
-        (fun module_ ->
-          List.filter_map
-            (fun (d : Resolve.Names.declaration) -> if kind d.path then Some d.path else None)
-            (Engine.get session.engine Resolve.Names.declarations module_))
-        (package_modules session name))
-    packages
-
-let test_results state : Compile.results =
-  {
-    find = (fun key -> Store.find_result state.store ~kind:"tests" ~key);
-    add = (fun key value -> Store.add_result state.store ~kind:"tests" ~key value);
-  }
-
-let find_main session packages =
-  match
-    declarations session packages (function Path.Top { name = "main"; _ } -> true | _ -> false)
-  with
-  | main :: _ -> Some main
-  | [] -> None
-
-(* The requests that need a worktree's session *)
-
-let with_session state request f =
-  let root = root_of request.directory in
-  if not (Sys.file_exists root) then refuse (request.directory ^ ": no such directory.")
+let open_session directory =
+  let state = current () in
+  let root = root_of directory in
+  if not (Sys.file_exists root) then Error (directory ^ ": no such directory.")
   else
     match open_directory state root with
-    | Error message -> refuse message
+    | Error message -> Error message
     | Ok session ->
         session.used <- Unix.time ();
         scan session root;
         ignore (stabilize state session);
-        let within = relative_to root request.directory in
-        let packages = target_packages session within in
-        if packages = [] && session.problems = [] then
-          refuse (request.directory ^ ": no truss.toml here or above, within the worktree.")
-        else Fun.protect ~finally:(fun () -> save state session) (fun () -> f session packages)
+        Ok (session, target_packages session (relative_to root directory))
 
-let problems_text session = String.concat "" (List.map (fun p -> p ^ "\n") session.problems)
+let refresh session =
+  match session.source with
+  | Directory root ->
+      scan session root;
+      ignore (stabilize (current ()) session)
+  | Commit _ -> ()
 
-let checked_or_fail session packages k =
-  let found = diagnostics_of session packages in
-  if found <> [] || session.problems <> [] then
-    answer
-      ~errors:(problems_text session ^ render_diagnostics ~json:false session found)
-      ~status:1 ""
-  else k ()
+let save_session session = save (current ()) session
+let objects_directory () = Store.files (current ()).store "objects"
+let programs_directory () = Store.files (current ()).store "programs"
 
-let test state request ~sanitize =
-  with_session state request (fun session packages ->
-      checked_or_fail session packages (fun () ->
-          let tests = declarations session packages (function Path.Test _ -> true | _ -> false) in
-          match compiler state session ~sanitize with
-          | Error message -> refuse message
-          | Ok compile -> (
-              let results = if sanitize then None else Some (test_results state) in
-              match Compile.run_tests ?results compile ~time_limit:10_000 tests with
-              | Error message -> answer ~errors:(message ^ "\n") ~status:1 ""
-              | Ok (status, output) ->
-                  let records = Compile.parse_report output in
-                  let buffer = Buffer.create 256 in
-                  let indented text =
-                    String.split_on_char '\n' text
-                    |> List.filter (( <> ) "")
-                    |> List.iter (fun line -> Buffer.add_string buffer ("    " ^ line ^ "\n"))
-                  in
-                  List.iter2
-                    (fun test (record : Compile.record) ->
-                      Buffer.add_string buffer
-                        (Printf.sprintf "%s: %s\n" (Path.show test) record.outcome);
-                      Option.iter indented record.message;
-                      Option.iter indented record.echo)
-                    tests records;
-                  let count outcome =
-                    List.length
-                      (List.filter (fun (r : Compile.record) -> r.outcome = outcome) records)
-                  in
-                  Buffer.add_string buffer
-                    (Printf.sprintf "\n%d passed, %d did not pass\n" (count "passed")
-                       (List.length records - count "passed"));
-                  Store.flush state.store;
-                  answer ~status (Buffer.contents buffer))))
+let test_results () : Compile.results =
+  let store = (current ()).store in
+  {
+    find = (fun key -> Store.find_result store ~kind:"tests" ~key);
+    add = (fun key value -> Store.add_result store ~kind:"tests" ~key value);
+  }
 
-let build state request ~output ~sanitize =
-  with_session state request (fun session packages ->
-      checked_or_fail session packages (fun () ->
-          match find_main session packages with
-          | None -> refuse (request.directory ^ ": the package has no main.")
-          | Some main -> (
-              match compiler state session ~sanitize with
-              | Error message -> refuse message
-              | Ok compile -> (
-                  match Compile.build_program compile ~main ~output with
-                  | Error message -> answer ~errors:(message ^ "\n") ~status:1 ""
-                  | Ok () -> answer ~program:output ""))))
+let flush_store () = Store.flush (current ()).store
 
-let run state request ~sanitize =
-  let directory = Store.files state.store "programs" in
-  let output =
-    Filename.concat directory
-      (Printf.sprintf "program-%d-%d" (Unix.getpid ())
-         (int_of_float (Unix.gettimeofday () *. 1000.)))
-  in
-  build state request ~output ~sanitize
+let sessions () =
+  match !state with
+  | None -> []
+  | Some state ->
+      Hashtbl.fold
+        (fun key session acc -> (key, List.length (Engine.nodes session.engine)) :: acc)
+        state.sessions []
+      |> List.sort compare
 
 (* Graph questions. Every answer names definitions and parts; the engine's
    nodes stay inside. *)
@@ -765,52 +636,21 @@ let find_definitions session name =
        (fun (d : Resolve.Names.declaration) -> if matches name d.path then Some d.path else None)
        (all_declarations session))
 
-let unique_sorted pairs = List.sort_uniq compare pairs
-let lines_of rows = String.concat "" (List.map (fun row -> row ^ "\n") rows)
+type dependencies = (Path.t, (Path.t * string * string) list) Hashtbl.t
 
-let references state request name =
-  ignore state;
-  with_session state request (fun session _ ->
-      match find_definitions session name with
-      | [] -> refuse (Printf.sprintf "no definition named %s in this worktree." name)
-      | targets ->
-          let table = dependency_table session in
-          let rows =
-            List.concat_map
-              (fun target ->
-                Hashtbl.fold
-                  (fun reader reads acc ->
-                    List.filter_map
-                      (fun (path, reader_part, read_part) ->
-                        if Path.equal path target then
-                          Some
-                            (Printf.sprintf "%s: its %s reads the %s of %s" (Path.show reader)
-                               reader_part read_part (Path.show target))
-                        else None)
-                      reads
-                    @ acc)
-                  table [])
-              targets
-          in
-          answer (lines_of (List.sort_uniq compare rows)))
+let dependencies = dependency_table
+let reads (table : dependencies) path = Option.value (Hashtbl.find_opt table path) ~default:[]
 
-let dependencies state request name =
-  with_session state request (fun session _ ->
-      match find_definitions session name with
-      | [] -> refuse (Printf.sprintf "no definition named %s in this worktree." name)
-      | targets ->
-          let table = dependency_table session in
-          let rows =
-            List.concat_map
-              (fun target ->
-                List.map
-                  (fun (path, part, read_part) ->
-                    Printf.sprintf "%s: its %s reads the %s of %s" (Path.show target) part read_part
-                      (Path.show path))
-                  (Option.value (Hashtbl.find_opt table target) ~default:[]))
-              targets
-          in
-          answer (lines_of (unique_sorted rows)))
+let readers (table : dependencies) target =
+  Hashtbl.fold
+    (fun reader reads acc ->
+      List.filter_map
+        (fun (path, reader_part, read_part) ->
+          if Path.equal path target then Some (reader, reader_part, read_part) else None)
+        reads
+      @ acc)
+    table []
+  |> List.sort_uniq compare
 
 (* Comparing a session with another, such as its base commit's *)
 
@@ -859,31 +699,21 @@ let compare_sessions mine theirs =
       (node, differs node))
     !cone
 
-let header_of session (path : Path.t) =
-  match
-    List.find_opt
-      (fun (d : Resolve.Names.declaration) -> Path.equal d.path path)
-      (all_declarations session)
-  with
-  | None -> None
-  | Some declaration -> (
-      match Engine.get session.engine Resolve.Names.text (Resolve.Names.key_of declaration) with
-      | Some text ->
-          let lines = String.split_on_char '\n' text in
-          let rec until = function
-            | [] -> []
-            | line :: rest ->
-                let trimmed = String.trim line in
-                if trimmed = "{" then []
-                else if String.length trimmed > 0 && trimmed.[String.length trimmed - 1] = '{' then
-                  [ String.trim (String.sub trimmed 0 (String.length trimmed - 1)) ]
-                else line :: until rest
-          in
-          Some (String.concat "\n" (until lines))
-      | None -> None
-      | exception _ -> None)
+(* Checks every package of a session, so that every definition's results
+   are there to compare and to walk; kept results make this cheap. *)
+let check_all session = ignore (diagnostics_of session (current_layout session.engine).packages)
 
-let base_commit ~root base =
+let changes mine theirs =
+  check_all mine;
+  List.filter_map
+    (fun (node, difference) ->
+      match subject_of node with
+      | Some (subject : Query.subject) -> Some (subject.path, subject.part, difference)
+      | None -> None)
+    (compare_sessions mine theirs)
+
+let base_commit session base =
+  let root = root_of_session session in
   match base with
   | Some revision -> Git.resolve ~directory:root revision
   | None -> (
@@ -892,283 +722,17 @@ let base_commit ~root base =
       | Some head, None -> Some head
       | None, _ -> None)
 
-let root_of_session session =
-  match session.source with Directory root -> root | Commit c -> c.repository
-
-let group rows =
-  let table = Hashtbl.create 16 in
-  List.iter
-    (fun (path, part) ->
-      let parts = Option.value (Hashtbl.find_opt table path) ~default:[] in
-      if not (List.mem part parts) then Hashtbl.replace table path (part :: parts))
-    rows;
-  Hashtbl.fold (fun path parts acc -> (path, List.sort compare parts) :: acc) table []
-  |> List.sort (fun (a, _) (b, _) -> Path.compare a b)
-
-let show_grouped rows =
-  lines_of
-    (List.map
-       (fun (path, parts) -> Printf.sprintf "  %s: %s" (Path.show path) (String.concat ", " parts))
-       (group rows))
-
-let impact state request base =
-  with_session state request (fun session _ ->
-      ignore (diagnostics_of session (current_layout session.engine).packages);
-      let root = root_of_session session in
-      match base_commit ~root base with
-      | None -> refuse "no base commit: name one with --base, or work in a git worktree."
-      | Some commit -> (
-          match open_commit state ~repository:root commit with
-          | Error message -> refuse message
-          | Ok base_session ->
-              let compared = compare_sessions session base_session in
-              let with_subject status =
-                List.filter_map
-                  (fun (node, difference) ->
-                    match subject_of node with
-                    | Some subject when difference = status ->
-                        Some (subject.path, Option.value subject.part ~default:"")
-                    | _ -> None)
-                  compared
-              in
-              let changed = with_subject Changed @ with_subject Added in
-              let same = with_subject Same in
-              let changed_paths = List.sort_uniq Path.compare (List.map fst changed) in
-              let same =
-                List.filter
-                  (fun (path, _) -> not (List.exists (Path.equal path) changed_paths))
-                  same
-              in
-              let interface_changed =
-                List.sort_uniq Path.compare
-                  (List.filter_map
-                     (fun (path, part) ->
-                       if List.mem part [ "interface"; "signature"; "shape" ] then Some path
-                       else None)
-                     changed)
-              in
-              let table = dependency_table session in
-              let readers_of target =
-                Hashtbl.fold
-                  (fun reader reads acc ->
-                    if List.exists (fun (path, _, _) -> Path.equal path target) reads then
-                      reader :: acc
-                    else acc)
-                  table []
-              in
-              let review =
-                List.sort_uniq Path.compare
-                  (interface_changed @ List.concat_map readers_of interface_changed)
-              in
-              let signatures =
-                List.filter_map
-                  (fun path ->
-                    Option.map
-                      (fun header ->
-                        Printf.sprintf "  %s\n    %s" (Path.show path)
-                          (String.concat "\n    " (String.split_on_char '\n' header)))
-                      (header_of session path))
-                  review
-              in
-              let tests =
-                match
-                  ( compiler state session ~sanitize:false,
-                    compiler state base_session ~sanitize:false )
-                with
-                | Ok mine, Ok theirs ->
-                    let packages = current_layout session.engine in
-                    let tests =
-                      declarations session packages.packages (function
-                        | Path.Test _ -> true
-                        | _ -> false)
-                    in
-                    let base_tests =
-                      declarations base_session (current_layout base_session.engine).packages
-                        (function
-                        | Path.Test _ -> true
-                        | _ -> false)
-                    in
-                    let mine = Compile.test_keys mine tests in
-                    let theirs = Compile.test_keys theirs base_tests in
-                    Some
-                      (List.filter_map
-                         (fun (path, key) ->
-                           match List.find_opt (fun (p, _) -> Path.equal p path) theirs with
-                           | Some (_, base_key) when base_key = key -> None
-                           | _ -> Some ("  " ^ Path.show path))
-                         mine)
-                | _ -> None
-              in
-              let section title body = if body = "" then "" else title ^ ":\n" ^ body in
-              answer
-                (String.concat ""
-                   [
-                     Printf.sprintf "Compared with %s.\n"
-                       (String.sub commit 0 (min 12 (String.length commit)));
-                     section "Changed" (show_grouped changed);
-                     section "Checked again, unchanged" (show_grouped same);
-                     section "Signatures to review" (lines_of signatures);
-                     (match tests with
-                     | Some tests -> section "Tests whose code changed" (lines_of tests)
-                     | None -> "");
-                   ])))
-
-(* Holes *)
-
-let reachable table start =
-  let seen = Hashtbl.create 64 in
-  let rec walk path =
-    if not (Hashtbl.mem seen path) then begin
-      Hashtbl.replace seen path ();
-      List.iter
-        (fun (read, _, _) -> walk read)
-        (Option.value (Hashtbl.find_opt table path) ~default:[])
-    end
-  in
-  walk start;
-  seen
-
-let holes state request =
-  with_session state request (fun session packages ->
-      let table = dependency_table session in
-      let roots =
-        declarations session packages (function
-          | Path.Test _ | Path.Top { name = "main"; _ } -> true
-          | _ -> false)
-      in
-      let reach = List.map (fun root -> (root, reachable table root)) roots in
-      let rows =
-        List.concat_map
-          (fun (_, name) ->
-            List.concat_map
-              (fun module_ ->
-                let source = lazy (source_of session module_) in
-                List.concat_map
-                  (fun (d : Resolve.Names.declaration) ->
-                    let key = Resolve.Names.key_of d in
-                    match
-                      ( Engine.get session.engine Resolve.Names.definition key,
-                        Engine.get session.engine Resolve.resolved key,
-                        Engine.get session.engine Infer.checked key,
-                        Engine.get session.engine Resolve.Names.base key )
-                    with
-                    | Some definition, Some resolved, Some checked, Some (_, base) ->
-                        List.map
-                          (fun (hole : Inspect.hole) ->
-                            let line, column =
-                              Source.position (Lazy.force source) (base + hole.offset)
-                            in
-                            let blocks =
-                              List.filter_map
-                                (fun (root, seen) ->
-                                  if Hashtbl.mem seen d.path then Some (Path.show root) else None)
-                                reach
-                            in
-                            Printf.sprintf
-                              "%s:%d:%d: a hole of type %s in %s\n  in scope: %s\n  blocks: %s"
-                              (file_of session module_) line column hole.expected (Path.show d.path)
-                              (if hole.scope = [] then "nothing"
-                               else
-                                 String.concat ", "
-                                   (List.map (fun (n, t) -> n ^ ": " ^ t) hole.scope))
-                              (if blocks = [] then "nothing" else String.concat ", " blocks))
-                          (Inspect.holes definition resolved checked.checked)
-                    | _ -> []
-                    | exception _ -> [])
-                  (Engine.get session.engine Resolve.Names.declarations module_))
-              (package_modules session name))
-          packages
-      in
-      answer (lines_of rows))
-
-(* What is at a position *)
-
-(* The byte offset of a line and column, both counting from 1, where a
-   column counts Unicode scalar values, as diagnostics do. *)
-let offset_of text ~line ~column =
-  let length = String.length text in
-  let rec start_of current offset =
-    if current >= line || offset >= length then offset
-    else
-      match String.index_from_opt text offset '\n' with
-      | Some newline -> start_of (current + 1) (newline + 1)
-      | None -> length
-  in
-  let rec advance offset remaining =
-    if remaining <= 0 || offset >= length || text.[offset] = '\n' then offset
-    else
-      let width = Uchar.utf_decode_length (String.get_utf_8_uchar text offset) in
-      advance (offset + max 1 width) (remaining - 1)
-  in
-  advance (start_of 1 0) (column - 1)
-
-let explain state request ~file ~line ~column =
-  with_session state request (fun session _ ->
-      let root = root_of_session session in
-      let relative = relative_to root (Filename.dirname file) in
-      let relative = (if relative = "" then "" else relative ^ "/") ^ Filename.basename file in
-      let lay = current_layout session.engine in
-      match Worktree.owner (List.map fst lay.packages) relative with
-      | None -> refuse (file ^ ": not a module of a package in this worktree.")
-      | Some directory -> (
-          let module_ : Path.module_ =
-            {
-              package = List.assoc directory lay.packages;
-              modules = Worktree.module_names ~package_directory:directory relative;
-            }
-          in
-          let source = source_of session module_ in
-          let offset = offset_of (Source.text source) ~line ~column in
-          let declarations = Engine.get session.engine Resolve.Names.declarations module_ in
-          let found =
-            List.find_map
-              (fun (d : Resolve.Names.declaration) ->
-                let key = Resolve.Names.key_of d in
-                match
-                  ( Engine.get session.engine Resolve.Names.base key,
-                    Engine.get session.engine Resolve.Names.text key )
-                with
-                | Some (_, base), Some text
-                  when base <= offset && offset <= base + String.length text -> (
-                    match
-                      ( Engine.get session.engine Resolve.Names.definition key,
-                        Engine.get session.engine Resolve.resolved key )
-                    with
-                    | Some definition, Some resolved ->
-                        let checked =
-                          Option.map
-                            (fun (r : Infer.result) -> r.checked)
-                            (try Engine.get session.engine Infer.checked key with _ -> None)
-                        in
-                        Inspect.at definition resolved checked ~text (offset - base)
-                    | _ -> None)
-                | _ -> None
-                | exception _ -> None)
-              declarations
-          in
-          match found with
-          | None -> answer "nothing there.\n"
-          | Some explanation ->
-              let signature =
-                match explanation.refers_to with
-                | Some path -> (
-                    match header_of session path with Some header -> Some header | None -> None)
-                | None -> None
-              in
-              answer
-                (lines_of
-                   (List.filter_map Fun.id
-                      [
-                        Some ("`" ^ explanation.text ^ "`");
-                        Option.map (fun m -> "means " ^ m) explanation.meaning;
-                        Option.map (fun t -> "has type " ^ t) explanation.type_;
-                        Option.map
-                          (fun s ->
-                            "signature:\n  " ^ String.concat "\n  " (String.split_on_char '\n' s))
-                          signature;
-                      ]))))
+let open_commit_of session commit =
+  open_commit (current ()) ~repository:(root_of_session session) commit
 
 (* Parallel work *)
+
+type place = { path : Path.t option; part : string option; label : string }
+
+type overlap =
+  | Both_change of place
+  | Reads of { this_worktree : bool; change : place; reads : place }
+      (** One worktree's change reads what the other changes *)
 
 (* Where two sessions' changes from a common base meet: each node both
    changed, and each node one changed that reads what the other changed. *)
@@ -1187,16 +751,13 @@ let overlaps ~base mine theirs =
   let mine_labels = labels mine_changed and theirs_labels = labels theirs_changed in
   let describe node =
     match subject_of node with
-    | Some subject ->
-        Printf.sprintf "the %s of %s"
-          (Option.value subject.part ~default:"definition")
-          (Path.show subject.path)
-    | None -> Engine.label node
+    | Some subject -> { path = Some subject.path; part = subject.part; label = Engine.label node }
+    | None -> { path = None; part = None; label = Engine.label node }
   in
   let both =
     List.filter_map
       (fun node ->
-        if Hashtbl.mem theirs_labels (Engine.label node) then Some ("both change " ^ describe node)
+        if Hashtbl.mem theirs_labels (Engine.label node) then Some (Both_change (describe node))
         else None)
       mine_changed
   in
@@ -1214,8 +775,12 @@ let overlaps ~base mine theirs =
                           (if who = "this" then mine_labels else theirs_labels)
                           (Engine.label read)) ->
                   Some
-                    (Printf.sprintf "%s worktree's change to %s reads %s, which the other changes"
-                       who (describe node) (describe other))
+                    (Reads
+                       {
+                         this_worktree = who = "this";
+                         change = describe node;
+                         reads = describe other;
+                       })
               | _ -> None)
             (Engine.reads node))
       changed
@@ -1228,7 +793,8 @@ let overlaps ~base mine theirs =
 (* A commit of a worktree's files as they are, for merging. *)
 let commit_of_worktree root = Git.snapshot ~directory:root
 
-let other_worktrees state session =
+let other_worktrees session =
+  let state = current () in
   let root = root_of_session session in
   let common = Git.common_directory root in
   Hashtbl.fold
@@ -1240,7 +806,10 @@ let other_worktrees state session =
       | _ -> acc)
     state.sessions []
 
-let overlap_with state session other ~other_name =
+let overlap_with session other =
+  let state = current () in
+  check_all session;
+  check_all other;
   let root = root_of_session session in
   let mine_commit = Git.head ~directory:root in
   let theirs_commit =
@@ -1255,159 +824,58 @@ let overlap_with state session other ~other_name =
       | Some base -> (
           match open_commit state ~repository:root base with
           | Error message -> Error message
-          | Ok base_session ->
-              Ok
-                (List.map
-                   (fun line -> other_name ^ ": " ^ line)
-                   (overlaps ~base:base_session session other))))
+          | Ok base_session -> Ok (overlaps ~base:base_session session other)))
   | _ -> Error "not a git worktree."
 
 (* The diagnostics of a merge of two commits that neither has. *)
-let merge_preview state session ~root ~mine ~theirs =
-  match Git.merged_files ~directory:root mine theirs with
-  | None -> Error "the two do not merge without a textual conflict."
-  | Some texts ->
-      let engine = Engine.fork session.engine in
-      let merged =
-        {
-          source = Commit { repository = root; commit = "merge" };
-          engine;
-          journal = None;
-          problems = [];
-          used = Unix.time ();
-          base = ref None;
-        }
-      in
-      apply merged (List.map (fun (path, text) -> (path, Text text)) texts);
-      let keys s =
-        List.concat_map
-          (fun (m, ds) ->
-            List.map (fun (d : Diagnostic.t) -> (m, Diagnostic.Code.name d.code, d.message)) ds)
-          (diagnostics_of s (current_layout s.engine).packages)
-      in
-      let sides =
-        List.concat_map
-          (fun commit ->
-            match open_commit state ~repository:root commit with
-            | Ok side -> keys side
-            | Error _ -> [])
-          [ mine; theirs ]
-      in
-      Ok
-        (List.filter_map
-           (fun ((m, code, message) as key) ->
-             if List.mem key sides then None
-             else Some (Printf.sprintf "%s: %s: %s" (file_of merged m) code message))
-           (List.sort_uniq compare (keys merged)))
-
-let overlap state request ~other ~merge =
-  with_session state request (fun session _ ->
-      let root = root_of_session session in
-      let others =
-        match other with
-        | Some branch -> (
-            match Git.resolve ~directory:root branch with
-            | Some commit -> (
+let merge_preview session other =
+  let state = current () in
+  let root = root_of_session session in
+  match
+    ( commit_of_worktree root,
+      match other.source with
+      | Directory other_root -> commit_of_worktree other_root
+      | Commit c -> Some c.commit )
+  with
+  | None, _ | _, None -> Error "cannot make commits to merge."
+  | Some mine, Some theirs -> (
+      match Git.merged_files ~directory:root mine theirs with
+      | None -> Error "the two do not merge without a textual conflict."
+      | Some texts ->
+          let engine = Engine.fork session.engine in
+          let merged =
+            {
+              source = Commit { repository = root; commit = "merge" };
+              engine;
+              journal = None;
+              problems = [];
+              used = Unix.time ();
+              base = ref None;
+            }
+          in
+          apply merged (List.map (fun (path, text) -> (path, Text text)) texts);
+          let keys s =
+            List.concat_map
+              (fun (m, ds) ->
+                List.map (fun (d : Diagnostic.t) -> (m, Diagnostic.Code.name d.code, d.message)) ds)
+              (diagnostics_of s (current_layout s.engine).packages)
+          in
+          let sides =
+            List.concat_map
+              (fun commit ->
                 match open_commit state ~repository:root commit with
-                | Ok s -> [ (branch, s) ]
+                | Ok side -> keys side
                 | Error _ -> [])
-            | None -> [])
-        | None -> List.map (fun s -> (root_of_session s, s)) (other_worktrees state session)
-      in
-      if others = [] then
-        answer "No other worktree of this repository is open, and no branch was named.\n"
-      else
-        let rows =
-          List.concat_map
-            (fun (name, other_session) ->
-              let found =
-                match overlap_with state session other_session ~other_name:name with
-                | Ok rows -> rows
-                | Error message -> [ name ^ ": " ^ message ]
-              in
-              let merged =
-                if not merge then []
-                else
-                  let theirs =
-                    match other_session.source with
-                    | Directory other_root -> commit_of_worktree other_root
-                    | Commit c -> Some c.commit
-                  in
-                  match (commit_of_worktree root, theirs) with
-                  | Some mine, Some theirs -> (
-                      match merge_preview state session ~root ~mine ~theirs with
-                      | Ok [] -> [ name ^ ": merging the two gives no new error." ]
-                      | Ok errors -> List.map (fun e -> name ^ ": merged: " ^ e) errors
-                      | Error message -> [ name ^ ": " ^ message ])
-                  | _ -> [ name ^ ": cannot make commits to merge." ]
-              in
-              found @ merged)
-            others
-        in
-        answer (if rows = [] then "No overlap.\n" else lines_of rows))
-
-(* A check also lists where this worktree's changes meet those of other open
-   worktrees of the repository. Overlaps are not diagnostics: nothing is
-   wrong with either worktree's code. *)
-let check state request =
-  with_session state request (fun session packages ->
-      let found = diagnostics_of session packages in
-      let errors = problems_text session in
-      let output = render_diagnostics ~json:request.json session found in
-      let status = if found = [] && session.problems = [] then 0 else 1 in
-      let overlaps =
-        if request.json then ""
-        else
-          match other_worktrees state session with
-          | [] -> ""
-          | others ->
-              let rows =
-                List.concat_map
-                  (fun other ->
-                    match overlap_with state session other ~other_name:(root_of_session other) with
-                    | Ok rows -> rows
-                    | Error _ -> [])
-                  others
-              in
-              if rows = [] then "" else "Overlaps with other worktrees:\n" ^ lines_of rows
-      in
-      if request.json then answer ~errors ~status output
-      else answer ~errors:(errors ^ output) ~status overlaps)
-
-let status state =
-  let lines =
-    Hashtbl.fold
-      (fun key session acc ->
-        Printf.sprintf "%s: %d nodes\n" key (List.length (Engine.nodes session.engine)) :: acc)
-      state.sessions []
-  in
-  answer (String.concat "" (List.sort compare lines))
+              [ mine; theirs ]
+          in
+          Ok
+            (List.filter_map
+               (fun ((m, code, message) as key) ->
+                 if List.mem key sides then None else Some (module_file merged m, code, message))
+               (List.sort_uniq compare (keys merged))))
 
 let stopping = ref false
-
-let handle_with state request =
-  match request.command with
-  | Check -> check state request
-  | Test { sanitize } -> test state request ~sanitize
-  | Build { output; sanitize } -> build state request ~output ~sanitize
-  | Run { sanitize } -> run state request ~sanitize
-  | Sync -> with_session state request (fun _ _ -> answer "")
-  | Status -> status state
-  | Stop ->
-      stopping := true;
-      answer ""
-  | Impact { base } -> impact state request base
-  | Holes -> holes state request
-  | References { name } -> references state request name
-  | Dependencies { name } -> dependencies state request name
-  | Overlap { other; merge } -> overlap state request ~other ~merge
-  | Explain { file; line; column } -> explain state request ~file ~line ~column
-
-let handle request =
-  let state = current () in
-  match handle_with state request with
-  | response -> response
-  | exception exception_ -> refuse ("the compiler failed: " ^ Printexc.to_string exception_)
+let stop () = stopping := true
 
 let reset () =
   match !state with
@@ -1511,7 +979,9 @@ let watch state =
       | Commit _ -> ())
     state.sessions
 
-let serve () =
+type 'response message = Progress of string | Final of 'response
+
+let serve ~handle =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let state = current () in
   let path = socket_path state.identity in
@@ -1546,8 +1016,9 @@ let serve () =
                 let input = Unix.in_channel_of_descr client in
                 let output = Unix.out_channel_of_descr client in
                 (try
-                   let request : request = Marshal.from_channel input in
-                   send output (handle request)
+                   let request = Marshal.from_channel input in
+                   let progress text = send output (Progress text) in
+                   send output (Final (handle ~progress request))
                  with _ -> ());
                 try Unix.close client with Unix.Unix_error _ -> ()))
       done;
@@ -1582,7 +1053,9 @@ let connect path =
       Unix.close socket;
       None
 
-let call ?program request =
+let store_directory () = Store.default_directory ()
+
+let call ?program ?(start_server = true) ~progress request =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let identity = Identity.compute (Store.default_directory ()) in
   let path = socket_path identity in
@@ -1591,7 +1064,7 @@ let call ?program request =
     match connect path with
     | Some socket -> Some socket
     | None ->
-        if tries = 0 then None
+        if tries = 0 || not start_server then None
         else begin
           if tries = 50 then start program;
           Unix.sleepf 0.1;
@@ -1599,19 +1072,27 @@ let call ?program request =
         end
   in
   match attempt 50 with
-  | None -> refuse "could not start or reach the background process; try --no-server."
+  | None when not start_server -> Error "No background process is running."
+  | None -> Error "could not start or reach the background process; try --no-server."
   | Some socket -> (
       let input = Unix.in_channel_of_descr socket in
       let output = Unix.out_channel_of_descr socket in
+      let rec receive () =
+        match Marshal.from_channel input with
+        | Progress text ->
+            progress text;
+            receive ()
+        | Final response -> response
+      in
       match
         send output request;
-        (Marshal.from_channel input : response)
+        receive ()
       with
       | response ->
           Unix.close socket;
-          response
+          Ok response
       | exception _ ->
           (try Unix.close socket with Unix.Unix_error _ -> ());
-          refuse
-            "the background process ended while answering; see its log in the store's servers \
-             directory.")
+          Error
+            "the background process ended while answering; see its log in the store's \
+             servers              directory.")

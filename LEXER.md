@@ -100,8 +100,9 @@ ordinary string, returns whether it was `Closed` or `Cut_off` by an error
 already reported, and an enclosing construct that must end on its line
 then ends too, without another error. The dune
 project is at the repository root, so that tests can read the documents.
-`stage0/bin/truss_lex.ml` builds `truss-lex`, which prints a file's
-diagnostics, as JSON with `--json`, and its tokens with `--tokens`.
+`stage0/tools/debug`, a tool of this repository that is not part of the
+`truss` command, prints a file's tokens and its diagnostics with `tokens
+FILE`, or with `--json`, only the diagnostics, as JSON.
 
 The scanner uses Layout too: it lays out each interpolation's tokens as it
 reads them, as [Interpolation](#interpolation) asks, so `Layout` defines the
