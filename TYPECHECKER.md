@@ -1011,10 +1011,12 @@ another branch uses, with disjointness obligations for indexes as above. A
 At each point in a body, a set of capabilities is *available*: the
 function's `uses`, its capability parameters, and the capabilities provided
 by each enclosing `provide`. Inside a capability `impl`'s methods, it is the
-`impl`'s `uses` and the capability itself, which there means this
-implementation. A method can then hand the capability on, as `write_with`
-passes `FileWrite` to the function it lends the writer to, and code
-generation passes the implementation's own evidence.
+`impl`'s `uses`. A call there through a function value may also use the
+capability itself, which means this implementation, so a method can hand
+it on, as `write_with` passes `FileWrite` to the function it lends the
+writer to; code generation passes the implementation's own evidence. A
+direct call of the capability would call the implementation itself, so it
+still needs the capability among the `impl`'s `uses`, from outside.
 
 - **A capability call,** such as `Clock.now()`, needs its capability
   available.

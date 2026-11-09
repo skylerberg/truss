@@ -451,4 +451,40 @@ let () =
          }\n"
         "ownership.not_owned")
 
+let () =
+  let make = "fn make() -> Option[String] { todo }\n\nfn keep(text: own String) {}\n\n" in
+  test "a binding inside a loop is a new one each time, so it may be moved" (fun () ->
+      fine
+        (make
+       ^ "fn f(ready: Bool) {\n\
+         \  while ready {\n\
+         \    let found = make()\n\
+         \    keep_found(own found)\n\
+         \  }\n\
+          }\n\n\
+          fn keep_found(found: own Option[String]) {}\n"));
+  test "a while loop's is binding may be moved each time round" (fun () ->
+      fine (make ^ "fn f() {\n  while make() is Some(text) {\n    keep(own text)\n  }\n}\n"));
+  test "an is binding in an if inside a loop may be moved" (fun () ->
+      fine
+        (make
+       ^ "fn f(ready: Bool) {\n\
+         \  while ready {\n\
+         \    if make() is Some(text) {\n\
+         \      keep(own text)\n\
+         \    }\n\
+         \  }\n\
+          }\n"));
+  test "a let-else binding inside a loop may be moved" (fun () ->
+      fine
+        (make
+       ^ "fn f(ready: Bool) {\n\
+         \  while ready {\n\
+         \    let Some(text) = make() else {\n\
+         \      return\n\
+         \    }\n\
+         \    keep(own text)\n\
+         \  }\n\
+          }\n"))
+
 let () = finish ()

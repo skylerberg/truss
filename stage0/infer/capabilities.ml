@@ -43,6 +43,9 @@ type scope = {
   collecting : bool;
   restricted : string option;
   lambdas : (id, T.capability list) Hashtbl.t;
+  handed_on : T.capability option;
+      (** In an implementation of a capability, that capability, which only calls through function
+          values may use. *)
 }
 
 (* Code that may use only [Panic], whatever the function declares. *)
@@ -289,7 +292,11 @@ and call_needs state scope (value : expression) (call : C.call) : T.capability l
   if not scope.collecting then
     List.iter
       (fun capability ->
-        if not (List.mem capability scope.available) then
+        if
+          not
+            (List.mem capability scope.available
+            || (call.callee = Function_value && scope.handed_on = Some capability))
+        then
           report state Not_available value.span
             (match scope.restricted with
             | Some reason ->
@@ -412,7 +419,9 @@ and provide state scope (value : expression) implementations body =
 
 let check (state : state) (lowered : Environment.lowered) =
   let lambdas = Hashtbl.create 16 in
-  let scope available = { available; collecting = false; restricted = None; lambdas } in
+  let scope available =
+    { available; collecting = false; restricted = None; lambdas; handed_on = None }
+  in
   let definition = state.definition in
   let broken = Resolve.Parts.broken definition in
   let run_in scope (body : block) =
@@ -450,12 +459,8 @@ let check (state : state) (lowered : Environment.lowered) =
                   match signature.name with Plain_name name | Member_name (_, name) -> name.text
                 in
                 let receiver = Names.receiver signature.parameters in
-                (* Inside an implementation of a capability, the capability
-                   itself is available, and means this implementation, so a
-                   method can hand it on, as [write_with] does to its
-                   callback. *)
                 let uses =
-                  if is_capability then union impl.impl_uses [ T.Capability impl.implements.trait ]
+                  if is_capability then impl.impl_uses
                   else
                     match
                       List.find_opt
@@ -466,7 +471,15 @@ let check (state : state) (lowered : Environment.lowered) =
                     | Some (_, _, method_signature) -> method_signature.uses
                     | None -> []
                 in
-                run uses body
+                (* Inside an implementation of a capability, a function
+                   value it calls may use the capability, which there means
+                   this implementation, as [write_with] hands [FileWrite] to
+                   its callback. A direct call of the capability would call
+                   the implementation itself, so it still needs [uses]. *)
+                let own =
+                  if is_capability then Some (T.Capability impl.implements.trait) else None
+                in
+                run_in { (scope uses) with handed_on = own } body
             | _ -> ())
           members
     | Trait { members; _ }, Trait_interface trait ->

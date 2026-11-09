@@ -274,7 +274,19 @@ let () =
       | found -> fail "found [%s]" (String.concat "; " found))
 
 let () =
-  test "an implementation of a capability may use the capability itself" (fun () ->
+  test "an implementation of a capability may not call the capability directly" (fun () ->
+      one_diagnostic
+        "capability Notes {\n\
+        \  fn note(text: StringSlice)\n\
+         }\n\n\
+         type Loud()\n\n\
+         impl Notes for Loud {\n\
+        \  fn note(self, text: StringSlice) {\n\
+        \    Notes.note(text)\n\
+        \  }\n\
+         }\n"
+        "capabilities.not_available");
+  test "an implementation of a capability may hand the capability to a function value" (fun () ->
       fine
         "capability Notes {\n\
         \  fn note(text: StringSlice)\n\
