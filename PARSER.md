@@ -610,8 +610,11 @@ added once the compiler works:
 The tests follow IMPLEMENTATION.md's rules for testing: each states one fact
 about a small input, and there are no golden files.
 
-- **Focused tests** in `stage0/test/parser_tests.ml`, grouped by section of
-  this document. A test gives a small input and asserts its tree, printed
+- **Focused tests** in `stage0/test/parser_tests.ml`, for each piece of the
+  grammar, and `parser_rules_tests.ml`, for whole definitions, precedence,
+  checks, recovery, and other languages' habits, grouped by section of this
+  document and sharing `parse_support`. `parser_documents_tests.ml` checks the
+  documents' examples and the reference grammar. A test gives a small input and asserts its tree, printed
   compactly by `Syntax_print`, or its one diagnostic: the code, where it
   starts, and the exact text each fix produces, which must parse cleanly.
 - **The documents' examples parse cleanly.** Each ```` ```truss ```` block in

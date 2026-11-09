@@ -225,10 +225,8 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
                    (List.length fields) names)))
     written_fields
 
-(* [Character"a"] and [UInt8"\n"]: a single character or byte is a tagged
-   string, of one Unicode scalar value or one ASCII character, without
-   [${...}]. See SYNTAX.md, "Characters and bytes". *)
-
+(* A constant in a pattern, or a range's end: recorded by the node's id, and
+   of the matched type. *)
 and constant_pattern state id span path type_ =
   state.tables.patterns.(id) <- Some (Constant_pattern path);
   match Query.demand state.database Environment.constant_type path with
@@ -281,6 +279,9 @@ and builtin_range type_ =
   | Some (UInt64 | USize) -> bits false 64
   | _ -> None
 
+(* [Character"a"] and [UInt8"\n"]: a single character or byte is a tagged
+   string, of one Unicode scalar value or one ASCII character, without
+   [${...}]. See SYNTAX.md, "Characters and bytes". *)
 and character_tag state (literal : string_literal) =
   match literal.tag with
   | Some tag -> (
@@ -293,7 +294,6 @@ and character_tag state (literal : string_literal) =
   | None -> None
 
 (* The value of a character or byte literal, recorded by [id], or an error. *)
-
 and character_value state id (literal : string_literal) (builtin : Intrinsic.builtin) =
   let text = literal.first.value in
   let scalars =
@@ -326,7 +326,6 @@ and character_literal state id literal builtin =
 
 (* A literal in a pattern, or a range's end: recorded by the node's id, and
    of the matched type. *)
-
 and literal_pattern state id (span : span) literal type_ =
   match literal with
   | Literal_integer number -> (
@@ -351,7 +350,6 @@ and literal_pattern state id (span : span) literal type_ =
       | None -> string_pattern state span type_)
 
 (* A string literal in a pattern matches a string. *)
-
 and string_pattern state span type_ =
   if not (is_named string_path type_ || is_named string_slice_path type_ || type_ = T.Error) then
     report state Mismatch span

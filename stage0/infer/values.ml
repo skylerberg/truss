@@ -180,7 +180,6 @@ and map_literal state env ?expected (_ : expression) entries =
   T.Named { path = map_path; arguments = [ T.Type key; T.Type value_type ] }
 
 (* Lambdas: their types come only from where they are used. *)
-
 and lambda state env ?expected (value : expression) parameters body =
   let references_before = state.references in
   state.lambdas <- value.span :: state.lambdas;
@@ -260,6 +259,17 @@ and if_ state env ?expected (test : expression) then_ else_ =
       join state ~expected [ (then_type, then_.span); (else_type, else_span) ]
 
 (* The type of branches together: arms of type [Never] are left out. *)
+and join state ~expected branches =
+  let live = List.filter (fun (type_, _) -> resolve state type_ <> T.Never) branches in
+  match (live, expected) with
+  | [], _ -> T.Never
+  | (first, _) :: rest, _ ->
+      let target = match expected with Some expected -> expected | None -> first in
+      List.iter
+        (fun (type_, span) ->
+          if not (unify state target type_) then mismatch state span ~expected:target ~found:type_)
+        (match expected with Some _ -> live | None -> rest);
+      target
 
 and match_ state env ?expected (value : expression) scrutinees arms =
   (* When the guards cover everything, the [match] ends with
@@ -304,7 +314,6 @@ and match_ state env ?expected (value : expression) scrutinees arms =
 
 (* An arm's body is a statement. As a value, a body that is not an
    expression has type [Unit]. *)
-
 and arm_value state env ?expected (body : statement) =
   match body.kind with
   | Expression value -> expression state env ?expected value
@@ -324,5 +333,3 @@ and element_of_collection state env (collection : expression) =
           report state Not_indexable collection.span
             (Printf.sprintf "`%s` cannot be looped over." (T.show collection_type));
           T.Error)
-
-(* What a value's [each] yields for a loop's mode. *)

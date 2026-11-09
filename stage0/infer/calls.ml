@@ -14,6 +14,7 @@ open State
 open Hooks
 open Lookups
 
+(* A call through a function value: by position, with no labels. *)
 let rec function_value_call state env (value : expression) (callee : expression) arguments =
   let callee_type = normalize state (expression state env callee) in
   match callee_type with
@@ -77,7 +78,6 @@ let rec function_value_call state env (value : expression) (callee : expression)
 
 (* One argument: checked against its parameter's type, with its mark, and
    with the one implicit conversion, from an owned collection to its view. *)
-
 and argument_value state env (value : expression) (parameter : T.parameter_info) =
   let inner =
     match value.kind with
@@ -125,7 +125,6 @@ and argument_value state env (value : expression) (parameter : T.parameter_info)
 (* Matches arguments to parameters: a label, a bare name that matches a
    parameter, or the first argument, in that order; then the arguments
    must come in the order of the parameters. *)
-
 and match_arguments state (value : expression) (parameters : T.parameter_info list)
     (arguments : argument list) ~record =
   let named =
@@ -299,7 +298,6 @@ and match_arguments state (value : expression) (parameters : T.parameter_info li
 
 (* Checks matched arguments: every argument that is not a lambda first, in
    order, then each lambda, whose parameters then have their types. *)
-
 and check_arguments state env (parameters : T.parameter_info list) matched ~offset =
   let is_lambda ((argument : argument), _) =
     match argument.value.kind with Lambda _ -> true | _ -> false
@@ -341,6 +339,7 @@ and named_call state env ?expected (value : expression) path (signature : T.sign
   check_specification_call state env value signature;
   finish_call state value callee instance checked left_out
 
+(* Building a record or a variant: fields by name, in any order. *)
 and construct state env ?expected ?type_arguments (value : expression) type_path variant arguments =
   let type_arguments =
     match type_arguments with Some given -> given | None -> fresh_arguments state type_path
@@ -411,6 +410,3 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
             result = type_;
           };
       type_
-
-(* [Type.name(...)]: a variant, a method without [self], or a method
-   written in full with its receiver first. *)

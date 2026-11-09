@@ -71,8 +71,8 @@ let rec call state env ?expected (value : expression) (callee : expression)
       | _ -> T.Error)
   | _ -> function_value_call state env value callee arguments
 
-(* A call through a function value: by position, with no labels. *)
-
+(* [Type.name(...)]: a variant, a method without [self], or a method
+   written in full with its receiver first. *)
 and static_call state env ?expected (value : expression) type_ (member : name) arguments =
   match type_ with
   | T.Named { path; arguments = type_arguments }
@@ -196,9 +196,10 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           T.Error)
   | _ -> T.Error
 
-(* Whether a type could implement a trait, with fresh arguments for the
-   trait's own parameters, which the call's arguments then decide. *)
-
+(* A trait method called through a type, with [Self] that type: a
+   constructor such as [Int64.from(count)] or [Self.empty()]. The trait's
+   own arguments are worked out from the call's arguments, never from the
+   expected type. *)
 and trait_method_through_type state env ?expected:_ (value : expression) self_type
     (trait : T.trait_reference) (method_ : T.trait_method) arguments =
   let trait_generics =
@@ -265,9 +266,8 @@ and trait_method_through_type state env ?expected:_ (value : expression) self_ty
   resolve_evidence state value self_type reference;
   normalize state result
 
-(* The [impl] a trait method call means is found once its types are known,
-   which may be at the end of the statement. *)
-
+(* [Ordered.compare(first, second)]: a trait method written in full, with
+   its receiver first. *)
 and trait_call_in_full state env (value : expression) trait (member : name) arguments =
   match Members.trait_methods state.database trait member.text with
   | method_ :: _ -> (
@@ -283,7 +283,6 @@ and trait_call_in_full state env (value : expression) trait (member : name) argu
       T.Error
 
 (* [Clock.now()]: a call to a capability's method. *)
-
 and capability_call state env (value : expression) capability (member : name) arguments =
   match Members.trait_methods state.database capability member.text with
   | method_ :: _ ->
@@ -313,7 +312,6 @@ and capability_call state env (value : expression) capability (member : name) ar
       T.Error
 
 (* [receiver.name(...)]: the type's own method, or a trait's. *)
-
 and method_call state env ?expected (value : expression) (base : expression) (member : name)
     ~type_arguments arguments =
   let receiver_type = normalize state (expression state env base) in
@@ -483,8 +481,6 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                    (show state receiver_type) member.text);
               T.Error))
 
-(* The traits that give a type a method with a name. *)
-
 and method_with_receiver state env ?expected ?(type_arguments = []) (value : expression)
     ~(receiver : expression) ~receiver_type method_path arguments =
   match function_signature state method_path with
@@ -594,6 +590,3 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
           arguments = instance.type_arguments;
         }
   | _ -> normalize state result
-
-(* [?]: a [Result] whose error is the function's, or an [Option] in a
-   function that returns one. *)

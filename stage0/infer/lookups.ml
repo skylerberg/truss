@@ -107,7 +107,6 @@ and name state env (value : expression) (path : path) =
 
 (* A variant used as a value: one with no fields is a value, and one with
    fields is a function that builds it. *)
-
 and variant_value state (value : expression) type_path variant ~arguments =
   let type_ = T.Named { path = type_path; arguments } in
   state.tables.meanings.(value.id) <- Some (Variant_value { type_; variant });
@@ -130,8 +129,6 @@ and variant_value state (value : expression) type_path variant ~arguments =
             (Printf.sprintf "`%s` has no variant `%s`." (T.show type_) variant);
           T.Error)
   | None -> T.Error
-
-(* [receiver.name] read as a value: a field, or a static member of a type. *)
 
 and field state (value : expression) base_type (member : name) =
   let unknown candidates =
@@ -183,7 +180,6 @@ and field state (value : expression) base_type (member : name) =
 
 (* [Type.name] read as a value: a variant, a constant under the type, or a
    method as a function. *)
-
 and static_member state (value : expression) type_ (member : name) =
   match type_ with
   | T.Named { path; arguments } ->
@@ -217,6 +213,9 @@ and static_member state (value : expression) type_ (member : name) =
         end
   | _ -> T.Error
 
+(* Explicit type arguments give the function's own generic parameters, in
+   order, after those of a method's type head: exactly one for each, of its
+   kind. *)
 and explicit_type_arguments ?(head = 0) state (value : expression) instance items =
   if items <> [] then begin
     let given =
@@ -281,8 +280,8 @@ and check_specification_call state env (value : expression) (signature : T.signa
     report state Specification_only value.span
       "This function mentions `Integer`, so it can be called only in specifications."
 
-(* Building a record or a variant: fields by name, in any order. *)
-
+(* Whether a type could implement a trait, with fresh arguments for the
+   trait's own parameters, which the call's arguments then decide. *)
 and could_implement state type_ trait =
   let arguments =
     match Query.demand state.database Environment.trait_interface trait with
@@ -314,11 +313,8 @@ and trait_static_method state path name =
         (Query.demand state.database Members.traits_declaring (package, name)))
     (Members.visible_packages state.database state.package)
 
-(* A trait method called through a type, with [Self] that type: a
-   constructor such as [Int64.from(count)] or [Self.empty()]. The trait's
-   own arguments are worked out from the call's arguments, never from the
-   expected type. *)
-
+(* The [impl] a trait method call means is found once its types are known,
+   which may be at the end of the statement. *)
 and resolve_evidence state (value : expression) self_type (reference : T.trait_reference) =
   defer state (fun () ->
       let self_type = zonk state self_type
@@ -351,9 +347,7 @@ and resolve_evidence state (value : expression) self_type (reference : T.trait_r
         true
       end)
 
-(* [Ordered.compare(first, second)]: a trait method written in full, with
-   its receiver first. *)
-
+(* The traits that give a type a method with a name. *)
 and trait_candidates state receiver_type name =
   let with_method (trait : T.trait_reference) =
     match
@@ -481,8 +475,7 @@ and each_call state type_ mode =
       | _ -> None)
   | _ -> None
 
-(* An assignment's left side must be a place that may change. *)
-
+(* What a value's [each] yields for a loop's mode. *)
 and yielded state type_ mode =
   let receiver : Path.receiver = match mode with T.Read -> Read | Mut -> Mut | Own -> Own in
   match type_ with
@@ -499,45 +492,3 @@ and yielded state type_ mode =
           | None -> None)
       | None -> None)
   | _ -> None
-
-(* A block used as a value: its last expression is checked against the
-   block's expected type, in the enclosing statement. *)
-
-and join state ~expected branches =
-  let live = List.filter (fun (type_, _) -> resolve state type_ <> T.Never) branches in
-  match (live, expected) with
-  | [], _ -> T.Never
-  | (first, _) :: rest, _ ->
-      let target = match expected with Some expected -> expected | None -> first in
-      List.iter
-        (fun (type_, span) ->
-          if not (unify state target type_) then mismatch state span ~expected:target ~found:type_)
-        (match expected with Some _ -> live | None -> rest);
-      target
-
-and statement_never state (written : statement) =
-  match written.kind with
-  | Expression value -> (
-      match state.tables.types.(value.id) with
-      | Some type_ -> resolve state type_ = T.Never
-      | None -> false)
-  | While { condition = { kind = True; _ }; body; _ } -> not (contains_break body)
-  | _ -> false
-
-and contains_break (written : block) =
-  let found = ref false in
-  let rec statement (written : statement) =
-    match written.kind with
-    | For _ | While _ -> ()
-    | _ -> Syntax_walk.statement_parts ~expression ~statement written
-  and expression (value : expression) =
-    match value.kind with
-    | Break -> found := true
-    | Lambda _ -> ()
-    | _ -> Syntax_walk.expression_parts ~expression ~statement value
-  in
-  List.iter statement written.statements;
-  !found
-
-(* A statement. A statement that is not the last of its block must have
-   type [Unit] or [Never]: any other value is unused. *)

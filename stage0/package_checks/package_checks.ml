@@ -497,21 +497,28 @@ let check =
              type, since an impl's type is always a named type: so each is
              compared only with the impls before it in its trait and type's
              group, here and in the packages depended on. *)
-          let groups = Hashtbl.create 64 in
           let group (impl : T.impl_interface) =
             (impl.implements.trait, Interface.Impls.head impl.for_type)
           in
-          let add impl =
-            let key = group impl in
-            Hashtbl.replace groups key
-              (impl :: Option.value ~default:[] (Hashtbl.find_opt groups key))
+          let grouped impls =
+            let table = Hashtbl.create 64 in
+            List.iter
+              (fun impl ->
+                let key = group impl in
+                Hashtbl.replace table key
+                  (impl :: Option.value ~default:[] (Hashtbl.find_opt table key)))
+              impls;
+            fun impl -> List.rev (Option.value ~default:[] (Hashtbl.find_opt table (group impl)))
           in
-          List.iter add dependency_impls;
+          let dependencies_like = grouped dependency_impls in
+          let earlier = Hashtbl.create 64 in
           let overlaps =
             List.concat_map
               (fun ((declaration : Names.declaration), definition, (impl : T.impl_interface)) ->
-                let earlier = Option.value ~default:[] (Hashtbl.find_opt groups (group impl)) in
-                add impl;
+                let key = group impl in
+                let before = List.rev (Option.value ~default:[] (Hashtbl.find_opt earlier key)) in
+                Hashtbl.replace earlier key
+                  (impl :: Option.value ~default:[] (Hashtbl.find_opt earlier key));
                 List.filter_map
                   (fun (other : T.impl_interface) ->
                     if overlap impl other then
@@ -522,7 +529,7 @@ let check =
                             most one `impl` of a trait for each set of its arguments."
                            (T.show_trait other.implements) (T.show other.for_type))
                     else None)
-                  (List.rev earlier))
+                  (before @ dependencies_like impl))
               placed
           in
           let recursion =

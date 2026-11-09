@@ -11,7 +11,6 @@ module Names = Resolve.Names
 module Environment = Interface.Environment
 module Lower = Interface.Lower
 open State
-open Lookups
 open Statements
 open Expressions
 

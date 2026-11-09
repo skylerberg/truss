@@ -14,6 +14,8 @@ open Hooks
 open Lookups
 open Pattern_typing
 
+(* [?]: a [Result] whose error is the function's, or an [Option] in a
+   function that returns one. *)
 let rec try_ state env (value : expression) (inner : expression) =
   let inner_type = normalize state (expression state env inner) in
   let output =
@@ -41,7 +43,6 @@ let rec try_ state env (value : expression) (inner : expression) =
       T.Error
 
 (* [base with (field: value)]: a record with some fields changed. *)
-
 and with_ state env (value : expression) (base : expression) updates =
   let base_type = normalize state (expression state env base) in
   (match base_type with
@@ -159,7 +160,6 @@ and prefix state env ?expected (value : expression) operator (inner : expression
 
 (* An operator that is a trait method: the [impl] is chosen by the types of
    both operands, once known, and the result is its [Output]. *)
-
 and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~left ~right =
   let arguments = match right with Some right -> [ T.Type right ] | None -> [] in
   let reference = trait_reference ~arguments trait in
@@ -238,7 +238,6 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
 
 (* A literal operand takes the other operand's type when it can be that
    type, as Go's untyped constants do. *)
-
 and literal_operands state ~left ~right =
   match (resolve state left, resolve state right) with
   | T.Literal (kind, _), other when Unify.literal_fits kind other -> ignore (unify state left right)
@@ -249,7 +248,6 @@ and literal_operands state ~left ~right =
 
 (* A place that is assigned or lent [mut]: each index on its way is the
    [mut] version of [at], which lends its element [mut]. *)
-
 and mutable_place state (value : expression) =
   match value.kind with
   | Member (base, _) | Parenthesized base -> mutable_place state base
@@ -273,7 +271,6 @@ and mutable_place state (value : expression) =
 
 (* [&&], [||], [!], [~], the bitwise operators, and shifts, which are
    built in on built-in types. *)
-
 and built_in_operator state (value : expression) (operands : expression list) result =
   state.tables.calls.(value.id) <-
     Some
@@ -294,7 +291,6 @@ and is_hole state type_ = resolve state type_ = T.Hole
 
 (* Checks both operands, the right against the left's type, and says
    whether either is an undecided [todo]. *)
-
 and operands_hole state env (left : expression) (right : expression) =
   let left_type = expression state env left in
   let right_type = expression state env ~expected:left_type right in
@@ -537,7 +533,6 @@ and mismatched_operands state (value : expression) (left : expression) (right : 
   else mismatch state right.span ~expected:left_type ~found:right_type
 
 (* [any value] *)
-
 and any_ state env ?expected (value : expression) (inner : expression) =
   match Option.map (normalize state) expected with
   | Some (T.Any trait as any_type) ->
@@ -558,6 +553,3 @@ and any_ state env ?expected (value : expression) (inner : expression) =
       report state Cannot_infer value.span
         "`any value` needs an expected type `any Trait`, from an annotation or a parameter.";
       T.Error
-
-(* A constant in a pattern, or a range's end: recorded by the node's id, and
-   of the matched type. *)

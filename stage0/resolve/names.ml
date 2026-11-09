@@ -436,8 +436,6 @@ let members =
         (Member_map.find_opt (owner, name)
            (Query.demand database member_index (Path.package owner))))
 
-(* Where a definition is: its module, its declaration, and its place in its
-   file. *)
 module Declaration_map = Map.Make (struct
   type t = Path.t * int
 
@@ -461,6 +459,8 @@ let items =
   Query.query ~name:"items" ~show:Path.show_module (fun database module_ ->
       Array.of_list (Query.demand database Workspace.file module_).definitions)
 
+(* Where a definition is: its module, its declaration, and its place in its
+   file. *)
 let locate =
   Query.query ~name:"locate" ~show:show_key (fun database key ->
       Option.map

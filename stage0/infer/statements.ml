@@ -15,6 +15,8 @@ open Lookups
 open Pattern_typing
 open Operators
 
+(* A block used as a value: its last expression is checked against the
+   block's expected type, in the enclosing statement. *)
 let rec block_value state env ?expected (written : block) =
   let rec go = function
     | [] -> T.unit
@@ -30,6 +32,32 @@ let rec block_value state env ?expected (written : block) =
   in
   go written.statements
 
+and statement_never state (written : statement) =
+  match written.kind with
+  | Expression value -> (
+      match state.tables.types.(value.id) with
+      | Some type_ -> resolve state type_ = T.Never
+      | None -> false)
+  | While { condition = { kind = True; _ }; body; _ } -> not (contains_break body)
+  | _ -> false
+
+and contains_break (written : block) =
+  let found = ref false in
+  let rec statement (written : statement) =
+    match written.kind with
+    | For _ | While _ -> ()
+    | _ -> Syntax_walk.statement_parts ~expression ~statement written
+  and expression (value : expression) =
+    match value.kind with
+    | Break -> found := true
+    | Lambda _ -> ()
+    | _ -> Syntax_walk.expression_parts ~expression ~statement value
+  in
+  List.iter statement written.statements;
+  !found
+
+(* A statement. A statement that is not the last of its block must have
+   type [Unit] or [Never]: any other value is unused. *)
 and statement state env (written : statement) ~last : unit =
   match written.kind with
   | Expression value ->
@@ -215,7 +243,6 @@ and loop_clause state env (clause : loop_clause) =
 
 (* What a [for] loop drives: a range of built-in integers, a call to a
    [yields] method, a cursor, or the [each] method of the loop's mode. *)
-
 and loop_iterable state env (written : statement) ~mode (iterable : expression) =
   match iterable.kind with
   | Range { start = Some _; stop = Some _; inclusive; _ } -> (
@@ -275,6 +302,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
                        | Own -> "`own self`"));
                   T.Error)))
 
+(* An assignment's left side must be a place that may change. *)
 and check_assignable state env (written : expression) =
   let rec root (value : expression) =
     match value.kind with

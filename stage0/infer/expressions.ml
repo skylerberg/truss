@@ -152,6 +152,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | Block body -> block_value state env ?expected body
   | Expression_error -> T.Error
 
+(* [receiver.name] read as a value: a field, or a static member of a type. *)
 and member_value state env (value : expression) (base : expression) (member : name) =
   match static_ state base with
   | Some (Static_type type_) -> static_member state value type_ member
@@ -209,10 +210,6 @@ and is_field state env (inner : expression) (member : name) =
       | Some fields -> List.exists (fun (field : T.field) -> field.field_name = member.text) fields
       | None -> false)
   | _ -> false
-
-(* Explicit type arguments give the function's own generic parameters, in
-   order, after those of a method's type head: exactly one for each, of its
-   kind. *)
 
 and index state env ?expected:_ (value : expression) (base : expression) items =
   let base_type = normalize state (expression state env base) in
