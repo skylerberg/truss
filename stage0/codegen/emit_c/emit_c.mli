@@ -13,8 +13,9 @@ type build = Development | Release
    [Internal], a copy of a small callee that the C compiler may inline. *)
 type linkage = External | Internal
 
-(* One C file holding the given instances, in order. *)
-val file : Memory_layout.env -> build -> (Lir.t * linkage) list -> string
+(* One C file holding the given instances, in order, and the given static
+   data. *)
+val file : Memory_layout.env -> build -> ?data:Lir.data list -> (Lir.t * linkage) list -> string
 
 (* The C type and name of a struct, for the runtime and startup code that
    are written in C. *)

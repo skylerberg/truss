@@ -82,7 +82,8 @@ let program toolchain cache env settings ~files ~sources ~output =
   let target = Memory_layout.target env in
   let emitted =
     List.mapi
-      (fun i file -> (Printf.sprintf "file %d" i, Emit_c.file env settings.build file))
+      (fun i (instances, data) ->
+        (Printf.sprintf "file %d" i, Emit_c.file env settings.build ~data instances))
       files
   in
   let runtime = ("the runtime", Startup.runtime target) in

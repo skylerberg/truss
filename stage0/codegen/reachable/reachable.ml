@@ -64,7 +64,13 @@ let references env (instance : Lir.t) =
   let keys = Array.fold_left in_function (in_function [] instance.main) instance.nested in
   List.filter (fun key -> not (Instance.equal key instance.key)) (List.rev keys)
 
-let reachable env ~lir roots =
+let compiled_key : Lir.compiled -> Instance.key = function Code t -> t.key | Data d -> d.data_key
+
+let compiled_references env : Lir.compiled -> Instance.key list = function
+  | Code t -> references env t
+  | Data _ -> []
+
+let reachable env ~lookup roots =
   (* Breadth-first, so an instance's number depends only on the shape of
      the walk up to it. *)
   let rec walk seen found = function
@@ -72,19 +78,19 @@ let reachable env ~lir roots =
     | key :: queue ->
         if List.exists (Instance.equal key) seen then walk seen found queue
         else
-          let instance = lir key in
-          walk (key :: seen) (instance :: found) (queue @ references env instance)
+          let compiled = lookup key in
+          walk (key :: seen) (compiled :: found) (queue @ compiled_references env compiled)
   in
   walk [] [] roots
 
-let test_key env ~lir root =
-  let instances = reachable env ~lir [ root ] in
+let test_key env ~lookup root =
+  let instances = reachable env ~lookup [ root ] in
   let number_of_instance key =
     let rec find i = function
       | [] ->
           invalid_arg ("Reachable.test_key: an unreachable reference to " ^ Instance.to_string key)
-      | (instance : Lir.t) :: rest ->
-          if Instance.equal instance.key key then i else find (i + 1) rest
+      | compiled :: rest ->
+          if Instance.equal (compiled_key compiled) key then i else find (i + 1) rest
     in
     find 0 instances
   in
@@ -100,7 +106,11 @@ let test_key env ~lir root =
   in
   let instance key = Cbor.Array [ Text "instance"; Cbor.int (number_of_instance key) ] in
   let encoded =
-    List.map (fun i -> Lir.encode ~path ~instance (Lir.canonical_instance i)) instances
+    List.map
+      (function
+        | Lir.Code i -> Lir.encode ~path ~instance (Lir.canonical_instance i)
+        | Data d -> Lir.encode_data ~path ~instance d)
+      instances
   in
   Blake3.hash
     (Cbor.encode (Cbor.Array [ Text "truss test"; Cbor.int Lir.version; Cbor.Array encoded ]))

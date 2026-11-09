@@ -6,7 +6,7 @@ type t = {
   toolchain : Toolchain.t;
   cache : Build.cache;
   settings : Build.settings;
-  mutable done_ : (Instance.key * Lir.t) list;
+  mutable done_ : (Instance.key * Lir.compiled) list;
 }
 
 let create database target toolchain cache settings =
@@ -14,28 +14,33 @@ let create database target toolchain cache settings =
 
 let environment (instance : Lir.t) n = instance.nested.(n).environment
 
-let make t (key : Instance.key) : Lir.t =
+let make t (key : Instance.key) : Lir.compiled =
   let glue = t.context.glue in
-  let instance =
-    match key with
-    | Code _ -> (
-        try Lower.instance t.context key
-        with Invalid_argument message ->
-          invalid_arg (message ^ ", lowering " ^ Instance.to_string key))
-    | Drop ty -> Glue.drop glue ty
-    | Copy ty -> Glue.copy glue ty
-    | Debug ty -> Glue.debug glue ty
-    | Constant _ | Cursor_next _ | Adapter _ ->
-        invalid_arg ("Compile: not built yet: " ^ Instance.to_string key)
+  let code instance =
+    let needs_drop ty = not (Glue.trivial glue ty) in
+    let elaborate f =
+      Drops.elaborate t.context.env ~needs_drop ~environment:(environment instance) f
+    in
+    Lir.Code
+      (Lir.canonical_instance
+         {
+           instance with
+           main = elaborate instance.main;
+           nested = Array.map elaborate instance.nested;
+         })
   in
-  let needs_drop ty = not (Glue.trivial glue ty) in
-  let elaborate f =
-    Drops.elaborate t.context.env ~needs_drop ~environment:(environment instance) f
-  in
-  Lir.canonical_instance
-    { instance with main = elaborate instance.main; nested = Array.map elaborate instance.nested }
+  match key with
+  | Code _ -> (
+      try code (Lower.instance t.context key)
+      with Invalid_argument message ->
+        invalid_arg (message ^ ", lowering " ^ Instance.to_string key))
+  | Constant path -> Data (Lower.constant t.context path)
+  | Drop ty -> code (Glue.drop glue ty)
+  | Copy ty -> code (Glue.copy glue ty)
+  | Debug ty -> code (Glue.debug glue ty)
+  | Cursor_next _ | Adapter _ -> invalid_arg ("Compile: not built yet: " ^ Instance.to_string key)
 
-let lir t key =
+let compiled t key =
   match List.find_opt (fun (k, _) -> Instance.equal k key) t.done_ with
   | Some (_, instance) -> instance
   | None ->
@@ -68,10 +73,12 @@ let anchor t (path : Path.t) : Positions.anchor option =
 
 let run_tests t ~time_limit tests =
   let roots = List.map Lower.test_key tests in
-  match Reachable.reachable t.context.env ~lir:(lir t) roots with
+  match Reachable.reachable t.context.env ~lookup:(compiled t) roots with
   | exception Invalid_argument message -> Error message
   | instances -> (
-      let paths = List.sort_uniq Path.compare (List.concat_map anchored instances) in
+      let code = List.filter_map (function Lir.Code i -> Some i | Data _ -> None) instances in
+      let data = List.filter_map (function Lir.Data d -> Some d | Code _ -> None) instances in
+      let paths = List.sort_uniq Path.compare (List.concat_map anchored code) in
       let anchors = List.filter_map (anchor t) paths in
       let target = Memory_layout.target t.context.env in
       let sources =
@@ -86,7 +93,9 @@ let run_tests t ~time_limit tests =
       in
       match
         Build.program t.toolchain t.cache t.context.env t.settings
-          ~files:(List.map (fun instance -> [ (instance, Emit_c.External) ]) instances)
+          ~files:
+            (List.map (fun instance -> ([ (instance, Emit_c.External) ], [])) code
+            @ List.map (fun d -> ([], [ d ])) data)
           ~sources ~output
       with
       | Error message -> Error message

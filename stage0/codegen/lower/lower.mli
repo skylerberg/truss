@@ -26,5 +26,9 @@ val context : Query.database -> Memory_layout.target -> context
    that is not code from source. *)
 val instance : context -> Instance.key -> Lir.t
 
+(* A constant's static data: its value worked out exactly from its
+   constant expression. *)
+val constant : context -> Path.t -> Lir.data
+
 (* The key of a test's instance. *)
 val test_key : Path.t -> Instance.key

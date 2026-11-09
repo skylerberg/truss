@@ -264,7 +264,7 @@ let run_program ?(extra = []) ?(anchors = []) (instances : Lir.t list) =
   in
   match
     Build.program (Lazy.force compiler) (Lazy.force cache) env settings
-      ~files:[ List.map (fun i -> (i, Emit_c.External)) instances ]
+      ~files:[ (List.map (fun i -> (i, Emit_c.External)) instances, []) ]
       ~sources ~output
   with
   | Ok () -> Toolchain.run output []
@@ -1290,9 +1290,17 @@ let lookup instances key = List.find (fun (i : Lir.t) -> Instance.equal i.key ke
 let () =
   test "a build reaches each called instance once, in order" (fun () ->
       let program = named_program ~entry_name:"start" ~helper_name:"helper" 1 in
-      let reached = Reachable.reachable (shape_env ()) ~lir:(lookup program) [ key "start" ] in
+      let reached =
+        Reachable.reachable (shape_env ())
+          ~lookup:(fun k -> Lir.Code (lookup program k))
+          [ key "start" ]
+      in
       expect_string ~expected:"test::start test::helper"
-        (String.concat " " (List.map (fun (i : Lir.t) -> Instance.to_string i.key) reached)));
+        (String.concat " "
+           (List.map
+              (function
+                | Lir.Code i -> Instance.to_string i.key | Data d -> Instance.to_string d.data_key)
+              reached)));
   test "a drop reaches the type's drop function" (fun () ->
       let f =
         instance "f"
@@ -1305,7 +1313,9 @@ let () =
         (String.concat " " (List.map Instance.to_string references)));
   let test_key ~entry_name ~helper_name returned =
     let program = named_program ~entry_name ~helper_name returned in
-    Reachable.test_key (shape_env ()) ~lir:(lookup program) (key entry_name)
+    Reachable.test_key (shape_env ())
+      ~lookup:(fun k -> Lir.Code (lookup program k))
+      (key entry_name)
   in
   test "renaming the definitions a test reaches keeps its key" (fun () ->
       if
@@ -1353,7 +1363,7 @@ let () =
       in
       match
         Build.program (Lazy.force compiler) (Lazy.force cache) (shape_env ()) settings
-          ~files:[ List.map (fun t -> (t, Emit_c.External)) tests ]
+          ~files:[ (List.map (fun t -> (t, Emit_c.External)) tests, []) ]
           ~sources ~output
       with
       | Error message -> fail "%s" message
@@ -1652,7 +1662,7 @@ let () =
       in
       match
         Build.program (Lazy.force compiler) (Lazy.force cache) env settings
-          ~files:[ List.map (fun i -> (i, Emit_c.External)) program ]
+          ~files:[ (List.map (fun i -> (i, Emit_c.External)) program, []) ]
           ~sources ~output
       with
       | Error message -> fail "%s" message
@@ -1888,6 +1898,27 @@ let () =
   assert padded.trim().to_string() == "hello"
   assert "apple" < "banana"
   assert "apple" != "apples"
+}
+|}
+
+let () =
+  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
+  passes "constants are static data, worked out exactly"
+    {|type Point(x: Int64, y: Int64)
+  derives Equal
+
+let seconds_per_day: Int64 = 24 * 60 * 60
+let origin: Point = Point(x: -1, y: 2)
+let greeting: String = "hello"
+let primes: List[Int64] = [2, 3, 5, 7]
+
+test "constants" {
+  assert seconds_per_day == 86400
+  assert origin == Point(x: -1, y: 2)
+  assert greeting == "hello"
+  assert primes[3] == 7
+  assert primes.length() == 4
+  assert ExitCode.failure.code == 1
 }
 |}
 

@@ -668,6 +668,7 @@ and place_expression st (e : S.expression) : Lir.place option =
   match e.kind with
   | Parenthesized inner | Mode (_, inner) -> place_expression st inner
   | Self_value -> st.frame.self_place
+  | (Name _ | Member _) when constant_place st e <> None -> constant_place st e
   | Name _ -> (
       match st.frame.code.checked.meanings.(e.id) with
       | Some (Local_value local) -> (
@@ -706,6 +707,16 @@ and place_expression st (e : S.expression) : Lir.place option =
             (lend st call_ ~expressions
                ~arguments:(with_receiver st call_ ~expressions call_.arguments))
       | _ -> None)
+  | _ -> None
+
+(* A constant's static data, which is a read-only place. *)
+and constant_place st (e : S.expression) =
+  match st.frame.code.checked.meanings.(e.id) with
+  | Some (Global { path; _ }) -> (
+      match demand st.context Environment.constant_type path with
+      | Some ty ->
+          Some { Lir.root = Static { key = Constant path; ty = ground st ty }; projections = [] }
+      | None -> None)
   | _ -> None
 
 (* Whether a call is to a lending method. *)
@@ -1998,6 +2009,193 @@ and match_ st ~scrutinees ~arms destination =
   start st.b after
 
 (* Instances *)
+
+(* Constants *)
+
+(* Wraps an integer to a type's width, as a shift may need. *)
+let wrap st ty value =
+  let integer = integer_of st ty in
+  let bytes = Memory_layout.integer_size (Memory_layout.target st.context.env) integer in
+  let bits = 8 * bytes in
+  let modulus = Z.shift_left Z.one bits in
+  let low = Z.erem value modulus in
+  match integer with
+  | Int8 | Int16 | Int32 | Int64 | ISize ->
+      if Z.geq low (Z.shift_left Z.one (bits - 1)) then Z.sub low modulus else low
+  | _ -> low
+
+(* A constant expression's value, worked out exactly: literals, arithmetic
+   on numbers, other constants, and records, variants, strings, lists, and
+   arrays built from constant parts. *)
+let rec static_of st (e : S.expression) : Lir.static_value =
+  let ty = type_of st e.id in
+  let number value : Lir.static_value =
+    Static_scalar (match operand_constant st ty value with c -> c)
+  in
+  match e.kind with
+  | Parenthesized inner -> static_of st inner
+  | Integer _ | Float _ -> number (literal st e.id)
+  | Prefix (Negate, ({ kind = Integer _; _ } as inner))
+    when st.frame.code.checked.calls.(e.id) = None -> (
+      match literal st inner.id with
+      | Integer_value v -> number (Integer_value (Z.neg v))
+      | Float_value v -> number (Float_value (Float.neg v)))
+  | True -> Static_scalar (Bool true)
+  | False -> Static_scalar (Bool false)
+  | String literal when literal.rest = [] && literal.tag = None -> (
+      match Monomorphic.shape st.context.monomorphic ty with
+      | Record [ (field, Typed _) ] ->
+          let bytes =
+            List.init (String.length literal.first.value) (fun i ->
+                Lir.Static_scalar (Integer (UInt8, Z.of_int (Char.code literal.first.value.[i]))))
+          in
+          Static_record
+            [
+              ( field,
+                Static_storage
+                  { element = Monomorphic.builtin UInt8; elements = bytes; owned = false } );
+            ]
+      | _ -> bug "a string constant of %s" (Ground.to_string ty))
+  | List elements -> (
+      match Monomorphic.shape st.context.monomorphic ty with
+      | Array _ -> Static_array (List.map (static_of st) elements)
+      | Record [ (field, Typed storage) ] -> (
+          match Monomorphic.kind st.context.monomorphic storage with
+          | Storage element ->
+              Static_record
+                [
+                  ( field,
+                    Static_storage
+                      { element; elements = List.map (static_of st) elements; owned = true } );
+                ]
+          | _ -> bug "a list constant of %s" (Ground.to_string ty))
+      | _ -> bug "a collection constant of %s, which is not built yet" (Ground.to_string ty))
+  | Name _ | Member _ -> (
+      match st.frame.code.checked.meanings.(e.id) with
+      | Some (Global { path; _ }) -> (constant_data st.context path).value
+      | Some (Variant_value { variant; _ }) -> Static_variant (variant, [])
+      | _ -> bug "a constant that names something else: %s" (source st e.span))
+  | Call (_, arguments) -> (
+      match st.frame.code.checked.calls.(e.id) with
+      | Some { callee = Constructor { variant; _ }; arguments = checked; _ } -> (
+          let names = constructor_fields st ty variant in
+          let fields =
+            List.map
+              (fun (argument : C.argument) ->
+                let value =
+                  (List.find (fun (a : S.argument) -> a.value.id = argument.expression) arguments)
+                    .value
+                in
+                (List.nth names argument.parameter, static_of st value))
+              checked
+          in
+          match variant with Some v -> Static_variant (v, fields) | None -> Static_record fields)
+      | _ -> bug "a call in a constant: %s" (source st e.span))
+  | Binary { operator; left; right; _ } ->
+      fold st ty ~operator:(Some operator) [ static_of st left; static_of st right ]
+  | Prefix (Negate, inner) -> fold st ty ~operator:None [ static_of st inner ]
+  | _ -> bug "this is not a constant expression: %s" (source st e.span)
+
+and operand_constant st ty literal =
+  match constant_of st ty literal with
+  | Constant c -> c
+  | _ -> bug "a literal that is not a constant"
+
+(* Arithmetic on constant numbers, exact for integers, which the type
+   checker has shown do not overflow, and IEEE for floats. *)
+and fold st ty ~operator values : Lir.static_value =
+  let integer = function
+    | Lir.Static_scalar (Integer (_, v)) -> v
+    | _ -> bug "an integer constant"
+  in
+  let real = function
+    | Lir.Static_scalar (Float64 bits) -> Int64.float_of_bits bits
+    | Static_scalar (Float32 bits) -> Int32.float_of_bits bits
+    | _ -> bug "a float constant"
+  in
+  match scalar_of st ty with
+  | Integer kind -> (
+      let v op = Lir.Static_scalar (Integer (kind, wrap st ty op)) in
+      match (operator, List.map integer values) with
+      | None, [ a ] -> v (Z.neg a)
+      | Some Add, [ a; b ] -> v (Z.add a b)
+      | Some Subtract, [ a; b ] -> v (Z.sub a b)
+      | Some Multiply, [ a; b ] -> v (Z.mul a b)
+      | Some Divide, [ a; b ] -> v (Z.div a b)
+      | Some Remainder, [ a; b ] -> v (Z.rem a b)
+      | Some Bit_and, [ a; b ] -> v (Z.logand a b)
+      | Some Bit_or, [ a; b ] -> v (Z.logor a b)
+      | Some Bit_xor, [ a; b ] -> v (Z.logxor a b)
+      | Some Shift_left, [ a; b ] -> v (Z.shift_left a (Z.to_int b))
+      | Some Shift_right, [ a; b ] -> v (Z.shift_right a (Z.to_int b))
+      | _ -> bug "an operation in a constant that is not folded")
+  | (Float32 | Float64) as scalar -> (
+      let v x =
+        Lir.Static_scalar
+          (if scalar = Float32 then Float32 (Int32.bits_of_float x)
+           else Float64 (Int64.bits_of_float x))
+      in
+      match (operator, List.map real values) with
+      | None, [ a ] -> v (Float.neg a)
+      | Some Add, [ a; b ] -> v (a +. b)
+      | Some Subtract, [ a; b ] -> v (a -. b)
+      | Some Multiply, [ a; b ] -> v (a *. b)
+      | Some Divide, [ a; b ] -> v (a /. b)
+      | _ -> bug "an operation in a constant that is not folded")
+  | _ -> bug "arithmetic in a constant on %s" (Ground.to_string ty)
+
+(* A constant's static data. *)
+and constant_data context path : Lir.data =
+  let key = key_of context path in
+  let value =
+    match demand context Names.definition key with
+    | Some { kind = Constant { value; _ }; _ } -> value
+    | _ -> bug "%s is not a constant" (Path.show path)
+  in
+  let ty =
+    match demand context Environment.constant_type path with
+    | Some ty -> Monomorphic.ground context.monomorphic [] ty
+    | None -> bug "%s has no type" (Path.show path)
+  in
+  let code =
+    {
+      definition_key = key;
+      anchor = path;
+      text = text_of context key;
+      checked = checked_of context key;
+      parameters = [];
+      body = { statements = []; span = S.Span.make 0 0; id = 0 };
+      result = Returns T.unit;
+      parameter_types = [];
+      substitution = [];
+      uses = [];
+      has_defaults = false;
+    }
+  in
+  let st =
+    {
+      context;
+      frame =
+        {
+          code;
+          bindings = Hashtbl.create 1;
+          self_place = None;
+          on_yield = None;
+          inlined = [];
+          exit = None;
+        };
+      b = Lir_builder.create ();
+      scopes = [ { owned = [] } ];
+      loops = [];
+      temporaries = [];
+      return_ = None;
+      result_local = None;
+      nested = ref [];
+    }
+  in
+  { data_key = Constant path; ty; value = static_of st value }
+
+let constant context path = constant_data context path
 
 (* Derived implementations *)
 

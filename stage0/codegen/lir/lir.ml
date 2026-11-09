@@ -185,6 +185,22 @@ type function_ = {
 
 type t = { key : Instance.key; main : function_; nested : function_ array }
 
+(* Static data: a constant's value, which the emitter writes as C
+   initializers in a read-only place. *)
+type static_value =
+  | Static_scalar of constant
+  | Static_record of (string * static_value) list
+  | Static_variant of string * (string * static_value) list
+  | Static_array of static_value list
+  | Static_storage of { element : Ground.ty; elements : static_value list; owned : bool }
+      (** Elements in static memory, with the capacity recorded as the length when [owned], and as 0
+          otherwise, as for a string's static bytes *)
+
+type data = { data_key : Instance.key; ty : Ground.ty; value : static_value }
+
+(* What an instance compiles to: code, or static data. *)
+type compiled = Code of t | Data of data
+
 let signature (f : function_) =
   {
     parameters = List.map (fun local -> f.locals.(local).ty) f.parameters;
@@ -652,6 +668,24 @@ let encode ?(path = Ground.encode_path) ?instance t =
       encode_function encoders t.main;
       list (encode_function encoders) (Array.to_list t.nested);
     ]
+
+let rec encode_static path = function
+  | Static_scalar constant -> tagged 0 [ encode_constant constant ]
+  | Static_record fields ->
+      tagged 1 [ list (fun (name, v) -> Cbor.Array [ Text name; encode_static path v ]) fields ]
+  | Static_variant (variant, fields) ->
+      tagged 2
+        [
+          Text variant;
+          list (fun (name, v) -> Cbor.Array [ Text name; encode_static path v ]) fields;
+        ]
+  | Static_array values -> tagged 3 [ list (encode_static path) values ]
+  | Static_storage { element; elements; owned } ->
+      tagged 4 [ Ground.encode ~path element; list (encode_static path) elements; Bool owned ]
+
+let encode_data ?(path = Ground.encode_path) ?instance data =
+  let instance = match instance with Some instance -> instance | None -> Instance.encode ~path in
+  Cbor.Array [ instance data.data_key; Ground.encode ~path data.ty; encode_static path data.value ]
 
 let hash t =
   Blake3.hash

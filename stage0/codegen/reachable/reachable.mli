@@ -10,8 +10,12 @@
 val references : Memory_layout.env -> Lir.t -> Instance.key list
 
 (* Every instance reachable from the roots, roots first, each once, in the
-   order it is first reached. [lir] gives an instance's LIR. *)
-val reachable : Memory_layout.env -> lir:(Instance.key -> Lir.t) -> Instance.key list -> Lir.t list
+   order it is first reached. [lookup] gives what an instance compiles to. *)
+val reachable :
+  Memory_layout.env ->
+  lookup:(Instance.key -> Lir.compiled) ->
+  Instance.key list ->
+  Lir.compiled list
 
 (* The key of a test's result: the hash of the LIR of everything the test
    can reach, with every instance and every path replaced by a number given
@@ -19,4 +23,4 @@ val reachable : Memory_layout.env -> lir:(Instance.key -> Lir.t) -> Instance.key
    Two programs that differ only in the names of definitions give the same
    key, so renaming or moving a definition finds its tests' results already
    done, and any change to what the test can run changes the key. *)
-val test_key : Memory_layout.env -> lir:(Instance.key -> Lir.t) -> Instance.key -> string
+val test_key : Memory_layout.env -> lookup:(Instance.key -> Lir.compiled) -> Instance.key -> string

@@ -198,6 +198,22 @@ type function_ = {
 
 type t = { key : Instance.key; main : function_; nested : function_ array }
 
+(* Static data: a constant's value, which the emitter writes as C
+   initializers in a read-only place. *)
+type static_value =
+  | Static_scalar of constant
+  | Static_record of (string * static_value) list
+  | Static_variant of string * (string * static_value) list
+  | Static_array of static_value list
+  | Static_storage of { element : Ground.ty; elements : static_value list; owned : bool }
+      (** Elements in static memory, with the capacity recorded as the length when [owned], and as 0
+          otherwise, as for a string's static bytes *)
+
+type data = { data_key : Instance.key; ty : Ground.ty; value : static_value }
+
+(* What an instance compiles to: code, or static data. *)
+type compiled = Code of t | Data of data
+
 val signature : function_ -> signature
 
 (* The type of a projection of a place of the given type, or [None] where it
@@ -236,6 +252,7 @@ val version : int
    number them instead, so that no name is in them. See CODEGEN.md, "Test
    results". *)
 val encode : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> t -> Cbor.t
+val encode_data : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> data -> Cbor.t
 
 (* The BLAKE3 hash of the canonical form's encoding and [version], which
    early cutoff compares. *)

@@ -183,6 +183,8 @@ type context = {
   mutable anchors : (string * Path.t) list;
   mutable references : key list option;  (** While defining a key, what its text names *)
   mutable helpers_used : string list;
+  mutable statics : string list;
+      (** Static arrays and blocks that data refers to, most recent first *)
 }
 
 let helper context name =
@@ -477,14 +479,14 @@ and operand_c context fc : Lir.operand -> (string * Lir.ty) option = function
       match place_c context fc place with
       | Some (text, ty) -> Some ("(&" ^ text ^ ")", Lir.Pointer { target = ty; writable })
       | None -> bug "the address of a place of zero size")
-  | Constant constant -> Some (constant_c context fc constant)
+  | Constant constant -> Some (constant_c context constant)
 
 and operand_c_exn context fc operand =
   match operand_c context fc operand with
   | Some (text, _) -> text
   | None -> bug "an operand of zero size"
 
-and constant_c context _fc : Lir.constant -> string * Lir.ty = function
+and constant_c context : Lir.constant -> string * Lir.ty = function
   | Integer (integer, value) -> (integer_literal integer value, Raw (Integer integer))
   | Float32 bits -> (float32_literal context bits, Raw Float32)
   | Float64 bits -> (float64_literal context bits, Raw Float64)
@@ -1002,7 +1004,121 @@ let function_c context key symbol ~linkage (f : Lir.function_) =
   Buffer.add_string buffer "}\n";
   Buffer.contents buffer
 
-let file env build (instances : (Lir.t * linkage) list) =
+(* Static data *)
+
+let static_name context =
+  let name = Printf.sprintf "t_static_%d" (List.length context.statics) in
+  name
+
+(* A static value as a C initializer, or [None] for a value of zero size.
+   Storage elements and the blocks of [indirect] variants become static
+   objects of their own, defined before the data that points at them. *)
+let rec initializer_c context ty (value : Lir.static_value) : string option =
+  let layout = layout context ty in
+  let fields_c (fields : Memory_layout.field list) (values : (string * Lir.static_value) list)
+      prefix =
+    String.concat ", "
+      (List.filter_map
+         (fun (field : Memory_layout.field) ->
+           match (List.assoc_opt field.name values, field.member) with
+           | Some value, Typed field_ty ->
+               Option.map
+                 (Printf.sprintf "%s.f_%s = %s" prefix field.name)
+                 (initializer_c context field_ty value)
+           | _ -> None)
+         fields)
+  in
+  let block_c variant fields =
+    let key = Block (ty, variant) in
+    register context key;
+    let name = static_name context in
+    let block_fields =
+      match (Memory_layout.block context.env ty variant).form with Struct f -> f | _ -> []
+    in
+    context.statics <-
+      Printf.sprintf "static const %s %s = { %s };\n" (key_name key) name
+        (fields_c block_fields fields "")
+      :: context.statics;
+    Printf.sprintf "((%s *)&%s)" (key_name key) name
+  in
+  match (layout.form, value) with
+  | Zero_size, _ -> None
+  | _, Static_storage { element; elements; owned } ->
+      let element_c = value_c context element in
+      let count = List.length elements in
+      let buffer =
+        if count = 0 || (Memory_layout.of_type context.env element).size = 0 then
+          "((void *)" ^ bytes_name context "" ^ ")"
+        else begin
+          let name = static_name context in
+          let values = List.filter_map (initializer_c context element) elements in
+          context.statics <-
+            Printf.sprintf "static const %s %s[%d] = { %s };\n" element_c name count
+              (String.concat ", " values)
+            :: context.statics;
+          Printf.sprintf "((%s *)%s)" element_c name
+        end
+      in
+      Some
+        (Printf.sprintf "{ .f_buffer = %s, .f_length = %d, .f_capacity = %d }" buffer count
+           (if owned then count else 0))
+  | Scalar _, Static_scalar constant -> Some (fst (constant_c context constant))
+  | Struct fields, Static_record values -> Some ("{ " ^ fields_c fields values "" ^ " }")
+  | Array { element; _ }, Static_array values ->
+      Some
+        ("{ .items = { "
+        ^ String.concat ", " (List.filter_map (initializer_c context element) values)
+        ^ " } }")
+  | Tag_only { variants; _ }, Static_variant (name, _) -> (
+      match List.find_index (String.equal name) variants with
+      | Some index -> Some (string_of_int index)
+      | None -> bug "no variant %s" name)
+  | Tagged { variants; _ }, Static_variant (name, values) -> (
+      match List.find_opt (fun (v : Memory_layout.variant) -> v.name = name) variants with
+      | None -> bug "no variant %s" name
+      | Some v -> (
+          match v.payload.form with
+          | Zero_size -> Some (Printf.sprintf "{ .tag = %d }" v.index)
+          | Struct fields ->
+              Some
+                (Printf.sprintf "{ .tag = %d, %s }" v.index
+                   (fields_c fields values (".payload.v_" ^ name)))
+          | Scalar (Pointer (Block _)) ->
+              Some
+                (Printf.sprintf "{ .tag = %d, .payload.v_%s = %s }" v.index name
+                   (block_c name values))
+          | _ -> bug "a payload"))
+  | Niche_encoded { dataful; others; encoding }, Static_variant (name, values) ->
+      if dataful.name = name then
+        match dataful.payload.form with
+        | Struct fields -> Some ("{ " ^ fields_c fields values "" ^ " }")
+        | Scalar (Pointer (Block _)) -> Some (block_c name values)
+        | _ -> bug "a payload"
+      else
+        begin match (List.assoc_opt name others, encoding) with
+        | Some stored, Some niche -> (
+            let stored = niche_value context niche stored in
+            match niche.path with
+            | [] -> Some stored
+            | path ->
+                Some
+                  (Printf.sprintf "{ %s = %s }"
+                     (String.concat ""
+                        (List.map
+                           (function Memory_layout.Field name -> ".f_" ^ name | Tag -> ".tag")
+                           path))
+                     stored))
+        | _ -> bug "no variant %s" name
+        end
+  | _ -> bug "static data that does not fit %s" (Ground.to_string ty)
+
+let data_c context (data : Lir.data) =
+  let symbol = Instance.symbol data.data_key in
+  match initializer_c context data.ty data.value with
+  | None -> ""
+  | Some value -> Printf.sprintf "const %s %s = %s;\n" (value_c context data.ty) symbol value
+
+let file env build ?(data = []) (instances : (Lir.t * linkage) list) =
   let context =
     {
       env;
@@ -1015,6 +1131,7 @@ let file env build (instances : (Lir.t * linkage) list) =
       anchors = [];
       references = None;
       helpers_used = [];
+      statics = [];
     }
   in
   List.iter
@@ -1044,6 +1161,7 @@ let file env build (instances : (Lir.t * linkage) list) =
         nested @ [ function_c context instance.key symbol ~linkage instance.main ])
       instances
   in
+  let data_definitions = List.map (data_c context) data in
   (* Define every type the code names, and every type those definitions
      name, until nothing new is named. *)
   let definitions = ref Keys.empty in
@@ -1116,5 +1234,7 @@ let file env build (instances : (Lir.t * linkage) list) =
   List.iter
     (fun (_, declaration) -> Buffer.add_string buffer declaration)
     (List.rev context.prototypes);
+  List.iter (Buffer.add_string buffer) (List.rev context.statics);
+  List.iter (Buffer.add_string buffer) data_definitions;
   List.iter (Buffer.add_string buffer) bodies;
   Buffer.contents buffer

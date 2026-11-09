@@ -586,7 +586,15 @@ and its siblings. Full-width multiplication, used by hashing and
 
 - **A constant** is emitted once as static data, with a symbol, and
   referenced by that symbol. A constant is a read-only place, so its data
-  can go in a read-only section.
+  can go in a read-only section. What an instance compiles to is either
+  code, its LIR, or data: a ground type and a static value, which the
+  emitter writes as C initializers, with the elements of storage and the
+  blocks of `indirect` variants as static objects of their own. Lowering
+  works a constant's value out exactly from its constant expression:
+  integers with Zarith, floats with IEEE arithmetic rounded once to their
+  type, and records, variants, strings, lists, and arrays from their parts.
+  Another constant's value is written in place, since C cannot initialize
+  static data from another object.
 - **A list or map literal in a function body** allocates its buffer and
   fills it, which is the one allocation DESIGN.md counts. A literal whose
   parts are all constant, and which is only read, can be static data
@@ -681,6 +689,17 @@ file. The C compiler inlines both, and the loop becomes a plain loop over the
 buffer. In a development build of a package's own yielding method, the body
 is called once per element. That is the cost DESIGN.md accepts for keeping
 rebuilds narrow.
+
+**Stage0 inlines instead.** Its lowering writes a lending or yielding
+method's body into the caller, with each `yield` handing its place to the
+caller's statement or running the caller's loop body there: `continue` goes
+on after the `yield`, and `break` takes the `yield`'s `stop` path, so the
+method's locals are dropped as the loop leaves them. This gives the plain
+loop the C compiler would make of the loop form, and needs no rewriting of
+the caller into continuation-passing style. The caller then depends on the
+method's body, which its trace records. A lending method's `yield` must be
+its last statement, and a method that yields through recursion is not
+lowered yet; both need the loop form above.
 
 ### Cursors
 

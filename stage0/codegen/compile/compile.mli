@@ -8,9 +8,10 @@ type t
 val create :
   Query.database -> Memory_layout.target -> Toolchain.t -> Build.cache -> Build.settings -> t
 
-(* An instance's LIR, lowered or generated, with its drops elaborated, in
-   canonical form. Each is made once. *)
-val lir : t -> Instance.key -> Lir.t
+(* What an instance compiles to: its LIR, lowered or generated, with its
+   drops elaborated, in canonical form, or a constant's static data. Each
+   is made once. *)
+val compiled : t -> Instance.key -> Lir.compiled
 
 (* Builds a program that runs the tests, each named by its path, and runs
    it, returning its exit status and its output, as [Startup.tests_calling]
