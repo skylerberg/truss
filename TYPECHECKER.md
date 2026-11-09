@@ -125,10 +125,44 @@ Every stored result is canonical, as DESIGN.md requires:
 - the checker never iterates over a hash table to build a result
 - diagnostics are sorted by position, then by code
 
+### Node identity
+
+Every node the parser builds has an *id*: a small integer, unique within its
+definition, given in the order the parser builds the definition's nodes.
+Later stages never rebuild or copy a tree. Each records what it decided in
+tables keyed by node id: resolution's table says what each name means, and
+the checked form's tables give each expression's type, each call's argument
+binding, each pattern's variants, and so on.
+
+- **Spans cannot be the key.** They are not unique: a node the lexer or
+  parser made in recovery is zero-width, and a node built for a habit, such
+  as the `from` in the call that `x as Int64` is parsed as, shares its span
+  with another node.
+- **Tables are better than a tree parameterized by its annotations,** as in
+  OCaml's separate typed tree or the "trees that grow" pattern. With such a
+  tree, each stage builds and stores another copy, and every stage's tree
+  has a different type. With tables, the tree is stored once and shared by
+  every stage and tool, a stage that records a new fact adds a table, and a
+  stored result is only what that stage decided. rustc names its nodes the
+  same way, by the item that owns them and a number within it (`HirId`), so
+  that a change to one item renumbers nothing in another.
+- **Ids are deterministic.** The same tokens give the same nodes with the
+  same ids, so a definition that only moved keeps its ids, as it keeps its
+  tree, and every table keyed by them stays valid.
+- **Ids are not hashed.** A definition's hash comes from its structure, and
+  its ids follow from that structure, so hashing them would add nothing.
+- **An id means something only within its definition.** A result never
+  names a node in another definition. It names the definition, by path, as
+  every reference across definitions does.
+- **Tables are dense arrays** indexed by id, stored in deterministic CBOR
+  like every other result. A node a stage says nothing about has an empty
+  entry.
+
 ## Name resolution
 
-`Resolve` turns a definition's syntax tree into its resolved form: the same
-tree, with every name annotated with what it refers to. It reads the
+`Resolve` turns a definition's syntax tree into its resolved form: a table,
+keyed by the tree's node ids, of what every name refers to. The tree itself is
+unchanged (see [Node identity](#node-identity)). It reads the
 definition's own tree, the file's `use` lines, and the names other files and
 packages make visible, each through a query.
 
@@ -205,6 +239,78 @@ Resolution reports names that refer to nothing, with a fix to the closest
 visible name when one is near. It also reports the habits from other
 languages that are names, with exact fixes: `null` and `nil` become `None`,
 and `Shape::Circle` becomes `Shape.Circle`.
+
+### Broken definitions
+
+A definition the parser could not read as written is still registered and
+checked as far as it can be, so that its error is reported once, by the
+parser, and nothing that uses it reports another. PARSER.md states what the
+parser keeps:
+
+- **A definition whose header did not parse** keeps only its keyword and
+  name, when those could be read.
+- **Any other broken definition** keeps its whole tree, with an `Error` node
+  for each part that failed, and its signature as written when every
+  diagnostic lies in its body.
+- **The members of a trait, an `impl`, or a capability recover one by one.**
+  A broken member is an `Error` member, or a method whose own signature or
+  body holds the diagnostic. The members around it are as written.
+- **Nodes built for a habit** lie in the same signature or body as the
+  habit's diagnostic.
+
+**A part is broken only when its tree differs from its source.** The unit is
+one signature, one body, or one type's definition, whether of a definition or
+of a member. The parser lists, on each definition, the spans where it built a
+tree that is not the source as written: where it built an `Error` node or a
+node for a habit, or consumed a closer the lexer inserted. A part is broken
+when one of its definition's recovered spans lies in the part's span: a
+signature runs from the definition's or member's start to its body's start,
+a body is its block, a member is its line, and a type is its definition.
+A recovered span with width lies in every part it overlaps. A zero-width
+one at position `p` lies in the part that starts at `p`, if there is one, even
+when that part is itself zero-width, and otherwise in the part with
+`start <= p < stop`. So a missing body, recorded as a zero-width span at the
+end of the signature, where its kept `Error` body also starts, breaks the
+body and not the signature, and the function keeps its interface. A parser
+diagnostic that only enforces a rule on code it read exactly as written,
+such as a misplaced `assert`, `yield`, `break`, or `echo`, `forall` outside a
+specification, a parameter named `result`, `lends own`, a repeated clause,
+or a misplaced `public` or `opaque`, does not make its part broken. Such a
+part is checked as usual, since checking it cannot report on invented code,
+and an agent then sees its type errors in the same build as the parser's.
+The parser decides which of its diagnostics are recoveries, in one
+exhaustive match over its codes, so a new kind of diagnostic cannot compile
+until it is put on one side, and the type checker never classifies codes.
+
+The type checker uses that as follows:
+
+- **Every broken definition that has a name is registered,** as a
+  definition of its kind, so uses of it resolve. One whose name could not be
+  read registers nothing, and a use of what it meant to define is an
+  unknown name.
+- **A broken part is never checked.** A definition whose header or
+  signature is broken gets the `Error` interface, and a type whose fields or
+  variants are broken gets the `Error` shape. A broken body is not checked.
+  A broken member of a trait, an `impl`, or a capability affects only that
+  member: a trait with one broken method keeps every other method's
+  interface, so uses of those are checked as usual, and only uses of the
+  broken method get `Error`. Since nodes built for a habit lie in a broken
+  part, no invented code is ever checked.
+- **Everything is accepted of an `Error` interface or shape, silently.** A
+  call to such a function takes any arguments and has type `Error`. Building
+  such a type, reading its fields, matching on it, and looking up its
+  members all give `Error`. A trait with the `Error` interface satisfies
+  every bound that names it, and a constant with it has type `Error`.
+- **A part that is not broken is checked as usual.** A function whose body
+  is broken keeps its interface, so callers are checked against its
+  signature as written, as for any function.
+- **A broken definition is a dependency like any other.** Results that used
+  its `Error` interface record it in their traces, so when the definition is
+  fixed, exactly they are checked again.
+- **Builds and tests skip what cannot run.** A build refuses a program that
+  can reach a definition with any error, broken or not. A test that can
+  reach one does not run, and is reported as blocked by it; every other test
+  runs as usual.
 
 ## Hashing
 
@@ -1028,8 +1134,9 @@ name in one package are an error.
 ## The checked form
 
 The checked form of a definition is what the prover and code generation
-read. It is the resolved tree with these annotations, and nothing that
-needs reading the syntax tree again:
+read. It is a set of tables keyed by the tree's node ids (see
+[Node identity](#node-identity)), and records these facts, so that nothing
+needs to work anything out from the syntax tree again:
 
 - **the type of every expression,** with no inference variables
 - **what each name means:** the definition and its type arguments, the field
@@ -1134,7 +1241,8 @@ gives an exact fix whenever it knows what was meant:
 
 - **One error per cause.** An expression whose type is wrong becomes `Error`,
   which unifies with everything and is never reported again, so one mistake
-  is reported once.
+  is reported once. A definition the parser could not read is reported by the
+  parser alone (see [Broken definitions](#broken-definitions)).
 - **The reading of `f[X]` is stated.** An error in `f[X]` says which reading
   applied, such as "`parse` is a generic function, and `[Int64]` is its type
   argument", as DESIGN.md asks.
@@ -1148,7 +1256,11 @@ gives an exact fix whenever it knows what was meant:
 ## Interfaces to other stages
 
 - **The parser** gives one syntax tree per definition, with positions
-  relative to it. Resolution annotates the tree without changing its shape.
+  relative to it and an id on every node. Later stages record what they
+  decide in tables keyed by those ids, and never change the tree. For a
+  broken definition, the parser keeps what PARSER.md states, and the type
+  checker relies on it as [Broken definitions](#broken-definitions)
+  describes.
 - **Hashing** reads the resolved form, and is part of this stage.
 - **The prover** reads checked forms, the interfaces and contracts of what
   they call, the bodies of pure functions used in specifications, and the
