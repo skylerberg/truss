@@ -101,7 +101,7 @@ These keywords are reserved everywhere and cannot be used as names:
 
 `any` `assert` `break` `capability` `continue` `cost` `decreases` `derives`
 `echo` `else` `ensures` `exists` `false` `fn` `for` `forall` `if` `impl` `in`
-`internal` `is` `invariant` `law` `let` `match` `mut` `opaque` `own`
+`indirect` `internal` `is` `invariant` `law` `let` `match` `mut` `opaque` `own`
 `parallel` `proof` `provide` `public` `requires` `return` `self` `Self` `test`
 `theorem` `todo` `trait` `true` `type` `unreachable` `use` `uses` `var`
 `while` `with` `yield` `yields`
@@ -297,11 +297,15 @@ fn circle_area(radius: Float64) -> Float64 {
 - The value is a *constant expression*: literals, arithmetic on numbers, other
   constants, and records, variants, lists, maps, and strings built from
   constant parts. It cannot call functions. The compiler works it out when the
-  code is compiled. Calls to pure functions may be allowed later, once the
-  compiler can run code while compiling.
-- Like a string literal, a constant lives in the program's static memory.
-  Reading one costs nothing, and it is copied to the heap only when a change
-  needs more room.
+  code is compiled. Calls to pure functions may be allowed later. Constants
+  can appear in types, so for now their values never wait on running code.
+- A constant lives in the program's static memory and is a read-only
+  place, like a variable that can never change. Reading it or taking a view
+  of it costs nothing. Where an owned value is needed, such as a `var`, an
+  `own` argument, or a record field, write `.copy()`, as for a variable:
+  `var scores = starting_scores.copy()`. A type that copies implicitly, such
+  as an integer, needs no `.copy()`. A constant can never be marked `own` or
+  `mut`.
 - There is no `var` at the top level, so there are no mutable globals.
 - A constant can be used as a pattern, written as it is anywhere else. See
   [Patterns](#patterns).
@@ -378,6 +382,32 @@ A generic parameter can also be a value of type `USize`, written in
 `lower_snake_case` with its type: `[Element, count: USize]`. Its value is
 known when the code is compiled. It cannot be computed in a type, so
 `Array[Float64, rows * columns]` is not allowed.
+
+### Recursive types
+
+A type that contains itself marks the variant where it does so `indirect`:
+
+```truss
+type Expression =
+  | Number(value: Int64)
+  | indirect Sum(left: Expression, right: Expression)
+  | Call(function: String, arguments: List[Expression])
+```
+
+- An `indirect` variant keeps its fields on the heap, all in one
+  allocation. Building one, as in `Expression.Sum(left, right)`, costs one
+  allocation, and `cost` clauses count it. Changing its fields in place, or
+  moving them out with `own`, allocates nothing.
+- Patterns and construction look the same as for any variant.
+- Every cycle of types that contain each other must pass through an
+  `indirect` variant, unless it passes through a collection. `Call` needs no
+  mark, because a `List` already keeps its elements on the heap. A missing
+  mark is a compile error, with a fix that adds it.
+- A record cannot contain itself, even through an `Option`, because there is
+  no variant to mark. Use a sum type with an `indirect` variant, or a
+  collection.
+- A variant that is not recursive may be marked `indirect` too, so that one
+  large, rarely used variant does not make every value of the type large.
 
 ### Single-field records
 
@@ -637,7 +667,7 @@ public type Interval =
 
 public type Tree =
   | Leaf
-  | Node(left: Tree, value: Int64, right: Tree)
+  | indirect Node(left: Tree, value: Int64, right: Tree)
   invariant is_balanced(self)
 ```
 
@@ -1003,8 +1033,9 @@ caller's value. `push` takes ownership of `item`.
 | `push(mut names, item: name.copy())` | `name` is kept, and `push` gets a copy. |
 | `push(mut names, item: "Alice")` | A temporary value is never marked. |
 
-A *place* is a variable or `self`, followed by any number of field accesses
-and indexes: `scores`, `config.servers`, `scores[0]`. When a place is passed
+A *place* is a variable, `self`, or a constant, followed by any number of
+field accesses and indexes: `scores`, `config.servers`, `scores[0]`. A
+constant is a read-only place. When a place is passed
 to a `mut` or `own` parameter, the call site repeats the keyword. A reader can
 see what happens to each existing value without looking up the signature.
 
@@ -1199,13 +1230,36 @@ mut grid.cell(position).visit()
   yields, or `None` when the method ends. A cursor that is never pulled
   again is simply dropped, which ends the method at its last `yield`, as
   `break` does. A cursor from an `own self` method owns what it iterates
-  over, so it can be stored and returned like any value. A cursor from a
-  `self` method is a view. Cursors are how `zip`, merging sorted sequences,
-  and looking ahead with `peek` are written.
+  over. A cursor from a `self` method is a view. Cursors are how `zip`,
+  merging sorted sequences, and looking ahead with `peek` are written.
+- **A cursor's type has no name,** as with Rust's closures, but every cursor
+  implements the prelude trait `Cursor`:
+
+  ```truss
+  trait Cursor {
+    type Element
+    fn next(mut self) -> Option[Self.Element]
+  }
+
+  type Lexer[Characters: Cursor[Element = Character]](characters: Characters, line: USize)
+  ```
+
+  A function or record that holds a cursor is generic over it, as `Lexer`
+  is, which costs nothing at run time. To return a cursor, or to store one
+  without a type parameter, use `any Cursor[Element = Int64]`, which
+  allocates once. Usually a yielding method is simpler than returning a
+  cursor. A hand-written cursor, such as one that keeps an explicit stack,
+  implements `Cursor` too.
 - A method that yields `mut` access cannot be pulled, because a cursor would
   have to store the access. To change two collections side by side, use
   indexes, or the standard `zip` for indexable collections:
   `for (name, age) in mut names.zip(mut ages)`.
+- A method whose yields go through a recursive call, such as a tree's `each`
+  that runs `for item in left { yield item }`, works in `for` loops but
+  cannot be pulled, because its cursor would need room for every level of
+  the recursion. Calling `next()` on its cursor is a compile error that
+  names the recursive loop. To pull such a structure, write a cursor type
+  that keeps an explicit stack.
 
 ### Constructors
 
@@ -1798,8 +1852,10 @@ let path = "C:\\logs\\today.txt"
 ```
 
 A string literal is a `String` kept in the program's static memory, so making
-one costs nothing. It is copied to the heap the first time a change needs more
-room. `StringSlice` is the view of a `String`, returned by methods such as
+one costs nothing. It is copied to the heap the first time it is changed. Only
+`String` methods that write bytes, such as `push`, can change it, and their
+cost clauses already allow an allocation. `copy()` of a literal's `String`
+costs nothing, because both can share the static bytes. `StringSlice` is the view of a `String`, returned by methods such as
 `trim()`, `split()`, and `lines()`.
 
 An ordinary string fits on one line; a line break inside one is a compile
@@ -2240,6 +2296,8 @@ for handler in server.handlers {
   once, which counts in `cost` clauses.
 - `any` names exactly one trait. To combine traits, declare a trait that
   requires them, like `Loggable` above.
+- `any` can fix a trait's associated types, as a bound can:
+  `any Cursor[Element = Int64]`.
 - A method can be called through `any` if it takes `self`, `mut self`, or
   `own self`, has no generic parameters of its own, and does not take or
   return `Self`. Calling any other method on an `any` value is a compile
@@ -2515,7 +2573,7 @@ never clash with variable or function names:
 - `Option` (`Some`, `None`) and `Result` (`Ok`, `Err`)
 - the core collections: `List`, `Slice`, `Map`, and `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
-  `Index`, `FromTemplate`, and the arithmetic traits `Add`, `Subtract`,
+  `Index`, `Cursor`, `FromTemplate`, and the arithmetic traits `Add`, `Subtract`,
   `Multiply`, `Divide`, `Remainder`, and `Negate`
 - the standard capabilities, such as `Console`, `FileRead`, and `Panic`
 

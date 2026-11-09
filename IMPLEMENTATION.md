@@ -74,6 +74,8 @@ The full design is in [PARSER.md](PARSER.md). In short:
 
 ### Code generation through C
 
+The full design is in [CODEGEN.md](CODEGEN.md). In short:
+
 - **Why C rather than QBE.** Truss has no foreign code, so the standard
   library's hashing, crypto, and text handling run on Truss's own generated
   code, and nothing can drop to C for speed. QBE has no inliner, no 128-bit
@@ -85,11 +87,11 @@ The full design is in [PARSER.md](PARSER.md). In short:
 - **A lowered IR in front of C.** Monomorphization, drops, yield lowering, and
   cursor state machines happen in the compiler's own IR. Early cutoff compares
   that IR, never object code, so a different C compiler version invalidates no
-  proofs or test results. The compile-time evaluator interprets the same IR,
-  which keeps it matching compiled code.
-- **Generated C avoids undefined behavior by construction.** Wrapping
-  arithmetic is emitted as unsigned. Shifts, indexes, and other checked
-  operations are always proven. The compiler passes `-fno-strict-aliasing`,
+  proofs or test results.
+- **Generated C avoids undefined behavior by construction.** It is compiled
+  with `-fwrapv`, so arithmetic wraps even if the prover were wrong about an
+  overflow, and shift amounts are masked. Indexes and division are always
+  proven. The compiler passes `-fno-strict-aliasing`,
   `-fno-finite-loops`, because a pure loop without a `time` clause may
   legitimately never end, and `-ffp-contract=off` with no fast-math, so floats
   follow IEEE 754 bit for bit.
@@ -100,9 +102,13 @@ The full design is in [PARSER.md](PARSER.md). In short:
   the build. Release builds may also emit `#line` directives for debuggers and
   profilers.
 - **Linking is O(program).** It is the one step of an everyday edit whose cost
-  grows with the whole program. Options: a fast linker such as mold or lld; or,
-  for development and tests, a long-running test runner that loads only the
-  code that changed, keeping full static links for programs that ship.
+  grows with the whole program. Stage0 links in full every time, with a fast
+  linker: lld or mold on Linux, and the system linker on macOS. Making it
+  incremental is deferred. The likely way is a long-running test runner that
+  keeps the program loaded, loads only the definitions that changed as a
+  small shared library, and forks test workers from itself. Truss has no
+  mutable global state, so swapping code in a running process needs no state
+  to be carried over.
 
 ### Proofs
 
@@ -113,9 +119,24 @@ The full design is in [PARSER.md](PARSER.md). In short:
 
 ### Running code while compiling
 
-- **Tagged templates need an evaluator.** The compiler proves a tag's
-  `requires` by running the check on the literal text, so stage0 needs an
-  interpreter for pure, terminating Truss code that matches compiled code
-  exactly, including float behavior and the size of `USize` on the target.
-  Constants can use the same evaluator once they are allowed to call
-  functions.
+- **No interpreter: compile and run, through the test runner.** Tagged
+  template checks, the values of templates without interpolation, and the
+  tables of `Map` and `Set` constants are computed by compiling the
+  functions involved and running them in the test runner's workers. Those
+  functions are pure and proven to terminate, so a run needs no step limit
+  and cannot panic. A stack overflow is reported as an error.
+- **The standard library's checkers ship compiled** with the toolchain, for
+  each host and for both widths of `USize`. Dependencies' checkers are
+  compiled once per version. Only a tag defined in the package being edited
+  costs a compile, and only when its check changes. Results are cached by
+  the checker's hash and the literal text.
+- **Code built to run while compiling uses the target's `USize`,** which is a
+  `typedef` in the generated C, so cross-compiling from a 64-bit host to a
+  32-bit target gives the target's results.
+- **Results become static data** through a walker generated for each type,
+  which writes the value out as C initializers.
+- **Constant arithmetic needs no running code.** Integers are exact, with
+  Zarith. Float operations in constants are the exact IEEE ones, which OCaml
+  computes bit for bit. `Float32` is computed in 64 bits and rounded to 32,
+  which gives the correctly rounded 32-bit result for `+`, `-`, `*`, `/`,
+  and `sqrt`, because 53 bits is more than twice 24 plus 2.

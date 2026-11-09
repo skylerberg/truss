@@ -1,0 +1,895 @@
+# Truss Code Generator
+
+This document designs stage0's code generation: everything between the type
+checker's output and a program that runs. It follows the decisions in
+[DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and
+[IMPLEMENTATION.md](IMPLEMENTATION.md). The type checker and prover are not
+designed yet, so this document states what it expects from them. The changes
+this design made to the other documents are listed at the end. Nothing is
+built yet.
+
+## What code generation does
+
+Code generation takes the checked form of each definition the program can
+reach and produces C, which a C compiler turns into object files, which a
+linker turns into a program. The checked form records the type of every
+expression, the exact method, variant, field, `impl`, or associated type
+each name means, the mode of every argument, and which places each statement
+moves. Every proof obligation has been discharged by then.
+
+Code generation:
+
+- finds the instances the program needs: each definition with its type
+  arguments and capability sets, starting from `main`, the tests, or the
+  code run while compiling
+- decides the memory layout of every type
+- lowers each instance to the lowered IR (LIR), a small typed control-flow
+  graph, inserting drops, copies, and the hidden parameters for capabilities
+  and defaults
+- turns yielding methods into calls that receive the caller's loop body, and
+  pulled cursors into state machines
+- emits C from the LIR, compiles it, and links the program, with the table
+  that turns positions into file names and lines
+
+It does not:
+
+- check anything about the program. Every error a user can see is reported
+  by an earlier stage. A failure here is a compiler bug.
+- insert run-time checks. Indexes, overflow, division, shifts, and
+  `unreachable` have all been proven. The only checks in generated code are
+  the ones the program asks for, such as `checked_add` or `items.get(i)`.
+- compile anything used only by proofs: theorems, laws, `proof` blocks,
+  `requires`, `ensures`, invariants, `decreases`, cost clauses, and functions
+  called only from those. Code generation starts from what can run, so they
+  are never reached.
+
+## Structure
+
+```text
+checked definitions
+      │
+      ▼
+ Instances ──▶ Layout ──▶ Lower ──▶ Drops ──▶ Yields ──▶ Emit C ──▶ cc ──▶ link
+                            │                                              ▲
+                            └──────────── LIR, cached per instance ────────┘
+```
+
+| OCaml module | Job |
+|---|---|
+| `Instance` | Instance keys, and collecting the instances reachable from a root |
+| `Layout` | Sizes, alignment, field placement, tags, and niches for every monomorphic type |
+| `Lir` | The lowered IR's types, and printing and hashing it canonically |
+| `Lower` | Checked form to LIR: expressions, patterns, calls, capabilities, defaults |
+| `Drops` | Drop elaboration: where values are dropped, with flags for conditional and partial moves |
+| `Yields` | Yielding methods to continuation calls, and pulled cursors to state machines |
+| `Glue` | Generated drop, copy, debug-output, and derived-trait code for each type |
+| `Emit_c` | LIR to C text |
+| `Toolchain` | Finding and identifying the C compiler and linker, and running them |
+| `Positions` | The table from definitions to files and lines, built at link time |
+| `Startup` | The generated C `main` for programs, test runners, and code run while compiling |
+
+Each is its own dune library, like the lexer's modules. Only `Emit_c` and
+`Toolchain` know about C.
+
+### Why one IR before C
+
+Lowering straight from the checked form to C text would put drops, yield
+lowering, state machines, and hashing all inside a string printer. A small IR
+between them gives:
+
+- **One place for every transformation.** Drop elaboration and the cursor
+  state machine are dataflow passes over a control-flow graph, which is the
+  form they are written in elsewhere. Rust's MIR exists for the same reasons.
+- **The thing early cutoff compares.** A definition whose LIR comes out the
+  same compiles to the same C, so nothing after it runs again, and tests that
+  reach it keep their cached results. The LIR does not depend on which C
+  compiler is installed, so a new compiler version invalidates no test
+  results.
+- **A small emitter.** `Emit_c` prints one C construct per LIR construct, so
+  it is easy to check and easy to port when the compiler is rewritten in
+  Truss.
+
+The LIR is not SSA. Locals are mutable slots, as in MIR, because the C
+compiler builds SSA itself, and slots make drop elaboration and state
+machines simpler.
+
+### The C that is emitted
+
+The generated C is C11 plus a few builtins that both clang and gcc provide.
+Clang is the supported compiler; gcc should work too. It never includes a
+header: the compiler declares the types, the functions it calls, and the
+libc functions the standard library uses itself, for each target, so
+compiling a file parses only what that file needs.
+
+Generated code has no undefined behavior, even if the prover were wrong
+about an overflow or a shift:
+
+| Rule | How |
+|---|---|
+| Integer arithmetic wraps if it ever overflows | `-fwrapv`. Truss proves overflow never happens, so this changes no result. It turns a prover bug into a wrong value rather than undefined behavior, at almost no cost, because indexes are `USize` and wrap anyway. |
+| Shift amounts are masked | `x << (n & 63)`. The mask is free on x86-64 and ARM64, where the instruction masks anyway. |
+| No type-based alias analysis | `-fno-strict-aliasing`. Truss's own guarantee, that nothing is aliased, is given to the compiler as `restrict` instead. |
+| Loops are not assumed to end | `-fno-finite-loops`. A pure loop without a `time` clause may legitimately run until the test's time limit. |
+| Floats are exact IEEE 754 | `-ffp-contract=off` and no fast-math. On x86-64, SSE2 is the baseline, never x87. |
+| `unreachable` and impossible `match` arms | A call to a compiler-bug report in development builds, `__builtin_unreachable()` in release builds. |
+
+Division by zero and `Int64.minimum / -1` are proven impossible. Making them
+defined would cost a test per division, so they are the one place where a
+prover bug could still reach undefined behavior. `--check-proofs` catches it
+(see [Testing](#testing)).
+
+Other flags: `-std=c11 -fno-common -fvisibility=hidden -fno-exceptions
+-fno-asynchronous-unwind-tables`, since nothing unwinds.
+
+## Instances
+
+### Roots
+
+A build starts from roots and compiles only what they can reach:
+
+- **A program:** its `main`.
+- **A test run:** each test that must run, that is, each test without a
+  cached result.
+- **Code run while compiling:** each tagged-template check, each value of a
+  template without interpolation, and each `Map` or `Set` constant to build
+  (see [Code run while compiling](#code-run-while-compiling)).
+
+### Instance keys
+
+An instance is a definition together with everything that makes one copy of
+its code different from another:
+
+- the definition's path and kind: a function, a method and its receiver
+  mode, an `impl`'s method, a derived implementation, or one of a type's
+  generated functions (drop, copy, debug output)
+- its type arguments, fully monomorphic. Generic code is compiled once for
+  each set of them, as DESIGN.md says, and the type checker has already
+  rejected instantiation cycles.
+- the capability sets bound to its capability parameters, such as
+  `Granted = {FileRead, Clock}`, since the hidden evidence parameters differ
+  for each set
+
+Collecting instances walks the LIR of each instance from a root and adds every
+instance it calls, takes as a function value, puts in an `any` vtable, or
+drops. The walk visits calls in the order they appear in the LIR, so the
+result is the same on every run.
+
+### Symbol names
+
+Each instance gets a C symbol made from its key: a `t_` prefix, the module
+path and name with `::` and `.` replaced, and the type arguments, such as
+`t_standard_list__List_each__Int64`. Names stay readable in profilers and
+debuggers. A name longer than 200 bytes keeps its first 180 bytes and adds a
+hash of the whole key.
+
+Renaming a definition changes its symbol, so its callers' C changes. Their
+types are checked again after a rename anyway, which costs more than
+compiling them. Test results do not change, because test keys never contain
+names (see [Test results](#test-results)).
+
+## The lowered IR
+
+An instance's LIR has:
+
+- **Parameters and locals,** numbered, each with a layout. A local has a name
+  only for debug output.
+- **Basic blocks,** each a list of statements and one terminator.
+
+| Statement | Meaning |
+|---|---|
+| `place = rvalue` | Write a value to a place |
+| `call(target, arguments, result place)` | A call. The target is an instance, a function value, an evidence entry, or an intrinsic |
+| `drop(place)` | Run the type's drop code |
+| `set_flag(flag, value)` | Record whether a conditionally moved place is still owned |
+| `position(site)` | Attach a definition-relative position to the next statement that can report one |
+
+| Rvalue | Meaning |
+|---|---|
+| `copy operand`, `move operand` | Read a place. `copy` only for types that copy implicitly. `move` leaves the place without a value |
+| `constant` | A literal or the address of static data |
+| `unary`, `binary` | A primitive operation on built-in types (see [Primitive operations](#primitive-operations)) |
+| `build(layout, variant, fields)` | Construct a record or variant |
+| `field(place, name)`, `tag(place)` | Read a field or a sum type's tag |
+| `address(place)` | A pointer to a place, for `mut`, large read-only, and large `own` arguments |
+| `function(instance, environment)` | A function value |
+
+| Terminator | Meaning |
+|---|---|
+| `goto block` | Jump |
+| `switch(operand, cases, default)` | Branch on an integer or a tag |
+| `return` | Return the result local |
+| `unreachable` | A proven-impossible point |
+| `panic(message, site)` | A call that never returns |
+
+Places are a local followed by fields, indexes, and dereferences of the
+pointers that `mut` and large parameters arrive as.
+
+**The LIR is canonical.** Locals are numbered by first use, blocks in
+reverse postorder from the entry, and every list is in source order. Two
+builds of the same definition give byte-identical LIR, as DESIGN.md requires
+of every stored result. The LIR is stored and hashed in deterministic CBOR,
+like the other stored forms.
+
+## Data layout
+
+The compiler chooses every layout, and no program can observe one: Truss has
+no pointers, no `size_of`, and no foreign code.
+
+### Built-in types
+
+| Type | C | Notes |
+|---|---|---|
+| `Int8` … `Int64`, `UInt8` … `UInt64` | `int8_t` … `uint64_t` | Declared by the compiler, without `<stdint.h>` |
+| `USize`, `ISize` | The target's pointer-sized integers | A `typedef`, so code built to run while compiling can use the target's width on any host |
+| `Float32`, `Float64` | `float`, `double` | |
+| `Bool` | `uint8_t`, 0 or 1 | Values 2 to 255 are a niche |
+| `Character` | `uint32_t` | Values above `0x10FFFF` are a niche |
+| `Unit` and records with no fields | Nothing | Erased from parameters, fields, and locals |
+| `Never` | No values | A function returning `Never` is `_Noreturn` |
+
+### Records
+
+- **Fields are placed by alignment, largest first, then by name.** Reordering
+  fields in the source never changes the layout, which is what DESIGN.md's
+  promise that "reordering fields rebuilds nothing" needs. A derived
+  `Ordered` compares in declaration order regardless of layout.
+- **A record with one field is laid out as that field,** as DESIGN.md
+  promises for `UserId(number: UInt64)`.
+- **Fields of zero size take no room.**
+- A record is a C `struct` named after its instance, such as
+  `t_geometry__Point`.
+
+### Sum types
+
+- **A sum type is a tag followed by the largest variant's fields,** as a C
+  `struct` holding a tag and a `union`. The tag is the smallest unsigned
+  integer that holds every variant, numbered in declaration order.
+- **A sum type with no fields at all is just its tag,** as `Ordering` and
+  `LogLevel` are.
+- **Niches remove the tag where a field has spare values,** as in Rust. When
+  every variant but one has no fields, and the one with fields has a field
+  with spare values, the other variants use those values instead of a tag.
+  Stage0 uses these spare values: non-null pointers, `Bool`, `Character`, and
+  the unused values of another sum type's tag. So `Option[List[Int64]]`,
+  `Option[Bool]`, and `Option[Character]` are the size of what they hold.
+  More can be added later without any change to the language, because no
+  program can see a layout.
+- **An `indirect` variant holds one pointer** to a heap block containing its
+  fields. Building one allocates that block; changing it in place writes
+  through the pointer; moving its fields out moves them from the block and
+  frees it. The pointer is never null, so an `indirect` variant gives a
+  niche, and `Option` of a type whose only variant with fields is `indirect`
+  is one pointer.
+
+### Arrays
+
+`Array[Element, count]` is the elements in place, wrapped in a one-field C
+`struct` so it can be passed and assigned by value.
+
+### Collections and strings
+
+These are standard-library types written in Truss on top of intrinsics (see
+[The system interface](#the-system-interface)). Their layouts follow from
+their fields like any other type. What matters to code generation is:
+
+| Type | Fields | Notes |
+|---|---|---|
+| `List[Element]` | buffer pointer, length, capacity | An empty list has capacity 0 and a non-null pointer that points at nothing, so `Option[List[...]]` has a niche |
+| `String` | buffer pointer, length, capacity | Capacity 0 with a non-empty length means static bytes: dropping frees nothing, and the first method that writes bytes copies them to the heap |
+| `Slice[Element]`, `StringSlice` | pointer, length | A view. Turning a `List` into a `Slice` reads two of its three fields |
+| `Map`, `Set` | Their fields, written in Truss | No special case |
+
+`String` is the only type with a static form. A constant is a read-only
+place, so a `List`, `Map`, or `Set` in static memory is only ever read, and
+nothing that drops or changes a value needs to check for static memory.
+
+### `any` values
+
+`any Handler` is two pointers: the heap block holding the value, and a
+vtable for that type and trait. A vtable holds:
+
+- the value's size and alignment
+- its drop function, and its copy function if it has one
+- one entry for each method that can be called through `any`, after the
+  receiver and its evidence
+
+`any value` allocates the block and moves the value in, which is the one
+allocation DESIGN.md says it costs.
+
+### Function values
+
+A function value is two pointers: the code and its environment. A lambda's
+environment is a `struct`, on the caller's stack, holding a pointer to each
+local the lambda reads, since lambdas capture by view. Making one never
+allocates. A function that captures nothing has a null environment, and a
+named function used as a value goes through a small adapter that ignores the
+environment. An `own` function-typed parameter accepts only functions that
+capture nothing, so storing one never stores a pointer into a stack.
+
+### Cursors
+
+A cursor is the state machine of one pulled yielding method (see
+[Cursors](#cursors-1)). Its layout is a state number, the method's
+parameters, and the locals that are live across a `yield`, with the states
+of any cursors it pulls from inside it. The type has no name in Truss, and
+its layout depends on the method's body. That dependency is recorded in the
+trace of every instance that holds one, as Rust records it for
+`impl Iterator`.
+
+## Calling convention
+
+The C compiler implements the platform's calling convention. Code
+generation only decides how each Truss parameter becomes C parameters.
+
+| Parameter | 16 bytes or less | Larger |
+|---|---|---|
+| read-only, including `self` | by value | `const T *restrict` |
+| `mut` | `T *restrict` | `T *restrict` |
+| `own` | by value | `T *restrict` to the caller's memory, which the callee now owns and drops |
+| result | returned | written through a `T *restrict` first parameter |
+
+- **Every pointer is `restrict`.** Truss guarantees that a place passed `mut`
+  is used by nothing else during the call, and that a viewed original does
+  not change while the view is in use. That is exactly what `restrict`
+  promises, and it lets the C compiler keep values in registers across
+  stores, which it can rarely do for C programs. Rust gives LLVM the same
+  facts through `noalias`.
+- **Read-only parameters are never copied to be safe.** The original is
+  frozen while a view is in use, so passing a pointer is always correct.
+- **Hidden parameters follow the written ones,** in this order: the
+  default-presence mask, if any parameter has a default; one evidence
+  pointer for each capability in `uses`, ordered by the capability's path;
+  and the loop body, for a yielding method.
+- **Parameters of zero size disappear.**
+
+### Defaults
+
+A function with defaults takes a mask with one bit for each parameter that
+has a default, set when the caller passed it. The function's first block
+fills in each missing argument from its constant. A caller that passes
+everything passes 0. This keeps DESIGN.md's rule that defaults are applied by
+the function, so changing one compiles only the function again. It avoids
+Kotlin's separate `$default` method, which costs an extra call.
+
+Where the default must be owned, for a record field or an `own` parameter,
+filling it in copies the constant: free for numbers, strings, and empty
+collections, one allocation for a non-empty one. That is how DESIGN.md counts
+it.
+
+## Ownership: moves, drops, and copies
+
+### Moves
+
+The type checker records which statements move which places, and rejects any
+use of a moved place. The LIR states each move explicitly. A move is a
+memory copy of the value's bytes, after which the source place holds nothing
+to drop.
+
+### Drop elaboration
+
+`Drops` runs a dataflow analysis over each instance's LIR: at each point,
+which places, and which fields of places, may still own a value. It then:
+
+- inserts `drop(place)` where an owned local, or each of its remaining
+  fields, goes out of scope, on every path, including `return` and `?`
+- uses a drop flag where a place is owned on some paths and not others, such
+  as after `if ready { consume(own item) }`. A flag is one byte on the stack,
+  set when the value is moved.
+- tracks fields separately after `own config.name`, so the rest of `config`
+  is dropped field by field, and `config` becomes whole again once
+  `config.name` is assigned, as DESIGN.md describes
+
+Values are dropped in reverse order of declaration. No program can observe
+the order, because dropping never runs Truss code.
+
+A panic drops nothing. The process ends, and the operating system reclaims
+memory and handles.
+
+### Generated functions for each type
+
+`Glue` generates these for each monomorphic type, each as its own instance,
+so they are compiled once and shared:
+
+- **Drop:** frees what the value owns, field by field. Plain data has
+  nothing to drop, so drop code for it is empty and every call to it is
+  removed. An `indirect` variant drops its fields and frees its block. A
+  standard-library handle frees its operating-system resource (see
+  [Handles](#handles)).
+- **Copy:** `copy()` follows the structure of the value. Plain data is a
+  memory copy. A `List` of plain data is one allocation and one memory copy,
+  the fast path DESIGN.md mentions. A static `String` is shared, not copied.
+- **Debug output:** the built-in debug output every type has, used by
+  `echo`, failed `assert`s, and the test runner, and to write out values
+  computed while compiling.
+- **Derived implementations:** `Equal`, `Hash`, `Ordered`, and `Default`, from
+  the type's shape and the version of the rule that derives them.
+
+### Updates in place
+
+- **`with` on an owned base** writes the new fields into the base's memory,
+  so `own config with (port: 443)` costs one write per field, as DESIGN.md
+  says.
+- **Compound assignment** moves the old value into the operator. When the
+  operator's trait has an `own self` version, it reuses the old value's
+  memory and the result is written back into the same place.
+
+## Lowering expressions
+
+### Primitive operations
+
+These are never calls, at any optimization level. The standard library
+declares them through traits so that typing and proofs see ordinary
+`impl`s, and the compiler emits their bodies directly:
+
+- arithmetic, comparison, and bitwise operators on built-in integers, floats,
+  `Bool`, and `Character`
+- `for` over a range of built-in integers, which becomes a counted loop
+- indexing and slicing `List`, `Slice`, `Array`, `String` bytes, and
+  `StringSlice` bytes, which become address arithmetic with no bounds check
+- `?`, `is`, `match`, `with`, building values, reading fields, and turning a
+  `List` into a `Slice`
+
+Float comparisons follow DESIGN.md's lawful rules:
+
+| Truss | C |
+|---|---|
+| `a == b` | `a == b \|\| (a != a && b != b)` |
+| `a < b` | `a < b \|\| (a == a && b != b)` |
+| `a.ieee_equal(b)`, `a.ieee_less(b)` | `a == b`, `a < b` |
+| `x.to_bits()` | the bits, with every NaN replaced by one canonical NaN |
+
+Checked, wrapping, and saturating arithmetic use `__builtin_add_overflow`
+and its siblings. Full-width multiplication, used by hashing and
+`checked_mul`, uses `unsigned __int128` on 64-bit targets.
+
+### Control flow and patterns
+
+- **`match`** compiles to a decision tree that tests each part of the value
+  once, in the order the patterns need, and switches on tags and integers.
+  Maranget's "Compiling Pattern Matching to Good Decision Trees" (2008) is
+  the method. The tree is built deterministically from the arms in order.
+- **`?`** is a tag test and an early return, with the drops elaboration
+  inserted.
+- **`is`** is the same test as a `match` arm, binding into locals that are
+  only live on the true branch.
+- **`while` and `for`** become blocks and gotos. A `for` over anything but a
+  range of built-in integers calls `each` (see
+  [Yielding methods](#yielding-methods)).
+
+### Strings and templates
+
+- **String interpolation builds into one buffer.** `"${count} items in
+  ${name}"` adds up the literal lengths, calls each part's `display` into a
+  `TextBuilder` with that much room reserved, and returns the `String`. It
+  never builds a `Template` or its lists. A `TextBuilder` grows only if a
+  part writes more than its first estimate.
+- **Other tags build a `Template`** with the literal text as constant data,
+  which costs nothing, and the parts in a list that the tag usually keeps,
+  as `SqlQuery` does.
+- **A template without interpolation is a constant.** Its value is computed
+  while compiling and placed in static memory. `Character"a"` and
+  `UInt8"\n"` are plain numbers. A `Regex"[a-z]+"` that is only read is used
+  in place. Where an owned value is needed, the static value is copied with
+  its copy function. This is never more expensive than building it: every
+  heap block the copy makes was allocated by `from_template` too, and the
+  copy writes no byte that `from_template` did not write.
+
+### Literals and constants
+
+- **A constant** is emitted once as static data, with a symbol, and
+  referenced by that symbol. A constant is a read-only place, so its data
+  can go in a read-only section.
+- **A list or map literal in a function body** allocates its buffer and
+  fills it, which is the one allocation DESIGN.md counts. A literal whose
+  parts are all constant, and which is only read, can be static data
+  instead.
+
+### Code that does not ship
+
+- **`echo`** calls the runtime's echo function with the value's debug output
+  and its position. It writes to the test's report in a test, and to stderr
+  elsewhere. Builds refuse programs that can reach it, so it only exists in
+  test and development runs.
+- **`todo`** reached in a test calls a function that tells the runner the
+  test is incomplete and ends the worker. Builds refuse programs that can
+  reach a `todo`.
+
+## Generics and traits
+
+- **Every call to a trait method is resolved before code generation.** The
+  type checker records which `impl` each call means. After
+  monomorphization, every such call is a direct call to an instance.
+- **A trait's provided methods,** such as `max`, are compiled for each type
+  that uses them, unless the `impl` replaces them.
+- **Derived implementations may be inlined into callers even in
+  development builds.** Their code comes from the type's shape, which every
+  caller already depends on through the layout, so inlining them adds
+  nothing to a trace.
+- **`any` calls** load the method from the vtable and call it with the
+  value's pointer.
+
+## Yielding methods
+
+### Loops and single yields
+
+A yielding method takes the caller's code as a function: the loop body, or
+the rest of the statement for a single `yield`. That function returns
+whether to go on. Pulling is a separate compilation of the same method (see
+[Cursors](#cursors-1)), made only when some code pulls it.
+
+The standard library's `List.each` is ordinary Truss:
+
+```truss
+fn List[Element].each(self) yields Element {
+  for index in 0..self.length() {
+    yield self[index]
+  }
+}
+```
+
+Its instance for `Int64` becomes:
+
+```c
+typedef struct {
+  t_step (*call)(void *environment, int64_t item);
+  void *environment;
+} t_body__Int64;
+
+static void t_standard_list__List_each__Int64(const t_List__Int64 *restrict self, t_body__Int64 body) {
+  for (t_usize index = 0; index < self->length; index += 1) {
+    if (body.call(body.environment, self->buffer[index]) == t_stop) {
+      return;
+    }
+  }
+}
+```
+
+A caller's loop body becomes a function too. Its environment holds pointers
+to the caller's locals it reads and changes, and a slot that records why the
+loop ended:
+
+- **`continue`** returns `t_continue` early.
+- **`break`** records "break" and returns `t_stop`. The method returns at
+  that `yield` without running any more of its code, except the drops for
+  its own locals.
+- **`return value` and `?`** record "return", store the value in the caller's
+  frame, and return `t_stop`. After the method returns, the caller checks
+  the slot and returns too.
+
+A method that yields once always continues after its `yield`, as DESIGN.md
+promises, even if the caller's statement leaves early. So for a single
+`yield`, the body's early exits are recorded the same way, but the method
+runs to its end before the caller acts on them.
+
+In release builds, and in development builds when the method is in the
+standard library or a dependency, `List.each` and the body are in the same C
+file. The C compiler inlines both, and the loop becomes a plain loop over the
+buffer. In a development build of a package's own yielding method, the body
+is called once per element. That is the cost DESIGN.md accepts for keeping
+rebuilds narrow.
+
+### Cursors
+
+When some code pulls a yielding method with `next()`, `Yields` makes a second
+version of it as a state machine, as C# and Kotlin compile iterators:
+
+1. Number each `yield` as a state. State 0 is the start.
+2. Find the locals live across each `yield`. They, the parameters, and the
+   state number become the cursor's fields. Everything else stays in C
+   locals.
+3. `next()` switches on the state and jumps to the block after that `yield`.
+   Each `yield` stores the live locals, sets the state, and returns `Some` of
+   the value. Reaching the end sets a finished state and returns `None`.
+4. A `for` loop or a pulled cursor inside the method becomes a cursor nested
+   in this one, as a field.
+
+A cursor's drop function drops the locals that are live in its current
+state, which is what DESIGN.md means by a dropped cursor ending the method
+at its last `yield`. A method whose yields go through a recursive call has
+no fixed-size state, so the type checker reports any pull of it, as
+DESIGN.md says.
+
+Every cursor implements the prelude's `Cursor` trait, whose `next` is the
+state machine's entry, so `any Cursor[Element = Int64]` gets an ordinary
+vtable.
+
+## Capabilities
+
+### Evidence
+
+A function that `uses` capabilities takes a hidden pointer to *evidence* for
+each one. Evidence is a small `struct` that `provide` builds on the stack:
+
+- a pointer to the implementation value. For `provide mut files`, this is
+  the address of the caller's variable, so changes stay in it afterward.
+- a pointer to the vtable for that implementation type and capability
+- the evidence for the capabilities the implementation itself `uses`, taken
+  from the code around the `provide`
+
+A call such as `Clock.now()` loads `now` from the evidence's vtable and calls
+it with the implementation pointer and the implementation's own evidence.
+Koka calls this evidence passing. It needs no global state, and it is safe
+for `parallel` code.
+
+- **Narrowing needs nothing special.** Inside an implementation of
+  `FileRead`, a call to `FileRead.read` uses the evidence captured from
+  outside the `provide`, so it reaches the next provider out.
+- **Providing a type provides every capability it implements.** `provide`
+  builds one evidence `struct` for each, all pointing at the same value.
+- **Capability parameters are part of the instance.** `for_each[Item,
+  capability Granted]` is compiled once for each set `Granted` stands for,
+  and passes on that set's evidence.
+- **Function types with `uses`** take evidence when called, like functions.
+  A callback stored in an `own` parameter gets its evidence from whoever
+  calls it.
+- **`Panic` has no evidence.** It cannot be provided, so `Panic.crash` is a
+  direct call into the runtime.
+
+A capability call costs one indirect call, which is small next to the I/O
+behind most capabilities. Release builds could call `main`'s real
+implementations directly, since `main` gets exactly the ones it declares.
+Stage0 does not.
+
+### `main` and the real implementations
+
+The standard library implements each standard capability for real with an
+ordinary type, such as a system clock and the real file system. The
+generated startup code builds the evidence for exactly the capabilities in
+`main`'s `uses` clause and passes it in. An external test gets its declared
+capabilities the same way.
+
+### Tasks
+
+Stage0 runs each task on an operating-system thread. DESIGN.md requires that
+calls into one implementation never overlap. When a task is spawned, each
+piece of evidence it receives is wrapped in evidence whose vtable takes that
+implementation's lock around every call. Code in the task cannot tell the
+difference, and a fake implementation in a test needs no locking of its own.
+Tests provide a seeded `Tasks` implementation that runs tasks one at a time,
+which needs no threads or locks at all.
+
+## Parallelism
+
+Stage0 runs `parallel` blocks and `parallel for` loops one branch after
+another, which DESIGN.md allows. The type checker has already proven the
+branches disjoint. A later compiler can hand branches to a thread pool with
+no change to the LIR above the statement that starts them.
+
+## The system interface
+
+Only the standard library reaches the operating system. The compiler
+provides a module, `standard::intrinsic`, that exists in no source file,
+like Go's `unsafe` package. Only the `standard` package can import it. Its
+functions are declared by the compiler, with types, `requires`, and cost
+clauses like any other function, and lower to C expressions or libc calls:
+
+| Group | Examples |
+|---|---|
+| Memory | allocate, grow, free, copy and move bytes, compare bytes |
+| Bits | count leading and trailing zeros, count ones, swap bytes, rotate, full-width multiply |
+| Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits` |
+| Overflow | add, subtract, and multiply with overflow detection |
+| Operating system | open, read, write, close, stat, directory listing, sockets, clocks, random bytes, processes, threads, locks |
+
+The libc functions used are declared by the compiler for each target, so the
+generated C still includes no headers. Allocation failure ends the process
+with a message, as DESIGN.md allows for running out of memory.
+
+### Handles
+
+The intrinsic module also provides a few handle types, such as a file
+descriptor, a process, and a thread. Their drop functions call the
+operating system to release them, such as `close`. They are the only drops
+that do more than free memory, and they run no Truss code, as DESIGN.md
+requires. Standard-library types such as `File` hold one in a field, so
+their drop functions release the resource by dropping that field.
+
+## Program startup and failure
+
+The C `main` of a program is generated:
+
+1. Install a handler for stack overflow on an alternate signal stack. Truss
+   code has no unsafe operations, so a segmentation fault means the stack
+   ran out.
+2. Turn `argc` and `argv` into `List[String]`.
+3. Build the evidence for `main`'s `uses` clause.
+4. Call Truss's `main` and return its `ExitCode` as the process's status.
+
+Failures end the process without running anything else:
+
+| Failure | What happens |
+|---|---|
+| `Panic.crash` | Writes the message and position to stderr with `write`, then exits with status 101, as Rust does |
+| Running out of memory | Writes a message to stderr and calls `abort` |
+| Stack overflow | The signal handler writes a message to stderr and exits with status 101 |
+
+None of these use stdio, so there are no buffers to flush and no `atexit`
+handlers to run.
+
+## Positions
+
+DESIGN.md keeps positions relative to their definition, so adding a line at
+the top of a file changes no generated code below it:
+
+- **Each site that can report a position,** such as a panic, an `echo`, or a
+  failed `assert`, passes three things: the address of its definition's
+  *anchor*, and its line and column within the definition.
+- **An anchor** is an external constant, one per definition, holding the
+  file's path and the definition's first line. The generated code only
+  refers to it, so its own C never changes when the definition moves.
+- **The anchors are defined in one C file generated at link time** from the
+  position table. Moving a definition changes only that file.
+
+Release builds can also emit `#line` directives, so debuggers and profilers
+see real files and lines. Those builds already compile every definition
+again, so absolute lines cost nothing there.
+
+## Code run while compiling
+
+DESIGN.md runs pure, terminating Truss code while compiling: tagged-template
+checks, the values of templates without interpolation, and the tables of
+`Map` and `Set` constants. That code goes through this same generator, and
+runs in the test runner's workers.
+
+- **It is built for the host, with the target's `USize`.** `USize` is a
+  `typedef` in the generated C, so code built to run while compiling for a
+  32-bit target uses 32 bits on a 64-bit host and computes what the target
+  would compute.
+- **Results are written out by their debug-output functions** in a binary
+  form, and the compiler turns them into static data in C. Values are never
+  shared, so every value is a tree, and writing it out is a simple walk.
+- **The standard library's checkers ship already compiled** with the
+  toolchain, for each host and both widths of `USize`. A dependency's are
+  compiled once per version. A package's own are compiled when they change,
+  like any other instance.
+- **Results are cached** by the hash of the code that ran and its input, so
+  a check runs again only when its literal or its code changes.
+
+## Tests
+
+### The test program
+
+A test run builds one program containing every test that must run, their
+instances, and a generated runner `main`. The runner starts one worker
+process per core by forking itself after startup, so workers share its
+loaded code. It sends each worker a test to run, over a pipe, and gets back
+the result and the test's `echo` output. A worker that panics, overflows its
+stack, runs out of memory, or reaches a `todo` ends. The runner records why
+from the exit status or the message on the pipe, starts a new worker, and
+carries on. The runner kills a worker whose test exceeds the project's time
+limit.
+
+### Test results
+
+A test's result is cached under a key built from all the code it can reach.
+DESIGN.md requires that renaming a definition or moving it to another module
+finds test results already done, so the key contains no names:
+
+- Walk the instances reachable from the test, in the deterministic order of
+  their calls, and number them in the order they are first reached.
+- Hash each instance's LIR with every reference to another instance replaced
+  by that instance's number.
+- The test's key is the hash of that numbered list, plus the version of code
+  generation.
+
+Two programs that differ only in names give the same key, and any change to
+what the test can run changes it. A layout change appears in the LIR of
+every instance that uses the layout, so it changes the key too.
+
+## Building
+
+### Caching
+
+Each step's output is stored under a key, with a trace of what it depended
+on, as DESIGN.md describes for every stage:
+
+| Output | Key |
+|---|---|
+| An instance's LIR | The instance, the codegen version, and a trace: the checked forms it lowered, the signatures it called, the layouts it used, and the bodies it inlined |
+| An instance's C | The LIR's hash and the emitter's version |
+| An object file | The C's hash, the C compiler's identity (its `--version` output and path), the flags, and the target |
+| A program | The objects, the anchors file, and the linker's identity |
+
+Early cutoff happens at the LIR: if an instance's LIR comes out the same, no
+C is written, nothing is compiled, and no test that reaches it runs again.
+The C compiler's identity is only in the object key, so upgrading clang
+recompiles objects but invalidates no test result.
+
+### C files and optimization
+
+- **Development builds compile one C file per instance.** The C compiler
+  runs once for each instance whose LIR changed, in parallel across cores.
+  Small standard-library and dependency instances that the instance calls
+  are emitted into the same file as `static` functions, so the C compiler
+  can inline them, as DESIGN.md allows for development builds. They are
+  chosen by size, and every yielding method is chosen. Each one is recorded
+  in the instance's trace.
+- **A package's own code compiles at `-O1`** in development builds, which is
+  fast to compile and avoids the stack traffic of `-O0`.
+- **The standard library and dependencies compile at `-O2`** and are cached,
+  so development builds of a project run them at full speed.
+- **Release builds** put each module's instances in one C file at `-O2` and
+  link with ThinLTO, so the C compiler can inline across every definition.
+
+One C file per instance means many small compiler runs on a cold build. If
+that is slow, instances can be grouped by definition later. The change
+affects only build speed.
+
+### Linking
+
+Stage0 links in full every time, as IMPLEMENTATION.md records: with lld or
+mold on Linux and the system linker on macOS, against the platform's libc.
+The standard library is linked from its cached objects. Making linking
+incremental is deferred.
+
+## Testing
+
+- **Golden LIR.** Small programs with their expected LIR, compared with
+  dune's `diff` actions, as the lexer's tests are.
+- **The generated C is checked strictly.** The compiler's own test suite
+  compiles generated C with `-Wall -Wextra -Werror` and a list of warnings
+  known not to apply to generated code, which catches emitter bugs that a C
+  compiler would otherwise accept quietly.
+- **Sanitizers.** The test suite also builds test programs with
+  AddressSanitizer and UndefinedBehaviorSanitizer. A memory error in Truss
+  code can only come from a bug in the compiler or the prover, so any report
+  is one. Being able to do this is one benefit of emitting C.
+- **`--check-proofs`.** A compiler flag, for testing the compiler only, that
+  emits a run-time check for every proven obligation: indexes, overflow,
+  division, shifts, and `unreachable`. A failed check reports a prover bug
+  with the obligation's position. Running the compiler's own corpus with it
+  checks the prover against real executions.
+- **Development and release agree.** Every corpus program runs in both, and
+  their outputs must be identical. Later, the compiler written in Truss is
+  checked against stage0 the same way.
+- **Deterministic output.** Building the corpus twice must give byte-identical
+  LIR and C.
+- **The documents as a corpus.** Every complete program in the design
+  documents is built and run.
+
+## Open questions
+
+- **Program arguments that are not UTF-8.** `main` takes `List[String]`, and
+  a `String` is always UTF-8, but a Unix argument can be any bytes. Rust's
+  `std::env::args` panics on such an argument, Python substitutes escapes,
+  and some programs replace bad sequences with U+FFFD. The language should
+  decide. Until then, stage0 replaces bad sequences with U+FFFD.
+- **Which types `copy()` applies to.** Copying a handle, such as an open
+  file, would duplicate it. The type checker should reject `copy()` on
+  handles and on types containing them, and the docs should say so.
+- **Static or dynamic libc on Linux.** Stage0 links dynamically on both
+  platforms. A static program with musl would match IMPLEMENTATION.md's
+  "single binary" more closely.
+- **Release-only optimizations:** calling `main`'s real capability
+  implementations directly, and giving proven `requires` clauses to the C
+  compiler as assumptions. Both are deferred.
+
+## Changes to other documents
+
+Designing code generation led to these decisions, recorded in the documents
+named:
+
+- **C rather than QBE** as the backend, for its optimizer, its builtins, and
+  `restrict` (IMPLEMENTATION.md).
+- **Development builds inline from the standard library and dependencies,**
+  whose bodies do not change while editing (DESIGN.md, incremental builds).
+- **Float results are the same on every platform:** `sin`, `exp`, and the
+  other functions, and converting floats to and from text, are written in
+  Truss, and `to_bits()` canonicalizes NaN (DESIGN.md, no hidden failure).
+- **A yielding method that yields through recursion can be looped over but
+  not pulled** (DESIGN.md and SYNTAX.md, yielding methods).
+- **Cursor types have no name** and implement the prelude trait `Cursor`, and
+  `any` can fix associated types (DESIGN.md, SYNTAX.md, GRAMMAR.md).
+- **No interpreter.** Code run while compiling is compiled and run like a
+  test, and constants stay literal-only so that type checking never waits on
+  running code (DESIGN.md, SYNTAX.md, IMPLEMENTATION.md).
+- **`Map` and `Set` constants are built while compiling** by the standard
+  library's own code (DESIGN.md, collections).
+- **No polymorphic recursion,** reported while type checking, as Go does
+  (DESIGN.md, types and inference).
+- **`indirect` variants** mark where a recursive type allocates, as in Swift
+  (DESIGN.md, SYNTAX.md, GRAMMAR.md, `grammar/truss.mly`).
+- **Constants are read-only places.** An owned value from one is made with
+  `copy()`, and only string literals have a static form (DESIGN.md,
+  SYNTAX.md).
+- **Linking stays a full link for now** (IMPLEMENTATION.md).

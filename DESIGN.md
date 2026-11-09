@@ -245,13 +245,21 @@ a design input rather than user error:
 - **Constants are worked out when compiling, from literals only.** A constant
   is built from literals, arithmetic, other constants, and records and
   collections of those, but it cannot call functions. This follows Go's
-  constants, and it keeps the first compiler free of an interpreter: allowing
-  calls would mean running Truss code while compiling, with exactly the same
-  results as the target machine, including float functions from libc and the
-  size of `USize`. Rust started with similarly limited constants and has
-  widened them release by release without breaking code, and Truss can do the
-  same once it has a compile-time evaluator. Tagged-template checks will need
-  that evaluator anyway, and constants should then share it.
+  constants. Constants can appear in types, as in `Array[UInt8, digest_size]`,
+  and keeping them free of calls means type checking never waits for code to
+  run. Rust started with similarly limited constants and has widened them
+  release by release without breaking code, and Truss can do the same.
+- **Code run while compiling is compiled code.** Tagged-template checks, and
+  building the tables of `Map` and `Set` values in constants, run Truss code
+  while compiling. That code is compiled and run the way tests are, as Lisp
+  compilers call compiled functions and Rust runs compiled procedural macros,
+  rather than by a separate interpreter. There is then only one meaning of
+  Truss code to keep correct, so results match the compiled program exactly,
+  including the size of `USize` on the target. The functions involved are
+  almost always in the standard library or a dependency, compiled once and
+  cached, and each result is cached by the function and its input. What runs
+  only discharges proofs and produces static data, so it never feeds type
+  checking.
 - **Explicit type arguments use the same square brackets as indexing,** as in
   Go and Nim: `parse[Int64](text)`. Rust needs `parse::<i64>` because `<` is
   also less-than; Truss's brackets have no such clash, so it needs no new
@@ -265,6 +273,14 @@ a design input rather than user error:
   `f[X]` must say which reading applied.
 - **Bodies are inferred.** Local variables need no type annotations, and
   lambdas never have them.
+- **Generic code is compiled once for each set of type arguments,** as in
+  Rust, C++, and Go, so generics cost nothing at run time. This rules out
+  polymorphic recursion: a generic function cannot call itself, or another
+  function in a cycle with it, with a type argument built from its own type
+  parameters, such as `Option[Element]`, and a generic type cannot contain
+  itself with different arguments. Go reports this as an instantiation cycle
+  while type checking, and Truss does the same, rather than failing while
+  compiling copies, as Rust does.
 
 ### Single-field records
 
@@ -373,7 +389,10 @@ building:
   `sort_by_key`, Go's options structs, and builder types.
 - **A default is a constant.** It follows the rules for constants and cannot
   refer to other parameters, so it is the same at every call. It cannot hide
-  an effect, and it costs what reading a constant costs.
+  an effect, and it costs what reading a constant costs. Where the default
+  must be an owned value, as for a record field or an `own` parameter, it is
+  copied. That is free for numbers, strings, and empty collections, and
+  costs one counted allocation for a non-empty `List`, `Map`, or `Set`.
 - **Defaults are applied by the function,** as in Kotlin, not copied into each
   caller, as in C# and Swift. C# is known for callers keeping an old default
   after a library changes it. In Truss, changing a default compiles only the
@@ -501,6 +520,16 @@ two variables never refer to the same changeable data.
   one field from a record would mean copying it or giving up the whole
   record. The check stays inside one function, like every other check on
   modes and views.
+- **Recursive types say where they allocate.** A `Tree` whose `Node` holds
+  two `Tree`s would be infinitely large if held in place, so such a variant
+  is marked `indirect` and keeps its fields on the heap, in one allocation,
+  as with Swift's `indirect`. Building one costs one allocation, which cost
+  clauses count. Changing it in place or moving parts out allocates nothing.
+  Rust says the same thing with `Box`, which every pattern then has to reach
+  through. Swift's mark keeps patterns unchanged. A cycle of types with no
+  `indirect` variant, and not through a collection, is a compile error whose
+  fix adds the mark, so the allocation is written where the type is
+  declared.
 - **Implicit copies never allocate.** A type made only of fixed-size data
   with nothing on the heap (integers, floats, `Bool`, and records or sum types
   built only from those) copies implicitly, because copying it is a plain
@@ -549,8 +578,18 @@ views are *second-class*, as in Hylo:
   a parameter of the view type.
 
 String literals are `String`s in static memory. Creating one costs nothing,
-and the first change that needs more room copies it to the heap. Methods such
-as `push` may allocate anyway, so cost clauses already account for that copy.
+and the first change copies it to the heap. Only methods that write bytes,
+such as `push`, can change a `String`, since strings cannot be indexed, and
+those may allocate anyway, so cost clauses already account for that copy.
+
+**Constants are read-only places.** Reading a constant or taking a view of
+it costs nothing. An owned value from a constant is made with `copy()`, as
+from any other place, so its allocation is written and counted. Rust's
+`static` works the same way. Swift instead copies on the first write to any
+collection, which would mean every in-place change, such as `items[i] = x`,
+checks for static memory and might allocate. No `cost allocations == 0`
+promise could then be proven for code that changes a collection it was
+given.
 
 ### Yielding methods
 
@@ -583,6 +622,25 @@ elements without returning a stored reference, which would need lifetimes.
 - **`mut` yields cannot be pulled.** A cursor would hold `mut` access between
   pulls, which is a stored mutable reference. Changing two collections in
   lockstep goes through indexes.
+- **A method that yields through recursion can be looped over but not
+  pulled.** A tree's `each` that loops over its subtrees and yields what
+  they yield is ordinary recursion in a `for` loop. A cursor over it would
+  need room for every level of the recursion. C#, Python, and Kotlin
+  allocate that room behind the scenes. Truss reports the `next()` call
+  instead, and a cursor over such a structure is written as a type with an
+  explicit stack, as in Rust and Swift, so its allocations are visible.
+  Whether a method can be pulled is worked out from its body. It is the one
+  fact callers take from a body rather than a signature, and the tools show
+  it with the signature. Early cutoff means a body edit that keeps the
+  method pullable re-checks no callers.
+- **Cursor types have no name, as in Rust and Swift.** A cursor is a state
+  machine the compiler makes from one method, so its type is described by the
+  prelude trait `Cursor`, which hand-written cursors implement too. Code that
+  holds a cursor is generic over it, which costs nothing, or uses
+  `any Cursor`, which allocates once and shows it. Returning a cursor without
+  allocating would need opaque result types, Rust's `impl Trait` and Swift's
+  `some`. They can be added later without breaking code if they are needed;
+  most of what they are used for is a yielding method in Truss.
 - **Compilation needs no coroutines at run time.** A loop or a single `yield`
   compiles to a call that receives the caller's code as a function, which
   inlining makes as cheap as a written-out loop, as in Swift and Hylo. A
@@ -950,6 +1008,18 @@ files.
 
 Floating-point arithmetic follows IEEE 754. NaN and infinity are ordinary
 values, so float operations never fail.
+
+**Float results are the same on every platform.** The operations IEEE 754
+defines exactly, such as `+`, `*`, `sqrt`, and `fma`, compile to hardware
+instructions and are never contracted or reordered. Functions such as `sin`
+and `exp`, and converting floats to and from text, are written in Truss in
+the standard library rather than taken from the platform's C library, whose
+results differ between systems and versions. Java's `StrictMath` and Go's
+`math` package do the same. A cached test result therefore holds on every
+machine, and code run while compiling gives exactly what the compiled program
+gives. `to_bits()` returns one bit pattern for every NaN, as Java's
+`doubleToLongBits` does, because processors disagree about which NaN an
+operation produces.
 
 ## Errors
 
@@ -1419,9 +1489,15 @@ decided. The exact syntax for task groups and channels is not yet:
   code.
 - **Literal allocation is counted.** A non-empty list or map literal in a
   function body counts as one allocation in `cost` clauses, and an empty one
-  as none. The compiler may keep such literals in static memory, but cost
-  clauses don't depend on that. Constants and defaults are different: they
-  always live in static memory, so reading one costs nothing.
+  as none. The compiler may keep a literal that is only read in static
+  memory, but cost clauses don't depend on that. Constants are different:
+  they always live in static memory, so reading one costs nothing.
+- **Constant collections are built while compiling.** The compiler builds a
+  `Map` or `Set` constant by running the standard library's own insertion
+  code while compiling, so its table is ready in static memory and lookups
+  cost what they always cost. Hashing has no random key, so the table comes
+  out the same on every build. Constants are read-only places, so the table
+  is only ever read; an owned, changeable copy is made with `copy()`.
 - **Duplicate keys in a map literal are a proof obligation.** Letting the last
   one win would silently hide a mistake.
 - **`Map` and `Set` iterate in insertion order,** like Python's `dict` and
@@ -1606,9 +1682,10 @@ from another module.
 **Malformed literal text is a compile error.** A tag states what valid text
 looks like with `requires`, such as `is_valid_pattern(template.literals)`. The
 literal text is a constant, so the compiler proves the clause by running the
-check on it. This is possible because functions used in specifications are pure
-and must terminate. The check runs with the same step limits and caching as
-other proofs. This gives:
+check on it, as compiled code, the way a test runs. This is possible because
+functions used in specifications are pure and must terminate, so a check
+always finishes and needs no step limit. Each result is cached by the check
+and the literal text. This gives:
 
 - **Mistakes found at build time.** `Regex"[a-z"` fails with the tag's own
   error message, instead of failing in production.

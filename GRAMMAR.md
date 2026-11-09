@@ -98,7 +98,7 @@ Reserved everywhere:
 
 ```text
 any assert break capability continue cost decreases derives echo else ensures
-exists false fn for forall if impl in internal invariant is law let match mut
+exists false fn for forall if impl in indirect internal invariant is law let match mut
 opaque own parallel proof provide public requires return self Self test
 theorem todo trait true type unreachable use uses var while with yield yields
 ```
@@ -259,7 +259,7 @@ so it needs no entry.
 Every other token continues the line before it: `.`, `,`, `:`, `::`, `)`,
 `]`, `}`, `?`, `|`, `=>`, `->`, `=` and the compound assignments, the binary
 operators other than `-`, `..`, `..=`, and the keywords `cost`, `decreases`,
-`derives`, `else`, `ensures`, `in`, `invariant`, `is`, `opaque`, `requires`,
+`derives`, `else`, `ensures`, `in`, `indirect`, `invariant`, `is`, `opaque`, `requires`,
 `uses`, `with`, and `yields`. So no `NEWLINE` ever comes before a closing `}`,
 and statements, `match` arms, and members are separated by `NEWLINE`s, not
 ended by them.
@@ -342,7 +342,7 @@ type_definition = "type" UPPER_NAME [ generics ]
 fields          = "(" list(field) ")" ;
 field           = LOWER_NAME ":" type [ "=" expression ] ;
 variants        = [ "|" ] variant { "|" variant } ;
-variant         = UPPER_NAME [ fields ] ;
+variant         = [ "indirect" ] UPPER_NAME [ fields ] ;
 type_clause     = "invariant" expression
                 | "derives" path_type { "," path_type }
                 | "cost" "potential" expression ;
@@ -353,6 +353,9 @@ type_clause     = "invariant" expression
   the type fits on one line, and otherwise puts each variant on its own line
   starting with `|`.
 - A record's field order is significant only for a derived `Ordered`.
+- `indirect` stores a variant's fields on the heap. Every cycle of types that
+  contain each other, other than through a collection, must pass through an
+  `indirect` variant; type checking reports a cycle that does not.
 
 ```ebnf
 type        = path_type
@@ -375,8 +378,8 @@ function_type_clause = "uses" capability_list | "cost" cost ;
 - An `INTEGER` or `LOWER_NAME` argument is the value of a `USize` generic
   parameter, as in `Array[UInt8, 32]` or `Array[Int64, count]`. It cannot be
   an expression.
-- `UPPER_NAME "=" type` constrains an associated type in a bound, as in
-  `Iterable[Element = Int64]`.
+- `UPPER_NAME "=" type` constrains an associated type in a bound or after
+  `any`, as in `Iterable[Element = Int64]` or `any Cursor[Element = Int64]`.
 - A function type with clauses must be in parentheses. The clauses of a
   function type cannot mention parameters.
 
