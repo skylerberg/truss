@@ -259,19 +259,25 @@ parser keeps:
   habit's diagnostic.
 
 **A part is broken only when its tree differs from its source.** The unit is
-one signature, one body, or one type's fields or variants, whether of a
-definition or of a member. A part is broken when the parser changed or left
-out anything in it: an `Error` node, a node built for a habit, or a closer
-the lexer inserted. The parser records this on each part. A parser
+one signature, one body, or one type's definition, whether of a definition or
+of a member. The parser lists, on each definition, the spans where it built a
+tree that is not the source as written: where it built an `Error` node or a
+node for a habit, or consumed a closer the lexer inserted. A part is broken
+when one of its definition's recovered spans lies in the part's span: a
+signature runs from the definition's or member's start to its body's start,
+a body is its block, a member is its line, and a type is its definition.
+Spans are half-open, so a zero-width recovered span at the boundary between
+two parts, such as a missing body at the end of a signature, lies in the part
+that starts there. A parser
 diagnostic that only enforces a rule on code it read exactly as written,
 such as a misplaced `assert`, `yield`, `break`, or `echo`, `forall` outside a
 specification, a parameter named `result`, `lends own`, a repeated clause,
 or a misplaced `public` or `opaque`, does not make its part broken. Such a
 part is checked as usual, since checking it cannot report on invented code,
 and an agent then sees its type errors in the same build as the parser's.
-The parser decides this from its own work, not the type checker from a list
-of diagnostic codes, so a new kind of parser diagnostic cannot be
-misclassified.
+The parser decides which of its diagnostics are recoveries, in one
+exhaustive match over its codes, so a new kind of diagnostic cannot compile
+until it is put on one side, and the type checker never classifies codes.
 
 The type checker uses that as follows:
 
