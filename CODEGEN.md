@@ -613,7 +613,10 @@ and its siblings. Full-width multiplication, used by hashing and
   `"${x}"` and `echo x` agree.
 - **Other tags build a `Template`** with the literal text as constant data,
   which costs nothing, and the parts in a list that the tag usually keeps,
-  as `SqlQuery` does.
+  as `SqlQuery` does. Each part becomes the tag's `Part` through the `From`
+  the type checker chose. Stage0 allocates the list of `Literal`s too,
+  each a view of static bytes; making that list static data is left for
+  later.
 - **A template without interpolation is a constant.** Its value is computed
   while compiling and placed in static memory. `Character"a"` and
   `UInt8"\n"` are plain numbers. A `Regex"[a-z]+"` that is only read is used

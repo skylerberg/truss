@@ -2222,6 +2222,31 @@ test "characters" {
   assert kind(Character"é") == 0
 }
 |};
+  passes "a tagged string gives its tag a template of its text and parts"
+    {|type Sum(pieces: USize, total: Int64)
+
+impl FromTemplate for Sum {
+  type Part = Int64
+
+  fn from_template(template: Template[Int64]) -> Sum {
+    var total = 0
+    for part in template.parts {
+      total += part
+    }
+    Sum(pieces: template.literals.length(), total: total)
+  }
+}
+
+test "templates" {
+  let small: Int8 = 2
+  let large: Int64 = 40
+  let sum = Sum"a ${small} b ${large} c"
+  assert sum.pieces == 3
+  assert sum.total == 42
+  let plain = Sum"none"
+  assert plain.pieces == 1 && plain.total == 0
+}
+|};
   passes "names an is test binds are used where it holds"
     {|fn describe(found: Option[String], limit: USize) -> String {
   if found is Some(text) && text.length() > limit {

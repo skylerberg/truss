@@ -1152,7 +1152,11 @@ and into st (e : S.expression) (destination : Lir.place) =
   | List elements -> list_into st (ty ()) elements destination ~span:e.span
   | Try inner -> try_ st inner destination
   | String literal when literal.tag = None -> interpolate st literal destination
-  | String _ -> bug "tagged strings are not lowered yet"
+  | String literal -> (
+      match st.frame.code.checked.templates.(literal.id) with
+      | Some template when template.from_template <> None ->
+          template_into st literal template destination ~span:e.span
+      | _ -> bug "a tagged string with no template")
   | With (base, updates) -> with_ st base updates destination
   | Lambda { parameters; body } -> lambda st e ~parameters ~body destination
   | Bracket _ -> (
@@ -1204,26 +1208,96 @@ and list_into st ty (elements : S.expression list) destination ~span =
           List.iteri
             (fun i (e : S.expression) -> into st e (destination / Index (usize i)))
             elements
-      | Record [ (field, Typed storage) ] -> (
-          match Monomorphic.kind st.context.monomorphic storage with
-          | Storage element ->
-              let storage_place = destination / Field field in
-              let lower operation arguments destination =
-                ignore
-                  (Intrinsics.lower st.context.env st.b st.context.types operation
-                     ~type_arguments:[ element ] arguments ~destination ~site:(site st span))
-              in
-              lower Storage_with_capacity
-                [ Value (usize (List.length elements)) ]
-                (Some storage_place);
-              List.iter
-                (fun (e : S.expression) ->
-                  let value = new_local st element in
-                  into st e value;
-                  lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
-                elements
-          | _ -> bug "a list literal of %s" (Ground.to_string ty))
+      | Record [ (_, Typed _) ] ->
+          list_of st ty destination ~span
+            (List.map (fun (e : S.expression) value -> into st e value) elements)
       | _ -> bug "a list literal of %s, which is not lowered yet" (Ground.to_string ty))
+
+(* A [List] in [destination], with storage of exactly its length, holding
+   what each fill writes to the element's place it is given. *)
+and list_of st ty destination ~span fills =
+  match Monomorphic.shape st.context.monomorphic ty with
+  | Record [ (field, Typed storage) ] -> (
+      match Monomorphic.kind st.context.monomorphic storage with
+      | Storage element ->
+          let storage_place = destination / Field field in
+          let lower operation arguments destination =
+            ignore
+              (Intrinsics.lower st.context.env st.b st.context.types operation
+                 ~type_arguments:[ element ] arguments ~destination ~site:(site st span))
+          in
+          lower Storage_with_capacity [ Value (usize (List.length fills)) ] (Some storage_place);
+          List.iter
+            (fun fill ->
+              let value = new_local st element in
+              fill value;
+              lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
+            fills
+      | _ -> bug "a list of %s" (Ground.to_string ty))
+  | _ -> bug "%s is not a list" (Ground.to_string ty)
+
+(* A tagged string, such as [Sql"..."]: a [Template] of its literal text,
+   each piece a [Literal] of static bytes, and its parts, each made the
+   tag's [Part] through its [From], given to the tag's [from_template]. *)
+and template_into st (literal : S.string_literal) (template : C.template) destination ~span =
+  let call_ =
+    match template.from_template with Some c -> c | None -> bug "a tag with no from_template"
+  in
+  let path, type_arguments =
+    match resolve_callee st call_ with Some r -> r | None -> bug "a from_template not resolved"
+  in
+  let signature = signature_of st.context path in
+  let substitution = bind signature.generics type_arguments in
+  let mode, template_ty =
+    match interface_parameters signature with
+    | [ (mode, ty) ] -> (mode, Monomorphic.ground st.context.monomorphic substitution ty)
+    | _ -> bug "from_template takes one template"
+  in
+  let field_type ty name =
+    match Monomorphic.shape st.context.monomorphic ty with
+    | Record fields -> (
+        match List.assoc_opt name fields with
+        | Some (Memory_layout.Typed ty) -> ty
+        | _ -> bug "%s has no field %s" (Ground.to_string ty) name)
+    | _ -> bug "%s is not a record" (Ground.to_string ty)
+  in
+  let element list_ty =
+    match Monomorphic.shape st.context.monomorphic list_ty with
+    | Record [ (_, Typed storage) ] -> (
+        match Monomorphic.kind st.context.monomorphic storage with
+        | Storage element -> element
+        | _ -> bug "%s is not a list" (Ground.to_string list_ty))
+    | _ -> bug "%s is not a list" (Ground.to_string list_ty)
+  in
+  let literals_ty = field_type template_ty "literals" in
+  let parts_ty = field_type template_ty "parts" in
+  let literal_ty = element literals_ty in
+  let slice_ty = field_type literal_ty "text" in
+  let texts =
+    literal.first.value :: List.map (fun (_, (text : S.text)) -> text.value) literal.rest
+  in
+  let built = temporary st template_ty in
+  list_of st literals_ty (built / Field "literals") ~span
+    (List.map
+       (fun text value ->
+         let slice = string_place st slice_ty text in
+         emit st.b
+           (Assign
+              (value, Build { ty = literal_ty; variant = None; fields = [ ("text", Copy slice) ] })))
+       texts);
+  list_of st parts_ty (built / Field "parts") ~span
+    (List.map2
+       (fun ((part : S.expression), _) conversion value ->
+         match conversion with
+         | Some (call_ : C.call) ->
+             call_with st call_ ~expressions:[ part ] ~arguments:call_.arguments value ~span
+         | None -> into st part value)
+       literal.rest template.part_conversions);
+  call_instance st
+    (Code { path; type_arguments })
+    ~signature ~substitution
+    ~arguments:[ (mode, template_ty, built) ]
+    ~mask:0 ~destination
 
 (* A [Set] or [Map] literal: the collection made empty, then each item
    inserted with the type's own [insert], which keeps it in order and keeps
