@@ -101,8 +101,19 @@ let snapshot ~directory =
             run ~environment ~directory [ "write-tree" ] )
         with
         | Some _, Some _, Some tree ->
+            (* A snapshot is the database's own, so it names its own author
+               rather than needing the user's to be set. *)
+            let author =
+              [
+                ("GIT_AUTHOR_NAME", "truss");
+                ("GIT_AUTHOR_EMAIL", "truss@localhost");
+                ("GIT_COMMITTER_NAME", "truss");
+                ("GIT_COMMITTER_EMAIL", "truss@localhost");
+              ]
+            in
             Option.map trim
-              (run ~directory [ "commit-tree"; trim tree; "-p"; head; "-m"; "truss snapshot" ])
+              (run ~environment:author ~directory
+                 [ "commit-tree"; trim tree; "-p"; head; "-m"; "truss snapshot" ])
         | _ -> None)
   in
   (try Sys.remove index with Sys_error _ -> ());
