@@ -37,8 +37,9 @@ commands that use them say what they will do.
 - **The same answer every time.** A command's output depends only on the
   code, the toolchain, and, for `run` and external tests, the world. It does
   not depend on whether a background process was running, what was cached,
-  or how many cores the machine has, apart from saying which test results
-  came from the cache.
+  or how many cores the machine has. The exceptions are the facts that
+  describe the run itself: which test results came from the cache, and how
+  long things took.
 
 ## Commands
 
@@ -149,7 +150,7 @@ diagnostics whose fixes were applied.
 ## Testing
 
 ```text
-truss test [--match TEXT] [--all] [--rerun] [--json] [FILE_OR_DIRECTORY...]
+truss test [--match TEXT] [--timings] [--rerun] [--json] [FILE_OR_DIRECTORY...]
 ```
 
 `truss test` checks the package, stopping at any diagnostic, and then runs
@@ -163,10 +164,23 @@ whose result is kept is not built or run again. External tests, those with
   them, and `--match TEXT` to the tests whose name contains the text. There
   is no way to skip external tests: DESIGN.md has them run every time the
   suite runs.
+- **Progress.** While the tests build and run, a status line on standard
+  error, redrawn as each test ends, shows how far the run has got, what has
+  not passed so far, and the test that has been running longest, as Bazel's
+  and nextest's do:
+
+  ```text
+  [ 97/143] 1 failed · 0.6s · running weather::parse "reads hourly rows" (0.4s)
+  ```
+
+  Before the tests run it shows the build instead, as instances compiled out
+  of those to compile. The line is drawn only when standard error is a
+  terminal and is erased when the run ends, so logs and CI output hold only
+  the report. It is never on standard output, and never with `--json`.
 - **The report** lists every test that did not pass, with its outcome, its
   message, and its `echo` output indented under it, in the order of the
-  tests, and then a count of each outcome and how many passes came from the
-  cache:
+  tests, and then a count of each outcome, how many passes came from the
+  cache, and how long the run took:
 
   ```text
   weather::forecast "rain chance is a percentage": failed
@@ -174,30 +188,47 @@ whose result is kept is not built or run again. External tests, those with
   weather::parse "reads hourly rows": incomplete
       todo at parse.truss:18:15
 
-  141 passed (139 cached), 1 failed, 1 incomplete
+  141 passed (139 cached), 1 failed, 1 incomplete in 1.4s (check 0.1s, build 0.9s, tests 0.4s)
   ```
 
   Passing tests are left out, as `go test` leaves them out, because after a
   small edit nearly every test passes from the cache, and a list of them
-  hides the few lines that matter. **`--all`** lists every test.
+  hides the few lines that matter. The report is in the order of the tests,
+  never in the order they ended, so two runs of the same code give the same
+  report apart from durations.
+- **`--timings`** lists every selected test, passing or not, with how long
+  it took, slowest first, after the report. A cached test shows the
+  duration of the run that kept its result, marked `cached`, so the list
+  says what the whole suite costs and not only what ran this time:
+
+  ```text
+   2.31s  weather::forecast "a year of hourly data"
+   0.42s  weather::parse "reads hourly rows"
+   0.08s  weather::render "renders an empty report"  cached
+  ```
+
+  A duration is the test's time in its worker, from being handed the test to
+  its end, which leaves out the build and the wait for a free worker.
 - **Outcomes** are those of the test program: `passed`, `failed`,
-  `panicked`, `incomplete`, `timed_out`, and `crashed`. **`incomplete`
-  does not fail the run:** a test that reaches a `todo` is reported, and the
-  exit status is 0 if every other test passed. DESIGN.md has tests written
-  before the code they test, and a suite that went red each time someone did
-  that would teach people to ignore it. What keeps unfinished code from
-  shipping is `truss build`.
+  `panicked`, `incomplete`, `timed_out`, and `crashed`. **Every outcome but
+  `passed` fails the run,** with exit status 1. A test written before the
+  code it tests, as DESIGN.md allows, turns the suite red until that code is
+  written, which is the red and green of test-first development. `incomplete`
+  stays its own outcome, so the report says which tests wait on a `todo` and
+  which are wrong, and `truss holes` lists what each `todo` blocks.
 - **`--rerun`** runs every selected test, using no kept results and keeping
   new ones, as `go test -count=1` does. Results are deterministic, so this
-  is only for doubting the cache: after a suspected compiler bug, or to time
-  the suite.
+  is only for doubting the cache, after a suspected compiler bug, or for
+  timing every test on this machine now.
 - **The time limit** for each test is the project's, set in the manifest as
   `[test] time_limit = 10`, in seconds, with 10 as the default. It is not a
   flag, so that every machine and CI run uses the same limit. The manifest
   reader does not read it yet, and the limit is fixed at 10 seconds.
-- **The JSON document** is `{"format", "diagnostics", "tests"}`, where each
-  test is `{"module", "name", "file", "line", "outcome", "cached",
-  "message", "echo"}`, for every selected test, passing or not.
+- **The JSON document** is `{"format", "diagnostics", "tests", "timings"}`,
+  where each test is `{"module", "name", "file", "line", "outcome",
+  "cached", "milliseconds", "message", "echo"}`, for every selected test,
+  passing or not, and `"timings"` gives the milliseconds of the check, the
+  build, the tests, and the whole run.
 
 ## Running and building
 
@@ -451,6 +482,12 @@ These are left out of `truss --help` and listed by `truss debug --help`:
   reading the manifest and the modules, and loading the standard library,
   which `truss.ml` and `truss_check.ml` each do on their own now. Another
   writes diagnostics for people or as JSON, with each one's file.
+- **The test program reports each test as it ends,** with its duration, as
+  CODEGEN.md's "The test program" describes, and `Compile.run_tests` reads
+  those records while the program runs rather than its whole output at the
+  end, handing each one to `truss test` for the status line. The program
+  and the parser of its report change together, and kept results gain the
+  duration.
 - **Each command is its own module** in `stage0/bin`, built into the one
   `truss` executable, and `truss_check.ml`, `truss_lex.ml`, and
   `truss_parse.ml` are removed.

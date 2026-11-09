@@ -1077,11 +1077,17 @@ Truss has no garbage collector and no way to leak a value on purpose, so a
 leak is a bug in code generation, most likely in drop elaboration. Every
 test that compiles Truss is therefore also a check of its drops.
 
-Results are printed in the order of the tests, however the tests were spread
-over workers, each as `test N outcome`, where the outcome is `passed`,
-`failed`, `panicked`, `incomplete`, `timed_out`, or `crashed`, followed by
-an optional `message` block and an optional `echo` block, each giving its
-length in bytes and then its bytes.
+The runner writes each test's result as soon as the test ends, so that
+`truss test` can show progress, as `test N outcome microseconds`, where `N`
+is the test's number in the table, the outcome is `passed`, `failed`,
+`panicked`, `incomplete`, `timed_out`, or `crashed`, and the duration is the
+time from handing the test to a worker to its end, followed by an optional
+`message` block and an optional `echo` block, each giving its length in
+bytes and then its bytes. Results therefore come in the order tests end,
+which depends on the workers, and `truss test` puts them back in the order
+of the tests for its report. Stage0's runner does not do this yet: it
+writes every result at the end, in the order of the tests, with no
+duration.
 
 ### Test results
 
@@ -1104,7 +1110,8 @@ every instance that uses the layout, so it changes the key too.
 
 `truss test` keeps results in `~/.cache/truss/results`, one file per key,
 and builds and runs only the tests without one. Stage0 keeps only a pass
-with nothing to show. A failure's message and an `echo` give positions,
+with nothing to show, and the file holds the duration of the run that kept
+it, which `truss test --timings` shows for a cached test. A failure's message and an `echo` give positions,
 which the key leaves out so that moving code keeps its results, so those
 tests run again, as do tests that ran out of time or crashed, which the
 machine may have caused. A sanitized run keeps nothing.
