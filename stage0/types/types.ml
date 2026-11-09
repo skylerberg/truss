@@ -130,6 +130,37 @@ and substitute_function substitution (function_type : function_type) =
     costs = function_type.costs;
   }
 
+let rec map f type_ =
+  match f type_ with
+  | Some replacement -> replacement
+  | None -> (
+      let argument = function Type type_ -> Type (map f type_) | value -> value in
+      let trait (reference : trait_reference) =
+        {
+          reference with
+          trait_arguments = List.map argument reference.trait_arguments;
+          associated = List.map (fun (name, type_) -> (name, map f type_)) reference.associated;
+        }
+      in
+      match type_ with
+      | Named { path; arguments } -> Named { path; arguments = List.map argument arguments }
+      | Projection { base; trait = reference; name } ->
+          Projection { base = map f base; trait = trait reference; name }
+      | Function function_type ->
+          Function
+            {
+              function_type with
+              inputs = List.map (fun (mode, type_) -> (mode, map f type_)) function_type.inputs;
+              output =
+                (match function_type.output with
+                | Returns type_ -> Returns (map f type_)
+                | Yields (mode, type_) -> Yields (mode, map f type_)
+                | Lends (mode, type_) -> Lends (mode, map f type_));
+            }
+      | Any reference -> Any (trait reference)
+      | Cursor { method_; arguments } -> Cursor { method_; arguments = List.map argument arguments }
+      | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error -> type_)
+
 let equal left right = left = right
 
 let rec contains_unsolved = function

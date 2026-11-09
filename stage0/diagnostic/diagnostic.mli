@@ -99,6 +99,9 @@ module Code : sig
     | Null
 
   type types =
+    | Implements_built_in
+    | Not_derivable
+    | Wrong_receiver
     | Not_a_type
     | Not_a_trait
     | Not_a_capability

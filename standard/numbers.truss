@@ -1902,6 +1902,20 @@ impl Negate for Float32 {
   }
 }
 
+impl Hash for Float32 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(intrinsic::to_bits[Float32, UInt32](self)))
+  }
+}
+
+public fn Float32.ieee_equal(self, other: Float32) -> Bool {
+  intrinsic::ieee_equal(self, other)
+}
+
+public fn Float32.ieee_less(self, other: Float32) -> Bool {
+  intrinsic::ieee_less(self, other)
+}
+
 public fn Float32.is_nan(self) -> Bool {
   intrinsic::is_nan(self)
 }
@@ -1986,6 +2000,20 @@ impl Negate for Float64 {
   fn negate(self) -> Float64 {
     intrinsic::negate(self)
   }
+}
+
+impl Hash for Float64 {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write(intrinsic::convert(intrinsic::to_bits[Float64, UInt64](self)))
+  }
+}
+
+public fn Float64.ieee_equal(self, other: Float64) -> Bool {
+  intrinsic::ieee_equal(self, other)
+}
+
+public fn Float64.ieee_less(self, other: Float64) -> Bool {
+  intrinsic::ieee_less(self, other)
 }
 
 public fn Float64.is_nan(self) -> Bool {

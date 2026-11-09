@@ -199,7 +199,6 @@ let () =
             \  uses Random\n\
              {\n\
             \  fn now(self) -> Instant { todo }\n\
-            \  fn sleep(self, duration: Duration) {}\n\
              }\n" );
         ]);
   test "traits cannot require each other in a cycle" (fun () ->
@@ -342,5 +341,177 @@ let () =
       Query.clear_log database;
       ignore (Query.demand database asker ());
       if List.mem "asker()" (Query.executed database) then fail "asked again")
+
+(* What the review of interfaces found *)
+
+let () =
+  test "a type that contains itself with growing arguments does not hang" (fun () ->
+      let database =
+        setup
+          [
+            ( "app::main",
+              "type Nested[Element] =\n\
+              \  | Leaf(value: Element)\n\
+              \  | indirect Node(inner: Nested[List[Element]])\n" );
+          ]
+      in
+      ignore
+        (Interface.Properties.copyable database
+           ~bounds:(fun _ -> [])
+           (Types.named (app "Nested") [ int64 ])));
+  test "an impl's method may have the trait method's own generic parameters" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "trait Mapper {\n\
+            \  fn apply[Output](self, value: Output) -> Output\n\
+             }\n\n\
+             type Point(x: Int64)\n\n\
+             impl Mapper for Point {\n\
+            \  fn apply[Output](self, value: Output) -> Output { todo }\n\
+             }\n" );
+        ]);
+  test "associated types inside function types are substituted in an impl" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "trait Visits {\n\
+            \  type Element\n\
+            \  fn visit(self, each: fn(Self.Element) -> Bool)\n\
+             }\n\n\
+             type Bag(count: Int64)\n\n\
+             impl Visits for Bag {\n\
+            \  type Element = Int64\n\
+            \  fn visit(self, each: fn(Int64) -> Bool) {}\n\
+             }\n" );
+        ]);
+  test "an associated type of a required trait is checked in an impl" (fun () ->
+      one_diagnostic
+        "trait Base {\n\
+        \  type Key\n\
+         }\n\n\
+         trait Sub: Base {\n\
+        \  fn get(self) -> Self.Key\n\
+         }\n\n\
+         type P(x: Int64)\n\n\
+         impl Base for P {\n\
+        \  type Key = Int64\n\
+         }\n\n\
+         impl Sub for P {\n\
+        \  fn get(self) -> String { todo }\n\
+         }\n"
+        "types.signature_mismatch");
+  test "an impl's associated type must meet the trait's bound on it" (fun () ->
+      one_diagnostic
+        "trait Keyed {\n\
+        \  type Key: Hash\n\
+         }\n\n\
+         type Opaque(x: Int64)\n\n\
+         type P(x: Int64)\n\n\
+         impl Keyed for P {\n\
+        \  type Key = Opaque\n\
+         }\n"
+        "types.unsatisfied_bound");
+  test "an associated type's declared bound holds where it is used" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "trait Keyed {\n  type Key: Hash + Ordered\n  fn keys(self) -> Set[Self.Key]\n}\n" );
+        ]);
+  test "Self in what a trait requires stands for the bounded type" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "trait Summable: Add[Self] {}\n\n\
+             type Needs[Value: Add[Value]](value: Value)\n\n\
+             fn f[Item: Summable](items: Needs[Item]) {}\n" );
+        ]);
+  test "a trait whose header did not parse satisfies every bound that names it" (fun () ->
+      let database =
+        setup
+          [
+            ( "app::main",
+              "trait Shape[ {\n\
+               }\n\n\
+               type Holder[Value: Shape](value: Value)\n\n\
+               type P(x: Int64)\n\n\
+               fn f(holder: Holder[P]) {}\n" );
+          ]
+      in
+      match Interface.diagnostics database (module_of "app::main") with
+      | [] -> ()
+      | found -> fail "found [%s]" (String.concat "; " (codes found)));
+  test "an opaque generic type is Copyable by its declaration and its arguments" (fun () ->
+      let database =
+        setup [ ("app::main", "public opaque type Box[Value](inner: Value)\n  derives Copyable\n") ]
+      in
+      if
+        not
+          (Interface.Properties.copyable database
+             ~bounds:(fun _ -> [])
+             (Types.named (app "Box") [ int64 ]))
+      then fail "not Copyable");
+  test "only some traits can be derived" (fun () ->
+      one_diagnostic "type P()\n  derives Iterable\n" "types.not_derivable");
+  test "a capability's impl must give every method" (fun () ->
+      one_diagnostic
+        "capability Log {\n\
+        \  fn write(text: StringSlice)\n\
+        \  fn flush()\n\
+         }\n\n\
+         type Silent()\n\n\
+         impl Log for Silent {\n\
+        \  fn write(self, text: StringSlice) {}\n\
+         }\n"
+        "types.missing_member");
+  test "a capability's impl takes self or mut self" (fun () ->
+      one_diagnostic
+        "type Fixed()\n\nimpl Clock for Fixed {\n  fn now(own self) -> Instant { todo }\n}\n"
+        "types.wrong_receiver");
+  test "a method's head names every generic parameter of its type" (fun () ->
+      one_diagnostic "type Box[Value](value: Value)\n\nfn Box.get(self) -> Int64 { todo }\n"
+        "types.arity");
+  test "a type argument must be of its parameter's kind" (fun () ->
+      one_diagnostic "fn f(items: List[3]) {}\n" "types.arity");
+  test "a constant in a type argument must have a value" (fun () ->
+      let database =
+        setup
+          [
+            ( "app::main",
+              "let first: USize = second\n\n\
+               let second: USize = first\n\n\
+               fn f(values: Array[Int64, first]) {}\n" );
+          ]
+      in
+      if
+        not
+          (List.mem "types.arity" (codes (Interface.diagnostics database (module_of "app::main"))))
+      then fail "accepted");
+  test "any must fix every associated type" (fun () ->
+      one_diagnostic "fn f(items: any Iterable) {}\n" "types.associated_type_not_fixed");
+  test "nothing can implement Copyable" (fun () ->
+      one_diagnostic "type P(x: Int64)\n\nimpl Copyable for P {\n  fn copy(self) -> P { todo }\n}\n"
+        "types.implements_built_in");
+  test "a public constant cannot have a private type" (fun () ->
+      one_diagnostic "type Secret(code: Int64)\n\npublic let secret: Secret = Secret(code: 1)\n"
+        "types.private_in_public");
+  test "uses names a capability parameter, not a type parameter" (fun () ->
+      one_diagnostic "fn f[Value](value: Value)\n  uses Value\n{\n}\n" "types.not_a_capability");
+  test "Never implements no trait" (fun () ->
+      let database = setup [] in
+      if
+        Option.is_some
+          (Interface.Impls.implements database ~bounds:(fun _ -> []) Types.Never (trait "Hash" []))
+      then fail "it does");
+  test "an any value implements its trait only with the same arguments" (fun () ->
+      let database = setup [] in
+      let any = Types.Any (trait "From" [ int64 ]) in
+      if
+        Option.is_some
+          (Interface.Impls.implements database
+             ~bounds:(fun _ -> [])
+             any
+             (trait "From" [ Types.builtin Int32 ]))
+      then fail "it does")
 
 let () = finish ()

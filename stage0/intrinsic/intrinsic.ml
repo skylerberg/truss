@@ -90,6 +90,8 @@ type operation =
   | Multiply_overflows
   | Equal
   | Less
+  | Ieee_equal
+  | Ieee_less
   | Bit_and
   | Bit_or
   | Bit_xor
@@ -145,6 +147,8 @@ let operations =
     Multiply_overflows;
     Equal;
     Less;
+    Ieee_equal;
+    Ieee_less;
     Bit_and;
     Bit_or;
     Bit_xor;
@@ -200,6 +204,8 @@ let operation_name = function
   | Multiply_overflows -> "multiply_overflows"
   | Equal -> "equal"
   | Less -> "less"
+  | Ieee_equal -> "ieee_equal"
+  | Ieee_less -> "ieee_less"
   | Bit_and -> "bit_and"
   | Bit_or -> "bit_or"
   | Bit_xor -> "bit_xor"

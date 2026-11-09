@@ -33,6 +33,14 @@ let head_type context owner (head : type_head) =
   match Lower.target context head.path.last with
   | Some (Definition type_path) ->
       let generics = Lower.generics context owner head.generics in
+      (match Query.demand context.database Summary.generics_of type_path with
+      | Some expected when List.length expected <> List.length generics ->
+          Lower.report context Arity head.span
+            (Printf.sprintf "`%s` takes %d generic %s, and this head names %d."
+               (Names.spell_path head.path) (List.length expected)
+               (if List.length expected = 1 then "parameter" else "parameters")
+               (List.length generics))
+      | _ -> ());
       let arguments =
         List.map
           (fun (generic : T.generic) ->

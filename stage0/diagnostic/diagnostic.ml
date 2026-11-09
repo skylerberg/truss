@@ -91,6 +91,9 @@ module Code = struct
     | Null
 
   type types =
+    | Implements_built_in
+    | Not_derivable
+    | Wrong_receiver
     | Not_a_type
     | Not_a_trait
     | Not_a_capability
@@ -216,6 +219,9 @@ module Code = struct
 
   let types_name code =
     match code with
+    | Implements_built_in -> "implements_built_in"
+    | Not_derivable -> "not_derivable"
+    | Wrong_receiver -> "wrong_receiver"
     | Not_a_type -> "not_a_type"
     | Not_a_trait -> "not_a_trait"
     | Not_a_capability -> "not_a_capability"
