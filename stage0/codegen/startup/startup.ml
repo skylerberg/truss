@@ -214,6 +214,52 @@ void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usiz
 void t_runtime_free(void *pointer) {
   free(pointer);
 }
+
+/* Gives storage room for at least [minimum] elements, at least doubling it
+   so that pushing is amortized O(1). Storage with capacity 0 owns no
+   buffer: its elements, if any, are static, so they are copied, and the
+   old buffer is never freed. */
+void t_runtime_storage_grow(void **buffer, t_usize length, t_usize *capacity, t_usize size, t_usize alignment,
+                            t_usize minimum) {
+  t_usize wanted = *capacity * 2;
+  if (wanted < minimum) wanted = minimum;
+  if (wanted < 4) wanted = 4;
+  if (size != 0 && wanted > (t_usize)-1 / size) t_out_of_memory();
+  if (*capacity == 0) {
+    void *fresh = t_runtime_allocate(wanted * size, alignment);
+    if (length > 0) memcpy(fresh, *buffer, length * size);
+    *buffer = fresh;
+  } else {
+    *buffer = t_runtime_reallocate(*buffer, *capacity * size, wanted * size, alignment);
+  }
+  *capacity = wanted;
+}
+
+t_isize t_runtime_write(int32_t descriptor, const uint8_t *bytes, t_usize count) {
+  for (;;) {
+    ssize_t written = write(descriptor, bytes, count);
+    if (written < 0 && errno == EINTR) continue;
+    return written;
+  }
+}
+
+t_isize t_runtime_read(int32_t descriptor, uint8_t *bytes, t_usize count) {
+  for (;;) {
+    ssize_t got = read(descriptor, bytes, count);
+    if (got < 0 && errno == EINTR) continue;
+    return got;
+  }
+}
+
+int64_t t_runtime_clock_now(void) {
+  struct timespec now;
+  clock_gettime(CLOCK_REALTIME, &now);
+  return (int64_t)now.tv_sec * 1000000000 + now.tv_nsec;
+}
+
+void t_runtime_random_fill(uint8_t *bytes, t_usize count) {
+  arc4random_buf(bytes, count);
+}
 |}
 
 let runner =
@@ -477,8 +523,8 @@ let runtime (target : Memory_layout.target) =
   String.concat ""
     [
       headers;
-      Printf.sprintf "typedef %s t_usize;\n"
-        (if target.usize_bytes = 8 then "uint64_t" else "uint32_t");
+      (if target.usize_bytes = 8 then "typedef uint64_t t_usize;\ntypedef int64_t t_isize;\n"
+       else "typedef uint32_t t_usize;\ntypedef int32_t t_isize;\n");
       Emit_c.anchor_struct;
       failing;
       allocation;

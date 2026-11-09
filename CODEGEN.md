@@ -59,6 +59,11 @@ checked definitions
 | `Ground` | Ground types: the fully monomorphic types that instances, layouts, and the LIR are written in |
 | `Instance` | Instance keys, their C symbols, and collecting the instances reachable from a root |
 | `Convention` | How each Truss parameter and result becomes C parameters and results, for lowering and the emitter alike |
+| `Monomorphic` | The type checker's types, after substitution, as ground types, and the shape of each ground type |
+| `Lir_builder` | Writing a function's LIR a statement at a time, for lowering, generated functions, and intrinsics |
+| `Intrinsics` | The operations of `standard::intrinsic`, written into the caller's LIR |
+| `Reachable` | The instances a root reaches, and test keys |
+| `Build` | Emitting, compiling through the object cache, and linking |
 | `Memory_layout` | Sizes, alignment, field placement, tags, and niches for every ground type |
 | `Lir` | The lowered IR's types, and printing and hashing it canonically |
 | `Lower` | Checked form to LIR: expressions, patterns, calls, capabilities, defaults |
@@ -771,17 +776,39 @@ no change to the LIR above the statement that starts them.
 
 Only the standard library reaches the operating system. The compiler
 provides a module, `standard::intrinsic`, that exists in no source file,
-like Go's `unsafe` package. Only the `standard` package can import it. Its
-functions are declared by the compiler, with types, `requires`, and cost
-clauses like any other function, and lower to C expressions or libc calls:
+like Go's `unsafe` package. Only the `standard` package can import it. It
+declares the built-in types, including `Storage[Element]` and its read-only
+view `View[Element]`, and the operations the standard library is written
+on. The type checker and code generation both match exhaustively on the one
+list of operations in the `intrinsic` library, so a new one cannot compile
+until both handle it.
 
 | Group | Examples |
 |---|---|
-| Memory | allocate, grow, free, copy and move bytes, compare bytes |
-| Bits | count leading and trailing zeros, count ones, swap bytes, rotate, full-width multiply |
-| Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits` |
-| Overflow | add, subtract, and multiply with overflow detection |
-| Operating system | open, read, write, close, stat, directory listing, sockets, clocks, random bytes, processes, threads, locks |
+| Numbers | arithmetic, wrapping arithmetic, overflow tests, lawful and IEEE comparisons, bit operations, conversions and whether a value fits a type |
+| Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits`, `from_bits` |
+| Storage | empty, with a capacity, length, capacity, reserve, push, pop, insert, remove, swap, lend an element, view |
+| Views | length, lend an element, slice |
+| Operating system | write and read bytes, the clock, random bytes, crash; more come with the standard library's real implementations |
+
+`Intrinsics` writes every operation into the caller's LIR, never as a call:
+numbers as primitive operations, and storage and views as a few statements
+over their fields, so the C compiler sees each whole. The operations that
+lend an element, such as `storage_at`, lend the place `buffer[index]`
+itself. The one exception is growing storage, which calls the runtime's
+grow function, since growing depends on the element type only through its
+size: it at least doubles the capacity, so pushing is amortized O(1).
+
+Storage with capacity 0 and a nonzero length is static, as a string
+literal's is: it owns no buffer, so dropping it frees nothing and copying
+it shares it. Every operation that writes the buffer in place gives such
+storage a buffer of its own first, by growing it, which copies the static
+elements and never frees them. A `String` constant is static in the same
+way. A `List`, `Map`, or `Set` constant has its elements in static memory
+too, but records its capacity as its length, so `copy()` of one really
+copies; a constant is a read-only place, so nothing writes or drops it. The
+standard library never moves a `String`'s storage into another type without
+copying it.
 
 The libc functions used are declared by the compiler for each target, so the
 generated C still includes no headers. Allocation failure ends the process

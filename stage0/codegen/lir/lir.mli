@@ -110,6 +110,14 @@ type intrinsic =
   | Round_even
   | Float_bits  (** A float's bits, with every NaN replaced by one canonical NaN *)
   | Float_from_bits
+  | Grow
+      (** [(buffer pointer's address, length, capacity's address, element size, alignment, minimum)]:
+          gives storage room for at least [minimum] elements. Storage with capacity 0 and a nonzero
+          length is static, and is copied to the heap, never freed. *)
+  | System_write  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
+  | System_read  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
+  | Clock_now  (** [() -> Int64], nanoseconds since the Unix epoch *)
+  | Random_fill  (** [(bytes, count)] *)
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }

@@ -44,69 +44,9 @@ let rec trivial t ty =
       t.trivial_types <- Types.add ty answer t.trivial_types;
       answer
 
-(* A small builder for the LIR of one function. *)
-type builder = {
-  mutable locals : Lir.local_info list;  (** Most recent first *)
-  mutable blocks : Lir.basic_block array;
-  mutable current : int;
-  mutable statements : Lir.statement list;  (** Of the current block, most recent first *)
-}
+open Lir_builder
 
-let builder () = { locals = []; blocks = [||]; current = 0; statements = [] }
-
-let local b ?name ty =
-  b.locals <- { Lir.ty; name } :: b.locals;
-  List.length b.locals - 1
-
-let new_block b =
-  b.blocks <- Array.append b.blocks [| { Lir.statements = []; terminator = Unreachable } |];
-  Array.length b.blocks - 1
-
-let start b block =
-  b.current <- block;
-  b.statements <- []
-
-let emit b statement = b.statements <- statement :: b.statements
-
-let finish b terminator =
-  b.blocks.(b.current) <- { statements = List.rev b.statements; terminator };
-  b.statements <- []
-
-let build b ~parameters ~result : Lir.function_ =
-  {
-    parameters;
-    result;
-    returns = true;
-    locals = Array.of_list (List.rev b.locals);
-    blocks = b.blocks;
-    environment = [];
-  }
-
-let at local : Lir.place = { root = Local local; projections = [] }
-
-let ( / ) (place : Lir.place) projection : Lir.place =
-  { place with projections = place.projections @ [ projection ] }
-
-let usize_constant n = Lir.Constant (Integer (USize, Z.of_int n))
-
-(* A counted loop from 0 to [count], running [body] with the index local. *)
-let loop t b ~count body =
-  let index = local b ~name:"index" (Value t.usize) in
-  let going = local b (Raw Bool) in
-  let test = new_block b in
-  let inside = new_block b in
-  let after = new_block b in
-  emit b (Assign (at index, Use (usize_constant 0)));
-  finish b (Goto test);
-  start b test;
-  emit b (Assign (at going, Binary (Less, Copy (at index), count)));
-  finish b (Switch { value = Copy (at going); cases = [ (Z.one, inside) ]; default = Some after });
-  start b inside;
-  body index;
-  emit b (Assign (at index, Binary (Add, Copy (at index), usize_constant 1)));
-  finish b (Goto test);
-  start b after
-
+let loop t b ~count body = loop b ~usize:t.usize ~count body
 let instance key main : Lir.t = { key; main; nested = [||] }
 
 let variant_shapes t ty =
@@ -121,10 +61,10 @@ let droppable t : Memory_layout.member -> bool = function
   | Raw _ -> false
 
 let drop t ty =
-  let b = builder () in
+  let b = create () in
   let pointer = local b ~name:"value" (Pointer { target = Value ty; writable = true }) in
   let value : Lir.place = { root = Local pointer; projections = [ Deref ] } in
-  start b (new_block b);
+  start b (block b);
   (match t.kind_of ty with
   | Storage element ->
       if not (trivial t element) then
@@ -132,10 +72,9 @@ let drop t ty =
           ~count:(Copy (value / Field "length"))
           (fun index -> emit b (Drop (value / Field "buffer" / Index (Copy (at index)))));
       let owned = local b (Raw Bool) in
-      let free = new_block b in
-      let after = new_block b in
-      emit b
-        (Assign (at owned, Binary (Not_equal, Copy (value / Field "capacity"), usize_constant 0)));
+      let free = block b in
+      let after = block b in
+      emit b (Assign (at owned, Binary (Not_equal, Copy (value / Field "capacity"), usize 0)));
       finish b (Switch { value = Copy (at owned); cases = [ (Z.one, free) ]; default = Some after });
       start b free;
       emit b
@@ -149,26 +88,22 @@ let drop t ty =
         fields
   | Shape (Array (element, count)) ->
       if not (trivial t element) then
-        loop t b ~count:(usize_constant count) (fun index ->
-            emit b (Drop (value / Index (Copy (at index)))))
+        loop t b ~count:(usize count) (fun index -> emit b (Drop (value / Index (Copy (at index)))))
   | Shape (Sum variants) ->
-      let after = new_block b in
+      let after = block b in
       let cases =
         List.filter_map
           (fun (v : Memory_layout.variant_shape) ->
             if v.indirect || List.exists (fun (_, m) -> droppable t m) v.fields then begin
-              let block = new_block b in
-              let saved = (b.current, b.statements) in
-              start b block;
-              List.iter
-                (fun (field, member) ->
-                  if droppable t member then
-                    emit b (Drop (value / Variant_field { variant = v.name; field })))
-                v.fields;
-              if v.indirect then emit b (Free_block { place = value; variant = v.name });
-              finish b (Goto after);
-              b.current <- fst saved;
-              b.statements <- snd saved;
+              let block = block b in
+              aside b block (fun () ->
+                  List.iter
+                    (fun (field, member) ->
+                      if droppable t member then
+                        emit b (Drop (value / Variant_field { variant = v.name; field })))
+                    v.fields;
+                  if v.indirect then emit b (Free_block { place = value; variant = v.name });
+                  finish b (Goto after));
               Some (v.name, block)
             end
             else None)
@@ -225,7 +160,7 @@ let copied_field t b ~source (name, member) =
       (name, Lir.Move (at temporary))
 
 let copy t ty =
-  let b = builder () in
+  let b = create () in
   let convention = Convention.result t.env ty in
   let result_pointer =
     match convention with
@@ -249,7 +184,7 @@ let copy t ty =
     | None, Some local -> at local
     | None, None -> bug "no place for the copy"
   in
-  start b (new_block b);
+  start b (block b);
   (if trivial t ty then emit b (Assign (result, Use (Copy self)))
    else
      match t.kind_of ty with
@@ -257,18 +192,17 @@ let copy t ty =
          let layout = Memory_layout.of_type t.env element in
          let shared = local b (Raw Bool) in
          let empty = local b (Raw Bool) in
-         let share = new_block b in
-         let check = new_block b in
-         let allocate = new_block b in
-         let after = new_block b in
+         let share = block b in
+         let check = block b in
+         let allocate = block b in
+         let after = block b in
          (* Static bytes, an empty buffer, and elements of zero size are
             shared, not copied. *)
-         emit b
-           (Assign (at shared, Binary (Equal, Copy (self / Field "capacity"), usize_constant 0)));
+         emit b (Assign (at shared, Binary (Equal, Copy (self / Field "capacity"), usize 0)));
          finish b
            (Switch { value = Copy (at shared); cases = [ (Z.one, share) ]; default = Some check });
          start b check;
-         emit b (Assign (at empty, Binary (Equal, Copy (self / Field "length"), usize_constant 0)));
+         emit b (Assign (at empty, Binary (Equal, Copy (self / Field "length"), usize 0)));
          finish b
            (Switch
               {
@@ -283,13 +217,12 @@ let copy t ty =
          let bytes = local b (Value t.usize) in
          let buffer = local b ~name:"buffer" (Raw (Pointer (Data element))) in
          emit b
-           (Assign
-              (at bytes, Binary (Multiply, Copy (self / Field "length"), usize_constant layout.size)));
+           (Assign (at bytes, Binary (Multiply, Copy (self / Field "length"), usize layout.size)));
          emit b
            (Call
               {
                 target = Intrinsic Allocate;
-                arguments = [ Copy (at bytes); usize_constant layout.alignment ];
+                arguments = [ Copy (at bytes); usize layout.alignment ];
                 result = Some (at buffer);
               });
          if trivial t element then
@@ -332,31 +265,28 @@ let copy t ty =
          in
          emit b (Assign (result, Build { ty; variant = None; fields }))
      | Shape (Array (element, count)) ->
-         loop t b ~count:(usize_constant count) (fun index ->
+         loop t b ~count:(usize count) (fun index ->
              copy_into t b
                ~destination:(result / Index (Copy (at index)))
                ~source:(self / Index (Copy (at index)))
                element)
      | Shape (Sum _) ->
-         let after = new_block b in
+         let after = block b in
          let cases =
            List.map
              (fun (v : Memory_layout.variant_shape) ->
-               let block = new_block b in
-               let saved = (b.current, b.statements) in
-               start b block;
-               let fields =
-                 List.map
-                   (fun (name, member) ->
-                     copied_field t b
-                       ~source:(self / Variant_field { variant = v.name; field = name })
-                       (name, member))
-                   v.fields
-               in
-               emit b (Assign (result, Build { ty; variant = Some v.name; fields }));
-               finish b (Goto after);
-               b.current <- fst saved;
-               b.statements <- snd saved;
+               let block = block b in
+               aside b block (fun () ->
+                   let fields =
+                     List.map
+                       (fun (name, member) ->
+                         copied_field t b
+                           ~source:(self / Variant_field { variant = v.name; field = name })
+                           (name, member))
+                       v.fields
+                   in
+                   emit b (Assign (result, Build { ty; variant = Some v.name; fields }));
+                   finish b (Goto after));
                (v.name, block))
              (variant_shapes t ty)
          in

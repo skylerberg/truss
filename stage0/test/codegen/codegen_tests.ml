@@ -1437,4 +1437,100 @@ let () =
       if Glue.trivial glue (list int64) then fail "a List is trivial";
       if not (Glue.trivial glue (option int64)) then fail "an Option of an Int64 is not trivial")
 
+(* Intrinsic operations *)
+
+let intrinsic_types : Intrinsics.types =
+  { usize; isize = named "ISize"; string_slice = named "StringSlice" }
+
+(* An [entry] built with the builder: [body] writes its statements and
+   returns the local to exit with. *)
+let built_entry body =
+  let b = Lir_builder.create () in
+  Lir_builder.start b (Lir_builder.block b);
+  let result = body b in
+  Lir_builder.finish b (Return (Some (Copy (Lir_builder.at result))));
+  instance "entry" (Lir_builder.build b ~parameters:[] ~result:(Some (value int32)))
+
+let operate b ?destination ?(type_arguments = [ int32 ]) operation arguments =
+  Intrinsics.lower (shape_env ()) b intrinsic_types operation ~type_arguments arguments ~destination
+    ~site:{ definition = definition "entry"; line = 0; column = 1 }
+
+let () =
+  test "storage grows as it is pushed, and inserts, removes, swaps, and pops in place" (fun () ->
+      let open Lir_builder in
+      let storage_ty = Ground.Named { path = Intrinsic.builtin_path Storage; arguments = [ Type int32 ] } in
+      expect_status 171
+        [
+          built_entry (fun b ->
+              let storage = local b ~name:"storage" (value storage_ty) in
+              let popped = local b (value int32) in
+              let sum = local b (value int32) in
+              ignore (operate b ~destination:(at storage) Storage_empty []);
+              List.iter
+                (fun n ->
+                  ignore (operate b Storage_push [ Place (at storage); Value (constant_int32 n) ]))
+                [ 1; 2; 3; 4; 5 ];
+              ignore
+                (operate b Storage_insert
+                   [ Place (at storage); Value (usize 0); Value (constant_int32 0) ]);
+              ignore
+                (operate b ~destination:(at popped) Storage_remove
+                   [ Place (at storage); Value (usize 2) ]);
+              ignore
+                (operate b Storage_swap [ Place (at storage); Value (usize 0); Value (usize 4) ]);
+              ignore (operate b ~destination:(at popped) Storage_pop [ Place (at storage) ]);
+              let element i weight =
+                match operate b Storage_at [ Place (at storage); Value (usize i) ] with
+                | Some place -> Lir.Binary (Multiply, Copy place, constant_int32 weight)
+                | None -> failwith "storage_at lends nothing"
+              in
+              emit b (Assign (at sum, Use (constant_int32 0)));
+              List.iter
+                (fun (i, weight) ->
+                  let term = local b (value int32) in
+                  emit b (Assign (at term, element i weight));
+                  emit b (Assign (at sum, Binary (Add, Copy (at sum), Copy (at term)))))
+                [ (0, 1); (1, 3); (2, 5); (3, 7) ];
+              let length = local b (value (named "USize")) in
+              ignore (operate b ~destination:(at length) Storage_length [ Place (at storage) ]);
+              let length32 = local b (value int32) in
+              emit b (Assign (at length32, Convert (Copy (at length), Integer Int32)));
+              emit b
+                (Assign (at length32, Binary (Multiply, Copy (at length32), constant_int32 30)));
+              emit b (Assign (at sum, Binary (Add, Copy (at sum), Copy (at length32))));
+              emit b (Assign (at sum, Binary (Add, Copy (at sum), Copy (at popped))));
+              sum);
+        ]);
+  test "pushing onto static storage copies it to the heap first" (fun () ->
+      let open Lir_builder in
+      let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
+      expect_status 197
+        [
+          built_entry (fun b ->
+              let storage = local b (value storage_ty) in
+              emit b
+                (Assign
+                   ( at storage,
+                     Build
+                       {
+                         ty = storage_ty;
+                         variant = None;
+                         fields =
+                           [
+                             ("buffer", Constant (Bytes "abc"));
+                             ("length", usize 3);
+                             ("capacity", usize 0);
+                           ];
+                       } ));
+              ignore
+                (operate b ~type_arguments:[ uint8 ] Storage_push
+                   [ Place (at storage); Value (Constant (Integer (UInt8, Z.of_int 100))) ]);
+              let first = local b (value int32) and last = local b (value int32) in
+              let element i = at storage / Field "buffer" / Index (usize i) in
+              emit b (Assign (at first, Convert (Copy (element 0), Integer Int32)));
+              emit b (Assign (at last, Convert (Copy (element 3), Integer Int32)));
+              emit b (Assign (at first, Binary (Add, Copy (at first), Copy (at last))));
+              first);
+        ])
+
 let () = Harness.finish ()

@@ -62,6 +62,12 @@ let runtime_declarations (target : Memory_layout.target) =
       "void *t_runtime_allocate(t_usize size, t_usize alignment);\n";
       "void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usize alignment);\n";
       "void t_runtime_free(void *pointer);\n";
+      "void t_runtime_storage_grow(void **buffer, t_usize length, t_usize *capacity, t_usize size, \
+       t_usize alignment, t_usize minimum);\n";
+      "t_isize t_runtime_write(int32_t descriptor, const uint8_t *bytes, t_usize count);\n";
+      "t_isize t_runtime_read(int32_t descriptor, uint8_t *bytes, t_usize count);\n";
+      "int64_t t_runtime_clock_now(void);\n";
+      "void t_runtime_random_fill(uint8_t *bytes, t_usize count);\n";
     ]
 
 (* Small functions that generated code calls, each emitted only into the
@@ -473,7 +479,7 @@ and constant_c context _fc : Lir.constant -> string * Lir.ty = function
   | Float64 bits -> (float64_literal context bits, Raw Float64)
   | Bool value -> ((if value then "((uint8_t)1)" else "((uint8_t)0)"), Raw Bool)
   | Character code -> (Printf.sprintf "((uint32_t)0x%xU)" code, Raw Character)
-  | Bytes text -> ("((uint8_t *)" ^ bytes_name context text ^ ")", Raw (Pointer Opaque))
+  | Bytes text -> ("((void *)" ^ bytes_name context text ^ ")", Raw (Pointer Opaque))
   | Null -> ("((void *)0)", Raw (Nullable_pointer Opaque))
 
 (* The scalar a value of a type is, for operators. *)
@@ -789,6 +795,11 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
       Printf.sprintf "%s(%s)"
         (helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
+  | Grow -> Printf.sprintf "t_runtime_storage_grow((void **)%s)" all
+  | System_write -> "t_runtime_write(" ^ all ^ ")"
+  | System_read -> "t_runtime_read(" ^ all ^ ")"
+  | Clock_now -> "t_runtime_clock_now()"
+  | Random_fill -> "t_runtime_random_fill(" ^ all ^ ")"
 
 let call_c context fc (target : Lir.target) arguments =
   let arguments = List.filter_map (operand_c context fc) arguments in

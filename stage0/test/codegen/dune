@@ -24,4 +24,6 @@
   interface
   types
   intrinsic
-  monomorphic))
+  monomorphic
+  lir_builder
+  intrinsics))

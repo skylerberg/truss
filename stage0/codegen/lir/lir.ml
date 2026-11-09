@@ -100,6 +100,14 @@ type intrinsic =
   | Round_even
   | Float_bits  (** A float's bits, with every NaN replaced by one canonical NaN *)
   | Float_from_bits
+  | Grow
+      (** [(buffer pointer's address, length, capacity's address, element size, alignment, minimum)]:
+          gives storage room for at least [minimum] elements. Storage with capacity 0 and a nonzero
+          length is static, and is copied to the heap, never freed. *)
+  | System_write  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
+  | System_read  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
+  | Clock_now  (** [() -> Int64], nanoseconds since the Unix epoch *)
+  | Random_fill  (** [(bytes, count)] *)
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
@@ -516,6 +524,11 @@ let intrinsic_tag = function
   | Round_even -> 21
   | Float_bits -> 22
   | Float_from_bits -> 23
+  | Grow -> 24
+  | System_write -> 25
+  | System_read -> 26
+  | Clock_now -> 27
+  | Random_fill -> 28
 
 let encode_rvalue instance rvalue =
   let operand = encode_operand instance in
@@ -731,6 +744,11 @@ let intrinsic_name = function
   | Round_even -> "round_even"
   | Float_bits -> "float_bits"
   | Float_from_bits -> "float_from_bits"
+  | Grow -> "grow"
+  | System_write -> "system_write"
+  | System_read -> "system_read"
+  | Clock_now -> "clock_now"
+  | Random_fill -> "random_fill"
 
 let rvalue_to_string = function
   | Use operand -> operand_to_string operand
