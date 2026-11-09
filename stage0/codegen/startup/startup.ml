@@ -1,6 +1,9 @@
 let runtime (target : Memory_layout.target) =
   String.concat ""
     [
+      (* Strict C11 hides POSIX functions such as [posix_memalign] and
+         [sigaltstack] in glibc unless they are asked for. *)
+      "#define _DEFAULT_SOURCE\n";
       "#include <stddef.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n";
       "#include <signal.h>\n#include <errno.h>\n#include <unistd.h>\n";
       Printf.sprintf "typedef %s t_usize;\n"
