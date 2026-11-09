@@ -2536,7 +2536,8 @@ and for_ st (s : S.statement) ~pattern ~iterable ~body =
               st.frame <- caller;
               let element_ty = yielded_type st path type_arguments in
               in_scope st (fun () ->
-                  bind_pattern st pattern place element_ty ~owned:(mode = T.Own);
+                  bind_pattern st pattern place element_ty ~owned:(mode = T.Own)
+                    ~changed:(mode = T.Mut);
                   st.loops <-
                     {
                       continue_ = resume;
@@ -2860,14 +2861,15 @@ and test_fields st fields place ty variant ~matched ~failed =
 
 (* Binds the names a pattern binds to the parts of the value at [place],
    once it is known to match: views of the parts, or the parts moved out
-   when the value is owned. Plain parts are copied. *)
-and bind_pattern st (pattern : S.pattern) place ty ~owned =
+   when the value is owned. Plain parts are copied, unless [changed], when
+   the names are the parts themselves, as a [mut] loop's are. *)
+and bind_pattern ?(changed = false) st (pattern : S.pattern) place ty ~owned =
   match pattern.kind with
   | Binding_or_constant name -> (
       match st.frame.code.checked.patterns.(pattern.id) with
       | Some (Constant_pattern _) -> ()
       | _ ->
-          if owned || trivial st ty then begin
+          if owned || (trivial st ty && not changed) then begin
             let local = at (local st.b ~name:name.text (Value ty)) in
             emit st.b
               (Assign (local, Use (if owned then owned_operand st place ty else Copy place)));
@@ -2876,17 +2878,19 @@ and bind_pattern st (pattern : S.pattern) place ty ~owned =
           end
           else Hashtbl.replace st.frame.bindings name.id place)
   | Wildcard | Literal _ | Pattern_range _ | Qualified_constant _ -> ()
-  | Alternatives (first :: _) -> bind_pattern st first place ty ~owned
+  | Alternatives (first :: _) -> bind_pattern ~changed st first place ty ~owned
   | Alternatives [] -> ()
   | Variant { name; fields } ->
       List.iter
         (fun (field, pattern, field_ty) ->
-          bind_pattern st pattern (field_place place (Some name.last.text) field) field_ty ~owned)
+          bind_pattern ~changed st pattern
+            (field_place place (Some name.last.text) field)
+            field_ty ~owned)
         (field_patterns st (Option.value fields ~default:[]) ty (Some name.last.text))
   | Record fields ->
       List.iter
         (fun (field, pattern, field_ty) ->
-          bind_pattern st pattern (field_place place None field) field_ty ~owned)
+          bind_pattern ~changed st pattern (field_place place None field) field_ty ~owned)
         (field_patterns st fields ty None)
   | Pattern_error -> bug "a pattern that did not parse"
 

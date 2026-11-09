@@ -1074,6 +1074,7 @@ let function_c context key symbol ~linkage (f : Lir.function_) =
         let zero =
           match info.ty with
           | Value ty when is_struct context ty -> "{0}"
+          | Environment n when environment_of context fc n = [] -> "{}"
           | Environment _ | Evidence _ -> "{0}"
           | _ -> "0"
         in
