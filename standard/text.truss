@@ -31,7 +31,10 @@ public fn String.is_empty(self) -> Bool
 }
 
 public fn String.push(mut self, text: StringSlice) {
-  todo
+  intrinsic::storage_reserve(mut self.storage, additional: text.length())
+  for index in 0..text.length() {
+    intrinsic::storage_push(mut self.storage, value: intrinsic::view_at(text.bytes, index: index))
+  }
 }
 
 public fn String.slice(self) -> StringSlice
@@ -41,7 +44,20 @@ public fn String.slice(self) -> StringSlice
 }
 
 public fn String.trim(self) -> StringSlice {
-  todo
+  let bytes = intrinsic::storage_view(self.storage)
+  var start: USize = 0
+  var stop = intrinsic::view_length(bytes)
+  while start < stop && is_space(intrinsic::view_at(bytes, index: start)) {
+    start += 1
+  }
+  while stop > start && is_space(intrinsic::view_at(bytes, index: stop - 1)) {
+    stop -= 1
+  }
+  StringSlice(bytes: intrinsic::view_slice(bytes, start, stop))
+}
+
+fn is_space(byte: UInt8) -> Bool {
+  byte == 32 || byte == 9 || byte == 10 || byte == 13
 }
 
 public fn StringSlice.length(self) -> USize
@@ -51,7 +67,9 @@ public fn StringSlice.length(self) -> USize
 }
 
 public fn StringSlice.to_string(self) -> String {
-  todo
+  var text = String(storage: intrinsic::storage_with_capacity(self.length()))
+  mut text.push(self)
+  text
 }
 
 public fn TextBuilder.new() -> TextBuilder {
@@ -66,21 +84,48 @@ public fn TextBuilder.finish(own self) -> String {
   self.text
 }
 
+internal fn TextBuilder.write_byte(mut self, byte: UInt8) {
+  intrinsic::storage_push(mut self.text.storage, value: byte)
+}
+
+internal fn TextBuilder.write_unsigned(mut self, value: UInt64) {
+  if value >= 10 {
+    mut self.write_unsigned(value / 10)
+  }
+  let digit: UInt8 = intrinsic::convert(value % 10)
+  mut self.write_byte(digit + 48)
+}
+
+internal fn TextBuilder.write_signed(mut self, value: Int64) {
+  if value < 0 {
+    mut self.write_byte(45)
+    let magnitude: UInt64 = intrinsic::convert(intrinsic::negate(value + 1))
+    mut self.write_unsigned(magnitude + 1)
+  } else {
+    let magnitude: UInt64 = intrinsic::convert(value)
+    mut self.write_unsigned(magnitude)
+  }
+}
+
 impl Equal for String {
   fn equal(self, other: String) -> Bool {
-    todo
+    self.slice() == other.slice()
   }
 }
 
 impl Ordered for String {
   fn compare(self, other: String) -> Ordering {
-    todo
+    let order = intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage))
+    if order < 0 { Ordering.Less } else if order > 0 { Ordering.Greater } else { Ordering.Equal }
   }
 }
 
 impl Hash for String {
   fn hash(self, hasher: mut Hasher) {
-    todo
+    let bytes = intrinsic::storage_view(self.storage)
+    for index in 0..intrinsic::view_length(bytes) {
+      mut hasher.write(intrinsic::convert(intrinsic::view_at(bytes, index: index)))
+    }
   }
 }
 
@@ -92,7 +137,7 @@ impl Display for String {
 
 impl Equal for StringSlice {
   fn equal(self, other: StringSlice) -> Bool {
-    todo
+    intrinsic::compare_bytes(self.bytes, right: other.bytes) == 0
   }
 }
 

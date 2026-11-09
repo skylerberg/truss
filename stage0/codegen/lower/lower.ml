@@ -411,6 +411,7 @@ type state = {
       (** Of each statement being lowered, innermost first *)
   return_ : Lir.place option;  (** Where a result too large to return is written *)
   result_local : Lir.local option;
+  nested : Lir.function_ option list ref;  (** The instance's lambdas, in order *)
 }
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
@@ -611,9 +612,43 @@ let string_value st ty text =
       (field, storage, storage_value)
   | _ -> bug "%s is not a record of storage" (Ground.to_string ty)
 
+(* Calls a trait's method on a value of a ground type, through the [impl]
+   the type has, with arguments that are places. *)
+let trait_call st ~trait ~name ~(receiver : Path.receiver) ~self ~arguments ~destination =
+  match
+    Interface.Impls.implements st.context.database
+      ~bounds:(fun _ -> [])
+      (back self)
+      { trait; trait_arguments = []; associated = [] }
+  with
+  | Some (From_impl { impl; substitution }) ->
+      let interface = impl_interface st.context impl in
+      let type_arguments =
+        List.map
+          (fun (g : T.generic) ->
+            match List.assoc_opt g.generic substitution with
+            | Some argument -> Monomorphic.ground_argument st.context.monomorphic [] argument
+            | None -> bug "an unbound parameter of %s" (Path.show impl))
+          interface.impl_generics
+      in
+      let path = Path.Method { owner = impl; name; receiver } in
+      let signature = signature_of st.context path in
+      call_instance st
+        (Code { path; type_arguments })
+        ~signature
+        ~substitution:(bind signature.generics type_arguments)
+        ~arguments ~mask:0 ~destination
+  | _ -> bug "%s has no impl of %s" (Ground.to_string self) (Path.show trait)
+
 let rec expression st (e : S.expression) : Lir.place =
   match e.kind with
   | Parenthesized inner | Mode (_, inner) -> expression st inner
+  | Todo | Unreachable | Return _ | Break | Continue ->
+      (* These never give a value, so what they are written into is never
+         read. *)
+      let nowhere = new_local st (Monomorphic.builtin Unit) in
+      into st e nowhere;
+      nowhere
   | Name _ | Member _ | Self_value -> (
       match place_expression st e with
       | Some place -> place
@@ -896,12 +931,15 @@ and into st (e : S.expression) (destination : Lir.place) =
       echo st destination (ty ()) e.span
   | List elements -> list_into st (ty ()) elements destination ~span:e.span
   | Try inner -> try_ st inner destination
-  | String _ -> bug "interpolated and tagged strings are not lowered yet"
+  | String literal when literal.tag = None -> interpolate st literal destination
+  | String _ -> bug "tagged strings are not lowered yet"
+  | With (base, updates) -> with_ st base updates destination
+  | Lambda { parameters; body } -> lambda st e ~parameters ~body destination
   | Bracket _ -> (
       match place_expression st e with
       | Some place -> assign (Use (owned st place (ty ())))
       | None -> bug "an index with no meaning")
-  | With _ | Any _ | Range _ | Quantified _ | Map _ | Lambda _ | Provide _ ->
+  | Any _ | Range _ | Quantified _ | Map _ | Provide _ ->
       bug "this expression is not lowered yet: %s" (source st e.span)
   | Self_type_value -> bug "Self as a value"
   | Expression_error -> bug "an expression that did not parse"
@@ -993,6 +1031,259 @@ and try_ st (inner : S.expression) destination =
            ( destination,
              Use (owned st (value / Variant_field { variant = success; field = name }) field_ty) ))
   | _ -> bug "? on a variant with more than one field"
+
+(* A call through a function value: its code, given its environment first,
+   then the arguments by position. *)
+and call_function_value st ~(callee : S.expression) ~(arguments : S.argument list) destination =
+  let f =
+    match type_of st callee.id with
+    | Function f -> f
+    | ty -> bug "a call of %s" (Ground.to_string ty)
+  in
+  let value = expression st callee in
+  let signature = Convention.function_value st.context.env f in
+  let passed =
+    List.concat
+      (List.map2
+         (fun ((mode : Ground.mode), ty) (argument : S.argument) ->
+           let types_mode : T.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
+           let place =
+             match (place_expression st argument.value, mode) with
+             | Some place, Own ->
+                 let moved = new_local st ty in
+                 emit st.b (Assign (moved, Use (owned st place ty)));
+                 moved
+             | Some place, _ -> place
+             | None, _ -> expression st argument.value
+           in
+           Option.to_list (pass st types_mode ty place))
+         f.parameters arguments)
+  in
+  let target = Lir.Indirect { value = Copy value; signature } in
+  match f.result with
+  | Returns ty ->
+      (match Convention.result st.context.env ty with
+      | Through_pointer _ ->
+          emit st.b
+            (Call
+               {
+                 target;
+                 arguments = Address { place = destination; writable = true } :: passed;
+                 result = None;
+               })
+      | Returned _ -> emit st.b (Call { target; arguments = passed; result = Some destination })
+      | Nothing -> emit st.b (Call { target; arguments = passed; result = None }));
+      if ty = Never then unreachable_block st
+  | Yields _ | Lends _ -> bug "a function value that yields"
+
+(* A lambda: a nested function whose environment holds the address of each
+   local it reads, made on the caller's stack, so making one never
+   allocates. *)
+and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block) destination =
+  let f =
+    match type_of st e.id with Function f -> f | ty -> bug "a lambda of %s" (Ground.to_string ty)
+  in
+  let captures = Option.value st.frame.code.checked.captures.(e.id) ~default:[] in
+  let index = List.length !(st.nested) in
+  st.nested := !(st.nested) @ [ None ];
+  let captured =
+    List.mapi
+      (fun i local ->
+        let place =
+          match Hashtbl.find_opt st.frame.bindings local with
+          | Some p -> p
+          | None -> bug "an unbound capture"
+        in
+        let ty =
+          match st.frame.code.checked.local_types.(local) with
+          | Some ty -> ground st ty
+          | None -> bug "a capture with no type"
+        in
+        (Printf.sprintf "capture%d" i, local, place, ty))
+      captures
+  in
+  let environment =
+    List.map
+      (fun (name, _, _, ty) -> (name, Lir.Pointer { target = Value ty; writable = false }))
+      captured
+  in
+  (* The caller fills in the environment and makes the value. *)
+  let environment_local = at (local st.b (Environment index)) in
+  List.iter
+    (fun (name, _, place, _) ->
+      emit st.b (Assign (environment_local / Field name, Use (Address { place; writable = false }))))
+    captured;
+  emit st.b
+    (Assign
+       ( destination,
+         Function_value
+           {
+             code = Nested index;
+             environment = Some (Address { place = environment_local; writable = false });
+           } ));
+  (* The lambda itself. *)
+  let b = Lir_builder.create () in
+  let environment_parameter = local b ~name:"environment" (Raw (Nullable_pointer Opaque)) in
+  let result_ty = match f.result with Returns ty -> ty | _ -> bug "a lambda that yields" in
+  let result = Convention.result st.context.env result_ty in
+  let return_pointer =
+    match result with Through_pointer pointer -> Some (local b ~name:"result" pointer) | _ -> None
+  in
+  let parameter_places =
+    List.map
+      (fun ((mode : Ground.mode), ty) ->
+        match Convention.parameter st.context.env mode ty with
+        | Some (Pointer _ as pointer) ->
+            let l = local b pointer in
+            (Some l, { Lir.root = Local l; projections = [ Deref ] }, mode, ty)
+        | Some lir_ty ->
+            let l = local b lir_ty in
+            (Some l, at l, mode, ty)
+        | None -> (None, at (local b (Value ty)), mode, ty))
+      f.parameters
+  in
+  let result_local =
+    match result with Returned ty -> Some (local b ~name:"result" ty) | _ -> None
+  in
+  let environment_pointer = local b (Pointer { target = Environment index; writable = false }) in
+  let inner =
+    {
+      st with
+      frame =
+        { st.frame with bindings = Hashtbl.copy st.frame.bindings; on_yield = None; exit = None };
+      b;
+      scopes = [ { owned = [] } ];
+      loops = [];
+      temporaries = [];
+      return_ =
+        Option.map
+          (fun pointer -> { Lir.root = Local pointer; projections = [ Deref ] })
+          return_pointer;
+      result_local;
+    }
+  in
+  start b (block b);
+  emit b (Assign (at environment_pointer, Use (Copy (at environment_parameter))));
+  List.iter
+    (fun (name, local, _, _) ->
+      Hashtbl.replace inner.frame.bindings local
+        { Lir.root = Local environment_pointer; projections = [ Deref; Field name; Deref ] })
+    captured;
+  List.iter2
+    (fun (pattern : S.pattern) (_, place, (mode : Ground.mode), ty) ->
+      bind_pattern inner pattern place ty ~owned:(mode = Own))
+    parameters parameter_places;
+  let destination =
+    match (inner.return_, result_local) with
+    | Some pointer, _ -> Some pointer
+    | None, Some local -> Some (at local)
+    | None, None -> None
+  in
+  block_into inner body destination;
+  drop_scope inner (List.hd inner.scopes);
+  finish b (Return (Option.map (fun local -> Lir.Move (at local)) result_local));
+  let function_ =
+    Lir_builder.build b
+      ~parameters:
+        ((environment_parameter :: Option.to_list return_pointer)
+        @ List.filter_map (fun (l, _, _, _) -> l) parameter_places)
+      ~result:(match result with Returned ty -> Some ty | _ -> None)
+  in
+  st.nested :=
+    List.mapi (fun i f -> if i = index then Some { function_ with environment } else f) !(st.nested)
+
+(* [base with (field: value)]: the base as an owned value, then each field
+   written in place, which costs one write per field. *)
+and with_ st (base : S.expression) (updates : S.update list) destination =
+  let ty = type_of st base.id in
+  (match place_expression st base with
+  | Some place -> emit st.b (Assign (destination, Use (owned st place ty)))
+  | None -> into st base destination);
+  List.iter
+    (fun (update : S.update) ->
+      match update.kind with
+      | Update { field; path; value } -> (
+          let target =
+            List.fold_left
+              (fun place (name : S.name) -> place / Lir.Field name.text)
+              destination (field :: path)
+          in
+          match value with
+          | Some value -> into st value target
+          | None -> (
+              (* [with (x)] uses the local named [x]. *)
+              let resolved = demand st.context Resolve.resolved st.frame.code.definition_key in
+              match Option.bind resolved (fun r -> r.names.(field.id)) with
+              | Some (Local local) -> (
+                  match Hashtbl.find_opt st.frame.bindings local with
+                  | Some place ->
+                      let field_ty =
+                        match st.frame.code.checked.local_types.(local) with
+                        | Some ty -> ground st ty
+                        | None -> bug "a local with no type"
+                      in
+                      emit st.b (Assign (target, Use (owned st place field_ty)))
+                  | None -> bug "an unbound local in with")
+              | _ -> bug "with (x) names no local"))
+      | Update_error -> bug "an update that did not parse")
+    updates
+
+(* An untagged string with interpolation: each piece written into a
+   [TextBuilder], the parts through their [Display]. *)
+and interpolate st (literal : S.string_literal) destination =
+  let text_path name : Path.t =
+    Top { module_ = { package = "standard"; modules = [ "text" ] }; name }
+  in
+  let builder_ty = Ground.Named { path = text_path "TextBuilder"; arguments = [] } in
+  let slice_ty = Ground.Named { path = text_path "StringSlice"; arguments = [] } in
+  let method_ name receiver = Path.Method { owner = text_path "TextBuilder"; name; receiver } in
+  let call path arguments destination =
+    let signature = signature_of st.context path in
+    call_instance st
+      (Code { path; type_arguments = [] })
+      ~signature ~substitution:[] ~arguments ~mask:0 ~destination
+  in
+  let builder = new_local st builder_ty in
+  call (method_ "new" Static) [] builder;
+  let unit = Monomorphic.builtin Unit in
+  let write text =
+    if text <> "" then begin
+      let slice = new_local st slice_ty in
+      (match Monomorphic.shape st.context.monomorphic slice_ty with
+      | Record [ (field, Typed view) ] ->
+          emit st.b
+            (Assign
+               ( slice / Field field,
+                 Build
+                   {
+                     ty = view;
+                     variant = None;
+                     fields =
+                       [
+                         ("elements", Constant (Bytes text)); ("length", usize (String.length text));
+                       ];
+                   } ))
+      | _ -> bug "a StringSlice that is not a view");
+      call (method_ "write" Mut)
+        [ (Mut, builder_ty, builder); (Read, slice_ty, slice) ]
+        (new_local st unit)
+    end
+  in
+  write literal.first.value;
+  List.iter
+    (fun ((part : S.expression), (text : S.text)) ->
+      let ty = type_of st part.id in
+      let place =
+        match place_expression st part with Some place -> place | None -> expression st part
+      in
+      trait_call st
+        ~trait:(Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Display" })
+        ~name:"display" ~receiver:Read ~self:ty
+        ~arguments:[ (Read, ty, place); (Mut, builder_ty, builder) ]
+        ~destination:(new_local st unit);
+      write text.value)
+    literal.rest;
+  call (method_ "finish" Own) [ (Own, builder_ty, builder) ] destination
 
 and is_built_in st (e : S.expression) =
   match st.frame.code.checked.calls.(e.id) with
@@ -1102,6 +1393,7 @@ and operator st (e : S.expression) operands destination =
 
 and call st (e : S.expression) ~callee ~arguments destination =
   match st.frame.code.checked.calls.(e.id) with
+  | Some { callee = Function_value; _ } -> call_function_value st ~callee ~arguments destination
   | Some call_ ->
       let expressions = List.map (fun (a : S.argument) -> a.value) arguments in
       let expressions =
@@ -1709,34 +2001,6 @@ and match_ st ~scrutinees ~arms destination =
 
 (* Derived implementations *)
 
-(* Calls a trait's method on a value of a ground type, through the [impl]
-   the type has, with arguments that are places. *)
-let trait_call st ~trait ~name ~(receiver : Path.receiver) ~self ~arguments ~destination =
-  match
-    Interface.Impls.implements st.context.database
-      ~bounds:(fun _ -> [])
-      (back self)
-      { trait; trait_arguments = []; associated = [] }
-  with
-  | Some (From_impl { impl; substitution }) ->
-      let interface = impl_interface st.context impl in
-      let type_arguments =
-        List.map
-          (fun (g : T.generic) ->
-            match List.assoc_opt g.generic substitution with
-            | Some argument -> Monomorphic.ground_argument st.context.monomorphic [] argument
-            | None -> bug "an unbound parameter of %s" (Path.show impl))
-          interface.impl_generics
-      in
-      let path = Path.Method { owner = impl; name; receiver } in
-      let signature = signature_of st.context path in
-      call_instance st
-        (Code { path; type_arguments })
-        ~signature
-        ~substitution:(bind signature.generics type_arguments)
-        ~arguments ~mask:0 ~destination
-  | _ -> bug "%s has no impl of %s" (Ground.to_string self) (Path.show trait)
-
 let core name : Path.t = Top { module_ = { package = "standard"; modules = [ "core" ] }; name }
 
 (* The fields of a variant, or of a record, with their ground types. *)
@@ -1815,6 +2079,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
       temporaries = [];
       return_ = None;
       result_local = None;
+      nested = ref [];
     }
   in
   let lir_signature, result =
@@ -2042,6 +2307,7 @@ let instance context (key : Instance.key) : Lir.t =
               (fun pointer -> { Lir.root = Local pointer; projections = [ Deref ] })
               return_pointer;
           result_local = None;
+          nested = ref [];
         }
       in
       let parameters =
@@ -2137,5 +2403,13 @@ let instance context (key : Instance.key) : Lir.t =
           ~parameters:(Option.to_list return_pointer @ parameters @ Option.to_list mask)
           ~result:(match result with Returned ty -> Some ty | _ -> None)
       in
-      { key; main = { main with returns = code.result <> Returns Never }; nested = [||] }
+      {
+        key;
+        main = { main with returns = code.result <> Returns Never };
+        nested =
+          Array.of_list
+            (List.map
+               (function Some f -> f | None -> bug "a lambda left unfinished")
+               !(st.nested));
+      }
   | _ -> bug "%s is not code from source" (Instance.to_string key)

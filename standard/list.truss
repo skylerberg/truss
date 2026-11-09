@@ -108,6 +108,14 @@ impl Index for Slice[Element] {
 
 impl Equal for List[Element: Equal] {
   fn equal(self, other: List[Element]) -> Bool {
-    todo
+    if self.length() != other.length() {
+      return false
+    }
+    for index in 0..self.length() {
+      if self[index] != other[index] {
+        return false
+      }
+    }
+    true
   }
 }

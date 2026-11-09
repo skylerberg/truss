@@ -1842,4 +1842,53 @@ test "results" {
 }
 |}
 
+let () =
+  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
+  passes "a string interpolates its parts"
+    {|test "interpolation" {
+  let count = 3
+  let name = "apples"
+  assert "${count} ${name}" == "3 apples"
+}
+|};
+  passes "a record is updated with with"
+    {|type Point(x: Int64, y: Int64)
+  derives Equal
+
+test "updates" {
+  let origin = Point(x: 0, y: 0)
+  let moved = origin with (x: 5)
+  assert moved == Point(x: 5, y: 0)
+}
+|};
+  passes "a lambda reads its caller's locals"
+    {|fn apply(value: Int64, transform: fn(Int64) -> Int64) -> Int64 {
+  transform(value)
+}
+
+test "lambdas" {
+  let offset = 10
+  assert apply(5, transform: fn(value) { value + offset }) == 15
+}
+|}
+
+let () =
+  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
+  passes "integers display in decimal, negative ones too"
+    {|test "display" {
+  let small: Int8 = -128
+  let large: UInt64 = 18446744073709551615
+  let least: Int64 = -9223372036854775808
+  assert "${small} ${large} ${least} ${0}" == "-128 18446744073709551615 -9223372036854775808 0"
+}
+|};
+  passes "strings compare, order, and trim"
+    {|test "strings" {
+  let padded = "  hello \n"
+  assert padded.trim().to_string() == "hello"
+  assert "apple" < "banana"
+  assert "apple" != "apples"
+}
+|}
+
 let () = Harness.finish ()
