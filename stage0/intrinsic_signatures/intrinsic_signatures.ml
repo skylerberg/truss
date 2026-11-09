@@ -114,6 +114,12 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Write_float ->
       make ~generics:[ "Value" ]
         [ input ~mode:Mut "buffer" (storage (T.builtin UInt8)); input "value" value ]
+  | Environment_variable ->
+      make ~output:(Returns bool)
+        [
+          input "name" (view (T.builtin UInt8));
+          input ~mode:Mut "buffer" (storage (T.builtin UInt8));
+        ]
   | Clock_now -> make ~output:(Returns (T.builtin Int64)) []
   | Random_fill ->
       make [ input ~mode:Mut "buffer" (storage (T.builtin UInt8)); input "count" usize ]

@@ -39,7 +39,7 @@ let lower env b types operation ~type_arguments arguments ~destination ~site =
      operations, which take none. *)
   let element () =
     match operation with
-    | Intrinsic.Read_bytes | Random_fill | Write_float ->
+    | Intrinsic.Read_bytes | Random_fill | Write_float | Environment_variable ->
         Ground.Named { path = Intrinsic.builtin_path UInt8; arguments = [] }
     | _ -> type_argument 0
   in
@@ -368,6 +368,33 @@ let lower env b types operation ~type_arguments arguments ~destination ~site =
           call ~result:(at count) Float_text
             [ value 1; Address { place = element_at storage (length storage); writable = true } ];
           add_to_length storage (Copy (at count))
+      | Environment_variable ->
+          let name = place (argument 0) in
+          let storage = place (argument 1) in
+          let found = local b ~name:"found" (Raw (Nullable_pointer Opaque)) in
+          let count = usize_local "count" in
+          call ~result:(at found) System_environment
+            [
+              Copy (name / Field "elements");
+              Copy (name / Field "length");
+              Address { place = at count; writable = true };
+            ];
+          let present = local b ~name:"present" (Raw Bool) in
+          emit b (Assign (at present, Binary (Not_equal, Copy (at found), Constant Null)));
+          when_ b
+            (Copy (at present))
+            (fun () ->
+              let wanted = usize_local "wanted" in
+              emit b (Assign (at wanted, Binary (Add, length storage, Copy (at count))));
+              grow_when Greater storage (Copy (at wanted));
+              call Copy_bytes
+                [
+                  Address { place = element_at storage (length storage); writable = true };
+                  Copy (at found);
+                  Copy (at count);
+                ];
+              add_to_length storage (Copy (at count)));
+          set (Use (Copy (at present)))
       | Clock_now -> call ?result:destination Clock_now []
       | Random_fill ->
           let storage = place (argument 0) in

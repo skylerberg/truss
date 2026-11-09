@@ -115,6 +115,9 @@ type intrinsic =
           length is static, and is copied to the heap, never freed. *)
   | System_write  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
   | System_read  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
+  | System_environment
+      (** [(name, name length, value length's address) -> bytes]: an environment variable's value,
+          null when it is unset *)
   | Float_text
       (** [(value, bytes) -> USize]: writes the shortest decimal that reads back as the float, at
           most [float_text_limit] bytes, as [Display] shows it *)
@@ -497,7 +500,7 @@ let canonical (f : function_) =
   }
 
 let canonical_instance t = { t with main = canonical t.main; nested = Array.map canonical t.nested }
-let version = 7
+let version = 8
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -653,6 +656,7 @@ let intrinsic_tag = function
   | Program_argument -> 42
   | Float_text -> 43
   | Evidence_fill -> 44
+  | System_environment -> 45
 
 let encode_rvalue instance rvalue =
   let operand = encode_operand instance in
@@ -929,6 +933,7 @@ let intrinsic_name = function
   | System_read -> "system_read"
   | Float_text -> "float_text"
   | Evidence_fill -> "evidence_fill"
+  | System_environment -> "system_environment"
   | Clock_now -> "clock_now"
   | Random_fill -> "random_fill"
   | Debug_begin -> "debug_begin"

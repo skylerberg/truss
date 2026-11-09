@@ -2403,6 +2403,27 @@ let () =
       expect_string ~expected:"hello\n3 arguments, then one\n" output)
 
 let () =
+  test "a program reads environment variables" (fun () ->
+      Unix.putenv "TRUSS_TEST_VARIABLE" "caf\xc3\xa9";
+      let status, output, _ =
+        run_main
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console, Environment
+{
+  if Environment.variable("TRUSS_TEST_VARIABLE".slice()) is Some(value) {
+    Console.print_line("${value}".slice())
+  }
+  if Environment.variable("TRUSS_TEST_UNSET".slice()) is None {
+    Console.print_line("unset".slice())
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"caf\xc3\xa9\nunset\n" output)
+
+let () =
   test "a program reads the real clock and random numbers" (fun () ->
       let status, output, _ =
         run_main

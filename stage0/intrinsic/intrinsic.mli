@@ -103,6 +103,9 @@ type operation =
   | Write_bytes
   | Read_bytes
   | Write_float  (** [(buffer, value)]: appends the shortest decimal that reads back as the float *)
+  | Environment_variable
+      (** [(name, buffer) -> Bool]: appends an environment variable's value; false when it is unset
+      *)
   | Clock_now
   | Random_fill
 

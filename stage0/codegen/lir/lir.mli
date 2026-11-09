@@ -125,6 +125,9 @@ type intrinsic =
           length is static, and is copied to the heap, never freed. *)
   | System_write  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
   | System_read  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
+  | System_environment
+      (** [(name, name length, value length's address) -> bytes]: an environment variable's value,
+          null when it is unset *)
   | Float_text
       (** [(value, bytes) -> USize]: writes the shortest decimal that reads back as the float, at
           most [float_text_limit] bytes, as [Display] shows it *)

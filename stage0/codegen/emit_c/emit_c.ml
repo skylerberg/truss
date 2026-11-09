@@ -73,6 +73,7 @@ let runtime_declarations (target : Memory_layout.target) =
       "t_isize t_runtime_write(int32_t descriptor, const uint8_t *bytes, t_usize count);\n";
       "t_isize t_runtime_read(int32_t descriptor, uint8_t *bytes, t_usize count);\n";
       "t_usize t_runtime_float32_text(float value, uint8_t *bytes);\n";
+      "uint8_t *t_runtime_environment(const uint8_t *name, t_usize length, t_usize *value_length);\n";
       "t_usize t_runtime_float64_text(double value, uint8_t *bytes);\n";
       "int64_t t_runtime_clock_now(void);\n";
       "void t_runtime_random_fill(uint8_t *bytes, t_usize count);\n";
@@ -835,6 +836,7 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
   | Grow -> Printf.sprintf "t_runtime_storage_grow((void **)%s)" all
   | System_write -> "t_runtime_write(" ^ all ^ ")"
   | System_read -> "t_runtime_read(" ^ all ^ ")"
+  | System_environment -> "t_runtime_environment(" ^ all ^ ")"
   | Evidence_fill ->
       let slot = argument 0 in
       let outer =

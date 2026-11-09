@@ -293,6 +293,20 @@ t_isize t_runtime_write(int32_t descriptor, const uint8_t *bytes, t_usize count)
   }
 }
 
+/* An environment variable's value and its length, or null when it is
+   unset. */
+uint8_t *t_runtime_environment(const uint8_t *name, t_usize length, t_usize *value_length) {
+  char *terminated = malloc(length + 1);
+  if (terminated == NULL) t_out_of_memory();
+  memcpy(terminated, name, length);
+  terminated[length] = 0;
+  char *value = getenv(terminated);
+  free(terminated);
+  if (value == NULL) return NULL;
+  *value_length = strlen(value);
+  return (uint8_t *)value;
+}
+
 /* Standard input is read a block at a time and handed out from this
    buffer, so that reading a line a byte at a time costs one system call a
    block. */

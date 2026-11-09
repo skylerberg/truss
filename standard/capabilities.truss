@@ -83,6 +83,19 @@ public capability Panic {
   fn crash(message: StringSlice) -> Never
 }
 
+internal type SystemEnvironment()
+
+impl Environment for SystemEnvironment {
+  fn variable(self, name: StringSlice) -> Option[String] {
+    var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+    if intrinsic::environment_variable(name.bytes, buffer: mut bytes) {
+      Some(String.from_bytes(own bytes))
+    } else {
+      None
+    }
+  }
+}
+
 internal type SystemClock()
 
 impl Clock for SystemClock {
