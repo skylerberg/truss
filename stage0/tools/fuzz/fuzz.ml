@@ -82,7 +82,7 @@ let check_robust text =
 let snippet text =
   let source = Source.create ~path:"fuzz.truss" text in
   let tokens, lexer_diagnostics = Lexer.lex source in
-  let items, parser_diagnostics = Parser.Snippet.parse source tokens in
+  let items, parser_diagnostics = Reference.Snippet.parse source tokens in
   (tokens, items, lexer_diagnostics @ parser_diagnostics)
 
 let check_tree text (item : Syntax.definition Syntax.item) =
@@ -164,7 +164,7 @@ let check_parsers_agree text =
       interpolations
   in
   List.iter
-    (fun (item : Parser.Snippet.item) ->
+    (fun (item : Reference.Snippet.item) ->
       let start = tokens.(item.first).span.start and stop = tokens.(item.stop - 1).span.stop in
       (* Whether a position is in a [cost] clause, where the grammar's rule
          takes any names, so that its structure depends on their spelling. *)
@@ -205,7 +205,7 @@ let check_parsers_agree text =
                   token.span.start = token.span.stop && token.kind <> End_of_file)
                 slice)
       then
-        let reference_rejects = not (Reference.accepts (Reference.entry item.kind) slice) in
+        let reference_rejects = not (Reference.accepts (Reference.Snippet.entry item.kind) slice) in
         if parser_rejects <> reference_rejects then
           fail "the parser %s and the reference grammar %s tokens %d to %d of %s"
             (if parser_rejects then "rejects" else "accepts")

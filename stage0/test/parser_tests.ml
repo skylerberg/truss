@@ -61,8 +61,7 @@ let definition text expected = definitions text [ expected ]
 let body_of text =
   let file, diagnostics = parse ("fn example() {\n" ^ text ^ "\n}") in
   match file.definitions with
-  | [ { value = { kind = Function { body = Some body; _ }; _ }; _ } ] ->
-      (body.statements, diagnostics)
+  | [ { value = { kind = Function { body; _ }; _ }; _ } ] -> (body.statements, diagnostics)
   | _ -> ([], diagnostics)
 
 (* Asserts that [text], as the body of a function, parses with no
@@ -187,17 +186,16 @@ let () =
                Function
                  {
                    body =
-                     Some
-                       {
-                         statements =
-                           [
-                             {
-                               kind = Expression { kind = String { rest = [ (value, _) ]; _ }; _ };
-                               _;
-                             };
-                           ];
-                         _;
-                       };
+                     {
+                       statements =
+                         [
+                           {
+                             kind = Expression { kind = String { rest = [ (value, _) ]; _ }; _ };
+                             _;
+                           };
+                         ];
+                       _;
+                     };
                    _;
                  };
              _;
@@ -211,6 +209,54 @@ let () =
       let text = "fn f() { " ^ String.make 300 '(' ^ "1" ^ String.make 300 ')' ^ " }" in
       if codes (snd (parse text)) <> [ "parser.nesting_too_deep" ] then
         fail "got [%s]" (String.concat "; " (codes (snd (parse text)))))
+
+let () =
+  let deep text = List.filter (( = ) "parser.nesting_too_deep") (codes (snd (parse text))) in
+  test "nested echo counts toward the limit" (fun () ->
+      let text =
+        "fn f() {\n  let x = " ^ String.concat "" (List.init 300 (fun _ -> "echo ")) ^ "1\n}"
+      in
+      if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
+  test "nested if counts toward the limit" (fun () ->
+      let text =
+        "fn f() {\n  let x = "
+        ^ String.concat "" (List.init 300 (fun _ -> "if "))
+        ^ "x"
+        ^ String.concat "" (List.init 300 (fun _ -> " {}"))
+        ^ "\n}"
+      in
+      if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
+  test "an inner statement cut off by an inserted closer leaves the outer one reported" (fun () ->
+      let _, diagnostics = parse "fn f() {\n  let x = run(fn() { g( }) +\n}" in
+      if codes diagnostics <> [ "lexer.unclosed_bracket"; "parser.unexpected_token" ] then
+        fail "got [%s]" (String.concat "; " (codes diagnostics)))
+
+(* Parsing one piece at a time *)
+
+let () =
+  let pieces text =
+    let source = source text in
+    let tokens, _ = Lexer.lex source in
+    (source, tokens, Parser.split tokens)
+  in
+  test "a definition's diagnostics are relative to it" (fun () ->
+      match pieces "fn g() {}\nfn f() { x = }" with
+      | source, tokens, [ _; second ] -> (
+          let parsed = Parser.definition source tokens second in
+          match parsed.diagnostics with
+          | [ diagnostic ] ->
+              if diagnostic.span.start <> 13 then fail "relative start %d" diagnostic.span.start
+          | _ -> fail "expected one diagnostic")
+      | _ -> fail "expected two pieces");
+  test "moving a definition changes neither its tree nor its diagnostics" (fun () ->
+      let text = "fn f(items: List[Int64]) {\n  let total = items[0] +\n}" in
+      let parsed text =
+        let source, tokens, pieces = pieces text in
+        let last = List.nth pieces (List.length pieces - 1) in
+        let parsed = Parser.definition source tokens last in
+        (parsed.value.value, parsed.diagnostics)
+      in
+      if parsed text <> parsed ("fn g() {}\n\n\n" ^ text) then fail "the results differ")
 
 (* Types *)
 
@@ -313,6 +359,13 @@ let () =
       body_error "for i in 0.. {}" ~code:Open_range ~at:"..");
   test "an open start outside brackets" (fun () ->
       body_error "let x = ..3" ~code:Open_range ~at:"..");
+  test "an open range is alone in its brackets" (fun () ->
+      body_error "let x = items[1.., 4]" ~code:Open_range ~at:"..");
+  test "a lambda's body may start on the next line" (fun () ->
+      statement "let f: fn(Job) -> Bool = fn(job)\n{\n  job.ready\n}"
+        "(let f : (fn (Job) -> Bool) (fn (job) (block (. job ready))))");
+  test "as at the end of a line is not read with the next line" (fun () ->
+      body_error "let n = size as\nlet m = 1" ~code:Reserved_word ~at:"as");
   test "brackets cannot be empty" (fun () ->
       body_error "let x = items[]" ~code:Unexpected_token ~at:"]");
   test "i++ is recognized only at the end of a line" (fun () ->
@@ -320,6 +373,19 @@ let () =
   test "type arguments and constraints in brackets" (fun () ->
       expression "List[String].with_capacity(64)" "(call (. ([] List String) with_capacity) 64)";
       expression "total[Iterable[Element = Int64]]" "([] total ([] Iterable Element = Int64))");
+  test "a collection cannot mix list elements and map entries" (fun () ->
+      body_error "let x = [1, \"a\": 2]" ~code:Unexpected_token ~at:"\"a\"";
+      body_error "let x = [\"a\": 1, 2]" ~code:Unexpected_token ~at:"2]");
+  test "a field and an update that do not parse are errors in the tree" (fun () ->
+      let file, _ = parse "type T(x: Int64, 1)" in
+      (match file.definitions with
+      | [ { value; _ } ] ->
+          if Syntax_print.definition value <> "(type T ((x: Int64) error))" then
+            fail "got %s" (Syntax_print.definition value)
+      | _ -> fail "wrong definitions");
+      let statements, _ = body_of "let y = x with (1)" in
+      if List.map Syntax_print.statement statements <> [ "(let y (with x error))" ] then
+        fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "lists and maps" (fun () ->
       expression "[1, 2,]" "(list 1 2)";
       expression "[]" "(list)";
@@ -540,38 +606,46 @@ let () =
 (* Precedence and combinations that need parentheses *)
 
 let () =
-  let combination text ~code ~fixes =
+  (* The error points at [at], the operator that cannot take its operand. *)
+  let combination text ~at ~code ~fixes =
     match fixes with
     | fixed :: alternatives ->
-        body_error ("let x = " ^ text) ~code ~at:text ~fixed:("let x = " ^ fixed)
+        body_error ("let x = " ^ text) ~code ~at ~fixed:("let x = " ^ fixed)
           ~alternatives:(List.map (( ^ ) "let x = ") alternatives)
-    | [] -> body_error ("let x = " ^ text) ~code ~at:text
+    | [] -> body_error ("let x = " ^ text) ~code ~at
   in
   test "bitwise and comparison: Rust's reading, then C's" (fun () ->
-      combination "flags & mask == 0" ~code:Needs_parentheses
+      combination "flags & mask == 0" ~at:"==" ~code:Needs_parentheses
         ~fixes:[ "(flags & mask) == 0"; "flags & (mask == 0)" ]);
   test "shift and addition: C and Rust's reading, then Go and Swift's" (fun () ->
-      combination "a << b + 1" ~code:Needs_parentheses ~fixes:[ "a << (b + 1)"; "(a << b) + 1" ]);
+      combination "a << b + 1" ~at:"<<" ~code:Needs_parentheses
+        ~fixes:[ "a << (b + 1)"; "(a << b) + 1" ]);
   test "& and | read the same everywhere" (fun () ->
-      combination "a & b | c" ~code:Needs_parentheses ~fixes:[ "(a & b) | c" ]);
+      combination "a & b | c" ~at:"|" ~code:Needs_parentheses ~fixes:[ "(a & b) | c" ]);
   test "& and | read the same on the right" (fun () ->
-      combination "c | a & b" ~code:Needs_parentheses ~fixes:[ "c | (a & b)" ]);
+      combination "c | a & b" ~at:"|" ~code:Needs_parentheses ~fixes:[ "c | (a & b)" ]);
   test "a reading that needs more parentheses inside && gets them" (fun () ->
-      combination "a & b == c && d" ~code:Needs_parentheses
+      combination "a & b == c && d" ~at:"==" ~code:Needs_parentheses
         ~fixes:[ "(a & b) == c && d"; "(a & (b == c)) && d" ]);
+  test "the other reading takes the operand next to the operator" (fun () ->
+      combination "s & a + b + c" ~at:"&" ~code:Needs_parentheses
+        ~fixes:[ "s & (a + b + c)"; "(s & a) + b + c" ]);
   test "the same bitwise operator chains" (fun () ->
       statement "let x = a | b | c" "(let x (| (| a b) c))");
   test "shifts chain" (fun () -> statement "let x = a << 1 >> 2" "(let x (>> (<< a 1) 2))");
   test "&& and || cannot be mixed" (fun () ->
-      combination "a && b || c" ~code:Needs_parentheses ~fixes:[ "(a && b) || c"; "a && (b || c)" ]);
+      combination "a && b || c" ~at:"||" ~code:Needs_parentheses
+        ~fixes:[ "(a && b) || c"; "a && (b || c)" ]);
   test "comparisons do not chain" (fun () ->
-      combination "a < b < c" ~code:Needs_parentheses ~fixes:[ "a < b && b < c" ]);
+      combination "a < b < c" ~at:"< c" ~code:Needs_parentheses ~fixes:[ "a < b && b < c" ]);
   test "a chained comparison without a simple middle has no fix" (fun () ->
-      combination "a < f(b) < c" ~code:Needs_parentheses ~fixes:[]);
-  test "is does not chain" (fun () -> combination "a is B == c" ~code:Needs_parentheses ~fixes:[]);
-  test "ranges do not chain" (fun () -> combination "0..10..20" ~code:Needs_parentheses ~fixes:[]);
+      combination "a < f(b) < c" ~at:"< c" ~code:Needs_parentheses ~fixes:[]);
+  test "is does not chain" (fun () ->
+      combination "a is B == c" ~at:"==" ~code:Needs_parentheses ~fixes:[]);
+  test "ranges do not chain" (fun () ->
+      combination "0..10..20" ~at:"..20" ~code:Needs_parentheses ~fixes:[]);
   test "==> does not chain: Dafny's reading first" (fun () ->
-      error "fn f() requires a ==> b ==> c {}" ~code:Needs_parentheses ~at:"a ==>"
+      error "fn f() requires a ==> b ==> c {}" ~code:Needs_parentheses ~at:"==> c"
         ~fixed:"fn f() requires a ==> (b ==> c) {}"
         ~alternatives:[ "fn f() requires (a ==> b) ==> c {}" ]);
   test "parentheses settle a combination" (fun () ->
@@ -595,7 +669,7 @@ let () =
   test "forall outside a specification" (fun () ->
       body_error "let x = forall i in s => i" ~code:Specification_only ~at:"forall");
   test "==> outside a specification" (fun () ->
-      body_error "let x = a ==> b" ~code:Specification_only ~at:"a ==>");
+      body_error "let x = a ==> b" ~code:Specification_only ~at:"==>");
   test "specifications allow forall" (fun () ->
       definition "type S(items: List[Int64])\n  invariant forall i in items => i > 0"
         "(type S ((items: List[Int64])) (invariant (forall (in i items) (> i 0))))";
@@ -713,11 +787,16 @@ let () =
   test "items.map { it.name }" (fun () ->
       body_error "let names = items.map { it.name }" ~code:Trailing_lambda ~at:"{ it"
         ~fixed:"let names = items.map(fn(item) { item.name })");
-  test "items.map { it.name } is parsed as the call it means" (fun () ->
+  test "the lambda's parameter is a plain singular, or element" (fun () ->
+      body_error "let x = entries.map { it.key }" ~code:Trailing_lambda ~at:"{ it"
+        ~fixed:"let x = entries.map(fn(entry) { entry.key })";
+      body_error "let x = statuses.map { it.code }" ~code:Trailing_lambda ~at:"{ it"
+        ~fixed:"let x = statuses.map(fn(element) { element.code })");
+  test "items.map { it.name } is parsed as the call its fix writes" (fun () ->
       let statements, _ = body_of "let names = items.map { it.name }" in
       if
         List.map Syntax_print.statement statements
-        <> [ "(let names (call (. items map) (fn (it) (block (. it name)))))" ]
+        <> [ "(let names (call (. items map) (fn (item) (block (. item name)))))" ]
       then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "parse::<List[Int64]> is parsed as the brackets it means" (fun () ->
       let statements, _ = body_of "let n = parse::<List[Int64]>(text)" in
@@ -759,7 +838,7 @@ let markdown_files =
 let snippet text =
   let source = source text in
   let tokens, lexer_diagnostics = Lexer.lex source in
-  let items, parser_diagnostics = Parser.Snippet.parse source tokens in
+  let items, parser_diagnostics = Reference.Snippet.parse source tokens in
   (tokens, items, lexer_diagnostics @ parser_diagnostics)
 
 let () =
@@ -775,6 +854,12 @@ let () =
         (Documents.truss_blocks (document name)))
     markdown_files
 
+let () =
+  test "a signature without a body in an example is checked" (fun () ->
+      let _, _, diagnostics = snippet "fn f(x: Int64)\n  requires x & 1 < 2" in
+      if codes diagnostics <> [ "parser.needs_parentheses" ] then
+        fail "got [%s]" (String.concat "; " (codes diagnostics)))
+
 (* The reference parser *)
 
 let () =
@@ -787,11 +872,11 @@ let () =
             (fun () ->
               let tokens, items, _ = snippet text in
               List.iter
-                (fun (item : Parser.Snippet.item) ->
+                (fun (item : Reference.Snippet.item) ->
                   let slice =
                     Array.to_list (Array.sub tokens item.first (item.stop - item.first))
                   in
-                  if not (Reference.accepts (Reference.entry item.kind) slice) then
+                  if not (Reference.accepts (Reference.Snippet.entry item.kind) slice) then
                     fail "the grammar rejects tokens %d to %d of %S" item.first item.stop text)
                 items))
         (Documents.truss_blocks (document name)))

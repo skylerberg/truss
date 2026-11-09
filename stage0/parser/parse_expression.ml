@@ -92,10 +92,6 @@ let is_clause_keyword = function
   | Keyword (Uses | Requires | Ensures | Decreases | Cost) -> true
   | _ -> false
 
-(* The cost words, recognized by their spelling. See GRAMMAR.md, "Keywords". *)
-let resource_words = [ "time"; "allocations"; "allocated_bytes"; "calls" ]
-let cost_words = ("amortized" :: resource_words) @ [ "O"; "finite"; "potential" ]
-
 let edit_distance a b =
   let previous = Array.init (String.length b + 1) Fun.id in
   for i = 1 to String.length a do
@@ -108,30 +104,51 @@ let edit_distance a b =
   done;
   previous.(String.length b)
 
-(* Reports a word where a cost word was expected. When exactly one of
-   [words] is close to it, the fix writes that word, and parsing goes on as
-   if it had been written, so that what follows is checked too. *)
-let cost_word cursor (token : Token.t) written ~words ~what =
+(* Reports a name where one of the cost words [words] was expected. When
+   exactly one of them is close to it, the fix writes that word, and parsing
+   goes on as if it had been written, so that what follows is checked too. *)
+let misspelled_cost_word cursor (token : Token.t) written ~words ~what =
   let message =
     Printf.sprintf "expected %s, one of %s, found `%s`" what
-      (String.concat ", " (List.map (Printf.sprintf "`%s`") words))
+      (String.concat ", " (List.map (fun word -> "`" ^ Cost_word.spelling word ^ "`") words))
       written
   in
-  match List.filter (fun word -> edit_distance written word <= 2) words with
+  match List.filter (fun word -> edit_distance written (Cost_word.spelling word) <= 2) words with
   | [ word ] ->
+      let spelling = Cost_word.spelling word in
       Cursor.report cursor Cost_word token.span message
         ~fixes:
           [
-            Diagnostic.fix (Printf.sprintf "Write `%s`" word) [ Diagnostic.replace token.span word ];
+            Diagnostic.fix
+              (Printf.sprintf "Write `%s`" spelling)
+              [ Diagnostic.replace token.span spelling ];
           ];
       word
   | _ ->
       Cursor.report cursor Cost_word token.span message;
       raise Cursor.Failed
 
+(* The cost word the current token spells, among [accepted], or the one of
+   [suggested] it misspells. *)
+let cost_word ?suggested cursor ~accepted ~what ~expected =
+  let token = Cursor.peek cursor in
+  let word =
+    match (Cost_word.of_token token.kind, token.kind) with
+    | Some word, _ when List.mem word accepted -> word
+    | _, (Lower written | Upper written) ->
+        misspelled_cost_word cursor token written
+          ~words:(Option.value suggested ~default:accepted)
+          ~what
+    | _ -> Cursor.fail cursor expected
+  in
+  Cursor.advance cursor;
+  word
+
 (* Types *)
 
-let rec type_expression cursor : type_expression =
+let rec type_expression cursor : type_expression = Cursor.nested cursor type_expression_in
+
+and type_expression_in cursor : type_expression =
   let start = cursor.Cursor.index in
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1, Cursor.peek_ahead cursor 2) with
   | Keyword Self_type, _, _ ->
@@ -222,29 +239,27 @@ and function_type cursor ~clauses:with_clauses =
 
 and parenthesized_function_type cursor =
   let start = cursor.Cursor.index in
-  Cursor.nested cursor (fun cursor ->
-      let closer = Cursor.closer cursor start in
-      Cursor.advance cursor;
-      match
-        if not (Cursor.is_keyword cursor Fn) then
-          Cursor.fail cursor
-            "a function type; parentheses in a type only hold a function type with clauses";
-        let function_type = function_type cursor ~clauses:true in
-        if function_type.clauses = [] then begin
-          Cursor.report cursor Unexpected_token (Cursor.token_at cursor start).span
-            "parentheses around a function type are only for its clauses; remove them";
-          raise Cursor.Failed
-        end;
-        if cursor.index < closer then
-          Cursor.fail cursor "`)` after the clauses of the function type";
-        function_type
-      with
-      | function_type ->
-          Cursor.skip_to cursor (closer + 1);
-          type_node cursor start (Function_type function_type)
-      | exception Cursor.Failed ->
-          Cursor.skip_to cursor (closer + 1);
-          type_node cursor start Type_error)
+  let closer = Cursor.closer cursor start in
+  Cursor.advance cursor;
+  match
+    if not (Cursor.is_keyword cursor Fn) then
+      Cursor.fail cursor
+        "a function type; parentheses in a type only hold a function type with clauses";
+    let function_type = function_type cursor ~clauses:true in
+    if function_type.clauses = [] then begin
+      Cursor.report cursor Unexpected_token (Cursor.token_at cursor start).span
+        "parentheses around a function type are only for its clauses; remove them";
+      raise Cursor.Failed
+    end;
+    if cursor.index < closer then Cursor.fail cursor "`)` after the clauses of the function type";
+    function_type
+  with
+  | function_type ->
+      Cursor.skip_to cursor (closer + 1);
+      type_node cursor start (Function_type function_type)
+  | exception Cursor.Failed ->
+      Cursor.skip_to cursor (closer + 1);
+      type_node cursor start Type_error
 
 (* [Element: Hash + Ordered]: one or more path types joined by [+]. *)
 and bounds cursor =
@@ -323,102 +338,93 @@ and clause cursor : clause =
    [cost potential expression] is parsed with the type. *)
 and cost cursor =
   let amortized =
-    match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-    | Lower "amortized", Lower _ ->
+    match (Cost_word.of_token (Cursor.peek_kind cursor), Cursor.peek_ahead cursor 1) with
+    | Some Amortized, Lower _ ->
         Cursor.advance cursor;
         true
     | _ -> false
   in
-  let resource_token = Cursor.peek cursor in
-  let resource_word =
-    match resource_token.kind with
-    | Lower "potential" ->
-        Cursor.report cursor Misplaced_potential resource_token.span
-          "`cost potential` belongs to a type, and states the potential its values hold";
-        raise Cursor.Failed
-    | Lower word when List.mem word resource_words -> word
-    | Lower written | Upper written ->
-        cost_word cursor resource_token written ~words:resource_words ~what:"a resource"
-    | _ ->
-        Cursor.fail cursor "a resource: `time`, `allocations`, `allocated_bytes`, or `calls(...)`"
-  in
-  Cursor.advance cursor;
+  if Cost_word.of_token (Cursor.peek_kind cursor) = Some Potential then begin
+    Cursor.report cursor Misplaced_potential (Cursor.peek cursor).span
+      "`cost potential` belongs to a type, and states the potential its values hold";
+    raise Cursor.Failed
+  end;
   let resource =
-    match resource_word with
-    | "time" -> Time
-    | "allocations" -> Allocations
-    | "allocated_bytes" -> Allocated_bytes
+    match
+      cost_word cursor ~accepted:Cost_word.resources ~what:"a resource"
+        ~expected:"a resource: `time`, `allocations`, `allocated_bytes`, or `calls(...)`"
+    with
+    | Time -> Time
+    | Allocations -> Allocations
+    | Allocated_bytes -> Allocated_bytes
     | _ -> Calls (call_target cursor)
   in
   let bound_token = Cursor.peek cursor in
-  let bound_word =
-    match bound_token.kind with
-    | Upper "O" -> Some "O"
-    | Lower "finite" -> Some "finite"
-    | Punctuation (Less_equal | Equal_equal) -> None
-    | Lower written | Upper written ->
-        Some
-          (cost_word cursor bound_token written
-             ~words:(if resource = Time then [ "O"; "finite" ] else [ "O" ])
-             ~what:"a bound")
-    | _ -> Cursor.fail cursor "a bound: `O(...)`, `finite`, `<=`, or `==`"
-  in
-  Cursor.advance cursor;
   let bound =
-    match bound_word with
-    | Some "O" -> Big_o (parenthesized_expression cursor)
-    | Some _ ->
-        if resource <> Time then
-          Cursor.report cursor Finite_not_time bound_token.span
-            "`finite` is a bound only for `time`; a countable resource takes `O(...)`, `<=`, or \
-             `==`";
-        Finite
-    | None ->
-        if bound_token.kind = Punctuation Less_equal then At_most (expression cursor)
-        else Exactly (expression cursor)
+    match bound_token.kind with
+    | Punctuation Less_equal ->
+        Cursor.advance cursor;
+        At_most (expression cursor)
+    | Punctuation Equal_equal ->
+        Cursor.advance cursor;
+        Exactly (expression cursor)
+    | _ -> (
+        (* [finite] is a bound only for [time], so it is suggested only
+           there. *)
+        let suggested = if resource = Time then [ Cost_word.O; Finite ] else [ O ] in
+        match
+          cost_word cursor ~accepted:[ O; Finite ] ~suggested ~what:"a bound"
+            ~expected:"a bound: `O(...)`, `finite`, `<=`, or `==`"
+        with
+        | O -> Big_o (parenthesized_expression cursor)
+        | _ ->
+            if resource <> Time then
+              Cursor.report cursor Finite_not_time bound_token.span
+                "`finite` is a bound only for `time`; a countable resource takes `O(...)`, `<=`, \
+                 or `==`";
+            Finite)
   in
   { amortized; resource; bound }
 
 (* The target of [calls(...)]: a parameter, a capability, or one of its
    methods. *)
 and call_target cursor =
-  Cursor.nested cursor (fun cursor ->
-      let opener = cursor.Cursor.index in
-      if not (Cursor.is_punctuation cursor (Open Paren)) then Cursor.fail cursor "`(` after `calls`";
-      let closer = Cursor.closer cursor opener in
-      Cursor.advance cursor;
-      let target =
-        match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-        | Lower text, next when next <> Punctuation Colon_colon ->
-            Call_parameter (Atoms.name cursor (Cursor.next cursor) text)
-        | _ ->
-            let capability = path_type cursor in
-            if Cursor.accept_punctuation cursor Dot then
-              Call_method (capability, Atoms.lower cursor "a method name")
-            else Call_capability capability
-      in
-      if cursor.index < closer then Cursor.fail cursor "`)` after the target of `calls`";
-      Cursor.skip_to cursor (closer + 1);
-      target)
+  let opener = cursor.Cursor.index in
+  if not (Cursor.is_punctuation cursor (Open Paren)) then Cursor.fail cursor "`(` after `calls`";
+  let closer = Cursor.closer cursor opener in
+  Cursor.advance cursor;
+  let target =
+    match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
+    | Lower text, next when next <> Punctuation Colon_colon ->
+        Call_parameter (Atoms.name cursor (Cursor.next cursor) text)
+    | _ ->
+        let capability = path_type cursor in
+        if Cursor.accept_punctuation cursor Dot then
+          Call_method (capability, Atoms.lower cursor "a method name")
+        else Call_capability capability
+  in
+  if cursor.index < closer then Cursor.fail cursor "`)` after the target of `calls`";
+  Cursor.skip_to cursor (closer + 1);
+  target
 
 (* An expression in parentheses that belong to the construct around it, as
    in [O(...)]. *)
 and parenthesized_expression cursor =
-  Cursor.nested cursor (fun cursor ->
-      let opener = cursor.Cursor.index in
-      if not (Cursor.is_punctuation cursor (Open Paren)) then Cursor.fail cursor "`(`";
-      let closer = Cursor.closer cursor opener in
-      Cursor.advance cursor;
-      let value = expression cursor in
-      if cursor.index < closer then Cursor.fail cursor "`)`";
-      Cursor.skip_to cursor (closer + 1);
-      value)
+  let opener = cursor.Cursor.index in
+  if not (Cursor.is_punctuation cursor (Open Paren)) then Cursor.fail cursor "`(`";
+  let closer = Cursor.closer cursor opener in
+  Cursor.advance cursor;
+  let value = expression cursor in
+  if cursor.index < closer then Cursor.fail cursor "`)`";
+  Cursor.skip_to cursor (closer + 1);
+  value
 
 (* Expressions *)
 
 (* An expression at the lowest level. Inside brackets, [open_range] lets a
    range leave out its start or its end. *)
-and expression ?(open_range = false) cursor = binary cursor ~level:0 ~open_range
+and expression ?(open_range = false) cursor =
+  Cursor.nested cursor (fun cursor -> binary cursor ~level:0 ~open_range)
 
 and binary cursor ~level ~open_range =
   let start = cursor.Cursor.index in
@@ -429,22 +435,31 @@ and binary cursor ~level ~open_range =
         if not open_range then open_range_error cursor token "start";
         let stop = range_stop cursor ~open_range in
         expression_node cursor start
-          (Range { start = None; stop; inclusive = range = Dot_dot_equal })
+          (Range
+             {
+               start = None;
+               operator_span = Cursor.span cursor token.span;
+               stop;
+               inclusive = range = Dot_dot_equal;
+             })
     | _ -> prefix cursor
   in
   let rec loop (left : expression) =
     match operator (Cursor.peek_kind cursor) with
     | Some (operator, operator_level) when operator_level >= level -> (
-        Cursor.advance cursor;
+        let operator_span = Cursor.span cursor (Cursor.next cursor).span in
         match operator with
         | Binary_operator operator ->
             let right = binary cursor ~level:(operator_level + 1) ~open_range:false in
-            loop (expression_node cursor start (Binary (operator, left, right)))
+            loop (expression_node cursor start (Binary { operator; operator_span; left; right }))
         | Is_operator ->
-            loop (expression_node cursor start (Is (left, Parse_pattern.pattern cursor)))
+            let pattern = Parse_pattern.pattern cursor in
+            loop (expression_node cursor start (Is { value = left; operator_span; pattern }))
         | Range_operator inclusive ->
             let stop = range_stop cursor ~open_range in
-            loop (expression_node cursor start (Range { start = Some left; stop; inclusive })))
+            loop
+              (expression_node cursor start
+                 (Range { start = Some left; operator_span; stop; inclusive })))
     | _ -> left
   in
   loop left
@@ -460,12 +475,13 @@ and range_stop cursor ~open_range =
       open_range_error cursor (Cursor.token_at cursor (cursor.index - 1)) "end";
       None
 
+and open_range_message part =
+  Printf.sprintf "a range without a%s %s is only allowed directly in brackets, as in `items[2..]`"
+    (if part = "end" then "n" else "")
+    part
+
 and open_range_error cursor (token : Token.t) part =
-  Cursor.report cursor Open_range token.span
-    (Printf.sprintf
-       "a range without a%s %s is only allowed directly in brackets, as in `items[2..]`"
-       (if part = "end" then "n" else "")
-       part);
+  Cursor.report cursor Open_range token.span (open_range_message part);
   raise Cursor.Failed
 
 and prefix cursor : expression =
@@ -508,7 +524,8 @@ and prefix cursor : expression =
     | _ -> postfix cursor
   in
   match Cursor.peek_kind cursor with
-  | Reserved As ->
+  (* [x as Int64], with the type on the same line as [as]. *)
+  | Reserved As when not (Cursor.token_at cursor (cursor.index + 1)).line_break_before ->
       let as_token = Cursor.next cursor in
       let target = type_expression cursor in
       Habits.as_conversion cursor ~value ~as_token ~target;
@@ -598,6 +615,23 @@ and postfix cursor : expression =
           cursor.index <- cursor.index - 1;
           Cursor.fail cursor "an index or type arguments"
         end;
+        (* A range that leaves out an end must be alone in its brackets. *)
+        if List.compare_length_with items 1 > 0 then
+          List.iter
+            (function
+              | Item
+                  {
+                    kind =
+                      ( Range { start = None; operator_span; _ }
+                      | Range { stop = None; operator_span; _ } );
+                    _;
+                  } ->
+                  Cursor.report cursor Open_range
+                    (Cursor.absolute cursor operator_span)
+                    "a range without a start or an end must be the only item in its brackets, as \
+                     in `items[2..]`"
+              | _ -> ())
+            items;
         loop (expression_node cursor start (Bracket (value, items)))
     | Punctuation (Open Paren) ->
         let arguments = arguments cursor in
@@ -611,8 +645,7 @@ and postfix cursor : expression =
         if not (Cursor.is_punctuation cursor (Open Paren)) then
           Cursor.fail cursor "`(` after `with`";
         let updates =
-          Cursor.bracketed cursor ~item:update ~recover:(fun span ->
-              { fields = []; value = Some { kind = Expression_error; span }; span })
+          Cursor.bracketed cursor ~item:update ~recover:(fun span -> { kind = Update_error; span })
         in
         loop (expression_node cursor start (With (value, updates)))
     | _ -> value
@@ -661,15 +694,16 @@ and argument cursor =
   | _ -> { label = None; value = expression cursor }
 
 (* [server.port: 443], or a bare [x]. *)
-and update cursor =
+and update cursor : update =
   let start = cursor.Cursor.index in
+  let field = Atoms.lower cursor "a field name" in
   let rec path fields =
-    let fields = Atoms.lower cursor "a field name" :: fields in
-    if Cursor.accept_punctuation cursor Dot then path fields else List.rev fields
+    if Cursor.accept_punctuation cursor Dot then path (Atoms.lower cursor "a field name" :: fields)
+    else List.rev fields
   in
-  let fields = path [] in
+  let path = path [] in
   let value = if Cursor.accept_punctuation cursor Colon then Some (expression cursor) else None in
-  { fields; value; span = Cursor.span_from cursor start }
+  { kind = Update { field; path; value }; span = Cursor.span_from cursor start }
 
 and primary cursor : expression =
   let start = cursor.Cursor.index in
@@ -691,21 +725,20 @@ and primary cursor : expression =
   | Keyword Self_value -> simple Self_value
   | Keyword Self_type -> simple Self_type_value
   | Lower _ | Upper _ -> named cursor start
-  | Punctuation (Open Paren) ->
-      Cursor.nested cursor (fun cursor ->
-          let closer = Cursor.closer cursor start in
-          Cursor.advance cursor;
-          match
-            let inner = expression cursor in
-            if cursor.index < closer then Cursor.fail cursor "`)`";
-            inner
-          with
-          | inner ->
-              Cursor.skip_to cursor (closer + 1);
-              expression_node cursor start (Parenthesized inner)
-          | exception Cursor.Failed ->
-              Cursor.skip_to cursor (closer + 1);
-              error_expression cursor start)
+  | Punctuation (Open Paren) -> (
+      let closer = Cursor.closer cursor start in
+      Cursor.advance cursor;
+      match
+        let inner = expression cursor in
+        if cursor.index < closer then Cursor.fail cursor "`)`";
+        inner
+      with
+      | inner ->
+          Cursor.skip_to cursor (closer + 1);
+          expression_node cursor start (Parenthesized inner)
+      | exception Cursor.Failed ->
+          Cursor.skip_to cursor (closer + 1);
+          error_expression cursor start)
   | Punctuation (Open Square) -> collection cursor
   | Punctuation (Open Curly) -> expression_node cursor start (Block (block cursor))
   | Keyword Fn -> lambda cursor
@@ -811,13 +844,9 @@ and string_literal cursor ~start ~modules literal =
 (* An interpolation is parsed from its own token array, with the same base,
    so its spans are relative to the definition too. *)
 and interpolation cursor (inner : Token.interpolation) : expression =
-  let tokens = inner.tokens in
-  let stop = Array.length tokens - 1 in
-  let nested =
-    Cursor.create ~source:cursor.source ~diagnostics:cursor.diagnostics ~base:cursor.base tokens
-      ~first:0 ~stop
-  in
-  nested.depth <- cursor.depth;
+  (* The interpolation's tokens end with its End_of_file. *)
+  let stop = Array.length inner.tokens - 1 in
+  let nested = Cursor.over cursor inner.tokens ~stop in
   (* An empty interpolation, or one a line break cut off before its first
      token, already has the lexer's error. *)
   if stop = 0 then { kind = Expression_error; span = Cursor.span cursor inner.span }
@@ -840,33 +869,39 @@ and collection cursor =
       Cursor.advance cursor;
       Cursor.advance cursor;
       expression_node cursor start (Map [])
-  | _ ->
-      let is_map = ref None in
-      let item cursor =
+  | _ -> (
+      (* Each element is parsed as a key with an optional value, and then
+         they must agree: all values, a map, or none, a list. *)
+      let element cursor =
         let key = expression cursor in
-        let map =
-          match !is_map with
-          | Some map -> map
-          | None ->
-              let map = Cursor.is_punctuation cursor Colon in
-              is_map := Some map;
-              map
+        let value =
+          if Cursor.accept_punctuation cursor Colon then Some (expression cursor) else None
         in
-        if map then begin
-          Cursor.expect_punctuation cursor Colon;
-          (key, Some (expression cursor))
-        end
-        else (key, None)
+        (key, value)
       in
-      let items =
-        Cursor.bracketed cursor ~item ~recover:(fun span ->
-            let error : expression = { kind = Expression_error; span } in
-            (error, if !is_map = Some true then Some error else None))
+      let elements =
+        Cursor.bracketed cursor ~item:element ~recover:(fun span ->
+            ({ kind = Expression_error; span }, None))
       in
-      if !is_map = Some true then
-        expression_node cursor start
-          (Map (List.map (fun (key, value) -> (key, Option.value value ~default:key)) items))
-      else expression_node cursor start (List (List.map fst items))
+      let is_error ((key : expression), _) = key.kind = Expression_error in
+      let entries =
+        List.filter_map (fun (key, value) -> Option.map (fun value -> (key, value)) value) elements
+      in
+      match elements with
+      | first :: _ when (not (is_error first)) && snd first <> None ->
+          if List.length entries = List.length elements then
+            expression_node cursor start (Map entries)
+          else mixed_collection cursor start (List.find (fun (_, value) -> value = None) elements)
+      | _ -> (
+          match List.find_opt (fun (_, value) -> value <> None) elements with
+          | None -> expression_node cursor start (List (List.map fst elements))
+          | Some entry -> mixed_collection cursor start entry))
+
+(* A collection whose elements mix list elements with map entries. *)
+and mixed_collection cursor start ((key : expression), _) =
+  Cursor.report cursor Unexpected_token (Cursor.absolute cursor key.span)
+    "a collection holds either list elements or map entries, `key: value`, not both";
+  error_expression cursor start
 
 and lambda cursor =
   let start = cursor.Cursor.index in
@@ -1030,8 +1065,10 @@ and replace_trailing (statement : statement) ~replace =
     in
     match value.kind with
     | Name _ | Member _ -> Some (replace value)
-    | Binary (operator, left, right) ->
-        Option.map (fun right -> around (Binary (operator, left, right)) right) (rightmost right)
+    | Binary binary ->
+        Option.map
+          (fun right -> around (Binary { binary with right }) right)
+          (rightmost binary.right)
     | Return (Some inner) ->
         Option.map (fun inner -> around (Return (Some inner)) inner) (rightmost inner)
     | Echo inner -> Option.map (fun inner -> around (Echo inner) inner) (rightmost inner)
@@ -1054,32 +1091,44 @@ and replace_trailing (statement : statement) ~replace =
   | _ -> None
 
 (* [items.map { it.name }]: a block on the same line after a call without
-   parentheses, which uses [it]. It is parsed as the call it means, with a
-   lambda whose parameter is [it]. *)
+   parentheses, which uses [it]. It is parsed as the call the fix writes:
+   the block becomes a lambda's body, with [it] renamed to the parameter. *)
 and trailing_lambda cursor statement =
   let opening = Cursor.peek cursor in
   let closer = Cursor.closer cursor cursor.index in
   let closing = Cursor.token_at cursor closer in
+  let block_tokens = Array.sub cursor.tokens cursor.index (closer - cursor.index + 1) in
   let uses =
-    List.filter_map
-      (fun index ->
-        let token = Cursor.token_at cursor index in
-        if token.kind = Lower "it" then Some token else None)
-      (List.init (closer - cursor.index) (fun offset -> cursor.index + offset))
+    List.filter (fun (token : Token.t) -> token.kind = Lower "it") (Array.to_list block_tokens)
   in
   let replace (callee : expression) : expression =
-    Habits.trailing_lambda cursor ~callee ~opening ~closing ~uses;
-    let body = block cursor in
-    let parameter : pattern =
+    let parameter = Habits.parameter_name callee in
+    Habits.trailing_lambda cursor ~callee ~parameter ~opening ~closing ~uses;
+    let renamed =
+      Array.map
+        (fun (token : Token.t) ->
+          if token.kind = Lower "it" then { token with kind = Lower parameter } else token)
+        block_tokens
+    in
+    let body = block (Cursor.over cursor renamed) in
+    Cursor.skip_to cursor (closer + 1);
+    let at_start = Syntax.Span.make body.span.start body.span.start in
+    let lambda : expression =
       {
         kind =
-          Binding_or_constant
-            { text = "it"; span = Syntax.Span.make body.span.start body.span.start };
-        span = Syntax.Span.make body.span.start body.span.start;
+          Lambda
+            {
+              parameters =
+                [
+                  {
+                    kind = Binding_or_constant { text = parameter; span = at_start };
+                    span = at_start;
+                  };
+                ];
+              body;
+            };
+        span = body.span;
       }
-    in
-    let lambda : expression =
-      { kind = Lambda { parameters = [ parameter ]; body }; span = body.span }
     in
     {
       kind = Call (callee, [ { label = None; value = lambda } ]);
@@ -1176,14 +1225,11 @@ and for_loop cursor ~parallel =
   (* In [for i in 0.. {}], the grammar reads the body as the end of the
      range, and the loop then has no body: the mistake is the range. *)
   (match iterable.kind with
-  | Range { stop = Some { kind = Block _; span }; _ } when not (opens_body cursor) ->
-      let block_start = (Cursor.absolute cursor span).start in
-      let rec operator index =
-        if (Cursor.token_at cursor index).span.start = block_start then
-          Cursor.token_at cursor (index - 1)
-        else operator (index - 1)
-      in
-      open_range_error cursor (operator (cursor.index - 1)) "end"
+  | Range { stop = Some { kind = Block _; _ }; operator_span; _ } when not (opens_body cursor) ->
+      Cursor.report cursor Open_range
+        (Cursor.absolute cursor operator_span)
+        (open_range_message "end");
+      raise Cursor.Failed
   | _ -> ());
   let clauses = loop_clauses cursor in
   For { parallel; pattern; iterable; clauses; body = body cursor }

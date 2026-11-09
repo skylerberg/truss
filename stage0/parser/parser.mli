@@ -1,0 +1,47 @@
+(** The parser's entry point. See PARSER.md.
+
+    A file's tokens are split into pieces, its [use] lines and its definitions, and each piece is
+    parsed on its own, from its own slice of the tokens. Its tree depends only on its own tokens,
+    its spans are relative to its first token, and so are its diagnostics, so that a piece that only
+    moved parses to exactly the same result, which can be cached and reused. *)
+
+type piece = Split.item = { first : int; stop : int }
+(** A piece of a file: the indexes of its first token and one past its last. *)
+
+val split : Token.t array -> piece list
+(** The pieces of a file, in order. *)
+
+val is_use : Token.t array -> piece -> bool
+
+type 'value parsed = {
+  value : 'value Syntax.item;
+  diagnostics : Diagnostic.t list;
+      (** Relative to [value.base]: {!Diagnostic.move} by the base gives their place in the file. *)
+}
+
+val definition : Source.t -> Token.t array -> piece -> Syntax.definition parsed
+(** A definition, with the checks that need its whole tree. *)
+
+val use_line : Source.t -> Token.t array -> piece -> Syntax.path option parsed
+(** A [use] line, and its path if it parsed. Whether it comes before every definition depends on the
+    rest of the file, so {!parse} checks it. *)
+
+val parse : Source.t -> Token.t array -> Syntax.file * Diagnostic.t list
+(** A whole file, with its diagnostics in the file's offsets, in order of position. *)
+
+val spelled_words : string list
+(** The names the parser recognizes by their spelling, in [cost] clauses. GRAMMAR.md lists them. *)
+
+(** {1 The documents' examples}
+
+    Examples in the documents mix definitions, signatures without bodies, and statements. Only the
+    tests of the documents and the tools that use the examples parse them, with these. Their
+    diagnostics are in the file's offsets. *)
+
+type example = Example_definition | Example_signature
+
+val example_definition : Source.t -> Token.t array -> piece -> example * Diagnostic.t list
+(** A definition, or a function's signature without a body. *)
+
+val example_statement : Source.t -> Token.t array -> piece -> Diagnostic.t list
+(** A statement, as a line of a block. *)

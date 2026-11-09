@@ -74,7 +74,7 @@ let children f (value : expression) =
   | Echo inner
   | Parenthesized inner ->
       f inner
-  | Is (inner, _) -> f inner
+  | Is { value = inner; _ } -> f inner
   | Bracket (inner, items) ->
       f inner;
       List.iter
@@ -85,8 +85,11 @@ let children f (value : expression) =
       List.iter (fun (argument : argument) -> f argument.value) arguments
   | With (base, updates) ->
       f base;
-      List.iter (fun (update : update) -> Option.iter f update.value) updates
-  | Binary (_, left, right) ->
+      List.iter
+        (fun (update : update) ->
+          match update.kind with Update { value; _ } -> Option.iter f value | Update_error -> ())
+        updates
+  | Binary { left; right; _ } ->
       f left;
       f right
   | Range { start; stop; _ } ->
@@ -152,11 +155,14 @@ let signature f (signature : signature) =
 
 let function_definition f (definition : function_definition) =
   signature f definition.signature;
-  Option.iter (block f) definition.body
+  block f definition.body
 
 let field f (field : field) =
-  type_expression f field.type_;
-  Option.iter f field.default
+  match field.kind with
+  | Field_declaration { type_; default; _ } ->
+      type_expression f type_;
+      Option.iter f default
+  | Field_error -> ()
 
 let definition f (definition : definition) =
   match definition.kind with
@@ -180,9 +186,11 @@ let definition f (definition : definition) =
       List.iter (generic_parameter f) generics;
       List.iter (path_type f) requires;
       List.iter
-        (fun (member : trait_member member) ->
+        (fun (member : trait_member line) ->
           match member.kind with
-          | Trait_method function_ -> function_definition f function_
+          | Trait_method { signature = method_; body } ->
+              signature f method_;
+              Option.iter (block f) body
           | Associated_type (_, bounds) -> List.iter (path_type f) bounds
           | Law law ->
               List.iter (parameter f) law.parameters;
@@ -195,7 +203,7 @@ let definition f (definition : definition) =
       type_head f type_;
       List.iter (path_type f) uses;
       List.iter
-        (fun (member : impl_member member) ->
+        (fun (member : impl_member line) ->
           match member.kind with
           | Impl_method function_ -> function_definition f function_
           | Associated_definition (_, type_) -> type_expression f type_
@@ -203,7 +211,7 @@ let definition f (definition : definition) =
         members
   | Capability { members; _ } ->
       List.iter
-        (fun (member : capability_member member) ->
+        (fun (member : capability_member line) ->
           match member.kind with
           | Capability_method method_ -> signature f method_
           | Capability_member_error -> ())

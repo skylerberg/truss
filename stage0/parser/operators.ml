@@ -34,7 +34,7 @@ let binary_group = function
 
 let group (value : expression) =
   match value.kind with
-  | Binary (operator, _, _) -> Some (binary_group operator)
+  | Binary { operator; _ } -> Some (binary_group operator)
   | Is _ -> Some Comparison
   | Range _ -> Some Range_group
   | Quantified _ | Echo _ | Return _ -> Some Lowest
@@ -44,10 +44,18 @@ let group (value : expression) =
    right operand. A range without both ends has none. *)
 let operands (value : expression) =
   match value.kind with
-  | Binary (_, left, right) -> Some (left.span, right.span)
-  | Is (left, pattern) -> Some (left.span, pattern.span)
+  | Binary { left; right; _ } -> Some (left.span, right.span)
+  | Is { value; pattern; _ } -> Some (value.span, pattern.span)
   | Range { start = Some start; stop = Some stop; _ } -> Some (start.span, stop.span)
   | _ -> None
+
+(* Where an operation's operator is, which is where an error about it
+   points. *)
+let operator_span (value : expression) =
+  match value.kind with
+  | Binary { operator_span; _ } | Is { operator_span; _ } | Range { operator_span; _ } ->
+      operator_span
+  | _ -> value.span
 
 (* How tightly Rust, C, Go, and Swift bind the operators Truss shares with
    them; higher binds tighter. Truss's total order is Rust's. *)
@@ -163,10 +171,20 @@ let reading_fix cursor ?context ~(whole : expression) ~(operand : expression) (x
    is the operator around [whole], if any, and whether [whole] is its right
    operand. *)
 let report_problem cursor ?context (whole : expression) (operand : expression) ~right problem =
+  (* [x _ y _ z], where [y] is the operand right next to [whole]'s operator.
+     On the right, that is the first operand of the chain [operand] starts,
+     [b] in [a & b + c + d]; on the left, a chain associates to the left, so
+     it is [operand]'s right operand. *)
+  let rec first_of_chain (value : expression) =
+    match value.kind with
+    | Binary { left; _ } when Option.equal ( = ) (group left) (group value) -> first_of_chain left
+    | _ -> Option.map fst (operands value)
+  in
   let pieces =
     match (operands whole, operands operand) with
     | Some (_, z), Some (x, y) when not right -> Some (x, y, z)
-    | Some (x, _), Some (y, z) when right -> Some (x, y, z)
+    | Some (x, _), Some (_, z) when right ->
+        Option.map (fun y -> (x, y, z)) (first_of_chain operand)
     | _ -> None
   in
   (* The parser's reading, and the other one. *)
@@ -188,11 +206,11 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
         "this takes everything after it, so as an operand it must be in parentheses, except that \
          `forall` and `exists` may be the last operand of `&&`, `||`, or `==>`"
         [ fix cursor operand.span (parentheses cursor operand.span operand.span) ]
-  | Mixed message -> report cursor whole.span message (both ())
+  | Mixed message -> report cursor (operator_span whole) message (both ())
   | Mixed_bitwise ->
       let fixes =
         match (whole.kind, operand.kind, pieces) with
-        | Binary (outer, _, _), Binary (inner, _, _), Some pieces ->
+        | Binary { operator = outer; _ }, Binary { operator = inner; _ }, Some pieces ->
             let first, second = if right then (outer, inner) else (inner, outer) in
             let readings =
               List.map
@@ -205,15 +223,15 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
             List.map (reading_of pieces) ordered
         | _ -> both ()
       in
-      report cursor whole.span
+      report cursor (operator_span whole)
         "shifts and bitwise operators combine only with themselves; add parentheses" fixes
   | Chained message ->
       let fixes =
         match (whole.kind, operand.kind) with
-        | Binary (Implies, _, _), _ ->
+        | Binary { operator = Implies; _ }, _ ->
             (* Dafny's reading of [a ==> b ==> c] first: [a ==> (b ==> c)]. *)
             List.rev (both ())
-        | Binary (_, _, _), Binary (_, _, middle) when (not right) && is_name_or_literal middle ->
+        | Binary _, Binary { right = middle; _ } when (not right) && is_name_or_literal middle ->
             (* Python's reading of [a < b < c]: [a < b && b < c]. *)
             let middle_text = Cursor.text cursor (Cursor.absolute cursor middle.span) in
             [
@@ -224,7 +242,7 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
             ]
         | _ -> []
       in
-      report cursor whole.span message fixes
+      report cursor (operator_span whole) message fixes
 
 (* Checks an expression and everything in it, reporting each operation that
    cannot combine with one of its operands. *)
@@ -236,11 +254,11 @@ let rec expression ?context cursor (value : expression) =
     | None -> ()
   in
   match value.kind with
-  | Binary (operator, left, right) ->
+  | Binary { operator; left; right; _ } ->
       let group = binary_group operator in
       operand group ~right:false left;
       operand group ~right:true right
-  | Is (left, _) -> operand Comparison ~right:false left
+  | Is { value = left; _ } -> operand Comparison ~right:false left
   | Range { start; stop; _ } ->
       Option.iter (operand Range_group ~right:false) start;
       Option.iter (operand Range_group ~right:true) stop

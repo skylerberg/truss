@@ -127,23 +127,65 @@ let token (kind : Token.kind) : Truss.token option =
 
 (* Whether the reference grammar accepts [tokens] from [entry]. *)
 let accepts entry (tokens : Token.t list) =
-  match List.map (fun (written : Token.t) -> token written.kind) tokens with
-  | converted when List.mem None converted -> false
-  | converted -> (
-      let remaining = ref (List.map Option.get converted) in
-      let next _ =
-        match !remaining with
-        | token :: rest ->
-            remaining := rest;
-            token
-        | [] -> Truss.EOF
-      in
-      match entry next (Lexing.from_string "") with () -> true | exception Truss.Error -> false)
-
-let entry : Parser.Snippet.kind -> _ = function
-  | Use -> Truss.snippet_use
-  | Definition -> Truss.snippet_definition
-  | Signature -> Truss.snippet_signature
-  | Statement -> Truss.snippet_statement
+  let converted = List.filter_map (fun (written : Token.t) -> token written.kind) tokens in
+  if List.compare_lengths converted tokens <> 0 then false
+  else
+    let remaining = ref converted in
+    let next _ =
+      match !remaining with
+      | token :: rest ->
+          remaining := rest;
+          token
+      | [] -> Truss.EOF
+    in
+    match entry next (Lexing.from_string "") with () -> true | exception Truss.Error -> false
 
 let file = Truss.file
+
+(* The documents' examples, split into pieces the way a file is, each parsed
+   by the kind of piece it starts like. *)
+module Snippet = struct
+  type kind = Use | Definition | Signature | Statement
+  type item = { kind : kind; first : int; stop : int }
+
+  (* Whether a piece starts like a definition rather than a statement. A
+     [let] starts a constant only before a name under a type, as in
+     [let UInt8.maximum]; otherwise it starts a statement. *)
+  let starts_definition (tokens : Token.t array) (piece : Parser.piece) =
+    let kind offset =
+      if piece.first + offset < piece.stop then tokens.(piece.first + offset).kind else End_of_file
+    in
+    match (kind 0, kind 1) with
+    | Keyword (Public | Internal | Type | Trait | Impl | Capability | Test | Theorem), _ -> true
+    | Keyword Fn, (Lower _ | Upper _) -> true
+    | Keyword Proof, Upper _ -> true
+    | Keyword Let, Upper _ -> (
+        match kind 2 with Punctuation (Dot | Open Square) -> true | _ -> false)
+    | _ -> false
+
+  let parse source tokens =
+    let pieces =
+      List.map
+        (fun (piece : Parser.piece) ->
+          let kind, diagnostics =
+            if Parser.is_use tokens piece then
+              let parsed = Parser.use_line source tokens piece in
+              (Use, List.map (Diagnostic.move parsed.value.base) parsed.diagnostics)
+            else if starts_definition tokens piece then
+              match Parser.example_definition source tokens piece with
+              | Example_definition, diagnostics -> (Definition, diagnostics)
+              | Example_signature, diagnostics -> (Signature, diagnostics)
+            else (Statement, Parser.example_statement source tokens piece)
+          in
+          ({ kind; first = piece.first; stop = piece.stop }, diagnostics))
+        (Parser.split tokens)
+    in
+    (List.map fst pieces, List.concat_map snd pieces)
+
+  (* The reference grammar's entry point for each kind of piece. *)
+  let entry = function
+    | Use -> Truss.snippet_use
+    | Definition -> Truss.snippet_definition
+    | Signature -> Truss.snippet_signature
+    | Statement -> Truss.snippet_statement
+end

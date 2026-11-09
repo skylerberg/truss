@@ -167,6 +167,23 @@ let replace span replacement = { span; replacement }
 let insert offset replacement = { span = Source.zero_width offset; replacement }
 let delete span = { span; replacement = "" }
 
+let move offset diagnostic =
+  let move_span (span : span) = Source.span (span.start + offset) (span.stop + offset) in
+  {
+    diagnostic with
+    span = move_span diagnostic.span;
+    notes = List.map (fun (span, note) -> (move_span span, note)) diagnostic.notes;
+    fixes =
+      List.map
+        (fun fix ->
+          {
+            fix with
+            edits =
+              List.map (fun (edit : edit) -> { edit with span = move_span edit.span }) fix.edits;
+          })
+        diagnostic.fixes;
+  }
+
 let apply_fix text fix =
   (* Edits at the same offset apply in the order they are listed. *)
   let edits =

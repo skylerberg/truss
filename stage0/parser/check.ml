@@ -56,8 +56,8 @@ let rec expression cursor context (value : expression) =
            "`%s` is only for specifications: `requires`, `ensures`, invariants, `decreases`, \
             `cost`, laws, theorems, and proofs"
            (match quantifier with Forall -> "forall" | Exists -> "exists"))
-  | Binary (Implies, _, _) when not context.specification ->
-      report cursor Specification_only value.span
+  | Binary { operator = Implies; operator_span; _ } when not context.specification ->
+      report cursor Specification_only operator_span
         "`==>` is only for specifications; in code, write `!a || b`"
   | Echo _ when context.proof ->
       report cursor Echo_in_proof value.span "`echo` is not allowed in proofs"
@@ -194,16 +194,22 @@ let signature cursor (signature : signature) =
   | None -> ());
   clauses cursor signature.clauses
 
+let function_ cursor (written : signature) body =
+  signature cursor written;
+  let yields = match written.result with Some (Yields _) -> true | _ -> false in
+  Option.iter (block cursor { plain with function_body = true; yields }) body
+
 let function_definition cursor (definition : function_definition) =
-  signature cursor definition.signature;
-  let yields = match definition.signature.result with Some (Yields _) -> true | _ -> false in
-  Option.iter (block cursor { plain with function_body = true; yields }) definition.body
+  function_ cursor definition.signature (Some definition.body)
 
 let fields cursor (fields : field list) =
   List.iter
     (fun (field : field) ->
-      types cursor plain field.type_;
-      Option.iter (expression cursor plain) field.default)
+      match field.kind with
+      | Field_declaration { type_; default; _ } ->
+          types cursor plain type_;
+          Option.iter (expression cursor plain) default
+      | Field_error -> ())
     fields
 
 let definition cursor (definition : definition) =
@@ -225,9 +231,9 @@ let definition cursor (definition : definition) =
   | Trait { generics; members; _ } ->
       generic_parameters cursor generics;
       List.iter
-        (fun (member : trait_member member) ->
+        (fun (member : trait_member line) ->
           match member.kind with
-          | Trait_method function_ -> function_definition cursor function_
+          | Trait_method { signature; body } -> function_ cursor signature body
           | Law law ->
               parameters cursor law.parameters;
               List.iter (expression cursor (specification plain)) law.requires;
@@ -237,7 +243,7 @@ let definition cursor (definition : definition) =
   | Impl { type_; members; _ } ->
       generic_parameters cursor type_.generics;
       List.iter
-        (fun (member : impl_member member) ->
+        (fun (member : impl_member line) ->
           match member.kind with
           | Impl_method function_ -> function_definition cursor function_
           | Associated_definition (_, type_) -> types cursor plain type_
@@ -245,7 +251,7 @@ let definition cursor (definition : definition) =
         members
   | Capability { members; _ } ->
       List.iter
-        (fun (member : capability_member member) ->
+        (fun (member : capability_member line) ->
           match member.kind with
           | Capability_method method_ -> signature cursor method_
           | Capability_member_error -> ())

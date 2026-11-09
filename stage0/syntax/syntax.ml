@@ -71,9 +71,17 @@ type assignment =
 
 type quantifier = Forall | Exists
 
+(* A statement, or a member of a trait, an [impl], or a capability: a node
+   that also records whether a blank line came before it, which [truss fmt]
+   keeps and hashing ignores. *)
+type 'kind line = { kind : 'kind; span : span; blank_line_before : bool }
+
+(* Most of the tree is nodes: what a part of the program is, and its span. *)
+type 'kind node = { kind : 'kind; span : span }
+
 (* Types *)
 
-type type_expression = { kind : type_kind; span : span }
+type type_expression = type_kind node
 
 and type_kind =
   | Path_type of path_type
@@ -98,7 +106,7 @@ and function_type = {
   clauses : clause list;
 }
 
-and generic_parameter = { kind : generic_kind; span : span }
+and generic_parameter = generic_kind node
 
 and generic_kind =
   | Type_parameter of name * path_type list  (** [Element: Hash + Ordered] *)
@@ -107,7 +115,7 @@ and generic_kind =
   | Generic_error
 
 (* Clauses *)
-and clause = { kind : clause_kind; span : span }
+and clause = clause_kind node
 
 and clause_kind =
   | Uses of path_type list
@@ -128,7 +136,7 @@ and call_target =
 and bound = Big_o of expression | Finite | At_most of expression | Exactly of expression
 
 (* Expressions *)
-and expression = { kind : expression_kind; span : span }
+and expression = expression_kind node
 
 and expression_kind =
   | Integer of Z.t
@@ -151,9 +159,14 @@ and expression_kind =
   | Prefix of prefix * expression
   | Mode of mode * expression
   | Any of expression
-  | Binary of binary * expression * expression
-  | Is of expression * pattern
-  | Range of { start : expression option; stop : expression option; inclusive : bool }
+  | Binary of { operator : binary; operator_span : span; left : expression; right : expression }
+  | Is of { value : expression; operator_span : span; pattern : pattern }
+  | Range of {
+      start : expression option;
+      operator_span : span;
+      stop : expression option;
+      inclusive : bool;
+    }
   | Quantified of { quantifier : quantifier; binder : binder; body : expression }
   | Echo of expression
   | Return of expression option
@@ -184,8 +197,13 @@ and bracket_item =
   | Item of expression  (** [0], [String], [..3] *)
   | Item_constraint of name * type_expression  (** [Element = Int64] *)
 
-(* [server.port: 443] has the path [server; port]. [with (x)] has no value. *)
-and update = { fields : name list; value : expression option; span : span }
+(* [server.port: 443] updates the field [server] at the path [port].
+   [with (x)] has no value. *)
+and update = update_kind node
+
+and update_kind =
+  | Update of { field : name; path : name list; value : expression option }
+  | Update_error
 
 and binder =
   | Binder_in of pattern * expression  (** [index in 0..count] *)
@@ -195,7 +213,7 @@ and else_branch = Else of block | Else_if of expression
 and block = { statements : statement list; span : span }
 
 (* Statements *)
-and statement = { kind : statement_kind; span : span; blank_line_before : bool }
+and statement = statement_kind line
 
 and statement_kind =
   | Let of {
@@ -221,7 +239,7 @@ and statement_kind =
   | Yield of expression
   | Statement_error
 
-and loop_clause = { kind : loop_clause_kind; span : span }
+and loop_clause = loop_clause_kind node
 and loop_clause_kind = Invariant of expression | Loop_decreases of expression list
 
 and arm = {
@@ -233,7 +251,7 @@ and arm = {
 }
 
 (* Patterns *)
-and pattern = { kind : pattern_kind; span : span }
+and pattern = pattern_kind node
 
 and pattern_kind =
   | Wildcard
@@ -257,9 +275,9 @@ and literal =
   | Literal_string of string_literal
 
 (* A bare name at the end of a range can only be a constant. *)
-and range_end = { kind : range_end_kind; span : span }
+and range_end = range_end_kind node
 and range_end_kind = End_literal of literal | End_constant of constant | End_name of name
-and pattern_field = { kind : pattern_field_kind; span : span }
+and pattern_field = pattern_field_kind node
 
 and pattern_field_kind =
   | Named_field of name * pattern  (** [element: score] *)
@@ -275,7 +293,7 @@ type visibility = Private | Internal | Public | Public_opaque
 type type_head = { path : path; generics : generic_parameter list; span : span }
 type function_name = Plain_name of name | Method_name of type_head * name
 
-type parameter = { kind : parameter_kind; span : span }
+type parameter = parameter_kind node
 
 and parameter_kind =
   | Self_parameter of mode option
@@ -297,14 +315,20 @@ type signature = {
   clauses : clause list;
 }
 
-(* A function's body is missing only in a trait or a capability, where a
-   method may be declared without one. *)
-type function_definition = { signature : signature; body : block option }
-type field = { name : name; type_ : type_expression; default : expression option; span : span }
+(* A function with its body. Only a trait or a capability declares a method
+   without one. *)
+type function_definition = { signature : signature; body : block }
+
+type field = field_kind node
+
+and field_kind =
+  | Field_declaration of { name : name; type_ : type_expression; default : expression option }
+  | Field_error
+
 type variant = { indirect : bool; name : name; fields : field list option; span : span }
 type type_body = Fields of field list | Variants of variant list | Type_todo
 
-type type_clause = { kind : type_clause_kind; span : span }
+type type_clause = type_clause_kind node
 
 and type_clause_kind =
   | Type_invariant of expression
@@ -312,10 +336,9 @@ and type_clause_kind =
   | Potential of expression
 
 type law = { name : name; parameters : parameter list; requires : expression list; body : block }
-type 'kind member = { kind : 'kind; span : span; blank_line_before : bool }
 
 type trait_member =
-  | Trait_method of function_definition
+  | Trait_method of { signature : signature; body : block option }
   | Associated_type of name * path_type list
   | Law of law
   | Trait_member_error
@@ -339,15 +362,15 @@ type definition_kind =
       name : name;
       generics : generic_parameter list;
       requires : path_type list;
-      members : trait_member member list;
+      members : trait_member line list;
     }
   | Impl of {
       trait_ : path_type;
       type_ : type_head;
       uses : path_type list;
-      members : impl_member member list;
+      members : impl_member line list;
     }
-  | Capability of { name : name; members : capability_member member list }
+  | Capability of { name : name; members : capability_member line list }
   | Constant of { name : function_name; type_ : type_expression; value : expression }
   | Test of { name : string_literal; uses : path_type list; body : block }
   | Theorem of {

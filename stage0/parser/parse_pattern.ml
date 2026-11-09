@@ -154,7 +154,9 @@ and pattern_fields cursor =
   fields
 
 (* A pattern, with alternatives: [Low | Normal]. *)
-and pattern cursor : pattern =
+and pattern cursor : pattern = Cursor.nested cursor alternatives
+
+and alternatives cursor : pattern =
   let start = cursor.Cursor.index in
   let first = primary cursor in
   if Cursor.is_punctuation cursor Bar then begin

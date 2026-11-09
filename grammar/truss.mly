@@ -537,7 +537,7 @@ map_entry:
   | expression COLON expression { () }
 
 lambda:
-  | FN LPAREN comma_list(pattern) RPAREN block { () }
+  | FN LPAREN comma_list(pattern) RPAREN newline_opt block { () }
 
 if_expression:
   | IF expression newline_opt block { () }

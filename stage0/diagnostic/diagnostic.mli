@@ -103,6 +103,12 @@ val replace : span -> string -> edit
 val insert : int -> string -> edit
 val delete : span -> edit
 
+val move : int -> t -> t
+(** [move offset diagnostic] adds [offset] to every span in [diagnostic]: its own, its notes', and
+    its fixes' edits. A stage whose results are cached apart from where they are in the file, such
+    as the parser's for each definition, keeps its diagnostics relative to a base and moves them
+    back when they are shown. Raises [Invalid_argument] if a span would start before 0. *)
+
 val apply_fix : string -> fix -> string
 (** Applies a fix's edits to the text it was made for. Raises [Invalid_argument] if the edits
     overlap. *)

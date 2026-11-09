@@ -165,9 +165,10 @@ and expression (value : expression) =
         [ expression inner ]
   | Mode (written, inner) -> form (mode written) [ expression inner ]
   | Any inner -> form "any" [ expression inner ]
-  | Binary (operator, left, right) -> form (binary operator) [ expression left; expression right ]
-  | Is (inner, tested) -> form "is" [ expression inner; pattern tested ]
-  | Range { start; stop; inclusive } ->
+  | Binary { operator; left; right; _ } ->
+      form (binary operator) [ expression left; expression right ]
+  | Is { value = inner; pattern = tested; _ } -> form "is" [ expression inner; pattern tested ]
+  | Range { start; stop; inclusive; _ } ->
       let bound = function Some value -> expression value | None -> "_" in
       form (if inclusive then "..=" else "..") [ bound start; bound stop ]
   | Quantified { quantifier; binder; body } ->
@@ -211,8 +212,11 @@ and argument (argument : argument) =
   | None -> expression argument.value
 
 and update (update : update) =
-  let fields = String.concat "." (List.map (fun (name : name) -> name.text) update.fields) in
-  match update.value with Some value -> form (fields ^ ":") [ expression value ] | None -> fields
+  match update.kind with
+  | Update { field; path; value } -> (
+      let fields = String.concat "." (List.map (fun (name : name) -> name.text) (field :: path)) in
+      match value with Some value -> form (fields ^ ":") [ expression value ] | None -> fields)
+  | Update_error -> "error"
 
 and arm (arm : arm) =
   form "=>"
@@ -327,20 +331,22 @@ let signature (signature : signature) =
   ]
   @ list clause signature.clauses
 
+let function_ written body = form "fn" (signature written @ [ optional block body ])
+
 let function_definition (definition : function_definition) =
-  form "fn" (signature definition.signature @ [ optional block definition.body ])
+  function_ definition.signature (Some definition.body)
 
 let field (field : field) =
-  form (field.name.text ^ ":")
-    [
-      type_expression field.type_;
-      optional (fun value -> form "=" [ expression value ]) field.default;
-    ]
+  match field.kind with
+  | Field_declaration { name; type_; default } ->
+      form (name.text ^ ":")
+        [ type_expression type_; optional (fun value -> form "=" [ expression value ]) default ]
+  | Field_error -> "error"
 
 let fields list_ = form "" (list field list_)
 
-let members print (members : _ member list) =
-  list (fun (member : _ member) -> print member.kind) members
+let members print (members : _ line list) =
+  list (fun (member : _ line) -> print member.kind) members
 
 let definition (definition : definition) =
   let body =
@@ -383,7 +389,7 @@ let definition (definition : definition) =
            ]
           @ members
               (function
-                | Trait_method function_ -> function_definition function_
+                | Trait_method { signature; body } -> function_ signature body
                 | Associated_type (name, []) -> form "type" [ name.text ]
                 | Associated_type (name, bounds) ->
                     form "type"

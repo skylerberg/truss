@@ -71,13 +71,21 @@ The parser is one dune library, which depends on `Token`, `Source`,
 | `Split` | Finds the `use` lines and each definition's token slice |
 | `Cursor` | Reads a token slice: the current token, lookahead, reporting errors, and the jumps recovery makes |
 | `Atoms` | Names, module prefixes, and string literals, which every part of the grammar uses |
+| `Cost_word` | The words of `cost` clauses, with the one table of their spellings |
 | `Parse_pattern` | Patterns |
 | `Parse_expression` | Types, clauses, expressions, statements, and blocks |
 | `Parse_definition` | Definitions, and the members of traits, `impl`s, and capabilities |
 | `Operators` | The check for combinations of operators that need parentheses |
 | `Habits` | The messages and fixes for syntax from other languages |
 | `Check` | Rules that need the whole tree of a definition |
-| `Parser` | The entry point: `Parser.parse : Source.t -> Token.t array -> Syntax.file * Diagnostic.t list` |
+| `Parser` | The entry points, for a whole file and for each piece of it |
+
+`Parser.parse : Source.t -> Token.t array -> Syntax.file * Diagnostic.t list`
+parses a whole file. The background process parses a file one piece at a
+time instead: `Parser.split` finds the pieces, a piece being a `use` line or
+a definition, and `Parser.definition` and `Parser.use_line` each parse one
+piece, so a piece whose text did not change keeps what it parsed to. See
+[Parsing one definition](#parsing-one-definition).
 
 Types, clauses, and expressions are one module because they contain each
 other: a statement has a type annotation, a function type in parentheses can
@@ -118,8 +126,15 @@ Each definition is parsed from its own token slice, with a fresh `Cursor`.
   tree is relative to the base. Adding a line above a definition changes only
   its base, so its tree, and every result computed from the tree, stays the
   same. DESIGN.md asks for exactly this for compiled positions; doing it in
-  the tree gives it to every later stage for free. Diagnostics add the base
-  back, since tools and editors work in file offsets.
+  the tree gives it to every later stage for free.
+- **So are its diagnostics.** Each piece collects its diagnostics apart from
+  the rest of the file's, and `Parser.definition` returns them relative to
+  the base, with their notes and fixes, so a definition that only moved
+  gives the same diagnostics as well as the same tree, and both can be
+  cached together. `Diagnostic.move` by the base gives their place in the
+  file, which `Parser.parse` does for a whole file, since tools and editors
+  work in file offsets. The one diagnostic that depends on the rest of the
+  file, a `use` line after a definition, is reported by `Parser.parse`.
 - **The definition keeps its source text,** the bytes from its first token to
   the end of its last token. `truss fmt` prints each literal from its span, as
   LEXER.md describes, and the spans are relative to this text.
@@ -142,14 +157,18 @@ three tokens ahead:
 | A label, `name:`, against an argument that starts with a name | `LOWER` then `:` |
 | An associated-type constraint, `Element = Int64`, in brackets | `UPPER` then `=` |
 | The empty map `[:]` | `[` then `:` then `]` |
-| A map literal against a list literal | Parse the first element, then look for `:` |
+| A map literal against a list literal | Parse each element with an optional `: value`, then check that they agree |
 | A trait method with its body on the next line, against the next member | `NEWLINE` then `{` |
 | A function name against a method name in a definition | `UPPER`, or `LOWER` then `::`, starts a type head |
 | A range with no start in brackets, `items[..3]` | `..` or `..=` right after `[` |
 
 Each parsing function consumes at least one token or returns, so parsing
-always ends. Nesting is limited to 256 levels of brackets and blocks, so
-hostile input cannot overflow the stack. Like the lexer's limit of 32 nested
+always ends. Nesting is limited to 256 levels, so hostile input cannot make
+the parser, or any later stage that walks the tree, recurse without bound.
+The parser counts each expression, type, pattern, and prefix operator it is
+inside, since every way it recurses goes through one of them: brackets,
+blocks, `if` conditions, and the bodies of `echo`, `return`, and the
+quantifiers all hold expressions. Like the lexer's limit of 32 nested
 interpolations, no real code comes near it.
 
 ## The syntax tree
@@ -183,9 +202,13 @@ lexer already gives it.
 ### Shape
 
 The tree types, in [`stage0/syntax/syntax.ml`](stage0/syntax/syntax.ml),
-follow GRAMMAR.md closely: an expression, a pattern, a type, a statement,
-and a clause are each a record of a `kind` and a `span`, and a definition is
-a record of its visibility, its kind, and its span.
+follow GRAMMAR.md closely. Most of the tree is made of one record,
+`'kind node`, which holds what a part of the program is and its span: an
+expression is an `expression_kind node`, and patterns, types, clauses,
+parameters, fields, and the rest are nodes the same way. Statements and the
+members of traits, `impl`s, and capabilities are `'kind line`s, which also
+record whether a blank line came before them. A definition is a record of
+its visibility, its kind, and its span.
 
 - **Constructs that parse the same are one node.** `Bracket` is an index or
   type arguments, `Name` is a variable, a constant, a function, a type, or a
@@ -204,14 +227,17 @@ a record of its visibility, its kind, and its span.
   but each is a specific constructor: `Uses`, `Requires`, `Ensures`,
   `Decreases`, or `Cost` with a parsed resource and bound. The hash sorts them
   by kind and keeps the order within each kind.
+- **An operation records where its operator is.** `Binary`, `Is`, and
+  `Range` keep their operator's span, so an error about a combination points
+  at the operator, and the language server can find it.
 - **Types rule out trees that cannot be written.** A trait's members, an
   `impl`'s members, and a capability's methods have a type each, so an `impl`
-  cannot hold a law. A function's body is optional only because a trait may
-  declare a method without one, and a document's example may show only a
-  signature.
+  cannot hold a law. Only a trait's method may have no body; a top-level
+  function and an `impl`'s method always have one. A `with` update names at
+  least one field.
 - **Every part that can fail to parse has an `Error` case:** definitions,
   members, statements, arms, clauses, parameters, generic parameters,
-  expressions, patterns, and types. A part that did not parse becomes an
+  fields, updates, expressions, patterns, and types. A part that did not parse becomes an
   `Error` node with the span it covered, and the rest of the tree is built
   around it.
 - **Each item records its base and its source text.** A file is its `use`
@@ -291,6 +317,8 @@ Rust, C, Go, and Swift bind each operator.
 - **A reading that cannot be written is not offered.** In `x is P & y`, the
   other reading would put `& y` inside the pattern, which has no grouping
   parentheses, so the only fix is `(x is P) & y`.
+- **Each error points at the operator** that cannot take its operand, such
+  as the `==` in `flags & mask == 0`, or the second `<` in `a < b < c`.
 - **Every combination is reported,** so a chain such as `a < b < c < d` gets
   one error for each `<` after the first. Applying any one fix removes its
   error and leaves the others as they were.
@@ -320,6 +348,11 @@ missing start or end anywhere else is an error that says open-ended ranges
 are only for brackets.
 
 - **Brackets hold at least one item,** so `items[]` is an error.
+- **A range that leaves out an end is alone in its brackets,** as the
+  grammar says, so `items[1.., 4]` is an error.
+- **A collection literal is a list or a map, not both.** Each element is
+  parsed with an optional `: value`, and then they must agree, so
+  `[1, "a": 2]` is one error at the first element that does not.
 - **`for i in 0.. {}` is reported at the `..`.** The grammar reads the `{}`
   as the end of the range, which leaves the loop without a body. When a `for`
   loop's collection is a range that ends with a block and no body follows,
@@ -365,7 +398,8 @@ at hand:
 The words of a `cost` clause are names to the lexer. The parser reads
 `cost [amortized] resource bound`, where `amortized`, `time`,
 `allocations`, `allocated_bytes`, `calls`, `O`, and `finite` must be spelled
-exactly. A misspelling gets a fix when one word is close, such as `allocation`
+exactly. `Cost_word` spells each word once, and the parser compares names
+against that table, never against a string written elsewhere. A misspelling gets a fix when one word is close, such as `allocation`
 for `allocations`, and parsing goes on as if that word had been written, so
 the rest of the clause is checked too. `finite` for a resource other than
 `time` is an error, and parsing goes on. `cost potential expression` is
@@ -439,7 +473,10 @@ To avoid cascades:
   [LEXER.md](LEXER.md#brackets)) already has its error, so the parser does not
   report what is missing before it. Once a statement, member, or arm has
   consumed such a closer, what follows in it is not what the author wrote,
-  so no more syntax errors are reported in it.
+  so no more syntax errors are reported in it. This belongs to the one item:
+  the items of a block inside it start afresh, and the item around the block
+  is as it was before the block, unless the block's own `}` is one the lexer
+  inserted.
 - An empty interpolation already has the lexer's error, so the parser
   reports nothing for it.
 - A file reports at most 200 diagnostics, as in the lexer.
@@ -465,8 +502,8 @@ as if the code had been fixed.
 | `\|x\| x + 1`, `\|\| x` | `\|` or `\|\|` where an expression must begin | `fn(x) { x + 1 }`, `fn() { x }` |
 | `Point { x: 1.0, y: 2.0 }` | An `UPPER` name, then `{`, a name, and `:`, on one line; no block starts with a label | `Point(x: 1.0, y: 2.0)` |
 | `parse::<Int64>(text)` | `::` followed by `<` | `parse[Int64](text)` |
-| `items.map { it.name }` | A statement that ends with a name or a member, followed on its line by a block that uses `it` | `items.map(fn(item) { item.name })` |
-| `x as Int64` | The reserved word `as` after an expression | `Int64.from(x)` |
+| `items.map { it.name }` | A statement that ends with a name or a member, followed on its line by a block that uses `it` | `items.map(fn(item) { item.name })`, naming the parameter with the singular of the collection's name where that is plain to work out, as `item` for `items` and `entry` for `entries`, and otherwise `element` |
+| `x as Int64` | The reserved word `as` after an expression, with a type after it on the same line | `Int64.from(x)` |
 | `loop {`, `const`, `static` | A `Reserved` token where a statement or a definition starts | `while true {`, `let` |
 | `where` and the other reserved words | A `Reserved` token anywhere else | None; the message says the word is reserved |
 | `elif` | The name `elif` starting a statement right after an `if` | `else if` |
@@ -505,9 +542,10 @@ added once the compiler works:
 - **The language server** maps a position to a node through the spans, after
   adding each definition's base.
 - **Incremental work.** The background process re-lexes a changed file, and
-  `Split` finds its definitions. A definition whose source text is unchanged
-  keeps its tree, which is the same tree because spans are relative. Only the
-  definitions whose text changed are parsed again.
+  `Parser.split` finds its pieces. A definition whose source text is
+  unchanged keeps its tree and its diagnostics, which are the same because
+  both are relative to the definition. Only the definitions whose text
+  changed are parsed again, with `Parser.definition`.
 
 ## Testing
 
@@ -521,9 +559,13 @@ about a small input, and there are no golden files.
 - **The documents' examples parse cleanly.** Each ```` ```truss ```` block in
   a Markdown document at the root of the repository is a test of its own.
   Many blocks mix definitions with statements, or show a signature with no
-  body to focus on it, so these tests use a snippet entry point that splits a
-  block into definitions, signatures without bodies, and statements. That
-  entry point exists only for these tests.
+  body to focus on it, so these tests split a block into pieces the way a
+  file is split, and parse each as a `use` line, a definition, a signature
+  without a body, or a statement. `Parser.example_definition` and
+  `Parser.example_statement` parse the last three, and exist only for these
+  tests and the tools that use the examples. Telling the kinds of piece
+  apart is the job of `Reference.Snippet`, in the test-only `Reference`
+  library.
 - **Both parsers agree on the documents.** The `Reference` library is a
   parser built by Menhir from `grammar/truss.mly`, only for tests and tools.
   It parses each piece of each example with the grammar's entry point for its
@@ -533,7 +575,7 @@ about a small input, and there are no golden files.
 - **The documents agree with the code.** A test checks GRAMMAR.md's list of
   words the parser recognizes by spelling against the parser's own list.
 - **Moving a definition changes nothing.** Adding lines above a definition
-  gives an identical tree for it.
+  gives an identical tree and identical diagnostics for it.
 - **The fuzzer**, `stage0/tools/fuzz`, is run by hand. It also checks that
   mutated examples never make the parser raise, that every tree's spans are
   in bounds and inside the node around them, that every fix removes its

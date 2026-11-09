@@ -122,21 +122,35 @@ let turbofish cursor ~(colons : Token.t) ~(less : Token.t) ~(greater : Token.t) 
       Diagnostic.replace greater.span "]";
     ]
 
+(* The singular of a plural English noun, for the plurals that are plain
+   to undo: [items] and [entries], but not [statuses] or [classes]. *)
+let singular word =
+  let length = String.length word in
+  let ends suffix = String.ends_with ~suffix word in
+  if length > 3 && ends "ies" then Some (String.sub word 0 (length - 3) ^ "y")
+  else if
+    length > 1 && ends "s"
+    && not (List.exists ends [ "ss"; "us"; "is"; "ses"; "xes"; "zes"; "ches"; "shes" ])
+  then Some (String.sub word 0 (length - 1))
+  else None
+
 (* The name a lambda's parameter gets in place of [it]: the singular of the
-   collection's name, as in [items.map(fn(item) { item.name })], or
-   [element]. *)
+   collection's name, as in [items.map(fn(item) { item.name })], when that
+   is plain to work out, and otherwise [element]. *)
 let parameter_name (callee : expression) =
   let receiver = match callee.kind with Member (receiver, _) -> Some receiver | _ -> None in
-  match receiver with
-  | Some { kind = Name { modules = []; last }; _ }
-    when String.length last.text > 1 && String.ends_with ~suffix:"s" last.text ->
-      String.sub last.text 0 (String.length last.text - 1)
+  let candidate =
+    match receiver with
+    | Some { kind = Name { modules = []; last }; _ } -> singular last.text
+    | _ -> None
+  in
+  match candidate with
+  | Some name when name <> "it" && Token.word name = None -> name
   | _ -> "element"
 
 (* [items.map { it.name }]: a lambda goes inside the parentheses. *)
-let trailing_lambda cursor ~(callee : expression) ~(opening : Token.t) ~(closing : Token.t)
-    ~(uses : Token.t list) =
-  let parameter = parameter_name callee in
+let trailing_lambda cursor ~(callee : expression) ~parameter ~(opening : Token.t)
+    ~(closing : Token.t) ~(uses : Token.t list) =
   let callee_stop = (Cursor.absolute cursor callee.span).stop in
   report cursor Trailing_lambda opening.span
     (Printf.sprintf
