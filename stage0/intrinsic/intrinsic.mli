@@ -114,12 +114,12 @@ type operation =
       (** [(handle, buffer, count) -> ISize]: appends up to [count] bytes, as [read_bytes] *)
   | Handle_write  (** [(handle, bytes) -> ISize]: writes, as [write_bytes] *)
   | Environment_variable
-  | Run_process
-      (** [(program, arguments, error) -> Int32]: runs a program found as a shell finds it,
-          with the arguments, each ending in a zero byte, and waits for it: its exit status, or
-          [128 +] the signal that ended it; [error] gets 0, or the system's error number *)
       (** [(name, buffer) -> Bool]: appends an environment variable's value; false when it is unset
       *)
+  | Run_process
+      (** [(program, arguments, error) -> Int32]: runs a program found as a shell finds it, with the
+          arguments, each ending in a zero byte, and waits for it: its exit status, or [128 +] the
+          signal that ended it; [error] gets 0, or the system's error number *)
   | Clock_now
   | Random_fill
 
