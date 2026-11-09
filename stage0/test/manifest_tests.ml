@@ -28,9 +28,13 @@ let () =
       match Manifest.parse "[package]\nname = \"a\"\n\n[dependencies]\njson\n" with
       | exception Manifest.Malformed (5, _) -> ()
       | _ -> fail "accepted");
-  test "an unknown section is malformed" (fun () ->
+  test "other sections are read past" (fun () ->
       match Manifest.parse "[package]\nname = \"a\"\n[profile]\nopt = \"3\"\n" with
-      | exception Manifest.Malformed (4, _) -> ()
-      | _ -> fail "accepted")
+      | { name = "a"; dependencies = [] } -> ()
+      | _ -> fail "read differently");
+  test "comments are read past, but not a # in quotes" (fun () ->
+      match Manifest.parse "# The app\n[package]\nname = \"a#b\" # its name\n" with
+      | { name = "a#b"; _ } -> ()
+      | _ -> fail "read differently")
 
 let () = finish ()

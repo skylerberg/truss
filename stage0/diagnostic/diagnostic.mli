@@ -161,6 +161,7 @@ module Code : sig
   type usage = Unused_variable | Unreachable_code
 
   type ownership =
+    | Views_temporary
     | Use_after_move
     | Not_owned
     | Field_not_restored

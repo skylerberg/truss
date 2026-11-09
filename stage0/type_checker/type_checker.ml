@@ -43,15 +43,13 @@ let read_directory ~package directory =
     |> List.concat_map (fun entry ->
         let path = Filename.concat absolute entry in
         if Sys.is_directory path then walk (relative @ [ entry ])
-        else if Filename.check_suffix entry ".truss" then (
-          let channel = open_in_bin path in
-          let text = really_input_string channel (in_channel_length channel) in
-          close_in channel;
+        else if Filename.check_suffix entry ".truss" then
+          let text = Source.text (Source.read_file path) in
           [
             ( ({ package; modules = relative @ [ Filename.chop_suffix entry ".truss" ] }
                 : Path.module_),
               text );
-          ])
+          ]
         else [])
   in
   walk []

@@ -186,4 +186,91 @@ let () =
       | [ "capabilities.not_granted" ] -> ()
       | found -> fail "found [%s]" (String.concat "; " found))
 
+let () =
+  let with_grant files granted =
+    let database = setup files in
+    Query.set database Workspace.packages "app"
+      {
+        name = "app";
+        dependencies = [ { package = "clock_library"; capabilities = granted } ];
+        modules = [ module_of "app::main" ];
+      };
+    codes (check database (module_of "app::main"))
+  in
+  let library =
+    ( "clock_library::time",
+      "public trait Stamper {\n\
+      \  fn stamp(self) -> Instant\n\
+      \    uses Clock\n\
+       }\n\n\
+       public type Wall()\n\n\
+       impl Stamper for Wall {\n\
+      \  fn stamp(self) -> Instant\n\
+      \    uses Clock\n\
+      \  {\n\
+      \    Clock.now()\n\
+      \  }\n\
+       }\n\n\
+       public type Fixed()\n\n\
+       impl Random for Fixed uses Clock {\n\
+      \  fn next(self) -> UInt64 {\n\
+      \    let _ = Clock.now()\n\
+      \    4\n\
+      \  }\n\
+       }\n" )
+  in
+  test "a dependency's trait method may use only what it is granted" (fun () ->
+      match
+        with_grant
+          [
+            ( "app::main",
+              "use clock_library::time\n\n\
+               fn f(wall: time::Wall) -> Instant\n\
+              \  uses Clock\n\
+               {\n\
+              \  wall.stamp()\n\
+               }\n" );
+            library;
+          ]
+          []
+      with
+      | "capabilities.not_granted" :: _ -> ()
+      | found -> fail "found [%s]" (String.concat "; " found));
+  test "a dependency's trait method may use what it is granted" (fun () ->
+      match
+        with_grant
+          [
+            ( "app::main",
+              "use clock_library::time\n\n\
+               fn f(wall: time::Wall) -> Instant\n\
+              \  uses Clock\n\
+               {\n\
+              \  wall.stamp()\n\
+               }\n" );
+            library;
+          ]
+          [ "Clock" ]
+      with
+      | [] -> ()
+      | found -> fail "found [%s]" (String.concat "; " found));
+  test "providing a dependency's type checks what its impls use" (fun () ->
+      match
+        with_grant
+          [
+            ( "app::main",
+              "use clock_library::time\n\n\
+               fn f() -> UInt64\n\
+              \  uses Clock\n\
+               {\n\
+              \  provide time::Fixed() {\n\
+              \    Random.next()\n\
+              \  }\n\
+               }\n" );
+            library;
+          ]
+          []
+      with
+      | [ "capabilities.not_granted" ] -> ()
+      | found -> fail "found [%s]" (String.concat "; " found))
+
 let () = finish ()

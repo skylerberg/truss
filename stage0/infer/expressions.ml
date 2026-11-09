@@ -2748,6 +2748,30 @@ and any_ state env ?expected (value : expression) (inner : expression) =
 
 (* Strings and templates *)
 
+(* A constant in a pattern, or a range's end: recorded by the node's id, and
+   of the matched type. *)
+and constant_pattern state id span path type_ =
+  state.tables.patterns.(id) <- Some (Constant_pattern path);
+  match Query.demand state.database Environment.constant_type path with
+  | Some constant_type ->
+      if not (unify state constant_type type_) then
+        mismatch state span ~expected:type_ ~found:constant_type
+  | None -> ()
+
+and qualified_constant state id span constant type_ =
+  let path =
+    match constant with
+    | Module_constant written_path -> (
+        match target state written_path.last with Some (Definition path) -> Some path | _ -> None)
+    | Type_constant (written_path, member) -> (
+        match target state written_path.last with
+        | Some (Definition owner) -> Members.own_constant state.database owner member.text
+        | _ -> None)
+  in
+  match path with
+  | Some path -> constant_pattern state id span path type_
+  | None -> report state Unknown_member span "This names no constant."
+
 and string_literal state env ?expected (literal : string_literal) =
   let parts = List.map (fun (part, _) -> (part, expression state env part)) literal.rest in
   let template : C.template =
@@ -3527,53 +3551,22 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                       binds it with one type."
                      bound.text (show state local.type_) (show state type_))
           | None -> ())
-      | Some (Definition path) -> (
-          state.tables.patterns.(written.id) <- Some (Constant_pattern path);
-          match Query.demand state.database Environment.constant_type path with
-          | Some constant_type ->
-              if not (unify state constant_type type_) then
-                mismatch state written.span ~expected:type_ ~found:constant_type
-          | None -> ())
+      | Some (Definition path) -> constant_pattern state written.id written.span path type_
       | Some (Generic _) ->
           if not (unify state (T.builtin USize) type_) then
             mismatch state written.span ~expected:type_ ~found:(T.builtin USize)
       | _ -> ())
-  | Qualified_constant constant -> (
-      let path =
-        match constant with
-        | Module_constant written_path -> (
-            match target state written_path.last with
-            | Some (Definition path) -> Some path
-            | _ -> None)
-        | Type_constant (written_path, member) -> (
-            match target state written_path.last with
-            | Some (Definition owner) -> Members.own_constant state.database owner member.text
-            | _ -> None)
-      in
-      match path with
-      | Some path -> (
-          state.tables.patterns.(written.id) <- Some (Constant_pattern path);
-          match Query.demand state.database Environment.constant_type path with
-          | Some constant_type ->
-              if not (unify state constant_type type_) then
-                mismatch state written.span ~expected:type_ ~found:constant_type
-          | None -> ())
-      | None -> report state Unknown_member written.span "This names no constant.")
+  | Qualified_constant constant -> qualified_constant state written.id written.span constant type_
   | Literal literal -> literal_pattern state env written literal type_
   | Pattern_range { start; stop; _ } ->
       List.iter
         (fun (end_ : range_end) ->
           match end_.kind with
           | End_literal literal -> literal_pattern state env written literal type_
-          | End_constant _ -> ()
+          | End_constant constant -> qualified_constant state end_.id end_.span constant type_
           | End_name bound -> (
               match target state bound with
-              | Some (Definition path) -> (
-                  match Query.demand state.database Environment.constant_type path with
-                  | Some constant_type ->
-                      if not (unify state constant_type type_) then
-                        mismatch state end_.span ~expected:type_ ~found:constant_type
-                  | None -> ())
+              | Some (Definition path) -> constant_pattern state end_.id end_.span path type_
               | _ -> ()))
         [ start; stop ]
   | Variant { name = variant_name; fields } -> (

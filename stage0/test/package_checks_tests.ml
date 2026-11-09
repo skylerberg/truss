@@ -82,4 +82,95 @@ let () =
       | [ "package.duplicate_test" ] -> ()
       | found -> fail "found [%s]" (String.concat "; " found))
 
+(* Recursive types, at scale *)
+
+let () =
+  test "a long chain of types that hold each other is fine" (fun () ->
+      fine
+        (String.concat ""
+           (List.init 20 (fun index ->
+                if index = 19 then "type T19(value: Int64)\n"
+                else Printf.sprintf "type T%d(inner: T%d)\n\n" index (index + 1)))));
+  test "nested instances of a generic type are not growing" (fun () ->
+      fine
+        "type Couple[First, Second](first: First, second: Second)\n\n\
+         type Nest(value: Couple[Couple[Int64, String], Couple[String, Int64]])\n");
+  test "many types that each hold the next several times are checked quickly" (fun () ->
+      let text =
+        String.concat ""
+          (List.init 16 (fun index ->
+               if index = 15 then "type D15(value: Int64)\n"
+               else
+                 Printf.sprintf "type D%d(a: D%d, b: D%d, c: D%d, d: D%d)\n\n" index (index + 1)
+                   (index + 1) (index + 1) (index + 1)))
+      in
+      let started = Sys.time () in
+      fine text;
+      if Sys.time () -. started > 5.0 then fail "took %.1f seconds" (Sys.time () -. started));
+  test "a type held in place through a generic type's argument needs indirect" (fun () ->
+      one_diagnostic
+        "type Couple[First, Second](first: First, second: Second)\n\n\
+         type Tree =\n\
+        \  | Leaf\n\
+        \  | Node(children: Couple[Tree, Int64])\n"
+        "package.needs_indirect");
+  test "a type held through a generic type's collection needs no indirect" (fun () ->
+      fine
+        "type Wrapper[Element](items: List[Element])\n\n\
+         type Tree =\n\
+        \  | Leaf\n\
+        \  | Node(children: Wrapper[Tree])\n");
+  test "generic types whose arguments grow through each other are both growing" (fun () ->
+      let database =
+        setup
+          [
+            ( "app::main",
+              "type Outer[Element] =\n\
+              \  | Empty\n\
+              \  | indirect More(inner: Inner[List[Element]])\n\n\
+               type Inner[Element](outer: Outer[Element])\n" );
+          ]
+      in
+      match codes (check database (module_of "app::main")) with
+      | [ "package.growing_type"; "package.growing_type" ] -> ()
+      | found -> fail "found [%s]" (String.concat "; " found));
+  test "a generic type that swaps its arguments is not growing" (fun () ->
+      fine "type Swap[First, Second] =\n  | Stop\n  | indirect Next(next: Swap[Second, First])\n")
+
+(* Across packages *)
+
+let () =
+  test "an impl overlaps an impl in a package it depends on" (fun () ->
+      let database = Query.create () in
+      Type_checker.load_standard database;
+      Type_checker.load_package database ~name:"lib" ~dependencies:[]
+        [
+          ( module_of "lib::vector",
+            "public type Vector[Element](items: List[Element])\n\n\
+             impl Add[Element] for Vector[Element] {\n\
+            \  type Output = Vector[Element]\n\
+            \  fn add(self, right: Element) -> Vector[Element] { todo }\n\
+             }\n" );
+        ];
+      Type_checker.load_package database ~name:"app"
+        ~dependencies:[ { package = "lib"; capabilities = [] } ]
+        [
+          ( module_of "app::main",
+            "use lib::vector\n\n\
+             public type Meters(value: Int64)\n\n\
+             impl Add[Meters] for vector::Vector[Element] {\n\
+            \  type Output = vector::Vector[Element]\n\
+            \  fn add(self, right: Meters) -> vector::Vector[Element] { todo }\n\
+             }\n" );
+        ];
+      match codes (Package_checks.diagnostics database (module_of "app::main")) with
+      | [ "package.overlapping_impls" ] -> ()
+      | found -> fail "found [%s]" (String.concat "; " found));
+  test "impls whose heads unify only through an infinite type do not overlap" (fun () ->
+      fine
+        "type Box[Element](value: Element)\n\n\
+         trait Mark[Other] {}\n\n\
+         impl Mark[Box[Element]] for Box[Element] {}\n\n\
+         impl Mark[Element] for Box[Element] {}\n")
+
 let () = finish ()

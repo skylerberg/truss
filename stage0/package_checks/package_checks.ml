@@ -74,14 +74,27 @@ let overlap (first : T.impl_interface) (second : T.impl_interface) =
         match Hashtbl.find_opt bindings parameter with Some bound -> resolve bound | None -> type_)
     | _ -> type_
   in
+  (* Binding a variable to a type that holds it would make an infinite
+     type, which no head can be. *)
+  let rec occurs parameter (type_ : T.ty) =
+    match resolve type_ with
+    | T.Parameter found -> found = parameter
+    | T.Named { arguments; _ } ->
+        List.exists (function T.Type type_ -> occurs parameter type_ | _ -> false) arguments
+    | _ -> false
+  in
+  let bind parameter other =
+    if other = T.Parameter parameter then true
+    else if occurs parameter other then false
+    else begin
+      Hashtbl.replace bindings parameter other;
+      true
+    end
+  in
   let rec unify left right =
     match (resolve left, resolve right) with
-    | T.Parameter parameter, other when List.mem parameter variables ->
-        if other <> T.Parameter parameter then Hashtbl.replace bindings parameter other;
-        true
-    | other, T.Parameter parameter when List.mem parameter variables ->
-        if other <> T.Parameter parameter then Hashtbl.replace bindings parameter other;
-        true
+    | T.Parameter parameter, other when List.mem parameter variables -> bind parameter other
+    | other, T.Parameter parameter when List.mem parameter variables -> bind parameter other
     | T.Named left, T.Named right ->
         Path.equal left.path right.path
         && List.length left.arguments = List.length right.arguments
@@ -122,143 +135,156 @@ let check_method_names database (declaration : Names.declaration) (definition : 
 
 (* Recursive types *)
 
-(* The types a value of a type holds in place: its fields' types, through
-   type arguments held in place, but not through an [indirect] variant, a
-   collection's storage, a function, or [any]. *)
-let rec in_place database (type_ : T.ty) : (Path.t * T.ty list) list =
-  match type_ with
-  | T.Named { path; arguments } -> (
-      match Intrinsic.builtin_of_path path with
-      | Some Array ->
-          List.concat_map
-            (function T.Type element -> in_place database element | _ -> [])
-            arguments
-      | Some _ -> []
-      | None ->
-          [ (path, List.filter_map (function T.Type type_ -> Some type_ | _ -> None) arguments) ])
-  | _ -> []
-
-let fields_in_place database path arguments =
+(* A type definition's generic parameters, and its fields, each with the
+   variant it is in and whether that variant is [indirect]. *)
+let type_fields database path =
   match Query.demand database Environment.type_interface path with
-  | Some interface -> (
-      let substitution =
-        if List.length interface.type_generics = List.length arguments then
-          List.combine
-            (List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics)
-            (List.map (fun type_ -> T.Type type_) arguments)
-        else []
+  | Some interface ->
+      let parameters =
+        List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics
       in
-      let fields (written : T.field list) =
-        List.map (fun (field : T.field) -> T.substitute substitution field.field_type) written
-      in
-      match interface.shape with
-      | Record written -> List.map (fun type_ -> (None, type_)) (fields written)
-      | Sum variants ->
-          List.concat_map
-            (fun (variant : T.variant) ->
-              if variant.indirect then []
-              else
-                List.map
-                  (fun type_ -> (Some variant.variant_name, type_))
-                  (fields (Option.value ~default:[] variant.fields)))
-            variants
-      | _ -> [])
-  | None -> []
-
-(* A cycle of types that contain each other in place, from a type back to
-   it, with the variant where the cycle leaves the type, if one. *)
-let find_cycle database (start : Path.t) =
-  let rec walk depth visited (path, arguments) =
-    if depth > 16 then `Growing
-    else
-      let result = ref `None in
-      List.iter
-        (fun (variant, field_type) ->
-          if !result = `None then
-            List.iter
-              (fun (inner_path, inner_arguments) ->
-                if !result = `None then
-                  if Path.equal inner_path start then result := `Cycle variant
-                  else if
-                    List.exists
-                      (fun (seen, seen_arguments) ->
-                        Path.equal seen inner_path && seen_arguments = inner_arguments)
-                      visited
-                  then ()
-                  else if
-                    List.exists (fun (seen, _) -> Path.equal seen inner_path) visited && depth > 8
-                  then result := `Growing
-                  else
-                    match
-                      walk (depth + 1)
-                        ((inner_path, inner_arguments) :: visited)
-                        (inner_path, inner_arguments)
-                    with
-                    | `Cycle _ -> result := `Cycle variant
-                    | `Growing -> result := `Growing
-                    | `None -> ())
-              (in_place database field_type))
-        (fields_in_place database path arguments);
-      !result
-  in
-  let generics =
-    match Query.demand database Environment.type_interface start with
-    | Some interface ->
-        List.map (fun (generic : T.generic) -> T.Parameter generic.generic) interface.type_generics
-    | None -> []
-  in
-  walk 0 [ (start, generics) ] (start, generics)
-
-(* Whether a generic type contains itself with different arguments,
-   through any field at all, [indirect] or in a collection, so that it has
-   no fixed set of instances. *)
-let grows database (start : Path.t) =
-  let rec mentions (type_ : T.ty) =
-    match type_ with
-    | T.Named { path; arguments } ->
-        (path, List.filter_map (function T.Type type_ -> Some type_ | _ -> None) arguments)
-        :: List.concat_map (function T.Type type_ -> mentions type_ | _ -> []) arguments
-    | _ -> []
-  in
-  let all_fields path arguments =
-    match Query.demand database Environment.type_interface path with
-    | Some interface -> (
-        let substitution =
-          if List.length interface.type_generics = List.length arguments then
-            List.combine
-              (List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics)
-              (List.map (fun type_ -> T.Type type_) arguments)
-          else []
-        in
-        let fields (written : T.field list) =
-          List.map (fun (field : T.field) -> T.substitute substitution field.field_type) written
-        in
+      let fields =
         match interface.shape with
-        | Record written -> fields written
+        | Record written ->
+            List.map (fun (field : T.field) -> (None, false, field.field_type)) written
         | Sum variants ->
             List.concat_map
-              (fun (variant : T.variant) -> fields (Option.value ~default:[] variant.fields))
+              (fun (variant : T.variant) ->
+                List.map
+                  (fun (field : T.field) ->
+                    (Some variant.variant_name, variant.indirect, field.field_type))
+                  (Option.value ~default:[] variant.fields))
               variants
-        | _ -> [])
+        | _ -> []
+      in
+      (parameters, fields)
+  | None -> ([], [])
+
+let output_type : T.result -> T.ty = function
+  | Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
+
+let type_arguments arguments =
+  List.filter_map (function T.Type type_ -> Some type_ | _ -> None) arguments
+
+(* Whether a generic type holds its [index]th parameter in place: in a field
+   of a variant that is not [indirect], outside collections' storage,
+   functions, and [any]. [visiting] cuts recursion, as the least answer. *)
+let rec holds database visiting (path, index) =
+  if List.mem (path, index) visiting then false
+  else
+    let parameters, fields = type_fields database path in
+    match List.nth_opt parameters index with
+    | None -> false
+    | Some parameter ->
+        let visiting = (path, index) :: visiting in
+        List.exists
+          (fun (_, indirect, field_type) ->
+            (not indirect)
+            && List.exists
+                 (function `Parameter found -> found = parameter | `Path _ -> false)
+                 (in_place database visiting field_type))
+          fields
+
+(* What a value of a type holds in place: the named types, and the
+   generic parameters, through the arguments of generic types that hold them
+   in place. *)
+and in_place database visiting (type_ : T.ty) =
+  match type_ with
+  | T.Parameter parameter -> [ `Parameter parameter ]
+  | T.Named { path; arguments } -> (
+      let arguments = type_arguments arguments in
+      match Intrinsic.builtin_of_path path with
+      | Some Array -> List.concat_map (in_place database visiting) arguments
+      | Some _ -> []
+      | None ->
+          `Path path
+          :: List.concat
+               (List.mapi
+                  (fun index argument ->
+                    if holds database visiting (path, index) then
+                      in_place database visiting argument
+                    else [])
+                  arguments))
+  | _ -> []
+
+(* A cycle of types that hold each other in place, from a type back to it:
+   [Some variant] with the variant of [start] where the cycle leaves it,
+   [None] for a record's field. Each type is visited once. *)
+let find_cycle database (start : Path.t) =
+  let visited = Hashtbl.create 16 in
+  let rec reaches path =
+    Path.equal path start
+    || (not (Hashtbl.mem visited path))
+       && begin
+         Hashtbl.replace visited path ();
+         List.exists
+           (fun (_, indirect, field_type) -> (not indirect) && reaches_any field_type)
+           (snd (type_fields database path))
+       end
+  and reaches_any field_type =
+    List.exists
+      (function `Path path -> reaches path | `Parameter _ -> false)
+      (in_place database [] field_type)
+  in
+  List.find_map
+    (fun (variant, indirect, field_type) ->
+      if (not indirect) && reaches_any field_type then Some variant else None)
+    (snd (type_fields database start))
+
+(* Whether a generic type contains itself with growing type arguments,
+   through any field at all, so that it has no fixed set of instances. As in
+   Go's check, the graph's nodes are the parameters of generic types: a
+   parameter goes to each argument position of a type named in a field that
+   mentions it, growing when the argument is more than the parameter itself.
+   The type grows when a path from its parameters back to them takes a
+   growing edge. Each node is visited once with each answer to whether the
+   path has grown. *)
+let grows database (start : Path.t) =
+  let edges (path, index) =
+    let parameters, fields = type_fields database path in
+    match List.nth_opt parameters index with
     | None -> []
+    | Some parameter ->
+        let rec mentions (type_ : T.ty) =
+          match type_ with
+          | T.Parameter found -> found = parameter
+          | T.Named { arguments; _ } -> List.exists mentions (type_arguments arguments)
+          | T.Function { inputs; output; _ } ->
+              List.exists (fun (_, type_) -> mentions type_) inputs || mentions (output_type output)
+          | _ -> false
+        in
+        let rec targets (type_ : T.ty) =
+          match type_ with
+          | T.Named { path = target; arguments } ->
+              let arguments = type_arguments arguments in
+              List.concat
+                (List.mapi
+                   (fun position argument ->
+                     if mentions argument then
+                       [ ((target, position), argument <> T.Parameter parameter) ]
+                     else [])
+                   arguments)
+              @ List.concat_map targets arguments
+          | T.Function { inputs; output; _ } ->
+              List.concat_map (fun (_, type_) -> targets type_) inputs
+              @ targets (output_type output)
+          | _ -> []
+        in
+        List.concat_map (fun (_, _, field_type) -> targets field_type) fields
   in
-  let generics =
-    match Query.demand database Environment.type_interface start with
-    | Some interface ->
-        List.map (fun (generic : T.generic) -> T.Parameter generic.generic) interface.type_generics
-    | None -> []
+  let visited = Hashtbl.create 16 in
+  let rec walk ((path, _) as node) grown =
+    if Path.equal path start && grown then true
+    else if Hashtbl.mem visited (node, grown) then false
+    else begin
+      Hashtbl.replace visited (node, grown) ();
+      List.exists (fun (target, growing) -> walk target (grown || growing)) (edges node)
+    end
   in
-  let rec walk depth seen (path, arguments) =
-    depth < 12
-    && List.exists
-         (fun (inner_path, inner_arguments) ->
-           if Path.equal inner_path start then inner_arguments <> generics
-           else if List.mem (inner_path, inner_arguments) seen then false
-           else
-             walk (depth + 1) ((inner_path, inner_arguments) :: seen) (inner_path, inner_arguments))
-         (List.concat_map mentions (all_fields path arguments))
-  in
-  generics <> [] && walk 0 [ (start, generics) ] (start, generics)
+  let parameters, _ = type_fields database start in
+  List.exists
+    (fun index -> List.exists (fun (target, growing) -> walk target growing) (edges (start, index)))
+    (List.init (List.length parameters) Fun.id)
 
 let check_recursion database (declaration : Names.declaration) (definition : definition) =
   match definition.kind with
@@ -269,12 +295,8 @@ let check_recursion database (declaration : Names.declaration) (definition : def
   | Type_definition { body; _ } -> (
       let key = Names.key_of declaration in
       match find_cycle database declaration.path with
-      | `None -> None
-      | `Growing ->
-          at database key Growing_type (header_span definition)
-            "This type contains itself with growing type arguments, so it has no fixed size, and \
-             generic code is compiled once for each set of arguments."
-      | `Cycle variant -> (
+      | None -> None
+      | Some variant -> (
           let variant_span =
             match (body, variant) with
             | Variants variants, Some name ->
@@ -425,11 +447,51 @@ let check =
                 check_location database declaration definition impl)
               impls
           in
+          (* An impl in the wrong place reports that alone. *)
+          let placed =
+            List.filter
+              (fun ((declaration : Names.declaration), _, impl) ->
+                List.mem declaration.module_.package (outer_packages impl))
+              impls
+          in
           let names =
             List.concat_map
               (fun (declaration, definition, impl) ->
                 check_method_names database declaration definition impl)
               impls
+          in
+          (* The impls of the packages this one depends on, directly or not:
+             one of this package's may overlap one of theirs, though each
+             is where the location rule lets it be. *)
+          let dependency_impls =
+            let rec packages seen = function
+              | [] -> seen
+              | name :: rest when List.mem name seen -> packages seen rest
+              | name :: rest ->
+                  let direct =
+                    match Workspace.package database name with
+                    | Some found ->
+                        List.map
+                          (fun (dependency : Workspace.dependency) -> dependency.package)
+                          found.dependencies
+                    | None -> []
+                  in
+                  packages (name :: seen) (direct @ rest)
+            in
+            let direct =
+              List.map
+                (fun (dependency : Workspace.dependency) -> dependency.package)
+                package.dependencies
+            in
+            let standard =
+              if package_name = Resolve.Prelude.standard then [] else [ Resolve.Prelude.standard ]
+            in
+            List.concat_map
+              (fun name ->
+                List.filter_map
+                  (fun (_, impl) -> Query.demand database Environment.impl_interface impl)
+                  (Query.demand database Interface.Impls.index name))
+              (List.filter (fun name -> name <> package_name) (packages [] (standard @ direct)))
           in
           let overlaps =
             List.concat
@@ -437,7 +499,7 @@ let check =
                  (fun index
                       ((declaration : Names.declaration), definition, (impl : T.impl_interface)) ->
                    List.filter_map
-                     (fun (_, _, (other : T.impl_interface)) ->
+                     (fun (other : T.impl_interface) ->
                        if
                          Path.equal impl.implements.trait other.implements.trait
                          && overlap impl other
@@ -449,8 +511,11 @@ let check =
                                most one `impl` of a trait for each set of its arguments."
                               (T.show_trait other.implements) (T.show other.for_type))
                        else None)
-                     (List.filteri (fun other _ -> other < index) impls))
-                 impls)
+                     (List.filteri
+                        (fun other _ -> other < index)
+                        (List.map (fun (_, _, impl) -> impl) placed)
+                     @ dependency_impls))
+                 placed)
           in
           let recursion =
             List.filter_map

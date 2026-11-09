@@ -163,4 +163,208 @@ let () =
          }\n"
         "ownership.parallel_conflict")
 
+(* Methods *)
+
+let () =
+  let bag = "type Bag(items: List[Int64])\n\n" in
+  test "an impl method's read-only parameter may be returned as a view" (fun () ->
+      fine
+        (bag
+       ^ "trait Shower {\n\
+         \  fn show(self, items: List[Int64]) -> Slice[Int64]\n\
+          }\n\n\
+          impl Shower for Bag {\n\
+         \  fn show(self, items: List[Int64]) -> Slice[Int64] { items[..] }\n\
+          }\n"));
+  test "an impl method cannot move a read-only parameter" (fun () ->
+      one_diagnostic
+        (keep ^ bag
+       ^ "trait Eater {\n\
+         \  fn eat(self, items: List[Int64])\n\
+          }\n\n\
+          impl Eater for Bag {\n\
+         \  fn eat(self, items: List[Int64]) {\n\
+         \    keep(own items)\n\
+         \  }\n\
+          }\n")
+        "ownership.not_owned");
+  test "an impl method may move a field of an owned self" (fun () ->
+      fine
+        (bag
+       ^ "trait Taker {\n\
+         \  fn take(own self) -> List[Int64]\n\
+          }\n\n\
+          impl Taker for Bag {\n\
+         \  fn take(own self) -> List[Int64] { own self.items }\n\
+          }\n"));
+  test "a trait's method with a body is checked too" (fun () ->
+      one_diagnostic
+        (keep ^ "trait Eater {\n  fn eat(self, items: List[Int64]) {\n    keep(own items)\n  }\n}\n")
+        "ownership.not_owned")
+
+(* Loans held for a stretch of code *)
+
+let () =
+  test "a loop's body cannot change what it goes over, even inside a branch" (fun () ->
+      one_diagnostic
+        "fn f(ready: Bool) {\n\
+        \  var items: List[Int64] = [1, 2]\n\
+        \  for _ in items {\n\
+        \    if ready {\n\
+        \      items = []\n\
+        \    }\n\
+        \  }\n\
+         }\n"
+        "ownership.changed_while_viewed");
+  test "a loop's body cannot lend mut what it goes over" (fun () ->
+      one_diagnostic
+        "fn f() {\n\
+        \  var items: List[Int64] = [1, 2]\n\
+        \  for item in items {\n\
+        \    mut items.push(item)\n\
+        \  }\n\
+         }\n"
+        "ownership.changed_while_viewed");
+  test "a parallel for cannot lend mut a place from outside it" (fun () ->
+      one_diagnostic
+        "fn f(items: List[Int64]) {\n\
+        \  var total: List[Int64] = []\n\
+        \  parallel for item in items {\n\
+        \    mut total.push(item)\n\
+        \  }\n\
+         }\n"
+        "ownership.parallel_conflict");
+  test "a parallel for cannot assign a place from outside it, even inside a branch" (fun () ->
+      one_diagnostic
+        "fn f(ready: Bool) {\n\
+        \  var total = 0\n\
+        \  parallel for item in 0..10 {\n\
+        \    if ready {\n\
+        \      total = item\n\
+        \    }\n\
+        \  }\n\
+         }\n"
+        "ownership.parallel_conflict");
+  test "a parallel for may change its own element and locals" (fun () ->
+      fine
+        "fn f(items: mut List[Int64]) {\n\
+        \  parallel for item in mut items {\n\
+        \    var doubled = item * 2\n\
+        \    doubled = doubled + 1\n\
+        \    item = doubled\n\
+        \  }\n\
+         }\n");
+  test "a call cannot view a place another of its arguments moves" (fun () ->
+      one_diagnostic
+        "fn both(first: List[Int64], second: own List[Int64]) {}\n\n\
+         fn f(items: own List[Int64]) {\n\
+        \  both(items, second: own items)\n\
+         }\n"
+        "ownership.conflicting_loan");
+  test "a Plain place passed own is copied, so the call may use it twice" (fun () ->
+      fine
+        "fn both(first: Int64, second: own Int64) {}\n\n\
+         fn f(count: Int64) {\n\
+        \  both(count, second: count)\n\
+         }\n")
+
+(* Pulling and lending *)
+
+let () =
+  let tree =
+    "type Tree =\n  | Leaf\n  | indirect Node(left: Tree, value: Int64, right: Tree)\n\n"
+  in
+  test "a method that yields through itself inside a branch cannot be pulled" (fun () ->
+      one_diagnostic
+        (tree
+       ^ "fn Tree.odd(self) yields Int64 {\n\
+         \  match self {\n\
+         \    Leaf => {}\n\
+         \    Node(left, ..) => {\n\
+         \      for item in left.odd() {\n\
+         \        if item > 0 {\n\
+         \          yield item\n\
+         \        }\n\
+         \      }\n\
+         \    }\n\
+         \  }\n\
+          }\n\n\
+          fn f(tree: Tree) -> Option[Int64] {\n\
+         \  var cursor = tree.odd()\n\
+         \  mut cursor.next()\n\
+          }\n")
+        "ownership.not_pullable");
+  test "methods that yield through each other cannot be pulled" (fun () ->
+      one_diagnostic
+        (tree
+       ^ "fn Tree.first(self) yields Int64 {\n\
+         \  match self {\n\
+         \    Leaf => {}\n\
+         \    Node(left, ..) => {\n\
+         \      for item in left.second() {\n\
+         \        yield item\n\
+         \      }\n\
+         \    }\n\
+         \  }\n\
+          }\n\n\
+          fn Tree.second(self) yields Int64 {\n\
+         \  for item in self.first() {\n\
+         \    yield item\n\
+         \  }\n\
+          }\n\n\
+          fn f(tree: Tree) -> Option[Int64] {\n\
+         \  var cursor = tree.first()\n\
+         \  mut cursor.next()\n\
+          }\n")
+        "ownership.not_pullable");
+  test "a call's result does not view a Plain argument it was given" (fun () ->
+      fine
+        "fn window(items: List[Int64], start: USize) -> Slice[Int64] {\n\
+        \  items[start..]\n\
+         }\n\n\
+         fn f(items: List[Int64]) -> Slice[Int64] {\n\
+        \  let start: USize = 1\n\
+        \  window(items, start)\n\
+         }\n");
+  test "a lending method's path that cannot finish need not yield" (fun () ->
+      fine
+        "type Grid(cells: List[Int64])\n\n\
+         fn Grid.cell(self, ready: Bool) lends Int64 {\n\
+        \  if ready {\n\
+        \    yield self.cells[0]\n\
+        \  } else {\n\
+        \    unreachable\n\
+        \  }\n\
+         }\n")
+
+(* Views of temporaries *)
+
+let () =
+  let same = "fn same(prefix: String) yields String {\n  yield prefix.copy()\n}\n\n" in
+  test "a cursor cannot view a temporary that the statement drops" (fun () ->
+      one_diagnostic
+        (same ^ "fn f() -> Option[String] {\n  var each = same(\"a${1}\")\n  mut each.next()\n}\n")
+        "ownership.views_temporary");
+  test "a cursor may view a named value" (fun () ->
+      fine
+        (same
+       ^ "fn f() -> Option[String] {\n\
+         \  let prefix = \"a${1}\"\n\
+         \  var each = same(prefix)\n\
+         \  mut each.next()\n\
+          }\n"));
+  test "a cursor may view a string literal, which lives in static memory" (fun () ->
+      fine (same ^ "fn f() -> Option[String] {\n  var each = same(\"a\")\n  mut each.next()\n}\n"));
+  test "a slice cannot view a temporary list" (fun () ->
+      one_diagnostic
+        "fn make() -> List[Int64] { [1, 2, 3] }\n\n\
+         fn f() -> USize {\n\
+        \  let middle = make()[1..2]\n\
+        \  middle.length()\n\
+         }\n"
+        "ownership.views_temporary");
+  test "a value computed from a temporary's view is fine" (fun () ->
+      fine
+        "fn make() -> List[Int64] { [1, 2, 3] }\n\nfn f() -> USize {\n  make()[1..2].length()\n}\n")
+
 let () = finish ()

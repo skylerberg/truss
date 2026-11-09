@@ -929,6 +929,14 @@ annotations:
   parameters and of what they view, never of its own locals. A method
   returning `self.items[1..4]` and `Option.unwrap_or` both meet this.
 
+- **A binding may not view a temporary.** A temporary lives until the end
+  of its statement, so a `let` or `var` whose view, or whose cursor, views
+  an owned temporary passed read-only to the call that made it is an error
+  that asks to bind the temporary to a name first, as Rust's E0716 does. A
+  cursor views what its call's read-only arguments view, as a view would.
+  A string literal without interpolation is in static memory, so viewing
+  one is fine.
+
 A value of a view type may be bound by `let` or `var`, held in local records
 and collections, and passed as an argument. It cannot be returned except by
 the rule above, and cannot be placed where an owned, storable value is
@@ -1030,7 +1038,8 @@ capabilities, which is at the signatures of its code, never its bodies:
 - **Inside the dependency,** its own bodies are checked against its own
   signatures, so nothing it does can exceed what its signatures declare.
 - **Grants nest:** a dependency's manifest may grant its own dependencies
-  only what it was granted, which is a check on manifests.
+  only what it was granted, which is a check on manifests. It is not built
+  yet, since `truss-check` loads no dependencies' manifests.
 
 The error names the dependency's function and the capability that was not
 granted, as DESIGN.md asks. A dependency that offers both a client and a
