@@ -163,4 +163,43 @@ let () =
          }\n"
         "ownership.parallel_conflict")
 
+(* Methods *)
+
+let () =
+  let bag = "type Bag(items: List[Int64])\n\n" in
+  test "an impl method's read-only parameter may be returned as a view" (fun () ->
+      fine
+        (bag
+       ^ "trait Shower {\n\
+         \  fn show(self, items: List[Int64]) -> Slice[Int64]\n\
+          }\n\n\
+          impl Shower for Bag {\n\
+         \  fn show(self, items: List[Int64]) -> Slice[Int64] { items[..] }\n\
+          }\n"));
+  test "an impl method cannot move a read-only parameter" (fun () ->
+      one_diagnostic
+        (keep ^ bag
+       ^ "trait Eater {\n\
+         \  fn eat(self, items: List[Int64])\n\
+          }\n\n\
+          impl Eater for Bag {\n\
+         \  fn eat(self, items: List[Int64]) {\n\
+         \    keep(own items)\n\
+         \  }\n\
+          }\n")
+        "ownership.not_owned");
+  test "an impl method may move a field of an owned self" (fun () ->
+      fine
+        (bag
+       ^ "trait Taker {\n\
+         \  fn take(own self) -> List[Int64]\n\
+          }\n\n\
+          impl Taker for Bag {\n\
+         \  fn take(own self) -> List[Int64] { own self.items }\n\
+          }\n"));
+  test "a trait's method with a body is checked too" (fun () ->
+      one_diagnostic
+        (keep ^ "trait Eater {\n  fn eat(self, items: List[Int64]) {\n    keep(own items)\n  }\n}\n")
+        "ownership.not_owned")
+
 let () = finish ()

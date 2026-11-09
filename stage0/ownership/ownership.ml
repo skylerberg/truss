@@ -74,9 +74,9 @@ type context = {
   bounds : T.parameter -> T.trait_reference list;
   kinds : (id, kind) Hashtbl.t;
   names : (id, string) Hashtbl.t;
-  parameters : id list;  (** Locals that are parameters, which a returned view may come from. *)
-  mutable_parameters : id list;
-  self_kind : kind option;
+  mutable parameters : id list;  (** The body's parameters, which a returned view may come from. *)
+  mutable mutable_parameters : id list;
+  mutable self_kind : kind option;
   paths : (int, (id * int) list) Hashtbl.t;
       (** For each position, the branches it is in: a branch's id and the arm. *)
   loops : (int, id list) Hashtbl.t;  (** For each position, the loops it is in. *)
@@ -1118,6 +1118,56 @@ let check_pulls context =
 
 type result = { diagnostics : Diagnostic.t list; moves : id list; obligations : C.obligation list }
 
+(* The receiver a written signature declares. *)
+let receiver_of (written : signature) : Path.receiver =
+  match
+    List.find_map
+      (fun (parameter : parameter) ->
+        match parameter.kind with Self_parameter mode -> Some mode | _ -> None)
+      written.parameters
+  with
+  | None -> Static
+  | Some None -> Read
+  | Some (Some Mut) -> Mut
+  | Some (Some Own) -> Own
+
+let name_of (written : signature) =
+  match written.name with Plain_name name | Member_name (_, name) -> name
+
+(* Sets up the context for one body: its parameters' modes, which the
+   lowered signature gives, and [self]'s. *)
+let enter context (written : signature) (lowered : T.signature option) =
+  let named =
+    match lowered with
+    | Some lowered ->
+        List.filter_map
+          (fun (parameter : parameter) ->
+            match parameter.kind with
+            | Named_parameter { name; _ } ->
+                Option.map
+                  (fun (info : T.parameter_info) -> (name.id, info.mode))
+                  (List.find_opt
+                     (fun (info : T.parameter_info) -> info.name = name.text)
+                     lowered.parameters)
+            | _ -> None)
+          written.parameters
+    | None -> []
+  in
+  List.iter
+    (fun (id, mode) ->
+      Hashtbl.replace context.kinds id
+        (match mode with T.Own -> Owned | Mut -> Mut_access | Read -> Viewing))
+    named;
+  context.parameters <- List.map fst named;
+  context.mutable_parameters <-
+    List.filter_map (fun (id, mode) -> if mode = T.Mut then Some id else None) named;
+  context.self_kind <-
+    (match receiver_of written with
+    | Own -> Some Owned
+    | Mut -> Some Mut_access
+    | Read -> Some Viewing
+    | Static -> None)
+
 let check database (key : Resolve.Names.key) =
   match
     ( Query.demand database Resolve.Names.definition key,
@@ -1130,42 +1180,6 @@ let check database (key : Resolve.Names.key) =
       List.iter
         (fun (name : name) -> Hashtbl.replace names name.id name.text)
         (Syntax_walk.names definition);
-      let signature =
-        match (definition.kind, lowered.interface) with
-        | Function { signature; _ }, Function_interface lowered_signature ->
-            Some (signature, lowered_signature)
-        | _ -> None
-      in
-      let parameters, mutable_parameters, self_kind =
-        match signature with
-        | Some (written, lowered_signature) -> (
-            let named =
-              List.filter_map
-                (fun (parameter : parameter) ->
-                  match parameter.kind with
-                  | Named_parameter { name; _ } ->
-                      Option.map
-                        (fun (info : T.parameter_info) -> (name.id, info.mode))
-                        (List.find_opt
-                           (fun (info : T.parameter_info) -> info.name = name.text)
-                           lowered_signature.parameters)
-                  | _ -> None)
-                written.parameters
-            in
-            ( named,
-              List.filter_map (fun (id, mode) -> if mode = T.Mut then Some id else None) named,
-              match lowered_signature.receiver with
-              | Some (Own, _) -> Some Owned
-              | Some (Mut, _) -> Some Mut_access
-              | _ -> Some Viewing ))
-        | None -> ([], [], None)
-      in
-      let kinds = Hashtbl.create 32 in
-      List.iter
-        (fun (id, mode) ->
-          Hashtbl.replace kinds id
-            (match mode with T.Own -> Owned | Mut -> Mut_access | Read -> Viewing))
-        parameters;
       let context =
         {
           database;
@@ -1174,11 +1188,11 @@ let check database (key : Resolve.Names.key) =
           checked = checked.checked;
           bounds =
             (fun parameter -> Option.value ~default:[] (List.assoc_opt parameter lowered.bounds));
-          kinds;
+          kinds = Hashtbl.create 32;
           names;
-          parameters = List.map fst parameters;
-          mutable_parameters;
-          self_kind;
+          parameters = [];
+          mutable_parameters = [];
+          self_kind = None;
           paths = Hashtbl.create 64;
           loops = Hashtbl.create 64;
           uses = Hashtbl.create 32;
@@ -1190,35 +1204,58 @@ let check database (key : Resolve.Names.key) =
           marks = Hashtbl.create 8;
         }
       in
-      let broken = Resolve.Parts.broken definition in
-      if not (broken Header || broken Body || checked.diagnostics <> []) then begin
-        prepare context;
+      (* A function's, an [impl]'s, or a trait's method with a body: each
+         with the signature its parameters' modes come from. *)
+      let method_body (written : signature) lowered (body : block) =
+        enter context written lowered;
         let state = { context; views = []; loop_frames = [] } in
-        (match definition.kind with
-        | Function { body; signature = written } -> (
-            let flow = function_body state body in
-            check_restored state flow body.span;
-            match written.result with
-            | Some (Lends _) ->
-                lends_count context body
-                  ~report_span:
-                    (match written.name with Plain_name name | Member_name (_, name) -> name.span)
-            | _ -> ())
-        | Test { body; _ } | Theorem { body; _ } | Law_proof { body; _ } ->
-            ignore (block state (Some []) body)
-        | Impl { members; _ } ->
+        let flow = function_body state body in
+        check_restored state flow body.span;
+        match written.result with
+        | Some (Lends _) -> lends_count context body ~report_span:(name_of written).span
+        | _ -> ()
+      in
+      let find_method methods (written : signature) =
+        List.find_map
+          (fun (name, receiver, signature) ->
+            if name = (name_of written).text && receiver = receiver_of written then Some signature
+            else None)
+          methods
+      in
+      if Option.is_some (Infer.clean database key) then begin
+        prepare context;
+        (match (definition.kind, lowered.interface) with
+        | Function { body; signature = written }, Function_interface signature ->
+            method_body written (Some signature) body
+        | Function { body; signature = written }, _ -> method_body written None body
+        | (Test { body; _ } | Theorem { body; _ } | Law_proof { body; _ }), _ ->
+            ignore (block { context; views = []; loop_frames = [] } (Some []) body)
+        | Impl { members; _ }, interface ->
+            let methods =
+              match interface with Impl_interface impl -> impl.impl_methods | _ -> []
+            in
             List.iter
               (fun (line : impl_member line) ->
                 match line.kind with
-                | Impl_method { body; signature = written } -> (
-                    ignore (function_body state body);
-                    match written.result with
-                    | Some (Lends _) ->
-                        lends_count context body
-                          ~report_span:
-                            (match written.name with
-                            | Plain_name name | Member_name (_, name) -> name.span)
-                    | _ -> ())
+                | Impl_method { body; signature = written } ->
+                    method_body written (find_method methods written) body
+                | _ -> ())
+              members
+        | Trait { members; _ }, interface ->
+            let methods =
+              match interface with
+              | Trait_interface trait ->
+                  List.map
+                    (fun (method_ : T.trait_method) ->
+                      (method_.method_name, method_.method_receiver, method_.method_signature))
+                    trait.methods
+              | _ -> []
+            in
+            List.iter
+              (fun (line : trait_member line) ->
+                match line.kind with
+                | Trait_method { body = Some body; signature = written } ->
+                    method_body written (find_method methods written) body
                 | _ -> ())
               members
         | _ -> ());

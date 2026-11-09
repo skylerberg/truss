@@ -158,4 +158,167 @@ let () =
       | Some { checked = { obligations = [ Guards_cover _ ]; _ }; _ } -> ()
       | _ -> fail "no obligation")
 
+(* Constants in patterns *)
+
+let () =
+  let codes_of text =
+    let database = setup [ ("app::main", text) ] in
+    (match parse_errors database (module_of "app::main") with
+    | [] -> ()
+    | errors -> fail "the test input does not parse: %s" (String.concat " " errors));
+    codes (check database (module_of "app::main"))
+  in
+  let expect text expected =
+    match codes_of text with
+    | found when found = expected -> ()
+    | found -> fail "found [%s]" (String.concat "; " found)
+  in
+  test "a qualified constant covers only its value" (fun () ->
+      expect
+        "type Code(number: Int64)\n\n\
+         public let Code.teapot: Int64 = 418\n\n\
+         fn f(n: Int64) -> Int64 {\n\
+        \  match n {\n\
+        \    Code.teapot => 1\n\
+        \    5 => 2\n\
+        \  }\n\
+         }\n"
+        [ "patterns.not_covered" ]);
+  test "a range with a constant end covers only up to it" (fun () ->
+      expect
+        "let limit: Int64 = 10\n\n\
+         fn f(n: Int64) -> Int64 {\n\
+        \  match n {\n\
+        \    limit..=20 => 1\n\
+        \    5 | 15 => 2\n\
+        \    _ => 3\n\
+        \  }\n\
+         }\n"
+        [ "patterns.unreachable_alternative" ]);
+  test "a range with a constant end is not a wildcard" (fun () ->
+      expect
+        "let limit: Int64 = 10\n\n\
+         fn f(n: Int64) -> Int64 {\n\
+        \  match n {\n\
+        \    limit..=20 => 1\n\
+        \  }\n\
+         }\n"
+        [ "patterns.not_covered" ]);
+  test "a Bool constant covers its value" (fun () ->
+      expect
+        "let on: Bool = true\n\n\
+         fn f(b: Bool) -> Int64 {\n\
+        \  match b {\n\
+        \    on => 1\n\
+        \    false => 2\n\
+        \  }\n\
+         }\n"
+        []);
+  test "a variant constant covers its variant" (fun () ->
+      expect
+        "type Color =\n\
+        \  | Red\n\
+        \  | Green\n\
+        \  derives Equal\n\n\
+         let favorite: Color = Color.Red\n\n\
+         fn f(color: Color) -> Int64 {\n\
+        \  match color {\n\
+        \    favorite => 1\n\
+        \    Green => 2\n\
+        \  }\n\
+         }\n"
+        []);
+  test "a constant whose value is not worked out covers nothing else" (fun () ->
+      expect
+        "fn make() -> Int64 { 3 }\n\n\
+         let made: Int64 = make()\n\n\
+         fn f(n: Int64) -> Int64 {\n\
+        \  match n {\n\
+        \    made => 1\n\
+        \    3 => 2\n\
+        \    _ => 3\n\
+        \  }\n\
+         }\n"
+        [])
+
+(* Errors reported once *)
+
+let () =
+  let codes_of text = codes (check (setup [ ("app::main", text) ]) (module_of "app::main")) in
+  test "a match on a type that failed to parse reports nothing more" (fun () ->
+      match
+        codes_of
+          "type Broken =\n\
+          \  | A\n\
+          \  | B(x: )\n\n\
+           fn f(e: Broken) -> Int64 {\n\
+          \  match e {\n\
+          \    A => 1\n\
+          \    B(..) => 2\n\
+          \  }\n\
+           }\n"
+      with
+      | found when List.mem "patterns.not_covered" found ->
+          fail "found [%s]" (String.concat "; " found)
+      | _ -> ());
+  test "a sub-pattern that failed to type makes no arm unreachable" (fun () ->
+      match
+        codes_of
+          "type Tree =\n\
+          \  | Leaf\n\
+          \  | indirect Node(left: Tree)\n\n\
+           fn f(tree: Tree) -> Int64 {\n\
+          \  match tree {\n\
+          \    Node(Lef) => 1\n\
+          \    Leaf => 2\n\
+          \    _ => 3\n\
+          \  }\n\
+           }\n"
+      with
+      | found when List.exists (fun code -> String.starts_with ~prefix:"patterns." code) found ->
+          fail "found [%s]" (String.concat "; " found)
+      | _ -> ())
+
+(* Alternatives *)
+
+let () =
+  test "an alternative that an earlier arm covers is unreachable, even the first" (fun () ->
+      one_diagnostic
+        "type Color =\n\
+        \  | Red\n\
+        \  | Green\n\
+        \  | Blue\n\n\
+         fn f(color: Color) -> Int64 {\n\
+        \  match color {\n\
+        \    Red => 1\n\
+        \    Red | Green => 2\n\
+        \    Blue => 3\n\
+        \  }\n\
+         }\n"
+        "patterns.unreachable_alternative"
+        ~fixed:
+          "type Color =\n\
+          \  | Red\n\
+          \  | Green\n\
+          \  | Blue\n\n\
+           fn f(color: Color) -> Int64 {\n\
+          \  match color {\n\
+          \    Red => 1\n\
+          \    Green => 2\n\
+          \    Blue => 3\n\
+          \  }\n\
+           }\n");
+  test "a nested alternative that the one before covers is unreachable" (fun () ->
+      one_diagnostic
+        "type Color =\n\
+        \  | Red\n\
+        \  | Green\n\n\
+         fn f(color: Option[Color]) -> Int64 {\n\
+        \  match color {\n\
+        \    Some(Red | Red) => 1\n\
+        \    _ => 2\n\
+        \  }\n\
+         }\n"
+        "patterns.unreachable_alternative")
+
 let () = finish ()

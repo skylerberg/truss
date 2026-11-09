@@ -227,16 +227,13 @@ let definition_diagnostics =
       match
         ( Query.demand database Resolve.Names.definition key,
           Query.demand database Resolve.resolved key,
-          Query.demand database Infer.checked key,
+          Infer.clean database key,
           Query.demand database Resolve.Names.text key )
       with
-      | Some definition, Some resolved, Some result, Some text ->
-          let context = { resolved; checked = result.checked; text; diagnostics = [] } in
-          if not (Resolve.Parts.broken definition Body || Resolve.Parts.broken definition Header)
-          then begin
-            check_unused context definition;
-            check_unreachable context definition
-          end;
+      | Some definition, Some resolved, Some checked, Some text ->
+          let context = { resolved; checked; text; diagnostics = [] } in
+          check_unused context definition;
+          check_unreachable context definition;
           List.sort
             (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span right.span)
             context.diagnostics
