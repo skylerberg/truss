@@ -712,11 +712,26 @@ let capability_part database (capability : Path.t) name =
             (fun (member : capability_member line) ->
               match member.kind with
               | Capability_method signature when name_of signature = name ->
-                  Some (part_of callee signature.parameters signature.clauses)
+                  Some (part_of callee signature.parameters signature.clauses, signature)
               | _ -> None)
             members
       | None -> None)
   | _ -> None
+
+(* A capability's method's contract. Its calls are never a function in the
+   logic: two calls may give different results, since the prover never
+   models an implementation's state. See PROVER.md, "Values are values". *)
+let capability_contract database (capability : Path.t) name =
+  Option.map
+    (fun (part, (signature : signature)) ->
+      {
+        (make_contract database
+           (Path.Method { owner = capability; name; receiver = Static })
+           ~own:part ~others:[] ~result:signature.result ~body:None)
+        with
+        pure = false;
+      })
+    (capability_part database capability name)
 
 (* A trait method's body, when it provides one. *)
 let provided_body database (trait : Path.t) name receiver =
@@ -1520,7 +1535,11 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
         | _ -> frame
       in
       Some (frame, arrive context frame "result" result_type)
-  | Capability_method _ | Intrinsic _ | Built_in_operator ->
+  | Capability_method { capability; name } ->
+      with_contract
+        (Path.Method { owner = capability; name; receiver = Static })
+        (capability_contract context.database capability name)
+  | Intrinsic _ | Built_in_operator ->
       let frame = havoc_mut frame in
       ignore source;
       let frame = spend context frame (step_amount context frame call_ values) in
@@ -3158,11 +3177,16 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
       values
   in
   let after =
-    spend context after
-      (callee_amount context after ~path ~parts:contract.parts
-         ~bound_frame:(fun part ->
-           { (entry_frame part) with result = Some result; condition = after.condition })
-         ~call_ ~values ~change:(Some change))
+    spend context after (fun counter ->
+        match (call_.callee, counter.resource) with
+        | Capability_method _, Calls _ ->
+            (* A call of a capability's method is one of its calls. *)
+            step_amount context after call_ values counter
+        | _ ->
+            callee_amount context after ~path ~parts:contract.parts
+              ~bound_frame:(fun part ->
+                { (entry_frame part) with result = Some result; condition = after.condition })
+              ~call_ ~values ~change:(Some change) counter)
   in
   (after, result)
 
@@ -3513,7 +3537,7 @@ and step_amount context frame (call_ : C.call) values (counter : Costs.counter) 
       | Calls _ -> direct
       | _ -> (
           match capability_part context.database capability name with
-          | Some part ->
+          | Some (part, _) ->
               let locals =
                 List.fold_left
                   (fun locals (index, binding) ->

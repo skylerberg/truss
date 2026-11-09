@@ -1018,6 +1018,29 @@ let () =
          }\n"
         "prover.ensures")
 
+(* Capabilities *)
+
+let dice = "capability Dice {\n  fn roll() -> UInt8\n    ensures result >= 1 && result <= 6\n}\n\n"
+
+let () =
+  test "a capability's method keeps its ensures" (fun () ->
+      proven (dice ^ "fn f() -> UInt8\n  uses Dice\n  ensures result <= 6\n{\n  Dice.roll()\n}\n"));
+  test "two calls of a capability's method may differ" (fun () ->
+      not_proven
+        (dice
+       ^ "fn f() -> Bool\n  uses Dice\n  ensures result\n{\n  Dice.roll() == Dice.roll()\n}\n")
+        "prover.ensures");
+  test "a call must meet a capability method's requires" (fun () ->
+      not_proven
+        "capability Store {\n\
+        \  fn put(slot: UInt8)\n\
+        \    requires slot < 4\n\
+         }\n\n\
+         fn f() uses Store {\n\
+        \  Store.put(9)\n\
+         }\n"
+        "prover.requires")
+
 (* Sets and maps *)
 
 let () =

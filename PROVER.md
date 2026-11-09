@@ -919,9 +919,11 @@ It proves, with one canonical, numbered, hashed query per obligation:
 - overflow of `+`, `-`, `*`, `/`, `%`, and negation on built-in integers;
   division by zero and the least value over `-1`; shift amounts; and
   `unreachable`
-- every `requires` at a call to a function, a theorem, or a trait method
-  whose contract it reads, and every `ensures` at each way a function
-  returns, with `old`, `result`, and `mut` arguments. A call resolved to an
+- every `requires` at a call to a function, a theorem, a trait method, or
+  a capability's method whose contract it reads, and every `ensures` at
+  each way a function returns, with `old`, `result`, and `mut` arguments.
+  A capability's method is never a function in the logic, so two calls of
+  it may give different results. A call resolved to an
   `impl` reads the `impl`'s clauses with its trait's, and its own `requires`
   when it states any; a call through a bound reads the trait's. Each
   callee's clauses are read with the call's type arguments, and its
@@ -1044,8 +1046,8 @@ It proves, with one canonical, numbered, hashed query per obligation:
   proof that its potential is never below zero. The potential of a
   standard collection's elements is not read yet.
 
-A call to anything whose contract it does not read yet, such as a trait
-method or a capability, gives a value known only by its type's range, and
+A call whose callee's contract it cannot read, such as one with errors,
+gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
 definition that uses anything else, such as a string, a float, or a

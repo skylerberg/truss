@@ -256,6 +256,26 @@ let check_definition state (lowered : Environment.lowered) =
                     body state { env with output = Some (Returns T.bool) } law.body
               | Associated_type _ | Trait_member_error -> ())
           members
+    | Capability { members; _ }, Trait_interface capability ->
+        (* A capability's methods have no bodies, but clauses to check. *)
+        List.iteri
+          (fun index (line : capability_member line) ->
+            if not (broken (Member_header index)) then
+              match line.kind with
+              | Capability_method signature -> (
+                  let name =
+                    match signature.name with Plain_name name | Member_name (_, name) -> name.text
+                  in
+                  match
+                    List.find_opt
+                      (fun (method_ : T.trait_method) -> method_.method_name = name)
+                      capability.methods
+                  with
+                  | Some method_ ->
+                      check_function state ~broken_body:true signature None method_.method_signature
+                  | None -> ())
+              | Capability_member_error -> ())
+          members
     | Impl { members; _ }, Impl_interface impl ->
         List.iteri
           (fun index (line : impl_member line) ->
