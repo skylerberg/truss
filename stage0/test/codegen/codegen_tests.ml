@@ -1995,6 +1995,30 @@ test "any" {
 }
 |}
 
+let () =
+  let passes name source = test name (fun () -> expect_output source "test 0 passed\n") in
+  passes "a pulled cursor yields each value and then None"
+    {|fn count_to(limit: Int64) yields Int64 {
+  var i = 1
+  while i <= limit {
+    yield i
+    i += 1
+  }
+}
+
+test "cursors" {
+  var first = count_to(3)
+  var second = count_to(2)
+  var total = 0
+  while first.next() is Some(left) && second.next() is Some(right) {
+    total += left * right
+  }
+  assert total == 5
+  assert first.next() == Some(3)
+  assert first.next() == None
+}
+|}
+
 (* Programs *)
 
 (* Compiles a module with a [main] and runs it with the arguments. *)

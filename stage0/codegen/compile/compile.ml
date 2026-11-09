@@ -7,10 +7,27 @@ type t = {
   cache : Build.cache;
   settings : Build.settings;
   mutable done_ : (Instance.key * Lir.compiled) list;
+  mutable pulled : (Ground.yielding * (Lir.function_ * Lir.local list)) list;
+      (** Each pulled method, with its drops elaborated *)
 }
 
+(* A pulled method's version with its drops elaborated, made once. *)
+let pulled t yielding =
+  match List.find_opt (fun (y, _) -> Ground.equal (Cursor y) (Cursor yielding)) t.pulled with
+  | Some (_, made) -> made
+  | None ->
+      let f, owned = Lower.pulled t.context yielding in
+      let glue = t.context.glue in
+      let made =
+        (Drops.elaborate t.context.env ~needs_drop:(fun ty -> not (Glue.trivial glue ty)) ~environment:(fun _ -> []) f, owned)
+      in
+      t.pulled <- (yielding, made) :: t.pulled;
+      made
+
 let create database target toolchain cache settings =
-  { database; context = Lower.context database target; toolchain; cache; settings; done_ = [] }
+  let t = { database; context = Lower.context database target; toolchain; cache; settings; done_ = []; pulled = [] } in
+  t.context.cursor_fields := (fun yielding -> Yields.cursor_fields t.context.env (fst (pulled t yielding)));
+  t
 
 let environment (instance : Lir.t) n = instance.nested.(n).environment
 
@@ -35,6 +52,16 @@ let make t (key : Instance.key) : Lir.compiled =
       with Invalid_argument message ->
         invalid_arg (message ^ ", lowering " ^ Instance.to_string key))
   | Constant path -> Data (Lower.constant t.context path)
+  | Drop (Cursor yielding as cursor) ->
+      let f, owned = pulled t yielding in
+      Code
+        (Lir.canonical_instance
+           { key; main = Yields.cursor_drop t.context.env ~cursor ~owned f; nested = [||] })
+  | Cursor_next yielding ->
+      let f, _ = pulled t yielding in
+      let cursor = Ground.Cursor yielding in
+      let result = Lower.cursor_result t.context yielding in
+      Code (Lir.canonical_instance { key; main = Yields.cursor_next t.context.env ~cursor ~result f; nested = [||] })
   | Drop ty -> code (Glue.drop glue ty)
   | Copy ty -> code (Glue.copy glue ty)
   | Debug ty -> code (Glue.debug glue ty)
@@ -42,7 +69,6 @@ let make t (key : Instance.key) : Lir.compiled =
   | Any_table _ -> Table (Lower.any_table t.context key)
   | Table _ -> Table (Lower.table t.context key)
   | Real_evidence capability -> Evidence (Lower.real_evidence t.context capability)
-  | Cursor_next _ -> invalid_arg ("Compile: not built yet: " ^ Instance.to_string key)
 
 let compiled t key =
   match List.find_opt (fun (k, _) -> Instance.equal k key) t.done_ with

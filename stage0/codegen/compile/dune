@@ -13,6 +13,7 @@
   lir
   glue
   drops
+  yields
   lower
   reachable
   emit_c

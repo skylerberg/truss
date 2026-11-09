@@ -17,6 +17,8 @@ type context = {
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;
+  cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
+      (** The fields of a pulled method's cursor, which the driver gives from its pulled lowering *)
 }
 
 val context : Query.database -> Memory_layout.target -> context
@@ -29,6 +31,15 @@ val instance : context -> Instance.key -> Lir.t
 (* A constant's static data: its value worked out exactly from its
    constant expression. *)
 val constant : context -> Path.t -> Lir.data
+
+(* The pulled version of a yielding method, before drop elaboration: its
+   body with each [yield] left in place for yield lowering, and the locals of
+   its parameters that the cursor's drop must drop when the method never
+   started. *)
+val pulled : context -> Ground.yielding -> Lir.function_ * Lir.local list
+
+(* What a cursor's [next] returns: an [Option] of what the method yields. *)
+val cursor_result : context -> Ground.yielding -> Ground.ty
 
 (* A capability [impl]'s table of entries. *)
 val table : context -> Instance.key -> Lir.table

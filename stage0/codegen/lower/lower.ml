@@ -14,6 +14,8 @@ type context = {
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;
+  cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
+      (** The fields of a pulled method's cursor, which the driver gives from its pulled lowering *)
 }
 
 let standard_text name : Ground.ty =
@@ -24,12 +26,13 @@ let standard_text name : Ground.ty =
     }
 
 let context database target =
+  let cursor_fields = ref (fun _ -> bug "no driver gives cursors their fields") in
   let monomorphic : Monomorphic.context =
     {
       type_interface = (fun path -> Query.demand database Environment.type_interface path);
       normalize = Interface.Impls.normalize database ~bounds:(fun _ -> []);
       capabilities = (fun _ -> []);
-      cursor_fields = (fun _ -> bug "cursors are not lowered yet");
+      cursor_fields = (fun yielding -> !cursor_fields yielding);
     }
   in
   let env = Memory_layout.create target ~shape_of:(Monomorphic.shape monomorphic) in
@@ -43,6 +46,7 @@ let context database target =
     monomorphic;
     types = { usize; isize = Monomorphic.builtin ISize; string_slice = standard_text "StringSlice" };
     bool = Monomorphic.builtin Bool;
+    cursor_fields;
   }
 
 let test_key path = Instance.Code { path; type_arguments = [] }
@@ -433,6 +437,7 @@ type state = {
   result_local : Lir.local option;
   nested : Lir.function_ option list ref;  (** The instance's lambdas, in order *)
   mutable evidence : (Path.t * Lir.operand) list;  (** The evidence for each capability available *)
+  pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
 }
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
@@ -705,6 +710,21 @@ let string_value st ty text =
       in
       (field, storage, storage_value)
   | _ -> bug "%s is not a record of storage" (Ground.to_string ty)
+
+(* What a yielding method yields, in an instance. *)
+let cursor_element context (yielding : Ground.yielding) =
+  let signature = signature_of context yielding.method_ in
+  match signature.output with
+  | Yields (_, ty) -> Monomorphic.ground context.monomorphic (bind signature.generics yielding.type_arguments) ty
+  | _ -> bug "%s does not yield" (Path.show yielding.method_)
+
+(* What a cursor's [next] returns: an [Option] of what it yields. *)
+let cursor_result context yielding : Ground.ty =
+  Named
+    {
+      path = Top { module_ = { package = "standard"; modules = [ "option" ] }; name = "Option" };
+      arguments = [ Type (cursor_element context yielding) ];
+    }
 
 (* Calls a trait's method on a value of a ground type, through the [impl]
    the type has, with arguments that are places. *)
@@ -1721,6 +1741,28 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
     let evaluated = List.map evaluate arguments in
     let in_order = List.sort (fun (a, _, _, _) (b, _, _, _) -> Int.compare a b) evaluated in
     match call_.callee with
+    | (Function _ | Trait_method _) when yields_cursor st call_ ->
+        (* A yielding method called outside a [for] loop makes a cursor,
+           which holds its arguments. *)
+        let path, type_arguments = Option.get (resolve_callee st call_) in
+        let signature = signature_of st.context path in
+        let substitution = bind signature.generics type_arguments in
+        let arguments = with_placeholders st signature substitution in_order in
+        let passed = List.filter_map (fun (mode, ty, place) -> pass st mode ty place) arguments in
+        let evidence = List.map (evidence_of st) (evidence_for substitution signature.uses) in
+        let fields =
+          List.mapi (fun i operand -> (Printf.sprintf "local%d" i, operand)) (passed @ evidence)
+        in
+        let cursor = Ground.Cursor { method_ = path; type_arguments } in
+        emit st.b
+          (Assign
+             ( destination,
+               Build { ty = cursor; variant = None; fields = ("state", Constant (Integer (UInt32, Z.zero))) :: fields } ))
+    | Trait_method { name = "next"; self_type; evidence = Built_in; _ }
+      when (match ground st self_type with Cursor _ -> true | _ -> false) -> (
+        match (ground st self_type, in_order) with
+        | Cursor yielding, (_, _, _, cursor) :: _ -> call_next st yielding cursor destination
+        | _ -> bug "next with no cursor")
     | Function { path; type_arguments } ->
         let signature = signature_of st.context path in
         let ground_arguments =
@@ -1859,6 +1901,39 @@ and with_placeholders st (signature : T.signature) substitution in_order =
             Monomorphic.ground st.context.monomorphic substitution ty,
             new_local st (Monomorphic.ground st.context.monomorphic substitution ty) ))
     (interface_parameters signature)
+
+and yields_cursor st (call_ : C.call) =
+  match call_.callee with
+  | Trait_method { evidence = Dynamic | Built_in; _ } -> false
+  | _ -> (
+      match resolve_callee st call_ with
+      | Some (path, _) -> ( match (signature_of st.context path).output with Yields _ -> true | _ -> false)
+      | None -> false)
+
+(* [next()] on a cursor: the pulled method's state machine. *)
+and call_next st (yielding : Ground.yielding) cursor destination =
+  let option = cursor_result st.context yielding in
+  let cursor_pointer = Lir.Pointer { target = Value (Cursor yielding); writable = true } in
+  let target signature = Lir.Direct { function_ = Instance (Cursor_next yielding); signature } in
+  let self = Lir.Address { place = cursor; writable = true } in
+  match Convention.result st.context.env option with
+  | Through_pointer pointer ->
+      emit st.b
+        (Call
+           {
+             target = target { parameters = [ pointer; cursor_pointer ]; result = None; returns = true };
+             arguments = [ Address { place = destination; writable = true }; self ];
+             result = None;
+           })
+  | Returned ty ->
+      emit st.b
+        (Call
+           {
+             target = target { parameters = [ cursor_pointer ]; result = Some ty; returns = true };
+             arguments = [ self ];
+             result = Some destination;
+           })
+  | Nothing -> bug "a cursor's next with no result"
 
 and default_mask (signature : T.signature) (call_ : C.call) =
   let defaulted = List.filter (fun (p : T.parameter_info) -> p.has_default) signature.parameters in
@@ -2087,6 +2162,17 @@ and statement st (s : S.statement) =
               finish st.b (Goto exit)
           | None -> finish st.b Unreachable);
           start st.b resume
+      | None when st.pulling ->
+          (* In a pulled method, a [yield] stays, for yield lowering to make a
+             state of. Its [stop] path drops what the method owns. *)
+          let ty = type_of st value.id in
+          let place = match place_expression st value with Some place -> place | None -> expression st value in
+          let resume = block st.b and stop = block st.b in
+          finish st.b (Yield { value = owned st place ty; resume; stop = Some stop });
+          start st.b stop;
+          leave_to st 0;
+          finish st.b (Return None);
+          start st.b resume
       | None -> bug "a yield outside an inlined method")
   | Statement_error -> bug "a statement that did not parse");
   end_statement st
@@ -2220,7 +2306,32 @@ and for_ st (s : S.statement) ~pattern ~iterable ~body =
           finish st.b (Goto after);
           start st.b after
       | None -> bug "a loop over something that is not a method")
-  | Some (Pulled _) -> bug "loops over cursors are not lowered yet"
+  | Some (Pulled { cursor }) -> (
+      (* A cursor, pulled until it ends. *)
+      let cursor_ty = ground st cursor in
+      let cursor_place = match place_expression st iterable with Some p -> p | None -> expression st iterable in
+      match cursor_ty with
+      | Cursor yielding ->
+          let option = cursor_result st.context yielding in
+          let test = block st.b and inside = block st.b and after = block st.b in
+          finish st.b (Goto test);
+          start st.b test;
+          let next = new_local st option in
+          call_next st yielding cursor_place next;
+          let more = local st.b (Raw Bool) in
+          emit st.b (Assign (at more, Is_variant (next, "Some")));
+          finish st.b (Switch { value = Copy (at more); cases = [ (Z.one, inside) ]; default = Some after });
+          start st.b inside;
+          in_scope st (fun () ->
+              let element = cursor_element st.context yielding in
+              bind_pattern st pattern (next / Variant_field { variant = "Some"; field = "value" }) element ~owned:true;
+              let depth = List.length st.scopes in
+              st.loops <- { continue_ = test; continue_depth = depth; break_ = after; break_depth = depth - 1 } :: st.loops;
+              block_into st body None;
+              st.loops <- List.tl st.loops);
+          finish st.b (Goto test);
+          start st.b after
+      | _ -> bug "a pulled loop over %s" (Ground.to_string cursor_ty))
   | None -> bug "a for loop with no meaning"
 
 (* The type a yielding method yields, in this instance. *)
@@ -2604,6 +2715,7 @@ and constant_data context path : Lir.data =
       result_local = None;
       nested = ref [];
       evidence = [];
+      pulling = false;
     }
   in
   { data_key = Constant path; ty; value = static_of st value }
@@ -2692,6 +2804,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
       result_local = None;
       nested = ref [];
       evidence = [];
+      pulling = false;
     }
   in
   let lir_signature, result =
@@ -2900,6 +3013,7 @@ let generated_state context ~anchor ~substitution =
     result_local = None;
     nested = ref [];
     evidence = [];
+    pulling = false;
   }
 
 (* The capability an [impl] implements, and the capabilities its own
@@ -3335,6 +3449,64 @@ let trait_provides context ~trait ~name ~receiver =
         members
   | _ -> false
 
+(* The pulled version of a yielding method: lowered as the method is, but
+   with its own [yield]s left for yield lowering, and its parameters first
+   among its locals, which is how a cursor's fields are named. *)
+let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list =
+  let code = code_of context yielding.method_ yielding.type_arguments in
+  let b = Lir_builder.create () in
+  let st =
+    {
+      context;
+      frame = { code; bindings = Hashtbl.create 16; self_place = None; on_yield = None; inlined = [ yielding.method_ ]; exit = None };
+      b;
+      scopes = [ { owned = [] } ];
+      loops = [];
+      temporaries = [];
+      return_ = None;
+      result_local = None;
+      nested = ref [];
+      evidence = [];
+      pulling = true;
+    }
+  in
+  let owned = ref [] in
+  let parameters =
+    List.filter_map
+      (fun (mode, ty, (parameter : S.parameter)) ->
+        let ty = Monomorphic.ground context.monomorphic code.substitution ty in
+        let place, local =
+          match Convention.parameter context.env (Monomorphic.mode mode) ty with
+          | None -> (new_local st ty, None)
+          | Some (Pointer _ as pointer) ->
+              let local = local b pointer in
+              ({ Lir.root = Local local; projections = [ Deref ] }, Some local)
+          | Some lir_ty ->
+              let local = local b lir_ty in
+              (at local, Some local)
+        in
+        (match parameter.kind with
+        | Self_parameter _ -> st.frame.self_place <- Some place
+        | Named_parameter { name; _ } -> Hashtbl.replace st.frame.bindings name.id place
+        | Parameter_error -> ());
+        if mode = T.Own && not (Glue.trivial context.glue ty) then begin
+          own_in_scope st place;
+          Option.iter (fun l -> owned := l :: !owned) local
+        end;
+        local)
+      code.parameter_types
+  in
+  if code.has_defaults then bug "%s has defaults, which pulled methods do not take yet" (Path.show yielding.method_);
+  let evidence =
+    List.map (fun capability -> (capability, local b ~name:"evidence" Convention.evidence)) (evidence_for code.substitution code.uses)
+  in
+  st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
+  start b (block b);
+  block_into st code.body None;
+  drop_scope st (List.hd st.scopes);
+  finish b (Return None);
+  (Lir_builder.build b ~parameters:(parameters @ List.map snd evidence) ~result:None, List.rev !owned)
+
 let instance context (key : Instance.key) : Lir.t =
   match key with
   | Entry method_key -> entry context key method_key
@@ -3385,6 +3557,7 @@ let instance context (key : Instance.key) : Lir.t =
           result_local = None;
           nested = ref [];
           evidence = [];
+          pulling = false;
         }
       in
       let parameters =
