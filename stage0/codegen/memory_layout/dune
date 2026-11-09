@@ -1,0 +1,3 @@
+(library
+ (name memory_layout)
+ (libraries ground zarith))

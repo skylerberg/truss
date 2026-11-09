@@ -1,5 +1,5 @@
 (tests
- (names lexer_tests parser_tests)
+ (names lexer_tests parser_tests codegen_tests)
  (libraries
   source
   diagnostic
@@ -12,6 +12,8 @@
   syntax
   syntax_print
   parser
-  reference)
+  reference
+  ground
+  memory_layout)
  (deps
   (glob_files %{workspace_root}/*.md)))

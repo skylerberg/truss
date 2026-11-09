@@ -5,7 +5,8 @@ checker's output and a program that runs. It follows the decisions in
 [DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and
 [IMPLEMENTATION.md](IMPLEMENTATION.md). It reads the checked form that
 [TYPECHECKER.md](TYPECHECKER.md) describes. The prover is not designed yet,
-so this document states what it expects from it. Nothing is built yet.
+so this document states what it expects from it. It is being built in
+[`stage0/codegen/`](stage0/codegen).
 
 ## What code generation does
 
@@ -55,8 +56,9 @@ checked definitions
 
 | OCaml module | Job |
 |---|---|
+| `Ground` | Ground types: the fully monomorphic types that instances, layouts, and the LIR are written in |
 | `Instance` | Instance keys, and collecting the instances reachable from a root |
-| `Layout` | Sizes, alignment, field placement, tags, and niches for every monomorphic type |
+| `Memory_layout` | Sizes, alignment, field placement, tags, and niches for every ground type |
 | `Lir` | The lowered IR's types, and printing and hashing it canonically |
 | `Lower` | Checked form to LIR: expressions, patterns, calls, capabilities, defaults |
 | `Drops` | Drop elaboration: where values are dropped, with flags for conditional and partial moves |
@@ -67,7 +69,9 @@ checked definitions
 | `Positions` | The table from definitions to files and lines, built at link time |
 | `Startup` | The generated C `main` for programs, test runners, and code run while compiling |
 
-Each is its own dune library, like the lexer's modules. Only `Emit_c` and
+Each is its own dune library, like the lexer's modules, under
+`stage0/codegen/`. `Memory_layout` is not called `Layout`, which is the
+lexer's layout stage. Only `Emit_c` and
 `Toolchain` know about C.
 
 ### Why one IR before C
@@ -233,7 +237,9 @@ no pointers, no `size_of`, and no foreign code.
   promise that "reordering fields rebuilds nothing" needs. A derived
   `Ordered` compares in declaration order regardless of layout.
 - **A record with one field is laid out as that field,** as DESIGN.md
-  promises for `UserId(number: UInt64)`.
+  promises for `UserId(number: UInt64)`: it has the field's size, alignment,
+  and spare values. In C it is a `struct` of that one field, which compilers
+  pass and store exactly as the field.
 - **Fields of zero size take no room.**
 - A record is a C `struct` named after its instance, such as
   `t_geometry__Point`.
@@ -244,13 +250,20 @@ no pointers, no `size_of`, and no foreign code.
   `struct` holding a tag and a `union`. The tag is the smallest unsigned
   integer that holds every variant, numbered in declaration order.
 - **A sum type with no fields at all is just its tag,** as `Ordering` and
-  `LogLevel` are.
+  `LogLevel` are. A variant whose fields all have zero size counts as having
+  none, so `Option[Unit]` is one byte.
+- **A sum type with one variant has no tag,** and one whose only variant
+  has no fields, like `Never`, has zero size.
 - **Niches remove the tag where a field has spare values,** as in Rust. When
   every variant but one has no fields, and the one with fields has a field
   with spare values, the other variants use those values instead of a tag.
   Stage0 uses these spare values: non-null pointers, `Bool`, `Character`, and
   the unused values of another sum type's tag. So `Option[List[Int64]]`,
   `Option[Bool]`, and `Option[Character]` are the size of what they hold.
+  The field with the most spare values is used, the first in placement order
+  on a tie, and the variants without fields take its first values, in
+  declaration order. What is left is spare for the type around it, so
+  `Option[Option[Bool]]` is still one byte.
   More can be added later without any change to the language, because no
   program can see a layout.
 - **An `indirect` variant holds one pointer** to a heap block containing its
