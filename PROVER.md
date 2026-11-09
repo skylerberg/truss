@@ -228,7 +228,13 @@ unstable proofs.
   and a few operations so far.
 - **Extensionality,** that two sequences with the same length and
   elements are identical, is the one fact contracts cannot state, since a
-  contract describes a result, and is to be an axiom of the prover's.
+  contract describes a result, so it is an axiom of the prover's. It is
+  stated for each two sequences that `identical` compares, rather than
+  for every two, which would have the solver compare every pair it
+  knows.
+- **A literal** of a `List` or a `Sequence` is a value whose sequence, the
+  list's model or the sequence itself, has the literal's length and
+  elements.
 - **`identical(a, b)`** is the solver's equality, for every type.
 - **Each type's `model()`** is a function from its sort to its model's.
   Inside the standard library, `List`'s `model()` is a definition over its
@@ -981,8 +987,13 @@ It proves, with one canonical, numbered, hashed query per obligation:
   callee's function-typed parameter promises them in its `requires`, and
   the `time` clause of their function type deciding whether they must end;
   and each call through a function-typed parameter whose type has a
-  `requires`, which must meet it. A function named as a value is not read
-  yet.
+  `requires`, which must meet it
+- functions named as values: a value of the function's type, one unit of
+  time per call when the function's `time` is a constant, and an edge of
+  the call graph that, in a function that must end, must not reach back.
+  Passed for a function-typed parameter, the function must accept every
+  argument the parameter's type promises it, and keep the type's cost
+  clauses.
 - laws: a trait's laws, and those of the traits it requires, are facts,
   quantified over their parameters, wherever the trait's methods are called
   on a type; each `impl` written by hand shows each law of its trait, with
@@ -1000,8 +1011,9 @@ It proves, with one canonical, numbered, hashed query per obligation:
   are functions in the logic, known by their contracts, and `identical` is
   the solver's equality, so the contracts of `List` and `Slice`, stated
   through their models, prove facts such as a pushed element's index and
-  value. Extensionality of sequences, sequence literals, and the contracts
-  of `Map`, `Set`, and `String` are not built yet.
+  value; sequences are extensional; and literals of `List` and `Sequence`
+  have their elements. The contracts of `Map`, `Set`, and `String`, and
+  their literals, are not built yet.
 - the type checker's `Integer_fits` obligations, and its `Guards_cover`,
   which the `_ => unreachable` arm it is about shows
 - the ownership check's `Disjoint` obligations, under `prover.disjoint`:
@@ -1031,8 +1043,8 @@ A call to anything whose contract it does not read yet, such as a trait
 method or a capability, gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
-definition that uses anything else, such as a string, a float, a cursor,
-or a function named as a value, is reported as
+definition that uses anything else, such as a string, a float, or a
+cursor, is reported as
 `prover.unsupported` with what stopped it, and none of its obligations
 count as proven.
 

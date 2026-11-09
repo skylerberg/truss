@@ -967,7 +967,8 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
   | With (base, updates) -> with_ context frame written base updates
   | Lambda { parameters; body } ->
       Some (lambda context frame written parameters body ~facts:(fun _ -> []))
-  | List _ | Map _ -> unsupported written.span "a collection literal"
+  | List items -> Some (list_literal context frame written items)
+  | Map _ -> unsupported written.span "a map literal"
   | String _ -> unsupported written.span "a string"
   | Float _ -> unsupported written.span "a float"
   | Range _ -> unsupported written.span "a range outside a `for` loop or a quantifier"
@@ -1026,8 +1027,8 @@ and name context frame (written : expression) (path : path) =
           let symbol = Printf.sprintf "generic.%s.%s" (Path.show parameter.owner) parameter.name in
           declare context (L.Constant (symbol, Int));
           Some (frame, L.Symbol symbol)
-      | Some (Global { path = global; _ }) ->
-          Some (frame, constant_value context frame written global)
+      | Some (Global { path = global; type_arguments }) ->
+          Some (frame, global_value context frame written global type_arguments)
       | Some (Variant_value { type_; variant }) ->
           let type_ = substituted frame type_ in
           let type_ = substituted frame type_ in
@@ -1266,6 +1267,7 @@ and call context frame (written : expression) callee_expression arguments =
       | [ { value = first; _ }; { value = second; _ } ] ->
           let frame, first_value = value context frame first in
           let frame, second_value = value context frame second in
+          extensional context frame (type_of frame first) first_value second_value;
           Some (frame, L.equal first_value second_value)
       | _ -> unsupported written.span "`identical` with other than two arguments")
   | Name path
@@ -1320,6 +1322,13 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
         | None, _ -> unsupported expression_.span "an argument")
       call_.arguments
   in
+  List.iter
+    (fun ((argument : C.argument), (expression_ : expression), _) ->
+      match named_function_of context frame expression_ with
+      | Some (path, contract) ->
+          check_named_callback context frame call_ argument expression_ path contract evaluated
+      | None -> ())
+    values;
   let result_type = substituted frame call_.result in
   (match call_.callee with
   | Constructor _ | Built_in_operator | Intrinsic _ -> ()
@@ -1972,6 +1981,107 @@ and sequence_at context element term index =
       Some (L.Apply (symbol, [ term; index ]))
   | [] -> None
 
+(* Two sequences with the same length and the same elements are identical:
+   the one fact about sequences their contracts cannot state, since a
+   contract describes a result. It is stated for each two that are
+   compared, which keeps the solver from comparing every two it knows. *)
+and extensional context frame (ty : T.ty) a b =
+  match ty with
+  | Named { path; arguments = [ T.Type element ] } when Path.equal path sequence_path -> (
+      context.fresh <- context.fresh + 1;
+      let index = Printf.sprintf "index.%d" context.fresh in
+      match
+        ( sequence_at context element a (L.Symbol index),
+          sequence_at context element b (L.Symbol index) )
+      with
+      | Some at_a, Some at_b ->
+          let length = sequence_length context element in
+          fact context frame
+            L.(
+              equal (length a) (length b)
+              &&& Forall
+                    ( [ (index, Int) ],
+                      Apply ("<=", [ int 0; Symbol index ])
+                      &&& Apply ("<", [ Symbol index; length a ])
+                      ==> equal at_a at_b )
+              ==> equal a b)
+      | _ -> ())
+  | _ -> ()
+
+(* A [List] or a [Sequence] written out: a value whose sequence, the list's
+   model or the sequence itself, has the elements in order. A non-empty
+   list is one allocation. *)
+and list_literal context frame (written : expression) items =
+  let ty = type_of frame written in
+  let frame, values =
+    List.fold_left
+      (fun (frame, values) item ->
+        let frame, term = value context frame item in
+        (frame, values @ [ term ]))
+      (frame, []) items
+  in
+  let element =
+    match ty with
+    | Named { arguments = T.Type element :: _; _ } -> element
+    | _ -> unsupported written.span "a literal of `%s`" (T.show ty)
+  in
+  let literal = arrive context frame "literal" ty in
+  let sequence =
+    match ty with
+    | Named { path; _ } when Path.equal path sequence_path -> literal
+    | Named
+        {
+          path = Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" };
+          _;
+        } -> (
+        match model_of context ty literal ~element with
+        | Some model -> model
+        | None -> unsupported written.span "a literal of `%s`" (T.show ty))
+    | _ -> unsupported written.span "a literal of `%s`" (T.show ty)
+  in
+  assume_valid context frame ty literal;
+  assume context frame
+    (L.equal (sequence_length context element sequence) (L.int (List.length values)));
+  List.iteri
+    (fun index item ->
+      match sequence_at context element sequence (L.int index) with
+      | Some at -> assume context frame (L.equal at item)
+      | None -> ())
+    values;
+  let allocates =
+    items <> []
+    && match ty with Named { path; _ } -> not (Path.equal path sequence_path) | _ -> false
+  in
+  let frame =
+    spend context frame (fun (counter : Costs.counter) ->
+        match (counter.resource, counter.counting) with
+        | Allocations, _ when allocates -> L.int 1
+        | Allocated_bytes, Units when allocates -> L.int 1
+        | Allocated_bytes, (At_most | Exactly) when allocates ->
+            unknown_amount context frame counter
+        | _ -> Costs.zero)
+  in
+  (frame, literal)
+
+(* A value's model, by the standard library's [impl] of [Model] for its
+   type, as a call of [model()] would read it. *)
+and model_of context (ty : T.ty) term ~element =
+  let model_trait : Path.t =
+    Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Model" }
+  in
+  match
+    Call_graph.impls_for
+      (Query.demand context.database Call_graph.package_impls "standard")
+      [ model_trait ] ty
+  with
+  | impl :: _ ->
+      let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
+      let symbol = "function." ^ Path.show path ^ "[" ^ type_key ty ^ "]" in
+      declare context
+        (L.Function (symbol, [ sort_of context ty ], sort_of context (sequence_type element)));
+      Some (L.Apply (symbol, [ term ]))
+  | [] -> None
+
 (* A sequence of parts with nothing in it. *)
 and empty_parts context frame element =
   let parts = fresh context "parts" (sort_of context (sequence_type element)) in
@@ -2051,7 +2161,8 @@ and member context frame (written : expression) base =
   | Some (Variant_value { type_; variant }) ->
       let type_ = substituted frame type_ in
       Some (frame, variant_value context written type_ variant)
-  | Some (Global { path; _ }) -> Some (frame, constant_value context frame written path)
+  | Some (Global { path; type_arguments }) ->
+      Some (frame, global_value context frame written path type_arguments)
   | _ -> unsupported written.span "this member"
 
 (* A field of a value, which is in its type's range like every value. *)
@@ -2082,6 +2193,196 @@ and variant_value context (written : expression) type_ variant =
       L.Apply (constructor_name type_ (Some variant), [])
   | Some _ -> unsupported written.span "a variant used as a function"
   | None -> unsupported written.span "a variant of `%s`" (T.show type_)
+
+(* A global used as a value: a constant's value, or a function named as a
+   value. *)
+and global_value context frame (written : expression) path type_arguments =
+  match function_contract context.database path with
+  | Some contract -> named_function context frame written path type_arguments contract
+  | None -> constant_value context frame written path
+
+(* A function named as a value is a value of its type known by what it
+   promises of its calls: one unit of time per call when its [time] is a
+   constant. Naming it is an edge of the call graph that passes no
+   arguments, so in a function that must end, it must not reach back.
+   See PROVER.md, "Termination". *)
+and named_function context frame (written : expression) path type_arguments contract =
+  if
+    context.terminates && frame.checking
+    && Call_graph.reaches context.graph ~from:path ~target:context.current
+  then
+    oblige context frame Termination written.span
+      (Printf.sprintf
+         "Naming `%s` as a value reaches back here, and such a use passes no arguments the prover \
+          can compare, so the recursion cannot be shown to end: write it as a direct call on a \
+          part."
+         (Path.show path))
+      (L.Boolean false);
+  let ty = type_of frame written in
+  let instance =
+    match List.map (T.substitute_argument frame.substitution) type_arguments with
+    | [] -> ""
+    | arguments -> "[" ^ String.concat ", " (List.map argument_key arguments) ^ "]"
+  in
+  let symbol = "named." ^ Path.show path ^ instance in
+  declare context (L.Constant (symbol, sort_of context ty));
+  let term = L.Symbol symbol in
+  let constant_time =
+    List.exists
+      (fun (part : part) ->
+        List.exists
+          (fun ((cost : cost), _) ->
+            match cost with
+            | { resource = Time; bound = Big_o { kind = Integer _; _ }; amortized = false } -> true
+            | _ -> false)
+          part.costs)
+      contract.parts
+  in
+  (if constant_time then
+     let time = time_of context frame ty term in
+     fact context frame (L.equal time (L.int 1)));
+  term
+
+(* The function a value names, if it names one by its path. *)
+and named_function_of context frame (expression_ : expression) =
+  match expression_.kind with
+  | Mode (_, inner) | Parenthesized inner -> named_function_of context frame inner
+  | Name _ | Member _ -> (
+      match frame.source.checked.meanings.(expression_.id) with
+      | Some (Global { path; _ }) -> (
+          match function_contract context.database path with
+          | Some contract -> Some (path, contract)
+          | None -> None)
+      | _ -> None)
+  | _ -> None
+
+(* A function named as a value and passed for a function-typed parameter
+   must accept every argument the parameter's type promises it, and keep
+   the cost clauses the type asks of what is passed. See PROVER.md,
+   "Obligations". *)
+and check_named_callback context frame (call_ : C.call) (argument : C.argument)
+    (passed : expression) path (contract : contract) evaluated =
+  let own = List.hd contract.parts in
+  match parameter_type context frame call_ argument.parameter with
+  | Some (T.Function expected) ->
+      let inputs =
+        List.map
+          (fun (_, input) ->
+            let input = substituted frame input in
+            let term = arrive context frame "argument" input in
+            assume_valid context frame input term;
+            term)
+          expected.inputs
+      in
+      let promised =
+        L.conjunction (callback_facts context frame call_ argument.parameter evaluated inputs)
+      in
+      let at = restrict frame promised in
+      (if List.length own.binding = List.length inputs then
+         let locals, self =
+           List.fold_left2
+             (fun (locals, self) binding term ->
+               match binding with
+               | Self_binding -> (locals, Some term)
+               | Parameter_binding name_ -> (Ids.add name_.id term locals, self))
+             (Ids.empty, None) own.binding inputs
+         in
+         let inside =
+           {
+             frame with
+             source = own.callee;
+             locals;
+             old_locals = locals;
+             self;
+             old_self = self;
+             checking = false;
+             loop = None;
+             result = None;
+             substitution = [];
+           }
+         in
+         List.iter
+           (fun (clause : expression) ->
+             oblige context at Requires passed.span
+               (Printf.sprintf
+                  "`%s` may not accept every argument this parameter's type promises it: its `%s` \
+                   may not hold."
+                  (Path.show path) (quote own.callee clause.span))
+               (snd (value context inside clause)))
+           own.requires);
+      List.iter
+        (fun (cost : T.cost) ->
+          if not (keeps_cost context path contract cost) then
+            oblige context frame Cost passed.span
+              (Printf.sprintf
+                 "`%s` does not promise what this parameter's type, `%s`, asks of a function \
+                  passed for it."
+                 (Path.show path) (T.show (T.Function expected)))
+              (L.Boolean false))
+        expected.costs
+  | _ ->
+      if own.requires <> [] || own.costs <> [] then
+        unsupported passed.span
+          "a function passed for a parameter whose type the prover cannot read"
+
+(* The type of a callee's parameter, by its position, with the call's type
+   arguments. *)
+and parameter_type context frame (call_ : C.call) index =
+  match call_.callee with
+  | Function { path; type_arguments } -> (
+      match Query.demand context.database Interface.Environment.signature path with
+      | Some (signature : T.signature) ->
+          let types =
+            (match signature.receiver with
+              | Some ((Read | Mut | Own), ty) -> [ ty ]
+              | Some (Static, _) | None -> [])
+            @ List.map (fun (info : T.parameter_info) -> info.type_) signature.parameters
+          in
+          let rec pair (generics : T.generic list) arguments =
+            match (generics, arguments) with
+            | generic :: generics, argument :: arguments ->
+                (generic.generic, T.substitute_argument frame.substitution argument)
+                :: pair generics arguments
+            | _ -> []
+          in
+          Option.map
+            (T.substitute (pair signature.generics type_arguments))
+            (List.nth_opt types index)
+      | None -> None)
+  | _ -> None
+
+(* Whether a named function's cost clauses imply one a function type asks
+   for, which can only be a constant: a constant [O(...)], or a number of
+   at most, or exactly, what is asked. *)
+and keeps_cost context path (contract : contract) (asked : T.cost) =
+  let resource : resource option =
+    match asked.resource with
+    | "time" -> Some Time
+    | "allocations" -> Some Allocations
+    | "allocated_bytes" -> Some Allocated_bytes
+    | _ -> None
+  in
+  let constant (value : expression) = match value.kind with Integer k -> Some k | _ -> None in
+  match (resource, asked.bound) with
+  | Some Time, Finite_cost -> signature_terminates context path
+  | Some resource, _ -> (
+      match
+        List.find_map
+          (fun (part : part) ->
+            List.find_map
+              (fun ((cost : cost), _) -> if cost.resource = resource then Some cost else None)
+              part.costs)
+          contract.parts
+      with
+      | Some cost -> (
+          match (asked.bound, cost.bound) with
+          | Order_of, (Big_o value | At_most value | Exactly value) -> constant value <> None
+          | No_more_than (Some most), (At_most value | Exactly value) -> (
+              match constant value with Some k -> Z.leq k most | None -> false)
+          | Exactly_cost (Some exact), Exactly value -> constant value = Some exact
+          | _ -> false)
+      | None -> false)
+  | None, _ -> false
 
 (* A constant is its value, worked out from its definition, which is made
    of literals, arithmetic, other constants, and values built from them. *)

@@ -913,6 +913,111 @@ let () =
          \  mut self.restore()\n\
           }\n"))
 
+(* Functions named as values *)
+
+let run =
+  "fn run(transform: (fn(UInt32) -> UInt32 cost time O(1))) -> UInt32\n\
+  \  cost time O(1)\n\
+   {\n\
+  \  transform(1)\n\
+   }\n\n"
+
+let () =
+  test "a named function that keeps its parameter type's cost" (fun () ->
+      proven
+        (run
+       ^ "fn same(value: UInt32) -> UInt32\n\
+         \  cost time O(1)\n\
+          {\n\
+         \  value\n\
+          }\n\n\
+          fn f() -> UInt32\n\
+         \  cost time O(1)\n\
+          {\n\
+         \  run(same)\n\
+          }\n"));
+  test "a named function that does not keep its parameter type's cost" (fun () ->
+      not_proven
+        (run
+       ^ "fn spin(value: UInt32) -> UInt32\n\
+         \  cost time O(value)\n\
+          {\n\
+         \  for _ in 0..value {\n\
+         \  }\n\
+         \  value\n\
+          }\n\n\
+          fn f() -> UInt32 {\n\
+         \  run(spin)\n\
+          }\n")
+        "prover.cost");
+  test "a named function must accept what its parameter's type promises" (fun () ->
+      not_proven
+        "fn apply(limit: USize, visit: (fn(index: USize) requires index < limit)) {\n\
+        \  if limit > 0 {\n\
+        \    visit(0)\n\
+        \  }\n\
+         }\n\n\
+         fn check(index: USize)\n\
+        \  requires index < 5\n\
+         {\n\
+         }\n\n\
+         fn f() {\n\
+        \  apply(10, visit: check)\n\
+         }\n"
+        "prover.requires");
+  test "a named function that accepts what its parameter's type promises" (fun () ->
+      proven
+        "fn apply(limit: USize, visit: (fn(index: USize) requires index < limit)) {\n\
+        \  if limit > 0 {\n\
+        \    visit(0)\n\
+        \  }\n\
+         }\n\n\
+         fn check(index: USize)\n\
+        \  requires index < 10\n\
+         {\n\
+         }\n\n\
+         fn f() {\n\
+        \  apply(10, visit: check)\n\
+         }\n");
+  test "naming a function that reaches back is recursion that cannot be shown to end" (fun () ->
+      not_proven
+        (run ^ "fn again(value: UInt32) -> UInt32\n  cost time O(1)\n{\n  run(again)\n}\n")
+        "prover.termination")
+
+(* Sequences *)
+
+let () =
+  test "a list literal has its elements in order" (fun () ->
+      proven
+        "fn f() -> Int64\n\
+        \  ensures result == 2\n\
+         {\n\
+        \  let items: List[Int64] = [1, 2, 3]\n\
+        \  items[1]\n\
+         }\n");
+  test "a list literal has its length" (fun () ->
+      proven "fn f() -> List[Int64]\n  ensures result.length() == 3\n{\n  [1, 2, 3]\n}\n");
+  test "a non-empty list literal is one allocation" (fun () ->
+      proven "fn f() -> List[Int64]\n  cost allocations == 1\n{\n  [1, 2, 3]\n}\n");
+  test "sequences with the same elements are identical" (fun () ->
+      proven
+        "fn f(items: mut List[Int64])\n\
+        \  requires items.length() > 0\n\
+        \  ensures identical(items.model(), old(items.model()))\n\
+         {\n\
+        \  let first = items[0]\n\
+        \  items[0] = first\n\
+         }\n");
+  test "sequences that differ in one element are not identical" (fun () ->
+      not_proven
+        "fn f(items: mut List[Int64])\n\
+        \  requires items.length() > 0\n\
+        \  ensures identical(items.model(), old(items.model()))\n\
+         {\n\
+        \  items[0] = 7\n\
+         }\n"
+        "prover.ensures")
+
 (* Places lent together *)
 
 let swap =
