@@ -705,6 +705,7 @@ let literal st (id : S.id) =
 let constant_of st ty (literal : C.literal) : Lir.operand =
   match (literal, scalar_of st ty) with
   | Integer_value value, Integer integer -> constant_int integer value
+  | Integer_value value, Character -> Constant (Character (Z.to_int value))
   | Float_value value, Float64 -> Constant (Float64 (Int64.bits_of_float value))
   | Float_value value, Float32 -> Constant (Float32 (Int32.bits_of_float value))
   | _ -> bug "a literal of type %s" (Ground.to_string ty)
@@ -1081,6 +1082,9 @@ and into st (e : S.expression) (destination : Lir.place) =
   | Integer _ | Float _ -> assign (Use (constant_of st (ty ()) (literal st e.id)))
   | True -> assign (Use (Constant (Bool true)))
   | False -> assign (Use (Constant (Bool false)))
+  | String _ when st.frame.code.checked.literals.(e.id) <> None ->
+      (* A tagged character, such as [Character"a"] or [UInt8"\n"]: a number. *)
+      assign (Use (constant_of st (ty ()) (literal st e.id)))
   | String literal when literal.rest = [] && literal.tag = None ->
       let field, storage_ty, storage = string_value st (ty ()) literal.first.value in
       let built = new_local st storage_ty in
@@ -2598,11 +2602,14 @@ and test_pattern st (pattern : S.pattern) place ty ~matched ~failed =
       check (Binary (Equal, Copy place, constant_of st ty (literal st pattern.id)))
   | Literal Literal_true -> check (Use (Copy place))
   | Literal Literal_false -> check (Unary (Not, Copy place))
+  | Literal (Literal_string _) when st.frame.code.checked.literals.(pattern.id) <> None ->
+      check (Binary (Equal, Copy place, constant_of st ty (literal st pattern.id)))
   | Literal (Literal_string literal) -> equal_to (string_place st ty literal.first.value)
   | Pattern_range { start; stop; inclusive } ->
       let bound (e : S.range_end) =
         match e.kind with
         | End_literal (Literal_integer value) -> constant_int (integer_of st ty) value
+        | End_literal (Literal_string _) -> constant_of st ty (literal st e.id)
         | End_constant _ | End_name _ -> (
             match st.frame.code.checked.patterns.(e.id) with
             | Some (Constant_pattern path) -> Copy (static_constant st path)
@@ -2800,6 +2807,7 @@ let rec static_of st (e : S.expression) : Lir.static_value =
       | Float_value v -> number (Float_value (Float.neg v)))
   | True -> Static_scalar (Bool true)
   | False -> Static_scalar (Bool false)
+  | String _ when st.frame.code.checked.literals.(e.id) <> None -> number (literal st e.id)
   | String literal when literal.rest = [] && literal.tag = None -> (
       match Monomorphic.shape st.context.monomorphic ty with
       | Record [ (field, Typed _) ] ->

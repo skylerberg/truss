@@ -2203,6 +2203,25 @@ test "provide" {
   assert console.lines[2] == "> hello 1"
 }
 |};
+  passes "tagged characters are numbers, in values, constants, and patterns"
+    {|let newline: UInt8 = UInt8"\n"
+
+fn kind(letter: Character) -> Int64 {
+  match letter {
+    Character"a"..=Character"z" => 1
+    Character"_" => 2
+    _ => 0
+  }
+}
+
+test "characters" {
+  assert newline == 10
+  assert UInt8"A" == 65
+  assert kind(Character"q") == 1
+  assert kind(Character"_") == 2
+  assert kind(Character"é") == 0
+}
+|};
   passes "names an is test binds are used where it holds"
     {|fn describe(found: Option[String], limit: USize) -> String {
   if found is Some(text) && text.length() > limit {
