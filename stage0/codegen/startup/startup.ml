@@ -293,6 +293,27 @@ t_isize t_runtime_write(int32_t descriptor, const uint8_t *bytes, t_usize count)
   }
 }
 
+/* Opens a file: to read (flags 0), to write from empty (1), or to append
+   (2), creating it to write. On failure it returns -1 and writes the error
+   number. */
+int32_t t_runtime_open(const uint8_t *path, t_usize length, int32_t flags, int32_t *error) {
+  char *terminated = malloc(length + 1);
+  if (terminated == NULL) t_out_of_memory();
+  memcpy(terminated, path, length);
+  terminated[length] = 0;
+  int mode = flags == 0 ? O_RDONLY : flags == 1 ? O_WRONLY | O_CREAT | O_TRUNC : O_WRONLY | O_CREAT | O_APPEND;
+  int descriptor;
+  do descriptor = open(terminated, mode | O_CLOEXEC, 0666);
+  while (descriptor < 0 && errno == EINTR);
+  free(terminated);
+  *error = descriptor < 0 ? errno : 0;
+  return descriptor;
+}
+
+void t_runtime_close(int32_t descriptor) {
+  if (descriptor >= 0) close(descriptor);
+}
+
 /* An environment variable's value and its length, or null when it is
    unset. */
 uint8_t *t_runtime_environment(const uint8_t *name, t_usize length, t_usize *value_length) {

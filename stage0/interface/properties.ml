@@ -133,6 +133,7 @@ let rec has database ~bounds ?(visiting = []) property (type_ : T.ty) =
           | Plain -> false
           | View -> List.exists recurse argument_types)
       | Some View -> true
+      | Some Handle -> false
       | Some Array -> (
           match property with
           | Copyable | Plain -> List.for_all recurse argument_types

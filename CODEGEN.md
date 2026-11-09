@@ -912,7 +912,13 @@ with a message, as DESIGN.md allows for running out of memory.
 
 The intrinsic module also provides a few handle types, such as a file
 descriptor, a process, and a thread. Their drop functions call the
-operating system to release them, such as `close`. They are the only drops
+operating system to release them, such as `close`. Stage0 has the first:
+`Handle`, a file descriptor in an `Int32`, which is neither `Copyable` nor
+`Plain`, with `open_file`, `handle_read`, and `handle_write`. The standard
+library's `SystemFileRead` and `SystemFileWrite`, and its `FileReader` and
+`FileWriter`, are written on them, as `SystemEnvironment` is on
+`environment_variable`, `SystemClock` on `clock_now`, and `SystemRandom` on
+`random_fill`. They are the only drops
 that do more than free memory, and they run no Truss code, as DESIGN.md
 requires. Standard-library types such as `File` hold one in a field, so
 their drop functions release the resource by dropping that field.

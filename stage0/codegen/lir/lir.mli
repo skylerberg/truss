@@ -128,6 +128,10 @@ type intrinsic =
   | System_environment
       (** [(name, name length, value length's address) -> bytes]: an environment variable's value,
           null when it is unset *)
+  | System_open
+      (** [(path, path length, flags, error's address) -> Int32]: a descriptor, -1 with the error
+          number written when it fails *)
+  | System_close  (** [(descriptor)] *)
   | Float_text
       (** [(value, bytes) -> USize]: writes the shortest decimal that reads back as the float, at
           most [float_text_limit] bytes, as [Display] shows it *)

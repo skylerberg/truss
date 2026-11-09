@@ -1,6 +1,9 @@
 let bug format = Printf.ksprintf (fun message -> invalid_arg ("Glue: " ^ message)) format
 
-type kind = Shape of Memory_layout.shape | Storage of Ground.ty
+type kind =
+  | Shape of Memory_layout.shape
+  | Storage of Ground.ty
+  | Handle  (** An operating system's descriptor, in a [descriptor] field, closed when dropped *)
 
 module Types = Map.Make (struct
   type t = Ground.ty
@@ -41,7 +44,7 @@ let rec trivial t ty =
         if any then false
         else
           match t.kind_of ty with
-          | Storage _ -> false
+          | Storage _ | Handle -> false
           | Shape (Scalar _) -> true
           | Shape (Record fields) -> List.for_all (fun (_, m) -> member m) fields
           | Shape (Array (element, _)) -> trivial t element
@@ -98,6 +101,14 @@ let drop t ty =
            {
              target = Intrinsic Free;
              arguments = [ Copy (value / Field "value") ];
+             result = Discarded;
+           })
+  | _, Handle ->
+      emit b
+        (Call
+           {
+             target = Intrinsic System_close;
+             arguments = [ Copy (value / Field "descriptor") ];
              result = Discarded;
            })
   | _, Storage element ->
@@ -220,6 +231,7 @@ let copy t ty =
   (if trivial t ty then emit b (Assign (result, Use (Copy self)))
    else
      match t.kind_of ty with
+     | Handle -> bug "a copy of a handle, which is not Copyable"
      | Storage element ->
          let layout = Memory_layout.of_type t.env element in
          let shared = local b (Raw Bool) in
@@ -444,6 +456,7 @@ let debug t ty =
   (match (t.debug_form ty, t.kind_of ty) with
   | (Text | Sequence), Shape (Record [ (field, Typed field_ty) ]) ->
       storage_or_view field_ty (value / Field field) ~as_text:(t.debug_form ty = Text)
+  | _, Handle -> text b "Handle"
   | _, Storage element ->
       list_of element
         ~element_at:(fun i -> value / Field "buffer" / Index i)

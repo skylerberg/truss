@@ -2403,6 +2403,43 @@ let () =
       expect_string ~expected:"hello\n3 arguments, then one\n" output)
 
 let () =
+  test "a program writes a file, reads it back, and reports a missing one" (fun () ->
+      let path = Filename.concat (Lazy.force scratch) "written.txt" in
+      let status, output, _ =
+        run_main ~arguments:[ path ]
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console, FileRead, FileWrite
+{
+  let path = Path.new(arguments[1].slice())
+  if FileWrite.write_text(path, contents: "first\nsecond line\nlast".slice()) is Err(_) {
+    return ExitCode(1)
+  }
+  if FileRead.read_text(path) is Ok(text) {
+    Console.print_line("${text.length()} bytes".slice())
+  }
+  match FileRead.open(path) {
+    Ok(file) => {
+      var reader = own file
+      if mut reader.read_line() is Ok(line) {
+        Console.print_line("${line}".slice())
+      }
+      if mut reader.read_line() is Ok(line) {
+        Console.print_line("${line}".slice())
+      }
+    }
+    Err(_) => {}
+  }
+  if FileRead.read_text(Path.new("/nonexistent/truss".slice())) is Err(NotFound) {
+    Console.print_line("missing".slice())
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"22 bytes\nfirst\nsecond line\nmissing\n" output)
+
+let () =
   test "a program reads environment variables" (fun () ->
       Unix.putenv "TRUSS_TEST_VARIABLE" "caf\xc3\xa9";
       let status, output, _ =

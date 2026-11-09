@@ -149,6 +149,7 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
             ]
       | Some View, [ Type element ] ->
           Record [ ("elements", Raw (Pointer (Data element))); ("length", Typed usize) ]
+      | Some Handle, [] -> Record [ ("descriptor", Raw (Integer Int32)) ]
       | Some Integer, _ -> bug "Integer exists only in specifications"
       | Some _, _ -> bug "a built-in type with the wrong arguments: %s" (Ground.to_string ty)
       | None, _ -> (
@@ -177,6 +178,8 @@ let kind context ty : Glue.kind =
   | Ground.Named { path; arguments = [ Type element ] }
     when Intrinsic.builtin_of_path path = Some Storage ->
       Storage element
+  | Ground.Named { path; arguments = [] } when Intrinsic.builtin_of_path path = Some Handle ->
+      Handle
   | _ -> Shape (shape context ty)
 
 let debug_form : Ground.ty -> Glue.debug_form = function

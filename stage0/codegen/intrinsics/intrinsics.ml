@@ -39,7 +39,7 @@ let lower env b types operation ~type_arguments arguments ~destination ~site =
      operations, which take none. *)
   let element () =
     match operation with
-    | Intrinsic.Read_bytes | Random_fill | Write_float | Environment_variable ->
+    | Intrinsic.Read_bytes | Random_fill | Write_float | Environment_variable | Handle_read ->
         Ground.Named { path = Intrinsic.builtin_path UInt8; arguments = [] }
     | _ -> type_argument 0
   in
@@ -368,6 +368,55 @@ let lower env b types operation ~type_arguments arguments ~destination ~site =
           call ~result:(at count) Float_text
             [ value 1; Address { place = element_at storage (length storage); writable = true } ];
           add_to_length storage (Copy (at count))
+      | Open_file ->
+          let path = place (argument 0) in
+          let descriptor = local b ~name:"descriptor" (Raw (Integer Int32)) in
+          call ~result:(at descriptor) System_open
+            [
+              Copy (path / Field "elements");
+              Copy (path / Field "length");
+              value 1;
+              Address { place = place (argument 2); writable = true };
+            ];
+          set
+            (Build
+               {
+                 ty = Named { path = Intrinsic.builtin_path Handle; arguments = [] };
+                 variant = None;
+                 fields = [ ("descriptor", Copy (at descriptor)) ];
+               })
+      | Handle_write ->
+          let view = place (argument 1) in
+          call ?result:destination System_write
+            [
+              Copy (place (argument 0) / Field "descriptor");
+              Copy (view / Field "elements");
+              Copy (view / Field "length");
+            ]
+      | Handle_read ->
+          let storage = place (argument 1) in
+          let count = value 2 in
+          let wanted = usize_local "wanted" in
+          emit b (Assign (at wanted, Binary (Add, length storage, count)));
+          grow_when Greater storage (Copy (at wanted));
+          let got = local b ~name:"got" (Value types.isize) in
+          call ~result:(at got) System_read
+            [
+              Copy (place (argument 0) / Field "descriptor");
+              Address { place = element_at storage (length storage); writable = true };
+              count;
+            ];
+          let read_some = local b (Raw Bool) in
+          emit b
+            (Assign
+               (at read_some, Binary (Greater, Copy (at got), Constant (Integer (ISize, Z.zero)))));
+          when_ b
+            (Copy (at read_some))
+            (fun () ->
+              let read = usize_local "read" in
+              emit b (Assign (at read, Convert (Copy (at got), Integer USize)));
+              add_to_length storage (Copy (at read)));
+          set (Use (Copy (at got)))
       | Environment_variable ->
           let name = place (argument 0) in
           let storage = place (argument 1) in

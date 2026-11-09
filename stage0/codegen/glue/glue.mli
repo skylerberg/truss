@@ -9,7 +9,10 @@
 
 (* What a type is, for glue: made of fields, or the built-in storage of
    elements of a type. *)
-type kind = Shape of Memory_layout.shape | Storage of Ground.ty
+type kind =
+  | Shape of Memory_layout.shape
+  | Storage of Ground.ty
+  | Handle  (** An operating system's descriptor, in a [descriptor] field, closed when dropped *)
 
 (* How a type's debug output is written: from its structure, as Truss would
    build it, such as [Point(x: 1.0, y: 2.0)] or [Some(3)]; as quoted text,
