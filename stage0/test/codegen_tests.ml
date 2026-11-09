@@ -678,4 +678,45 @@ let () =
         (Lir.function_to_string (Lir.canonical f)));
   ()
 
+let () =
+  let numbered first second =
+    function_ ~result:(value int32)
+      [ local (value int32); local (value int32) ]
+      [
+        block
+          [ Assign (at first, Use (constant_int32 1)); Assign (at second, Use (copy first)) ]
+          (Return (Some (copy second)));
+      ]
+  in
+  test "two lowerings that differ only in numbering hash the same" (fun () ->
+      let hash f = Lir.hash (instance "f" f) in
+      let a = numbered 0 1 and b = numbered 1 0 in
+      if hash a <> hash b then fail "the hashes differ");
+  test "a change to what an instance does changes its hash" (fun () ->
+      let changed =
+        function_ ~result:(value int32)
+          [ local (value int32) ]
+          [ block [ Assign (at 0, Use (constant_int32 2)) ] (Return (Some (copy 0))) ]
+      in
+      if Lir.hash (instance "f" (numbered 0 1)) = Lir.hash (instance "f" changed) then
+        fail "the hashes are equal");
+  test "a symbol names the path and the type arguments" (fun () ->
+      let key =
+        Instance.Method
+          {
+            owner = { package = "standard"; modules = [ "list" ]; name = "List" };
+            name = "each";
+            receiver = Some Read;
+            type_arguments = [ Type int64 ];
+            capabilities = [];
+          }
+      in
+      expect_string ~expected:"t_standard__list__List_each_Of_test__Int64_End_"
+        (Instance.symbol key));
+  test "a long symbol keeps its start and ends with a hash" (fun () ->
+      let long name = Instance.symbol (key (String.make 300 name)) in
+      let a = long 'a' and b = long 'b' in
+      expect_int ~expected:(180 + 6 + 32) (String.length a);
+      if a = b then fail "two long names give one symbol")
+
 let () = Harness.finish ()

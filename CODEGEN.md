@@ -57,7 +57,8 @@ checked definitions
 | OCaml module | Job |
 |---|---|
 | `Ground` | Ground types: the fully monomorphic types that instances, layouts, and the LIR are written in |
-| `Instance` | Instance keys, and collecting the instances reachable from a root |
+| `Instance` | Instance keys, their C symbols, and collecting the instances reachable from a root |
+| `Convention` | How each Truss parameter and result becomes C parameters and results, for lowering and the emitter alike |
 | `Memory_layout` | Sizes, alignment, field placement, tags, and niches for every ground type |
 | `Lir` | The lowered IR's types, and printing and hashing it canonically |
 | `Lower` | Checked form to LIR: expressions, patterns, calls, capabilities, defaults |
@@ -102,7 +103,18 @@ The generated C is C11 plus a few builtins that both clang and gcc provide.
 Clang is the supported compiler; gcc should work too. It never includes a
 header: the compiler declares the types, the functions it calls, and the
 libc functions the standard library uses itself, for each target, so
-compiling a file parses only what that file needs.
+compiling a file parses only what that file needs. Each file declares the
+fixed-width integers from the compiler's own predefined macros, such as
+`__INT64_TYPE__`, the target's `USize`, and the runtime's few functions,
+and defines only the small helpers it uses, such as the one that gives a
+float's bits with every NaN made canonical. Every local starts zeroed, which
+the C compiler removes wherever it is overwritten.
+
+The runtime (see [Program startup and failure](#program-startup-and-failure))
+is the exception. It is one fixed file for each target, compiled once and
+cached, and it includes the system's headers, since its declarations of
+signals and alternate stacks differ between systems and parsing them costs
+nothing on an edit.
 
 Generated code has no undefined behavior, even if the prover were wrong
 about an overflow or a shift:
@@ -122,7 +134,11 @@ prover bug could still reach undefined behavior. `--check-proofs` catches it
 (see [Testing](#testing)).
 
 Other flags: `-std=c11 -fno-common -fvisibility=hidden -fno-exceptions
--fno-asynchronous-unwind-tables`, since nothing unwinds.
+-fno-asynchronous-unwind-tables`, since nothing unwinds, and
+`-fno-math-errno`, so `sqrt` is one instruction rather than a call that
+might set `errno`; it changes no result. Programs link with `-lm`, since
+`fma` is a call into libm on processors without the instruction, such as
+baseline x86-64.
 
 ## Instances
 
@@ -160,10 +176,16 @@ result is the same on every run.
 ### Symbol names
 
 Each instance gets a C symbol made from its key: a `t_` prefix, the module
-path and name with `::` and `.` replaced, and the type arguments, such as
-`t_standard_list__List_each__Int64`. Names stay readable in profilers and
-debuggers. A name longer than 200 bytes keeps its first 180 bytes and adds a
-hash of the whole key.
+path with `__` between its parts, a type's method after a single `_`, and
+the type arguments between markers, such as
+`t_standard__list__List_each_Of_standard__Int64_End_`. Names stay readable
+in profilers and debuggers. A marker is `_`, an `UpperCamelCase` word, and
+`_`, such as `_Of_`, `_Mut_`, or `_Drop_`, which no Truss name can contain,
+since a name with `_` has no uppercase letter and an `UpperCamelCase` name
+has no `_`. So every symbol reads back in exactly one way, and two keys
+never share one. A name longer than 200 bytes keeps its first 180 bytes and
+adds `_Hash_` and 32 hexadecimal digits of the BLAKE3 hash of the whole
+name.
 
 Renaming a definition changes its symbol, so its callers' C changes. Their
 types are checked again after a rename anyway, which costs more than
@@ -172,46 +194,65 @@ names (see [Test results](#test-results)).
 
 ## The lowered IR
 
-An instance's LIR has:
+An instance's LIR is a main function and the nested functions it makes: its
+lambdas and its loop bodies. Each function has:
 
-- **Parameters and locals,** numbered, each with a layout. A local has a name
-  only for debug output.
+- **Parameters and locals,** numbered, each with a type: a Truss value, a
+  pointer to one, a raw scalar such as a drop flag, or a nested function's
+  environment. A local has a name only for debug output.
 - **Basic blocks,** each a list of statements and one terminator.
+- **For a nested function, its environment's fields:** a pointer to each
+  local of the function around it that it reads, and for a loop body the
+  slots it reports through.
+
+Every choice about how a value is passed is already made in the LIR (see
+[Calling convention](#calling-convention)): a parameter that arrives as a
+pointer has a pointer type, an argument passed by address is an address
+operand, and a result too large to return is written through a pointer
+parameter. The emitter only prints.
 
 | Statement | Meaning |
 |---|---|
-| `place = rvalue` | Write a value to a place |
-| `call(target, arguments, result place)` | A call. The target is an instance, a function value, an evidence entry, or an intrinsic |
+| `place = rvalue` | Write a value to a place. A drop flag is a `Bool` local written this way. |
+| `call(target, arguments, result place)` | A call. The target is an instance or nested function with its C signature, a function value, or an intrinsic |
 | `drop(place)` | Run the type's drop code |
-| `set_flag(flag, value)` | Record whether a conditionally moved place is still owned |
-| `position(site)` | Attach a definition-relative position to the next statement that can report one |
 
 | Rvalue | Meaning |
 |---|---|
-| `copy operand`, `move operand` | Read a place. `copy` only for types that copy implicitly. `move` leaves the place without a value |
-| `constant` | A literal or the address of static data |
+| an operand | `copy place`, only for types that copy implicitly; `move place`, which leaves the place without a value; a constant; or the address of a place |
 | `unary`, `binary` | A primitive operation on built-in types (see [Primitive operations](#primitive-operations)) |
-| `build(layout, variant, fields)` | Construct a record or variant |
-| `field(place, name)`, `tag(place)` | Read a field or a sum type's tag |
-| `address(place)` | A pointer to a place, for `mut`, large read-only, and large `own` arguments |
-| `function(instance, environment)` | A function value |
+| `convert` | A conversion between built-in numbers that keeps the value |
+| `build(type, variant, fields)` | Construct a record or variant. Building an `indirect` variant allocates its block. |
+| `is_variant(place, variant)` | Whether a sum type's value holds the variant, however its layout tells them apart |
+| `function(code, environment)` | A function value |
 
 | Terminator | Meaning |
 |---|---|
 | `goto block` | Jump |
-| `switch(operand, cases, default)` | Branch on an integer or a tag |
-| `return` | Return the result local |
+| `switch(operand, cases, default)` | Branch on an integer, a `Bool`, or a `Character` |
+| `switch_variant(place, cases, default)` | Branch on a sum type's variant |
+| `return operand` | Return a value, or nothing |
 | `unreachable` | A proven-impossible point |
-| `panic(message, site)` | A call that never returns |
+| `panic(message, length, site)` | End the process with a message and a position |
+| `yield(operand, resume, stop)` | Before yield lowering only: give a value to the caller's loop, then go on at `resume`, or at `stop` if the loop has ended. A lending method's `yield` has no `stop`, since it always continues. |
 
-Places are a local followed by fields, indexes, and dereferences of the
-pointers that `mut` and large parameters arrive as.
+Places are a local or a constant's static data, followed by fields, the
+fields of a variant, elements, and dereferences of pointers. A variant's
+field reaches into the block of an `indirect` variant, and how it is laid
+out is the emitter's business, as are tags and niches: the LIR names
+variants, never tag values.
 
-**The LIR is canonical.** Locals are numbered by first use, blocks in
-reverse postorder from the entry, and every list is in source order. Two
+Code generation never asks the type checker what a value is: every local
+has a ground type, and the layout of each is computed from it.
+
+**The LIR is canonical.** Locals are numbered with the parameters first and
+then by first use, blocks in reverse postorder from the entry, unused locals
+and unreachable blocks are removed, and every list is in source order. Two
 builds of the same definition give byte-identical LIR, as DESIGN.md requires
 of every stored result. The LIR is stored and hashed in deterministic CBOR,
-like the other stored forms.
+like the other stored forms, with the version of code generation. A
+reference to another instance is encoded by its key, or by a number in a
+test key (see [Test results](#test-results)).
 
 ## Data layout
 
@@ -282,12 +323,16 @@ no pointers, no `size_of`, and no foreign code.
 
 These are standard-library types written in Truss on top of intrinsics (see
 [The system interface](#the-system-interface)). Their layouts follow from
-their fields like any other type. What matters to code generation is:
+their fields like any other type. Truss types cannot define what dropping
+them does, so the one type that owns a buffer of elements is built in:
+`Storage[Element]` in `standard::intrinsic`, whose drop and copy the
+compiler generates. What matters to code generation is:
 
 | Type | Fields | Notes |
 |---|---|---|
-| `List[Element]` | buffer pointer, length, capacity | An empty list has capacity 0 and a non-null pointer that points at nothing, so `Option[List[...]]` has a niche |
-| `String` | buffer pointer, length, capacity | Capacity 0 with a non-empty length means static bytes: dropping frees nothing, and the first method that writes bytes copies them to the heap |
+| `Storage[Element]` | buffer pointer, length, capacity | Elements `0` to `length` are live. Dropping one drops them and frees the buffer. It is `Copyable` exactly when `Element` is, and never `Plain`. An empty one has capacity 0 and a non-null pointer that points at nothing, so `Option[Storage[...]]` has a niche. |
+| `List[Element]` | `storage: Storage[Element]` | A one-field record, laid out as its storage |
+| `String` | `storage: Storage[UInt8]` | Capacity 0 with a non-empty length means static bytes: dropping frees nothing, and the first method that writes bytes copies them to the heap |
 | `Slice[Element]`, `StringSlice` | pointer, length | A view. Turning a `List` into a `Slice` reads two of its three fields |
 | `Map`, `Set` | Their fields, written in Truss | No special case |
 
@@ -316,7 +361,9 @@ environment is a `struct`, on the caller's stack, holding a pointer to each
 local the lambda reads, since lambdas capture by view. Making one never
 allocates. A function that captures nothing has a null environment, and a
 named function used as a value goes through a small adapter that ignores the
-environment. An `own` function-typed parameter accepts only functions that
+environment. The code takes the environment as its first parameter, then
+the function type's parameters, then one evidence pointer for each
+capability in its `uses`. An `own` function-typed parameter accepts only functions that
 capture nothing, so storing one never stores a pointer into a stack.
 
 ### Cursors
@@ -727,7 +774,8 @@ the top of a file changes no generated code below it:
 
 - **Each site that can report a position,** such as a panic, an `echo`, or a
   failed `assert`, passes three things: the address of its definition's
-  *anchor*, and its line and column within the definition.
+  *anchor*, and its line and column within the definition. The line
+  counts from 0 at the definition's first line, and the column from 1.
 - **An anchor** is an external constant, one per definition, holding the
   file's path and the definition's first line. The generated code only
   refers to it, so its own C never changes when the definition moves.
@@ -851,7 +899,9 @@ fact about a small input, and there are no golden files.
 - **The generated C is checked strictly.** Every focused test that emits C
   compiles it with `-Wall -Wextra -Werror` and a list of warnings known not
   to apply to generated code, which catches emitter bugs that a C compiler
-  would otherwise accept quietly.
+  would otherwise accept quietly. The list is `-Wno-unused-parameter`, since
+  an adapter ignores its environment and a trait's implementation may not
+  read every parameter.
 - **Output is deterministic.** A test lowers and emits the same definition
   twice and checks that the LIR and C are byte-identical.
 - **The documents' complete programs build and run,** each as a test of its

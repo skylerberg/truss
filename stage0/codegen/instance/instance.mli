@@ -38,6 +38,9 @@ type key =
       (** A named function used as a function value: it takes the environment and ignores it *)
 
 val compare : key -> key -> int
+
+(* The canonical encoding, in deterministic CBOR. *)
+val encode : key -> Cbor.t
 val equal : key -> key -> bool
 
 (* The definition whose position anchor an instance's sites are relative to,

@@ -51,3 +51,10 @@ val definition_to_string : definition -> string
 (* A type as Truss writes it, such as [Option[List[Int64]]], for tests and
    messages. *)
 val to_string : ty -> string
+
+(* The canonical encoding, in deterministic CBOR, that instance keys and the
+   LIR are hashed by. *)
+val encode : ty -> Cbor.t
+val encode_definition : definition -> Cbor.t
+val encode_argument : argument -> Cbor.t
+val encode_mode : mode -> Cbor.t

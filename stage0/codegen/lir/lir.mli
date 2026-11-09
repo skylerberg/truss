@@ -180,6 +180,19 @@ val successors : terminator -> block list
 val canonical : function_ -> function_
 val canonical_instance : t -> t
 
+(* The version of code generation, part of every key built from the LIR. *)
+val version : int
+
+(* The canonical encoding, in deterministic CBOR. Each reference to another
+   instance is written by [instance], which by default encodes its key;
+   test keys pass one that numbers instances instead, so that no name is in
+   them. See CODEGEN.md, "Test results". *)
+val encode : ?instance:(Instance.key -> Cbor.t) -> t -> Cbor.t
+
+(* The BLAKE3 hash of the canonical form's encoding and [version], which
+   early cutoff compares. *)
+val hash : t -> string
+
 (* A compact text form, for tests. *)
 val to_string : t -> string
 val function_to_string : function_ -> string

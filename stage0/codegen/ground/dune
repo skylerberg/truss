@@ -1,3 +1,3 @@
 (library
  (name ground)
- (libraries zarith))
+ (libraries zarith cbor))

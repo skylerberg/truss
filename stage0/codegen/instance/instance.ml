@@ -74,6 +74,49 @@ let rec compare a b =
   | _ -> Int.compare (rank a) (rank b)
 
 let equal a b = compare a b = 0
+let tagged n items = Cbor.Array (Cbor.int n :: items)
+let encode_arguments arguments = Cbor.Array (List.map Ground.encode_argument arguments)
+
+let encode_capabilities sets =
+  Cbor.Array (List.map (fun set -> Cbor.Array (List.map Ground.encode_definition set)) sets)
+
+let encode_receiver = function None -> Cbor.Null | Some mode -> Ground.encode_mode mode
+
+let rec encode = function
+  | Function { definition; type_arguments; capabilities } ->
+      tagged 0
+        [
+          Ground.encode_definition definition;
+          encode_arguments type_arguments;
+          encode_capabilities capabilities;
+        ]
+  | Method { owner; name; receiver; type_arguments; capabilities } ->
+      tagged 1
+        [
+          Ground.encode_definition owner;
+          Text name;
+          encode_receiver receiver;
+          encode_arguments type_arguments;
+          encode_capabilities capabilities;
+        ]
+  | Impl_method { trait; trait_arguments; self; name; receiver; type_arguments; capabilities } ->
+      tagged 2
+        [
+          Ground.encode_definition trait;
+          encode_arguments trait_arguments;
+          Ground.encode self;
+          Text name;
+          encode_receiver receiver;
+          encode_arguments type_arguments;
+          encode_capabilities capabilities;
+        ]
+  | Constant definition -> tagged 3 [ Ground.encode_definition definition ]
+  | Drop ty -> tagged 4 [ Ground.encode ty ]
+  | Copy ty -> tagged 5 [ Ground.encode ty ]
+  | Debug ty -> tagged 6 [ Ground.encode ty ]
+  | Cursor_next yielding -> tagged 7 [ Ground.encode (Cursor yielding) ]
+  | Cursor_drop yielding -> tagged 8 [ Ground.encode (Cursor yielding) ]
+  | Adapter key -> tagged 9 [ encode key ]
 
 let definition = function
   | Function { definition; _ } | Constant definition -> Some definition
@@ -179,7 +222,7 @@ let kept = 180
    with a hash of the whole name, which keeps it unique. *)
 let shorten name =
   if String.length name <= limit then name
-  else String.sub name 0 kept ^ "_Hash_" ^ Digest.to_hex (Digest.string name)
+  else String.sub name 0 kept ^ "_Hash_" ^ String.sub (Blake3.to_hex (Blake3.hash name)) 0 32
 
 let path_symbol = path
 let symbol key = shorten ("t_" ^ mangle key)

@@ -127,3 +127,50 @@ and argument_to_string = function Type ty -> to_string ty | Value v -> Z.to_stri
 
 and arguments_to_string arguments =
   "[" ^ String.concat ", " (List.map argument_to_string arguments) ^ "]"
+
+(* Each constructor is an array whose first item numbers it. *)
+let tagged n items = Cbor.Array (Cbor.int n :: items)
+
+let encode_definition d =
+  Cbor.Array (List.map (fun s -> Cbor.Text s) ((d.package :: d.modules) @ [ d.name ]))
+
+let encode_mode = function Read -> Cbor.int 0 | Mut -> Cbor.int 1 | Own -> Cbor.int 2
+
+let rec encode = function
+  | Named { definition; arguments } ->
+      tagged 0 [ encode_definition definition; Cbor.Array (List.map encode_argument arguments) ]
+  | Function f -> tagged 1 [ encode_function f ]
+  | Any { trait; arguments; associated } ->
+      tagged 2
+        [
+          encode_definition trait;
+          Cbor.Array (List.map encode_argument arguments);
+          Cbor.Array (List.map (fun (name, ty) -> Cbor.Array [ Text name; encode ty ]) associated);
+        ]
+  | Cursor yielding -> tagged 3 [ encode_yielding yielding ]
+  | Never -> tagged 4 []
+
+and encode_argument = function
+  | Type ty -> tagged 0 [ encode ty ]
+  | Value v -> tagged 1 [ Cbor.Integer v ]
+
+and encode_function f =
+  Cbor.Array
+    [
+      Cbor.Array
+        (List.map (fun (mode, ty) -> Cbor.Array [ encode_mode mode; encode ty ]) f.parameters);
+      (match f.result with
+      | Returns ty -> tagged 0 [ encode ty ]
+      | Yields (mode, ty) -> tagged 1 [ encode_mode mode; encode ty ]
+      | Lends (mode, ty) -> tagged 2 [ encode_mode mode; encode ty ]);
+      Cbor.Array (List.map encode_definition f.uses);
+    ]
+
+and encode_yielding y =
+  Cbor.Array
+    [
+      encode_definition y.method_;
+      encode_mode y.receiver;
+      Cbor.Array (List.map encode_argument y.type_arguments);
+      Cbor.Array (List.map (fun set -> Cbor.Array (List.map encode_definition set)) y.capabilities);
+    ]
