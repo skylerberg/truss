@@ -201,7 +201,12 @@ let builtin_items () =
     Intrinsic.builtins
   @ List.map
       (fun operation ->
-        { name = Intrinsic.operation_name operation; kind = Function; visibility = Public; generic = true })
+        {
+          name = Intrinsic.operation_name operation;
+          kind = Function;
+          visibility = Public;
+          generic = true;
+        })
       Intrinsic.operations
 
 let entries =

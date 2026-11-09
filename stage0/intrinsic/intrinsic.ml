@@ -129,7 +129,61 @@ type operation =
   | Clock_now
   | Random_fill
 
-let operations = [ Add; Subtract; Multiply; Divide; Remainder; Negate; Wrapping_add; Wrapping_subtract; Wrapping_multiply; Add_overflows; Subtract_overflows; Multiply_overflows; Equal; Less; Bit_and; Bit_or; Bit_xor; Complement; Shift_left; Shift_right; Convert; Fits; Square_root; Fused_multiply_add; Floor; Ceiling; Truncate; Round_to_even; To_bits; From_bits; Is_nan; Storage_empty; Storage_with_capacity; Storage_length; Storage_capacity; Storage_reserve; Storage_push; Storage_pop; Storage_insert; Storage_remove; Storage_swap; Storage_at; Storage_at_mut; Storage_view; View_length; View_at; View_slice; Crash; Write_bytes; Read_bytes; Clock_now; Random_fill ]
+let operations =
+  [
+    Add;
+    Subtract;
+    Multiply;
+    Divide;
+    Remainder;
+    Negate;
+    Wrapping_add;
+    Wrapping_subtract;
+    Wrapping_multiply;
+    Add_overflows;
+    Subtract_overflows;
+    Multiply_overflows;
+    Equal;
+    Less;
+    Bit_and;
+    Bit_or;
+    Bit_xor;
+    Complement;
+    Shift_left;
+    Shift_right;
+    Convert;
+    Fits;
+    Square_root;
+    Fused_multiply_add;
+    Floor;
+    Ceiling;
+    Truncate;
+    Round_to_even;
+    To_bits;
+    From_bits;
+    Is_nan;
+    Storage_empty;
+    Storage_with_capacity;
+    Storage_length;
+    Storage_capacity;
+    Storage_reserve;
+    Storage_push;
+    Storage_pop;
+    Storage_insert;
+    Storage_remove;
+    Storage_swap;
+    Storage_at;
+    Storage_at_mut;
+    Storage_view;
+    View_length;
+    View_at;
+    View_slice;
+    Crash;
+    Write_bytes;
+    Read_bytes;
+    Clock_now;
+    Random_fill;
+  ]
 
 let operation_name = function
   | Add -> "add"

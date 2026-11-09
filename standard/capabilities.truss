@@ -56,6 +56,7 @@ public type Duration(nanoseconds: Int64)
   derives Equal
 
 public opaque type Path(text: String)
+  derives Copyable
 
 public fn Path.new(text: StringSlice) -> Path {
   Path(text: text.to_string())

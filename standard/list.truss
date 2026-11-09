@@ -1,8 +1,10 @@
 use standard::intrinsic
 
 public opaque type List[Element](storage: intrinsic::Storage[Element])
+  derives Copyable
 
 public opaque type Slice[Element](elements: intrinsic::View[Element])
+  derives Plain
 
 public fn List[Element].with_capacity(capacity: USize) -> List[Element] {
   List(storage: intrinsic::storage_with_capacity(capacity))

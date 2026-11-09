@@ -28,6 +28,7 @@ public trait Hash: Equal {
 }
 
 public opaque type Hasher(state: UInt64)
+  derives Plain
 
 public fn Hasher.new() -> Hasher {
   Hasher(state: 14695981039346656037)

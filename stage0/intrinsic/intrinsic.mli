@@ -25,9 +25,10 @@ type builtin =
   | Integer  (** The mathematical integers, in specifications only. *)
   | Array  (** [Array[Element, count: USize]] *)
   | Storage
-      (** [Storage[Element]]: owned storage on the heap, a buffer, a length, and a capacity, with the
-          elements below the length live. The compiler generates its drop and copy, so [List] and
-          [String] need no destructor. It is [Copyable] when its elements are, and never [Plain]. *)
+      (** [Storage[Element]]: owned storage on the heap, a buffer, a length, and a capacity, with
+          the elements below the length live. The compiler generates its drop and copy, so [List]
+          and [String] need no destructor. It is [Copyable] when its elements are, and never
+          [Plain]. *)
   | View  (** [View[Element]]: a read-only view of elements, a pointer and a length. A view type. *)
 
 val builtins : builtin list

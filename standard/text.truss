@@ -1,8 +1,10 @@
 use standard::intrinsic
 
 public opaque type String(storage: intrinsic::Storage[UInt8])
+  derives Copyable
 
 public opaque type StringSlice(bytes: intrinsic::View[UInt8])
+  derives Plain
 
 public opaque type TextBuilder(text: String)
 
@@ -12,6 +14,7 @@ public trait FromTemplate {
 }
 
 public opaque type Literal(text: StringSlice)
+  derives Plain
 
 public type Template[Part](literals: List[Literal], parts: List[Part])
 

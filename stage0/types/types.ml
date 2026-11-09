@@ -55,12 +55,15 @@ let integer_types : Intrinsic.builtin list =
   [ Int8; Int16; Int32; Int64; UInt8; UInt16; UInt32; UInt64; USize; ISize ]
 
 let float_types : Intrinsic.builtin list = [ Float32; Float64 ]
-let is_integer_type type_ = match builtin_of type_ with Some found -> List.mem found integer_types | None -> false
+
+let is_integer_type type_ =
+  match builtin_of type_ with Some found -> List.mem found integer_types | None -> false
 
 let is_signed type_ =
   match builtin_of type_ with Some (Int8 | Int16 | Int32 | Int64 | ISize) -> true | _ -> false
 
-let is_float_type type_ = match builtin_of type_ with Some found -> List.mem found float_types | None -> false
+let is_float_type type_ =
+  match builtin_of type_ with Some found -> List.mem found float_types | None -> false
 
 (* Substitution *)
 
@@ -70,7 +73,8 @@ let rec substitute substitution type_ =
   if substitution = [] then type_
   else
     match type_ with
-    | Named { path; arguments } -> Named { path; arguments = List.map (substitute_argument substitution) arguments }
+    | Named { path; arguments } ->
+        Named { path; arguments = List.map (substitute_argument substitution) arguments }
     | Parameter parameter -> (
         match List.assoc_opt parameter substitution with
         | Some (Type replacement) -> replacement
@@ -89,14 +93,17 @@ let rec substitute substitution type_ =
 and substitute_argument substitution = function
   | Type type_ -> Type (substitute substitution type_)
   | Value (Value_parameter parameter) as value -> (
-      match List.assoc_opt parameter substitution with Some (Value _ as replacement) -> replacement | _ -> value)
+      match List.assoc_opt parameter substitution with
+      | Some (Value _ as replacement) -> replacement
+      | _ -> value)
   | Value _ as value -> value
 
 and substitute_trait substitution (trait : trait_reference) =
   {
     trait = trait.trait;
     trait_arguments = List.map (substitute_argument substitution) trait.trait_arguments;
-    associated = List.map (fun (name, type_) -> (name, substitute substitution type_)) trait.associated;
+    associated =
+      List.map (fun (name, type_) -> (name, substitute substitution type_)) trait.associated;
   }
 
 and substitute_function substitution (function_type : function_type) =
@@ -106,7 +113,8 @@ and substitute_function substitution (function_type : function_type) =
     | Lends (mode, type_) -> Lends (mode, substitute substitution type_)
   in
   {
-    inputs = List.map (fun (mode, type_) -> (mode, substitute substitution type_)) function_type.inputs;
+    inputs =
+      List.map (fun (mode, type_) -> (mode, substitute substitution type_)) function_type.inputs;
     output = result function_type.output;
     uses =
       List.sort_uniq compare
@@ -128,9 +136,11 @@ let rec contains_unsolved = function
   | Variable _ | Literal _ | Hole -> true
   | Named { arguments; _ } | Cursor { arguments; _ } -> List.exists argument_unsolved arguments
   | Projection { base; trait; _ } -> contains_unsolved base || trait_unsolved trait
-  | Function { inputs; output; _ } ->
+  | Function { inputs; output; _ } -> (
       List.exists (fun (_, type_) -> contains_unsolved type_) inputs
-      || (match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> contains_unsolved type_)
+      ||
+      match output with
+      | Returns type_ | Yields (_, type_) | Lends (_, type_) -> contains_unsolved type_)
   | Any trait -> trait_unsolved trait
   | Parameter _ | Never | Integer | Error -> false
 
@@ -148,14 +158,13 @@ let terminates (function_type : function_type) =
 
 (* Showing *)
 
-let path_name = function
-  | Path.Top { name; _ } -> name
-  | path -> Path.show path
+let path_name = function Path.Top { name; _ } -> name | path -> Path.show path
 
 let rec show = function
   | Named { path; arguments = [] } -> path_name path
   | Named { path; arguments } ->
-      Printf.sprintf "%s[%s]" (path_name path) (String.concat ", " (List.map show_argument arguments))
+      Printf.sprintf "%s[%s]" (path_name path)
+        (String.concat ", " (List.map show_argument arguments))
   | Parameter { name; _ } -> name
   | Projection { base; name; _ } -> show base ^ "." ^ name
   | Function function_type -> show_function function_type
@@ -185,7 +194,8 @@ and show_trait trait =
 and show_function (function_type : function_type) =
   let mode = function Read -> "" | Mut -> "mut " | Own -> "own " in
   let inputs =
-    String.concat ", " (List.map (fun (written, type_) -> mode written ^ show type_) function_type.inputs)
+    String.concat ", "
+      (List.map (fun (written, type_) -> mode written ^ show type_) function_type.inputs)
   in
   let output =
     match function_type.output with
@@ -196,9 +206,13 @@ and show_function (function_type : function_type) =
   in
   let base = Printf.sprintf "fn(%s)%s" inputs output in
   let uses =
-    List.map (function Capability path -> path_name path | Capability_parameter { name; _ } -> name) function_type.uses
+    List.map
+      (function Capability path -> path_name path | Capability_parameter { name; _ } -> name)
+      function_type.uses
   in
-  let costs = List.map (fun (cost : cost) -> "cost " ^ cost.resource ^ " " ^ cost.bound) function_type.costs in
+  let costs =
+    List.map (fun (cost : cost) -> "cost " ^ cost.resource ^ " " ^ cost.bound) function_type.costs
+  in
   match (uses, costs) with
   | [], [] -> base
   | _ ->
@@ -232,10 +246,13 @@ let function_type_of (signature : signature) =
     | Some (Own, type_) -> [ (Own, type_) ]
   in
   {
-    inputs = receiver @ List.map (fun parameter -> (parameter.mode, parameter.type_)) signature.parameters;
+    inputs =
+      receiver @ List.map (fun parameter -> (parameter.mode, parameter.type_)) signature.parameters;
     output = signature.output;
     uses = signature.uses;
-    costs = (if signature.terminates then [ { amortized = false; resource = "time"; bound = "finite" } ] else []);
+    costs =
+      (if signature.terminates then [ { amortized = false; resource = "time"; bound = "finite" } ]
+       else []);
   }
 
 type field = { field_name : string; field_type : ty; field_has_default : bool }
@@ -248,7 +265,13 @@ type shape =
   | Builtin_type of Intrinsic.builtin
   | Error_shape
 
-type type_interface = { type_generics : generic list; shape : shape; opaque : bool; derives : Path.t list }
+type type_interface = {
+  type_generics : generic list;
+  shape : shape;
+  opaque : bool;
+  derives : Path.t list;
+}
+
 type associated_type = { associated_name : string; associated_bounds : trait_reference list }
 
 type trait_method = {

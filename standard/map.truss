@@ -1,4 +1,5 @@
 public opaque type Map[Key: Hash + Ordered, Value](entries: List[Entry[Key, Value]])
+  derives Copyable
 
 public type Entry[Key, Value](key: Key, value: Value)
 

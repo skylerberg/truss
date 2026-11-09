@@ -29,7 +29,9 @@ let rec expression database resolved (value : expression) : Z.t option =
       | _ -> None)
   | Member ({ kind = Name owner; _ }, member) -> (
       match resolved.names.(owner.last.id) with
-      | Some (Definition owner) -> Query.demand database (Lazy.force value_of) (Member_constant { owner; name = member.text })
+      | Some (Definition owner) ->
+          Query.demand database (Lazy.force value_of)
+            (Member_constant { owner; name = member.text })
       | _ -> None)
   | _ -> None
 
@@ -39,7 +41,8 @@ and value_of =
          match Summary.definition database path with
          | Some (key, { kind = Constant { value; _ }; _ }) -> (
              match Query.demand database Resolve.resolved key with
-             | Some resolved -> ( try expression database resolved value with Query.Cycle _ -> None)
+             | Some resolved -> (
+                 try expression database resolved value with Query.Cycle _ -> None)
              | None -> None)
          | _ -> None))
 

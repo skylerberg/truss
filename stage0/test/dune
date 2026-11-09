@@ -1,5 +1,12 @@
 (tests
- (names lexer_tests parser_tests hashing_tests query_tests resolve_tests standard_library_tests)
+ (names
+  lexer_tests
+  parser_tests
+  hashing_tests
+  query_tests
+  resolve_tests
+  standard_library_tests
+  interface_tests)
  (libraries
   harness
   source
@@ -22,6 +29,10 @@
   resolve
   hash
   standard_library
+  support
+  types
+  intrinsic
+  interface
   syntax_walk)
  (deps
   (glob_files %{workspace_root}/*.md)))

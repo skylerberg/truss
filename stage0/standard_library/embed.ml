@@ -23,6 +23,8 @@ let () =
             if index = List.length modules - 1 then Filename.chop_suffix part ".truss" else part)
           modules
       in
-      Printf.printf "  ([ %s ], %S);\n" (String.concat "; " (List.map (Printf.sprintf "%S") modules)) text)
+      Printf.printf "  ([ %s ], %S);\n"
+        (String.concat "; " (List.map (Printf.sprintf "%S") modules))
+        text)
     files;
   print_string "]\n"

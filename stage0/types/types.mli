@@ -1,14 +1,14 @@
 (** Types, and the interfaces of definitions. See TYPECHECKER.md, "Types" and "Checking signatures
     and definitions".
 
-    This library is shared by the type checker, the prover, and code generation, which depend on
-    it without depending on the checker. *)
+    This library is shared by the type checker, the prover, and code generation, which depend on it
+    without depending on the checker. *)
 
 type mode = Read | Mut | Own  (** How a parameter or a receiver takes its value. *)
 
+type parameter = { owner : Path.t; name : string }
 (** A generic parameter, named by the definition that declares it and its name. Inside a trait,
     [Self] is the parameter named ["Self"] of the trait. *)
-type parameter = { owner : Path.t; name : string }
 
 type literal_kind = Integer_literal | Float_literal
 
@@ -54,8 +54,8 @@ and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
 and capability = Capability of Path.t | Capability_parameter of parameter
 
 and cost = { amortized : bool; resource : string; bound : string }
-(** A cost clause of a function type, which cannot mention parameters, spelled canonically. Only
-    the prover reads its bound; the checker reads whether there is a [time] clause. *)
+(** A cost clause of a function type, which cannot mention parameters, spelled canonically. Only the
+    prover reads its bound; the checker reads whether there is a [time] clause. *)
 
 val unit : ty
 val bool : ty
@@ -109,18 +109,20 @@ type generic_kind =
   | Capability_generic
 
 type generic = { generic : parameter; kind : generic_kind }
-
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
 type signature = {
   generics : generic list;  (** The type head's, then the function's own. *)
-  receiver : (Path.receiver * ty) option;  (** For a method: how it takes [self], and [self]'s type. *)
+  receiver : (Path.receiver * ty) option;
+      (** For a method: how it takes [self], and [self]'s type. *)
   parameters : parameter_info list;  (** Not counting [self]. *)
   output : result;
   uses : capability list;
   terminates : bool;  (** Whether it has a [time] clause. *)
-  specification_only : bool;  (** Whether it mentions [Integer], so it can be called only in specifications. *)
-  stores_functions : string list;  (** The [own] function-typed parameters, which accept only functions that capture nothing. *)
+  specification_only : bool;
+      (** Whether it mentions [Integer], so it can be called only in specifications. *)
+  stores_functions : string list;
+      (** The [own] function-typed parameters, which accept only functions that capture nothing. *)
 }
 
 val function_type_of : signature -> function_type

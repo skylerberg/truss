@@ -11,12 +11,14 @@ module T = Types
 type context = {
   database : Query.database;
   resolved : Resolve.resolved;
-  parameters : (id, T.parameter) Hashtbl.t;  (** Generic parameters, by the id of the name that binds them. *)
+  parameters : (id, T.parameter) Hashtbl.t;
+      (** Generic parameters, by the id of the name that binds them. *)
   bounds : (T.parameter, T.trait_reference list) Hashtbl.t;
   self_type : T.ty option;  (** What [Self] means here. *)
   self_trait : T.trait_reference option;  (** In a trait, the trait [Self] implements. *)
   self_associated : (string * T.ty) list;  (** In an [impl], its associated types. *)
-  mutable diagnostics : Diagnostic.t list;
+  diagnostics : Diagnostic.t list ref;  (** Shared by every copy of the context. *)
+  named : (span * T.ty) list ref;  (** Each named type lowered, for checking its bounds. *)
 }
 
 let create database resolved =
@@ -28,12 +30,14 @@ let create database resolved =
     self_type = None;
     self_trait = None;
     self_associated = [];
-    diagnostics = [];
+    diagnostics = ref [];
+    named = ref [];
   }
 
 let report context code (span : span) message =
-  context.diagnostics <-
-    Diagnostic.make ~code:(Types code) (Source.span span.start span.stop) message :: context.diagnostics
+  context.diagnostics :=
+    Diagnostic.make ~code:(Types code) (Source.span span.start span.stop) message
+    :: !(context.diagnostics)
 
 let target context (name : name) = context.resolved.names.(name.id)
 
@@ -61,9 +65,7 @@ let rec type_ context (written : type_expression) : T.ty =
       | Some parameter -> associated context (T.Parameter parameter) parameter key
       | None -> T.Error)
   | Any_type path -> (
-      match trait_reference context path with
-      | Some trait -> T.Any trait
-      | None -> T.Error)
+      match trait_reference context path with Some trait -> T.Any trait | None -> T.Error)
   | Function_type function_type -> T.Function (function_type_ context function_type)
   | Type_error -> T.Error
 
@@ -76,10 +78,12 @@ and self_associated context (key : name) =
           match List.assoc_opt key.text trait.associated with
           | Some fixed -> fixed
           | None ->
-              if declares context trait.trait key.text then T.Projection { base = self; trait; name = key.text }
+              if declares context trait.trait key.text then
+                T.Projection { base = self; trait; name = key.text }
               else begin
                 report context Unknown_associated_type key.span
-                  (Printf.sprintf "`%s` declares no associated type `%s`." (T.show_trait trait) key.text);
+                  (Printf.sprintf "`%s` declares no associated type `%s`." (T.show_trait trait)
+                     key.text);
                 T.Error
               end)
       | _ -> T.Error)
@@ -146,7 +150,9 @@ and check_arity context (path : path_type) shown expected =
   match expected with
   | None -> ()
   | Some expected ->
-      let given = List.length (List.filter (function Constraint _ -> false | _ -> true) path.arguments) in
+      let given =
+        List.length (List.filter (function Constraint _ -> false | _ -> true) path.arguments)
+      in
       if given <> List.length expected then
         report context Arity path.span
           (Printf.sprintf "`%s` takes %d %s, and %d %s given." shown (List.length expected)
@@ -170,30 +176,39 @@ and path_type context (path : path_type) : T.ty =
       | Some Never -> T.Never
       | Some Integer -> T.Integer
       | Some _ ->
-          check_arity context path shown (Query.demand context.database Summary.generics_of definition_path);
-          T.Named { path = definition_path; arguments = arguments context path }
+          check_arity context path shown
+            (Query.demand context.database Summary.generics_of definition_path);
+          let type_ = T.Named { path = definition_path; arguments = arguments context path } in
+          context.named := (path.span, type_) :: !(context.named);
+          type_
       | None -> (
           match Summary.kind_of context.database definition_path with
           | Some Type ->
-              check_arity context path shown (Query.demand context.database Summary.generics_of definition_path);
-              T.Named { path = definition_path; arguments = arguments context path }
+              check_arity context path shown
+                (Query.demand context.database Summary.generics_of definition_path);
+              let type_ = T.Named { path = definition_path; arguments = arguments context path } in
+              context.named := (path.span, type_) :: !(context.named);
+              type_
           | Some (Trait | Capability) ->
               report context Not_a_type path.span
-                (Printf.sprintf "`%s` is a trait, not a type. A value of any type with it is `any %s`."
-                   shown shown);
+                (Printf.sprintf
+                   "`%s` is a trait, not a type. A value of any type with it is `any %s`." shown
+                   shown);
               T.Error
           | _ ->
               report context Not_a_type path.span (Printf.sprintf "`%s` is not a type." shown);
               T.Error))
   | _ -> T.Error
 
-(* A bound, an [impl]'s trait, or the trait after [any]. *)
-and trait_reference context (path : path_type) : T.trait_reference option =
+(* A bound, an [impl]'s trait, or the trait after [any]. An [impl] may
+   implement a capability too. *)
+and trait_reference ?(capability = false) context (path : path_type) : T.trait_reference option =
   let shown = show_path path.path in
   match target context path.path.last with
   | Some (Definition trait) -> (
       match Summary.kind_of context.database trait with
-      | Some Trait ->
+      | (Some Trait | Some Capability)
+        when capability || Summary.kind_of context.database trait = Some Trait ->
           check_arity context path shown (Query.demand context.database Summary.generics_of trait);
           let associated =
             List.sort compare
@@ -223,15 +238,17 @@ and capability context (path : path_type) : T.capability option =
       None
   | _ -> None
 
-and capabilities context paths =
-  List.sort_uniq compare (List.filter_map (capability context) paths)
-
+and capabilities context paths = List.sort_uniq compare (List.filter_map (capability context) paths)
 and mode = function None -> T.Read | Some Mut -> T.Mut | Some Own -> T.Own
 
 and function_type_ context (written : function_type) : T.function_type =
   {
-    inputs = List.map (fun (written_mode, input) -> (mode written_mode, type_ context input)) written.inputs;
-    output = T.Returns (match written.output with Some output -> type_ context output | None -> T.unit);
+    inputs =
+      List.map
+        (fun (written_mode, input) -> (mode written_mode, type_ context input))
+        written.inputs;
+    output =
+      T.Returns (match written.output with Some output -> type_ context output | None -> T.unit);
     uses =
       capabilities context
         (List.concat_map
@@ -291,9 +308,11 @@ let rec mentions_integer = function
   | T.Integer -> true
   | T.Named { arguments; _ } | T.Cursor { arguments; _ } ->
       List.exists (function T.Type type_ -> mentions_integer type_ | T.Value _ -> false) arguments
-  | T.Function { inputs; output; _ } ->
+  | T.Function { inputs; output; _ } -> (
       List.exists (fun (_, type_) -> mentions_integer type_) inputs
-      || (match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> mentions_integer type_)
+      ||
+      match output with
+      | Returns type_ | Yields (_, type_) | Lends (_, type_) -> mentions_integer type_)
   | T.Projection { base; _ } -> mentions_integer base
   | T.Parameter _ | T.Any _ | T.Never | T.Variable _ | T.Literal _ | T.Hole | T.Error -> false
 
@@ -335,14 +354,19 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
   in
   let uses =
     capabilities context
-      (List.concat_map (fun (clause : clause) -> match clause.kind with Uses paths -> paths | _ -> []) written.clauses)
+      (List.concat_map
+         (fun (clause : clause) -> match clause.kind with Uses paths -> paths | _ -> [])
+         written.clauses)
   in
   let terminates =
     List.exists
-      (fun (clause : clause) -> match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
+      (fun (clause : clause) ->
+        match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
       written.clauses
   in
-  let result_type = match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_ in
+  let result_type =
+    match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
+  in
   {
     generics = generics_;
     receiver;
@@ -351,10 +375,15 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
     uses;
     terminates;
     specification_only =
-      mentions_integer result_type || List.exists (fun (parameter : T.parameter_info) -> mentions_integer parameter.type_) parameters;
+      mentions_integer result_type
+      || List.exists
+           (fun (parameter : T.parameter_info) -> mentions_integer parameter.type_)
+           parameters;
     stores_functions =
       List.filter_map
         (fun (parameter : T.parameter_info) ->
-          match (parameter.mode, parameter.type_) with Own, Function _ -> Some parameter.name | _ -> None)
+          match (parameter.mode, parameter.type_) with
+          | Own, Function _ -> Some parameter.name
+          | _ -> None)
         parameters;
   }

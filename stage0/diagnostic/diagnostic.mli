@@ -123,7 +123,12 @@ module Code : sig
     | Associated_type_not_fixed
 
   (* Each stage adds its own group; its codes are named "stage.code". *)
-  type t = Lexer of lexer | Parser of parser | Resolve of resolve | Types of types | Too_many_diagnostics
+  type t =
+    | Lexer of lexer
+    | Parser of parser
+    | Resolve of resolve
+    | Types of types
+    | Too_many_diagnostics
 
   val name : t -> string
 end

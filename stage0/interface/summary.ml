@@ -15,7 +15,8 @@ let key =
       let find module_ =
         List.find_map
           (fun (declaration : Names.declaration) ->
-            if Path.equal declaration.path path && declaration.ordinal = 0 then Some (Names.key_of declaration)
+            if Path.equal declaration.path path && declaration.ordinal = 0 then
+              Some (Names.key_of declaration)
             else None)
           (Query.demand database Names.declarations module_)
       in
@@ -64,7 +65,8 @@ let generics_of =
               if Resolve.Parts.broken definition Header then None
               else
                 match definition.kind with
-                | Type_definition { generics; _ } | Trait { generics; _ } -> Some (generic_kinds generics)
+                | Type_definition { generics; _ } | Trait { generics; _ } ->
+                    Some (generic_kinds generics)
                 | Capability _ -> Some []
                 | _ -> None)
           | None -> None))
@@ -107,8 +109,12 @@ let rec trait_closure database ?(seen = []) path =
     | None -> [ path ]
     | Some header ->
         path
-        :: List.concat_map (fun required -> trait_closure database ~seen:(path :: seen) required) header.required
-        |> List.fold_left (fun acc path -> if List.exists (Path.equal path) acc then acc else acc @ [ path ]) []
+        :: List.concat_map
+             (fun required -> trait_closure database ~seen:(path :: seen) required)
+             header.required
+        |> List.fold_left
+             (fun acc path -> if List.exists (Path.equal path) acc then acc else acc @ [ path ])
+             []
 
 let kind_of database (path : Path.t) =
   match path with
