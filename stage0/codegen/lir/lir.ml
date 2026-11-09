@@ -263,24 +263,23 @@ let reverse_postorder (blocks : basic_block array) =
   if Array.length blocks > 0 then visit 0;
   !order
 
-let rec map_place map_local map_block (place : place) =
-  let root =
-    match place.root with Local local -> Local (map_local local) | Static _ as root -> root
-  in
-  { root; projections = List.map (map_projection map_local map_block) place.projections }
+(* Rewrites every place, each after the places in its indexes, and every
+   block number. *)
+let rec map_place ~place ~block (p : place) =
+  place { p with projections = List.map (map_projection ~place ~block) p.projections }
 
-and map_projection map_local map_block = function
-  | Index operand -> Index (map_operand map_local map_block operand)
+and map_projection ~place ~block = function
+  | Index operand -> Index (map_operand ~place ~block operand)
   | (Field _ | Variant_field _ | Deref) as projection -> projection
 
-and map_operand map_local map_block = function
-  | Copy place -> Copy (map_place map_local map_block place)
-  | Move place -> Move (map_place map_local map_block place)
-  | Address { place; writable } -> Address { place = map_place map_local map_block place; writable }
+and map_operand ~place ~block = function
+  | Copy p -> Copy (map_place ~place ~block p)
+  | Move p -> Move (map_place ~place ~block p)
+  | Address { place = p; writable } -> Address { place = map_place ~place ~block p; writable }
   | Constant _ as operand -> operand
 
-let map_rvalue map_local map_block rvalue =
-  let operand = map_operand map_local map_block in
+let map_rvalue ~place ~block rvalue =
+  let operand = map_operand ~place ~block in
   match rvalue with
   | Use o -> Use (operand o)
   | Unary (op, o) -> Unary (op, operand o)
@@ -288,53 +287,53 @@ let map_rvalue map_local map_block rvalue =
   | Convert (o, scalar) -> Convert (operand o, scalar)
   | Build { ty; variant; fields } ->
       Build { ty; variant; fields = List.map (fun (name, o) -> (name, operand o)) fields }
-  | Is_variant (place, variant) -> Is_variant (map_place map_local map_block place, variant)
+  | Is_variant (p, variant) -> Is_variant (map_place ~place ~block p, variant)
   | Function_value { code; environment } ->
       Function_value { code; environment = Option.map operand environment }
 
-let map_target map_local map_block = function
-  | Indirect { value; signature } ->
-      Indirect { value = map_operand map_local map_block value; signature }
+let map_target ~place ~block = function
+  | Indirect { value; signature } -> Indirect { value = map_operand ~place ~block value; signature }
   | (Direct _ | Intrinsic _) as target -> target
 
-let map_statement map_local map_block = function
-  | Assign (place, rvalue) ->
-      Assign (map_place map_local map_block place, map_rvalue map_local map_block rvalue)
+let map_statement ~place ~block = function
+  | Assign (p, rvalue) -> Assign (map_place ~place ~block p, map_rvalue ~place ~block rvalue)
   | Call { target; arguments; result } ->
       Call
         {
-          target = map_target map_local map_block target;
-          arguments = List.map (map_operand map_local map_block) arguments;
-          result = Option.map (map_place map_local map_block) result;
+          target = map_target ~place ~block target;
+          arguments = List.map (map_operand ~place ~block) arguments;
+          result = Option.map (map_place ~place ~block) result;
         }
-  | Drop place -> Drop (map_place map_local map_block place)
-  | Free_block { place; variant } ->
-      Free_block { place = map_place map_local map_block place; variant }
+  | Drop p -> Drop (map_place ~place ~block p)
+  | Free_block { place = p; variant } -> Free_block { place = map_place ~place ~block p; variant }
 
-let map_terminator map_local map_block terminator =
-  let operand = map_operand map_local map_block in
+let map_terminator ~place ~block terminator =
+  let operand = map_operand ~place ~block in
   match terminator with
-  | Goto block -> Goto (map_block block)
+  | Goto b -> Goto (block b)
   | Switch { value; cases; default } ->
       Switch
         {
           value = operand value;
-          cases = List.map (fun (value, block) -> (value, map_block block)) cases;
-          default = Option.map map_block default;
+          cases = List.map (fun (value, b) -> (value, block b)) cases;
+          default = Option.map block default;
         }
-  | Switch_variant { place; cases; default } ->
+  | Switch_variant { place = p; cases; default } ->
       Switch_variant
         {
-          place = map_place map_local map_block place;
-          cases = List.map (fun (variant, block) -> (variant, map_block block)) cases;
-          default = Option.map map_block default;
+          place = map_place ~place ~block p;
+          cases = List.map (fun (variant, b) -> (variant, block b)) cases;
+          default = Option.map block default;
         }
   | Return value -> Return (Option.map operand value)
   | Unreachable -> Unreachable
   | Panic { message; length; site } ->
       Panic { message = operand message; length = operand length; site }
   | Yield { value; resume; stop } ->
-      Yield { value = operand value; resume = map_block resume; stop = Option.map map_block stop }
+      Yield { value = operand value; resume = block resume; stop = Option.map block stop }
+
+let rename map_local (p : place) =
+  match p.root with Local local -> { p with root = Local (map_local local) } | Static _ -> p
 
 let canonical (f : function_) =
   let order = reverse_postorder f.blocks in
@@ -352,10 +351,12 @@ let canonical (f : function_) =
   List.iter (fun local -> ignore (number local)) f.parameters;
   let identity block = block in
   List.iter
-    (fun block ->
-      let { statements; terminator } = f.blocks.(block) in
-      List.iter (fun statement -> ignore (map_statement number identity statement)) statements;
-      ignore (map_terminator number identity terminator))
+    (fun b ->
+      let { statements; terminator } = f.blocks.(b) in
+      List.iter
+        (fun statement -> ignore (map_statement ~place:(rename number) ~block:identity statement))
+        statements;
+      ignore (map_terminator ~place:(rename number) ~block:identity terminator))
     order;
   let locals = Array.make !next { ty = Raw Bool; name = None } in
   Array.iteri (fun old index -> if index >= 0 then locals.(index) <- f.locals.(old)) local_number;
@@ -367,8 +368,9 @@ let canonical (f : function_) =
          (fun block ->
            let { statements; terminator } = f.blocks.(block) in
            {
-             statements = List.map (map_statement map_local map_block) statements;
-             terminator = map_terminator map_local map_block terminator;
+             statements =
+               List.map (map_statement ~place:(rename map_local) ~block:map_block) statements;
+             terminator = map_terminator ~place:(rename map_local) ~block:map_block terminator;
            })
          order)
   in

@@ -623,6 +623,12 @@ static void t_standard_list__List_each__Int64(const t_List__Int64 *restrict self
 }
 ```
 
+In the loop form, `Yields` adds the body as the method's last parameter, and
+turns each `yield` into a call to it followed by a switch on its result: on
+to the block after the `yield`, or to the `yield`'s `stop` path, whose drops
+drop elaboration has already placed. A lending method's `yield` has no
+`stop`, so it calls the body and always goes on.
+
 A caller's loop body becomes a function too. Its environment holds pointers
 to the caller's locals it reads and changes, and a slot that records why the
 loop ended:
@@ -649,22 +655,32 @@ rebuilds narrow.
 
 ### Cursors
 
-When some code pulls a yielding method with `next()`, `Yields` makes a second
-version of it as a state machine, as C# and Kotlin compile iterators:
+When some code pulls a yielding method with `next()`, it is lowered a second
+time, for pulling, and `Yields` makes that version a state machine, as C#
+and Kotlin compile iterators:
 
-1. Number each `yield` as a state. State 0 is the start.
-2. Find the locals live across each `yield`. They, the parameters, and the
-   state number become the cursor's fields. Everything else stays in C
-   locals.
-3. `next()` switches on the state and jumps to the block after that `yield`.
-   Each `yield` stores the live locals, sets the state, and returns `Some` of
-   the value. Reaching the end sets a finished state and returns `None`.
-4. A `for` loop or a pulled cursor inside the method becomes a cursor nested
-   in this one, as a field.
+1. Number each `yield` as a state, from 1 in the order of the blocks. State
+   0 is the start, and the state after the last is the end.
+2. Find the locals live where a `yield` resumes or stops, by liveness over
+   the LIR. They and the parameters become the cursor's fields, beside the
+   state number; everything else stays in C locals. A kept local reads and
+   writes its field through the cursor, so a `yield` stores nothing.
+3. `next()` switches on the state and jumps to the block after that
+   `yield`. Each `yield` sets the state and returns `Some` of the value.
+   Reaching the end sets the end state and returns `None`, as `next()` does
+   ever after.
+4. In the version lowered for pulling, a `for` loop or a pulled cursor
+   inside the method is an explicit cursor and calls to its `next()`, rather
+   than a loop body, since a loop body cannot stop partway. The inner cursor
+   is live across the outer `yield`s, so it becomes a field of the outer
+   cursor.
 
-A cursor's drop function drops the locals that are live in its current
-state, which is what DESIGN.md means by a dropped cursor ending the method
-at its last `yield`. A method whose yields go through a recursive call has
+A cursor's drop function runs the `stop` path of the `yield` it is stopped
+at, which drop elaboration has already filled with the drops of what the
+method owns there. That is what DESIGN.md means by a dropped cursor ending
+the method at its last `yield`. Before the method starts, it drops the
+owned parameters, such as the receiver of an `own self` method, and after
+the end it drops nothing. A method whose yields go through a recursive call has
 no fixed-size state, so the type checker reports any pull of it, as
 DESIGN.md says.
 

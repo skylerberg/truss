@@ -183,6 +183,11 @@ val projection_type :
 val place_type :
   Memory_layout.env -> environment:(int -> (string * ty) list) -> function_ -> place -> ty option
 
+(* A statement or terminator with every place rewritten by [place], each
+   after the places inside its indexes, and every block number by [block]. *)
+val map_statement : place:(place -> place) -> block:(block -> block) -> statement -> statement
+val map_terminator : place:(place -> place) -> block:(block -> block) -> terminator -> terminator
+
 (* The blocks a terminator may go to, in order. *)
 val successors : terminator -> block list
 

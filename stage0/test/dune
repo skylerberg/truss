@@ -26,6 +26,7 @@
   toolchain
   startup
   positions
-  drops)
+  drops
+  yields)
  (deps
   (glob_files %{workspace_root}/*.md)))
