@@ -164,9 +164,11 @@ let signature f (signature : signature) =
   | None -> ());
   List.iter (clause f) signature.clauses
 
-let function_definition f (definition : function_definition) =
+let function_definition ?statement:visit f (definition : function_definition) =
   signature f definition.signature;
-  block f definition.body
+  match visit with
+  | Some visit -> List.iter visit definition.body.statements
+  | None -> block f definition.body
 
 let field f (field : field) =
   match field.kind with
@@ -175,9 +177,15 @@ let field f (field : field) =
       Option.iter f default
   | Field_error -> ()
 
-let definition f (definition : definition) =
+(* Calls [f] on each outermost expression of a definition. With
+   [~statement], each statement of the definition's own blocks goes to it
+   instead, so a walk that cares about statements sees every one. *)
+let definition ?statement:visit f (definition : definition) =
+  let block (written : block) =
+    match visit with Some visit -> List.iter visit written.statements | None -> block f written
+  in
   match definition.kind with
-  | Function function_ -> function_definition f function_
+  | Function function_ -> function_definition ?statement:visit f function_
   | Type_definition { generics; body; clauses; _ } ->
       List.iter (generic_parameter f) generics;
       (match body with
@@ -201,12 +209,12 @@ let definition f (definition : definition) =
           match member.kind with
           | Trait_method { signature = method_; body } ->
               signature f method_;
-              Option.iter (block f) body
+              Option.iter block body
           | Associated_type (_, bounds) -> List.iter (path_type f) bounds
           | Law law ->
               List.iter (parameter f) law.parameters;
               List.iter f law.requires;
-              block f law.body
+              block law.body
           | Trait_member_error -> ())
         members
   | Impl { trait_; type_; uses; members } ->
@@ -216,7 +224,7 @@ let definition f (definition : definition) =
       List.iter
         (fun (member : impl_member line) ->
           match member.kind with
-          | Impl_method function_ -> function_definition f function_
+          | Impl_method function_ -> function_definition ?statement:visit f function_
           | Associated_definition (_, type_) -> type_expression f type_
           | Impl_member_error -> ())
         members
@@ -233,16 +241,16 @@ let definition f (definition : definition) =
       f value
   | Test { uses; body; _ } ->
       List.iter (path_type f) uses;
-      block f body
+      block body
   | Theorem { generics; parameters; clauses; body; _ } ->
       List.iter (generic_parameter f) generics;
       List.iter (parameter f) parameters;
       List.iter (clause f) clauses;
-      block f body
+      block body
   | Law_proof { trait_; type_; body; _ } ->
       path_type f trait_;
       type_expression f type_;
-      block f body
+      block body
   | Definition_error _ -> ()
 
 (* Visits every name in a definition, references and the names that bind,

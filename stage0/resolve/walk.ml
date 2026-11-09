@@ -418,8 +418,10 @@ and bracket state scope (value : expression) base items =
 
 (* Whether a marked expression starts with a place: a local, a parameter,
    [self], or a constant, then fields and indexes, up to the first method
-   call. *)
+   call. After that call, the expression works on its result, so a [?] can
+   follow it, as in [mut file.read_line()?]. *)
 and check_place state (marked : expression) (inner : expression) =
+  (* [`Place called] says whether a method call took the place. *)
   let rec head (value : expression) =
     match value.kind with
     | Member (base, _) -> head base
@@ -431,22 +433,23 @@ and check_place state (marked : expression) (inner : expression) =
         | Some (Index | Method_bracket) -> head base
         | _ -> `Not_a_place value)
     | Call ({ kind = Member (base, _); _ }, _)
-    | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) ->
-        head base
-    | Self_value -> `Place
+    | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) -> (
+        match head base with `Place _ -> `Place true | other -> other)
+    | Try base -> ( match head base with `Place false -> `Not_a_place value | other -> other)
+    | Self_value -> `Place false
     | Name path -> (
         match target_of state path.last with
-        | Some (Local _ | Field _) -> `Place
+        | Some (Local _ | Field _) -> `Place false
         | Some (Definition path_) -> (
             match is_generic_definition state path_ with
-            | Some item when item.kind = Constant -> `Place
+            | Some item when item.kind = Constant -> `Place false
             | _ -> `Not_a_place value)
         | Some Unknown -> `Unknown
         | _ -> `Not_a_place value)
     | _ -> `Not_a_place value
   in
   match head inner with
-  | `Place | `Unknown -> ()
+  | `Place _ | `Unknown -> ()
   | `Not_a_place _ ->
       let keyword_end = inner.span.start in
       report state Not_a_place marked.span

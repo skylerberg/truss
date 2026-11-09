@@ -1,5 +1,5 @@
 (executables
- (names truss_lex truss_parse truss)
+ (names truss_lex truss_parse truss_check truss)
  (libraries
   source
   diagnostic
@@ -11,10 +11,7 @@
   path
   query
   workspace
-  standard_library
-  resolve
-  interface
-  infer
+  type_checker
   memory_layout
   toolchain
   build

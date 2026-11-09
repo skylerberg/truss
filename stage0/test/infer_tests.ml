@@ -148,6 +148,60 @@ let () =
       match checked.calls.(value.id) with
       | Some { defaults_left_out = [ "port" ]; _ } -> ()
       | _ -> fail "the default left out is not recorded");
+  test "a String passed where a StringSlice is expected is viewed" (fun () ->
+      let text = "fn greet(text: StringSlice) {}\n\nfn f(name: String) {\n  greet(name)\n}\n" in
+      let value, checked = expression_at text "greet(name)" 1 in
+      match checked.calls.(value.id) with
+      | Some { arguments = [ { conversion = Some Owned_to_view; _ } ]; _ } -> ()
+      | _ -> fail "no conversion recorded");
+  test "a capability's method views a String argument too" (fun () ->
+      let text = "fn f(name: String)\n  uses Console\n{\n  Console.print_line(name)\n}\n" in
+      let value, checked = expression_at text "Console.print_line(name)" 1 in
+      match checked.calls.(value.id) with
+      | Some { arguments = [ { conversion = Some Owned_to_view; _ } ]; _ } -> ()
+      | _ -> fail "no conversion recorded");
+  test "a string literal is a String, viewed where a StringSlice is expected" (fun () ->
+      let text = "fn f()\n  uses Console\n{\n  Console.print_line(\"hello\")\n}\n" in
+      has_type text "\"hello\"" "String";
+      let value, checked = expression_at text "Console.print_line(\"hello\")" 1 in
+      match checked.calls.(value.id) with
+      | Some { arguments = [ { conversion = Some Owned_to_view; _ } ]; _ } -> ()
+      | _ -> fail "no conversion recorded");
+  test "a cursor's next is the Cursor trait's, built in" (fun () ->
+      let text =
+        "fn count_to(limit: Int64) yields Int64 {\n\
+        \  yield limit\n\
+         }\n\n\
+         fn f() {\n\
+        \  var first = count_to(3)\n\
+        \  while mut first.next() is Some(left) {\n\
+        \    let _ = left\n\
+        \  }\n\
+         }\n"
+      in
+      fine text;
+      has_type text "count_to(3)" "the cursor of app::main::count_to";
+      let value, checked = expression_at text "first.next()" 1 in
+      match checked.calls.(value.id) with
+      | Some
+          {
+            callee =
+              Trait_method
+                {
+                  name = "next";
+                  receiver = Mut;
+                  self_type = Cursor _;
+                  evidence = Built_in;
+                  trait;
+                  _;
+                };
+            result;
+            _;
+          }
+        when Path.show trait.trait = "standard::core::Cursor" && Types.show result = "Option[Int64]"
+        ->
+          ()
+      | _ -> fail "not the built-in Cursor's next");
   test "an unknown label is an error with a fix to the closest" (fun () ->
       one_diagnostic
         (functions ^ "fn f() {\n  copy_file(1, destinaton: 2)\n}\n")
@@ -187,8 +241,11 @@ let () =
         ~fixed:"fn keep(count: own Int64) {}\n\nfn f(count: Int64) {\n  keep(count)\n}\n");
   test "a mut receiver chooses the method's mut version" (fun () ->
       fine "fn f() {\n  var items: List[Int64] = []\n  mut items.push(1)\n}\n");
-  test "a method without the version a receiver asks for is an error" (fun () ->
-      one_diagnostic "fn f(items: List[Int64]) {\n  items.push(1)\n}\n" "types.wrong_receiver")
+  test "a place calling a method that takes mut self needs the mark, with a fix that adds it"
+    (fun () ->
+      one_diagnostic "fn f() {\n  var items: List[Int64] = []\n  items.push(1)\n}\n"
+        "types.missing_mark"
+        ~fixed:"fn f() {\n  var items: List[Int64] = []\n  mut items.push(1)\n}\n")
 
 (* Statements *)
 

@@ -149,12 +149,48 @@ module Code = struct
     | Unknown_associated_type
     | Associated_type_not_fixed
 
+  type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
+  type usage = Unused_variable | Unreachable_code
+
+  type ownership =
+    | Use_after_move
+    | Not_owned
+    | Field_not_restored
+    | Conflicting_loan
+    | Changed_while_viewed
+    | Returns_local_view
+    | Needs_owned
+    | Lends_count
+    | Not_pullable
+    | Parallel_conflict
+
+  type capabilities =
+    | Not_available
+    | Lambda_uses
+    | Not_granted
+    | Provide_mark
+    | Not_an_implementation
+
+  type package =
+    | Impl_location
+    | Overlapping_impls
+    | Method_name_clash
+    | Needs_indirect
+    | Growing_type
+    | Instantiation_cycle
+    | Duplicate_test
+
   (* Each stage adds its own group; its codes are named "stage.code". *)
   type t =
     | Lexer of lexer
     | Parser of parser
     | Resolve of resolve
     | Types of types
+    | Patterns of patterns
+    | Usage of usage
+    | Ownership of ownership
+    | Capabilities of capabilities
+    | Package of package
     | Too_many_diagnostics
 
   let lexer_name code =
@@ -309,11 +345,57 @@ module Code = struct
     | Unknown_associated_type -> "unknown_associated_type"
     | Associated_type_not_fixed -> "associated_type_not_fixed"
 
+  let patterns_name code =
+    match code with
+    | Not_covered -> "not_covered"
+    | Unreachable_arm -> "unreachable_arm"
+    | Unreachable_alternative -> "unreachable_alternative"
+    | Refutable -> "refutable"
+
+  let usage_name code =
+    match code with Unused_variable -> "unused_variable" | Unreachable_code -> "unreachable_code"
+
+  let ownership_name code =
+    match code with
+    | Use_after_move -> "use_after_move"
+    | Not_owned -> "not_owned"
+    | Field_not_restored -> "field_not_restored"
+    | Conflicting_loan -> "conflicting_loan"
+    | Changed_while_viewed -> "changed_while_viewed"
+    | Returns_local_view -> "returns_local_view"
+    | Needs_owned -> "needs_owned"
+    | Lends_count -> "lends_count"
+    | Not_pullable -> "not_pullable"
+    | Parallel_conflict -> "parallel_conflict"
+
+  let capabilities_name code =
+    match code with
+    | Not_available -> "not_available"
+    | Lambda_uses -> "lambda_uses"
+    | Not_granted -> "not_granted"
+    | Provide_mark -> "provide_mark"
+    | Not_an_implementation -> "not_an_implementation"
+
+  let package_name code =
+    match code with
+    | Impl_location -> "impl_location"
+    | Overlapping_impls -> "overlapping_impls"
+    | Method_name_clash -> "method_name_clash"
+    | Needs_indirect -> "needs_indirect"
+    | Growing_type -> "growing_type"
+    | Instantiation_cycle -> "instantiation_cycle"
+    | Duplicate_test -> "duplicate_test"
+
   let name = function
     | Lexer code -> "lexer." ^ lexer_name code
     | Parser code -> "parser." ^ parser_name code
     | Resolve code -> "resolve." ^ resolve_name code
     | Types code -> "types." ^ types_name code
+    | Patterns code -> "patterns." ^ patterns_name code
+    | Usage code -> "usage." ^ usage_name code
+    | Ownership code -> "ownership." ^ ownership_name code
+    | Capabilities code -> "capabilities." ^ capabilities_name code
+    | Package code -> "package." ^ package_name code
     | Too_many_diagnostics -> "too_many_diagnostics"
 end
 
@@ -519,33 +601,33 @@ let json_span source span =
   Printf.sprintf {|{"start":%d,"stop":%d,"line":%d,"column":%d,"end_line":%d,"end_column":%d}|}
     span.start span.stop line column end_line end_column
 
-let to_json source diagnostics =
+let to_json_object source diagnostic =
   let path = json_string (Source.path source) in
-  let one diagnostic =
-    let notes =
-      List.map
-        (fun (span, message) ->
-          Printf.sprintf {|{"span":%s,"message":%s}|} (json_span source span) (json_string message))
-        diagnostic.notes
-    in
-    let fixes =
-      List.map
-        (fun fix ->
-          let edits =
-            List.map
-              (fun (edit : edit) ->
-                Printf.sprintf {|{"start":%d,"stop":%d,"replacement":%s}|} edit.span.start
-                  edit.span.stop (json_string edit.replacement))
-              fix.edits
-          in
-          Printf.sprintf {|{"title":%s,"edits":[%s]}|} (json_string fix.title)
-            (String.concat "," edits))
-        diagnostic.fixes
-    in
-    Printf.sprintf {|{"path":%s,"code":%s,"message":%s,"span":%s,"notes":[%s],"fixes":[%s]}|} path
-      (json_string (Code.name diagnostic.code))
-      (json_string diagnostic.message)
-      (json_span source diagnostic.span)
-      (String.concat "," notes) (String.concat "," fixes)
+  let notes =
+    List.map
+      (fun (span, message) ->
+        Printf.sprintf {|{"span":%s,"message":%s}|} (json_span source span) (json_string message))
+      diagnostic.notes
   in
-  "[" ^ String.concat ",\n" (List.map one diagnostics) ^ "]\n"
+  let fixes =
+    List.map
+      (fun fix ->
+        let edits =
+          List.map
+            (fun (edit : edit) ->
+              Printf.sprintf {|{"start":%d,"stop":%d,"replacement":%s}|} edit.span.start
+                edit.span.stop (json_string edit.replacement))
+            fix.edits
+        in
+        Printf.sprintf {|{"title":%s,"edits":[%s]}|} (json_string fix.title)
+          (String.concat "," edits))
+      diagnostic.fixes
+  in
+  Printf.sprintf {|{"path":%s,"code":%s,"message":%s,"span":%s,"notes":[%s],"fixes":[%s]}|} path
+    (json_string (Code.name diagnostic.code))
+    (json_string diagnostic.message)
+    (json_span source diagnostic.span)
+    (String.concat "," notes) (String.concat "," fixes)
+
+let to_json source diagnostics =
+  "[" ^ String.concat ",\n" (List.map (to_json_object source) diagnostics) ^ "]\n"

@@ -443,6 +443,19 @@ let base =
           let file = Query.demand database Workspace.file module_ in
           Some (module_, (List.nth file.definitions declaration.index).base))
 
+(* A stage's diagnostics for a file: each definition's, which [of_definition]
+   gives in the definition's own offsets, moved to the file's, in order. *)
+let per_definition database module_ of_definition =
+  List.concat_map
+    (fun declaration ->
+      let key = key_of declaration in
+      match Query.demand database base key with
+      | Some (_, base) -> List.map (Diagnostic.move base) (of_definition key)
+      | None -> [])
+    (Query.demand database declarations module_)
+  |> List.sort (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
+      compare (left.span, left.code) (right.span, right.code))
+
 (* A definition's source text, which fixes quote, apart from the rest of
    its file, so that editing another definition changes nothing that reads
    it. *)

@@ -7,7 +7,14 @@
   resolve_tests
   standard_library_tests
   interface_tests
-  infer_tests)
+  infer_tests
+  patterns_tests
+  usage_tests
+  ownership_tests
+  capabilities_tests
+  package_checks_tests
+  documents_tests
+  manifest_tests)
  (libraries
   harness
   source
@@ -36,6 +43,11 @@
   interface
   checked
   infer
-  syntax_walk)
+  patterns
+  usage
+  ownership
+  package_checks
+  syntax_walk
+  type_checker)
  (deps
   (glob_files %{workspace_root}/*.md)))

@@ -186,6 +186,24 @@ type evidence =
   | Accepted
       (** An [Error] or [Hole], or a trait whose definition did not parse: accepted silently. *)
 
+let cursor_trait : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Cursor" }
+
+(* What a pulled yielding method's cursor gives: what the method yields,
+   with the method's type arguments. *)
+let cursor_element database (method_ : Path.t) arguments =
+  match Query.demand database Environment.signature method_ with
+  | Some signature when List.length signature.generics = List.length arguments -> (
+      let substitution =
+        List.combine
+          (List.map (fun (generic : T.generic) -> generic.generic) signature.generics)
+          arguments
+      in
+      match signature.output with
+      | Yields (_, element) -> Some (T.substitute substitution element)
+      | _ -> None)
+  | _ -> None
+
 let copyable_path = Properties.copyable_trait
 let plain_path = Properties.plain_trait
 
@@ -237,7 +255,8 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) (type_ : T.ty)
   else
     match type_ with
     | T.Error | T.Hole | T.Variable _ -> Some Accepted
-    | T.Never | T.Integer | T.Literal _ | T.Function _ | T.Cursor _ -> None
+    | T.Cursor _ -> if Path.equal wanted.trait cursor_trait then Some Built_in else None
+    | T.Never | T.Integer | T.Literal _ | T.Function _ -> None
     | T.Parameter _ | T.Projection _ ->
         if
           List.exists
@@ -344,7 +363,12 @@ and associated_type database ~bounds type_ (trait : T.trait_reference) name =
                 (fun (bound : T.trait_reference) -> List.assoc_opt name bound.associated)
                 (any :: Properties.bound_closure database ~self:type_ any)
           | _ -> None)
-      | Some (Accepted | Built_in) -> Some T.Error
+      | Some Built_in -> (
+          match type_ with
+          | T.Cursor { method_; arguments } when name = "Element" ->
+              cursor_element database method_ arguments
+          | _ -> Some T.Error)
+      | Some Accepted -> Some T.Error
       | None -> None)
 
 (* Replaces every projection whose base is known by what the [impl]
