@@ -63,7 +63,11 @@ type pattern =
   | Literal_pattern of literal
   | Other_pattern
 
-type template = { from_template : call; part_conversions : call option list; interpolated : bool }
+type template = {
+  from_template : call option;
+  part_conversions : call option list;
+  interpolated : bool;
+}
 
 type obligation =
   | Disjoint of { first : Syntax.id; second : Syntax.id }

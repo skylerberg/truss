@@ -49,8 +49,6 @@ let body state env (written : block) =
   in
   go written.statements
 
-let in_own_statement state env (span : span) f = in_statement state env span f
-
 let declare_parameters state (written : parameter list) (signature : T.signature) =
   List.iter
     (fun (parameter : parameter) ->
@@ -83,7 +81,7 @@ let check_clauses state env (clauses : clause list) =
   let env = { env with specification = true } in
   List.iter
     (fun ((value : expression), kind) ->
-      in_own_statement state env value.span (fun () ->
+      in_statement state env value.span (fun () ->
           match kind with
           | `Bool -> check state env value T.bool
           | `Measure -> ignore (expression state env value)))
@@ -100,7 +98,7 @@ let check_defaults state env (written : parameter list) (signature : T.signature
               signature.parameters
           with
           | Some info ->
-              in_own_statement state env value.span (fun () -> check state env value info.type_)
+              in_statement state env value.span (fun () -> check state env value info.type_)
           | None -> ())
       | _ -> ())
     written
@@ -141,10 +139,9 @@ let check_definition state (lowered : Environment.lowered) =
           (fun (clause : type_clause) ->
             match clause.kind with
             | Type_invariant value ->
-                in_own_statement state env value.span (fun () -> check state env value T.bool)
+                in_statement state env value.span (fun () -> check state env value T.bool)
             | Potential value ->
-                in_own_statement state env value.span (fun () ->
-                    ignore (expression state env value))
+                in_statement state env value.span (fun () -> ignore (expression state env value))
             | Derives _ -> ())
           clauses;
         let defaults (fields : field list) (lowered_fields : T.field list) =
@@ -158,7 +155,7 @@ let check_definition state (lowered : Environment.lowered) =
                       lowered_fields
                   with
                   | Some lowered ->
-                      in_own_statement state no_output value.span (fun () ->
+                      in_statement state no_output value.span (fun () ->
                           check state no_output value lowered.field_type)
                   | None -> ())
               | _ -> ())
@@ -213,7 +210,7 @@ let check_definition state (lowered : Environment.lowered) =
                     law.parameters;
                   List.iter
                     (fun (requirement : expression) ->
-                      in_own_statement state env requirement.span (fun () ->
+                      in_statement state env requirement.span (fun () ->
                           check state env requirement T.bool))
                     law.requires;
                   if not (broken (Member_body index)) then
@@ -244,7 +241,7 @@ let check_definition state (lowered : Environment.lowered) =
           members
     | Constant { value; _ }, Constant_interface constant ->
         if not (broken Body) then
-          in_own_statement state no_output value.span (fun () ->
+          in_statement state no_output value.span (fun () ->
               check state no_output value constant.constant_type)
     | Test { body = written; _ }, _ ->
         if not (broken Body) then
@@ -344,7 +341,7 @@ let finalize (state : state) =
   update tables.templates (fun (template : C.template) ->
       {
         template with
-        from_template = call template.from_template;
+        from_template = Option.map call template.from_template;
         part_conversions = List.map (Option.map call) template.part_conversions;
       })
 
@@ -379,9 +376,8 @@ let check database (key : Names.key) =
       Query.demand database Resolve.resolved key,
       Query.demand database Names.base key )
   with
-  | Some definition, Some resolved, Some (module_, base) ->
+  | Some definition, Some resolved, Some (module_, _) ->
       let lowered, context = Environment.lower_definition database key definition resolved in
-      ignore base;
       let text = Option.value ~default:"" (Query.demand database Names.text key) in
       let binding_spans = Hashtbl.create 64 in
       List.iter
@@ -405,9 +401,21 @@ let check database (key : Names.key) =
           references = [];
           receiver_modes = [];
           binding_spans;
+          lambdas = [];
         }
       in
+      (* What lowering reported for the interface is the interface's to
+         report; what it reports for the types written inside bodies, and
+         their bounds, are the body's. *)
+      let interface_diagnostics = List.length !(context.diagnostics) in
+      let interface_named = List.length !(context.named) in
       check_definition state lowered;
+      let since count list = List.filteri (fun index _ -> index < List.length list - count) list in
+      state.diagnostics <- since interface_diagnostics !(context.diagnostics) @ state.diagnostics;
+      List.iter
+        (fun (span, message) -> report state Unsatisfied_bound span message)
+        (Interface.Check.unmet_bounds database ~bounds:(bounds state)
+           (since interface_named !(context.named)));
       finalize state;
       Some
         {
