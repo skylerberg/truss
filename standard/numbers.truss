@@ -2026,6 +2026,18 @@ public fn Float64.square_root(self) -> Float64 {
 
 public type ConversionError()
 
+impl Display for Bool {
+  fn display(self, output: mut TextBuilder) {
+    if self { mut output.write("true") } else { mut output.write("false") }
+  }
+}
+
+impl Display for Character {
+  fn display(self, output: mut TextBuilder) {
+    mut output.write_character(self)
+  }
+}
+
 impl Equal for Bool {
   fn equal(self, other: Bool) -> Bool {
     intrinsic::equal(self, right: other)

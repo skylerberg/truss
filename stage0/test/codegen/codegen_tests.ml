@@ -2220,6 +2220,8 @@ test "characters" {
   assert kind(Character"q") == 1
   assert kind(Character"_") == 2
   assert kind(Character"é") == 0
+  let accented = Character"é"
+  assert "${accented}${true}${Character"z"}" == "étruez"
 }
 |};
   passes "a tagged string gives its tag a template of its text and parts"
@@ -2399,6 +2401,25 @@ let () =
       in
       expect_int ~expected:3 status;
       expect_string ~expected:"hello\n3 arguments, then one\n" output)
+
+let () =
+  test "a program reads the real clock and random numbers" (fun () ->
+      let status, output, _ =
+        run_main
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console, Clock, Random
+{
+  let now = Clock.now()
+  let first = Random.next()
+  let second = Random.next()
+  let late = now.nanoseconds > 1600000000000000000
+  Console.print_line("${late} ${first != second}".slice())
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"true true\n" output)
 
 let () =
   test "a program reads its input a line at a time, with bad bytes replaced" (fun () ->
