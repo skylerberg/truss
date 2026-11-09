@@ -92,7 +92,7 @@ let rec space ?replace context type_ (written : pattern) : space =
       match context.checked.patterns.(written.id) with
       | Some (Constant_pattern path) -> constant context type_ path
       | _ -> Wild)
-  | Literal literal -> literal_space literal
+  | Literal literal -> literal_space context written.id literal
   | Pattern_range { start; stop; inclusive } -> (
       match (range_end context start, range_end context stop) with
       | Ok (Some low), Ok (Some high) ->
@@ -110,11 +110,16 @@ let rec space ?replace context type_ (written : pattern) : space =
       in
       Alternatives (List.map (space ?replace context type_) alternatives)
 
-and literal_space = function
-  | Literal_integer value -> Constructed (Interval (value, value), [])
+(* A literal's value as body checking recorded it, so a character or byte
+   is the integer it stands for. *)
+and literal_space context id = function
   | Literal_true -> Constructed (Boolean true, [])
   | Literal_false -> Constructed (Boolean false, [])
-  | Literal_string literal -> Constructed (Text literal.first.value, [])
+  | literal -> (
+      match (context.checked.literals.(id), literal) with
+      | Some (Integer_value value), _ -> Constructed (Interval (value, value), [])
+      | _, Literal_string literal -> Constructed (Text literal.first.value, [])
+      | _ -> Wild)
 
 (* A constant as the pattern of its value, so it covers exactly what that
    value does. A value that is not worked out here, such as one built by a
@@ -236,8 +241,10 @@ and constant_value context (resolved : Resolve.resolved) type_ seen (value : exp
    worked out here. *)
 and range_end context (written : range_end) =
   match written.kind with
-  | End_literal (Literal_integer value) -> Ok (Some value)
-  | End_literal _ -> Ok None
+  | End_literal _ -> (
+      match context.checked.literals.(written.id) with
+      | Some (Integer_value value) -> Ok (Some value)
+      | _ -> Ok None)
   | End_name _ | End_constant _ -> (
       match context.checked.patterns.(written.id) with
       | Some (Constant_pattern path) -> (

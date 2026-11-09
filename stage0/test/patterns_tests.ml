@@ -321,4 +321,16 @@ let () =
          }\n"
         "patterns.unreachable_alternative")
 
+let () =
+  test "character literals and ranges cover their values" (fun () ->
+      one_diagnostic
+        "fn f(letter: Character) -> Int64 {\n\
+        \  match letter {\n\
+        \    Character\"a\"..=Character\"z\" => 1\n\
+        \    Character\"m\" => 2\n\
+        \    _ => 3\n\
+        \  }\n\
+         }\n"
+        "patterns.unreachable_arm")
+
 let () = finish ()
