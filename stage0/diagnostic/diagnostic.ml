@@ -91,6 +91,39 @@ module Code = struct
     | Null
 
   type types =
+    | Mismatch
+    | Cannot_infer
+    | Missing_label
+    | Unknown_label
+    | Out_of_order
+    | Missing_argument
+    | Too_many_arguments
+    | Repeated_argument
+    | Missing_mark
+    | Redundant_mark
+    | Wrong_mark
+    | Unknown_member
+    | Ambiguous_method
+    | Private_field
+    | Not_callable
+    | Not_a_value
+    | No_impl
+    | Mismatched_integers
+    | String_addition
+    | Literal_out_of_range
+    | Integer_for_float
+    | Negated_unsigned
+    | Unused_value
+    | Not_assignable
+    | Wrong_try
+    | Lambda_needs_type
+    | Not_a_record
+    | Unknown_variant
+    | Wrong_yield
+    | Specification_only
+    | Not_in_specification
+    | Wrong_receiver
+    | Not_indexable
     | Not_a_type
     | Not_a_trait
     | Not_a_capability
@@ -216,6 +249,39 @@ module Code = struct
 
   let types_name code =
     match code with
+    | Mismatch -> "mismatch"
+    | Cannot_infer -> "cannot_infer"
+    | Missing_label -> "missing_label"
+    | Unknown_label -> "unknown_label"
+    | Out_of_order -> "out_of_order"
+    | Missing_argument -> "missing_argument"
+    | Too_many_arguments -> "too_many_arguments"
+    | Repeated_argument -> "repeated_argument"
+    | Missing_mark -> "missing_mark"
+    | Redundant_mark -> "redundant_mark"
+    | Wrong_mark -> "wrong_mark"
+    | Unknown_member -> "unknown_member"
+    | Ambiguous_method -> "ambiguous_method"
+    | Private_field -> "private_field"
+    | Not_callable -> "not_callable"
+    | Not_a_value -> "not_a_value"
+    | No_impl -> "no_impl"
+    | Mismatched_integers -> "mismatched_integers"
+    | String_addition -> "string_addition"
+    | Literal_out_of_range -> "literal_out_of_range"
+    | Integer_for_float -> "integer_for_float"
+    | Negated_unsigned -> "negated_unsigned"
+    | Unused_value -> "unused_value"
+    | Not_assignable -> "not_assignable"
+    | Wrong_try -> "wrong_try"
+    | Lambda_needs_type -> "lambda_needs_type"
+    | Not_a_record -> "not_a_record"
+    | Unknown_variant -> "unknown_variant"
+    | Wrong_yield -> "wrong_yield"
+    | Specification_only -> "specification_only"
+    | Not_in_specification -> "not_in_specification"
+    | Wrong_receiver -> "wrong_receiver"
+    | Not_indexable -> "not_indexable"
     | Not_a_type -> "not_a_type"
     | Not_a_trait -> "not_a_trait"
     | Not_a_capability -> "not_a_capability"

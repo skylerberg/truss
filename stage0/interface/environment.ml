@@ -297,21 +297,22 @@ let lower_definition database (key : Names.key) (definition : definition)
       | Law_proof _ -> Law_proof_interface
       | Definition_error _ -> Error_interface
   in
-  {
+  ( {
     interface;
     diagnostics = List.rev !(context.diagnostics);
     named = List.rev !(context.named);
     bounds =
       List.sort compare
         (Hashtbl.fold (fun parameter bounds acc -> (parameter, bounds) :: acc) context.bounds []);
-  }
+    },
+    context )
 
 let lowered =
   Query.query ~name:"lowered" ~show:Names.show_key (fun database key ->
       match
         (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
       with
-      | Some definition, Some resolved -> Some (lower_definition database key definition resolved)
+      | Some definition, Some resolved -> Some (fst (lower_definition database key definition resolved))
       | _ -> None)
 
 (* The interface a path names, from its definition with ordinal 0. *)
