@@ -153,7 +153,7 @@ let rec signature_of context (path : Path.t) =
   match demand context Environment.signature path with
   | Some signature -> (
       (* An [impl]'s method is an instance of the [impl]'s parameters as well
-         as its own, which come first. *)
+         as its own, which come first, and uses what the [impl] uses. *)
       match path with
       | Method { owner = Impl _ as owner; _ } ->
           let impl = impl_interface context owner in
@@ -163,7 +163,14 @@ let rec signature_of context (path : Path.t) =
                 not (List.exists (fun (h : T.generic) -> h.generic = g.generic) signature.generics))
               impl.impl_generics
           in
-          { signature with generics = missing @ signature.generics }
+          (* Its [impl]'s [uses] are its own too. *)
+          let uses =
+            signature.uses
+            @ List.filter
+                (fun capability -> not (List.mem capability signature.uses))
+                impl.impl_uses
+          in
+          { signature with generics = missing @ signature.generics; uses }
       | _ -> signature)
   | None -> (
       match path with
@@ -1167,8 +1174,8 @@ and into st (e : S.expression) (destination : Lir.place) =
              variant = None;
              fields = [ ("start", start); ("stop", stop); ("inclusive", Constant (Bool inclusive)) ];
            })
-  | Range _ | Quantified _ | Provide _ ->
-      bug "this expression is not lowered yet: %s" (source st e.span)
+  | Provide { implementations; body } -> provide st e implementations body destination
+  | Range _ | Quantified _ -> bug "this expression is not lowered yet: %s" (source st e.span)
   | Self_type_value -> bug "Self as a value"
   | Expression_error -> bug "an expression that did not parse"
 
@@ -1247,6 +1254,75 @@ and collection_into st ty destination ~span items =
         ~mask:0
         ~destination:(new_local st (Monomorphic.builtin Unit)))
     items
+
+(* [provide]: each implementation evaluated once, as a place or a temporary
+   that lives to the end of the statement, and for each capability it
+   provides, evidence on the stack pointing at it, its table, and the
+   evidence it captures from the code around the [provide]. The body runs
+   with that evidence. *)
+and provide st (e : S.expression) implementations body destination =
+  let provides =
+    match st.frame.code.checked.provides.(e.id) with
+    | Some p -> p.implementations
+    | None -> bug "a provide with no meaning"
+  in
+  let around = st.evidence in
+  let rec provided_by (e : S.expression) =
+    match List.assoc_opt e.id provides with
+    | Some provided -> provided
+    | None -> (
+        match e.kind with
+        | Mode (_, inner) | Parenthesized inner -> provided_by inner
+        | _ -> bug "an implementation with no capabilities")
+  in
+  let added =
+    List.concat_map
+      (fun (implementation : S.expression) ->
+        let ty = type_of st implementation.id in
+        let pointer =
+          if zero_size st ty then Lir.Constant Null
+          else Address { place = expression st implementation; writable = true }
+        in
+        List.map
+          (fun (provided : C.provided) ->
+            let interface = impl_interface st.context provided.impl in
+            let type_arguments =
+              List.map
+                (fun (g : T.generic) ->
+                  match List.assoc_opt g.generic provided.arguments with
+                  | Some a ->
+                      Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution
+                        a
+                  | None -> bug "an unbound parameter of %s" (Path.show provided.impl))
+                interface.impl_generics
+            in
+            let outer =
+              List.map
+                (fun capability ->
+                  match List.find_opt (fun (path, _) -> Path.equal path capability) around with
+                  | Some (_, operand) -> operand
+                  | None -> bug "no evidence for %s here" (Path.show capability))
+                (evidence_for [] interface.impl_uses)
+            in
+            let slot = local st.b (Evidence (List.length outer)) in
+            emit st.b
+              (Call
+                 {
+                   target = Intrinsic Evidence_fill;
+                   arguments =
+                     Address { place = at slot; writable = true }
+                     :: pointer
+                     :: Constant (Symbol_address (Table { impl = provided.impl; type_arguments }))
+                     :: outer;
+                   result = Discarded;
+                 });
+            (provided.capability, Lir.Address { place = at slot; writable = false }))
+          (provided_by implementation))
+      implementations
+  in
+  st.evidence <- added @ around;
+  block_into st body (Some destination);
+  st.evidence <- around
 
 (* [?]: the error, or [None], returned at once, as the function's own
    result type; otherwise the value inside. *)

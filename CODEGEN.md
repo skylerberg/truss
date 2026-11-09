@@ -798,6 +798,16 @@ it with the implementation pointer and the implementation's own evidence.
 Koka calls this evidence passing. It needs no global state, and it is safe
 for `parallel` code.
 
+- **How `provide` is lowered.** Each implementation is evaluated once: a
+  place by its address, so `provide mut files` changes `files`, and any
+  other value into a temporary that lives to the end of the statement. For
+  each capability it provides, a local of LIR type `evidence(n)`, a
+  `struct t_evidence` followed by room for the `n` evidence pointers its
+  `impl` captures, is filled with the implementation's address, the table
+  for that `impl`, and the captured evidence, taken from the code around
+  the `provide`. The body is lowered with that evidence for those
+  capabilities. An `impl`'s `uses` are part of each of its methods'
+  signatures, so its methods take that evidence as other functions do.
 - **Narrowing needs nothing special.** Inside an implementation of
   `FileRead`, a call to `FileRead.read` uses the evidence captured from
   outside the `provide`, so it reaches the next provider out.

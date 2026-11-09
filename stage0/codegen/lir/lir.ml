@@ -10,6 +10,9 @@ type ty =
   | Environment of int
       (** The environment [struct] of nested function [n] of this instance, whose fields its
           [environment] lists *)
+  | Evidence of int
+      (** Evidence a [provide] builds on the stack, with room for [n] pointers to the evidence its
+          implementation captured *)
 
 (* A place: a local or a constant's static data, then fields, elements, and
    dereferences. *)
@@ -131,6 +134,9 @@ type intrinsic =
   | Program_argument
       (** [(arguments, index, length pointer) -> bytes]: a program argument as UTF-8, with bad
           sequences replaced by U+FFFD *)
+  | Evidence_fill
+      (** [(evidence's address, implementation, table, captured evidence...)]: fills evidence a
+          [provide] builds *)
 
 let float_text_limit = 32
 
@@ -250,7 +256,7 @@ let bug format = Printf.ksprintf (fun message -> invalid_arg ("Lir: " ^ message)
 
 let erased env = function
   | Value ty -> (Memory_layout.of_type env ty).size = 0
-  | Pointer _ | Raw _ | Environment _ -> false
+  | Pointer _ | Raw _ | Environment _ | Evidence _ -> false
 
 let member_ty : Memory_layout.member -> ty = function
   | Typed ty -> Value ty
@@ -486,7 +492,7 @@ let canonical (f : function_) =
   }
 
 let canonical_instance t = { t with main = canonical t.main; nested = Array.map canonical t.nested }
-let version = 5
+let version = 6
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -528,6 +534,7 @@ let rec encode_ty instance = function
   | Pointer { target; writable } -> tagged 1 [ encode_ty instance target; Bool writable ]
   | Raw scalar -> tagged 2 [ encode_scalar instance scalar ]
   | Environment n -> tagged 3 [ Cbor.int n ]
+  | Evidence n -> tagged 4 [ Cbor.int n ]
 
 let encode_function_ref instance = function
   | Instance key -> tagged 0 [ instance.instance key ]
@@ -638,6 +645,7 @@ let intrinsic_tag = function
   | Evidence_outer -> 41
   | Program_argument -> 42
   | Float_text -> 43
+  | Evidence_fill -> 44
 
 let encode_rvalue instance rvalue =
   let operand = encode_operand instance in
@@ -821,6 +829,7 @@ let rec ty_to_string = function
   | Pointer { target; writable } -> (if writable then "*mut " else "*") ^ ty_to_string target
   | Raw scalar -> "raw " ^ scalar_name scalar
   | Environment n -> Printf.sprintf "environment %d" n
+  | Evidence n -> Printf.sprintf "evidence %d" n
 
 let function_ref_to_string = function
   | Instance key -> Instance.to_string key
@@ -908,6 +917,7 @@ let intrinsic_name = function
   | System_write -> "system_write"
   | System_read -> "system_read"
   | Float_text -> "float_text"
+  | Evidence_fill -> "evidence_fill"
   | Clock_now -> "clock_now"
   | Random_fill -> "random_fill"
   | Debug_begin -> "debug_begin"

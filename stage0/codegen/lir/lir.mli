@@ -20,6 +20,9 @@ type ty =
   | Environment of int
       (** The environment [struct] of nested function [n] of this instance, whose fields its
           [environment] lists *)
+  | Evidence of int
+      (** Evidence a [provide] builds on the stack, with room for [n] pointers to the evidence its
+          implementation captured *)
 
 (* A place: a local or a constant's static data, then fields, elements, and
    dereferences. *)
@@ -141,6 +144,9 @@ type intrinsic =
   | Program_argument
       (** [(arguments, index, length pointer) -> bytes]: a program argument as UTF-8, with bad
           sequences replaced by U+FFFD *)
+  | Evidence_fill
+      (** [(evidence's address, implementation, table, captured evidence...)]: fills evidence a
+          [provide] builds *)
 
 (* The most bytes [Float_text] writes. *)
 val float_text_limit : int

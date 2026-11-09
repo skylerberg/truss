@@ -2132,6 +2132,77 @@ test "ranges" {
   assert count == 2
 }
 |};
+  passes "provide runs its body with the implementations given, nested and narrowed"
+    {|type Recorded(lines: List[String])
+
+impl Console for Recorded {
+  fn print_line(mut self, text: StringSlice) {
+    mut self.lines.push(text.to_string())
+  }
+
+  fn print_error(mut self, text: StringSlice) {
+    mut self.lines.push("error: ${text}")
+  }
+
+  fn read_line(self) -> Option[String] {
+    None
+  }
+}
+
+type Quiet()
+
+impl Console for Quiet {
+  fn print_line(self, text: StringSlice) {}
+  fn print_error(self, text: StringSlice) {}
+  fn read_line(self) -> Option[String] { Some("typed") }
+}
+
+type Prefixed(prefix: String)
+
+impl Console for Prefixed
+  uses Console
+{
+  fn print_line(self, text: StringSlice) {
+    Console.print_line("${self.prefix}${text}".slice())
+  }
+
+  fn print_error(self, text: StringSlice) {
+    Console.print_error(text)
+  }
+
+  fn read_line(self) -> Option[String] {
+    Console.read_line()
+  }
+}
+
+fn greet(name: String) -> USize
+  uses Console
+{
+  Console.print_line("hello ${name}".slice())
+  Console.print_error("done".slice())
+  name.length()
+}
+
+test "provide" {
+  var console = Recorded(lines: [])
+  let length = provide mut console {
+    greet("ada")
+  }
+  assert length == 3
+  assert console.lines == ["hello ada", "error: done"]
+  let typed = provide Quiet() {
+    Console.read_line()
+  }
+  assert typed == Some("typed")
+  provide mut console {
+    provide Prefixed(prefix: "> ") {
+      let _ = greet("${1}")
+    }
+  }
+  assert console.lines.length() == 4
+  assert console.lines[2] == "> hello 1"
+}
+|};
   passes "names an is test binds are used where it holds"
     {|fn describe(found: Option[String], limit: USize) -> String {
   if found is Some(text) && text.length() > limit {

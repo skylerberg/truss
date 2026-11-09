@@ -156,7 +156,7 @@ let member : Lir.ty -> Memory_layout.member = function
   | Value ty -> Typed ty
   | Raw scalar -> Raw scalar
   | Pointer { target = Value ty; _ } -> Raw (Pointer (Data ty))
-  | Pointer _ | Environment _ -> bug "a local a cursor cannot keep"
+  | Pointer _ | Environment _ | Evidence _ -> bug "a local a cursor cannot keep"
 
 let state_ty = Lir.Raw (Integer UInt32)
 

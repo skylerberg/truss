@@ -254,6 +254,9 @@ let rec c_ty context symbol : Lir.ty -> string = function
   | Environment n ->
       register context (Environment (symbol, n));
       key_name (Environment (symbol, n))
+  | Evidence n ->
+      Printf.sprintf "struct { struct t_evidence evidence; const struct t_evidence *outer[%d]; }"
+        (max n 1)
 
 let member_c context : Memory_layout.member -> string = function
   | Typed ty -> value_c context ty
@@ -382,7 +385,7 @@ let local_name (f : Lir.function_) local =
 
 let erased context : Lir.ty -> bool = function
   | Value ty -> (layout context ty).size = 0
-  | Pointer _ | Raw _ | Environment _ -> false
+  | Pointer _ | Raw _ | Environment _ | Evidence _ -> false
 
 let find_field (fields : Memory_layout.field list) name =
   List.find_opt (fun (field : Memory_layout.field) -> field.name = name) fields
@@ -521,7 +524,7 @@ let scalar_of context : Lir.ty -> Memory_layout.scalar = function
       | Tag_only { tag; _ } -> Integer tag
       | _ -> bug "an operator on %s, which is not a scalar" (Ground.to_string ty))
   | Raw scalar -> scalar
-  | Pointer _ | Environment _ -> Pointer Opaque
+  | Pointer _ | Environment _ | Evidence _ -> Pointer Opaque
 
 let is_float : Memory_layout.scalar -> bool = function Float32 | Float64 -> true | _ -> false
 
@@ -829,6 +832,18 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
   | Grow -> Printf.sprintf "t_runtime_storage_grow((void **)%s)" all
   | System_write -> "t_runtime_write(" ^ all ^ ")"
   | System_read -> "t_runtime_read(" ^ all ^ ")"
+  | Evidence_fill ->
+      let slot = argument 0 in
+      let outer =
+        List.mapi
+          (fun i (text, _) ->
+            Printf.sprintf "%s->outer[%d] = (const struct t_evidence *)%s, " slot i text)
+          (List.filteri (fun i _ -> i >= 3) arguments)
+      in
+      Printf.sprintf
+        "(%s->evidence.implementation = (void *)%s, %s->evidence.table = (const void *const *)%s, \
+         %s%s->evidence.outer = %s->outer)"
+        slot (argument 1) slot (argument 2) (String.concat "" outer) slot slot
   | Float_text ->
       (if scalar 0 = Float32 then "t_runtime_float32_text(" else "t_runtime_float64_text(")
       ^ all ^ ")"
@@ -1050,7 +1065,7 @@ let function_c context key symbol ~linkage (f : Lir.function_) =
         let zero =
           match info.ty with
           | Value ty when is_struct context ty -> "{0}"
-          | Environment _ -> "{0}"
+          | Environment _ | Evidence _ -> "{0}"
           | _ -> "0"
         in
         Buffer.add_string buffer
