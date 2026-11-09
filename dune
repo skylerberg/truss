@@ -1,3 +1,1 @@
 (dirs stage0 grammar)
-
-(data_only_dirs grammar)

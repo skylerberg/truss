@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  stage0:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: ocaml/setup-ocaml@v3.9.1
+        with:
+          ocaml-compiler: 5.5.2
+
+      - name: Install dependencies
+        run: opam install . --deps-only --with-test --with-dev-setup --yes
+
+      - name: Build
+        run: opam exec -- dune build
+
+      - name: Check formatting
+        run: opam exec -- dune build @fmt
+
+      - name: Check that truss.opam matches dune-project
+        run: opam exec -- dune build @install
+
+      - name: Test
+        run: opam exec -- dune test
