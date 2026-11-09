@@ -16,7 +16,7 @@ type ty =
   | Hole
   | Error
 
-and argument = Type of ty | Value of value
+and argument = Type of ty | Value of value | Capabilities of capability list
 and value = Known of Z.t | Value_parameter of parameter | Value_variable of int
 
 and trait_reference = {
@@ -78,7 +78,7 @@ let rec substitute substitution type_ =
     | Parameter parameter -> (
         match List.assoc_opt parameter substitution with
         | Some (Type replacement) -> replacement
-        | Some (Value _) | None -> type_)
+        | Some (Value _ | Capabilities _) | None -> type_)
     | Projection { base; trait; name } -> (
         let base = substitute substitution base and trait = substitute_trait substitution trait in
         match List.assoc_opt name trait.associated with
@@ -97,6 +97,19 @@ and substitute_argument substitution = function
       | Some (Value _ as replacement) -> replacement
       | _ -> value)
   | Value _ as value -> value
+  | Capabilities capabilities -> Capabilities (substitute_capabilities substitution capabilities)
+
+(* A capability parameter stands for the set it is bound to. *)
+and substitute_capabilities substitution capabilities =
+  List.sort_uniq compare
+    (List.concat_map
+       (function
+         | Capability_parameter parameter as capability -> (
+             match List.assoc_opt parameter substitution with
+             | Some (Capabilities replacement) -> replacement
+             | _ -> [ capability ])
+         | capability -> [ capability ])
+       capabilities)
 
 and substitute_trait substitution (trait : trait_reference) =
   {
@@ -116,19 +129,40 @@ and substitute_function substitution (function_type : function_type) =
     inputs =
       List.map (fun (mode, type_) -> (mode, substitute substitution type_)) function_type.inputs;
     output = result function_type.output;
-    uses =
-      List.sort_uniq compare
-        (List.concat_map
-           (function
-             | Capability_parameter parameter as capability -> (
-                 match List.assoc_opt parameter substitution with
-                 | Some (Type (Named { path; _ })) -> [ Capability path ]
-                 | Some (Type (Parameter replacement)) -> [ Capability_parameter replacement ]
-                 | _ -> [ capability ])
-             | capability -> [ capability ])
-           function_type.uses);
+    uses = substitute_capabilities substitution function_type.uses;
     costs = function_type.costs;
   }
+
+let rec map f type_ =
+  match f type_ with
+  | Some replacement -> replacement
+  | None -> (
+      let argument = function Type type_ -> Type (map f type_) | value -> value in
+      let trait (reference : trait_reference) =
+        {
+          reference with
+          trait_arguments = List.map argument reference.trait_arguments;
+          associated = List.map (fun (name, type_) -> (name, map f type_)) reference.associated;
+        }
+      in
+      match type_ with
+      | Named { path; arguments } -> Named { path; arguments = List.map argument arguments }
+      | Projection { base; trait = reference; name } ->
+          Projection { base = map f base; trait = trait reference; name }
+      | Function function_type ->
+          Function
+            {
+              function_type with
+              inputs = List.map (fun (mode, type_) -> (mode, map f type_)) function_type.inputs;
+              output =
+                (match function_type.output with
+                | Returns type_ -> Returns (map f type_)
+                | Yields (mode, type_) -> Yields (mode, map f type_)
+                | Lends (mode, type_) -> Lends (mode, map f type_));
+            }
+      | Any reference -> Any (trait reference)
+      | Cursor { method_; arguments } -> Cursor { method_; arguments = List.map argument arguments }
+      | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error -> type_)
 
 let equal left right = left = right
 
@@ -147,7 +181,7 @@ let rec contains_unsolved = function
 and argument_unsolved = function
   | Type type_ -> contains_unsolved type_
   | Value (Value_variable _) -> true
-  | Value _ -> false
+  | Value _ | Capabilities _ -> false
 
 and trait_unsolved trait =
   List.exists argument_unsolved trait.trait_arguments
@@ -183,6 +217,14 @@ and show_argument = function
   | Value (Known value) -> Z.to_string value
   | Value (Value_parameter { name; _ }) -> name
   | Value (Value_variable _) -> "_"
+  | Capabilities capabilities ->
+      "{"
+      ^ String.concat ", "
+          (List.map
+             (function
+               | Capability path -> path_name path | Capability_parameter { name; _ } -> name)
+             capabilities)
+      ^ "}"
 
 and show_trait trait =
   let arguments = List.map show_argument trait.trait_arguments in

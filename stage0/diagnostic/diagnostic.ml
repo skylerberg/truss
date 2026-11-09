@@ -124,6 +124,8 @@ module Code = struct
     | Not_in_specification
     | Wrong_receiver
     | Not_indexable
+    | Implements_built_in
+    | Not_derivable
     | Not_a_type
     | Not_a_trait
     | Not_a_capability
@@ -282,6 +284,8 @@ module Code = struct
     | Not_in_specification -> "not_in_specification"
     | Wrong_receiver -> "wrong_receiver"
     | Not_indexable -> "not_indexable"
+    | Implements_built_in -> "implements_built_in"
+    | Not_derivable -> "not_derivable"
     | Not_a_type -> "not_a_type"
     | Not_a_trait -> "not_a_trait"
     | Not_a_capability -> "not_a_capability"

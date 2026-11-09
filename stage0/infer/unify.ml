@@ -28,29 +28,37 @@ let fresh_value unifier =
 let rec resolve unifier (type_ : T.ty) =
   match type_ with
   | Variable index | Literal (_, index) -> (
-      match Hashtbl.find_opt unifier.types index with Some bound -> resolve unifier bound | None -> type_)
+      match Hashtbl.find_opt unifier.types index with
+      | Some bound -> resolve unifier bound
+      | None -> type_)
   | _ -> type_
 
 let rec resolve_value unifier (value : T.value) =
   match value with
   | Value_variable index -> (
-      match Hashtbl.find_opt unifier.values index with Some bound -> resolve_value unifier bound | None -> value)
+      match Hashtbl.find_opt unifier.values index with
+      | Some bound -> resolve_value unifier bound
+      | None -> value)
   | _ -> value
 
 (* Replaces every solved variable, at any depth. *)
 let rec zonk unifier (type_ : T.ty) : T.ty =
   let zonk = zonk unifier in
   match resolve unifier type_ with
-  | Named { path; arguments } -> Named { path; arguments = List.map (zonk_argument unifier) arguments }
-  | Projection { base; trait; name } -> Projection { base = zonk base; trait = zonk_trait unifier trait; name }
+  | Named { path; arguments } ->
+      Named { path; arguments = List.map (zonk_argument unifier) arguments }
+  | Projection { base; trait; name } ->
+      Projection { base = zonk base; trait = zonk_trait unifier trait; name }
   | Function function_type -> Function (zonk_function unifier function_type)
   | Any trait -> Any (zonk_trait unifier trait)
-  | Cursor { method_; arguments } -> Cursor { method_; arguments = List.map (zonk_argument unifier) arguments }
+  | Cursor { method_; arguments } ->
+      Cursor { method_; arguments = List.map (zonk_argument unifier) arguments }
   | type_ -> type_
 
 and zonk_argument unifier = function
   | T.Type type_ -> T.Type (zonk unifier type_)
   | T.Value value -> T.Value (resolve_value unifier value)
+  | T.Capabilities _ as capabilities -> capabilities
 
 and zonk_trait unifier (trait : T.trait_reference) =
   {
@@ -74,10 +82,15 @@ let rec occurs unifier index (type_ : T.ty) =
   match resolve unifier type_ with
   | Variable other | Literal (_, other) -> other = index
   | Named { arguments; _ } | Cursor { arguments; _ } ->
-      List.exists (function T.Type type_ -> occurs unifier index type_ | T.Value _ -> false) arguments
-  | Function { inputs; output; _ } ->
+      List.exists
+        (function
+          | T.Type type_ -> occurs unifier index type_ | T.Value _ | T.Capabilities _ -> false)
+        arguments
+  | Function { inputs; output; _ } -> (
       List.exists (fun (_, type_) -> occurs unifier index type_) inputs
-      || (match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> occurs unifier index type_)
+      ||
+      match output with
+      | Returns type_ | Yields (_, type_) | Lends (_, type_) -> occurs unifier index type_)
   | Projection { base; _ } -> occurs unifier index base
   | _ -> false
 
@@ -103,28 +116,34 @@ let rec unify unifier (left : T.ty) (right : T.ty) =
   | Variable index, other | other, Variable index -> bind unifier index other
   | Literal (left_kind, left_index), Literal (right_kind, right_index) ->
       left_kind = right_kind && (left_index = right_index || bind unifier left_index right)
-  | Literal (kind, index), other | other, Literal (kind, index) -> literal_fits kind other && bind unifier index other
+  | Literal (kind, index), other | other, Literal (kind, index) ->
+      literal_fits kind other && bind unifier index other
   | Named left, Named right ->
       Path.equal left.path right.path && unify_arguments unifier left.arguments right.arguments
   | Parameter left, Parameter right -> left = right
   | Function left, Function right ->
       List.length left.inputs = List.length right.inputs
       && List.for_all2
-           (fun (left_mode, left) (right_mode, right) -> left_mode = right_mode && unify unifier left right)
+           (fun (left_mode, left) (right_mode, right) ->
+             left_mode = right_mode && unify unifier left right)
            left.inputs right.inputs
       && unify_result unifier left.output right.output
   | Any left, Any right -> unify_trait unifier left right
   | Projection left, Projection right ->
-      left.name = right.name && Path.equal left.trait.trait right.trait.trait && unify unifier left.base right.base
+      left.name = right.name
+      && Path.equal left.trait.trait right.trait.trait
+      && unify unifier left.base right.base
   | Cursor left, Cursor right ->
-      Path.equal left.method_ right.method_ && unify_arguments unifier left.arguments right.arguments
+      Path.equal left.method_ right.method_
+      && unify_arguments unifier left.arguments right.arguments
   | Never, Never | Integer, Integer -> true
   | _ -> false
 
 and unify_result unifier (left : T.result) (right : T.result) =
   match (left, right) with
   | Returns left, Returns right -> unify unifier left right
-  | Yields (left_mode, left), Yields (right_mode, right) | Lends (left_mode, left), Lends (right_mode, right) ->
+  | Yields (left_mode, left), Yields (right_mode, right)
+  | Lends (left_mode, left), Lends (right_mode, right) ->
       left_mode = right_mode && unify unifier left right
   | _ -> false
 
@@ -136,6 +155,7 @@ and unify_arguments unifier left right =
          | T.Type left, T.Type right -> unify unifier left right
          | T.Value left, T.Value right -> unify_value unifier left right
          | T.Type T.Error, _ | _, T.Type T.Error -> true
+         | T.Capabilities _, T.Capabilities _ -> true
          | _ -> false)
        left right
 
@@ -143,7 +163,9 @@ and unify_value unifier left right =
   let left = resolve_value unifier left and right = resolve_value unifier right in
   match (left, right) with
   | Value_variable index, other | other, Value_variable index ->
-      (match other with Value_variable other_index when other_index = index -> () | _ -> Hashtbl.replace unifier.values index other);
+      (match other with
+      | Value_variable other_index when other_index = index -> ()
+      | _ -> Hashtbl.replace unifier.values index other);
       true
   | left, right -> left = right
 
@@ -152,7 +174,8 @@ and unify_trait unifier (left : T.trait_reference) (right : T.trait_reference) =
   && unify_arguments unifier left.trait_arguments right.trait_arguments
   && List.length left.associated = List.length right.associated
   && List.for_all2
-       (fun (left_name, left) (right_name, right) -> left_name = right_name && unify unifier left right)
+       (fun (left_name, left) (right_name, right) ->
+         left_name = right_name && unify unifier left right)
        left.associated right.associated
 
 (* Gives each literal that nothing decided its default type: [Int64] and
@@ -163,8 +186,14 @@ let rec default_literals unifier ~specification (type_ : T.ty) =
       Hashtbl.replace unifier.types index (if specification then T.Integer else T.builtin Int64)
   | Literal (Float_literal, index) -> Hashtbl.replace unifier.types index (T.builtin Float64)
   | Named { arguments; _ } | Cursor { arguments; _ } ->
-      List.iter (function T.Type type_ -> default_literals unifier ~specification type_ | T.Value _ -> ()) arguments
-  | Function { inputs; output; _ } ->
+      List.iter
+        (function
+          | T.Type type_ -> default_literals unifier ~specification type_
+          | T.Value _ | T.Capabilities _ -> ())
+        arguments
+  | Function { inputs; output; _ } -> (
       List.iter (fun (_, type_) -> default_literals unifier ~specification type_) inputs;
-      (match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> default_literals unifier ~specification type_)
+      match output with
+      | Returns type_ | Yields (_, type_) | Lends (_, type_) ->
+          default_literals unifier ~specification type_)
   | _ -> ()

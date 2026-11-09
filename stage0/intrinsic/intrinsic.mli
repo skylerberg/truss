@@ -56,6 +56,8 @@ type operation =
   | Multiply_overflows
   | Equal
   | Less
+  | Ieee_equal
+  | Ieee_less
   | Bit_and
   | Bit_or
   | Bit_xor

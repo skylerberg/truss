@@ -132,6 +132,8 @@ module Code : sig
     | Not_in_specification
     | Wrong_receiver
     | Not_indexable
+    | Implements_built_in
+    | Not_derivable
     | Not_a_type
     | Not_a_trait
     | Not_a_capability

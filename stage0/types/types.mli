@@ -30,7 +30,10 @@ type ty =
   | Hole  (** The type of a [todo] with nothing expected. *)
   | Error  (** After an error, to stop cascades. Unifies with everything. *)
 
-and argument = Type of ty | Value of value
+and argument =
+  | Type of ty
+  | Value of value
+  | Capabilities of capability list  (** What a [capability] parameter stands for, sorted. *)
 
 and value =
   | Known of Z.t
@@ -80,6 +83,11 @@ val substitute : substitution -> ty -> ty
 val substitute_argument : substitution -> argument -> argument
 val substitute_trait : substitution -> trait_reference -> trait_reference
 val substitute_function : substitution -> function_type -> function_type
+
+val map : (ty -> ty option) -> ty -> ty
+(** Rewrites a type from the outside in: where [f] gives a replacement, it is used as it is, and
+    elsewhere the type's parts are rewritten. Every part is visited: arguments, function inputs and
+    outputs, [any] and projection traits. *)
 
 val equal : ty -> ty -> bool
 (** Structural: types are nominal, so two [Named] types are equal when they name the same definition

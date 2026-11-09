@@ -1,7 +1,7 @@
 public type Result[Value, Error] =
   | Ok(value: Value)
   | Err(error: Error)
-  derives Equal
+  derives Equal, Hash, Ordered
 
 public fn Result[Value, Error].is_ok(self) -> Bool
   cost time O(1)

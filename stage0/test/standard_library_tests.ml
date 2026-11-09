@@ -23,10 +23,15 @@ let () =
   List.iter
     (fun ((module_ : Path.module_), _) ->
       test
-        (Printf.sprintf "%s parses and resolves cleanly" (Path.show_module module_))
+        (Printf.sprintf "%s checks cleanly" (Path.show_module module_))
         (fun () ->
           let file = Query.demand database Workspace.file module_ in
-          let diagnostics = file.diagnostics @ Resolve.diagnostics database module_ in
+          let diagnostics =
+            file.diagnostics
+            @ Resolve.diagnostics database module_
+            @ Interface.diagnostics database module_
+            @ Infer.diagnostics database module_
+          in
           List.iter (fun diagnostic -> fail "%s" (show diagnostic file.source)) diagnostics))
     Standard_library.modules
 

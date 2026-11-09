@@ -1,3 +1,18 @@
 (library
  (name infer)
- (libraries query path intrinsic types checked workspace syntax resolve interface diagnostic source token zarith))
+ (libraries
+  query
+  path
+  intrinsic
+  intrinsic_signatures
+  types
+  checked
+  workspace
+  syntax
+  resolve
+  interface
+  diagnostic
+  source
+  token
+  syntax_walk
+  zarith))
