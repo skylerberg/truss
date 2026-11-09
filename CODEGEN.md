@@ -62,7 +62,7 @@ checked definitions
 | `Memory_layout` | Sizes, alignment, field placement, tags, and niches for every ground type |
 | `Lir` | The lowered IR's types, and printing and hashing it canonically |
 | `Lower` | Checked form to LIR: expressions, patterns, calls, capabilities, defaults |
-| `Drops` | Drop elaboration: where values are dropped, with flags for conditional and partial moves |
+| `Drops` | Drop elaboration: what each drop lowering wrote still owns, with flags for conditional moves and field-by-field drops for partial ones |
 | `Yields` | Yielding methods to continuation calls, and pulled cursors to state machines |
 | `Glue` | Generated drop, copy, debug-output, and derived-trait code for each type |
 | `Emit_c` | LIR to C text |
@@ -215,7 +215,8 @@ parameter. The emitter only prints.
 |---|---|
 | `place = rvalue` | Write a value to a place. A drop flag is a `Bool` local written this way. |
 | `call(target, arguments, result place)` | A call. The target is an instance or nested function with its C signature, a function value, or an intrinsic |
-| `drop(place)` | Run the type's drop code |
+| `drop(place)` | Run the type's drop code. Before drop elaboration: drop whatever the place still owns |
+| `free_block(place, variant)` | Free the block of an `indirect` variant whose fields have all been moved out or dropped |
 
 | Rvalue | Meaning |
 |---|---|
@@ -427,18 +428,35 @@ to drop.
 
 ### Drop elaboration
 
-`Drops` runs a dataflow analysis over each instance's LIR: at each point,
-which places, and which fields of places, may still own a value. It then:
+Lowering writes `drop(place)` wherever an owned local goes out of scope, on
+every path out of the scope, including `return`, `?`, `break`, and a loop's
+`stop` at a `yield`, since lowering is where scopes are known. Such a drop
+means "drop whatever this place still owns here", which lowering cannot
+always tell. `Drops` works it out, as Rust's drop elaboration does over MIR:
+a dataflow analysis over each function finds, at each point, which places,
+and which fields of places, may own a value and which may not. Then each
+`drop(place)` becomes:
 
-- inserts `drop(place)` where an owned local, or each of its remaining
-  fields, goes out of scope, on every path, including `return` and `?`
-- uses a drop flag where a place is owned on some paths and not others, such
-  as after `if ready { consume(own item) }`. A flag is one byte on the stack,
-  set when the value is moved.
-- tracks fields separately after `own config.name`, so the rest of `config`
-  is dropped field by field, and `config` becomes whole again once
-  `config.name` is assigned, as DESIGN.md describes
+- **nothing,** where the place was moved out on every path
+- **a drop of the whole place,** where nothing in it was moved out
+- **a drop of each remaining field,** where a field was moved out with
+  `own config.name`, so the rest of `config` is dropped field by field. Once
+  `config.name` is assigned again, `config` is whole again, as DESIGN.md
+  describes, and is dropped whole. When the fields of an `indirect`
+  variant are moved out, what is left of them is dropped and the variant's
+  block is freed.
+- **a drop behind a flag,** where the place owns a value on some paths and
+  not others, as after `if ready { consume(own item) }`. A flag is a `Bool`
+  local, set where the place is given a value and cleared where it is moved
+  or dropped.
 
+An assignment to a place that may still own a value drops that value first,
+after the assignment's own moves, so `items = rebuild(own items)` drops
+nothing and `name = other_name` drops the old `name`. The new value is
+computed into a temporary first, so the old one is dropped only once
+nothing can read it.
+
+Drops of types with nothing to drop, such as plain data, are removed.
 Values are dropped in reverse order of declaration. No program can observe
 the order, because dropping never runs Truss code.
 

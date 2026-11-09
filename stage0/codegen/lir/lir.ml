@@ -127,6 +127,9 @@ type statement =
   | Assign of place * rvalue
   | Call of { target : target; arguments : operand list; result : place option }
   | Drop of place  (** Runs the type's drop code *)
+  | Free_block of { place : place; variant : string }
+      (** Frees the block of an [indirect] variant whose fields have all been moved out or dropped
+      *)
 
 type terminator =
   | Goto of block
@@ -163,6 +166,80 @@ let signature (f : function_) =
     result = f.result;
     returns = f.returns;
   }
+
+let bug format = Printf.ksprintf (fun message -> invalid_arg ("Lir: " ^ message)) format
+
+let erased env = function
+  | Value ty -> (Memory_layout.of_type env ty).size = 0
+  | Pointer _ | Raw _ | Environment _ -> false
+
+let member_ty : Memory_layout.member -> ty = function
+  | Typed ty -> Value ty
+  | Raw scalar -> Raw scalar
+
+let find_field (fields : Memory_layout.field list) name =
+  List.find_map
+    (fun (field : Memory_layout.field) ->
+      if field.name = name then Some (member_ty field.member) else None)
+    fields
+
+let struct_field (layout : Memory_layout.t) name =
+  match layout.form with Struct fields -> find_field fields name | _ -> None
+
+let variant_field_type env sum variant field =
+  let layout = Memory_layout.of_type env sum in
+  let in_payload (payload : Memory_layout.t) =
+    match payload.form with
+    | Struct fields -> find_field fields field
+    | Scalar (Pointer (Block _)) -> struct_field (Memory_layout.block env sum variant) field
+    | _ -> None
+  in
+  match layout.form with
+  | Tagged { variants; _ } -> (
+      match List.find_opt (fun (v : Memory_layout.variant) -> v.name = variant) variants with
+      | Some v -> in_payload v.payload
+      | None -> bug "%s has no variant %s" (Ground.to_string sum) variant)
+  | Niche_encoded { dataful; _ } when dataful.name = variant -> in_payload dataful.payload
+  | Niche_encoded _ | Tag_only _ | Zero_size -> None
+  | _ -> bug "a variant of %s, which is not a sum type" (Ground.to_string sum)
+
+let projection_type env ~environment ty projection =
+  let result =
+    match (projection, ty) with
+    | Deref, Pointer { target; _ } -> Some target
+    | Deref, Raw (Pointer (Data target) | Nullable_pointer (Data target)) -> Some (Value target)
+    | Field name, Value record -> (
+        let layout = Memory_layout.of_type env record in
+        match layout.form with
+        | Struct _ -> struct_field layout name
+        | Zero_size -> None
+        | _ -> bug "field %s of %s, which is not a record" name (Ground.to_string record))
+    | Field name, Environment n -> (
+        match List.assoc_opt name (environment n) with
+        | Some ty -> Some ty
+        | None -> bug "environment %d has no field %s" n name)
+    | Variant_field { variant; field }, Value sum -> variant_field_type env sum variant field
+    | Index _, Value array -> (
+        match (Memory_layout.of_type env array).form with
+        | Array { element; _ } -> Some (Value element)
+        | Zero_size -> None
+        | _ -> bug "an index into %s" (Ground.to_string array))
+    | Index _, Raw (Pointer (Data element) | Nullable_pointer (Data element)) ->
+        Some (Value element)
+    | _ -> bug "a projection that does not fit its place"
+  in
+  match result with Some ty when erased env ty -> None | other -> other
+
+let place_type env ~environment (f : function_) (place : place) =
+  let root =
+    match place.root with Local local -> f.locals.(local).ty | Static { ty; _ } -> Value ty
+  in
+  if erased env root then None
+  else
+    List.fold_left
+      (fun ty projection ->
+        Option.bind ty (fun ty -> projection_type env ~environment ty projection))
+      (Some root) place.projections
 
 let successors = function
   | Goto block -> [ block ]
@@ -231,6 +308,8 @@ let map_statement map_local map_block = function
           result = Option.map (map_place map_local map_block) result;
         }
   | Drop place -> Drop (map_place map_local map_block place)
+  | Free_block { place; variant } ->
+      Free_block { place = map_place map_local map_block place; variant }
 
 let map_terminator map_local map_block terminator =
   let operand = map_operand map_local map_block in
@@ -458,6 +537,7 @@ let encode_statement instance = function
           option (encode_place instance) result;
         ]
   | Drop place -> tagged 2 [ encode_place instance place ]
+  | Free_block { place; variant } -> tagged 3 [ encode_place instance place; Text variant ]
 
 let encode_terminator instance terminator =
   let operand = encode_operand instance in
@@ -647,6 +727,7 @@ let statement_to_string = function
       ^ String.concat ", " (List.map operand_to_string arguments)
       ^ ")"
   | Drop place -> "drop " ^ place_to_string place
+  | Free_block { place; variant } -> "free " ^ place_to_string place ^ "." ^ variant
 
 let terminator_to_string = function
   | Goto block -> Printf.sprintf "goto b%d" block

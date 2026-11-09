@@ -25,6 +25,7 @@
   emit_c
   toolchain
   startup
-  positions)
+  positions
+  drops)
  (deps
   (glob_files %{workspace_root}/*.md)))

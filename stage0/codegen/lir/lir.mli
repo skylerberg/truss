@@ -137,6 +137,9 @@ type statement =
   | Assign of place * rvalue
   | Call of { target : target; arguments : operand list; result : place option }
   | Drop of place  (** Runs the type's drop code *)
+  | Free_block of { place : place; variant : string }
+      (** Frees the block of an [indirect] variant whose fields have all been moved out or dropped
+      *)
 
 type terminator =
   | Goto of block
@@ -168,6 +171,17 @@ type function_ = {
 type t = { key : Instance.key; main : function_; nested : function_ array }
 
 val signature : function_ -> signature
+
+(* The type of a projection of a place of the given type, or [None] where it
+   has zero size and so is erased. [environment] gives the fields of a
+   nested function's environment. Raises [Invalid_argument] for a projection
+   that does not fit the type, which is a compiler bug. *)
+val projection_type :
+  Memory_layout.env -> environment:(int -> (string * ty) list) -> ty -> projection -> ty option
+
+(* The type of a place in a function, or [None] where it has zero size. *)
+val place_type :
+  Memory_layout.env -> environment:(int -> (string * ty) list) -> function_ -> place -> ty option
 
 (* The blocks a terminator may go to, in order. *)
 val successors : terminator -> block list

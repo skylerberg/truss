@@ -226,10 +226,6 @@ let member_c context : Memory_layout.member -> string = function
   | Typed ty -> value_c context ty
   | Raw scalar -> scalar_c context scalar
 
-let member_ty : Memory_layout.member -> Lir.ty = function
-  | Typed ty -> Value ty
-  | Raw scalar -> Raw scalar
-
 (* The structs a member is held as by value. *)
 let holds_member context : Memory_layout.member -> key list = function
   | Typed ty when is_struct context ty -> [ Type ty ]
@@ -391,6 +387,31 @@ let function_ref_symbol fc : Lir.function_ref -> string = function
   | Instance key -> Instance.symbol key
   | Nested n -> Printf.sprintf "%s_Nested_%d" fc.symbol n
 
+let environment_of context fc n =
+  match Keys.find_opt (Environment (fc.symbol, n)) context.environments with
+  | Some fields -> fields
+  | None -> []
+
+(* Whether a variant of a sum type keeps its fields in a block. *)
+let indirect context sum variant =
+  let is_block (payload : Memory_layout.t) =
+    match payload.form with Scalar (Pointer (Block _)) -> true | _ -> false
+  in
+  match (layout context sum).form with
+  | Tagged { variants; _ } ->
+      List.exists
+        (fun (v : Memory_layout.variant) -> v.name = variant && is_block v.payload)
+        variants
+  | Niche_encoded { dataful; _ } -> dataful.name = variant && is_block dataful.payload
+  | _ -> false
+
+(* The C expression for the pointer to an [indirect] variant's block. *)
+let block_pointer context text sum variant =
+  match (layout context sum).form with
+  | Tagged _ -> text ^ ".payload.v_" ^ variant
+  | Niche_encoded _ -> text
+  | _ -> bug "a block of %s, which is not a sum type" (Ground.to_string sum)
+
 let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
   let root =
     match place.root with
@@ -401,79 +422,31 @@ let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
           (Printf.sprintf "extern const %s %s;\n" (value_c context ty) symbol);
         (symbol, Lir.Value ty)
   in
-  let step (text, (ty : Lir.ty)) (projection : Lir.projection) =
+  let text (text, (ty : Lir.ty)) (projection : Lir.projection) =
     match (projection, ty) with
-    | Deref, Pointer { target; _ } -> Some ("(*" ^ text ^ ")", target)
-    | Deref, Raw (Pointer (Data target) | Nullable_pointer (Data target)) ->
-        Some ("(*" ^ text ^ ")", Lir.Value target)
-    | Field name, Value record -> (
-        match (layout context record).form with
-        | Struct fields -> (
-            match find_field fields name with
-            | Some field -> Some (text ^ ".f_" ^ name, member_ty field.member)
-            | None -> None)
-        | Zero_size -> None
-        | _ -> bug "field %s of %s, which is not a record" name (Ground.to_string record))
-    | Field name, Environment n -> (
-        let fields =
-          match Keys.find_opt (Environment (fc.symbol, n)) context.environments with
-          | Some f -> f
-          | None -> []
-        in
-        match List.assoc_opt name fields with
-        | Some ty -> Some (text ^ ".f_" ^ name, ty)
-        | None -> bug "environment %d has no field %s" n name)
-    | Variant_field { variant; field }, Value sum -> variant_field context text sum variant field
-    | Index index, Value array -> (
-        match (layout context array).form with
-        | Array { element; _ } ->
-            Some (text ^ ".items[" ^ operand_c_exn context fc index ^ "]", Lir.Value element)
-        | Zero_size -> None
-        | _ -> bug "an index into %s" (Ground.to_string array))
-    | Index index, Raw (Pointer (Data element) | Nullable_pointer (Data element)) ->
-        Some (text ^ "[" ^ operand_c_exn context fc index ^ "]", Lir.Value element)
-    | _ -> bug "a projection that does not fit its place"
+    | Deref, _ -> "(*" ^ text ^ ")"
+    | Field name, _ -> text ^ ".f_" ^ name
+    | Variant_field { variant; field }, Value sum ->
+        if indirect context sum variant then block_pointer context text sum variant ^ "->f_" ^ field
+        else
+          (match (layout context sum).form with
+            | Tagged _ -> text ^ ".payload.v_" ^ variant
+            | _ -> text)
+          ^ ".f_" ^ field
+    | Index index, Value _ -> text ^ ".items[" ^ operand_c_exn context fc index ^ "]"
+    | Index index, _ -> text ^ "[" ^ operand_c_exn context fc index ^ "]"
+    | Variant_field _, _ -> bug "a variant of a place that is not a value"
   in
-  let rec walk current = function
+  let rec walk ((_, ty) as current) = function
     | [] -> Some current
     | projection :: rest -> (
-        match step current projection with
+        match
+          Lir.projection_type context.env ~environment:(environment_of context fc) ty projection
+        with
         | None -> None
-        | Some next -> if erased context (snd next) then None else walk next rest)
+        | Some next -> walk (text current projection, next) rest)
   in
   if erased context (snd root) then None else walk root place.projections
-
-and variant_field context text sum variant field =
-  let in_block access =
-    match (Memory_layout.block context.env sum variant).form with
-    | Struct fields -> (
-        match find_field fields field with
-        | Some found -> Some (access ^ "->f_" ^ field, member_ty found.member)
-        | None -> None)
-    | _ -> None
-  in
-  let in_payload access (payload : Memory_layout.t) =
-    match payload.form with
-    | Struct fields -> (
-        match find_field fields field with
-        | Some found -> Some (access ^ ".f_" ^ field, member_ty found.member)
-        | None -> None)
-    | Scalar (Pointer (Block _)) -> in_block access
-    | Zero_size -> None
-    | _ -> bug "the payload of %s" variant
-  in
-  match (layout context sum).form with
-  | Tagged { variants; _ } -> (
-      match List.find_opt (fun (v : Memory_layout.variant) -> v.name = variant) variants with
-      | Some v -> in_payload (text ^ ".payload.v_" ^ variant) v.payload
-      | None -> bug "no variant %s" variant)
-  | Niche_encoded { dataful; _ } when dataful.name = variant -> (
-      match dataful.payload.form with
-      | Struct _ -> in_payload text dataful.payload
-      | Scalar (Pointer (Block _)) -> in_block text
-      | _ -> None)
-  | Niche_encoded _ | Tag_only _ | Zero_size -> None
-  | _ -> bug "a variant of %s, which is not a sum type" (Ground.to_string sum)
 
 and operand_c context fc : Lir.operand -> (string * Lir.ty) option = function
   | Copy place | Move place -> place_c context fc place
@@ -865,6 +838,11 @@ let statement_c context fc buffer (statement : Lir.statement) =
             ^ ";\n");
           line "%s(&%s);" symbol text
       | Some _ -> bug "a drop of a place that is not a value")
+  | Free_block { place; variant } -> (
+      match place_c context fc place with
+      | Some (text, Value sum) ->
+          line "t_runtime_free(%s);" (block_pointer context text sum variant)
+      | _ -> bug "a block of a place that is not a sum type")
 
 let unreachable_c context =
   match context.build with
