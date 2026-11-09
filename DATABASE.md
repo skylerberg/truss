@@ -460,8 +460,33 @@ A stage marks a query as saved where reading its result back is cheaper than
 computing it, and where early cutoff matters after a restart. Saved are each
 file's declarations, each definition's tree and where it starts, its
 resolved form, the hash of its parts, its interface, shape, and signature,
-its checked body and ownership's result, each file's diagnostics, and each
-package's checks.
+its checked body and ownership's result, each file's diagnostics, each
+package's checks, each instance's LIR, each pulled method's version, and
+each test's key.
+
+### Lowering
+
+Code generation's lowering is a query too, so a test run after an edit
+lowers only the instances the edit reached, and a test's key, which is the
+hash of what its code can reach, stays current like any other result:
+
+- **An instance's LIR** is a query keyed by the instance and by how it is
+  lowered: the target's widths, and whether the program checks what the
+  prover would prove. A pulled method's version, whose locals make its
+  cursor's fields, is a query of its own.
+- **Each computation lowers in a context of its own,** made from the
+  query's reads. A layout or a piece of generated code worked out on the way
+  is read through that query, never cached where another query could use it
+  without reading what it came from.
+- **A constant that is worked out by running code** is the one result a
+  query cannot make, since running code is not a function of reads. Its
+  query says so instead, and the build runs the constant's evaluator, whose
+  code is lowered by the same query, and puts the value in the program. Only
+  that constant's data depends on running code; every instance that uses it
+  refers to it by name.
+- **A test's key** is a query that walks what the test can reach through the
+  LIR queries, with an evaluated constant standing for its evaluator's code,
+  which decides its value.
 
 ### Garbage collection
 
@@ -737,7 +762,9 @@ about a small input.
   every earlier write and refusing a second writer, checks before and after
   fixes and restarts, what an edit computes again, removed modules, malformed
   manifests, packages in one worktree, the `usize_bits` rule between
-  packages, a new worktree starting near another, holes, references,
+  packages, a new worktree starting near another, a test run that lowers
+  nothing after a restart and only what an edit reached after one, holes,
+  references,
   dependencies, explaining a name, impact, and both kinds of overlap, with a
   merge, in a git repository.
 - **Every other stage's tests** run on the same engine, with the standard
@@ -750,12 +777,6 @@ each problem it finds becoming a focused test.
 
 ## Not built yet
 
-- **Lowering as a kept query.** Code generation lowers each test run's
-  instances again, so finding which tests a change affects costs lowering
-  what they reach. Lowering reads the type checker's results through queries,
-  but its context holds what the driver works out along the way, such as a
-  pulled method's cursor fields and constants it runs code for, which must
-  become queries first.
 - **Watching files with FSEvents and inotify,** in place of scanning stamps
   each second.
 - **Dependency packages as frozen layers,** once there is a registry.
@@ -771,8 +792,8 @@ each problem it finds becoming a focused test.
 - **Large projects.** A graph held in memory suits projects up to a few
   hundred thousand definitions. Beyond that, a graph that keeps cold parts on
   disk is a change inside `Engine` alone.
-- **Running affected tests unasked.** Once lowering is a kept query, test
-  keys stay current, so the background process could run the tests whose keys
-  changed while the machine is idle, and have their results ready before
-  `test` is asked. Whether that
-  is worth the CPU when several agents share a machine is not decided.
+- **Running affected tests unasked.** Test keys stay current once a test
+  run has asked for them, so the background process could run the tests whose
+  keys changed while the machine is idle, and have their results ready before
+  `test` is asked. Whether that is worth the CPU when several agents share a
+  machine is not decided.

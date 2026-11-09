@@ -233,6 +233,47 @@ let () =
       expect_contains response "app::main::double";
       expect_contains response "fn double(value: Int64) -> Int64")
 
+(* Lowering is kept too *)
+
+let lowered directory =
+  List.filter (fun label -> contains label "lowered_instance(") (computed directory)
+
+let () =
+  test "a test run after a restart lowers nothing" (fun () ->
+      fresh_store ();
+      let directory = package () in
+      expect_status (request directory (Test { sanitize = false })) 0;
+      Database.reset ();
+      expect_status (request directory (Test { sanitize = false })) 0;
+      match lowered directory with
+      | [] -> ()
+      | found -> fail "lowered [%s]" (String.concat "; " found));
+  test "editing one function lowers that function again, and not the others" (fun () ->
+      fresh_store ();
+      let directory = package () in
+      write directory "other.truss"
+        "internal fn triple(value: Int64) -> Int64 {\n\
+        \  value * 3\n\
+         }\n\n\
+         test \"tripling\" {\n\
+        \  assert triple(1) == 3\n\
+         }\n";
+      expect_status (request directory (Test { sanitize = false })) 0;
+      clear directory;
+      write directory "other.truss"
+        "internal fn triple(value: Int64) -> Int64 {\n\
+        \  value * 4 - value\n\
+         }\n\n\
+         test \"tripling\" {\n\
+        \  assert triple(1) == 3\n\
+         }\n";
+      expect_status (request directory (Test { sanitize = false })) 0;
+      let again = lowered directory in
+      if List.exists (fun label -> contains label "double") again then
+        fail "lowered double again: [%s]" (String.concat "; " again);
+      if not (List.exists (fun label -> contains label "triple") again) then
+        fail "did not lower triple: [%s]" (String.concat "; " again))
+
 (* With git *)
 
 let git directory arguments =

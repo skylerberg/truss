@@ -1,86 +1,151 @@
 module Names = Resolve.Names
 
-type t = {
-  database : Query.context;
-  context : Lower.context;
-  toolchain : Toolchain.t;
-  cache : Build.cache;
-  settings : Build.settings;
-  mutable done_ : (Instance.key * Lir.compiled) list;
-  mutable pulled : (Ground.yielding * (Lir.function_ * Lir.local list)) list;
-      (** Each pulled method, with its drops elaborated *)
-}
+(* Lowering is a query: what each instance compiles to, for a target and
+   whether the program checks what the prover would prove, kept current by
+   the code database like any other result. See DATABASE.md, "Exact keys",
+   and CODEGEN.md, "Caching".
 
-(* A pulled method's version with its drops elaborated, made once. *)
-let pulled t yielding =
-  match List.find_opt (fun (y, _) -> Ground.equal (Cursor y) (Cursor yielding)) t.pulled with
-  | Some (_, made) -> made
-  | None ->
-      let f, owned = Lower.pulled t.context yielding in
-      let glue = t.context.glue in
-      let made =
-        ( Drops.elaborate t.context.env
-            ~needs_drop:(fun ty -> not (Glue.trivial glue ty))
-            ~environment:(fun _ -> [])
-            f,
-          owned )
-      in
-      t.pulled <- (yielding, made) :: t.pulled;
-      made
+   Each computation makes a lowering context of its own from the query's
+   reads, so a layout or a piece of glue worked out on the way is read
+   through this query and never cached where another could miss the
+   dependency. A pulled method's cursor is a query too. A constant whose value
+   must be worked out by running code is the one result a query cannot make,
+   since running code is not a function of reads: the query says so, and the
+   driver runs its [Evaluator], whose own code is lowered by the query. *)
+
+type lowering = { target : Memory_layout.target; checks : bool }
+
+let show_lowering lowering =
+  Printf.sprintf "%d-bit%s" (lowering.target.usize_bytes * 8)
+    (if lowering.checks then ", checked" else "")
+
+exception Needs_evaluation of Path.t * Ground.ty
+
+type outcome = Compiled of Lir.compiled | Evaluate of Path.t * Ground.ty
 
 let environment (instance : Lir.t) n = instance.nested.(n).environment
 
-let make t (key : Instance.key) : Lir.compiled =
-  let glue = t.context.glue in
-  let code instance =
-    let needs_drop ty = not (Glue.trivial glue ty) in
-    let elaborate f =
-      Drops.elaborate t.context.env ~needs_drop ~environment:(environment instance) f
-    in
-    Lir.Code
-      (Lir.canonical_instance
-         {
-           instance with
-           main = elaborate instance.main;
-           nested = Array.map elaborate instance.nested;
-         })
-  in
+let elaborate_code (context : Lower.context) (instance : Lir.t) =
+  let needs_drop ty = not (Glue.trivial context.glue ty) in
+  let elaborate f = Drops.elaborate context.env ~needs_drop ~environment:(environment instance) f in
+  Lir.Code
+    (Lir.canonical_instance
+       {
+         instance with
+         main = elaborate instance.main;
+         nested = Array.map elaborate instance.nested;
+       })
+
+let rec fresh_context lowering database =
+  let context = Lower.context ~checks:lowering.checks database lowering.target in
+  (context.cursor_fields :=
+     fun yielding ->
+       Yields.cursor_fields context.env
+         (fst (Query.demand database (Lazy.force pulled) (lowering, yielding))));
+  (context.evaluate := fun path ty -> raise (Needs_evaluation (path, ty)));
+  context
+
+(* A pulled method's version, with its drops elaborated. *)
+and pulled =
+  lazy
+    (Query.query ~name:"pulled" ~saved:true
+       ~show:(fun (lowering, yielding) ->
+         show_lowering lowering ^ " " ^ Ground.to_string (Cursor yielding))
+       (fun database (lowering, yielding) ->
+         let context = fresh_context lowering database in
+         let f, owned = Lower.pulled context yielding in
+         ( Drops.elaborate context.env
+             ~needs_drop:(fun ty -> not (Glue.trivial context.glue ty))
+             ~environment:(fun _ -> [])
+             f,
+           owned )))
+
+let make (context : Lower.context) lowering database (key : Instance.key) : Lir.compiled =
+  let glue = context.glue in
+  let pulled yielding = Query.demand database (Lazy.force pulled) (lowering, yielding) in
   match key with
   | Code _ -> (
-      try code (Lower.instance t.context key)
+      try elaborate_code context (Lower.instance context key)
       with Invalid_argument message ->
         invalid_arg (message ^ ", lowering " ^ Instance.to_string key))
-  | Constant path -> Data (Lower.constant t.context path)
+  | Constant path -> Data (Lower.constant context path)
   | Drop (Cursor yielding as cursor) ->
-      let f, owned = pulled t yielding in
+      let f, owned = pulled yielding in
       Code
         (Lir.canonical_instance
-           { key; main = Yields.cursor_drop t.context.env ~cursor ~owned f; nested = [||] })
+           { key; main = Yields.cursor_drop context.env ~cursor ~owned f; nested = [||] })
   | Cursor_next yielding ->
-      let f, _ = pulled t yielding in
+      let f, _ = pulled yielding in
       let cursor = Ground.Cursor yielding in
-      let result = Lower.cursor_result t.context yielding in
+      let result = Lower.cursor_result context yielding in
       Code
         (Lir.canonical_instance
-           { key; main = Yields.cursor_next t.context.env ~cursor ~result f; nested = [||] })
-  | Drop ty -> code (Glue.drop glue ty)
-  | Copy ty -> code (Glue.copy glue ty)
-  | Debug ty -> code (Glue.debug glue ty)
-  | Encode ty -> code (Glue.encode glue ty)
-  | Any_drop ty -> code (Glue.any_drop glue ty)
-  | Evaluator path -> code (Lower.evaluator t.context path)
-  | Entry _ | Program_main _ | Any_entry _ | Adapter _ -> code (Lower.instance t.context key)
-  | Any_table _ -> Table (Lower.any_table t.context key)
-  | Table _ -> Table (Lower.table t.context key)
-  | Real_evidence capability -> Evidence (Lower.real_evidence t.context capability)
+           { key; main = Yields.cursor_next context.env ~cursor ~result f; nested = [||] })
+  | Drop ty -> elaborate_code context (Glue.drop glue ty)
+  | Copy ty -> elaborate_code context (Glue.copy glue ty)
+  | Debug ty -> elaborate_code context (Glue.debug glue ty)
+  | Encode ty -> elaborate_code context (Glue.encode glue ty)
+  | Any_drop ty -> elaborate_code context (Glue.any_drop glue ty)
+  | Evaluator path -> elaborate_code context (Lower.evaluator context path)
+  | Entry _ | Program_main _ | Any_entry _ | Adapter _ ->
+      elaborate_code context (Lower.instance context key)
+  | Any_table _ -> Table (Lower.any_table context key)
+  | Table _ -> Table (Lower.table context key)
+  | Real_evidence capability -> Evidence (Lower.real_evidence context capability)
+
+let lowered =
+  Query.query ~name:"lowered_instance" ~saved:true
+    ~show:(fun (lowering, key) -> show_lowering lowering ^ " " ^ Instance.to_string key)
+    (fun database (lowering, key) ->
+      let context = fresh_context lowering database in
+      match make context lowering database key with
+      | compiled -> Compiled compiled
+      | exception Needs_evaluation (path, ty) -> Evaluate (path, ty))
+
+(* What a test's result is kept under: what its code can reach. A constant
+   worked out by running code is keyed by the evaluator that works it out,
+   whose code is what decides its value. *)
+let test_key_query =
+  Query.query ~name:"test_key" ~saved:true
+    ~show:(fun (lowering, path) -> show_lowering lowering ^ " " ^ Path.show path)
+    (fun database (lowering, path) ->
+      let context = fresh_context lowering database in
+      let rec lookup key =
+        match Query.demand database lowered (lowering, key) with
+        | Compiled compiled -> compiled
+        | Evaluate (path, _) -> lookup (Instance.Evaluator path)
+      in
+      match Reachable.test_key context.env ~lookup (Lower.test_key path) with
+      | key -> Some key
+      | exception Invalid_argument _ -> None)
+
+type t = {
+  database : Query.context;
+  lowering : lowering;
+  context : Lower.context;  (** For laying out and emitting what the queries lowered *)
+  toolchain : Toolchain.t;
+  cache : Build.cache;
+  settings : Build.settings;
+  mutable evaluated : (Path.t * Lir.static_value) list;
+      (** Each constant worked out by running code, in this build *)
+}
+
+let evaluate_hook : (t -> Path.t -> Ground.ty -> Lir.static_value) ref =
+  ref (fun _ _ _ -> invalid_arg "Compile: no evaluator")
 
 let compiled t key =
-  match List.find_opt (fun (k, _) -> Instance.equal k key) t.done_ with
-  | Some (_, instance) -> instance
-  | None ->
-      let instance = make t key in
-      t.done_ <- (key, instance) :: t.done_;
-      instance
+  match Query.demand t.database lowered (t.lowering, key) with
+  | Compiled compiled -> compiled
+  | Evaluate (path, ty) ->
+      let value =
+        match List.find_opt (fun (p, _) -> Path.equal p path) t.evaluated with
+        | Some (_, value) -> value
+        | None ->
+            let value = !evaluate_hook t path ty in
+            t.evaluated <- (path, value) :: t.evaluated;
+            value
+      in
+      Data { data_key = Constant path; ty; value }
 
 (* The definitions an instance's positions are relative to. *)
 let anchored (instance : Lir.t) =
@@ -215,9 +280,12 @@ let run_tests ?results t ~time_limit tests =
       (* Each test's result is kept under its key, which changes with any
          code it can run, and a test is run again only when it changes. *)
       match
-        List.map
-          (fun root -> (root, Reachable.test_key t.context.env ~lookup:(compiled t) root))
-          roots
+        List.map2
+          (fun root path ->
+            match Query.demand t.database test_key_query (t.lowering, path) with
+            | Some key -> (root, key)
+            | None -> invalid_arg ("Compile: cannot lower " ^ Path.show path))
+          roots tests
       with
       | exception Invalid_argument message -> Error message
       | keyed -> (
@@ -264,9 +332,9 @@ let run_tests ?results t ~time_limit tests =
 let test_keys t tests =
   List.filter_map
     (fun path ->
-      match Reachable.test_key t.context.env ~lookup:(compiled t) (Lower.test_key path) with
-      | key -> Some (path, key)
-      | exception Invalid_argument _ -> None)
+      Option.map
+        (fun key -> (path, key))
+        (Query.demand t.database test_key_query (t.lowering, path)))
     tests
 
 let run_program ?input t ~main ~arguments =
@@ -374,18 +442,15 @@ let evaluate t path ty =
            errors)
 
 let create ?(checks = true) database target toolchain cache settings =
-  let t =
-    {
-      database;
-      context = Lower.context ~checks database target;
-      toolchain;
-      cache;
-      settings;
-      done_ = [];
-      pulled = [];
-    }
-  in
-  (t.context.cursor_fields :=
-     fun yielding -> Yields.cursor_fields t.context.env (fst (pulled t yielding)));
-  (t.context.evaluate := fun path ty -> evaluate t path ty);
-  t
+  let lowering = { target; checks } in
+  {
+    database;
+    lowering;
+    context = fresh_context lowering database;
+    toolchain;
+    cache;
+    settings;
+    evaluated = [];
+  }
+
+let () = evaluate_hook := evaluate
