@@ -418,6 +418,7 @@ let check database (key : Names.key) =
         (Interface.Check.unmet_bounds database ~bounds:(bounds state)
            (since interface_named !(context.named)));
       finalize state;
+      Capabilities.check state lowered;
       Some
         {
           checked = { state.tables with obligations = List.rev state.obligations };

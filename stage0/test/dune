@@ -10,7 +10,8 @@
   infer_tests
   patterns_tests
   usage_tests
-  ownership_tests)
+  ownership_tests
+  capabilities_tests)
  (libraries
   harness
   source
