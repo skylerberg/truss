@@ -114,7 +114,7 @@ let check_grants checking (origin : Core.origin) (callee : Core.callee) =
                 interface.impl_methods
           | None -> ())
       | Bound | Dynamic -> ())
-  | Capability_method _ | Intrinsic _ | Value _ -> ()
+  | Capability_method _ | Intrinsic _ | Through _ -> ()
 
 (* What code needs must be within what is available where it is. *)
 let need checking scope (origin : Core.origin) ?(implementation = false) ?(through_value = false)
@@ -174,7 +174,7 @@ let callee_needs checking scope (origin : Core.origin) (callee : Core.callee) =
         | Some method_ -> method_.method_signature.uses
         | None -> [])
     | Capability_method { capability; _ } -> [ T.Capability capability ]
-    | Intrinsic _ | Value _ -> [])
+    | Intrinsic _ | Through _ -> [])
 
 let rec expression checking scope (node : Core.expression) =
   match node.kind with
@@ -200,7 +200,7 @@ let rec expression checking scope (node : Core.expression) =
          own. *)
       check_grants checking node.origin call.callee;
       need checking scope node.origin
-        ~through_value:(match call.callee with Value _ -> true | _ -> false)
+        ~through_value:(match call.callee with Through _ -> true | _ -> false)
         call.uses
   | _ -> inside checking scope (`Expression node)
 
@@ -242,7 +242,7 @@ and statement checking scope (written : Core.statement) =
           expression checking scope stop
       | Each each -> expression checking scope each
       | Pull { cursor; next } ->
-          expression checking scope cursor;
+          Core_walk.place { Core_walk.nothing with expression = expression checking scope } cursor;
           Option.iter (callee_needs checking scope written.origin) next);
       inside checking scope (`Pattern pattern);
       specifications checking clauses;

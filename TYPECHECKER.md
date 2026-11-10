@@ -1177,9 +1177,12 @@ variables are read-only inside it.
 
 ### Owned values where they are required
 
-A `var`'s initializer, an `own` argument, a field, a collection element, and
-a returned value must be owned. A place there must be marked `own` or copied
-with `copy()`, unless it is `Plain`. Otherwise the error offers both fixes.
+A `var`'s initializer, an `own` argument, a field, a collection element, a
+part of a tagged string, and a returned value must be owned. A place there
+must be marked `own` or copied with `copy()`, unless it is `Plain`.
+Otherwise the error offers both fixes. A tagged string takes its parts
+because each goes into the template its tag is given; a plain string only
+reads what it interpolates.
 
 ### Yielding and lending
 
@@ -1565,8 +1568,12 @@ none, and nothing that runs or proves the program reaches it.
   the part a lending call lends, which is what an index is, or a value held
   for the statement so that a part of it can be named. Wherever a place can
   be used where it is, the node says whether it is: an argument, what a
-  `match`, a `let`, or an `is` takes apart, what a `yield` gives, and an
-  implementation that is provided.
+  `match`, a `let`, or an `is` takes apart, what a `yield` gives, an
+  implementation that is provided, a function value that is called, what a
+  string displays, and a cursor a loop pulls. So the value of a place,
+  where the form has it as a value, is taken from the place: copied where
+  its type copies implicitly, and moved otherwise. Nothing that only reads
+  a place is given its value.
 - **An operator is what it means.** Arithmetic, a bitwise operator, or a
   shift on built-in types is one node holding the operation, whether it was
   written `left + right` or `left.add(right)`. A comparison of built-in
@@ -1579,14 +1586,19 @@ none, and nothing that runs or proves the program reaches it.
   update of its target, worked out once, by the operator applied to what
   the target held; a `for` over a value is a loop over the call of its
   `each`; a range written as a value is the range type's record; a variant
-  used as a function is the lambda that builds it; and `with (port)` names
-  the field and the local.
-- **What is primitive stays one node, with every choice made.** An
+  used as a function is the lambda that builds it; `with (port)` names the
+  field and the local; a list literal is a storage with room for its
+  elements, each pushed onto it, made into the list; and an owned
+  collection seen as its view is the call of its `slice`.
+- **A node of its own is for what no other node says.** A tagged string is
+  the call of its tag's `from_template` on the template built from it,
+  beside the texts as they were written, which the prover runs the tag's
+  clauses on. An array literal is built in place, and a specification's
+  sequence, set, or map is built by no code. A function value widened, and
+  an integer meeting an `Integer`, are conversions where they happen. An
   interpolated string holds its pieces, each value with its `display`, and
-  the builder's methods. A collection literal says how it is built. A
-  tagged string holds its `from_template` and the template it is given. A
-  conversion is a node where it happens, and holds the method that gives a
-  view.
+  the builder's methods, and a set or a map literal what makes it empty and
+  what inserts into it.
 - **Every node has its type,** solved and normalized.
 - **A condition says whether it runs:** each `requires` and each `assert`
   is marked as one the program checks when nothing in it is only for
@@ -1827,6 +1839,11 @@ the compiler. The prelude holds:
 - **Reading the core form.** Ownership, the prover, and code generation
   read the checked form's tables and the syntax tree, and work out again
   what the core form holds.
+- **An interpolated string and a set or map literal as the calls they
+  are.** Each is still a node that names the standard library's functions
+  it stands for. An interpolation is to be the builder's calls once those
+  and `display` promise to end, and a set or a map literal a call of the
+  type's `empty` and its `insert`s once the types have one.
 - **A contract as a result of its own.** DESIGN.md has callers' proofs read a
   function's contract, apart from its interface and its body. The contract
   is type-checked with the body, and the prover reads it from the callee's

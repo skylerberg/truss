@@ -246,9 +246,10 @@ let definition ?statement:visit f (definition : definition) =
       block body
   | Definition_error _ -> ()
 
-(* Where each expression, statement, pattern, arm, and update of a
-   definition is, by its id: what the stages that read the core form, which
-   holds no positions, show a node's source by. *)
+(* The span of each expression, statement, pattern, match arm, record
+   update, contract clause, and loop clause of a definition, indexed by
+   node id. The core form holds no spans, so a stage that reads it looks up
+   a node's origin here to show its source text. *)
 let spans (definition_ : definition) : span array =
   let spans = Array.make (definition_.id + 1) definition_.span in
   let rec pattern (written : pattern) =
@@ -283,10 +284,21 @@ let spans (definition_ : definition) : span array =
   and statement (written : statement) =
     spans.(written.id) <- written.span;
     (match written.kind with
-    | Let { pattern = bound; _ } | For { pattern = bound; _ } -> pattern bound
+    | Let { pattern = bound; _ } -> pattern bound
+    | For { pattern = bound; clauses; _ } ->
+        pattern bound;
+        List.iter (fun (clause : loop_clause) -> spans.(clause.id) <- clause.span) clauses
+    | While { clauses; _ } ->
+        List.iter (fun (clause : loop_clause) -> spans.(clause.id) <- clause.span) clauses
     | _ -> ());
     statement_parts ~expression ~statement written
   in
+  (match definition_.kind with
+  | Function { signature = { clauses; _ }; _ }
+  | Method_declaration { clauses; _ }
+  | Theorem { clauses; _ } ->
+      List.iter (fun (clause : clause) -> spans.(clause.id) <- clause.span) clauses
+  | _ -> ());
   definition ~statement expression definition_;
   spans
 

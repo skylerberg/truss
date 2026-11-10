@@ -253,7 +253,7 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
       | Some _ -> not_ported "an operation that lends"
       | None -> ())
   | Capability_method _ -> not_ported "a call of a capability's method"
-  | Value _ -> not_ported "a call through a function value"
+  | Through _ -> not_ported "a call through a function value"
 
 and return_ st (returned : Core.expression option) =
   (match st.frame.exit with
@@ -320,10 +320,12 @@ and block_into st (inner : Core.block) destination =
 and statement st (written : Core.statement) =
   in_statement st (fun () ->
       match written.kind with
-      | Evaluate { kind = Use _; _ } -> ()
+      | Evaluate { kind = Use found; _ } -> ignore (place st found)
       | Evaluate value -> ignore (value_place st value)
       | Let { pattern = { kind = Anything; _ }; value; otherwise = None } -> (
-          match value with Place _ -> () | Value value -> ignore (value_place st value))
+          match value with
+          | Place found -> ignore (place st found)
+          | Value value -> ignore (value_place st value))
       | Let
           {
             pattern = { kind = Bind { local; name; mutable_; _ }; type_; _ };

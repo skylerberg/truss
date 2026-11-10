@@ -21,6 +21,20 @@ let () =
         (keep ^ "fn f(items: own List[Int64]) {\n  keep(own items)\n  look(items)\n}\n")
         "ownership.use_after_move"
         ~fixed:(keep ^ "fn f(items: own List[Int64]) {\n  keep(items.copy())\n  look(items)\n}\n"));
+  test "a tagged string takes its parts, and a plain one reads them" (fun () ->
+      let shout =
+        "type Shout(text: String)\n\n\
+         impl FromTemplate for Shout {\n\
+        \  type Part = String\n\n\
+        \  fn from_template(template: Template[String]) -> Shout { todo }\n\
+         }\n\n"
+      in
+      one_diagnostic
+        (shout ^ "fn f(name: String) -> Shout {\n  Shout\"hey ${name}\"\n}\n")
+        "ownership.needs_owned";
+      fine (shout ^ "fn f(name: String) -> Shout {\n  Shout\"hey ${name.copy()}\"\n}\n");
+      fine (shout ^ "fn f(name: own String) -> Shout {\n  Shout\"hey ${own name}\"\n}\n");
+      fine "fn f(name: String) -> String {\n  \"hey ${name}\"\n}\n");
   test "a place that copies implicitly is copied, not moved" (fun () ->
       fine "fn take(count: own Int64) {}\n\nfn f(count: Int64) {\n  take(count)\n  take(count)\n}\n");
   test "a place moved on one path cannot be used after the paths meet" (fun () ->
