@@ -742,11 +742,24 @@ and statement_kind builder frontier (node : Core.statement) =
                 (fun lent : loan -> { lent; mode = Read; lender = To_loop })
                 (Place.of_core cursor) )
       in
-      loop builder frontier ~bound:(pattern_locals pattern) ~held ~condition:None body node.origin
+      (* The loop's names view what the loop goes over. A name of a [Plain]
+         type is a copy, so it views only what that views. *)
+      let views =
+        match iteration with
+        | Integer_range _ -> []
+        | Yielding_call call ->
+            List.map
+              (fun (view : view) ->
+                if builder.plain pattern.type_ then { view with taken = true } else view)
+              (viewed builder call)
+        | Cursor { cursor; _ } -> taken_from builder cursor
+      in
+      loop builder frontier ~bound:(pattern_locals pattern) ~views ~held ~condition:None body
+        node.origin
         ~parallel:(match node.kind with For { parallel; _ } -> parallel | _ -> false)
   | While { condition; body; _ } ->
-      loop builder frontier ~bound:[] ~held:None ~condition:(Some condition) body node.origin
-        ~parallel:false
+      loop builder frontier ~bound:[] ~views:[] ~held:None ~condition:(Some condition) body
+        node.origin ~parallel:false
   | Parallel branches ->
       let frontier, ranges =
         List.fold_left
@@ -838,7 +851,7 @@ and let_ builder frontier (node : Core.statement) (pattern : Core.pattern) (valu
    evaluates its condition after the head, as a statement of its own. The
    loop ends from the head or the condition, and from every [break]. A
    loop over a place lends the place for the body. *)
-and loop builder frontier ~bound ~held ~condition ~parallel (body : Core.block) origin =
+and loop builder frontier ~bound ~views ~held ~condition ~parallel (body : Core.block) origin =
   match frontier with
   | [] -> []
   | _ ->
@@ -856,8 +869,12 @@ and loop builder frontier ~bound ~held ~condition ~parallel (body : Core.block) 
         | None -> [ head ]
       in
       builder.loans <- Option.to_list held @ loans;
+      let entered =
+        if bound = [] || views = [] then tested
+        else emit builder tested (Hold { holders = bound; views }) origin
+      in
       let first = builder.count in
-      let body_end = block builder tested body in
+      let body_end = block builder entered body in
       if parallel then
         builder.parallel_loops <-
           ({ first; limit = builder.count }, bound) :: builder.parallel_loops;

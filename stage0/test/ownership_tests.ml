@@ -357,6 +357,29 @@ let () =
     \  add\n\
      }\n"
     "ownership.returns_local_view";
+  rejected "a view copied out of a loop variable views what the loop goes over"
+    "fn f(data: mut List[Int64], other: List[Int64]) -> USize {\n\
+    \  var parts: List[Slice[Int64]] = []\n\
+    \  mut parts.push(data[..])\n\
+    \  var kept: Slice[Int64] = other[..]\n\
+    \  for part in parts {\n\
+    \    kept = part\n\
+    \  }\n\
+    \  mut data.push(1)\n\
+    \  kept.length()\n\
+     }\n"
+    "ownership.changed_while_viewed";
+  accepted "a `Plain` loop variable is a copy, so what the loop went over can change after it"
+    "fn f(data: List[Int64], other: List[Int64]) -> USize {\n\
+    \  var parts: List[Slice[Int64]] = []\n\
+    \  mut parts.push(data[..])\n\
+    \  var kept: Slice[Int64] = other[..]\n\
+    \  for part in parts {\n\
+    \    kept = part\n\
+    \  }\n\
+    \  mut parts.clear()\n\
+    \  kept.length()\n\
+     }\n";
   rejected "a place cannot change while a name that a `match` on it binds is in use"
     "fn f() -> USize {\n\
     \  var slot: Option[String] = Some(\"a\".copy())\n\

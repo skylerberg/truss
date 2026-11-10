@@ -1236,6 +1236,11 @@ all read from one account of what a value views:
 - **A name bound by a `match` or an `is` on a place views that place,**
   because the name refers to a part of it. `slot = None` inside the
   `Some(inner)` arm of `match slot` is an error while `inner` is in use.
+- **The names that a `for` loop binds view what the loop goes over:** what
+  the yielding call's arguments lend, or what the cursor views. A name of a
+  `Plain` type is a copy, so it views only what that views. After
+  `for part in parts { kept = part }`, where `parts` holds slices of
+  `data`, `kept` views `data`.
 - **A function returns views only of what reached it through its
   parameters.** A returned view-typed value may hold loans only of its
   parameters and of what they view, never of what ends with the function:
