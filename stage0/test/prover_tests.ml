@@ -881,6 +881,57 @@ let () =
         \  }\n\
         \  last\n\
          }\n");
+  test "a loop over a cursor in a field calls its next" (fun () ->
+      proven
+        "type Countdown(left: UInt8)\n\n\
+         impl Cursor for Countdown {\n\
+        \  type Element = UInt8\n\n\
+        \  fn next(mut self) -> Option[UInt8]\n\
+        \    ensures result != None ==> self.left < old(self.left)\n\
+        \    ensures result != None ==> result == Some(self.left)\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    if self.left == 0 { None } else {\n\
+        \      self.left -= 1\n\
+        \      Some(self.left)\n\
+        \    }\n\
+        \  }\n\
+         }\n\n\
+         type Timer(countdown: Countdown, ticks: UInt8)\n\n\
+         fn f(timer: mut Timer) -> UInt8\n\
+        \  ensures timer.ticks == old(timer.ticks)\n\
+        \  cost time finite\n\
+         {\n\
+        \  var last: UInt8 = 0\n\
+        \  for value in timer.countdown\n\
+        \    invariant timer.ticks == old(timer.ticks)\n\
+        \    decreases timer.countdown.left\n\
+        \  {\n\
+        \    last = value\n\
+        \  }\n\
+        \  last\n\
+         }\n");
+  test "a later arm sees what an earlier arm's guard changed" (fun () ->
+      proven
+        "fn bump(count: mut Int64) -> Bool\n\
+        \  requires count < 100\n\
+        \  ensures count == old(count) + 1\n\
+        \  ensures !result\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  count += 1\n\
+        \  false\n\
+         }\n\n\
+         fn f(value: Int64) -> Int64\n\
+        \  ensures value == 1 ==> result == 1\n\
+        \  ensures value != 1 ==> result == 0\n\
+         {\n\
+        \  var count: Int64 = 0\n\
+        \  match value {\n\
+        \    1 if bump(mut count) => 5\n\
+        \    _ => count\n\
+        \  }\n\
+         }\n");
   test "assigning an element changes only that element" (fun () ->
       proven
         "fn f(items: mut List[Int64])\n\
