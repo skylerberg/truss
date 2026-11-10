@@ -1,12 +1,12 @@
-(* Looking up a name after a dot: fields, a type's own methods, trait
-   methods, and a type's static members. *)
+(* Looks up a member, the name after a dot: fields, methods of a type, trait
+   methods, and static members of a type. *)
 
 module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
 
-(* The packages whose traits a dot-call may find: the standard library, the
-   calling package, and those its manifest lists. *)
+(* The packages whose traits a method call with a dot can find: the standard
+   library, the calling package, and the packages its manifest lists. *)
 let visible_packages database (package : string) =
   List.sort_uniq compare
     ("standard" :: package
@@ -14,7 +14,7 @@ let visible_packages database (package : string) =
          (fun (dependency : Workspace.dependency) -> dependency.package)
          (Query.demand database Workspace.dependencies package))
 
-(* A type's own methods with a name: one per receiver. *)
+(* The methods of a type with the given name: one for each receiver mode. *)
 let own_methods database owner name =
   List.filter_map
     (fun (key : Names.key) ->
@@ -26,7 +26,7 @@ let own_constant database owner name =
     (fun (key : Names.key) -> match key.path with Member_constant _ -> Some key.path | _ -> None)
     (Query.demand database Names.members (owner, name))
 
-(* A trait's versions of a method: one for each way it takes [self]. *)
+(* The versions of a trait method: one for each receiver mode. *)
 let trait_methods database trait name =
   match Query.demand database Environment.trait_interface trait with
   | Some interface ->
@@ -78,13 +78,13 @@ let shape database path =
   | Some interface -> Some interface.shape
   | None -> None
 
-(* The report of a type whose definition did not parse, of which everything
-   is accepted. *)
+(* The report for a type whose definition did not parse. Any member access
+   on such a type is accepted. *)
 let broken database path =
   match shape database path with Some (Error_shape report) -> Some report | _ -> None
 
-(* Whether code in a package may see a type's fields: an opaque type's
-   fields are visible only in its own package. *)
+(* Whether code in a package can see the fields of a type. The fields of an
+   opaque type are visible only in its own package. *)
 let fields_visible database ~package (path : Path.t) =
   match Query.demand database Environment.type_interface path with
   | Some { opaque = true; _ } -> Path.package path = package

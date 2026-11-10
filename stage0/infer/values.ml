@@ -1,5 +1,5 @@
-(* Values built from parts: strings and tagged templates, collection
-   literals, lambdas, [if], and [match]. *)
+(* Checks expressions that build values: strings and tagged strings,
+   collection literals, lambdas, [if], and [match]. *)
 
 open Syntax
 module T = Types
@@ -56,7 +56,8 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
   match literal.tag with
   | None ->
       register_expression state value (fun () -> Form.untagged_string state literal);
-      (* Each part of a plain string is written out with its [Display]. *)
+      (* Each interpolated value of an untagged string is converted with its
+         [Display]. *)
       List.iteri
         (fun index ((part : expression), part_type) ->
           defer state (fun () ->
@@ -114,8 +115,9 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
                     | None -> ());
                     let part = associated state tag_type template_trait "Part" ~at:literal.span in
                     part_type := Some part;
-                    (* Each part becomes the tag's [Part] through [From], chosen by
-                       the part's type. *)
+                    (* Each interpolated value is converted to the tag's
+                       [Part] type with [From], selected by the value's
+                       type. *)
                     List.iteri
                       (fun index ((part_expression : expression), part_type) ->
                         let part_type = normalize state part_type in
@@ -202,13 +204,13 @@ and map_literal state env ?expected (value : expression) entries =
            entries));
   T.Named { path = map_type; arguments = [ T.Type key; T.Type value_type ] }
 
-(* Lambdas: their types come only from where they are used. *)
+(* A lambda. Its parameter types come only from the expected type. *)
 and lambda state env ?expected (value : expression) parameters body =
   let references_before = state.references in
   state.lambdas <- value.span :: state.lambdas;
   let expected = Option.map (normalize state) expected in
-  (* A lambda whose types are not known is still checked, for its own
-     errors, with what it binds as unknown as it is. *)
+  (* A lambda with no known parameter types is still checked, so that its
+     own errors are reported. Its parameters get the unknown type. *)
   let untyped unknown =
     List.iter (fun written -> pattern state env written unknown ~mode:T.Read) parameters;
     ignore (block_value state env body);
@@ -243,7 +245,8 @@ and lambda state env ?expected (value : expression) parameters body =
               Give the `let` a function type, or the call type arguments.")
   in
   state.lambdas <- List.tl state.lambdas;
-  (* The outer locals the lambda reads, in the order it first reads them. *)
+  (* The locals of the enclosing function that the lambda reads, in order of
+     first use. *)
   let rec newer acc list =
     if list == references_before then acc
     else match list with [] -> acc | id :: rest -> newer (id :: acc) rest
@@ -323,15 +326,16 @@ and if_ state env ?expected (value : expression) (test : expression) then_ else_
       join state env ~expected
         [ (then_type, then_.span, block_end then_); (else_type, else_span, else_end) ]
 
-(* The expression a block ends with, whose value is the block's. *)
+(* The last expression of a block, which is the block's value. *)
 and block_end (written : block) =
   match List.rev written.statements with
   | { kind = Expression value; _ } :: _ -> Some value.id
   | _ -> None
 
-(* The type of branches together: arms of type [Never] are left out. Each
-   branch's value, the expression it ends with, meets the type expected of
-   them all, and with none expected the branches have one type. *)
+(* The type of an [if] or a [match]: the common type of its branches. A
+   branch of type [Never] does not count. If a type is expected, each
+   branch's value is checked against it. Otherwise the branches must have
+   the same type. *)
 and join state env ~expected branches =
   let live = List.filter (fun (type_, _, _) -> resolve state type_ <> T.Never) branches in
   match (live, expected) with
@@ -350,8 +354,8 @@ and join state env ~expected branches =
       first
 
 and match_ state env ?expected (value : expression) scrutinees arms =
-  (* When the guards cover everything, the [match] ends with
-     [_ => unreachable], which the prover shows is never reached. *)
+  (* A [match] whose guards cover every case ends with [_ => unreachable].
+     The prover shows that this arm is never reached. *)
   let guards_exhaustive =
     match List.rev arms with
     | { patterns; guard = None; body = { kind = Expression { kind = Unreachable; _ }; _ }; _ }
@@ -362,7 +366,7 @@ and match_ state env ?expected (value : expression) scrutinees arms =
   in
   if guards_exhaustive then
     state.obligations <- Guards_cover { match_ = value.id } :: state.obligations;
-  (* The values a [match] matches settle before its arms, as a header. *)
+  (* The types of the scrutinees are inferred before the arms are checked. *)
   let types =
     List.map
       (fun (scrutinee : expression) ->
@@ -418,8 +422,8 @@ and match_ state env ?expected (value : expression) scrutinees arms =
   in
   join state env ~expected branch_types
 
-(* An arm's body is a statement. As a value, a body that is not an
-   expression has type [Unit]. *)
+(* The body of an arm is a statement. A body that is not an expression has
+   type [Unit]. *)
 and arm_value state env ?expected (body : statement) =
   match body.kind with
   | Expression value -> expression state env ?expected value

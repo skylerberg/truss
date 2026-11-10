@@ -178,7 +178,7 @@ and `reads` clauses):
 |---|---|
 | Built-in integers, `Integer` | The integers, with the range of a built-in type as a fact about each value of it |
 | `Bool` | Booleans |
-| `Character` | Integers up to `0x10FFFF` |
+| `Character` | Integers up to `0x10FFFF` that are not surrogates (`0xD800` to `0xDFFF`); converting an integer into a `Character` must show it is one |
 | `Float32`, `Float64` | The SMT-LIB floating-point theory, bit for bit |
 | Records and sum types whose fields are visible | Algebraic datatypes, one for each type with its type arguments |
 | Opaque types from another package, and types defined as `todo` | Uninterpreted sorts, known through their methods and their model |
@@ -313,6 +313,10 @@ unstable proofs.
   with each field's own `==`, unfolded once for each two values compared,
   so a `Point` of floats is equal exactly when its coordinates are, by the
   lawful float comparison.
+- **Every other derived method is its derived body.** A derived `compare`
+  orders by variant and then field by field, and a derived `hash` or
+  `default` is what the derivation writes, so each is pure and functional,
+  and its body is its definition, as any such function's is.
 
 ### Generic code is proven once
 
@@ -1065,12 +1069,6 @@ sanitized runs, test the trusted base against real executions.
   function the solver knows nothing more about, so a contract such as
   `List.map`'s `ensures result[i] == transform(self[i])` gives the caller
   facts about its own lambda only when the lambda's body is functional.
-- **A derived ordering's definition.** A derived `Ordered` is to be defined
-  by variant and then field by field, as a derived `Equal` is field by
-  field. An ordering on a type that is not built in is known only by the
-  laws of `Ordered`.
-- **Surrogates.** A `Character` is never to be a surrogate. It is any
-  integer up to `0x10FFFF`.
 - **Ranks for a collection's elements.** An element of a standard
   collection is to be smaller than the collection, as Dafny orders its
   sequences, so that recursion over a tree whose children are a list ends

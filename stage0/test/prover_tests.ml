@@ -2271,6 +2271,49 @@ let () =
   test "a cost clause's bound must be well defined" (fun () ->
       let found = codes "fn f(items: List[Int64]) -> Int64\n  cost time O(items[0])\n{\n  0\n}\n" in
       if not (List.mem "prover.requires" found) then fail "found [%s]" (String.concat "; " found));
+  test "a derived ordering of a record compares its fields in order" (fun () ->
+      proven
+        "type Version(major: Int64, minor: Int64)\n\
+        \  derives Equal, Ordered\n\n\
+         fn f(first: Version, second: Version) -> Bool\n\
+        \  requires first.major < second.major\n\
+        \  ensures result\n\
+         {\n\
+        \  first < second\n\
+         }\n");
+  test "a derived ordering of a record falls to the next field on a tie" (fun () ->
+      proven
+        "type Version(major: Int64, minor: Int64)\n\
+        \  derives Equal, Ordered\n\n\
+         fn f(first: Version, second: Version) -> Bool\n\
+        \  requires first.major == second.major && first.minor > second.minor\n\
+        \  ensures result\n\
+         {\n\
+        \  first > second\n\
+         }\n");
+  test "a derived ordering of a sum orders by variant first" (fun () ->
+      proven
+        "type Light =\n\
+        \  | Off\n\
+        \  | Dim(level: Int64)\n\
+        \  | On\n\
+        \  derives Equal, Ordered\n\n\
+         fn f(level: Int64) -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  Light.Off < Light.Dim(level: level) && Light.Dim(level: level) < Light.On\n\
+         }\n");
+  test "a derived ordering is not the reverse of itself" (fun () ->
+      not_proven
+        "type Version(major: Int64, minor: Int64)\n\
+        \  derives Equal, Ordered\n\n\
+         fn f(first: Version, second: Version) -> Bool\n\
+        \  requires first.major < second.major\n\
+        \  ensures result\n\
+         {\n\
+        \  first > second\n\
+         }\n"
+        "prover.ensures");
   test "alternatives bind each name to the part that matched" (fun () ->
       proven
         "type Side =\n\

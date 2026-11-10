@@ -487,6 +487,11 @@ filling it in copies the constant: free for numbers, strings, and empty
 collections, one allocation for a non-empty one. That is how DESIGN.md counts
 it.
 
+A capability method is the exception: its caller evaluates the defaults of
+the arguments it omits and passes every argument. An entry of a capability's
+table takes no mask, and no one implementation is there to fill a default
+in, since the default is written in the capability and not in each `impl`.
+
 ## Ownership: moves, drops, and copies
 
 ### Moves

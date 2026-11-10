@@ -1,5 +1,5 @@
-(* Typing patterns: what each binds and with which mode, constants and
-   literals in patterns, and the values of character and byte literals. *)
+(* Checks patterns: the names each pattern binds and their modes, constants
+   and literals in patterns, and the values of character and byte literals. *)
 
 open Syntax
 module T = Types
@@ -43,8 +43,8 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
           declare state bound type_ ~mutable_ ~mode
       | Some (Local id) -> (
           binds id bound;
-          (* A later alternative's name binds what the first one's does, with
-             the same type. *)
+          (* A name in a later alternative is the same local as the name in
+             the first alternative, and has the same type. *)
           match Hashtbl.find_opt state.locals id with
           | Some local ->
               if not (unify state local.type_ type_) then
@@ -85,9 +85,9 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
           in
           let start = end_ start in
           Range { start; stop = end_ stop; inclusive });
-      (* Only integers and characters are ordered so that a range of them
-         can be matched; a range of anything else is one error, and its ends
-         are not checked against the type. *)
+      (* A range pattern is only for integers and characters. A range of any
+         other type is one error, and its bounds are not checked against the
+         type. *)
       match resolve state type_ with
       | (T.Named _ | T.Function _ | T.Any _ | T.Cursor _ | T.Parameter _) as resolved
         when not (T.is_integer_type resolved || T.is_builtin Character resolved) ->
@@ -209,7 +209,7 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
   let bare_name (inner : pattern) =
     match inner.kind with Binding_or_constant name -> Some name.text | _ -> None
   in
-  (* A pattern names every field, or writes [..] for the rest. *)
+  (* A pattern must name every field, or end with [..] for the rest. *)
   let named =
     List.filter_map
       (fun (field : pattern_field) ->
@@ -292,9 +292,9 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
               None))
     written_fields
 
-(* A pattern that cannot be matched against its type still binds its names,
-   each as unknown as what the pattern matches, so that no use of one is
-   without a type. What it matches is as unknown to it. *)
+(* A pattern that does not fit the type it matches still binds its names, so
+   that every use of a name has a type. Each name gets the given unknown
+   type (an error or a hole), and so do the sub-patterns. *)
 and unknown_pattern state env (written : pattern) unknown ~mutable_ ~mode =
   state.tables.pattern_types.(written.id) <- Some unknown;
   match written.kind with
@@ -308,8 +308,8 @@ and unknown_pattern state env (written : pattern) unknown ~mutable_ ~mode =
         fields
   | _ -> ()
 
-(* A constant in a pattern, or a range's end: recorded by the node's id, and
-   of the matched type. *)
+(* A constant used as a pattern or as a bound of a range pattern. It is
+   recorded under the node's id, and its type must be the matched type. *)
 and constant_pattern state id span path type_ =
   state.tables.patterns.(id) <- Some (Constant_pattern path);
   match Query.demand state.database Environment.constant_type path with
@@ -329,8 +329,9 @@ and constant_pattern state id span path type_ =
              | _ -> "the_constant"))
   | None -> ()
 
-(* Whether two equal values of a type cannot be told apart: built-in
-   identity equality, or a derived [Equal] over fields that all have it. *)
+(* Whether a type has structural equality: values that are equal cannot be
+   told apart. This holds for built-in equality, and for a derived [Equal]
+   if every field has structural equality. *)
 and structural ?(seen = []) state (type_ : T.ty) =
   if
     T.is_integer_type type_ || T.is_builtin Bool type_ || T.is_builtin Character type_
@@ -406,9 +407,9 @@ and check_literal_fits state (value : expression) number type_ =
           | _ -> ());
           true)
 
-(* The width of [USize] and [ISize] the package's code must hold for: 32
-   bits unless its manifest says [usize_bits = 64], so that code checked
-   once holds on every target. *)
+(* The number of bits of [USize] and [ISize] that the package is checked
+   for: 32, unless the manifest says [usize_bits = 64]. Code checked for 32
+   bits is correct on every target. *)
 and usize_bits state = Query.demand state.database Workspace.usize_bits state.package
 
 and builtin_range ?(usize_bits = 64) type_ =
@@ -430,9 +431,9 @@ and builtin_range ?(usize_bits = 64) type_ =
   | Some USize -> bits false usize_bits
   | _ -> None
 
-(* [Character"a"] and [UInt8"\n"]: a single character or byte is a tagged
-   string, of one Unicode scalar value or one ASCII character, without
-   [${...}]. *)
+(* [Character"a"] and [UInt8"\n"]: a character or byte literal is a tagged
+   string with exactly one Unicode scalar value or one ASCII character, and
+   no [${...}]. *)
 and character_tag state (literal : string_literal) =
   match literal.tag with
   | Some tag -> (
@@ -444,7 +445,8 @@ and character_tag state (literal : string_literal) =
       | _ -> None)
   | None -> None
 
-(* The value of a character or byte literal, recorded by [id], or an error. *)
+(* Records the value of a character or byte literal under [id], or reports
+   an error. *)
 and character_value state id (literal : string_literal) (builtin : Intrinsic.builtin) =
   let text = literal.first.value in
   let scalars =
@@ -475,8 +477,8 @@ and character_literal state id literal builtin =
   character_value state id literal builtin;
   T.builtin builtin
 
-(* A literal in a pattern, or a range's end: recorded by the node's id, and
-   of the matched type. *)
+(* A literal used as a pattern or as a bound of a range pattern. It is
+   recorded under the node's id, and its type must be the matched type. *)
 and literal_pattern state id (span : span) literal type_ =
   match literal with
   | Literal_integer number -> (
@@ -500,7 +502,7 @@ and literal_pattern state id (span : span) literal type_ =
             mismatch state span ~expected:type_ ~found:(T.builtin builtin)
       | None -> string_pattern state span type_)
 
-(* A string literal in a pattern matches a string. *)
+(* A string literal used as a pattern matches a string. *)
 and string_pattern state span type_ =
   if not (is_named string_path type_ || is_named string_slice_path type_ || T.is_error type_) then
     report state Mismatch span

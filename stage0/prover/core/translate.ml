@@ -421,7 +421,6 @@ let core_trait name : Path.t =
   Top { module_ = { package = "standard"; modules = [ "core" ] }; name }
 
 let equal_trait = core_trait "Equal"
-let ordered_trait = core_trait "Ordered"
 
 (* A type's interface, when it is a type whose fields this package sees. *)
 let visible_type context (ty : T.ty) =
@@ -545,10 +544,18 @@ let rec structural context ?(seen = []) (ty : T.ty) =
              shape
     | _ -> false
 
+(* Whether a term is a value of a type: within its bounds, and for a
+   [Character], a Unicode scalar value, so never a surrogate. *)
 let in_range ty term =
   match bounds ty with
   | Some (low, high) ->
-      L.(Apply ("<=", [ Integer low; term ]) &&& Apply ("<=", [ term; Integer high ]))
+      let within =
+        L.(Apply ("<=", [ Integer low; term ]) &&& Apply ("<=", [ term; Integer high ]))
+      in
+      if T.is_builtin Character ty then
+        L.(
+          within &&& not_ (Apply ("<=", [ int 0xD800; term ]) &&& Apply ("<=", [ term; int 0xDFFF ])))
+      else within
   | None -> L.Boolean true
 
 (* A sort's name, as part of a symbol's. *)
@@ -865,7 +872,7 @@ let functional_block (body : block) =
   !fine
 
 let make_contract database path ~own ~others ~body =
-  let signature = Query.demand database Interface.Environment.signature path in
+  let signature = Interface.Impls.signature database path in
   let pure =
     match signature with
     | Some (signature : T.signature) -> (
@@ -1820,7 +1827,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
     List.map (T.substitute_argument frame.substitution) type_arguments
   in
   let generics_of path =
-    match Query.demand context.database Interface.Environment.signature path with
+    match Interface.Impls.signature context.database path with
     | Some (signature : T.signature) ->
         List.map (fun (generic : T.generic) -> generic.generic) signature.generics
     | None -> []
@@ -1929,12 +1936,6 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       | "equal", Impl { impl = Derived _; _ }, [ a; b ] when Path.equal trait.trait equal_trait ->
           (* A derived [impl] is defined by the rule that derived it. *)
           Some (frame, equal_of context frame self_type a b)
-      | "compare", Impl { impl = Derived _; _ }, [ a; b ] when Path.equal trait.trait ordered_trait
-        ->
-          let sort = sort_of context self_type in
-          let symbol = "compare." ^ type_key self_type in
-          declare context (L.Function (symbol, [ sort; sort ], sort_of context result_type));
-          Some (frame, L.Apply (symbol, [ a; b ]))
       | _ ->
           (match evidence with
           | (Bound | Dynamic) when name = "from_template" && Path.equal trait.trait template_trait
@@ -2098,6 +2099,17 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
   | Compare_bytes, _ ->
       buffer_operation context frame ~node operation (T.builtin UInt8) operands ~changed known
   | Libc function_, _ -> libc_call context frame ~node function_ operands ~changed known
+  | Convert, [ _; target ] when T.is_builtin Character target -> (
+      (* A [Character] is made from an integer only when the integer is a
+         Unicode scalar value, which the conversion does not check. *)
+      match operands with
+      | [ value ] ->
+          oblige context frame Requires (at frame node)
+            (Printf.sprintf "`%s` may not be a Unicode scalar value, which a `Character` must be."
+               (quote frame.source node.origin))
+            (in_range target value);
+          value
+      | _ -> known)
   | _ -> integer_intrinsic context frame operation types operands known
 
 (* A function of the C library is never given a storage, only an address
@@ -2522,7 +2534,7 @@ and callback_facts context frame (call_ : call) position known arguments =
           | Some { callback_contract = Some { inputs; requires }; _ }
             when List.length inputs = List.length arguments ->
               let substitution =
-                match Query.demand context.database Interface.Environment.signature path with
+                match Interface.Impls.signature context.database path with
                 | Some (signature : T.signature) ->
                     let rec pair generics arguments =
                       match (generics, arguments) with
@@ -3308,7 +3320,7 @@ and mentions_result (clause : expression) =
   !found
 
 and signature_terminates context path =
-  match Query.demand context.database Interface.Environment.signature path with
+  match Interface.Impls.signature context.database path with
   | Some (signature : T.signature) -> signature.terminates
   | None -> true
 
@@ -3507,7 +3519,7 @@ and check_named_callback context frame (call_ : call) (passed : passed) (named :
 and parameter_type context frame (call_ : call) index =
   match call_.callee with
   | Function { path; type_arguments } -> (
-      match Query.demand context.database Interface.Environment.signature path with
+      match Interface.Impls.signature context.database path with
       | Some (signature : T.signature) ->
           let types =
             (match signature.receiver with
@@ -4167,7 +4179,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
   (if contract.result_kind = `Yields then
      match result_type with
      | T.Cursor _ as cursor_type -> (
-         match Query.demand context.database Interface.Environment.signature path with
+         match Interface.Impls.signature context.database path with
          | Some { output = Yields (_, element); _ } ->
              let element = T.substitute (substitution_of own) element in
              let made = { method_frame = entry_frame own; own; element } in
@@ -4234,7 +4246,7 @@ and note_known_call context (call_ : call) path term arguments =
     | _ -> None
   in
   let values = List.filter_map literal arguments in
-  match Query.demand context.database Interface.Environment.signature path with
+  match Interface.Impls.signature context.database path with
   | Some ({ specification_only = false; generics = []; output = Returns result; _ } : T.signature)
     when direct
          && List.length values = List.length arguments
@@ -6030,7 +6042,7 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
     match call_.callee with
     | Function { path; type_arguments } -> (
         let substitution =
-          match Query.demand context.database Interface.Environment.signature path with
+          match Interface.Impls.signature context.database path with
           | Some (signature : T.signature) ->
               let rec pair generics arguments =
                 match (generics, arguments) with
@@ -6042,7 +6054,7 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
               pair signature.generics type_arguments
           | None -> []
         in
-        match Query.demand context.database Interface.Environment.signature path with
+        match Interface.Impls.signature context.database path with
         | Some signature ->
             (Some path, signature.terminates, function_contract context.database path, substitution)
         | None -> (Some path, false, None, substitution))
@@ -6543,7 +6555,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
     | Function { parameters; contract; body = Some body } -> (parameters, contract, body)
     | _ -> unsupported (definition_span source) "a function without a body"
   in
-  let signature = Query.demand database Interface.Environment.signature path in
+  let signature = Interface.Impls.signature database path in
   let terminates =
     proof
     || match signature with Some (signature : T.signature) -> signature.terminates | None -> false
