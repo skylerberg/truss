@@ -2703,7 +2703,7 @@ known, and its body may rely on the bound name being in its range:
 
 ```truss
 fn is_sorted[Element: Ordered](items: Slice[Element]) -> Bool
-  cost time O(items.length())
+  cost time finite
 {
   forall i in 1..items.length() => items[i - 1] <= items[i]
 }

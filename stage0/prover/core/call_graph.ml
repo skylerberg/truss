@@ -101,8 +101,8 @@ let impls_for impls traits ty =
 
 (* The [impl]s a call uses: for each of the callee's generic parameters
    with bounds, the [impl]s of those bounds for the type it is given. *)
-let impls_used database impls (call : C.call) =
-  match call.callee with
+let impls_used database impls (callee : Core.callee) =
+  match callee with
   | Function { path; type_arguments } -> (
       match Query.demand database Interface.Environment.signature path with
       | Some (signature : T.signature) ->
@@ -128,50 +128,40 @@ let impls_used database impls (call : C.call) =
       | None -> [])
   | _ -> []
 
-(* The edges of the expressions of one body. *)
-let edges database impls (checked : C.t) ids =
-  List.concat_map
-    (fun id ->
-      let from_call =
-        match checked.calls.(id) with
-        | Some ({ callee = Function { path; _ }; _ } as call) ->
-            Calls path :: List.map (fun impl -> Uses_impl impl) (impls_used database impls call)
-        | Some { callee = Trait_method { evidence = Impl { impl; _ }; name; receiver; _ }; _ } ->
-            [ Calls (Path.Method { owner = impl; name; receiver }) ]
-        | _ -> []
-      in
-      let from_meaning =
-        match checked.meanings.(id) with Some (Global { path; _ }) -> [ Calls path ] | _ -> []
-      in
-      from_call @ from_meaning)
-    ids
-
-(* [any value] builds the table of the [impl] of its trait for the value's
-   type. *)
-let any_edges database impls (checked : C.t) anys =
-  List.concat_map
-    (fun (outer, inner) ->
-      match (checked.types.(outer), checked.types.(inner)) with
-      | Some (T.Any trait), Some ty ->
-          List.map
-            (fun impl -> Uses_impl impl)
-            (impls_for impls (traits_with_required database trait.trait) ty)
-      | _ -> [])
-    anys
-
-(* The ids of every expression in a block, and each [any value], as the
-   ids of the [any] and of its value. *)
-let expression_ids (written : block) =
-  let ids = ref [] and anys = ref [] in
-  let rec visit_expression (expression : expression) =
-    ids := expression.id :: !ids;
-    (match expression.kind with Any inner -> anys := (expression.id, inner.id) :: !anys | _ -> ());
-    Syntax_walk.expression_parts ~expression:visit_expression ~statement:visit_statement expression
-  and visit_statement (statement : statement) =
-    Syntax_walk.statement_parts ~expression:visit_expression ~statement:visit_statement statement
+(* The edges of one body: each call, each function named as a value, and
+   each [impl] an [any] value is made with. *)
+let edges database impls (body : Core.block) =
+  let found = ref [] in
+  let add edges = found := List.rev_append edges !found in
+  let callee (called : Core.callee) =
+    match called with
+    | Function { path; _ } ->
+        add (Calls path :: List.map (fun impl -> Uses_impl impl) (impls_used database impls called))
+    | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ } ->
+        add [ Calls (Path.Method { owner = impl; name; receiver }) ]
+    | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> ()
   in
-  List.iter visit_statement written.statements;
-  (List.rev !ids, List.rev !anys)
+  Core_walk.block
+    (Core_walk.deep
+       {
+         Core_walk.ignore_all with
+         expression =
+           (fun (node : Core.expression) ->
+             match node.kind with
+             | Call { callee = called; _ } -> callee called
+             | Function_value { path; _ } -> add [ Calls path ]
+             | To_any { value; trait; _ } ->
+                 (* It builds the table of the [impl] of its trait, and of the
+                    traits that one requires, for the value's type. *)
+                 add
+                   (List.map
+                      (fun impl -> Uses_impl impl)
+                      (impls_for impls (traits_with_required database trait.trait) value.type_))
+             | _ -> ());
+         callee;
+       })
+    body;
+  List.rev !found
 
 let build database package =
   let modules = Query.demand database Workspace.modules package in
@@ -181,19 +171,12 @@ let build database package =
       List.concat_map
         (fun (declaration : Names.declaration) ->
           let key = Names.key_of declaration in
-          match (Query.demand database Names.definition key, Infer.clean database key) with
-          | Some definition, Some checked -> (
-              let node path body =
-                let ids, anys = expression_ids body in
-                (path, edges database impls checked ids @ any_edges database impls checked anys)
-              in
-              match definition.kind with
-              (* A trait's own method is reached through an [impl], as
-                     it always was, and is no node of its own. *)
-              | Function { body; _ } when not (in_trait database key) ->
-                  [ node declaration.path body ]
-              | Theorem { body; _ } -> [ node declaration.path body ]
-              | _ -> [])
+          match (declaration.kind, Query.demand database Infer.core key) with
+          (* A trait's own method is reached through an [impl], as it always
+             was, and is no node of its own. *)
+          | (Function | Method | Theorem), Some { definition = Function { body = Some body; _ }; _ }
+            when not (in_trait database key) ->
+              [ (declaration.path, edges database impls body) ]
           | _ -> [])
         (Query.demand database Names.declarations module_))
     modules

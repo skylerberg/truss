@@ -7,103 +7,82 @@ module L = Logic
 
 type proof = Obligations of Translate.outcome | Unsupported of span * string | Not_proven_here
 
-let method_path (key : Names.key) (signature : signature) name =
-  let receiver : Path.receiver =
-    match signature.parameters with
-    | { kind = Self_parameter None; _ } :: _ -> Read
-    | { kind = Self_parameter (Some Mut); _ } :: _ -> Mut
-    | { kind = Self_parameter (Some Own); _ } :: _ -> Own
-    | _ -> Static
-  in
-  Path.Method { owner = key.path; name; receiver }
-
 (* The trait's clauses an [impl]'s method keeps, with the [impl]'s type as
-   [Self] and its arguments for the trait's parameters. *)
-let inherited database impl (signature : signature) name =
-  match Query.demand database Interface.Environment.interface impl with
-  | Some (Interface.Environment.Impl_interface interface) -> (
-      match
-        Translate.trait_part database interface.implements.trait name
-          (Translate.receiver_of signature.parameters)
-      with
-      | Some (part, _) ->
-          Some
-            ( part,
-              Option.value ~default:[] (Interface.Impls.trait_substitution database impl),
-              Translate.provided_body database interface.implements.trait name
-                (Translate.receiver_of signature.parameters) )
-      | None -> None)
+   [Self] and its arguments for the trait's parameters, and the body the
+   trait provides for the method, if any. *)
+let inherited database (path : Path.t) =
+  match path with
+  | Method { owner = impl; name; receiver } -> (
+      match Query.demand database Interface.Environment.interface impl with
+      | Some (Interface.Environment.Impl_interface interface) ->
+          Option.map
+            (fun part ->
+              ( part,
+                Option.value ~default:[] (Interface.Impls.trait_substitution database impl),
+                Translate.provided_body database interface.implements.trait name receiver ))
+            (Translate.trait_part database interface.implements.trait name receiver)
+      | _ -> None)
   | _ -> None
 
 (* The [proof]s written for a trait's laws on a type, in the package: each
    law's name, with the proof's source and body. *)
 let law_proofs database package trait (for_type : Types.ty) =
   let head = match for_type with Named { path; _ } -> Some path | _ -> None in
-  let modules = Query.demand database Workspace.modules package in
   List.concat_map
     (fun module_ ->
       List.filter_map
         (fun (declaration : Names.declaration) ->
-          let key = Names.key_of declaration in
           match
-            ( Query.demand database Names.definition key,
-              Query.demand database Resolve.resolved key,
-              Translate.callee_source database key )
+            ( declaration.kind,
+              Query.demand database Interface.Environment.interface declaration.path )
           with
-          | ( Some { kind = Law_proof { trait_; law; type_; body }; _ },
-              Some resolved,
-              Some proof_source ) -> (
-              let named_trait =
-                match resolved.names.(trait_.path.last.id) with
-                | Some (Definition (_, path)) -> Path.equal path trait
-                | _ -> false
-              in
-              let named_type =
-                match (type_.kind, head) with
-                | Path_type written, Some head -> (
-                    match resolved.names.(written.path.last.id) with
-                    | Some (Definition (_, path)) -> Path.equal path head
-                    | _ -> false)
-                | _ -> false
-              in
-              match (named_trait, named_type) with
-              | true, true -> Some (law.text, (proof_source, body))
+          | Law_proof, Some (Interface.Environment.Law_proof_interface proven)
+            when Path.equal proven.trait.trait trait
+                 &&
+                 match (proven.for_type, head) with
+                 | Named { path; _ }, Some head -> Path.equal path head
+                 | _ -> false -> (
+              match Translate.source_at_key database (Names.key_of declaration) with
+              | Some ({ core = { definition = Law_proof body; _ }; _ } as source) ->
+                  Some (proven.law, (source, body))
               | _ -> None)
           | _ -> None)
         (Query.demand database Names.declarations module_))
-    modules
+    (Query.demand database Workspace.modules package)
 
-(* Whether any method the [impl] defines contains a [todo]. *)
-let has_todo_method database (impl : Path.t) (interface : Types.impl_interface) =
+(* Whether an [impl] writes a method whose body holds a [todo]. Its laws
+   are about what its methods return, so they wait, as the methods'
+   contracts do. *)
+let unfinished database (key : Names.key) =
   List.exists
-    (fun (name, receiver, (_ : Types.signature)) ->
-      match Interface.Summary.definition database (Method { owner = impl; name; receiver }) with
-      | Some (_, { kind = Function { body; _ }; _ }) ->
+    (fun (method_ : Names.key) ->
+      match Translate.source_at_key database method_ with
+      | Some { core = { definition = Function { body = Some body; _ }; _ }; _ } ->
           let found = ref false in
-          let rec visit (value : expression) =
-            if value.kind = Todo then found := true else Syntax_walk.children visit value
-          in
-          Syntax_walk.block visit body;
+          Core_walk.block
+            (Core_walk.deep
+               {
+                 Core_walk.ignore_all with
+                 expression =
+                   (fun (node : Core.expression) ->
+                     match node.kind with Todo -> found := true | _ -> ());
+               })
+            body;
           !found
       | _ -> false)
-    interface.impl_methods
+    (Query.demand database Names.contained key)
 
-(* The obligations that an [impl] satisfies each law of its trait. An
-   [impl] with a [todo] method has none: a law constrains what the methods
-   return, so it cannot be checked until they are written. *)
-let impl_laws database (key : Names.key) source (definition : definition) =
-  match (Query.demand database Interface.Environment.interface key.path, definition.kind) with
-  | Some (Interface.Environment.Impl_interface interface), Impl _
-    when has_todo_method database key.path interface ->
-      []
-  | Some (Interface.Environment.Impl_interface interface), Impl { trait_; _ } ->
+(* An [impl]'s obligation to keep each law of its trait. *)
+let impl_laws database (key : Names.key) source =
+  match Query.demand database Interface.Environment.interface key.path with
+  | Some (Interface.Environment.Impl_interface interface) when not (unfinished database key) ->
       [
         Translate.laws database source ~impl:key.path ~trait:interface.implements.trait
           ~for_type:interface.for_type
           ~proofs:
             (law_proofs database (Path.package key.path) interface.implements.trait
                interface.for_type)
-          ~at:trait_.span;
+          ~at:(Translate.definition_span source);
       ]
   | _ -> []
 
@@ -112,53 +91,37 @@ let impl_laws database (key : Names.key) source (definition : definition) =
 let specification (key : Names.key) =
   key.module_ = { package = "standard"; modules = [ "specification" ] }
 
+let declaration database (key : Names.key) =
+  Names.Declaration_map.find_opt (key.path, key.ordinal)
+    (Query.demand database Names.declaration_index key.module_)
+
 let prove database (key : Names.key) =
-  match (Query.demand database Names.definition key, Translate.callee_source database key) with
+  match (declaration database key, Translate.source_at_key database key) with
   | _ when specification key -> Not_proven_here
-  | Some definition, Some source -> (
+  | Some declaration, Some source -> (
       try
-        match definition.kind with
+        match (declaration.kind, source.core.definition) with
         (* A trait's provided body is not proven on its own: an [impl] that
            replaces it shows its result is the body's, and one that keeps it
            is not proven yet. *)
-        | Function _ when Call_graph.in_trait database key -> Not_proven_here
-        | Function { signature; body } ->
-            let updating_helper =
-              definition.visibility = Private
-              && (match signature.name with Member_name _ -> true | Plain_name _ -> false)
-              && Translate.receiver_of signature.parameters = Mut
-            in
-            (* A method written inside an [impl] keeps its trait's clauses. *)
-            let inherited =
-              match Call_graph.container database key with
-              | Some (impl, { kind = Impl _; _ }) ->
-                  inherited database impl.path signature (Names.signature_name signature).text
-              | _ -> None
-            in
+        | (Function | Method), Function _ when Call_graph.in_trait database key -> Not_proven_here
+        | Theorem, Function _ -> Obligations (Translate.theorem database source ~path:key.path)
+        | (Function | Method), Function { body = Some _; _ } ->
             Obligations
-              (Translate.function_ ~updating_helper ?inherited database source ~path:key.path
-                 signature body)
-        | Test { body; _ } -> Obligations (Translate.test database source ~path:key.path body)
-        | Theorem { parameters; clauses; body; _ } ->
-            Obligations (Translate.theorem database source ~path:key.path ~parameters ~clauses body)
-        | Impl _ ->
-            let outcomes = impl_laws database key source definition in
+              (Translate.function_
+                 ~updating_helper:(Translate.is_updating_helper database key.path)
+                 ?inherited:(inherited database key.path) database source ~path:key.path)
+        | Test, Test _ -> Obligations (Translate.test database source ~path:key.path)
+        | Impl, _ ->
+            let outcomes = impl_laws database key source in
             Obligations
               {
                 obligations =
                   List.concat_map (fun (o : Translate.outcome) -> o.obligations) outcomes;
                 holes = List.concat_map (fun (o : Translate.outcome) -> o.holes) outcomes;
               }
-        | Type_definition { clauses; _ } -> (
-            match
-              List.find_map
-                (fun (clause : type_clause) ->
-                  match clause.kind with Potential written -> Some written | _ -> None)
-                clauses
-            with
-            | Some written ->
-                Obligations (Translate.type_potential database source ~path:key.path ~written)
-            | None -> Not_proven_here)
+        | Type, Type { potential = Some _; _ } ->
+            Obligations (Translate.type_potential database source ~path:key.path)
         | _ -> Not_proven_here
       with
       | Translate.Unsupported (span, message) -> Unsupported (span, message)

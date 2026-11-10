@@ -1,8 +1,9 @@
 # Truss Prover
 
 This document describes stage0's prover, in
-[`stage0/prover/`](stage0/prover): everything between the type checker's
-checked forms and the knowledge that every promise a program makes holds. It
+[`stage0/prover/`](stage0/prover): everything between the core form the
+type checker gives each definition and the knowledge that every promise a
+program makes holds. It
 follows the decisions in [DESIGN.md](DESIGN.md) and [SYNTAX.md](SYNTAX.md),
 reads what [TYPECHECKER.md](TYPECHECKER.md) produces, and states what
 [CODEGEN.md](CODEGEN.md) relies on. `truss check` and `truss build` run it,
@@ -11,8 +12,8 @@ which [DATABASE.md](DATABASE.md) describes.
 
 ## What the prover does
 
-The prover takes the checked form of each definition, the interfaces and
-contracts of what it calls, and the bodies it reads as definitions. For each
+The prover takes the core form of each definition, the interfaces and
+contracts of its callees, and the bodies it reads as definitions. For each
 definition it finds every *obligation*, a fact that must hold for the
 program's promises to be kept, builds one solver query for each, runs a
 pinned solver on it within a fixed number of steps, and reports each
@@ -35,8 +36,10 @@ The prover:
 
 It does not:
 
-- type-check or resolve names. It walks each definition's tree, and what
-  it needs to know of each node is in the checked form's tables.
+- type-check or resolve names. It walks each definition's core form, in
+  which every call names its callee, every operator is the call or the
+  operation it means, sugar is desugared, and every type is solved. It
+  reads no syntax tree.
 - infer specifications. Loop invariants, measures, and contracts are
   written; the few loops whose facts are worked out alone get them from the
   contracts of the methods they call (see [Loops](#loops)).
@@ -48,7 +51,7 @@ It does not:
 ## Structure
 
 ```text
-checked forms, interfaces, contracts
+core forms, interfaces, contracts
         │
         ▼
 a body, run forward ──▶ obligations ──▶ pruned queries ──▶ solver ──▶ answers
@@ -70,7 +73,7 @@ The prover works as the type checker does, through queries with traces (see
 TYPECHECKER.md, "One definition at a time, through queries"), and goes one
 step further:
 
-- **A definition's obligations are a query** that reads its checked form
+- **A definition's obligations are a query** that reads its core form
   and, through the environment, the interfaces, contracts, definitions,
   invariants, and laws its obligations mention. Each is recorded in its
   trace. Its result is every obligation with its solver query, and not the
@@ -710,11 +713,13 @@ The prover adds a ghost counter for each resource that has a cost clause:
   to the prover, and so is any callee's allocation.
 - **The intrinsic module's operations** each take a fixed number of steps,
   steps in proportion to a buffer's length, or are known by no bound, as
-  the compiler declares them: arithmetic and reading or swapping in place
-  are the first kind; inserting into or removing from a storage, and
-  comparing runs of bytes, the second; growing storage and reaching the
-  system the third. Only the first kind never allocates, with removing and
-  comparing.
+  the compiler declares them: arithmetic, reading or swapping in place, and
+  making a storage with room for some elements are the first kind;
+  inserting into or removing from a storage, giving a storage a new
+  capacity, and comparing runs of bytes, the second; running a test and
+  reaching the system the third. Making a storage, giving it a new
+  capacity, running a test, and reaching the system may allocate; nothing
+  else does.
 - **A `calls(target)` counter** counts each call through a function value
   or of a capability's method. A callee that is passed the function value,
   or uses the capability, counts what its own `calls` clause about it says;
@@ -1000,13 +1005,18 @@ sanitized runs, test the trusted base against real executions.
 
 ## Interfaces to other stages
 
-- **The type checker** gives the checked form of each definition, its
-  interface, and the obligations it created, as TYPECHECKER.md describes.
-  The prover works nothing out from a tree that the checked form already
-  has.
-- **Code generation** runs a tagged template's checks for the prover, and
-  builds every program and test with run-time checks of what the prover
-  proves, as CODEGEN.md describes.
+- **The type checker** gives the core form of each definition and its
+  interface, as TYPECHECKER.md describes. What the checker leaves the
+  prover to show is in the form's nodes: a `From_integer` conversion must
+  fit its type, a widened function value's costs must imply the expected
+  ones, and a `match` whose guards must be exhaustive ends in an
+  `unreachable` arm. A node's origin finds the source text a diagnostic
+  quotes.
+- **The ownership check** gives the pairs of indexes and slices that must
+  reach different elements, by the bracket each is written with.
+- **Code generation** runs a tagged template's checks for the prover. It
+  builds tests and `truss run` with run-time checks of what the prover
+  proves, and `truss build` without them, as CODEGEN.md describes.
 - **The build** refuses a package with an obligation that is not proven,
   and a program whose `main` can reach a hole in a proof.
 
@@ -1018,9 +1028,10 @@ sanitized runs, test the trusted base against real executions.
   clauses: it is to be proven once, with `Self` a type parameter bounded by
   the trait.
 - **Contracts for the intrinsic module's floats and system calls.** Only
-  the integer operations, storage, views, and reading and writing bytes
-  have meanings. A call of any other intrinsic gives a value known only by
-  its type, and what the standard library states no contract for, such as
+  the integer operations, storage, views, and what a C function keeps of
+  the storages it is lent have meanings. A call of any other intrinsic, and
+  what a C function returns beyond the counts `read`, `write`, and
+  `snprintf` give, is known only by its type, and what the standard library states no contract for, such as
   the `ieee_` comparisons, is known only by its type.
 - **Obligations and facts under a quantifier.** An obligation that names a
   quantifier's bound name, such as the bounds of an index on it, is not

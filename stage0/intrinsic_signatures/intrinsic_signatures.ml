@@ -152,13 +152,16 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Libc_number number -> make ~output:(Returns (libc_scalar (Libc.number_type number))) []
 
 type time = Constant_time | Linear_in of int | Unbounded_time
-type cost = { time : time; allocation_free : bool }
+type allocations = No_allocations | One_if_positive of int | Unknown_allocations
+type cost = { time : time; allocations : allocations }
 
-(* What each operation costs, as the prover trusts it: arithmetic and
-   reading or swapping in place take a fixed number of steps and allocate
-   nothing; moving or comparing the elements of a storage or a view takes
-   steps in proportion to its length; anything else that grows storage, or
-   reaches the system, may do more, and is known by no bound. *)
+(* What each operation costs, as the prover trusts it. Arithmetic, and
+   reading or swapping in place, take a fixed number of steps and allocate
+   nothing. Making a storage with room for some elements takes a fixed
+   number of steps and allocates one block, unless the room is for none. Moving or comparing the elements of a storage or a view, as
+   giving a storage a new capacity moves them, takes steps in proportion to
+   its length. Running a test and reaching the system may do more, and are
+   known by no bound. *)
 let cost (operation : Intrinsic.operation) =
   match operation with
   | Add | Subtract | Multiply | Divide | Remainder | Negate | Wrapping_add | Wrapping_subtract
@@ -170,8 +173,9 @@ let cost (operation : Intrinsic.operation) =
   | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
   | View_slice | View_address | Storage_model | View_model | Crash | Storage_lengthen | Storage_push
   | Handle_from | Handle_descriptor | Report_tests_to | Live_blocks | Libc_number _ ->
-      { time = Constant_time; allocation_free = true }
+      { time = Constant_time; allocations = No_allocations }
   | Compare_bytes | Storage_remove | Storage_insert ->
-      { time = Linear_in 0; allocation_free = true }
-  | Storage_set_capacity -> { time = Linear_in 0; allocation_free = false }
-  | Storage_with_capacity | Run_test | Libc _ -> { time = Unbounded_time; allocation_free = false }
+      { time = Linear_in 0; allocations = No_allocations }
+  | Storage_set_capacity -> { time = Linear_in 0; allocations = Unknown_allocations }
+  | Storage_with_capacity -> { time = Constant_time; allocations = One_if_positive 0 }
+  | Run_test | Libc _ -> { time = Unbounded_time; allocations = Unknown_allocations }

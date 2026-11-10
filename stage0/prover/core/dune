@@ -7,8 +7,9 @@
   path
   types
   checked
+  core
+  core_walk
   syntax
-  syntax_walk
   resolve
   interface
   infer
