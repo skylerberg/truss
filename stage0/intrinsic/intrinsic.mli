@@ -105,6 +105,9 @@ type operation =
   | Storage_insert
   | Storage_remove
   | Storage_swap
+  | Storage_from_array
+      (** [storage_from_array(array)]: new storage that holds the elements of an [own] array, in
+          order, with the array's length as its length and its capacity. The array is moved. *)
   | Storage_at
   | Storage_at_mut
   | Storage_view

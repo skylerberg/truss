@@ -26,7 +26,8 @@ let integer_range (integer : Memory_layout.integer) bytes =
       (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
   | UInt8 | UInt16 | UInt32 | UInt64 | USize -> (Z.zero, Z.pred (Z.shift_left Z.one bits))
 
-let lower ?(checks = false) env b types operation ~type_arguments arguments ~destination ~site =
+let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_arguments arguments
+    ~destination ~site =
   let set rvalue = Option.iter (fun d -> emit b (Assign (d, rvalue))) destination in
   let argument i = List.nth arguments i in
   let value i = operand (argument i) in
@@ -341,6 +342,34 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           emit b (Assign (at held, Use (Move (element_at storage (value 1)))));
           emit b (Assign (element_at storage (value 1), Use (Move (element_at storage (value 2)))));
           emit b (Assign (element_at storage (value 2), Use (Move (at held))))
+      | Storage_from_array ->
+          (* The array's bytes are the elements, so the whole array is moved
+             into the new buffer at once. *)
+          let count =
+            match value_arguments with
+            | [ count ] -> count
+            | _ -> bug "storage_from_array without the array's length"
+          in
+          let array_ty : Ground.ty =
+            Named
+              {
+                path = Intrinsic.builtin_path Array;
+                arguments = [ Type (element ()); Value count ];
+              }
+          in
+          let ty = Storage.of_elements (element ()) in
+          let result = local b (Value ty) in
+          emit b (Assign (at result, Storage.empty ty));
+          if Z.sign count > 0 && (Memory_layout.of_type env array_ty).size > 0 then begin
+            set_capacity (at result) (Constant (Integer (USize, count)));
+            let untyped = local b (Raw (Pointer Opaque)) in
+            emit b (Assign (at untyped, Use (Copy (Storage.buffer (at result)))));
+            let typed = local b (Pointer { target = Value array_ty; writable = true }) in
+            emit b (Assign (at typed, Use (Copy (at untyped))));
+            emit b (Assign ({ root = Local typed; projections = [ Deref ] }, Use (value 0)))
+          end;
+          add_to_length (at result) (Constant (Integer (USize, count)));
+          set (Use (Move (at result)))
       | Storage_view ->
           let storage = place (argument 0) in
           set

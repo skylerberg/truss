@@ -18,12 +18,14 @@ type argument = Place of Lir.place | Value of Lir.operand
 type types = { usize : Ground.ty; string_slice : Ground.ty }
 
 (* Writes the operation, with its type arguments in the order the intrinsic
-   module declares them, into the builder. The result, if any, goes to
-   [destination]. A lending operation instead returns the place it lends.
-   An operation that never returns, [crash], leaves the builder in a new
-   block that nothing reaches. *)
+   module declares them, into the builder. [value_arguments] are its generic
+   value arguments, such as an array's length, in the same order. The
+   result, if any, goes to [destination]. A lending operation instead
+   returns the place it lends. An operation that never returns, [crash],
+   leaves the builder in a new block that nothing reaches. *)
 val lower :
   ?checks:bool ->
+  ?value_arguments:Z.t list ->
   Memory_layout.env ->
   Lir_builder.t ->
   types ->

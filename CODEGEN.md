@@ -1028,7 +1028,7 @@ until both handle it.
 |---|---|
 | Numbers | arithmetic, wrapping arithmetic, overflow tests, lawful and IEEE comparisons, bit operations, conversions and whether a value fits a type |
 | Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits`, `from_bits` |
-| Storage | empty, with a capacity, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view |
+| Storage | empty, with a capacity, from an array, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view |
 | Views | length, lend an element, slice |
 | Operating system | the C library's functions and numbers, a handle from a descriptor and its descriptor, the address of a view, crash |
 | A test program | run a test by its number, have failures reported to a descriptor, how many blocks are allocated and not freed |
@@ -1038,6 +1038,14 @@ numbers as primitive operations, and storage and views as a few statements
 over their fields, so the C compiler sees each whole. The operations that
 lend an element, such as `storage_at`, lend the place `buffer[index]`
 itself.
+
+`storage_from_array` moves an `own` array into new storage whose length
+and capacity are the array's length. An array's bytes are its elements in
+order, so the whole array is written into the new buffer at once and is
+moved-from afterwards. That is the only way to take an array's elements
+out one at a time: the elements are then popped from the storage, which
+stays valid after each pop, so a loop that ends early drops only the
+elements it has not taken.
 
 Storage never grows by itself. `storage_set_capacity` gives it a buffer of
 its own with room for exactly as many elements as it is told, and
