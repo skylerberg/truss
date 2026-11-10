@@ -20,6 +20,7 @@ public fn Array[Element, count: USize].generate(
 public fn Array[Element, count: USize].length(self) -> USize
   ensures result == count
   cost time O(1)
+  cost allocations == 0
 {
   count
 }
@@ -27,6 +28,7 @@ public fn Array[Element, count: USize].length(self) -> USize
 public fn Array[Element, count: USize].slice(self) -> Slice[Element]
   ensures identical(result.model(), self.model())
   cost time O(1)
+  cost allocations == 0
 {
   Slice(elements: intrinsic::array_view(self))
 }
@@ -38,6 +40,7 @@ internal fn Array[Element, count: USize].slice_range(self, start: USize, stop: U
   ensures forall index in 0..result.length() =>
     identical(result.model()[index], self.model()[start + index])
   cost time O(1)
+  cost allocations == 0
 {
   self.slice().slice_range(start, stop: stop)
 }
@@ -58,6 +61,7 @@ impl Index for Array[Element, count: USize] {
 
   fn contains_key(self, key: USize) -> Bool
     cost time O(1)
+    cost allocations == 0
   {
     key < count
   }
@@ -66,6 +70,7 @@ impl Index for Array[Element, count: USize] {
     requires key < count
     ensures identical(result, self.model()[key])
     cost time O(1)
+    cost allocations == 0
   {
     yield intrinsic::view_at(intrinsic::array_view(self), index: key)
   }
@@ -75,6 +80,7 @@ impl Index for Array[Element, count: USize] {
     ensures identical(result, old(self.model())[key])
     ensures identical(self.model(), old(self.model()).update(key, value: yielded[0]))
     cost time O(1)
+    cost allocations == 0
   {
     yield intrinsic::array_at_mut(mut self, index: key)
   }

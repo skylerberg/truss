@@ -101,6 +101,28 @@ type number =
   | Vreg
   | Vdir
   | Vlnk
+  | Termios_size
+  | Termios_iflag_offset
+  | Termios_oflag_offset
+  | Termios_cflag_offset
+  | Termios_lflag_offset
+  | Termios_flag_size
+  | Termios_cc_offset
+  | Vmin
+  | Vtime
+  | Tcsaflush
+  | Tiocgwinsz
+  | Icanon
+  | Echo
+  | Isig
+  | Iexten
+  | Ixon
+  | Icrnl
+  | Brkint
+  | Inpck
+  | Istrip
+  | Opost
+  | Cs8
 
 type extent =
   | Counted of { by : string; each : int }
@@ -177,6 +199,9 @@ type function_ =
   | Posix_spawn_file_actions_addchdir
   | Getdents64
   | Getattrlistbulk
+  | Ioctl_tiocgwinsz
+  | Tcgetattr
+  | Tcsetattr
 
 let functions =
   [
@@ -229,6 +254,9 @@ let functions =
     Posix_spawn_file_actions_addchdir;
     Getdents64;
     Getattrlistbulk;
+    Ioctl_tiocgwinsz;
+    Tcgetattr;
+    Tcsetattr;
   ]
 
 let function_name = function
@@ -281,6 +309,9 @@ let function_name = function
   | Posix_spawn_file_actions_addchdir -> "posix_spawn_file_actions_addchdir"
   | Getdents64 -> "getdents64"
   | Getattrlistbulk -> "getattrlistbulk"
+  | Ioctl_tiocgwinsz -> "ioctl_tiocgwinsz"
+  | Tcgetattr -> "tcgetattr"
+  | Tcsetattr -> "tcsetattr"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -756,6 +787,42 @@ let describe function_ =
         ]
         ~headers:[ "sys/attr.h"; "unistd.h" ]
         ~layout:[ "sizeof(struct attrlist) == 24" ]
+  | Ioctl_tiocgwinsz ->
+      (* A terminal's size: its rows, its columns, and its width and height
+         in pixels, each two bytes. *)
+      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "ioctl") ~variadic_from:2
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("request", Fixed Tiocgwinsz, everywhere "unsigned long");
+          ("size", Elements_to_change (UInt8, Exactly 8), everywhere "void *");
+        ]
+        ~headers:[ "sys/ioctl.h" ]
+        ~layout:
+          [
+            "sizeof(struct winsize) == 8";
+            "__builtin_offsetof(struct winsize, ws_row) == 0";
+            "__builtin_offsetof(struct winsize, ws_col) == 2";
+          ]
+  | Tcgetattr ->
+      (* A terminal's settings, a [struct termios] as bytes, which the
+         standard library reads and changes at the offsets the table's
+         numbers give. *)
+      row (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("settings", Elements_to_change (UInt8, Number Termios_size), everywhere "void *");
+        ]
+        ~named:[ ("settings", "struct termios *") ]
+        ~headers:[ "termios.h" ]
+  | Tcsetattr ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("when", Fixed Tcsaflush, everywhere "int");
+          ("settings", Elements (UInt8, Number Termios_size), everywhere "const void *");
+        ]
+        ~named:[ ("settings", "const struct termios *") ]
+        ~headers:[ "termios.h" ]
 
 let available system function_ = (describe function_).on system.os
 
@@ -896,6 +963,28 @@ let numbers =
     Vreg;
     Vdir;
     Vlnk;
+    Termios_size;
+    Termios_iflag_offset;
+    Termios_oflag_offset;
+    Termios_cflag_offset;
+    Termios_lflag_offset;
+    Termios_flag_size;
+    Termios_cc_offset;
+    Vmin;
+    Vtime;
+    Tcsaflush;
+    Tiocgwinsz;
+    Icanon;
+    Echo;
+    Isig;
+    Iexten;
+    Ixon;
+    Icrnl;
+    Brkint;
+    Inpck;
+    Istrip;
+    Opost;
+    Cs8;
   ]
 
 let number_name = function
@@ -977,6 +1066,28 @@ let number_name = function
   | Vreg -> "VREG"
   | Vdir -> "VDIR"
   | Vlnk -> "VLNK"
+  | Termios_size -> "TERMIOS_SIZE"
+  | Termios_iflag_offset -> "TERMIOS_IFLAG_OFFSET"
+  | Termios_oflag_offset -> "TERMIOS_OFLAG_OFFSET"
+  | Termios_cflag_offset -> "TERMIOS_CFLAG_OFFSET"
+  | Termios_lflag_offset -> "TERMIOS_LFLAG_OFFSET"
+  | Termios_flag_size -> "TERMIOS_FLAG_SIZE"
+  | Termios_cc_offset -> "TERMIOS_CC_OFFSET"
+  | Vmin -> "VMIN"
+  | Vtime -> "VTIME"
+  | Tcsaflush -> "TCSAFLUSH"
+  | Tiocgwinsz -> "TIOCGWINSZ"
+  | Icanon -> "ICANON"
+  | Echo -> "ECHO"
+  | Isig -> "ISIG"
+  | Iexten -> "IEXTEN"
+  | Ixon -> "IXON"
+  | Icrnl -> "ICRNL"
+  | Brkint -> "BRKINT"
+  | Inpck -> "INPCK"
+  | Istrip -> "ISTRIP"
+  | Opost -> "OPOST"
+  | Cs8 -> "CS8"
 
 (* A size or an offset in a structure is a [USize], and the bits of a
    file's mode are compared with a number read out of the structure. *)
@@ -987,8 +1098,13 @@ let number_type = function
   | S_ifmt | S_ifreg | S_ifdir | S_iflnk -> UInt64
   | Utime_omit -> Int64
   | Path_max | Spawn_file_actions_size | Dirent_length_offset | Dirent_kind_offset
-  | Dirent_name_offset ->
+  | Dirent_name_offset | Termios_size | Termios_iflag_offset | Termios_oflag_offset
+  | Termios_cflag_offset | Termios_lflag_offset | Termios_flag_size | Termios_cc_offset | Vmin
+  | Vtime ->
       USize
+  | Tiocgwinsz | Icanon | Echo | Isig | Iexten | Ixon | Icrnl | Brkint | Inpck | Istrip | Opost
+  | Cs8 ->
+      UInt64
   | Dt_unknown | Dt_dir | Dt_reg | Dt_lnk | Attr_bit_map_count | Attr_cmn_returned_attrs
   | Attr_cmn_name | Attr_cmn_objtype | Vreg | Vdir | Vlnk ->
       UInt64
@@ -1018,6 +1134,11 @@ let number_headers = function
   | Attr_bit_map_count | Attr_cmn_returned_attrs | Attr_cmn_name | Attr_cmn_objtype ->
       [ "sys/attr.h" ]
   | Vreg | Vdir | Vlnk -> [ "sys/vnode.h" ]
+  | Termios_size | Termios_iflag_offset | Termios_oflag_offset | Termios_cflag_offset
+  | Termios_lflag_offset | Termios_flag_size | Termios_cc_offset | Vmin | Vtime | Tcsaflush | Icanon
+  | Echo | Isig | Iexten | Ixon | Icrnl | Brkint | Inpck | Istrip | Opost | Cs8 ->
+      [ "termios.h" ]
+  | Tiocgwinsz -> [ "sys/ioctl.h" ]
   | Path_max -> [ "limits.h" ]
 
 (* The C expression that a number is the value of, which the check compares
@@ -1028,6 +1149,13 @@ let number_expression (system : system) number =
   let offset_of field = Some (Printf.sprintf "__builtin_offsetof(struct stat, %s)" field) in
   match (number, system.os) with
   | Stat_size, _ -> Some "sizeof(struct stat)"
+  | Termios_size, _ -> Some "sizeof(struct termios)"
+  | Termios_iflag_offset, _ -> Some "__builtin_offsetof(struct termios, c_iflag)"
+  | Termios_oflag_offset, _ -> Some "__builtin_offsetof(struct termios, c_oflag)"
+  | Termios_cflag_offset, _ -> Some "__builtin_offsetof(struct termios, c_cflag)"
+  | Termios_lflag_offset, _ -> Some "__builtin_offsetof(struct termios, c_lflag)"
+  | Termios_flag_size, _ -> Some "sizeof(((struct termios *)0)->c_lflag)"
+  | Termios_cc_offset, _ -> Some "__builtin_offsetof(struct termios, c_cc)"
   | Dirent_length_offset, Linux -> Some "__builtin_offsetof(struct dirent64, d_reclen)"
   | Dirent_kind_offset, Linux -> Some "__builtin_offsetof(struct dirent64, d_type)"
   | Dirent_name_offset, Linux -> Some "__builtin_offsetof(struct dirent64, d_name)"
@@ -1162,6 +1290,43 @@ let value (system : system) number =
   | Attr_cmn_returned_attrs, Macos -> 0x80000000
   | Attr_cmn_name, Macos -> 1
   | Attr_cmn_objtype, Macos -> 8
+  | Termios_size, Linux -> 60
+  | Termios_size, Macos -> 72
+  | Termios_iflag_offset, Linux -> 0
+  | Termios_iflag_offset, Macos -> 0
+  | Termios_oflag_offset, Linux -> 4
+  | Termios_oflag_offset, Macos -> 8
+  | Termios_cflag_offset, Linux -> 8
+  | Termios_cflag_offset, Macos -> 16
+  | Termios_lflag_offset, Linux -> 12
+  | Termios_lflag_offset, Macos -> 24
+  | Termios_flag_size, Linux -> 4
+  | Termios_flag_size, Macos -> 8
+  | Termios_cc_offset, Linux -> 17
+  | Termios_cc_offset, Macos -> 32
+  | Vmin, Linux -> 6
+  | Vmin, Macos -> 16
+  | Vtime, Linux -> 5
+  | Vtime, Macos -> 17
+  | Tcsaflush, (Linux | Macos) -> 2
+  | Tiocgwinsz, Linux -> 0x5413
+  | Tiocgwinsz, Macos -> 0x40087468
+  | Icanon, Linux -> 2
+  | Icanon, Macos -> 256
+  | Echo, (Linux | Macos) -> 8
+  | Isig, Linux -> 1
+  | Isig, Macos -> 128
+  | Iexten, Linux -> 32768
+  | Iexten, Macos -> 1024
+  | Ixon, Linux -> 1024
+  | Ixon, Macos -> 512
+  | Icrnl, (Linux | Macos) -> 256
+  | Brkint, (Linux | Macos) -> 2
+  | Inpck, (Linux | Macos) -> 16
+  | Istrip, (Linux | Macos) -> 32
+  | Opost, (Linux | Macos) -> 1
+  | Cs8, Linux -> 48
+  | Cs8, Macos -> 768
   | Vreg, Macos -> 1
   | Vdir, Macos -> 2
   | Vlnk, Macos -> 5

@@ -1,11 +1,51 @@
+use standard::intrinsic
+
 public type DecodeError =
   | InvalidCharacter(offset: USize)
   | OddLength
   derives Equal
 
 impl Display for DecodeError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      InvalidCharacter(offset) => {
+        mut output.write("the byte at offset ")
+        offset.display(mut output)
+        mut output.write(" is not a hexadecimal digit")
+      }
+      OddLength => mut output.write("the text has an odd number of digits")
+    }
+  }
+}
+
+internal fn digit(value: UInt8, uppercase: Bool) -> UInt8
+  requires value < 16
+  cost time O(1)
+  cost allocations == 0
+{
+  if value < 10 {
+    value + 48
+  } else if uppercase {
+    value + 55
+  } else {
+    value + 87
+  }
+}
+
+internal fn digit_value(byte: UInt8) -> UInt8
+  ensures result <= 16
+  cost time O(1)
+  cost allocations == 0
+{
+  if byte >= 48 && byte <= 57 {
+    byte - 48
+  } else if byte >= 97 && byte <= 102 {
+    byte - 87
+  } else if byte >= 65 && byte <= 70 {
+    byte - 55
+  } else {
+    16
   }
 }
 
@@ -14,7 +54,19 @@ public fn encode(bytes: Slice[UInt8], uppercase: Bool = false) -> String
   cost time O(bytes.length())
   cost allocations <= 1
 {
-  todo
+  if bytes.length() > USize.maximum / 2 {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(2 * bytes.length())
+  for index in 0..bytes.length()
+    invariant intrinsic::storage_length(output) == 2 * yielded.length()
+    invariant intrinsic::storage_capacity(output) == 2 * bytes.length()
+  {
+    let byte = bytes[index]
+    intrinsic::storage_push(mut output, value: digit(byte / 16, uppercase: uppercase))
+    intrinsic::storage_push(mut output, value: digit(byte % 16, uppercase: uppercase))
+  }
+  String(storage: own output)
 }
 
 public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError]
@@ -25,5 +77,30 @@ public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError]
   cost time O(text.length())
   cost allocations <= 1
 {
-  todo
+  if text.length() % 2 != 0 {
+    return Err(DecodeError.OddLength)
+  }
+  var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(text.length() / 2)
+  var index: USize = 0
+  while index < text.length()
+    invariant index <= text.length()
+    invariant index % 2 == 0
+    invariant 2 * intrinsic::storage_length(bytes) == index
+    invariant intrinsic::storage_capacity(bytes) == text.length() / 2
+    decreases text.length() - index
+    cost time O(index)
+    cost allocations == 0
+  {
+    let high = digit_value(text.byte(index))
+    if high == 16 {
+      return Err(DecodeError.InvalidCharacter(offset: index))
+    }
+    let low = digit_value(text.byte(index + 1))
+    if low == 16 {
+      return Err(DecodeError.InvalidCharacter(offset: index + 1))
+    }
+    intrinsic::storage_push(mut bytes, value: high * 16 + low)
+    index += 2
+  }
+  Ok(List(storage: own bytes))
 }

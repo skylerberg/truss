@@ -53,12 +53,14 @@ internal fn List[Element].elements(self) -> intrinsic::View[Element] {
 public fn List[Element].length(self) -> USize
   ensures result == self.model().length()
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::storage_length(self.storage)
 }
 
 public fn List[Element].is_empty(self) -> Bool
   cost time O(1)
+  cost allocations == 0
 {
   self.length() == 0
 }
@@ -104,6 +106,7 @@ public fn List[Element].partition_point(self, before: (fn(Element) -> Bool cost 
 public fn List[Element].slice(self) -> Slice[Element]
   ensures identical(result.model(), self.model())
   cost time O(1)
+  cost allocations == 0
 {
   Slice(elements: intrinsic::storage_view(self.storage))
 }
@@ -115,6 +118,7 @@ internal fn List[Element].slice_range(self, start: USize, stop: USize) -> Slice[
   ensures forall index in 0..result.length() =>
     identical(result.model()[index], self.model()[start + index])
   cost time O(1)
+  cost allocations == 0
 {
   self.slice().slice_range(start, stop: stop)
 }
@@ -126,6 +130,7 @@ internal fn Slice[Element].slice_range(self, start: USize, stop: USize) -> Slice
   ensures forall index in 0..result.length() =>
     identical(result.model()[index], self.model()[start + index])
   cost time O(1)
+  cost allocations == 0
 {
   Slice(elements: intrinsic::view_slice(self.elements, start, stop))
 }
@@ -174,6 +179,7 @@ public fn List[Element].swap(mut self, first: USize, second: USize)
   ensures forall i in 0..self.length() =>
     i == first || i == second || identical(self.model()[i], old(self.model())[i])
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::storage_swap(mut self.storage, first: first, second: second)
 }
@@ -233,6 +239,7 @@ public fn Array[Element, count: USize].to_list(own self) -> List[Element]
 public fn Slice[Element].length(self) -> USize
   ensures result == self.model().length()
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::view_length(self.elements)
 }
@@ -281,6 +288,7 @@ impl Index for List[Element] {
 
   fn contains_key(self, key: USize) -> Bool
     cost time O(1)
+    cost allocations == 0
   {
     key < self.length()
   }
@@ -289,6 +297,7 @@ impl Index for List[Element] {
     requires key < self.length()
     ensures identical(result, self.model()[key])
     cost time O(1)
+    cost allocations == 0
   {
     yield intrinsic::storage_at(self.storage, index: key)
   }
@@ -298,6 +307,7 @@ impl Index for List[Element] {
     ensures identical(result, old(self.model())[key])
     ensures identical(self.model(), old(self.model()).update(key, value: yielded[0]))
     cost time O(1)
+    cost allocations == 0
   {
     yield intrinsic::storage_at_mut(mut self.storage, index: key)
   }
@@ -309,6 +319,7 @@ impl Index for Slice[Element] {
 
   fn contains_key(self, key: USize) -> Bool
     cost time O(1)
+    cost allocations == 0
   {
     key < self.length()
   }
@@ -317,6 +328,7 @@ impl Index for Slice[Element] {
     requires key < self.length()
     ensures identical(result, self.model()[key])
     cost time O(1)
+    cost allocations == 0
   {
     yield intrinsic::view_at(self.elements, index: key)
   }
@@ -326,6 +338,7 @@ impl Index for Slice[Element] {
     ensures identical(result, old(self.model())[key])
     ensures identical(self.model(), old(self.model()).update(key, value: yielded[0]))
     cost time O(1)
+    cost allocations == 0
   {
     yield intrinsic::view_at_mut(mut self.elements, index: key)
   }
@@ -379,6 +392,7 @@ public fn List[Element].collect[Source: Cursor[Element = Element]](source: own S
 public fn List[Element].capacity(self) -> USize
   ensures result >= self.length()
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::storage_capacity(self.storage)
 }
