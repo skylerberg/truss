@@ -101,7 +101,6 @@ let derived_interface database ~type_ ~trait =
           { path = type_; arguments = Environment.generic_arguments type_interface.type_generics }
       in
       let self : T.substitution = [ ({ owner = trait; name = "Self" }, T.Type for_type) ] in
-      let substitute = T.substitute self in
       Some
         {
           T.impl_generics;
@@ -111,26 +110,10 @@ let derived_interface database ~type_ ~trait =
           impl_methods =
             List.map
               (fun (method_ : T.trait_method) ->
-                let signature = method_.method_signature in
                 ( method_.method_name,
                   method_.method_receiver,
-                  {
-                    signature with
-                    receiver =
-                      Option.map
-                        (fun (receiver, type_) -> (receiver, substitute type_))
-                        signature.receiver;
-                    parameters =
-                      List.map
-                        (fun (parameter : T.parameter_info) ->
-                          { parameter with type_ = substitute parameter.type_ })
-                        signature.parameters;
-                    output =
-                      (match signature.output with
-                      | Returns type_ -> Returns (substitute type_)
-                      | Yields (mode, type_) -> Yields (mode, substitute type_)
-                      | Lends (mode, type_) -> Lends (mode, substitute type_));
-                  } ))
+                  T.inside ~generics:impl_generics ~uses:[]
+                    (T.substitute_signature self method_.method_signature) ))
               trait_interface.methods;
           impl_broken = false;
         }
@@ -151,6 +134,26 @@ let trait_substitution database (impl : Path.t) =
         (fun trait ->
           Properties.trait_substitution trait ~self:interface.for_type interface.implements)
         (Query.demand database Environment.trait_interface interface.implements.trait))
+
+(* The signature of a function or a method at a path, for every path that
+   code is compiled or proven at. A method that an [impl] leaves to its
+   trait, or that a derived [impl] has, is written nowhere of its own: its
+   signature is the trait's method's, with [Self] and the trait's parameters
+   standing for what the [impl] gives them, inside that [impl]. *)
+let signature database (path : Path.t) =
+  match (Query.demand database Environment.signature path, path) with
+  | Some signature, _ -> Some signature
+  | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
+      match (impl_interface database owner, trait_substitution database owner) with
+      | Some impl, Some substitution ->
+          Option.map
+            (fun declared ->
+              T.inside ~generics:impl.impl_generics ~uses:impl.impl_uses
+                (T.substitute_signature substitution declared))
+            (Query.demand database Environment.signature
+               (Method { owner = impl.implements.trait; name; receiver }))
+      | _ -> None)
+  | None, _ -> None
 
 (* Matching *)
 
