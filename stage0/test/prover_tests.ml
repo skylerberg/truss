@@ -2208,6 +2208,25 @@ let () =
       if found <> [ "prover.cost" ] then fail "%s" (String.concat ", " found));
   test "a list's potential is its elements', through its model" (fun () ->
       proven (meter ^ "fn keep(meters: mut List[Meter])\n  cost amortized time O(1)\n{\n}\n"));
+  let encoder = "type Encoder(bytes: List[UInt8])\n\n" in
+  test "a record with no potential clause holds its parts'" (fun () ->
+      proven
+        (encoder
+       ^ "fn Encoder.uint8(mut self, value: UInt8)\n\
+         \  cost amortized time O(1)\n\
+          {\n\
+         \  mut self.bytes.push(value)\n\
+          }\n"));
+  test "a loop that pushes into a record's list is amortized linear" (fun () ->
+      proven
+        (encoder
+       ^ "fn Encoder.bytes(mut self, bytes: Slice[UInt8])\n\
+         \  cost amortized time O(bytes.length())\n\
+          {\n\
+         \  for index in 0..bytes.length() {\n\
+         \    mut self.bytes.push(bytes[index])\n\
+         \  }\n\
+          }\n"));
   test "a potential below zero" (fun () ->
       not_proven "type Debt(owed: Int64)\n  cost potential owed\n" "prover.cost");
   test "a potential its invariant keeps at or above zero" (fun () ->

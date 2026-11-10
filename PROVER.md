@@ -931,7 +931,11 @@ plus what happens before and after:
 ### Amortized bounds
 
 - **A value's potential** is its type's `cost potential` plus the
-  potentials of its parts, as DESIGN.md defines it. In the logic it is a
+  potentials of its parts, as DESIGN.md defines it, and a type with no
+  `cost potential` holds none of its own. A record's potential is its
+  parts', and a part of a record built here is what it was built from, so
+  a push into `self.bytes` changes the potential of `self` by what it
+  changes the list's. In the logic it is a
   function of the value, whose definition is unfolded once for each value
   it is asked of, so a recursive type's potential is never unfolded
   forever. A growable buffer, a storage or a type whose model is the
