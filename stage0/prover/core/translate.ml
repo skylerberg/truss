@@ -247,6 +247,8 @@ type context = {
   mutable proving : bool;
       (** In a theorem, a [proof] block, or a law's proof, where a [todo] is a hole. *)
   mutable holes : (Names.key * span) list;  (** Reversed. *)
+  mutable unfinished : L.term list;
+      (** The condition of each path a [todo] ends in the [proof] block being read. *)
   mutable call_targets : (L.term * Core.local) list;
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
   ranking : bool;
@@ -1437,7 +1439,10 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
   | Todo ->
       (* What follows a [todo] on its path is not shown, and a build refuses
          what can reach it. In a proof it is a hole. *)
-      if context.proving then context.holes <- (context.home, at frame node) :: context.holes;
+      if context.proving then begin
+        context.holes <- (context.home, at frame node) :: context.holes;
+        context.unfinished <- frame.condition :: context.unfinished
+      end;
       Some
         ( { frame with condition = L.Boolean false },
           arrive context frame "todo" (type_of context frame node) )
@@ -2636,7 +2641,11 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
   in
   if List.length parameters <> List.length function_type.inputs then
     unsupported span "a lambda with a different number of parameters";
-  let inside = { frame with result = None; loop = None; updating = None } in
+  (* A lambda's body runs only where it is called, which may be nowhere, so
+     what its path assumes is only where it is called: what the body
+     assumes of its arguments, or of what it calls, holds of no other path. *)
+  let called = fresh context frame "called" L.Bool in
+  let inside = { (restrict frame called) with result = None; loop = None; updating = None } in
   let start_fresh = context.fresh
   and start_facts = List.length context.facts
   and start_declarations = List.length context.declarations in
@@ -2795,7 +2804,7 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
     | None ->
         let term = arrive context frame "lambda" ty in
         if in_the_logic function_type && frame.bound = [] then
-          what_a_lambda_does context function_type term ~arguments ~start_fresh ~end_fresh
+          what_a_lambda_does context function_type term ~called ~arguments ~start_fresh ~end_fresh
             ~start_declarations ~premises ~shown:(facts_since context facts_mark) ~ended:!ended;
         term
   in
@@ -2809,11 +2818,12 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
 (* What a lambda whose body is not its definition does, for every argument:
    its body ran on arguments that are arbitrary but for [premises], so what
    it showed, and the value it ended with on each path, hold for each
-   argument the premises admit. Over each argument, each value made in the
+   argument the premises admit, since its type promises that it ends, and
+   so is called wherever it is applied. Over each argument, each value made in the
    body is a function of the arguments, since it can differ for each. A
    nested lambda's symbol, named after what it captures, is not such a
    function, so a body with one gives nothing. *)
-and what_a_lambda_does context function_type term ~arguments ~start_fresh ~end_fresh
+and what_a_lambda_does context function_type term ~called ~arguments ~start_fresh ~end_fresh
     ~start_declarations ~premises ~shown ~ended =
   let declared_here =
     List.filteri
@@ -2836,6 +2846,7 @@ and what_a_lambda_does context function_type term ~arguments ~start_fresh ~end_f
     in
     let variables = List.map (fun (name, _) -> L.Symbol name) parameters in
     let renamed = Hashtbl.create 16 in
+    (match called with L.Symbol name -> Hashtbl.replace renamed name (L.Boolean true) | _ -> ());
     List.iter2
       (fun argument variable ->
         match argument with L.Symbol name -> Hashtbl.replace renamed name variable | _ -> ())
@@ -2943,7 +2954,17 @@ and lambda_definition context frame (function_type : T.function_type) parameters
         | Some last -> (
             match in_range (type_of context frame (unconverted last)) application with
             | L.Boolean true -> ()
-            | range -> fact context frame (L.Forall (bound, range)))
+            | range ->
+                (* For arguments of the parameters' types, which the body
+                   was read with. *)
+                let arguments_in_range =
+                  L.conjunction
+                    (List.map2
+                       (fun (name, _) (_, input) ->
+                         in_range (substituted context frame input) (L.Symbol name))
+                       bound function_type.inputs)
+                in
+                fact context frame (L.Forall (bound, L.( ==> ) arguments_in_range range)))
         | None -> ());
         Some term
     | _ -> None
@@ -6304,6 +6325,28 @@ and statement context frame (node : statement) : frame option =
       raise (Unsupported (span_of frame.source node.origin, message))
   else statement_kind context frame node
 
+(* A proof is ghost code, which a build leaves out: what it shows is known
+   after it, but the program goes on from where it was, with nothing the
+   proof changed, whichever way the proof ends, or if it never ends. A
+   [todo] in it stands for the proof still to write, so what follows is not
+   shown on the paths that reach one, which are what this gives. *)
+and ghost context frame body =
+  let proving = context.proving
+  and returns = context.returns
+  and leaving = context.leaving
+  and unfinished = context.unfinished in
+  context.proving <- true;
+  context.unfinished <- [];
+  Fun.protect
+    ~finally:(fun () ->
+      context.proving <- proving;
+      context.returns <- returns;
+      context.leaving <- leaving;
+      context.unfinished <- unfinished)
+    (fun () ->
+      ignore (block_value context { frame with loop = None } body);
+      L.disjunction context.unfinished)
+
 and statement_kind context frame (node : statement) : frame option =
   let span = span_of frame.source node.origin in
   match node.kind with
@@ -6350,14 +6393,7 @@ and statement_kind context frame (node : statement) : frame option =
           (Printf.sprintf "`%s` may not hold." (quote frame.source asserted.origin))
           term;
       Some frame
-  | Proof block_ -> (
-      let proving = context.proving in
-      context.proving <- true;
-      let after = block_value context frame block_ in
-      context.proving <- proving;
-      match after with
-      | Some (after, _) -> Some { frame with locals = after.locals; condition = after.condition }
-      | None -> None)
+  | Proof block_ -> Some (restrict frame (L.not_ (ghost context frame block_)))
   | Parallel branches ->
       (* Branches are disjoint, so they can run in order. *)
       List.fold_left
@@ -7469,6 +7505,7 @@ let new_context database ~home ~current ~terminates ~measures =
     cursors = [];
     proving = false;
     holes = [];
+    unfinished = [];
     call_targets = [];
     validating = [];
     ranking =
@@ -7964,30 +8001,26 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
               term)
             types
         in
-        let frame = ref start in
         (* A [proof]'s statements are hints: its calls' postconditions are
            facts where their preconditions hold, which is all a proof
            needs. *)
+        let start =
+          List.fold_left
+            (fun start ((proof_source : source), (body : block)) ->
+              restrict start
+                (L.not_ (ghost context { start with source = proof_source; checking = false } body)))
+            start
+            (List.filter_map
+               (fun (name, proof) -> if name = law.name then Some proof else None)
+               proofs)
+        in
+        let inside = law_frame start law_source trait for_type law terms in
         List.iter
-          (fun ((proof_source : source), (body : block)) ->
-            context.proving <- true;
-            let after =
-              block_value context { start with source = proof_source; checking = false } body
-            in
-            context.proving <- false;
-            match after with
-            | Some (after, _) -> frame := { start with condition = after.condition }
-            | None -> ())
-          (List.filter_map
-             (fun (name, proof) -> if name = law.name then Some proof else None)
-             proofs);
-        let inside = law_frame !frame law_source trait for_type law terms in
-        List.iter
-          (fun clause -> assume context !frame (snd (clause_value context inside clause)))
+          (fun clause -> assume context start (snd (clause_value context inside clause)))
           law.requires;
         match block_value context inside law.body with
         | Some (_, holds) ->
-            oblige context !frame Law at
+            oblige context start Law at
               (Printf.sprintf "The law `%s` may not hold for `%s`." law.name (T.show for_type))
               holds
         | None -> ()

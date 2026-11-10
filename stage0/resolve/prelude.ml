@@ -41,6 +41,7 @@ let types =
             "Remainder";
             "Negate";
             "Index";
+            "IndexAssign";
             "Model";
             "Iterable";
             "Cursor";

@@ -80,6 +80,9 @@ and statement state env (written : statement) ~last : unit =
           let pattern = build_pattern state written_pattern in
           Let { pattern; value; else_ = Option.map (build_block state) else_ });
       binding_pattern state env written_pattern type_ ~mutable_ ~mode
+  | Assignment { target; operator = Assign; value }
+    when assigns_through_index state env written target value ->
+      ()
   | Assignment { target = written_target; operator; value } -> (
       let target_type = expression state env written_target in
       mutate state env ~by:Assignment written_target;
@@ -279,6 +282,73 @@ and statement state env (written : statement) ~last : unit =
           report state Wrong_yield written.span
             "Only a method whose signature `yields` or `lends` can `yield`.")
   | Statement_error -> ()
+
+(* [collection[key] = value], where the collection's type implements
+   [IndexAssign], is a call of its [assign]. The collection keeps the key
+   and the value, so a key that is absent is added. Returns false for any
+   other assignment, which assigns to the place that the target denotes. *)
+and assigns_through_index state env (written : statement) (target : expression) (value : expression)
+    =
+  match (target.kind, state.resolved.brackets.(target.id)) with
+  | Bracket (_, [ Item { kind = Range _; _ } ]), _ -> false
+  | Bracket (base, [ Item key ]), (Some Index | None) -> (
+      let base_type = normalize state (expression state env base) in
+      let trait = trait_reference (core "IndexAssign") in
+      match
+        ( implements state base_type trait,
+          Members.trait_method state.database trait.trait "assign" Mut )
+      with
+      | Some ((Impls.From_impl _ | From_bound | From_any) as found), Some method_ ->
+          let index = trait_reference (core "Index") in
+          let parameter name type_ : T.parameter_info =
+            { name; mode = Own; type_; has_default = false }
+          in
+          mutate state env ~by:Assignment base;
+          let key_conversion, _ =
+            Calls.argument_value state env key
+              (parameter "key" (associated state base_type index "Key" ~at:key.span))
+          in
+          let value_conversion, _ =
+            Calls.argument_value state env value
+              (parameter "value" (associated state base_type index "Output" ~at:value.span))
+          in
+          (* The call is recorded for the statement, which has no
+             expression of its own to record it for. *)
+          let call : expression =
+            { kind = Expression_error; span = written.span; id = written.id }
+          in
+          record state call T.unit;
+          let argument (given : expression) position mode conversion : C.argument =
+            { expression = given.id; parameter = position; mode; conversion }
+          in
+          state.tables.calls.(written.id) <-
+            Some
+              {
+                callee =
+                  Trait_method
+                    {
+                      trait;
+                      name = "assign";
+                      receiver = Mut;
+                      self_type = base_type;
+                      type_arguments = [];
+                      evidence = evidence_of found;
+                    };
+                arguments =
+                  [
+                    argument base 0 Mut None;
+                    argument key 1 Own key_conversion;
+                    argument value 2 Own value_conversion;
+                  ];
+                defaults_left_out = [];
+                uses = method_.method_signature.uses;
+                result = T.unit;
+              };
+          Form.register_call state call;
+          register_statement state written (fun () -> Evaluate (build_expression state call));
+          true
+      | _ -> false)
+  | _ -> false
 
 and loop_body state env (body : block) =
   List.iter

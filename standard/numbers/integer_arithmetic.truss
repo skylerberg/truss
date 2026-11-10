@@ -191,12 +191,12 @@ public fn Int8.saturating_sum(items: Slice[Int8]) -> Int8
 }
 
 public fn Int8.wrapping_sum(items: Slice[Int8]) -> Int8
-  ensures exists wraps: Integer => result + wraps * 256 == Int8.total(items)
+  ensures (Int8.total(items) - result) % 256 == 0
   cost time O(items.length())
 {
   var total: Int8 = 0
   for item in items
-    invariant exists wraps: Integer => total + wraps * 256 == yielded.sum(fn(value) { value })
+    invariant (yielded.sum(fn(value) { value }) - total) % 256 == 0
   {
     total = total.wrapping_add(item)
   }
@@ -515,12 +515,12 @@ public fn Int16.saturating_sum(items: Slice[Int16]) -> Int16
 }
 
 public fn Int16.wrapping_sum(items: Slice[Int16]) -> Int16
-  ensures exists wraps: Integer => result + wraps * 65536 == Int16.total(items)
+  ensures (Int16.total(items) - result) % 65536 == 0
   cost time O(items.length())
 {
   var total: Int16 = 0
   for item in items
-    invariant exists wraps: Integer => total + wraps * 65536 == yielded.sum(fn(value) { value })
+    invariant (yielded.sum(fn(value) { value }) - total) % 65536 == 0
   {
     total = total.wrapping_add(item)
   }
@@ -839,12 +839,12 @@ public fn Int32.saturating_sum(items: Slice[Int32]) -> Int32
 }
 
 public fn Int32.wrapping_sum(items: Slice[Int32]) -> Int32
-  ensures exists wraps: Integer => result + wraps * 4294967296 == Int32.total(items)
+  ensures (Int32.total(items) - result) % 4294967296 == 0
   cost time O(items.length())
 {
   var total: Int32 = 0
   for item in items
-    invariant exists wraps: Integer => total + wraps * 4294967296 == yielded.sum(fn(value) { value })
+    invariant (yielded.sum(fn(value) { value }) - total) % 4294967296 == 0
   {
     total = total.wrapping_add(item)
   }
@@ -1163,12 +1163,12 @@ public fn Int64.saturating_sum(items: Slice[Int64]) -> Int64
 }
 
 public fn Int64.wrapping_sum(items: Slice[Int64]) -> Int64
-  ensures exists wraps: Integer => result + wraps * 18446744073709551616 == Int64.total(items)
+  ensures (Int64.total(items) - result) % 18446744073709551616 == 0
   cost time O(items.length())
 {
   var total: Int64 = 0
   for item in items
-    invariant exists wraps: Integer => total + wraps * 18446744073709551616 == yielded.sum(fn(value) { value })
+    invariant (yielded.sum(fn(value) { value }) - total) % 18446744073709551616 == 0
   {
     total = total.wrapping_add(item)
   }
@@ -1487,12 +1487,12 @@ public fn ISize.saturating_sum(items: Slice[ISize]) -> ISize
 }
 
 public fn ISize.wrapping_sum(items: Slice[ISize]) -> ISize
-  ensures exists wraps: Integer => result + wraps * 18446744073709551616 == ISize.total(items)
+  ensures (ISize.total(items) - result) % 18446744073709551616 == 0
   cost time O(items.length())
 {
   var total: ISize = 0
   for item in items
-    invariant exists wraps: Integer => total + wraps * 18446744073709551616 == yielded.sum(fn(value) { value })
+    invariant (yielded.sum(fn(value) { value }) - total) % 18446744073709551616 == 0
   {
     total = total.wrapping_add(item)
   }
@@ -1790,12 +1790,12 @@ public fn UInt8.saturating_sum(items: Slice[UInt8]) -> UInt8
 }
 
 public fn UInt8.wrapping_sum(items: Slice[UInt8]) -> UInt8
-  ensures exists wraps: Integer => result + wraps * 256 == UInt8.total(items)
+  ensures (UInt8.total(items) - result) % 256 == 0
   cost time O(items.length())
 {
   var total: UInt8 = 0
   for item in items
-    invariant exists wraps: Integer => total + wraps * 256 == yielded.sum(fn(value) { value })
+    invariant (yielded.sum(fn(value) { value }) - total) % 256 == 0
   {
     total = total.wrapping_add(item)
   }
@@ -2092,12 +2092,12 @@ public fn UInt16.saturating_sum(items: Slice[UInt16]) -> UInt16
 }
 
 public fn UInt16.wrapping_sum(items: Slice[UInt16]) -> UInt16
-  ensures exists wraps: Integer => result + wraps * 65536 == UInt16.total(items)
+  ensures (UInt16.total(items) - result) % 65536 == 0
   cost time O(items.length())
 {
   var total: UInt16 = 0
   for item in items
-    invariant exists wraps: Integer => total + wraps * 65536 == yielded.sum(fn(value) { value })
+    invariant (yielded.sum(fn(value) { value }) - total) % 65536 == 0
   {
     total = total.wrapping_add(item)
   }
@@ -2394,12 +2394,12 @@ public fn UInt32.saturating_sum(items: Slice[UInt32]) -> UInt32
 }
 
 public fn UInt32.wrapping_sum(items: Slice[UInt32]) -> UInt32
-  ensures exists wraps: Integer => result + wraps * 4294967296 == UInt32.total(items)
+  ensures (UInt32.total(items) - result) % 4294967296 == 0
   cost time O(items.length())
 {
   var total: UInt32 = 0
   for item in items
-    invariant exists wraps: Integer => total + wraps * 4294967296 == yielded.sum(fn(value) { value })
+    invariant (yielded.sum(fn(value) { value }) - total) % 4294967296 == 0
   {
     total = total.wrapping_add(item)
   }
@@ -2696,12 +2696,12 @@ public fn UInt64.saturating_sum(items: Slice[UInt64]) -> UInt64
 }
 
 public fn UInt64.wrapping_sum(items: Slice[UInt64]) -> UInt64
-  ensures exists wraps: Integer => result + wraps * 18446744073709551616 == UInt64.total(items)
+  ensures (UInt64.total(items) - result) % 18446744073709551616 == 0
   cost time O(items.length())
 {
   var total: UInt64 = 0
   for item in items
-    invariant exists wraps: Integer => total + wraps * 18446744073709551616 == yielded.sum(fn(value) { value })
+    invariant (yielded.sum(fn(value) { value }) - total) % 18446744073709551616 == 0
   {
     total = total.wrapping_add(item)
   }
@@ -2998,12 +2998,12 @@ public fn USize.saturating_sum(items: Slice[USize]) -> USize
 }
 
 public fn USize.wrapping_sum(items: Slice[USize]) -> USize
-  ensures exists wraps: Integer => result + wraps * 18446744073709551616 == USize.total(items)
+  ensures (USize.total(items) - result) % 18446744073709551616 == 0
   cost time O(items.length())
 {
   var total: USize = 0
   for item in items
-    invariant exists wraps: Integer => total + wraps * 18446744073709551616 == yielded.sum(fn(value) { value })
+    invariant (yielded.sum(fn(value) { value }) - total) % 18446744073709551616 == 0
   {
     total = total.wrapping_add(item)
   }

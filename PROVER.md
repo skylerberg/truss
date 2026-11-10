@@ -424,7 +424,12 @@ decides when a body is a definition. In the solver:
   same captured values are the same value, so a bound and a loop's bound
   that both write `fn(row) { row.length() }` mean the same sum. A lambda
   is proven where it is written, with fresh arguments, and must end
-  exactly when its function type has a `time` clause.
+  exactly when its function type has a `time` clause. Its body runs only
+  where it is called, which may be nowhere, so what the body assumes, of
+  its arguments or from what it calls, is known only inside it: a lambda
+  that calls a function that never returns, or whose type's `requires` no
+  argument meets, shows nothing of the path it is written on. The range of
+  its result is known for arguments in the ranges of their types.
 - **Otherwise, a function value is known by its contract.** A lambda whose
   body is not functional, as one with a `var` or a loop is, gives what its
   body showed for its fresh arguments, for every argument meeting what was
@@ -659,7 +664,10 @@ not.
   `decreases` makes sound.
 - **A `proof` block's statements** are walked at that point and nowhere
   else. Its calls and `assert`s add facts for the obligations after it.
-  Codegen never sees it.
+  Codegen never sees it, so the program goes on from where the block
+  started: nothing the block assigns reaches the code after it, and a
+  `return`, a `break`, or a loop that never ends inside it does not end the
+  program's path.
 - **`assert`** in a theorem or a proof is an obligation, and a fact for the
   rest of the path. In a test it is assumed, since the test's run checks
   it.
@@ -669,7 +677,9 @@ not.
   concrete type whose `impl`'s laws are proven. Each hand-written `impl`
   must prove each law, under the code `prover.law`, from the `impl`'s
   method contracts and definitions and the body of its `proof` definition,
-  if there is one. A law's own proof never uses that law.
+  if there is one. That body is a `proof` block: its facts are known, but
+  the law is shown from where it started, so a proof that never ends
+  shows nothing. A law's own proof never uses that law.
 - **A derived `Equal`** is the solver's equality, or its definition field
   by field, as [Equality](#equality) says. Nothing is proven for a derived
   implementation, as DESIGN.md says.
@@ -1108,8 +1118,9 @@ regardless, with their run-time checks.
 - **What a hole was to prove is everything after it on its path.** A proof
   cannot say which later obligations its steps were for, so the path
   through a hole ends there for the prover, as an `assume false` would,
-  and the obligations after it hold trivially. That is sound because a
-  hole is never in a program that is built.
+  and the obligations after it hold trivially, the code after a `proof`
+  block included. That is sound because a hole is never in a program that
+  is built.
 - **A `todo` in code also ends its path.** The contracts of a function
   whose body is `todo` are not checked against the body, and none of them
   is reported. DESIGN.md has a package's signatures and contracts written

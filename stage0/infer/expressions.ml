@@ -288,7 +288,13 @@ and is_field state env (inner : expression) (member : name) =
   | _ -> false
 
 and index state env ?expected:_ (value : expression) (base : expression) items =
-  let base_type = normalize state (expression state env base) in
+  (* An assignment through an index has already checked the collection. *)
+  let base_type =
+    normalize state
+      (match state.tables.types.(base.id) with
+      | Some type_ -> type_
+      | None -> expression state env base)
+  in
   match items with
   | [ Item ({ kind = Range { start; stop; _ }; _ } as range) ] -> (
       (* A slice: a view of a range of the collection. *)

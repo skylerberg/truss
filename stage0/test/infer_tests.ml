@@ -549,6 +549,22 @@ let () =
           \    serve(2)\n\
           \  }\n\
            }\n")));
+  test "an assignment through an index of a map takes the key as an owned value" (fun () ->
+      fine
+        "fn f(name: own String) -> USize {\n\
+        \  var ports: Map[String, Int64] = [\"http\": 80]\n\
+        \  ports[\"ftp\"] = 21\n\
+        \  ports[own name] = 8080\n\
+        \  ports.length()\n\
+         }\n";
+      one_diagnostic
+        "fn f(name: String) {\n\
+        \  var ports: Map[String, Int64] = [\"http\": 80]\n\
+        \  ports[name] = 8080\n\
+         }\n"
+        "types.missing_mark";
+      one_diagnostic "fn f(ports: Map[String, Int64]) {\n  ports[\"ftp\"] = 21\n}\n"
+        "types.not_assignable");
   test "the body of a concurrent block gets its types" (fun () ->
       has_type
         "fn g(count: UInt16) {}\n\n\
