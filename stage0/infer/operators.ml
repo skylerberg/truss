@@ -1,5 +1,5 @@
-(* Operators: [?], [with], prefix and binary operators through their traits
-   or built in, and [any]. *)
+(* Checks operators: [?], [with], prefix and binary operators (built in, or
+   resolved to a trait method), and [any]. *)
 
 open Syntax
 module T = Types
@@ -13,8 +13,8 @@ open Hooks
 open Lookups
 open Pattern_typing
 
-(* [?]: a [Result] whose error is the function's, or an [Option] in a
-   function that returns one. *)
+(* [?] takes a [Result] whose error type is the function's error type, or an
+   [Option] in a function that returns an [Option]. *)
 let rec try_ state env (value : expression) (inner : expression) =
   let inner_type = normalize state (expression state env inner) in
   let output =
@@ -44,7 +44,7 @@ let rec try_ state env (value : expression) (inner : expression) =
         "`?` works on a `Result` in a function that returns a `Result`, and on an `Option` in a \
          function that returns an `Option`. Convert between them with `ok_or` or `ok`."
 
-(* [base with (field: value)]: a record with some fields changed. *)
+(* [base with (field: value)]: a copy of a record with some fields replaced. *)
 and with_ state env (value : expression) (base : expression) updates =
   let base_type = normalize state (expression state env base) in
   (match base_type with
@@ -144,9 +144,9 @@ and prefix state env ?expected (value : expression) operator (inner : expression
   | Negate -> (
       match inner.kind with
       | Integer number ->
-          (* A literal negated directly is checked after the negation, so
+          (* A negated literal is range-checked after the negation, so
              [-128] fits an [Int8]. *)
-          (* The negation is the value: [-128] is one literal. *)
+          (* The negated literal is one literal: [-128]. *)
           state.tables.literals.(inner.id) <- Some (Integer_value number);
           state.tables.literals.(value.id) <- Some (Integer_value (Z.neg number));
           register_expression state value (fun () -> Form.numeric_literal state value.id);
@@ -156,8 +156,8 @@ and prefix state env ?expected (value : expression) operator (inner : expression
               match resolve state type_ with
               | T.Literal _ | T.Variable _ -> false
               | resolved ->
-                  (* Negating a literal of an unsigned type is the one error,
-                     not also a value out of range. *)
+                  (* A negated literal of an unsigned type gets only this
+                     diagnostic, and no second one for a value out of range. *)
                   if
                     T.is_integer_type resolved
                     && (not (T.is_signed resolved))
@@ -189,8 +189,9 @@ and prefix state env ?expected (value : expression) operator (inner : expression
               state value ~trait:(core "Negate") ~method_:"negate" ~left:type_ ~right:None
           end)
 
-(* An operator that is a trait method: the [impl] is chosen by the types of
-   both operands, once known, and the result is its [Output]. *)
+(* An operator that resolves to a trait method. The [impl] is found once the
+   types of both operands are inferred, and the result type is the [impl]'s
+   [Output]. *)
 and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~left ~right =
   let arguments = match right with Some right -> [ T.Type right ] | None -> [] in
   let reference = trait_reference ~arguments trait in
@@ -226,8 +227,8 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
         (match implements state left reference with
         | Some evidence ->
             let output = associated state left reference "Output" ~at:value.span in
-            (* What the statement decided the result is must be what the
-               [impl] gives. *)
+            (* The result type that the statement inferred must unify with
+               the [Output] of the [impl]. *)
             let decided = zonk state result in
             if not (unify state result output) then
               report state Mismatch value.span
@@ -265,8 +266,8 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
       end);
   result
 
-(* A literal operand takes the other operand's type when it can be that
-   type, as Go's untyped constants do. *)
+(* A literal operand takes the type of the other operand if the literal can
+   have that type, as an untyped constant does in Go. *)
 and literal_operands state ~left ~right =
   match (resolve state left, resolve state right) with
   | T.Literal (kind, _), other when Unify.literal_fits kind other -> ignore (unify state left right)
@@ -275,8 +276,8 @@ and literal_operands state ~left ~right =
       ignore (unify state left right)
   | _ -> ()
 
-(* [&&], [||], [!], [~], the bitwise operators, and shifts, which are
-   built in on built-in types. *)
+(* [&&], [||], [!], [~], the bitwise operators, and the shifts are built in
+   on built-in types. *)
 and built_in_operator state (value : expression) (operands : expression list) result =
   state.tables.calls.(value.id) <-
     Some
@@ -294,8 +295,8 @@ and built_in_operator state (value : expression) (operands : expression list) re
 
 and is_hole state type_ = resolve state type_ = T.Hole
 
-(* Checks both operands, the right against the left's type, and says
-   whether either is an undecided [todo]. *)
+(* Checks both operands, the right against the type of the left. Returns
+   whether the type of either is a hole left by a [todo]. *)
 and operands_hole state env (left : expression) (right : expression) =
   let left_type = expression state env left in
   let right_type = expression state env ~expected:left_type right in
@@ -392,8 +393,8 @@ and binary state env ?expected (value : expression) operator (left : expression)
         register_expression state value (fun () -> Form.comparison state value operator left right);
         if not (unify state left_type right_type) then
           ignore (mismatched_operands state value left right ~left_type ~right_type);
-        (* An ordering is its [compare], whose [Ordering] the operator
-           tests. *)
+        (* An ordering operator calls [compare] and tests the resulting
+           [Ordering]. *)
         let trait, method_, result =
           match operator with
           | Equal | Not_equal -> (core "Equal", "equal", T.bool)
@@ -425,8 +426,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
         T.bool
       end
   | (Add | Subtract | Multiply | Divide | Remainder) when operands_hole state env left right ->
-      (* Every operation on a [todo] whose type is not decided is accepted,
-         and gives such a value. *)
+      (* Any operation on a hole is accepted, and its type is a hole. *)
       register_expression state value (fun () ->
           Form.operator state value (Form.operation_of operator) [ left; right ]);
       T.Hole
@@ -435,9 +435,10 @@ and binary state env ?expected (value : expression) operator (left : expression)
       let right_type = Option.get state.tables.types.(right.id) in
       literal_operands state ~left:left_type ~right:right_type;
       if operator = Add && (is_string state left_type || is_string state right_type) then begin
-        (* A plain literal is spliced in as written, between its quotes, so
-           its escapes stay; anything else is interpolated. A raw string
-           cannot be spliced into an ordinary one, so then there is no fix. *)
+        (* The fix splices a plain string literal into the other string as
+           written, between its quotes, so its escapes are kept. Any other
+           operand is interpolated. A raw string cannot be spliced into an
+           ordinary one, so then there is no fix. *)
         let piece (side : expression) =
           match side.kind with
           | String { tag = None; rest = []; _ } ->

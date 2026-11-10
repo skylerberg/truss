@@ -1,10 +1,11 @@
-(* The core form of the methods a derived [impl] gives: what [derives]
-   means, as the body each would have if it were written. A type's [equal]
-   compares its variant and then each field; its [hash] writes its variant's
-   number and then hashes each field; its [compare] orders by variant, in
-   the order they are declared, and then by each field in turn; and its
-   [default] is each field's. A method the trait gives a body, such as
-   [not_equal], is the trait's, and has no form here. *)
+(* Generates the core forms of the methods of a derived [impl]. Each is the
+   body that the method would have if it were written by hand. [equal]
+   compares the variants and then each field. [hash] writes the variant's
+   index and then hashes each field. [compare] orders by variant index, in
+   declaration order, and then by each field in order. [default] constructs
+   the record from each field's default. A method with a default body in the
+   trait, such as [not_equal], uses the trait's core form and is not
+   generated here. *)
 
 module T = Types
 module Impls = Interface.Impls
@@ -28,7 +29,7 @@ let form database (path : Path.t) : Core.t option =
           Query.demand database Environment.type_interface type_,
           Impls.signature database path )
       with
-      (* A type still to be written has nothing to derive from yet. *)
+      (* A type whose definition is [todo] has no fields to derive from. *)
       | _, Some { shape = Todo_type; _ }, _ -> None
       | Some interface, Some { shape; _ }, Some signature ->
           let nodes = ref 0 and made = ref 0 in
@@ -42,8 +43,8 @@ let form database (path : Path.t) : Core.t option =
             incr made;
             Synthetic local
           in
-          (* The code has no text of its own: every node comes from where the
-             type is declared. *)
+          (* Generated code has no source text, so every node has the origin
+             0. *)
           let origin = 0 in
           let node type_ kind : Core.expression = { id = id (); origin; type_; kind } in
           let pattern type_ kind : Core.pattern = { id = id (); origin; type_; kind } in
@@ -97,8 +98,9 @@ let form database (path : Path.t) : Core.t option =
             | [ parameter ] -> Local { local = parameter.local; type_ = parameter.type_; origin }
             | _ -> bug "`%s` takes one value beside its own" (Path.show path)
           in
-          (* A method of [wanted] on a value of [of_type], by the [impl] the
-             type has of it, or by a bound where the type is a parameter. *)
+          (* A call of a method of the trait [wanted] on a value of
+             [of_type]. The evidence is the type's [impl], or a bound if the
+             type is a generic parameter. *)
           let method_of (wanted : Path.t) name (receiver : Path.receiver) of_type arguments type_ =
             let reference : T.trait_reference =
               { trait = wanted; trait_arguments = []; associated = [] }
@@ -146,7 +148,8 @@ let form database (path : Path.t) : Core.t option =
           let record_fields () =
             match shape with Record fields -> fields | _ -> bug "a record's fields of a sum type"
           in
-          (* A record's fields, each where it is in the record at [base]. *)
+          (* The fields of a record, each as a place inside the record at
+             [base]. *)
           let record_parts base =
             List.map
               (fun (field : T.field) ->
@@ -154,8 +157,8 @@ let form database (path : Path.t) : Core.t option =
                   Core.Field { base; field = field.field_name; type_ = field.field_type; origin } ))
               (record_fields ())
           in
-          (* A variant's fields are reached by a pattern that binds each,
-             lent from the value matched. *)
+          (* The fields of a variant are reachable only through a pattern.
+             The pattern binds each field, borrowed from the matched value. *)
           let bound named (fields : T.field list) =
             List.map (fun (field : T.field) -> (field, local (), named field.field_name)) fields
           in
@@ -181,8 +184,9 @@ let form database (path : Path.t) : Core.t option =
           in
           let self_place : Core.place = Local { local = Self; type_ = self_type; origin } in
           let is variant : Core.pattern = pattern self_type (Variant { variant; fields = [] }) in
-          (* What [each] gives of the parts of [self]: of a record's fields,
-             or of the fields of the variant it is, by an arm for each. *)
+          (* Applies [each] to the fields of [self]: to the fields of a
+             record, or, for a sum type, to the fields of each variant in a
+             [match] with one arm per variant. *)
           let of_self type_
               (each : string option -> int -> (T.field * Core.place) list -> Core.block) =
             match variants with
@@ -311,7 +315,8 @@ let form database (path : Path.t) : Core.t option =
             | "Ordered", "compare" -> (
                 let other = given () in
                 let ordering name = node result (Construct { variant = Some name; fields = [] }) in
-                (* Field by field: the first that is not equal decides. *)
+                (* Compares field by field. The first pair of fields that is
+                   not equal decides. *)
                 let rec in_turn mine theirs =
                   match (mine, theirs) with
                   | [], _ | _, [] -> ordering "Equal"
@@ -359,8 +364,9 @@ let form database (path : Path.t) : Core.t option =
                           (of_other other result variant mine ~same:(in_turn mine)
                              ~different:(fun () -> ordering "Equal")))
                 | Some variants ->
-                    (* The other's variant as a number, which this one's is
-                       compared with when the two differ. *)
+                    (* The index of the other value's variant, to compare
+                       with the index of this value's variant when the two
+                       differ. *)
                     let theirs = local () in
                     let numbered =
                       node number
@@ -453,6 +459,6 @@ let form database (path : Path.t) : Core.t option =
       | _ -> None)
   | _ -> None
 
-(* The form of a method a derived [impl] gives, by the method's path, made
-   once however many of its instances are compiled. *)
+(* The core form of a method of a derived [impl], by the method's path. It
+   is generated once, however many instances of the method are compiled. *)
 let core = Query.query ~name:"derived" ~phase:Bodies ~show:Path.show form

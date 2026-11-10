@@ -1,18 +1,20 @@
-(* Checking bodies: bidirectional, one statement at a time.
+(* The type checking algorithm for bodies: bidirectional, one statement at a
+   time.
 
-   An expression is either checked against an expected type, which flows
-   in from annotations, parameters, and operators, or has its type
-   inferred. Unknown types within a statement are inference variables.
-   When a statement ends, its literals take their defaults, every variable
-   it made must be solved, and the types it recorded are final. Variables
-   are numbered across the definition, so a statement inside a lambda leaves
-   the enclosing statement's variables for that statement to settle. *)
+   An expression is either checked against an expected type, which comes
+   from an annotation, a parameter, or an operator, or its type is inferred.
+   A type that is not known yet is an inference variable. At the end of a
+   statement, unsolved literal variables take their default types, every
+   other variable that the statement created must be solved, and the
+   recorded types are final. Variables are numbered across the definition,
+   so a statement inside a lambda leaves the variables of the enclosing
+   statement for that statement to solve. *)
 
-(* This file holds the dispatch on an expression's kind, literals, names,
-   members, and brackets. The other parts are files of their own, in the
-   order they call each other: [Lookups], [Pattern_typing], [Calls],
-   [Methods], [Operators], [Statements], and [Values]. A part calls one
-   after it through [Hooks], which this file sets. *)
+(* This file has the dispatch on the kind of an expression, and the checks
+   of literals, names, members, and brackets. The rest is in other files, in
+   the order they call each other: [Lookups], [Pattern_typing], [Calls],
+   [Methods], [Operators], [Statements], and [Values]. A file calls a later
+   file through [Hooks], which this file sets. *)
 
 open Syntax
 module T = Types
@@ -50,8 +52,8 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       register_expression state value (fun () -> Form.numeric_literal state value.id);
       let type_ = literal_type state ~expected Float_literal in
       let significand = number.significand and exponent = number.exponent in
-      (* Rounded once, from the exact decimal, to the type the statement
-         decides. *)
+      (* The literal is rounded once, from its exact decimal value, to the
+         type that the statement infers. *)
       defer state (fun () ->
           match resolve state type_ with
           | T.Literal _ | T.Variable _ -> false
@@ -87,7 +89,8 @@ and expression_kind state env ?expected (value : expression) : T.ty =
           match value.kind with Break -> Break | Continue -> Continue | _ -> Unreachable);
       T.Never
   | Self_value -> (
-      (* A lambda that reads [self] captures it, named by the definition's id. *)
+      (* A lambda that reads [self] captures it. In the list of references,
+         [self] is the definition's own id. *)
       state.references <- state.definition.id :: state.references;
       register_expression state value (fun () -> Use (Form.self_local state env ~origin:value.id));
       match env.self with
@@ -214,7 +217,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       block_value state env ?expected body
   | Expression_error -> T.Error (Resolve.Parts.error_node value.span)
 
-(* [receiver.name] read as a value: a field, or a static member of a type. *)
+(* [receiver.name] used as a value: a field, or a static member of a type. *)
 and member_value state env (value : expression) (base : expression) (member : name) =
   match static_ state base with
   | Some (Static_type type_) -> static_member state value type_ member
@@ -240,13 +243,13 @@ and member_value state env (value : expression) (base : expression) (member : na
 and bracket state env ?expected (value : expression) (base : expression) items =
   match state.resolved.brackets.(value.id) with
   | Some Type_arguments -> (
-      (* A name with type arguments, as a value. *)
+      (* A name with type arguments, used as a value. *)
       match head state value with
       | Some found -> named state env value found
       | None -> bug "type arguments are written after what is not a name")
   | Some Method_bracket -> (
-      (* Resolution cannot tell a field from a method before the dot; a
-         field followed by brackets is indexed. *)
+      (* Name resolution cannot tell a field from a method before the dot. A
+         field followed by brackets is an index expression. *)
       match base.kind with
       | Member (inner, member)
         when Option.is_none (static_ state inner) && is_field state env inner member ->
@@ -273,7 +276,7 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
   let base_type = normalize state (expression state env base) in
   match items with
   | [ Item ({ kind = Range { start; stop; _ }; _ } as range) ] -> (
-      (* Slicing: a view of part of the collection. *)
+      (* A slice: a view of a range of the collection. *)
       Option.iter (fun start -> check state env start (T.builtin USize)) start;
       Option.iter (fun stop -> check state env stop (T.builtin USize)) stop;
       record state range (T.Named { path = range_path; arguments = [ T.Type (T.builtin USize) ] });
@@ -315,7 +318,7 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
             | Some evidence ->
                 let associated name = associated state base_type index_trait name ~at:value.span in
                 let key_type = associated "Key" and output = associated "Output" in
-                (* A key is passed for the parameter of [at]. *)
+                (* The key is an argument for the parameter of [at]. *)
                 let key_conversion =
                   let found = expression state env ~expected:key_type key in
                   coerce state env ~argument:true key ~found ~expected:key_type

@@ -1,5 +1,5 @@
-(* Rounding a float literal, from its exact decimal value, to its type,
-   once, with ties to even. A literal that rounds to infinity has no value. *)
+(* Rounds a float literal from its exact decimal value to its type, once,
+   with ties to even. A literal that rounds to infinity has no value. *)
 
 (* [precision] bits of significand, with the smallest normal exponent
    [minimum] and the largest [maximum]. *)
