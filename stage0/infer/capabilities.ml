@@ -123,14 +123,16 @@ let pass checking scope (origin : Core.origin) ~what ~uses ~unlisted =
           unlisted
     | solving -> List.iter (fun passed -> passed := union !passed unlisted) solving
 
-(* The signature of the function a call calls, when it is one. *)
-let called state (callee : Core.callee) =
+(* The signature of what a call calls, whose capability parameters the call
+   solves: a function's, or a trait's method's as the trait declares it. *)
+let called state (callee : Core.callee) : T.signature option =
   match callee with
-  | Function { path; _ } ->
+  | Function { path; _ } -> Query.demand state.database Environment.signature path
+  | Trait_method { trait; name; receiver; _ } ->
       Option.map
-        (fun signature -> (path, signature))
-        (Query.demand state.database Environment.signature path)
-  | _ -> None
+        (fun (method_ : T.trait_method) -> method_.method_signature)
+        (Members.trait_method state.database trait.trait name receiver)
+  | Capability_method _ | Intrinsic _ | Value _ -> None
 
 (* What a dependency's code that is called uses must be granted to it: a
    function's, and for a trait's method what the trait declares for it and
@@ -249,7 +251,7 @@ let rec expression checking scope (node : Core.expression) : T.capability list =
       let callee = called state call.callee in
       let passed =
         match callee with
-        | Some (_, signature) ->
+        | Some signature ->
             List.filter_map
               (fun parameter ->
                 if List.mem parameter scope.own then None else Some (parameter, ref []))
