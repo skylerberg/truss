@@ -41,7 +41,9 @@ and call_named state env ?expected (value : expression) (callee : expression)
   match target with
   | Old -> (
       match arguments with
-      | [ argument ] -> expression state env ?expected argument.value
+      | [ argument ] ->
+          draft state value (fun () -> Old (built state argument.value));
+          expression state env ?expected argument.value
       | _ ->
           arguments_alone state env arguments
             (error state
@@ -55,13 +57,25 @@ and call_named state env ?expected (value : expression) (callee : expression)
           let second_type = expression state env ~expected:first_type second.value in
           if not (unify state first_type second_type) then
             mismatch state second.value.span ~expected:first_type ~found:second_type;
+          draft state value (fun () ->
+              let first = built state first.value in
+              Identical (first, built state second.value));
           T.bool
       | _ ->
           report state
             (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
             value.span "`identical` takes two values of one type.";
           arguments_alone state env arguments T.bool)
-  | Cost_function _ -> arguments_alone state env arguments T.Integer
+  | Cost_function function_ ->
+      draft state value (fun () ->
+          Measure
+            {
+              function_ =
+                (match function_ with Log -> Log | Power -> Power | Time -> Time | Calls -> Calls);
+              arguments =
+                List.map (fun (argument : argument) -> built state argument.value) arguments;
+            });
+      arguments_alone state env arguments T.Integer
   | Definition (Type, path) -> (
       match named_type state callee path type_arguments with
       | T.Named { arguments = type_arguments; _ } ->
@@ -168,7 +182,10 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                         | _ -> receiver.value
                       in
                       let receiver_type = expression state env inner in
-                      if inner != receiver.value then record state receiver.value receiver_type;
+                      if inner != receiver.value then begin
+                        record state receiver.value receiver_type;
+                        same state receiver.value inner
+                      end;
                       if not (unify state receiver_type type_) then
                         mismatch state inner.span ~expected:type_ ~found:receiver_type;
                       let mode : T.mode = match wanted with Mut -> Mut | Own -> Own | _ -> Read in
@@ -311,6 +328,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
         capability_arguments = [];
         result;
       };
+  Form.draft_call state value;
   resolve_evidence state value self_type reference;
   normalize state result
 
@@ -361,6 +379,7 @@ and capability_call state env (value : expression) capability (member : name) ar
             capability_arguments = [];
             result;
           };
+      Form.draft_call state value;
       result
   | None ->
       arguments_alone state env arguments
@@ -603,6 +622,7 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
         capability_arguments = [];
         result;
       };
+  Form.draft_call state value;
   (match receiver_type with
   | T.Any _ -> ()
   | _ -> resolve_evidence state value receiver_type reference);

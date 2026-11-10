@@ -121,6 +121,13 @@ binding, each pattern's variants, and so on.
   stored result is only what that stage decided. rustc names its nodes the
   same way, by the item that owns them and a number within it (`HirId`), so
   that a change to one item renumbers nothing in another.
+- **What the program means is one more tree, built once.** The syntax tree
+  is the program as written, which is what tools and diagnostics need. The
+  stages that run or prove the program need what it means: which method a
+  call calls, what a `?` does, where a value is. That is
+  [the core form](#the-core-form), which the type checker builds as it
+  decides, so that no later stage decides it again. Its nodes name the
+  syntax nodes they came from, and hold no positions.
 - **Ids are deterministic.** The same tokens give the same nodes with the
   same ids, so a definition that only moved keeps its ids, as it keeps its
   tree, and every table keyed by them stays valid.
@@ -1503,6 +1510,71 @@ It is canonical, so that two checks of the same definition give equal
 results, and the database saves it with the graph, as DATABASE.md
 describes.
 
+### The core form
+
+The core form of a definition is what checking decided, as a tree that
+leaves nothing about the program's meaning to work out. A definition has one
+when it parsed whole, nothing in it is an error, and every type in it is
+decided. One with an error, or with a `todo` whose type nothing fixes, has
+none, and nothing that runs or proves the program reaches it.
+
+- **A call names what it calls and lists an argument for every parameter,**
+  in the callee's order, a method's receiver first. A parameter nothing was
+  passed for is marked as taking its default, which is in the callee's own
+  form. The callee is a function or a type's method with its type
+  arguments, a trait's method with how its `impl` was found, a capability's
+  method, an operation of `standard::intrinsic`, or a function value.
+- **A place is told from a value.** A place is a local, a field of a place,
+  the part a lending call lends, which is what an index is, or a value held
+  for the statement so that a part of it can be named. Wherever a place can
+  be used where it is, the node says whether it is: an argument, what a
+  `match`, a `let`, or an `is` takes apart, what a `yield` gives, and an
+  implementation that is provided.
+- **An operator is what it means.** Arithmetic, a bitwise operator, or a
+  shift on built-in types is one node holding the operation, whether it was
+  written `left + right` or `left.add(right)`. A comparison of built-in
+  values is a comparison. On any other type `==` is the call of `equal`,
+  `!=` is its negation, and an ordering is a test of the `Ordering` that
+  `compare` gives. In a specification, where arithmetic and comparisons are
+  of `Integer`s, a built-in operand is first converted.
+- **Sugar is the construct it stands for:** `?` is a `match` that gives the
+  value or returns what there is in its place; a compound assignment is an
+  update of its target, worked out once, by the operator applied to what
+  the target held; a `for` over a value is a loop over the call of its
+  `each`; a range written as a value is the range type's record; a variant
+  used as a function is the lambda that builds it; and `with (port)` names
+  the field and the local.
+- **What is primitive stays one node, with every choice made.** An
+  interpolated string holds its pieces, each value with its `display`, and
+  the builder's methods. A collection literal says how it is built. A
+  tagged string holds its `from_template` and the template it is given. A
+  conversion is a node where it happens, and holds the method that gives a
+  view.
+- **Every node has its type,** solved and normalized.
+- **A condition says whether it runs:** each `requires` and each `assert`
+  is marked as one the program checks when nothing in it is only for
+  specifications. That is no quantifier, no `Integer`, no `old` or `result`,
+  and no function for specifications only.
+- **A block says whether it ends,** so that what follows a `return`, or a
+  loop with nothing to leave it, is known to be unreachable without looking
+  at types.
+- **A definition is its parts:** a function's parameters, with their
+  defaults and what a function-typed parameter requires of calls, its
+  contract, and its body; a type's defaults, invariants, and potential; a
+  trait's laws; a constant's value; a test; a law's proof.
+
+Each node has an id of its own, numbered within the definition as the form
+is built, which later results are keyed by, and the id of the syntax node
+it came from, which is how a diagnostic finds the text to quote. Several
+nodes can come from one syntax node, as the call and the update of
+`total += step` do. No node holds a span, so a definition that was only
+laid out again has the same form.
+
+The type checker says how each node is built where it decides what the
+expression, statement, or pattern is, and builds the form once the
+definition has checked: only then is every type final, and every choice a
+statement settles at its end, such as the `impl` an operator means.
+
 ### Obligations the type checker creates
 
 Most proof obligations come from the program itself: every index, every
@@ -1680,6 +1752,10 @@ the compiler. The prelude holds:
 
 ## Not built
 
+- **Reading the core form.** Ownership, the prover, and code generation
+  read the checked form's tables and the syntax tree, and work out again
+  what the core form holds. The methods of a derived `impl` have no core
+  form.
 - **A contract as a result of its own.** DESIGN.md has callers' proofs read a
   function's contract, apart from its interface and its body. The contract
   is type-checked with the body, and the prover reads it from the callee's

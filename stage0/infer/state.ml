@@ -46,6 +46,19 @@ type frame = {
   span : span;
 }
 
+(* The core form as it is being made: how the node of each expression,
+   statement, and pattern is built, by its id in the syntax tree. Each is
+   set where checking decides what the node is, and run once the whole
+   definition has checked, when every type and every choice is final. *)
+type form = {
+  expressions : (unit -> Core.expression) option array;
+  statements : (unit -> Core.statement) option array;
+  patterns : (unit -> Core.pattern) option array;
+  mutable parts : (unit -> Core.parts) option;
+  mutable next : int;  (** The next node's id. *)
+  mutable made : int;  (** How many locals checking has made. *)
+}
+
 type state = {
   database : Query.context;
   key : Names.key;
@@ -55,6 +68,7 @@ type state = {
   context : Lower.context;
   text : string;  (** The definition's source text, for fixes. *)
   tables : C.t;
+  form : form;
   mutable obligations : C.obligation list;
   mutable diagnostics : Diagnostic.t list;
   unifier : Unify.t;
@@ -98,6 +112,70 @@ let source state (span : span) =
     String.sub state.text span.start (span.stop - span.start)
   else ""
 
+(* The core form *)
+
+let next_id state =
+  let id = state.form.next in
+  state.form.next <- id + 1;
+  id
+
+(* A node that no expression of the syntax tree is: one an expansion makes. *)
+let make state ~origin type_ kind : Core.expression = { id = next_id state; origin; type_; kind }
+
+(* Says how an expression's node is built. Its type is the one checking
+   records for it. *)
+let draft state (value : expression) kind =
+  state.form.expressions.(value.id) <-
+    Some
+      (fun () ->
+        let id = next_id state in
+        match state.tables.types.(value.id) with
+        | Some type_ -> { Core.id; origin = value.id; type_; kind = kind () }
+        | None -> bug "`%s` has a node and no type" (source state value.span))
+
+let built state (value : expression) : Core.expression =
+  match state.form.expressions.(value.id) with
+  | Some build -> build ()
+  | None -> bug "`%s` has no node in the core form" (source state value.span)
+
+let draft_statement state (written : statement) kind =
+  state.form.statements.(written.id) <-
+    Some (fun () -> { Core.id = next_id state; origin = written.id; kind = kind () })
+
+let built_statement state (written : statement) : Core.statement =
+  match state.form.statements.(written.id) with
+  | Some build -> build ()
+  | None -> bug "`%s` has no node in the core form" (source state written.span)
+
+(* Says how a pattern's node is built. Its type is that of what it matches. *)
+let draft_pattern state (written : pattern) kind =
+  state.form.patterns.(written.id) <-
+    Some
+      (fun () ->
+        let id = next_id state in
+        match state.tables.pattern_types.(written.id) with
+        | Some type_ -> { Core.id; origin = written.id; type_; kind = kind () }
+        | None -> bug "`%s` has a node and no type" (source state written.span))
+
+let built_pattern state (written : pattern) : Core.pattern =
+  match state.form.patterns.(written.id) with
+  | Some build -> build ()
+  | None -> bug "`%s` has no node in the core form" (source state written.span)
+
+(* An expression whose node is another's: parentheses, and a mark. *)
+let same state (value : expression) (inner : expression) =
+  state.form.expressions.(value.id) <- Some (fun () -> built state inner)
+
+(* Where a node's value is: the place it reads, or one that holds it for
+   the statement. *)
+let place_of (node : Core.expression) : Core.place =
+  match node.kind with Use place -> place | _ -> Temporary node
+
+let made_local state : Core.local =
+  let number = state.form.made in
+  state.form.made <- number + 1;
+  Made number
+
 let fix title edits = Diagnostic.fix title edits
 let replace (span : span) text = Diagnostic.replace (Source.span span.start span.stop) text
 let insert position text = Diagnostic.insert position text
@@ -121,6 +199,38 @@ let bounds state parameter =
 
 let normalize state type_ = Impls.normalize state.database ~bounds:(bounds state) (zonk state type_)
 
+(* What no statement settled is an error, under the report of the first
+   statement that could not work its types out, or one made here when
+   there is none: nothing unsolved is ever stored unreported. A hole stays
+   a hole, since a [todo] is not an error. *)
+let unsolved state =
+  match state.unsolved with
+  | Some report -> T.Error report
+  | None ->
+      let report =
+        reported state Cannot_infer
+          (Span.make state.definition.span.start state.definition.span.start)
+          "A type in this definition cannot be worked out. Give the `let` a type, or the call type \
+           arguments."
+      in
+      state.unsolved <- Some report;
+      T.Error report
+
+(* A type as the finished definition has it: solved, normalized, and an
+   error where nothing decided it. *)
+let final state type_ =
+  T.map
+    (function T.Variable _ | T.Literal _ -> Some (unsolved state) | _ -> None)
+    (normalize state type_)
+
+let final_argument state = function
+  | T.Type type_ -> T.Type (final state type_)
+  | T.Value value -> (
+      match Unify.resolve_value state.unifier value with
+      | T.Value_variable _ -> T.Type (unsolved state)
+      | value -> T.Value value)
+  | T.Capabilities _ as capabilities -> capabilities
+
 (* Projections whose base is known are normalized first, so [C.Key] meets
    the type the [impl] chooses. *)
 let unify state left right =
@@ -129,9 +239,22 @@ let unify state left right =
   in
   Unify.unify state.unifier (normalize left) (normalize right)
 
+(* A trait as it is asked about: with its arguments in their normal form,
+   as a type is, so that an associated type among them is what it stands
+   for. *)
+let normalize_trait state (trait : T.trait_reference) : T.trait_reference =
+  {
+    trait with
+    trait_arguments =
+      List.map
+        (function T.Type type_ -> T.Type (normalize state type_) | other -> other)
+        (Unify.zonk_trait state.unifier trait).trait_arguments;
+    associated = List.map (fun (name, type_) -> (name, normalize state type_)) trait.associated;
+  }
+
 let implements state type_ trait =
-  Impls.implements state.database ~bounds:(bounds state) (zonk state type_)
-    (Unify.zonk_trait state.unifier trait)
+  Impls.implements state.database ~bounds:(bounds state) (normalize state type_)
+    (normalize_trait state trait)
 
 (* A bound that is met by an [impl] names the [impl]'s code, so what the
    [impl] uses must be granted to its package. *)
@@ -152,6 +275,7 @@ let plain state type_ = Impls.plain state.database ~bounds:(bounds state) (zonk 
    that leaves one out has that reported as its own error, which is the
    report here too. *)
 let associated state type_ (trait : T.trait_reference) name ~(at : span) =
+  let type_ = normalize state type_ and trait = normalize_trait state trait in
   match Impls.associated_type state.database ~bounds:(bounds state) type_ trait name with
   | Some found -> found
   | None -> (
@@ -313,6 +437,56 @@ let in_statement state env (span : span) body =
   state.frames <- List.tl state.frames;
   result
 
+(* Whether a statement never ends: a value of type [Never], or a loop
+   with nothing to leave it. *)
+let rec statement_never state (written : statement) =
+  match written.kind with
+  | Expression value -> (
+      match state.tables.types.(value.id) with
+      | Some type_ -> resolve state type_ = T.Never
+      | None -> false)
+  | While { condition = { kind = True; _ }; body; _ } -> not (contains_break body)
+  | _ -> false
+
+and contains_break (written : block) =
+  let found = ref false in
+  let rec statement (written : statement) =
+    match written.kind with
+    | For _ | While _ -> ()
+    | _ -> Syntax_walk.statement_parts ~expression ~statement written
+  and expression (value : expression) =
+    match value.kind with
+    | Break -> found := true
+    | Lambda _ -> ()
+    | _ -> Syntax_walk.expression_parts ~expression ~statement value
+  in
+  List.iter statement written.statements;
+  !found
+
+(* A block's node: its statements, and the expression it ends with when
+   that was checked as its value and not as a statement. *)
+let built_block state (written : block) : Core.block =
+  let rec go (statements : statement list) =
+    match statements with
+    | [] -> ([], None)
+    | [ ({ kind = Expression value; _ } as last) ]
+      when Option.is_none state.form.statements.(last.id) ->
+        ([], Some (built state value))
+    | first :: rest ->
+        let first = built_statement state first in
+        let rest, value = go rest in
+        (first :: rest, value)
+  in
+  let statements, value = go written.statements in
+  {
+    statements;
+    value;
+    ends =
+      (match List.rev written.statements with
+      | last :: _ -> not (statement_never state last)
+      | [] -> true);
+  }
+
 (* Locals *)
 
 let declare state (name : name) type_ ~mutable_ ~mode =
@@ -436,6 +610,45 @@ type static_ =
    Anything else must be the type expected. *)
 let convert state env ?(argument = false) ?expression (span : span) ~found ~expected :
     C.conversion option =
+  (* What converts is the conversion's node from then on, of the type
+     expected. *)
+  let convert (conversion : C.conversion) : Core.conversion option =
+    match conversion with
+    | From_never -> None
+    | Function_widening -> Some Widen
+    | To_integer -> Some To_integer
+    | From_integer -> Some From_integer
+    | Owned_to_view -> (
+        match normalize state found with
+        | T.Named { path; arguments } ->
+            Some
+              (View
+                 (Function
+                    {
+                      path = Method { owner = path; name = "slice"; receiver = Read };
+                      type_arguments = arguments;
+                    }))
+        | given -> bug "`%s` is viewed and has no view" (T.show given))
+  in
+  let converted (conversion : C.conversion option) =
+    (match (conversion, expression) with
+    | Some conversion, Some id ->
+        let before = state.form.expressions.(id) in
+        state.form.expressions.(id) <-
+          Option.map
+            (fun build () ->
+              let inner : Core.expression = build () in
+              match convert conversion with
+              | Some conversion ->
+                  make state ~origin:id (final state expected)
+                    (Convert { conversion; value = inner })
+              | None -> inner)
+            before
+    | _ -> ());
+    conversion
+  in
+  converted
+  @@
   let given = normalize state found and wanted = normalize state expected in
   let refused () =
     mismatch state span ~expected ~found;
