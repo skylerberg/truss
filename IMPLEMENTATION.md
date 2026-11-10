@@ -117,3 +117,6 @@ Every stage of stage0 is tested the same way:
 - **Checks against the documents are tests,** as long as each one states a
   single property, such as "GRAMMAR.md's keyword list matches the lexer's",
   or "every example in the documents lexes cleanly".
+- **One test can be run alone.** With `TRUSS_TEST` set, a test executable
+  runs only the tests whose names contain it, for working on one:
+  `TRUSS_TEST=standard::text _build/default/stage0/test/standard_library_tests.exe`.

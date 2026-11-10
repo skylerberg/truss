@@ -120,6 +120,12 @@ type operation =
   | Handle_from
       (** [(descriptor) -> Handle]: owns a descriptor that is open, which dropping it closes *)
   | Handle_descriptor  (** [(handle) -> Int32]: the descriptor a handle owns *)
+  | Run_test
+      (** [(index)]: runs a test of the test program, by its place in the program's table of them *)
+  | Report_tests_to
+      (** [(descriptor)]: from here on a panic, a failed [assert], a [todo], and an [echo] are
+          written as records to the descriptor, for a test's worker *)
+  | Live_blocks  (** [() -> USize]: how many blocks a test program has allocated and not freed *)
   | Libc of Libc.function_
       (** A function of the system's C library, named [libc_] and its name: [libc_write] *)
   | Libc_number of Libc.number

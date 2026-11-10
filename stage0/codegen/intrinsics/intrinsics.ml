@@ -42,7 +42,9 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
   let into intrinsic = call ?result:destination intrinsic (List.map operand arguments) in
   let usize_local name = local b ~name (Value types.usize) in
   let element () = type_argument 0 in
-  let element_layout () = Memory_layout.of_type env (element ()) in
+  let element_layout ?element:given () =
+    Memory_layout.of_type env (match given with Some element -> element | None -> element ())
+  in
   let length storage = Lir.Copy (Storage.length storage) in
   let view_length view = Lir.Copy (Storage.view_length view) in
   let element_at = Storage.at in
@@ -65,8 +67,8 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
      elements, which is at least as many as it has. A buffer it owns is
      made larger; elements it does not own, as static ones are, are copied
      to a new one and never freed. *)
-  let set_capacity storage capacity =
-    let layout = element_layout () in
+  let set_capacity ?element storage capacity =
+    let layout = element_layout ?element () in
     let bytes = usize_local "bytes" and too_many = local b (Raw Bool) in
     call ~result:(at too_many) Multiply_overflow
       [ capacity; usize layout.size; Address { place = at bytes; writable = true } ];
@@ -94,11 +96,11 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
     emit b (Assign (Storage.capacity storage, Use capacity))
   in
   (* Static storage gets a buffer of its own before it is written. *)
-  let own storage =
+  let own ?element storage =
     let storage = place storage in
     let borrowed = local b (Raw Bool) in
     emit b (Assign (at borrowed, Binary (Greater, length storage, Copy (Storage.capacity storage))));
-    when_ b (Copy (at borrowed)) (fun () -> set_capacity storage (length storage))
+    when_ b (Copy (at borrowed)) (fun () -> set_capacity ?element storage (length storage))
   in
   let add_to_length storage amount =
     emit b (Assign (Storage.length storage, Binary (Add, length storage, amount)))
@@ -386,6 +388,9 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                  fields = [ ("descriptor", value 0) ];
                })
       | Handle_descriptor -> set (Use (Copy (read (argument 0) / Field "descriptor")))
+      | Run_test -> call Run_test [ value 0 ]
+      | Report_tests_to -> call Report_tests_to [ value 0 ]
+      | Live_blocks -> call ?result:destination Live_blocks []
       | Libc function_ -> (
           let ground scalar =
             Ground.Named
@@ -410,6 +415,10 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                 | Room _ ->
                     let storage = place (argument (taken ())) in
                     Address { place = element_at storage (length storage); writable = true }
+                | Elements_to_change scalar ->
+                    let storage = argument (taken ()) in
+                    own ~element:(ground scalar) storage;
+                    Copy (Storage.buffer (place storage))
                 | Written (scalar, names) ->
                     let structure =
                       local b
@@ -452,6 +461,10 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           match result with
           | Returns _ ->
               call (match destination with Some place -> Returned place | None -> Discarded)
+          | Never ->
+              call Discarded;
+              finish b Unreachable;
+              start b (block b)
           | Points_at scalar ->
               let address = local b (Raw (Pointer (Data (ground scalar)))) in
               call (Returned (at address));

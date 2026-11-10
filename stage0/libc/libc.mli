@@ -21,6 +21,9 @@ type passes =
   | Room of scalar
       (** Storage: the address after its last element, for a function that fills room the storage
           has beyond its length *)
+  | Elements_to_change of scalar
+      (** Storage: the address of its first element, for a function that reads the elements the
+          storage has and writes some of them *)
   | Written of scalar * string list
       (** A structure of numbers of one type that the function writes: the address of one, whose
           numbers then go to [mut] arguments of these names, one each *)
@@ -35,6 +38,7 @@ type result =
   | Text
       (** The bytes at the address returned, up to a zero byte, as a view, with a last [mut Bool]
           argument, [found], that says whether the function returned an address at all *)
+  | Never  (** The function does not return *)
 
 type signature = { parameters : (string * passes) list; result : result }
 (** A function as Truss calls it: how each parameter of the C function is given. *)
@@ -62,6 +66,12 @@ type function_ =
   | Waitpid
   | Snprintf
   | Strtod
+  | Fork
+  | Pipe
+  | Poll
+  | Kill
+  | Sysconf
+  | Exit  (** [_exit], which ends the process at once *)
 
 val functions : function_ list
 
@@ -86,6 +96,11 @@ type number =
   | Eio
   | Einval
   | Clock_realtime
+  | Clock_monotonic
+  | Sc_nprocessors_onln
+  | Pollin
+  | Pollhup
+  | Sigkill
 
 val numbers : number list
 

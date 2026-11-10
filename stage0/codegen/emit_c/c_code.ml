@@ -66,6 +66,9 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
       Printf.sprintf "%s(%s)"
         (helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
+  | Run_test -> "t_runtime_run_test(" ^ all ^ ")"
+  | Report_tests_to -> "t_runtime_report_tests_to(" ^ all ^ ")"
+  | Live_blocks -> "t_runtime_live_blocks()"
   | Environment ->
       declare_prototype context "environ" "extern char **environ;\n";
       "((void *)environ)"

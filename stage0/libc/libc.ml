@@ -14,11 +14,12 @@ type passes =
   | Value of scalar
   | Elements of scalar
   | Room of scalar
+  | Elements_to_change of scalar
   | Written of scalar * string list
   | Always of int
   | Environment
 
-type result = Returns of scalar | Points_at of scalar | Text
+type result = Returns of scalar | Points_at of scalar | Text | Never
 type signature = { parameters : (string * passes) list; result : result }
 
 type declaration = {
@@ -41,6 +42,12 @@ type function_ =
   | Waitpid
   | Snprintf
   | Strtod
+  | Fork
+  | Pipe
+  | Poll
+  | Kill
+  | Sysconf
+  | Exit
 
 let functions =
   [
@@ -56,6 +63,12 @@ let functions =
     Waitpid;
     Snprintf;
     Strtod;
+    Fork;
+    Pipe;
+    Poll;
+    Kill;
+    Sysconf;
+    Exit;
   ]
 
 let function_name = function
@@ -71,6 +84,12 @@ let function_name = function
   | Waitpid -> "waitpid"
   | Snprintf -> "snprintf"
   | Strtod -> "strtod"
+  | Fork -> "fork"
+  | Pipe -> "pipe"
+  | Poll -> "poll"
+  | Kill -> "kill"
+  | Sysconf -> "sysconf"
+  | Exit -> "exit_at_once"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -203,6 +222,43 @@ let describe function_ =
           ("end", Always 0, everywhere "char **");
         ]
         ~headers:[ "stdlib.h" ]
+  | Fork -> row "int" (Returns Int32) [] ~headers:[ "unistd.h" ]
+  | Pipe ->
+      row "int" (Returns Int32)
+        [ ("ends", Written (Int32, [ "read_end"; "write_end" ]), everywhere "int *") ]
+        ~headers:[ "unistd.h" ]
+  | Poll ->
+      (* A [pollfd] is its descriptor and then two numbers of half the
+         size, what to wait for and what was found, which are the low and
+         the high half of one [Int32] where the low byte comes first. *)
+      row "int" (Returns Int32)
+        [
+          ("waited_for", Elements_to_change Int32, everywhere "struct pollfd *");
+          ("count", Value USize, function Linux -> "unsigned long" | Macos -> "unsigned int");
+          ("timeout", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "poll.h" ]
+        ~layout:
+          [
+            "sizeof(struct pollfd) == 8";
+            "__builtin_offsetof(struct pollfd, fd) == 0";
+            "sizeof(((struct pollfd *)0)->fd) == 4";
+            "__builtin_offsetof(struct pollfd, events) == 4";
+            "sizeof(((struct pollfd *)0)->events) == 2";
+            "__builtin_offsetof(struct pollfd, revents) == 6";
+            "sizeof(((struct pollfd *)0)->revents) == 2";
+            "__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__";
+          ]
+  | Kill ->
+      row "int" (Returns Int32)
+        [ ("process", Value Int32, everywhere "int"); ("signal", Value Int32, everywhere "int") ]
+        ~headers:[ "signal.h" ]
+  | Sysconf ->
+      row "long" (Returns ISize) [ ("name", Value Int32, everywhere "int") ] ~headers:[ "unistd.h" ]
+  | Exit ->
+      row "_Noreturn void" Never
+        [ ("status", Value Int32, everywhere "int") ]
+        ~symbol:(everywhere "_exit") ~headers:[ "unistd.h" ]
 
 let signature function_ =
   let row = describe function_ in
@@ -272,6 +328,11 @@ type number =
   | Eio
   | Einval
   | Clock_realtime
+  | Clock_monotonic
+  | Sc_nprocessors_onln
+  | Pollin
+  | Pollhup
+  | Sigkill
 
 let numbers =
   [
@@ -286,6 +347,11 @@ let numbers =
     Eio;
     Einval;
     Clock_realtime;
+    Clock_monotonic;
+    Sc_nprocessors_onln;
+    Pollin;
+    Pollhup;
+    Sigkill;
   ]
 
 let number_name = function
@@ -300,13 +366,21 @@ let number_name = function
   | Eio -> "EIO"
   | Einval -> "EINVAL"
   | Clock_realtime -> "CLOCK_REALTIME"
+  | Clock_monotonic -> "CLOCK_MONOTONIC"
+  | Sc_nprocessors_onln -> "_SC_NPROCESSORS_ONLN"
+  | Pollin -> "POLLIN"
+  | Pollhup -> "POLLHUP"
+  | Sigkill -> "SIGKILL"
 
 let number_type (_ : number) = Int32
 
 let number_headers = function
   | O_rdonly | O_wronly | O_creat | O_trunc | O_cloexec -> [ "fcntl.h" ]
   | Eintr | Enoent | Eacces | Eio | Einval -> [ "errno.h" ]
-  | Clock_realtime -> [ "time.h" ]
+  | Clock_realtime | Clock_monotonic -> [ "time.h" ]
+  | Sc_nprocessors_onln -> [ "unistd.h" ]
+  | Pollin | Pollhup -> [ "poll.h" ]
+  | Sigkill -> [ "signal.h" ]
 
 let value os number =
   match (number, os) with
@@ -324,6 +398,13 @@ let value os number =
   | Eio, (Linux | Macos) -> 5
   | Einval, (Linux | Macos) -> 22
   | Clock_realtime, (Linux | Macos) -> 0
+  | Clock_monotonic, Linux -> 1
+  | Clock_monotonic, Macos -> 6
+  | Sc_nprocessors_onln, Linux -> 84
+  | Sc_nprocessors_onln, Macos -> 58
+  | Pollin, (Linux | Macos) -> 0x1
+  | Pollhup, (Linux | Macos) -> 0x10
+  | Sigkill, (Linux | Macos) -> 9
 
 (* How many bytes a number the function reaches through an address takes,
    which the C type it is declared with must take too. [USize] has no one
@@ -343,10 +424,13 @@ let check os =
       @ List.concat_map number_headers numbers)
   in
   let holds what condition = Printf.sprintf "_Static_assert(%s, \"%s\");\n" condition what in
+  (* The address is of one of the numbers, where C takes the first of
+     several, or of a structure that is all of them. *)
   let reached symbol c count scalar =
     holds
       (symbol ^ " reaches numbers of another size")
-      (Printf.sprintf "sizeof(*(%s)0) == %d" c (count * bytes scalar))
+      (Printf.sprintf "sizeof(*(%s)0) == %d || sizeof(*(%s)0) == %d" c (bytes scalar) c
+         (count * bytes scalar))
   in
   let is_void c =
     String.starts_with ~prefix:"void" c || String.starts_with ~prefix:"const void" c
@@ -379,12 +463,14 @@ let check os =
           (prototype as_the_headers_name_it :: List.map (holds declaration.symbol) row.layout)
           @ (match row.result with
             | Points_at scalar -> [ reached declaration.symbol declaration.returns 1 scalar ]
-            | Returns _ | Text -> [])
+            | Returns _ | Text | Never -> [])
           @ List.filter_map
               (fun (_, passes, c) ->
                 match passes with
                 | Written (scalar, names) when not (is_void (c os)) ->
                     Some (reached declaration.symbol (c os) (List.length names) scalar)
-                | Written _ | Value _ | Elements _ | Room _ | Always _ | Environment -> None)
+                | Written _ | Value _ | Elements _ | Room _ | Elements_to_change _ | Always _
+                | Environment ->
+                    None)
               row.parameters)
         functions)

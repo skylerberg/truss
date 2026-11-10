@@ -136,9 +136,16 @@ let () =
 (* The test runner *)
 
 let () =
-  test "the test runner reports each test's outcome, message, and echo output in order, and a leak"
-    (fun () ->
-      let site : Lir.site = { definition = definition "suite"; line = 2; column = 3 } in
+  test
+    "the test runner reports each test's outcome, message, and echo output, a leak, and a worker \
+     that ends without a word" (fun () ->
+      (* The tests are made by hand, so that one can leave a block
+         allocated, which no source compiles to. They report positions in a
+         definition of a module that is loaded. *)
+      let _, compile = load "fn suite() {\n}\n" in
+      let site : Lir.site =
+        { definition = Top { module_ = example; name = "suite" }; line = 2; column = 3 }
+      in
       let text value = Lir.Constant (Bytes value) in
       let length value = Lir.Constant (Integer (USize, Z.of_int (String.length value))) in
       let ending failure message =
@@ -170,24 +177,24 @@ let () =
                 ]
                 (Return None);
             ];
+          suite "quits"
+            [
+              block
+                [
+                  Call
+                    {
+                      target = Foreign (Libc.declaration host Exit);
+                      arguments = [ constant_int32 3 ];
+                      result = Discarded;
+                    };
+                ]
+                Unreachable;
+            ];
         ]
       in
       incr counter;
       let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "tests%d" !counter) in
-      let symbols = List.map (fun (t : Lir.t) -> Instance.symbol t.key) tests in
-      let sources =
-        [
-          ("tests", Startup.tests_calling ~time_limit:300 symbols);
-          ( "anchors",
-            Positions.anchors_file target_64
-              [ { definition = definition "suite"; path = "suite.truss"; first_line = 10 } ] );
-        ]
-      in
-      match
-        Build.program ~tests:true (Lazy.force compiler) (Lazy.force cache) (shape_env ()) settings
-          ~files:[ List.map (fun t -> Lir.Code t) tests ]
-          ~sources ~output
-      with
+      match Compile.build_made_tests compile ~time_limit:300 tests ~output with
       | Error message -> fail "%s" message
       | Ok () ->
           let status, out, _ = Toolchain.run output [] in
@@ -197,12 +204,16 @@ let () =
               (String.concat ""
                  [
                    "test 0 passed\n";
-                   "test 1 failed\nmessage 35\nvalues differ\n  at suite.truss:12:3\n";
-                   "test 2 panicked\nmessage 26\nboom\n  at suite.truss:12:3\n";
-                   "test 3 passed\necho 21\nsuite.truss:12:3: 42\n\n";
+                   "test 1 failed\nmessage 41\nvalues differ\n  at example/main.truss:3:3\n";
+                   "test 2 panicked\nmessage 32\nboom\n  at example/main.truss:3:3\n";
+                   "test 3 passed\necho 27\nexample/main.truss:3:3: 42\n\n";
                    "test 4 timed_out\nmessage 23\nran past the time limit\n";
-                   "test 5 incomplete\nmessage 40\nhole of type Int64\n  at suite.truss:12:3\n";
+                   "test 5 incomplete\n\
+                    message 46\n\
+                    hole of type Int64\n\
+                   \  at example/main.truss:3:3\n";
                    "test 6 panicked\nmessage 45\ncompiler bug: the test left 1 block allocated\n";
+                   "test 7 crashed\nmessage 19\nended with status 3\n";
                  ])
             (match Compile.parse_report out with
             | Ok records -> render_records records

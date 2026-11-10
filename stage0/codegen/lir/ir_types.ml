@@ -110,6 +110,10 @@ type intrinsic =
   | Round_even
   | Float_bits  (** A float's bits, with every NaN replaced by one canonical NaN *)
   | Float_from_bits
+  | Run_test  (** [(index: UInt32)]: runs a test of the test program's table *)
+  | Report_tests_to
+      (** [(descriptor: Int32)]: has failures and echoes written as records to the descriptor *)
+  | Live_blocks  (** [() -> USize]: how many blocks a test program has allocated and not freed *)
   | Environment  (** [() -> pointer] to the environment the process was started with *)
   | Terminated_length  (** [(bytes) -> USize]: how many bytes come before the first zero byte *)
   | Evidence_implementation  (** [(evidence) -> pointer] to the value that implements it *)

@@ -71,6 +71,9 @@ let runtime_declarations (target : Memory_layout.target) =
       "void *t_runtime_allocate(t_usize size, t_usize alignment);\n";
       "void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usize alignment);\n";
       "void t_runtime_free(void *pointer);\n";
+      "void t_runtime_run_test(uint32_t index);\n";
+      "void t_runtime_report_tests_to(int32_t descriptor);\n";
+      "t_usize t_runtime_live_blocks(void);\n";
     ]
 
 (* Small functions that generated code calls, each emitted only into the

@@ -1,0 +1,512 @@
+use standard::growth
+use standard::intrinsic
+use standard::system::calls
+use standard::writing
+
+internal type Worker(
+  process: Int32,
+  commands: Int32,
+  reports: Int32,
+  running: Bool,
+  number: USize,
+  ending: Bool,
+  started: UInt64,
+  unread: intrinsic::Storage[UInt8],
+  echoed: intrinsic::Storage[UInt8],
+)
+
+fn no_worker() -> Worker {
+  Worker(
+    process: -1,
+    commands: -1,
+    reports: -1,
+    running: false,
+    number: 0,
+    ending: false,
+    started: 0,
+    unread: intrinsic::storage_empty(),
+    echoed: intrinsic::storage_empty(),
+  )
+}
+
+fn microseconds() -> UInt64 {
+  var seconds: Int64 = 0
+  var nanoseconds: Int64 = 0
+  let _ = intrinsic::libc_clock_gettime(
+    intrinsic::libc_clock_monotonic(),
+    seconds: mut seconds,
+    nanoseconds: mut nanoseconds,
+  )
+  let whole: UInt64 = intrinsic::convert(seconds)
+  let part: UInt64 = intrinsic::convert(nanoseconds)
+  whole.wrapping_multiply(1000000).wrapping_add(part / 1000)
+}
+
+fn microseconds_since(earlier: UInt64) -> UInt64 {
+  let now = microseconds()
+  if now > earlier { now - earlier } else { 0 }
+}
+
+fn cores() -> USize {
+  let online = intrinsic::libc_sysconf(intrinsic::libc_sc_nprocessors_onln())
+  if online > 0 { intrinsic::convert(online) } else { 1 }
+}
+
+fn write_out(written: intrinsic::Storage[UInt8]) {
+  let _ = calls::write_fully(1, bytes: intrinsic::storage_view(written))
+}
+
+fn add_block(report: mut intrinsic::Storage[UInt8], label: StringSlice, content: intrinsic::View[UInt8]) {
+  writing::append(mut report, bytes: label.bytes)
+  writing::byte(mut report, value: 32)
+  writing::unsigned(mut report, value: intrinsic::convert(intrinsic::view_length(content)))
+  writing::byte(mut report, value: 10)
+  writing::append(mut report, bytes: content)
+  writing::byte(mut report, value: 10)
+}
+
+fn add_outcome(report: mut intrinsic::Storage[UInt8], outcome: UInt8) {
+  if outcome == 0 {
+    writing::append(mut report, bytes: "passed".slice().bytes)
+  } else if outcome == 1 {
+    writing::append(mut report, bytes: "failed".slice().bytes)
+  } else if outcome == 2 {
+    writing::append(mut report, bytes: "panicked".slice().bytes)
+  } else if outcome == 3 {
+    writing::append(mut report, bytes: "incomplete".slice().bytes)
+  } else if outcome == 5 {
+    writing::append(mut report, bytes: "timed_out".slice().bytes)
+  } else {
+    writing::append(mut report, bytes: "crashed".slice().bytes)
+  }
+}
+
+fn add_low_bytes_first(record: mut intrinsic::Storage[UInt8], number: USize) {
+  writing::byte(mut record, value: intrinsic::convert(number & 255))
+  writing::byte(mut record, value: intrinsic::convert((number >> 8) & 255))
+  writing::byte(mut record, value: intrinsic::convert((number >> 16) & 255))
+  writing::byte(mut record, value: intrinsic::convert((number >> 24) & 255))
+}
+
+fn low_bytes_first(bytes: intrinsic::View[UInt8], from: USize) -> USize
+  requires from + 4 <= intrinsic::view_length(bytes)
+{
+  let first: USize = intrinsic::convert(intrinsic::view_at(bytes, index: from))
+  let second: USize = intrinsic::convert(intrinsic::view_at(bytes, index: from + 1))
+  let third: USize = intrinsic::convert(intrinsic::view_at(bytes, index: from + 2))
+  let fourth: USize = intrinsic::convert(intrinsic::view_at(bytes, index: from + 3))
+  first | (second << 8) | (third << 16) | (fourth << 24)
+}
+
+fn write_record(reports: Int32, kind: UInt8, content: intrinsic::View[UInt8]) {
+  var record: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+  writing::byte(mut record, value: kind)
+  add_low_bytes_first(mut record, number: intrinsic::view_length(content))
+  writing::append(mut record, bytes: content)
+  let _ = calls::write_fully(reports, bytes: intrinsic::storage_view(record))
+}
+
+fn report_blocks_left(reports: Int32, before: USize, after: USize) {
+  var why: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+  if after > before {
+    let left = after - before
+    writing::append(mut why, bytes: "compiler bug: the test left ".slice().bytes)
+    writing::unsigned(mut why, value: intrinsic::convert(left))
+    if left == 1 {
+      writing::append(mut why, bytes: " block allocated".slice().bytes)
+    } else {
+      writing::append(mut why, bytes: " blocks allocated".slice().bytes)
+    }
+  } else {
+    writing::append(mut why, bytes: "compiler bug: the test freed ".slice().bytes)
+    writing::unsigned(mut why, value: intrinsic::convert(before - after))
+    writing::append(mut why, bytes: " more blocks than it allocated".slice().bytes)
+  }
+  write_record(reports, kind: 2, content: intrinsic::storage_view(why))
+}
+
+fn work(commands: Int32, reports: Int32) {
+  var command: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(4)
+  var working = true
+  while working {
+    while working && intrinsic::storage_length(command) < 4 {
+      match calls::read_onto_end(commands, buffer: mut command, count: 4 - intrinsic::storage_length(command)) {
+        Ok(read) => {
+          if read == 0 {
+            working = false
+          }
+        }
+        Err(_) => {
+          working = false
+        }
+      }
+    }
+    if working {
+      let number: UInt32 = intrinsic::convert(low_bytes_first(intrinsic::storage_view(command), from: 0))
+      let _ = intrinsic::storage_pop(mut command)
+      let _ = intrinsic::storage_pop(mut command)
+      let _ = intrinsic::storage_pop(mut command)
+      let _ = intrinsic::storage_pop(mut command)
+      let before = intrinsic::live_blocks()
+      intrinsic::run_test(number)
+      let after = intrinsic::live_blocks()
+      if after != before {
+        report_blocks_left(reports, before: before, after: after)
+        intrinsic::libc_exit_at_once(101)
+      }
+      write_record(reports, kind: 0, content: "".slice().bytes)
+    }
+  }
+}
+
+fn start(workers: mut List[Worker], index: USize)
+  requires index < workers.length()
+  ensures workers.length() == old(workers.length())
+{
+  var command_read: Int32 = -1
+  var command_write: Int32 = -1
+  var report_read: Int32 = -1
+  var report_write: Int32 = -1
+  if intrinsic::libc_pipe(mut command_read, write_end: mut command_write) != 0 {
+    intrinsic::crash("the system gave the test runner no pipe".slice())
+  }
+  if intrinsic::libc_pipe(mut report_read, write_end: mut report_write) != 0 {
+    intrinsic::crash("the system gave the test runner no pipe".slice())
+  }
+  let process = intrinsic::libc_fork()
+  if process < 0 {
+    intrinsic::crash("the system started no worker for the test runner".slice())
+  }
+  if process == 0 {
+    for other in 0..workers.length() {
+      let others_process = workers[other].process
+      if other != index && others_process > 0 {
+        let others_commands = workers[other].commands
+        let others_reports = workers[other].reports
+        let _ = intrinsic::libc_close(others_commands)
+        let _ = intrinsic::libc_close(others_reports)
+      }
+    }
+    let _ = intrinsic::libc_close(command_write)
+    let _ = intrinsic::libc_close(report_read)
+    intrinsic::report_tests_to(report_write)
+    work(command_read, reports: report_write)
+    intrinsic::libc_exit_at_once(0)
+  }
+  let _ = intrinsic::libc_close(command_read)
+  let _ = intrinsic::libc_close(report_write)
+  workers[index] = Worker(
+    process: process,
+    commands: command_write,
+    reports: report_read,
+    running: false,
+    number: 0,
+    ending: false,
+    started: 0,
+    unread: intrinsic::storage_empty(),
+    echoed: intrinsic::storage_empty(),
+  )
+}
+
+fn Worker.begin(mut self, number: USize) {
+  self.number = number
+  self.running = true
+  self.started = microseconds()
+  var command: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+  add_low_bytes_first(mut command, number: number)
+  let _ = calls::write_fully(self.commands, bytes: intrinsic::storage_view(command))
+  var line: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+  writing::append(mut line, bytes: "start ".slice().bytes)
+  writing::unsigned(mut line, value: intrinsic::convert(number))
+  writing::byte(mut line, value: 10)
+  write_out(line)
+}
+
+fn report_end(
+  number: USize,
+  spent: UInt64,
+  echoed: intrinsic::View[UInt8],
+  outcome: UInt8,
+  message: intrinsic::View[UInt8],
+) {
+  var report: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+  if intrinsic::view_length(message) > 0 {
+    add_block(mut report, label: "message".slice(), content: message)
+  }
+  if intrinsic::view_length(echoed) > 0 {
+    add_block(mut report, label: "echo".slice(), content: echoed)
+  }
+  writing::append(mut report, bytes: "test ".slice().bytes)
+  writing::unsigned(mut report, value: intrinsic::convert(number))
+  writing::byte(mut report, value: 32)
+  add_outcome(mut report, outcome: outcome)
+  writing::byte(mut report, value: 32)
+  writing::unsigned(mut report, value: spent)
+  writing::byte(mut report, value: 10)
+  write_out(report)
+}
+
+fn Worker.ended(mut self, failed: mut Bool, outcome: UInt8, message: intrinsic::View[UInt8])
+  ensures intrinsic::storage_length(self.unread) == old(intrinsic::storage_length(self.unread))
+{
+  report_end(
+    self.number,
+    spent: microseconds_since(self.started),
+    echoed: intrinsic::storage_view(self.echoed),
+    outcome: outcome,
+    message: message,
+  )
+  self.echoed = intrinsic::storage_empty()
+  self.running = false
+  if outcome != 0 {
+    self.ending = true
+    failed = true
+  }
+}
+
+fn Worker.forget(mut self, taken: USize)
+  requires taken <= intrinsic::storage_length(self.unread)
+{
+  if taken > 0 {
+    let length = intrinsic::storage_length(self.unread)
+    let rest = calls::copy_of(intrinsic::view_slice(intrinsic::storage_view(self.unread), start: taken, stop: length))
+    self.unread = own rest
+  }
+}
+
+fn Worker.take_records(mut self, failed: mut Bool) {
+  var taken: USize = 0
+  var whole = true
+  while whole
+    invariant taken <= intrinsic::storage_length(self.unread)
+  {
+    let available = intrinsic::storage_length(self.unread) - taken
+    if available < 5 {
+      whole = false
+    } else {
+      let kind = intrinsic::view_at(intrinsic::storage_view(self.unread), index: taken)
+      let length = low_bytes_first(intrinsic::storage_view(self.unread), from: taken + 1)
+      if available - 5 < length {
+        whole = false
+      } else {
+        let content = calls::copy_of(
+          intrinsic::view_slice(intrinsic::storage_view(self.unread), start: taken + 5, stop: taken + 5 + length),
+        )
+        if kind == 4 {
+          writing::append(mut self.echoed, bytes: intrinsic::storage_view(content))
+          writing::byte(mut self.echoed, value: 10)
+        } else if self.running {
+          mut self.ended(mut failed, outcome: kind, message: intrinsic::storage_view(content))
+        }
+        taken = taken + 5 + length
+      }
+    }
+  }
+  mut self.forget(taken)
+}
+
+fn Worker.bury(mut self, failed: mut Bool, outcome: UInt8) {
+  let _ = intrinsic::libc_close(self.commands)
+  let _ = intrinsic::libc_close(self.reports)
+  var status: Int32 = 0
+  let _ = intrinsic::libc_waitpid(self.process, status: mut status, options: 0)
+  if self.running {
+    var why: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+    let ending_signal = status & 127
+    if outcome == 5 {
+      writing::append(mut why, bytes: "ran past the time limit".slice().bytes)
+    } else if ending_signal != 0 {
+      writing::append(mut why, bytes: "ended by signal ".slice().bytes)
+      writing::unsigned(mut why, value: intrinsic::convert(ending_signal))
+    } else {
+      writing::append(mut why, bytes: "ended with status ".slice().bytes)
+      writing::unsigned(mut why, value: intrinsic::convert((status >> 8) & 255))
+    }
+    mut self.ended(mut failed, outcome: outcome, message: intrinsic::storage_view(why))
+  }
+  self.process = -1
+}
+
+fn Worker.read_reports(mut self, failed: mut Bool) -> Bool {
+  match calls::read_onto_end(self.reports, buffer: mut self.unread, count: 65536) {
+    Ok(read) => {
+      mut self.take_records(mut failed)
+      if read == 0 {
+        mut self.bury(mut failed, outcome: 6)
+        false
+      } else {
+        true
+      }
+    }
+    Err(_) => {
+      mut self.take_records(mut failed)
+      mut self.bury(mut failed, outcome: 6)
+      false
+    }
+  }
+}
+
+fn Worker.milliseconds_left(self, now: UInt64, longest: UInt64) -> Int32 {
+  let spent = if now > self.started { now - self.started } else { 0 }
+  if spent >= longest {
+    0
+  } else {
+    let left = (longest - spent - 1) / 1000 + 1
+    if left > 2147483647 { 2147483647 } else { intrinsic::convert(left) }
+  }
+}
+
+fn Worker.leave(mut self) {
+  let _ = intrinsic::libc_close(self.commands)
+  let _ = intrinsic::libc_close(self.reports)
+  var status: Int32 = 0
+  let _ = intrinsic::libc_waitpid(self.process, status: mut status, options: 0)
+  self.process = -1
+}
+
+fn any_running(workers: List[Worker]) -> Bool {
+  var running = false
+  for index in 0..workers.length() {
+    if workers[index].running {
+      running = true
+    }
+  }
+  running
+}
+
+fn hand_out(workers: mut List[Worker], next: USize, tests: USize) -> USize
+  ensures workers.length() == old(workers.length())
+{
+  let width = workers.length()
+  var handed = next
+  for index in 0..width
+    invariant workers.length() == width
+  {
+    let gone = workers[index].process < 0
+    if gone && handed < tests {
+      start(mut workers, index: index)
+    }
+    let free = workers[index].process >= 0 && !workers[index].ending && !workers[index].running
+    if free && handed < tests {
+      mut workers[index].begin(handed)
+      handed += 1
+    }
+  }
+  handed
+}
+
+fn wait_for_reports(workers: List[Worker], longest: UInt64) -> Result[intrinsic::Storage[Int32], Int32] {
+  let width = workers.length()
+  let now = microseconds()
+  var timeout: Int32 = -1
+  var waited_for: intrinsic::Storage[Int32] = intrinsic::storage_empty()
+  for index in 0..width {
+    let process = workers[index].process
+    let reports = workers[index].reports
+    let running = workers[index].running
+    if process >= 0 {
+      growth::push(mut waited_for, value: reports)
+    } else {
+      growth::push(mut waited_for, value: -1)
+    }
+    growth::push(mut waited_for, value: intrinsic::libc_pollin())
+    if process >= 0 && running {
+      let left = workers[index].milliseconds_left(now, longest: longest)
+      if timeout < 0 || left < timeout {
+        timeout = left
+      }
+    }
+  }
+  let ready = intrinsic::libc_poll(mut waited_for, count: width, timeout: timeout)
+  if ready < 0 && !calls::interrupted_by_signal() {
+    Err(intrinsic::libc_errno())
+  } else {
+    Ok(own waited_for)
+  }
+}
+
+fn found_for(waited_for: intrinsic::View[Int32], worker: USize) -> Int32 {
+  if worker < intrinsic::view_length(waited_for) / 2 {
+    (intrinsic::view_at(waited_for, index: worker * 2 + 1) >> 16) & 65535
+  } else {
+    0
+  }
+}
+
+fn read_what_came(
+  workers: mut List[Worker],
+  waited_for: intrinsic::View[Int32],
+  longest: UInt64,
+  failed: mut Bool,
+)
+  ensures workers.length() == old(workers.length())
+{
+  let width = workers.length()
+  for index in 0..width
+    invariant workers.length() == width
+  {
+    let process = workers[index].process
+    if process >= 0 {
+      let found = found_for(waited_for, worker: index)
+      var alive = true
+      if (found & (intrinsic::libc_pollin() | intrinsic::libc_pollhup())) != 0 {
+        alive = mut workers[index].read_reports(mut failed)
+      }
+      let running = workers[index].running
+      let started = workers[index].started
+      if alive && running && microseconds_since(started) > longest {
+        let _ = intrinsic::libc_kill(process, signal: intrinsic::libc_sigkill())
+        mut workers[index].bury(mut failed, outcome: 5)
+      }
+    }
+  }
+}
+
+fn leave_all(workers: mut List[Worker]) {
+  let width = workers.length()
+  for index in 0..width
+    invariant workers.length() == width
+  {
+    let process = workers[index].process
+    if process >= 0 {
+      mut workers[index].leave()
+    }
+  }
+}
+
+internal fn run(count: UInt32, time_limit: UInt32) -> Int32 {
+  let tests: USize = intrinsic::convert(count)
+  let limit: UInt64 = intrinsic::convert(time_limit)
+  let longest = limit * 1000
+  var width = cores()
+  if width > tests {
+    width = tests
+  }
+  var workers: List[Worker] = List.with_capacity(width)
+  for _ in 0..width
+    invariant workers.length() == yielded.length()
+  {
+    mut workers.push(no_worker())
+  }
+  for index in 0..width
+    invariant workers.length() == width
+  {
+    start(mut workers, index: index)
+  }
+  var failed = false
+  var next: USize = 0
+  var waiting = true
+  while waiting && (next < tests || any_running(workers)) {
+    next = hand_out(mut workers, next: next, tests: tests)
+    match wait_for_reports(workers, longest: longest) {
+      Ok(waited_for) => {
+        read_what_came(mut workers, waited_for: intrinsic::storage_view(waited_for), longest: longest, failed: mut failed)
+      }
+      Err(_) => {
+        waiting = false
+      }
+    }
+  }
+  leave_all(mut workers)
+  if failed { 1 } else { 0 }
+}
