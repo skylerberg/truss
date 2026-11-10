@@ -211,6 +211,19 @@ let () =
       one_diagnostic
         "fn f() -> Int64 {\n  parallel {\n    let left = 1\n    let right = left\n  }\n  right\n}\n"
         "resolve.unknown_name");
+  test "a let in a concurrent branch is in scope after the block, and in no other branch" (fun () ->
+      refers_to_binding
+        "fn f() -> Int64 {\n  concurrent {\n    let left = 1\n    let right = 2\n  }\n  left\n}\n"
+        ~use:("left", 2) ~binding:("left", 1);
+      one_diagnostic
+        "fn f() -> Int64 {\n\
+        \  concurrent {\n\
+        \    let left = 1\n\
+        \    let right = left\n\
+        \  }\n\
+        \  right\n\
+         }\n"
+        "resolve.unknown_name");
   test "a lambda's parameter is in scope in its body" (fun () ->
       refers_to_binding "fn f() -> fn(Int64) -> Int64 {\n  fn(item) { item }\n}\n" ~use:("item", 2)
         ~binding:("item", 1));
@@ -550,6 +563,10 @@ let () =
         ]);
   test "two parallel branches cannot bind one name" (fun () ->
       one_diagnostic "fn f() -> Int64 {\n  parallel {\n    let a = 1\n    let a = 2\n  }\n  a\n}\n"
+        "resolve.hides_name");
+  test "two concurrent branches cannot bind one name" (fun () ->
+      one_diagnostic
+        "fn f() -> Int64 {\n  concurrent {\n    let a = 1\n    let a = 2\n  }\n  a\n}\n"
         "resolve.hides_name");
   test "a definition cannot take a prelude name" (fun () ->
       one_diagnostic "type List(count: Int64)\n" "resolve.hides_name");

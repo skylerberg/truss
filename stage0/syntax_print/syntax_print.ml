@@ -250,13 +250,17 @@ and statement (statement : statement) =
   | Expression value -> expression value
   | Assignment { target; operator; value } ->
       form (assignment operator) [ expression target; expression value ]
-  | For { parallel; pattern = bound; iterable; clauses; body } ->
+  | For { mode; pattern = bound; iterable; clauses; body } ->
       form
-        (if parallel then "parallel-for" else "for")
+        (match mode with
+        | Sequential -> "for"
+        | Parallel_loop -> "parallel-for"
+        | Concurrent_loop -> "concurrent-for")
         ([ pattern bound; expression iterable ] @ list loop_clause clauses @ [ block body ])
   | While { condition; clauses; body } ->
       form "while" ((expression condition :: list loop_clause clauses) @ [ block body ])
   | Parallel body -> form "parallel" [ block body ]
+  | Concurrent body -> form "concurrent" [ block body ]
   | Proof body -> form "proof" [ block body ]
   | Assert value -> form "assert" [ expression value ]
   | Yield value -> form "yield" [ expression value ]

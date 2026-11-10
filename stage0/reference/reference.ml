@@ -27,6 +27,7 @@ let token (kind : Token.kind) : Truss.token option =
         | Assert -> ASSERT
         | Break -> BREAK
         | Capability -> CAPABILITY
+        | Concurrent -> CONCURRENT
         | Continue -> CONTINUE
         | Cost -> COST
         | Decreases -> DECREASES

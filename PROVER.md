@@ -1227,6 +1227,22 @@ sanitized runs, test the trusted base against real executions.
 - **The limit in steps** is not settled. Its value, and whether it should
   grow with the size of a query, are to be set by measuring the standard
   library's proofs.
-- **Contracts for concurrency** are not designed. Tasks and channels are
-  capabilities, so their contracts are what code can rely on, but what
-  those contracts should say about ordering is not decided.
+- **`concurrent`.** Its branches are to be proven as `parallel`'s are, one
+  after another. They change disjoint places, and a capability call
+  already gives a fresh value, so nothing a proof relies on is changed by
+  what another task does between two calls.
+  - A branch's `?`, `return`, or `break` is taken where the block ends,
+    after the other branches, which run on as far as cancellation lets
+    them. The places they change are disjoint, so the state there is each
+    branch's where it ended.
+  - Cancellation asks nothing more. The cancelled value is returned by an
+    implementation, which is proven against its method's contract like any
+    other result, so a method's `ensures` hold of it too.
+  - A channel's `receive` and `send` have no `time` clause, so a function
+    that must end cannot wait on one.
+  - A message that is received is known by its type's invariant, as a
+    capability call's result is. What a channel's contract should say
+    about the order of messages is not decided.
+- **`span`** is not a resource yet. Its rules are `time`'s, with the
+  largest of the branches' costs at a `parallel` block where `time` has
+  their sum.

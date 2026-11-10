@@ -226,6 +226,10 @@ and block = { statements : statement list; span : span; id : id }
 (* Statements *)
 and statement = statement_kind line
 
+(** How the iterations of a [for] loop run: one after another, at the same time with no
+    capabilities, or each as a task. *)
+and loop_mode = Sequential | Parallel_loop | Concurrent_loop
+
 and statement_kind =
   | Let of {
       mutable_ : bool;  (** [var] rather than [let] *)
@@ -237,7 +241,7 @@ and statement_kind =
   | Expression of expression
   | Assignment of { target : expression; operator : assignment; value : expression }
   | For of {
-      parallel : bool;
+      mode : loop_mode;
       pattern : pattern;
       iterable : expression;
       clauses : loop_clause list;
@@ -245,6 +249,7 @@ and statement_kind =
     }
   | While of { condition : expression; clauses : loop_clause list; body : block }
   | Parallel of block
+  | Concurrent of block
   | Proof of block
   | Assert of expression
   | Yield of expression

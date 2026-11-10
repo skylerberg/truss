@@ -91,10 +91,11 @@ define one, as a single name and reports it once.
 Reserved everywhere:
 
 ```text
-any assert break capability continue cost decreases derives echo else ensures
-exists false fn for forall if impl in indirect internal invariant is law lends let
-match mut opaque own parallel proof provide public requires return self Self test
-theorem todo trait true type unreachable use uses var while with yield yields
+any assert break capability concurrent continue cost decreases derives echo else
+ensures exists false fn for forall if impl in indirect internal invariant is law
+lends let match mut opaque own parallel proof provide public requires return self
+Self test theorem todo trait true type unreachable use uses var while with yield
+yields
 ```
 
 Reserved for later use, and an error if written:
@@ -241,11 +242,11 @@ so it needs no entry.
    - the first token after it **can begin a statement**: a name, `_`, a
      number or string literal, `(`, `[`, `{`, `-`, `!`, `~`, a reserved word,
      or one of the keywords `any`, `assert`, `break`, `capability`,
-     `continue`, `echo`, `exists`, `false`, `fn`, `for`, `forall`, `if`,
-     `impl`, `internal`, `law`, `let`, `match`, `mut`, `own`, `parallel`,
-     `proof`, `provide`, `public`, `return`, `self`, `Self`, `test`,
-     `theorem`, `todo`, `trait`, `true`, `type`, `unreachable`, `use`, `var`,
-     `while`, `yield`.
+     `concurrent`, `continue`, `echo`, `exists`, `false`, `fn`, `for`,
+     `forall`, `if`, `impl`, `internal`, `law`, `let`, `match`, `mut`, `own`,
+     `parallel`, `proof`, `provide`, `public`, `return`, `self`, `Self`,
+     `test`, `theorem`, `todo`, `trait`, `true`, `type`, `unreachable`,
+     `use`, `var`, `while`, `yield`.
 3. Several line feeds in a row produce at most one `NEWLINE`.
 4. At the end of the file, a `NEWLINE` follows the last token if it can end a
    statement.
@@ -445,6 +446,8 @@ statement = "let" pattern [ ":" type ] "=" expression [ "else" block ]
           | "while" expression { loop_clause } block
           | "parallel" block
           | "parallel" "for" pattern "in" expression { loop_clause } block
+          | "concurrent" block
+          | "concurrent" "for" pattern "in" expression { loop_clause } block
           | "proof" block
           | "assert" expression
           | "yield" expression ;
@@ -464,8 +467,9 @@ loop_clause = "invariant" expression | "decreases" expression { "," expression }
   `let Some(x) = (if ready { a } else { b }) else { ... }` with parentheses.
 - `assert` is allowed only in tests, theorems, and proofs. `proof` blocks are
   allowed only in function bodies.
-- `parallel` and `parallel for` are statements; each statement directly inside
-  a `parallel` block is a branch.
+- `parallel`, `parallel for`, `concurrent`, and `concurrent for` are
+  statements; each statement directly inside a `parallel` or `concurrent`
+  block is a branch.
 - `yield` is allowed only in a method whose signature `yields` or `lends`.
   `yield mut part` is `yield` followed by the expression `mut part`, whose
   `mut` marks the place being lent.

@@ -134,7 +134,7 @@ let statement_parts ~expression:f ~statement (written : statement) =
       f condition;
       List.iter (loop_clause f) clauses;
       block body
-  | Parallel body | Proof body -> block body
+  | Parallel body | Concurrent body | Proof body -> block body
   | Statement_error -> ()
 
 let rec statement f written = statement_parts ~expression:f ~statement:(statement f) written

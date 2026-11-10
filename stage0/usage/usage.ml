@@ -179,7 +179,8 @@ let check_unreachable context (definition : definition) =
     Syntax_walk.expression_parts ~expression ~statement value
   and statement (written : statement) =
     (match written.kind with
-    | For { body; _ } | While { body; _ } | Parallel body | Proof body -> check_block context body
+    | For { body; _ } | While { body; _ } | Parallel body | Concurrent body | Proof body ->
+        check_block context body
     | Let { else_ = Some block; _ } -> check_block context block
     | _ -> ());
     Syntax_walk.statement_parts ~expression ~statement written

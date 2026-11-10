@@ -220,8 +220,8 @@ can have a version for each mode.
   level of its `&&` chain, and in the body of a `match` arm whose guard
   contains it that way. It is not in scope after `||`, under `!`, or in an
   `else`. A name bound by `let ... else` is in scope for the rest of the
-  enclosing block. A `let` in a `parallel` branch is in scope after the
-  `parallel` block, not in the other branches.
+  enclosing block. A `let` in a branch of a `parallel` or `concurrent`
+  block is in scope after the block, not in the other branches.
 - **No name hides another.** Binding a name that is already visible in the
   values namespace, whether a local of an enclosing scope, a parameter, or a
   definition in the same file, is an error that names both. The prelude
@@ -2195,6 +2195,31 @@ list's `each`, which only the `impl`'s method has.
 
 ## Not built
 
+- **`concurrent`.** The parser reads a `concurrent` block and a
+  `concurrent for`, and their names resolve as a `parallel` block's and
+  loop's do. The checker gives the body its types and reports
+  `types.not_built` at the keyword, so a definition that has one has no
+  core form. What is to be built:
+  - The function needs `Tasks`, as a `for` loop needs what its `each` uses.
+    A branch has the capabilities that are available around the block.
+  - Branches follow `parallel`'s rule for places: a place that one branch
+    changes must not overlap a place that another uses, and a
+    `concurrent for` may change only its own element and its own locals.
+  - `?`, `return`, `break`, and `continue` may leave a branch. A
+    `concurrent` block has type `Never` when one of its branches does,
+    since the block ends normally only when every branch does.
+  - An early exit from one branch is checked as if each other branch had
+    either not started or run to any of its ends, since the code after the
+    block does not run. So what a branch moves out of a place that
+    outlives the block, that branch puts back.
+  - The type argument of `Channel` is never a view type, which leaves out
+    every function type and every `any` type.
+  - At a `provide mut` whose body can use `Tasks`, the implementation's
+    calls take turns, so its capability may have no method with a
+    parameter whose type can hold, at any depth, a function or an `any`
+    value that uses a capability. A body that uses a capability parameter
+    of the enclosing function counts as able to use `Tasks`.
+  - The core form's shape for both is not decided.
 - **An interpolated string as calls.** It is still a node that names the
   text builder's methods and each value's `display`. It will be desugared
   to those calls once they have `time` clauses.

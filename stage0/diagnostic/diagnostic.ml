@@ -156,6 +156,7 @@ module Code = struct
     | Impl_uses
     | Unknown_associated_type
     | Associated_type_not_fixed
+    | Not_built
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
   type usage = Unused_variable | Unreachable_code
@@ -382,6 +383,7 @@ module Code = struct
     | Impl_uses -> "impl_uses"
     | Unknown_associated_type -> "unknown_associated_type"
     | Associated_type_not_fixed -> "associated_type_not_fixed"
+    | Not_built -> "not_built"
 
   let patterns_name code =
     match code with
