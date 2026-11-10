@@ -191,11 +191,9 @@ let record (context : context) (node : node) =
       end
   | None ->
       let engine = context.engine in
-      if not engine.frozen then
-        if node.engine != engine then
-          begin if not node.kept then Hashtbl.replace engine.pinned node.id ()
-          end
-        else if not node.kept then begin
+      if (not engine.frozen) && not node.kept then
+        if node.engine != engine then Hashtbl.replace engine.pinned node.id ()
+        else begin
           (* That a request keeps a node is part of the state, so it is
              written, though the node's result is as it was. *)
           node.kept <- true;
