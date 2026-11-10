@@ -1113,419 +1113,420 @@ code generation read, the ones that `?` expands to among them:
 
 ## Ownership: moves, loans, and views
 
-`Ownership` checks DESIGN.md's rules on modes, moves, and views within each
-function. It reads the definition's [core form](#the-core-form) and the
-interfaces of what the definition calls.
+`Ownership` enforces DESIGN.md's rules on modes, moves, and views within each
+function. It prevents use after move, dangling views, mutation of a borrowed
+place, and data races. It reads the definition's [core form](#the-core-form)
+and the interfaces of the definition's callees.
 
 The check builds a control-flow graph of the body. Each point of the graph
-does one thing to one place: it reads it, moves it, borrows it `mut`,
-assigns it, or binds new locals. The edges follow the order of evaluation,
-and a loop has a back edge. The body of a lambda is a separate entry into
-the graph, because it runs when the lambda is called. Three analyses run on
-the graph:
+performs one action on one place: a read, a move, a `mut` borrow, an
+assignment, or a binding of new locals. The edges follow evaluation order, and
+a loop has a back edge. A lambda's body is a separate entry point, because it
+runs when the lambda is called. Three dataflow analyses run on the graph:
 
-- forward, the places that may have been moved before each point;
-- forward, the places that each holder of a view may view at each point;
-- backward, the locals that are still used after each point.
+- forward: the places that may have been moved before each point;
+- forward: the views that each holder may store at each point, where a holder
+  is a local or a `mut` parameter that stores a value of a view type;
+- backward: the locals that are live after each point.
 
-A function for specifications only is not checked. It never runs, so it
-moves and borrows nothing.
+A specification-only function is not checked. It is never executed, so it has
+no moves or borrows.
 
 ### Places
 
-A place is a local, a parameter, `self`, or a constant, followed by fields
-and by indexes of a `List`, a `Slice`, or an `Array`. A constant that a type
-declares, such as `UInt8.maximum`, is a place like any other constant. An index whose value
-the checker cannot compare, such as `items[i]`, stands for *some element* of
-`items`. An index of any other collection is not a place: it is a call of
-the collection's `at`, a lending call (see
-[Yielding and lending](#yielding-and-lending)).
+A place is a local, a parameter, `self`, or a constant, followed by field
+accesses and by indexes of a `List`, a `Slice`, or an `Array`. A constant that
+a type declares, such as `UInt8.maximum`, is a place like any other constant.
+The checker does not compare index values, so `items[i]` denotes an unknown
+element of `items`. An index of any other collection is not a place: it is a
+call of the collection's `at`, a lending method (see [Yielding and
+lending](#yielding-and-lending)).
 
 Two places *overlap* when one is a prefix of the other. `config.servers` and
-`config.clients` do not overlap. `items[i]` and `items[j]` may, and so may
-two slices of one collection: where that matters, the checker does not
-report an error but records an obligation that the indexes or ranges are
-disjoint, which the prover discharges, as DESIGN.md requires for
-`sort(mut items[..middle])` beside `sort(mut items[middle..])`.
+`config.clients` are disjoint. `items[i]` and `items[j]` may overlap, and so
+may two slices of one collection. Where that matters, the checker reports no
+error. It emits a `Disjoint` obligation instead, which the prover discharges,
+as DESIGN.md requires for `sort(mut items[..middle])` next to `sort(mut
+items[middle..])`.
 
 ### Moves
 
-A place is moved by `own place`, by a `for` loop over `own place`, by
-matching an owned value, by `own base with (...)`, and by returning it. A
-`Plain` value is copied instead.
+These move a place: `own place`, a `for` loop over `own place`, a `match` on an
+owned value, `own base with (...)`, and returning the place. A `Plain` value is
+copied instead.
 
-- **A moved place cannot be used** until it is assigned again, on any path
-  that may reach the use. The error points at the move, with a fix that
-  writes `.copy()` at the move when the type is `Copyable`.
-- **A field can be moved out on its own.** The rest of the record stays
-  usable, and the whole becomes usable again once the field is assigned, as
-  DESIGN.md describes. The checker tracks moved fields path by path.
-- **Only owned places can be moved.** Moving out of a read-only parameter, a
+- **Use after move is an error.** A moved place cannot be used until it is
+  assigned again, on any path that reaches the use. The error has a note at the
+  move, and a fix that inserts `.copy()` at the move when the type is
+  `Copyable`.
+- **A field can be moved out by itself.** The other fields stay usable, and the
+  whole record is usable again once the field is assigned, as DESIGN.md
+  describes. The checker tracks moved places by field path.
+- **Only an owned place can be moved.** Moving out of a read-only parameter, a
   view, a constant, or an element, as in `own items[i]`, is an error, as in
-  Rust. The fixes offer `copy()`, and a method such as `remove` for an
-  element.
-- **A place lent `mut` can be moved out of if it is put back.** A `mut`
-  parameter, `mut self`, the variable of a `mut` loop, a `mut` binding of a
-  `match`, and a lambda's `mut` parameter belong to someone else, who gets
-  them back. Such a place, or a field of it, may be given up with `own` if
-  it is assigned again on every path before it goes back: before the
-  function returns, before the loop's iteration, the `match` arm, or the
-  lambda ends, and, in a yielding method, before each `yield`, because a
-  loop may stop the method there. A lending method always continues after
-  its `yield`, so it may yield in between. Until the place is assigned,
-  using it is an error, as for any moved place. So `Option.take` is
-  `let taken = own self`, then `self = None`, then `taken`. This is sound
-  because a panic ends the program: nothing can see the place while it is
-  empty. Rust unwinds, so it forbids the move and offers `mem::replace`
+  Rust. The fixes offer `copy()`, and for an element a method such as `remove`.
+- **A place can be moved out of a `mut` borrow if it is reinitialized before
+  the borrow ends.** A `mut` parameter, `mut self`, the variable of a `mut`
+  loop, a `mut` binding of a `match`, and a lambda's `mut` parameter are
+  borrowed from an owner that uses them afterwards. Such a place, or a field of
+  it, can be moved with `own` if every path assigns it again before the borrow
+  ends:
+  - before the function returns;
+  - before the loop iteration, the `match` arm, or the lambda ends;
+  - in a yielding method, before each `yield`, because the caller's loop may
+    `break` there, and the method then never resumes. A lending method always
+    resumes after its `yield`, so it may yield while the place is moved out.
+
+  Until the place is assigned, using it is a use after move. So `Option.take`
+  is `let taken = own self`, then `self = None`, then `taken`. This is sound
+  because a panic ends the program: no code can observe the place while it is
+  uninitialized. Rust unwinds, so it forbids the move and offers `mem::replace`
   instead.
-- **A name that a value is moved into owns it.** After `let taken = own
-  items`, `taken` views nothing, and `items` can be assigned again while
-  `taken` is in use.
-- **A returned place that is not owned is an error,** with a fix that
-  copies it. This holds for the function's last expression, and for the
-  value of a block, an `if`, or a `match` arm that is the last expression.
-- **Inside a lambda, a captured local is a view,** so it cannot be moved
+- **A local that a value is moved into owns the value.** After `let taken = own
+  items`, `taken` has no views, and `items` can be assigned again while `taken`
+  is live.
+- **Returning a place that is not owned is an error,** with a fix that copies
+  it. This applies to the function's tail expression, and to the tail
+  expressions of a block, an `if`, or a `match` in tail position.
+- **Inside a lambda, a captured local is borrowed,** so it cannot be moved
   there.
-- **The result records every move,** by the id of the core node that takes
-  the value.
+- **The result records every move,** by the id of the core node that moves the
+  value.
 
 ### Loans
 
-A *loan* is a period during which a place is lent. Each is shared or `mut`:
+A *loan* is a borrow of a place, together with the region of code in which the
+borrow is live. A loan is shared or `mut`:
 
-| Loan | Kind | Lasts while |
+| Loan | Kind | Live during |
 |---|---|---|
 | A read-only argument | shared | the call |
 | A `mut` argument or receiver | `mut` | the call |
-| A `let` of a place | shared | the binding is live |
-| A value of a view type, such as a slice, a cursor, or a lambda that captures | shared | the value is live |
-| What a lending call is called on | shared, or `mut` when the method takes `mut self` | the rest of the statement |
+| A `let` of a place | shared | the liveness of the binding |
+| A value of a view type, such as a slice, a cursor, or a capturing lambda | shared | the liveness of the value |
+| The receiver of a lending call | shared, or `mut` when the method takes `mut self` | the rest of the statement |
 | A `for` loop's variable | shared or `mut` | the iteration |
 | A `provide` of a place | shared or `mut` | the `provide` block |
-| An operand that has been evaluated | shared | until its operation runs |
+| An evaluated operand | shared | until its operation runs |
 
-A loan is live while any value that holds it may still be used, which a
-liveness analysis decides, as in Rust's non-lexical lifetimes. While a shared
-loan of a place is live, nothing may change, move, or lend `mut` an
-overlapping place. While a `mut` loan is live, nothing else may use an
-overlapping place at all. So `swap(mut first, second: mut first)` is an
-error, and `mut items.push(9)` is allowed once `middle` is no longer used, as
-in SYNTAX.md's example. A loan of a view is also a loan of what the view
-views.
+A loan that a value holds is live while the value is live, which a liveness
+analysis computes, as in Rust's non-lexical lifetimes. While a shared loan of a
+place is live, no code can assign, move, or `mut`-borrow an overlapping place.
+While a `mut` loan is live, no other code can use an overlapping place at all.
+So `swap(mut first, second: mut first)` is an error, and `mut items.push(9)` is
+allowed once `middle` is dead, as in SYNTAX.md's example. A loan of a view is
+also a loan of the places that the view views.
 
-The operands of one operation are evaluated in order, and an operand stays
-as it was evaluated until the operation runs. The operands are the arguments
-of a call, the fields of a constructor, the elements of a literal, the
-scrutinees of a `match`, the collection and then the keys of an index, and
+The operands of one operation are evaluated in order, and a later operand
+cannot mutate what an earlier operand evaluated to. The operands are the
+arguments of a call, the fields of a constructor, the elements of a literal,
+the scrutinees of a `match`, the collection and then the keys of an index, and
 the value of an assignment and then the keys of its target.
 
-- **An evaluated operand is lent until its operation runs.** An operand
-  that is a place lends the place, and an operand of a view type lends what
-  it views. A later operand may read what is lent, but may not change it,
-  move it, or lend it `mut`. So `show(items[0], count: grow(mut items))` is
-  an error, as in Rust: the call would be given an element of a list that
-  `grow` has since changed. An operand that is a copy lends nothing.
-- **What a `match` matches is lent while a guard is evaluated.** If the
-  guard is false, the arms after it are tried against the same value, so a
-  guard may read it and may not change it: `0 if bump(mut n) => 1` in
-  `match n` is an error, as in Rust. An arm's body may change it, once the
-  arm is chosen.
-- **A `mut` borrow for an argument begins at the call,** after every
-  argument is evaluated. So `mut items.push(items.length())` is allowed, as
-  Rust's two-phase borrows allow it. At the call, two places that the call
-  borrows may not overlap if one of them is borrowed `mut`.
+- **An evaluated operand stays borrowed until its operation runs.** An operand
+  that is a place borrows the place, and an operand of a view type borrows the
+  places that it views. A later operand can read them, but cannot assign, move,
+  or `mut`-borrow them. So `show(items[0], count: grow(mut items))` is an
+  error, as in Rust: the call would receive an element of a list that `grow`
+  has since mutated. An operand that is a copy borrows nothing.
+- **The scrutinee of a `match` stays borrowed while a guard is evaluated.** If
+  the guard is false, the later arms are matched against the same value. So a
+  guard can read the scrutinee and cannot mutate it: `0 if bump(mut n) => 1` in
+  `match n` is an error, as in Rust. An arm's body can mutate it, because the
+  arm has been selected.
+- **An argument's `mut` borrow starts at the call,** after every argument is
+  evaluated. So `mut items.push(items.length())` is allowed, as Rust's
+  two-phase borrows allow it. At the call, two places that the call borrows
+  cannot overlap if either is borrowed `mut`.
 
 ### Views
 
-DESIGN.md's views are second class: they never outlive the function that
-made them. The checker keeps them so with rules that need no annotations,
-all read from one account of what a value views:
+DESIGN.md's views are second-class: a view never outlives the function that
+created it. The checker enforces this without annotations. Every rule below
+uses one definition of the places that a value views, `Graph.views_of`.
 
-- **A call's result views everything its arguments lend it.** A result of a
-  view type holds the loans of every argument lent to the call, read-only or
-  `mut`, that is not `Plain`, and of every view-typed argument.
-  `found.unwrap_or(default: backup[..])` therefore views `backup`, and
-  `mut backup.push(9)` is rejected while the result is in use. Plain-data
-  arguments, such as an index, lend nothing, so the rule rarely holds more
-  than it must.
-- **A place given `mut` that can hold views takes on the loans of the views
-  that the call is given,** since the callee may keep them in it: the loans
-  of the call's other arguments of a view type. After
-  `mut views.push(data[0..2])`, `views` views `data`, and `mut data.push(4)`
-  is rejected while `views` is in use. An argument that is only lent, such
-  as the buffer in `mut reader.read(mut buffer, limit: 2)`, is not kept: the
-  callee's check refuses that, by the rule on what the caller keeps below.
-  So `reader` does not come to view `buffer`, and the next read into the
-  same buffer is fine.
-- **The value of an `if`, a `match`, or a block views what any of its
-  branches' values view.** After
-  `let part = if first { items[..1] } else { items[1..] }`, `part` views
-  `items`. A copy of a view views what the view does, and a record made by
-  `with` views what its base and its new fields view. The checker decides
-  this for every kind of expression, with no default.
-- **A place assigned a view views what the value does.** After
-  `holder.view = data[0..2]`, `holder` views `data`. A variable assigned
-  again still views what it viewed before, since the checker follows no
-  path one at a time.
-- **A value taken out of a place views what the place's root views, and a
-  value that refers to a place views the place too.** A value is taken out
-  when it is copied or moved: after `let part = items[0..2]`, a value read
-  from `part` views `items` and not `part`, so a function may return it
-  when `items` is a parameter. A value refers to a place when it borrows
-  it, or is a slice of an owning collection. So for a value that both owns
-  data and holds a view, such as a record with a `String` and a `Slice`, a
-  borrow of it and a slice of its string view the record itself, and the
-  record cannot change while they are in use.
-- **A name bound by a `match` or an `is` on a place views that place,**
-  because the name refers to a part of it. `slot = None` inside the
-  `Some(inner)` arm of `match slot` is an error while `inner` is in use.
-- **A view of a name that refers to a place is a view of the place.** A
-  name that a `let` binds to a place, that a pattern binds to a part of a
-  place, or that a loop binds to an element has no value of its own. So in
-  `match self.user { Some(found) => Some(found.slice()) ... }`, the slice
-  views `self.user`, and a method may return it, as it may return
-  `self.scheme.slice()`. The same `match` on a local gives a view of the
-  local, which cannot be returned.
-- **The names that a `for` loop binds view what the loop goes over:** what
-  the yielding call's arguments lend, or what the cursor views. A name of a
-  `Plain` type is a copy, so it views only what that views. After
-  `for part in parts { kept = part }`, where `parts` holds slices of
-  `data`, `kept` views `data`.
-- **A function returns views only of what reached it through its
-  parameters.** A returned view-typed value may hold loans only of its
-  parameters and of what they view, never of what ends with the function:
-  its locals, and a parameter or `self` it takes `own`. A value taken out
-  of an `own` parameter, such as a slice that the parameter held, views
-  what the caller has, so it can be returned; a reference into the
-  parameter cannot. A method returning `self.items[1..4]` and
-  `Option.unwrap_or` both meet this.
-- **What the caller keeps views only the same.** A `mut` parameter, and
-  `self` in a `mut self` method, outlive the function, so a view put in one,
-  by assignment or by a call that takes it `mut`, must not be of what ends
-  with the function. And since the caller goes on using it, nothing it views
-  may be changed in the rest of the function.
-- **A function keeps only the views that it is given.** A view put in what
-  the caller keeps must be one that the function received as a view: it
-  comes from a parameter of a view type, such as a `Slice` or a function.
-  A view of a parameter that is only lent is an error, so
-  `self.view = data[0..2]` needs `data: Slice[Int64]`, not
-  `data: List[Int64]`. Callers do not change, because a `List` passed to a
-  `Slice` parameter becomes a view of it. The signature then says what the
-  callee may keep, which is what lets the caller assume no more. Rust has
-  the same default: two borrowed parameters do not capture each other
-  unless the signature ties their lifetimes.
-- **A value cannot keep a view of its own part.** `self.recent =
-  self.items[0..1]` is an error, because the caller would not know that
-  changing `items` ends `recent`.
-- **No view crosses into or out of a capability's implementation.** Code
-  that calls `Journal.write(line)` reaches the implementation through the
-  capability and cannot see it, so none of the rules above can follow a
-  view there. In a method of an `impl` of a capability, keeping in `self` a
-  view that the method is given is an error, and so is returning a view of
-  a part of `self`: the caller could drop what the first views, and the
-  next call could change what the second views. The implementation keeps a
-  copy and returns a copy. A view that the implementation was built with
-  can be returned as it is, because whoever built the implementation holds
-  what it views for as long as the implementation is provided.
+- **A call's result views every argument that it could borrow from.** A result
+  of a view type holds the loan of every argument that the call borrows,
+  read-only or `mut`, and that is not `Plain`, and of every argument of a view
+  type. So `found.unwrap_or(default: backup[..])` views `backup`, and `mut
+  backup.push(9)` is rejected while the result is live. A `Plain` argument,
+  such as an index, contributes no loan, so the rule is rarely more
+  conservative than necessary.
+- **A `mut` argument that can hold views may store the call's view arguments.**
+  The callee may store them there, so the place takes on the loans of the
+  call's other arguments of a view type. After `mut views.push(data[0..2])`,
+  `views` views `data`, and `mut data.push(4)` is rejected while `views` is
+  live. A borrowed argument that is not a view, such as the buffer in `mut
+  reader.read(mut buffer, limit: 2)`, is not stored: the callee's own check
+  rejects that, by the rule on stored views below. So `reader` does not view
+  `buffer` afterwards, and the next read into the same buffer is accepted.
+- **The value of an `if`, a `match`, or a block views what any of its tail
+  expressions views.** After `let part = if first { items[..1] } else {
+  items[1..] }`, `part` views `items`. A copy of a view has the same views, and
+  a record built by `with` views what its base and its new fields view. The
+  checker decides this for every kind of expression, with no default case.
+- **A place that is assigned a view has the value's views.** After `holder.view
+  = data[0..2]`, `holder` views `data`. A variable that is assigned again also
+  keeps its earlier views, because the analysis is a may-analysis over all
+  paths.
+- **A value copied out of a place has the views that the place's root stores. A
+  value that borrows a place also views the place.** A value is copied out when
+  it is copied or moved: after `let part = items[0..2]`, a value read from
+  `part` views `items` and not `part`, so a function can return it when `items`
+  is a parameter. A value borrows a place when it is a borrow of the place or a
+  slice of an owning collection. So for a value that both owns data and stores
+  a view, such as a record with a `String` and a `Slice`, a borrow of the
+  record and a slice of its string both view the record, and the record cannot
+  be mutated while they are live.
+- **A binding of a `match` or an `is` on a place aliases the place,** because
+  the binding refers to a part of it. `slot = None` inside the `Some(inner)`
+  arm of `match slot` is an error while `inner` is live.
+- **A view of an alias is a view of the aliased place.** A local that a `let`
+  binds to a place, that a pattern binds to a part of a place, or that a loop
+  binds to an element is an alias: it has no storage of its own. So in `match
+  self.user { Some(found) => Some(found.slice()) ... }`, the slice views
+  `self.user`, and a method can return it, as it can return
+  `self.scheme.slice()`. The same `match` on a local gives a view of the local,
+  which cannot be returned.
+- **A `for` loop's pattern variables view the collection that the loop iterates
+  over:** the places that the yielding call's arguments are borrowed from, or
+  the places that the cursor views. A variable of a `Plain` type is a copy, so
+  it has only the element's own views. After `for part in parts { kept = part
+  }`, where `parts` stores slices of `data`, `kept` views `data`.
+- **A function can return a view only of its parameters.** A returned value of
+  a view type can hold loans only of the function's parameters and of what they
+  view. It cannot hold a loan of a place that is dropped when the function
+  returns: a local, or a parameter or `self` taken `own`. Such a view would
+  dangle. A view that is copied out of an `own` parameter, such as a slice that
+  the parameter stored, borrows the caller's data, so it can be returned. A
+  borrow of the parameter itself cannot. A method that returns
+  `self.items[1..4]` and `Option.unwrap_or` both satisfy this rule.
+- **A view stored in a `mut` parameter must not dangle.** A `mut` parameter,
+  and `self` in a `mut self` method, outlive the function. So a view that is
+  stored in one, by an assignment or by a call that borrows it `mut`, cannot be
+  a view of a place that is dropped when the function returns. The caller keeps
+  using the parameter, so the places that it views cannot be mutated in the
+  rest of the function either.
+- **A function stores only the views that it receives as view arguments.** A
+  view that is stored in a `mut` parameter must come from a parameter of a view
+  type, such as a `Slice` or a function. Storing a view of a parameter that is
+  borrowed but is not a view is an error, so `self.view = data[0..2]` needs
+  `data: Slice[Int64]`, not `data: List[Int64]`. Callers do not change, because
+  a `List` that is passed to a `Slice` parameter converts to a view of it. The
+  signature therefore states which arguments the callee may store, and the
+  caller assumes nothing more. Rust has the same default: two borrowed
+  parameters do not capture each other unless the signature ties their
+  lifetimes.
+- **A value cannot be self-referential.** `self.recent = self.items[0..1]` is
+  an error, because the caller would not know that mutating `items` invalidates
+  `recent`.
+- **No view crosses the boundary of a capability's implementation.** Code that
+  calls `Journal.write(line)` reaches the implementation through the capability
+  and cannot see it, so the caller's check cannot track a view there. In a
+  method of an `impl` of a capability, two things are errors: storing in `self`
+  a view that the method receives, because the caller could drop the borrowed
+  data, and returning a view of `self`'s own state, because the next call could
+  mutate that state. The implementation stores a copy and returns a copy. A
+  view that the implementation was constructed with can be returned unchanged,
+  because the code that constructed the implementation keeps the borrowed data
+  alive for as long as the implementation is provided.
 
-- **Writing through a slice needs `mut` access to what it views.** A `var`
-  that holds a `Slice` or a `StringSlice` can be passed `mut`, or assigned
-  through, only if every place it views is mutable: a `var`, a `mut`
-  parameter, the variable of a `mut` loop, or `mut self`. A slice held in a
-  field is read-only whatever the mode of its holder, because that mode
-  says nothing about what the field views. A slice parameter is writable if
-  its mode is `mut`. The rule is for the two slice types only: a `var` of
-  another view type, such as a cursor, can be passed `mut` over a read-only
-  source.
+- **Writing through a slice requires every place that it views to be mutable.**
+  A `var` that stores a `Slice` or a `StringSlice` can be passed `mut`, or
+  assigned through, only if every place that it views is mutable: a `var`, a
+  `mut` parameter, the variable of a `mut` loop, or `mut self`. A slice that is
+  stored in a field is read-only whatever the mode of the record, because the
+  record's mode does not say whether the viewed place is mutable. A slice
+  parameter is writable if its mode is `mut`. The rule applies to the two slice
+  types only: a `var` of another view type, such as a cursor, can be passed
+  `mut` over a read-only source.
 
-- **A view cannot be passed with a `mut` borrow of what it views.** A call
-  that is given a view and that borrows `mut`, as another argument, a place
-  that the view views is an error in either order: the callee would hold
-  the view and change what it views. The intrinsic operations that give a
-  view back to its owner are the exception.
+- **A view argument cannot alias a `mut` argument.** A call that takes a view
+  and also borrows `mut`, as another argument, a place that the view views is
+  an error in either order: the callee could mutate the place while it reads
+  the view. The intrinsics that return a view to its owner are exempt.
 
-- **Nothing kept may view a temporary.** A temporary lives until the end
-  of its statement, so a `let` or `var` whose view, or whose cursor, views
-  an owned temporary passed read-only to the call that made it is an error
-  that asks to bind the temporary to a name first, as Rust's E0716 does. So
-  is a view of a temporary assigned to a place, or passed to a call beside
-  a place given `mut` that can hold views. A cursor views what its call's
-  read-only arguments view, as a view would. A string literal without
-  interpolation is in static memory, so viewing one is fine.
+- **A stored view cannot view a temporary.** A temporary is dropped at the end
+  of its statement. So it is an error for a `let` or a `var` to bind a view, or
+  a cursor, of an owned temporary that was passed read-only to the call that
+  produced the view. The error asks to bind the temporary to a name first, as
+  Rust's E0716 does. The same holds for a view of a temporary that is assigned
+  to a place, or that is passed to a call together with a `mut` argument that
+  can hold views. A cursor views what its call's read-only arguments view, as a
+  view would. A string literal without interpolation has static storage, so a
+  view of one is accepted.
 
-A value of a view type may be bound by `let` or `var`, held in local records
-and collections, and passed as an argument. It cannot be returned except by
-the rule above, and cannot be placed where an owned, storable value is
-required, such as an `own` function-typed parameter. Putting a view into a
-record or a list makes that record or list a view, so "a view cannot be
-stored" holds by construction.
+A value of a view type can be bound by `let` or `var`, stored in local records
+and collections, and passed as an argument. It cannot be returned except by the
+rule above, and it cannot be used where a `Storable` value is required. A
+record or a list that stores a view is itself of a view type, so "a view cannot
+escape its function" holds by construction.
 
-An `any Trait` type does not say what the value inside holds, so it is a
-view type unless `Trait` requires `Storable`. A conversion to `any` views
-what the converted value views, so a record that holds a slice of a local
-cannot be returned inside an `any`, and an `any` made from owned data views
-nothing.
+An `any Trait` type does not name the type of the value that it holds, so it is
+a view type unless `Trait` requires `Storable`. A conversion to `any` has the
+views of the converted value. So a record that stores a slice of a local cannot
+be returned inside an `any`, and an `any` made from owned data has no views.
 
-A function type does not say whether a function captures, so every function
-type is a view type, and the value decides what it views. A conversion to a
-function type with more `uses` or weaker costs views what the converted
-function views:
+A function type does not state whether the function captures, so every function
+type is a view type, and the views depend on the value. A conversion to a
+function type with more `uses` or weaker costs has the views of the converted
+function:
 
-- **A named function, or a lambda that captures nothing, views nothing.** It
-  can be returned and stored like any plain value.
-- **A lambda that captures views what it captures and its environment.**
-  The environment is the record of what the lambda captured. It is a local
-  of the function that the lambda is written in, whatever the lambda
-  captures, a parameter included. So a lambda that captures cannot be
-  returned, alone or inside a record or a collection, and cannot be put in
-  a place that the caller keeps. It can be passed to a call, and held in a
-  local record or list that stays in the function. DESIGN.md's answer for a
+- **A named function, or a lambda that captures nothing, has no views.** It can
+  be returned and stored like any `Plain` value.
+- **A capturing lambda views each captured variable and its environment
+  record.** The environment record stores the lambda's captures. It is a local
+  of the enclosing function, whatever the lambda captures, even a parameter. So
+  a capturing lambda cannot be returned, alone or inside a record or a
+  collection, and cannot be stored in a `mut` parameter. It can be passed to a
+  call, and stored in a local record or list. DESIGN.md's replacement for a
   `make_adder` is a record with a method.
-- **A function value given to an `own` parameter must capture nothing,**
-  because the callee may keep it after the caller returns. A lambda that
-  captures is refused there, and so is a function value that the caller
-  does not own, such as a read-only function-typed parameter, which may be
-  a lambda that captures.
+- **A function value that is passed to an `own` parameter must capture
+  nothing,** because the callee may store it, and it could then outlive its
+  captures. A capturing lambda is rejected there. So is a function value that
+  the caller does not own, such as a read-only function-typed parameter,
+  because it may be a capturing lambda.
 
-A lambda cannot change what it captures, which is a type error: captured
-variables are read-only inside it.
+A lambda cannot mutate a captured variable, which is a type error: captured
+variables are read-only inside the lambda.
 
 ### Owned values where they are required
 
-A `var`'s initializer, the value of an assignment, an `own` argument, a
+The initializer of a `var`, the value of an assignment, an `own` argument, a
 field, a collection element, a part of a tagged string, and a returned value
-must be owned. A place there must be marked `own` or copied with `copy()`,
-unless it is `Plain`. Otherwise the error offers both fixes.
+must be owned. A place in one of these positions must be marked `own` or copied
+with `copy()`, unless its type is `Plain`. Otherwise the error offers both
+fixes.
 
-- **The type checker reports a missing mark.** The rule depends on the
-  marks, which only the syntax tree has. In the core form, reading a value
-  out of a place that is not `Plain` is always a move that the source
-  allows.
+- **The type checker reports a missing mark.** The rule depends on the marks,
+  which only the syntax tree records. In the core form, reading a value that is
+  not `Plain` out of a place is always a move that the source permits.
 - **A returned place needs no mark.** Returning an owned local moves it.
   Returning a place that is not owned, such as a read-only parameter, is an
   error with a fix that copies it.
-- **A constant expression is exempt.** The compiler evaluates the value of
-  a constant and a default, so a constant used inside one is not moved at
-  run time.
-- **A tagged string takes its parts,** because each part goes into the
-  template that its tag receives. A plain string only reads the values it
+- **A constant expression is exempt.** The compiler evaluates the value of a
+  constant and of a default at compile time, so a constant that is used inside
+  one is not moved at run time.
+- **A tagged string moves its parts,** because each part is stored in the
+  template that the tag receives. A plain string only reads the values that it
   interpolates.
-- **A yielded constructor lends its places instead.** In
-  `yield Some(self[index])` the field is lent, not taken, so it needs no
-  mark (see [Yielding and lending](#yielding-and-lending)).
+- **A yielded constructor lends its places instead.** In `yield
+  Some(self[index])` the field is lent, not moved, so it needs no mark (see
+  [Yielding and lending](#yielding-and-lending)).
 
 ### Yielding and lending
 
-- **A `lends` method yields exactly once on every path,** as Swift checks
-  its `_read` and `_modify` accessors. The checker finds a path with no
-  `yield` or with two, and reports it. What it yields has the mode the
-  signature states, and may be a part of `self` or a value the method made.
-  A `lends` method cannot drive a `for` loop or be pulled.
-- **A lending call lends the whole place it is called on,** for the rest of
-  the caller's statement, read-only or `mut` as the method takes `self`. A
-  `while` loop's test is a statement of its own for this, so what the test
-  lends goes back before the body runs. Until then, a use of a place lent
-  `mut`, or a change of one lent read-only, is an error, and so is passing a
-  place to a call beside a part it lends when either is `mut`. An index of
-  a collection other than a `List`, a `Slice`, or an `Array` is such a call,
-  so two indexes of a user's collection are never lent `mut` in one
-  statement, and `grid[a] = grid[b]` needs the right side in a `let` first.
+- **A `lends` method yields exactly once on every path,** as Swift checks its
+  `_read` and `_modify` accessors. The checker reports a path that has no
+  `yield` or more than one. The yielded part has the mode that the signature
+  states, and can be a part of `self` or a value that the method created. A
+  `lends` method cannot drive a `for` loop or be pulled.
+- **A lending call borrows its whole receiver,** for the rest of the caller's
+  statement, read-only or `mut` according to how the method takes `self`. The
+  condition of a `while` loop counts as a statement of its own, so a loan that
+  the condition starts ends before the body runs. While the loan is live, using
+  a `mut`-borrowed place or mutating a place that is borrowed read-only is an
+  error. So is passing a place to a call together with a part that it lends,
+  when either is `mut`. An index of a collection other than a `List`, a
+  `Slice`, or an `Array` is a lending call. So two indexes of a user-defined
+  collection are never lent `mut` in one statement, and `grid[a] = grid[b]`
+  needs the right side in a `let` first.
 - **A yielded constructor lends the places among its fields.** A lookup that
-  can miss lends an `Option`, as in `yield Some(self[index])`, and the
-  element stays in the collection. So in the constructor written directly
-  after `yield`, and in a constructor that is a field of it, a field that is
-  a place is lent to the value that is built, and needs no `own` and no
-  copy. The place is anything the method could yield by itself: a part of
-  `self`, a parameter, or a local.
+  can fail lends an `Option`, as in `yield Some(self[index])`, and the element
+  stays in the collection. So in the constructor directly after `yield`, and in
+  a constructor that is a field of it, a field that is a place is lent to the
+  constructed value, and needs no `own` and no copy. The place can be anything
+  that the method could yield directly: a part of `self`, a parameter, or a
+  local.
   - A method that yields or lends read-only lends every place read-only. A
     `Plain` place is copied instead, as in any constructor.
-  - A method that yields or lends `mut` lends the places that are marked
-    `mut`, as in `yield Indexed(index: index, value: mut self[index])`.
-    When the lend ends, such a place has the value of its field as the
-    caller left it. A field without the mark takes a value, as in any
-    constructor, so `index` is a copy, and a place there that is not
-    `Plain` is an error whose fix is the mark. Two places lent `mut` to
-    one value may not overlap: the same place twice is an error, and two
-    indexes are an obligation for the prover, as for two `mut` arguments.
-  - A yielded value that lends a place owns nothing. Each of its other
-    fields is a constructor or a `Plain` value, such as an index or a
-    slice. An owned value there is an error
-    (`ownership.owned_beside_lent`) that says to bind it to a name first:
-    the name is a place, and is lent like the rest. A yielded constructor
-    that lends no place is an ordinary owned value.
-  - A slice is a value, so `rest: self[1..]` is taken, not lent.
-  - A method that yields such a value yields places, so it can be pulled
-    only where the element is `Plain`.
-- **A part that is lent goes back.** Returning it, storing it, or giving it
-  to an `own` parameter is an error unless it is `Plain`, and so is binding
-  it with `let`, since the name would outlast the statement. Matching one
-  binds views of its parts, or `mut` access to them when it is lent `mut`.
-- **A method yields views only of what reached it through its
-  parameters,** as a function returns them. A yielded value of a view type
-  is a copy in the caller's hands, and the caller may keep it after the
-  loop or the statement. So `yield buffer[..]`, where `buffer` is a local
-  of the method, is an error. The method can yield `buffer` itself, which
-  the caller cannot keep, or a slice of `self`.
-- **Each step of a loop that is lent a place `mut` may change the place.**
-  In `for chunk in mut reader.chunks()`, the method may change `reader`
-  between two yields. So a view of `reader` that the body copied out of
-  `chunk` cannot be used in a later step or after the loop.
-- **A `yields` method may yield any number of times.** Calling it as a
-  `for` loop's expression drives the loop. Calling it anywhere else makes a
-  cursor, which is a view of the receiver when the method takes `self`, and
-  owns it when the method takes `own self`. A method that yields `mut`
-  cannot make a cursor, since the cursor would store that access.
-- **Whether a cursor can be made is checked where it is made.** Whatever
-  holds a cursor pulls it: a `next()` call, a `for` loop over it, one of the
-  `Cursor` trait's own methods such as `count`, and generic code that is
-  given it, as in `List.collect(names.each())`. Generic code is checked
-  without knowing what it will be given, so the rule cannot wait for the
+  - A method that yields or lends `mut` lends the places that are marked `mut`,
+    as in `yield Indexed(index: index, value: mut self[index])`. When the loan
+    ends, such a place has the value that the caller left in the field. A field
+    without the mark is an owned value, as in any constructor, so `index` is a
+    copy, and a place there that is not `Plain` is an error whose fix adds the
+    mark. Two places that are lent `mut` to one value cannot overlap: the same
+    place twice is an error, and two indexes produce a `Disjoint` obligation,
+    as for two `mut` arguments.
+  - A yielded value that lends a place owns nothing. Each of its other fields
+    is a constructor or a `Plain` value, such as an index or a slice. An owned
+    value there is an error (`ownership.owned_beside_lent`) that asks to bind
+    it to a name first: the name is a place, and is lent like the others. A
+    yielded constructor that lends no place is an ordinary owned value.
+  - A slice is a value, so `rest: self[1..]` is copied, not lent.
+  - A method that yields such a value yields places, so it can be pulled only
+    where the element is `Plain`.
+- **A lent part cannot outlive its loan.** Returning it, storing it, or passing
+  it to an `own` parameter is an error unless it is `Plain`. So is binding it
+  with `let`, because the binding would outlive the statement. A `match` on a
+  lent part binds views of its fields, or `mut` borrows of them when the part
+  is lent `mut`.
+- **A method can yield a view only of its parameters,** as a function can
+  return one. The caller receives a copy of a yielded value of a view type, and
+  may store it after the loop or the statement. So `yield buffer[..]`, where
+  `buffer` is a local of the method, is an error. The method can yield `buffer`
+  itself, which the caller cannot store, or a slice of `self`.
+- **A loop that borrows its collection `mut` may mutate it on every
+  iteration.** In `for chunk in mut reader.chunks()`, the method may mutate
+  `reader` between two yields. So a view of `reader` that the body copied out
+  of `chunk` cannot be used in a later iteration or after the loop.
+- **A `yields` method may yield any number of times.** A call of it as the
+  iteration of a `for` loop drives the loop. A call anywhere else creates a
+  cursor. The cursor is a view of the receiver when the method takes `self`,
+  and owns the receiver when the method takes `own self`. A method that yields
+  `mut` cannot create a cursor, because the cursor would store a `mut` borrow
+  between pulls.
+- **Whether a cursor can be created is checked where it is created.** Every
+  holder of a cursor may pull it: a `next()` call, a `for` loop over it, one of
+  the `Cursor` trait's own methods such as `count`, and generic code that
+  receives it, as in `List.collect(names.each())`. Generic code is checked
+  without knowing its type arguments, so the rule cannot be checked at the
   pull.
-- **A pull hands out an owned value.** `next()` returns `Option[Element]`,
-  so a method that yields read-only views of places, as `List.each` yields
-  `self[index]`, can make a cursor only where its element is `Plain`, which
-  is copied implicitly anyway. A named place counts, whether a field, an
-  element, a parameter, or a local. Anything else would be copied unasked,
-  which DESIGN.md rules out, so making the cursor is an error that suggests
-  a `for` loop or a method that yields owned values. A method that yields
-  only temporaries, such as calls' results, yields owned values, which a
-  pull moves.
-- **Pullability is worked out from the body,** as DESIGN.md says. A
-  `yields` method whose yields reach a recursive call, through a `for` over
-  a method in its own call cycle, cannot be pulled, and whether a method
-  yields views of places is read from the body too. This is the one fact
-  callers read from a body. It is stored apart from the interface, and a
+- **A pull returns an owned value.** `next()` returns `Option[Element]`. So a
+  method that yields read-only views of places, as `List.each` yields
+  `self[index]`, can create a cursor only where its element is `Plain`, which
+  is copied implicitly in any case. Any named place counts: a field, an
+  element, a parameter, or a local. An element of any other type would be
+  copied implicitly, which DESIGN.md rules out, so creating the cursor is an
+  error that suggests a `for` loop or a method that yields owned values. A
+  method that yields only temporaries, such as the results of calls, yields
+  owned values, which a pull moves.
+- **Whether a method can be pulled is derived from its body,** as DESIGN.md
+  says. A `yields` method cannot be pulled if it yields recursively: through a
+  `for` loop over a method in its own call cycle. Whether a method yields views
+  of places is derived from the body too. This is the only fact that callers
+  read from a callee's body. It is stored separately from the interface, and a
   caller reads it only when the caller pulls the method.
 
 ### `parallel`
 
-Each branch of a `parallel` block, and each iteration of a `parallel for`,
-is checked as if it ran at the same time as the others. A place that one
-branch changes, by assignment, `mut`, or `own`, must not overlap any place
-another branch uses, with disjointness obligations for indexes as above. A
-use of a view is a use of what it views, and a write through a slice is a
-change of what the slice views, so one branch cannot push to a list while
-another reads a slice of it. A `parallel for` may change only its own
-element and its own locals.
+Each branch of a `parallel` block, and each iteration of a `parallel for`, is
+checked as if it ran at the same time as the others, to prevent data races. A
+place that one branch mutates, by an assignment, a `mut` borrow, or a move,
+must not overlap a place that another branch uses. Two indexes of one
+collection produce a `Disjoint` obligation, as above. A use of a view uses the
+places that it views, and a write through a slice mutates the places that the
+slice views, so one branch cannot push to a list while another reads a slice of
+it. The body of a `parallel for` can mutate only its own element and its own
+locals.
 
 ### `concurrent`
 
-The branches of a `concurrent` block and the iterations of a
-`concurrent for` follow the same rule for places as `parallel`'s. They
-differ in that `?`, `return`, `break`, and `continue` may leave one, which
-adds one rule:
+The branches of a `concurrent` block and the iterations of a `concurrent for`
+follow the same data race rule as `parallel`. They differ in that `?`,
+`return`, `break`, and `continue` can exit a branch early, which adds one rule:
 
-- **A branch leaves each place whole.** When a branch leaves early, the
-  other branches end along their own paths and the code after the block
-  does not run. So a branch that takes a value out of a place that is lent
-  `mut` must give the place a value again before the branch ends. Under
-  `parallel`, the code after the block could do that. A value that is taken
-  out before the block must be back where a branch returns, as at any
-  `return`.
-- **An exit that leaves a branch goes where it would go outside
-  `concurrent` code,** for the check: a `return` ends the function, and a
-  `break` or a `continue` goes to its loop. Each other branch has by then
-  not started or run to one of its ends, and each end is checked.
+- **A branch reinitializes every place that it moves out of a `mut` borrow.**
+  When a branch exits early, the other branches finish along their own paths,
+  and the code after the block does not run. So a branch that moves a value out
+  of a `mut`-borrowed place must assign the place again before the branch ends.
+  Under `parallel`, the code after the block could do that. A place that is
+  moved out before the block must be reinitialized at every `return` in a
+  branch, as at any `return`.
+- **An early exit from a branch transfers control to the same target as outside
+  `concurrent` code,** for this check: a `return` ends the function, and a
+  `break` or a `continue` goes to its loop. By then each other branch has
+  either not started or run to one of its ends, and each end is checked.
 
 ## Capabilities
 
