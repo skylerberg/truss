@@ -245,12 +245,12 @@ impl streams::Seek for FileReader {
   }
 }
 
-public opaque type FileWriter(handle: intrinsic::Handle)
+public opaque type FileWriter(file: File)
 
 public fn FileWriter.write(mut self, text: StringSlice) -> Result[Unit, SystemError]
   uses Handles
 {
-  handles::write_all(mut self.handle, bytes: text.bytes)
+  handles::write_all(mut self.file.handle.descriptor, bytes: text.bytes)
 }
 
 public fn FileWriter.write_line(mut self, text: StringSlice) -> Result[Unit, SystemError]
@@ -268,7 +268,7 @@ public fn FileWriter.write_bytes(mut self, bytes: Slice[UInt8]) -> Result[Unit, 
 public fn FileWriter.flush(mut self) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Ok(Unit)
 }
 
 public opaque type File(handle: streams::Handle)
@@ -352,7 +352,11 @@ public fn write_with[Output, capability Granted](
 ) -> Result[Output, SystemError]
   uses FileWrite, Handles, Granted
 {
-  todo
+  let opened = FileWrite.open(file, mode: mode)?
+  var writer = FileWriter(file: own opened)
+  let output = write(mut writer)?
+  mut writer.flush()?
+  Ok(own output)
 }
 
 public fn write_atomically(file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError]

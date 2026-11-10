@@ -2,6 +2,10 @@ use standard::streams
 
 public opaque type Input(handle: streams::Handle)
 
+public fn Input.from_handle(handle: own streams::Handle) -> Input {
+  Input(handle: own handle)
+}
+
 impl streams::Reader for Input {
   fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
     uses Handles
@@ -11,6 +15,10 @@ impl streams::Reader for Input {
 }
 
 public opaque type Output(handle: streams::Handle)
+
+public fn Output.from_handle(handle: own streams::Handle) -> Output {
+  Output(handle: own handle)
+}
 
 impl streams::Writer for Output {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
@@ -30,6 +38,16 @@ public type Size(columns: UInt16, rows: UInt16)
   derives Equal
 
 public opaque type Terminal(handle: streams::Handle)
+
+public fn Terminal.from_handle(handle: own streams::Handle) -> Terminal {
+  Terminal(handle: own handle)
+}
+
+public fn Terminal.is_interactive(self) -> Bool
+  uses Handles
+{
+  self.size().is_ok()
+}
 
 public fn Terminal.size(self) -> Result[Size, SystemError]
   uses Handles
@@ -154,7 +172,7 @@ impl Console for CapturedConsole {
     todo
   }
 
-  fn terminal(mut self) -> Option[Terminal] {
-    None
+  fn terminal(mut self) -> Terminal {
+    todo
   }
 }

@@ -193,7 +193,9 @@ test "ranges" {
 }
 |};
   passes "provide runs its body with the implementations given, nested and narrowed"
-    {|type Recorded(lines: List[String])
+    {|use standard::console
+
+type Recorded(lines: List[String])
 
 impl Console for Recorded {
   fn print_line(mut self, text: StringSlice) {
@@ -207,6 +209,16 @@ impl Console for Recorded {
   fn read_line(self) -> Option[String] {
     None
   }
+
+  fn print(self, text: StringSlice) {}
+
+  fn input(self) -> console::Input { todo }
+
+  fn output(self) -> console::Output { todo }
+
+  fn error_output(self) -> console::Output { todo }
+
+  fn terminal(self) -> console::Terminal { todo }
 }
 
 type Quiet()
@@ -215,6 +227,16 @@ impl Console for Quiet {
   fn print_line(self, text: StringSlice) {}
   fn print_error(self, text: StringSlice) {}
   fn read_line(self) -> Option[String] { Some("typed") }
+
+  fn print(self, text: StringSlice) {}
+
+  fn input(self) -> console::Input { todo }
+
+  fn output(self) -> console::Output { todo }
+
+  fn error_output(self) -> console::Output { todo }
+
+  fn terminal(self) -> console::Terminal { todo }
 }
 
 type Prefixed(prefix: String)
@@ -232,6 +254,26 @@ impl Console for Prefixed
 
   fn read_line(self) -> Option[String] {
     Console.read_line()
+  }
+
+  fn print(self, text: StringSlice) {
+    Console.print(text)
+  }
+
+  fn input(self) -> console::Input {
+    Console.input()
+  }
+
+  fn output(self) -> console::Output {
+    Console.output()
+  }
+
+  fn error_output(self) -> console::Output {
+    Console.error_output()
+  }
+
+  fn terminal(self) -> console::Terminal {
+    Console.terminal()
   }
 }
 

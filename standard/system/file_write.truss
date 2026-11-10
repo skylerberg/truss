@@ -1,4 +1,5 @@
 use standard::files
+use standard::streams
 use standard::system::handles
 
 internal type SystemFileWrite()
@@ -15,30 +16,38 @@ impl FileWrite for SystemFileWrite {
   }
 
   fn open(self, file: Path, mode: files::WriteMode) -> Result[files::File, SystemError] {
-    todo
+    match mode {
+      Replace => {
+        let descriptor = handles::open_to_write_from_empty(file)?
+        Ok(files::File(handle: streams::Handle(descriptor: own descriptor, number: 0)))
+      }
+      Append => Err(SystemError.Unsupported)
+      CreateNew => Err(SystemError.Unsupported)
+      Update => Err(SystemError.Unsupported)
+    }
   }
 
   fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn remove(self, path: Path) -> Result[Unit, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn rename(self, from: Path, to: Path) -> Result[Unit, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn link(self, target: Path, link: Path, kind: files::LinkKind) -> Result[Unit, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn set_permissions(self, path: Path, permissions: files::Permissions) -> Result[Unit, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn set_modified(self, path: Path, time: Instant) -> Result[Unit, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 }

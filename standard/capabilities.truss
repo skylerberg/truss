@@ -14,7 +14,7 @@ public capability Console {
   fn input() -> console::Input
   fn output() -> console::Output
   fn error_output() -> console::Output
-  fn terminal() -> Option[console::Terminal]
+  fn terminal() -> console::Terminal
 }
 
 public capability FileRead {

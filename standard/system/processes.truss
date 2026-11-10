@@ -43,13 +43,13 @@ impl Processes for SystemProcesses {
       if ending_signal == 0 {
         processes::ExitStatus.Exited(code: intrinsic::convert((status >> 8) & 255))
       } else {
-        processes::ExitStatus.Signaled(signal: processes::Signal.Other(number: ending_signal))
+        processes::ExitStatus.Signaled(signal: processes::Signal.from_number(ending_signal))
       }
     Ok(processes::Output(status: ended, output: [], error_output: []))
   }
 
   fn spawn(self, command: processes::Command) -> Result[processes::Child, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 }
 

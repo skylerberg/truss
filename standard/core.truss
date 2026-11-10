@@ -150,22 +150,17 @@ public trait Iterable {
   fn each(self) yields Self.Element
     cost time finite
 
-  fn fold[Total, capability Granted](
+  fn fold[Total](
     self,
     initial: own Total,
-    combine: (fn(own Total, Self.Element) -> Total uses Granted cost time finite),
+    combine: (fn(own Total, Self.Element) -> Total cost time finite),
   ) -> Total
-    uses Granted
     cost time finite
   {
     todo
   }
 
-  fn map[Output, capability Granted](
-    self,
-    transform: (fn(Self.Element) -> Output uses Granted cost time finite),
-  ) -> List[Output]
-    uses Granted
+  fn map[Output](self, transform: (fn(Self.Element) -> Output cost time finite)) -> List[Output]
     cost time finite
   {
     var results: List[Output] = []
@@ -175,21 +170,19 @@ public trait Iterable {
     results
   }
 
-  fn filter_map[Output, capability Granted](
+  fn filter_map[Output](
     self,
-    transform: (fn(Self.Element) -> Option[Output] uses Granted cost time finite),
+    transform: (fn(Self.Element) -> Option[Output] cost time finite),
   ) -> List[Output]
-    uses Granted
     cost time finite
   {
     todo
   }
 
-  fn flat_map[Output, capability Granted](
+  fn flat_map[Output](
     self,
-    transform: (fn(Self.Element) -> List[Output] uses Granted cost time finite),
+    transform: (fn(Self.Element) -> List[Output] cost time finite),
   ) -> List[Output]
-    uses Granted
     cost time finite
   {
     todo
@@ -243,13 +236,7 @@ public trait Cursor {
     todo
   }
 
-  fn fold[Total, capability Granted](
-    own self,
-    initial: own Total,
-    combine: (fn(own Total, own Self.Element) -> Total uses Granted),
-  ) -> Total
-    uses Granted
-  {
+  fn fold[Total](own self, initial: own Total, combine: fn(own Total, own Self.Element) -> Total) -> Total {
     todo
   }
 

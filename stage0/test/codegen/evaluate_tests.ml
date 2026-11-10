@@ -26,9 +26,11 @@ let proven_with_running text =
   Prover.diagnostics ~evaluate database (Lazy.force solver) example
 
 let shout =
-  {|type Shout(text: String)
+  {|use standard::text
 
-fn is_quiet(literals: List[Literal]) -> Bool
+type Shout(text: String)
+
+fn is_quiet(literals: List[text::Literal]) -> Bool
   cost time finite
 {
   var quiet = true

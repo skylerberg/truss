@@ -60,11 +60,22 @@ public fn is_valid_command(literals: Slice[text::Literal]) -> Bool
 }
 
 public fn Command.new(program: StringSlice) -> Command {
-  todo
+  Command(
+    program: program.to_string(),
+    arguments: [],
+    variables: [],
+    clear_variables: false,
+    directory: None,
+    input: Redirect.Inherit,
+    output: Redirect.Inherit,
+    error_output: Redirect.Inherit,
+  )
 }
 
 public fn Command.argument(own self, argument: StringSlice) -> Command {
-  todo
+  var command = own self
+  mut command.arguments.push(argument.to_string())
+  command
 }
 
 public fn Command.arguments(own self, arguments: Slice[String]) -> Command {
@@ -128,6 +139,24 @@ public type Signal =
   | User2
   | Other(number: Int32)
   derives Equal, Hash
+
+public fn Signal.from_number(number: Int32) -> Signal
+  cost time O(1)
+{
+  if number == 1 {
+    Signal.HangUp
+  } else if number == 2 {
+    Signal.Interrupt
+  } else if number == 3 {
+    Signal.Quit
+  } else if number == 9 {
+    Signal.Kill
+  } else if number == 15 {
+    Signal.Terminate
+  } else {
+    Signal.Other(number: number)
+  }
+}
 
 public type Output(status: ExitStatus, output: List[UInt8], error_output: List[UInt8])
 

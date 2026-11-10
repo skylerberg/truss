@@ -33,6 +33,8 @@ let () =
         "type FixedClock(time: Instant)\n\n\
          impl Clock for FixedClock {\n\
         \  fn now(self) -> Instant { self.time }\n\
+        \  fn monotonic(self) -> Duration { todo }\n\
+        \  fn sleep(self, duration: Duration) {}\n\
          }\n\n\
          fn stamp() -> Instant\n\
         \  uses Clock\n\
@@ -49,6 +51,8 @@ let () =
         "type Fixed[Tag](time: Instant, tag: Tag)\n\n\
          impl Clock for Fixed[Tag] {\n\
         \  fn now(self) -> Instant { self.time }\n\
+        \  fn monotonic(self) -> Duration { todo }\n\
+        \  fn sleep(self, duration: Duration) {}\n\
          }\n\n\
          fn f() -> Instant {\n\
         \  provide Fixed(time: Instant.epoch, tag: true) {\n\
