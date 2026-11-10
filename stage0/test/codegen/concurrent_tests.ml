@@ -551,6 +551,148 @@ fn main(arguments: List[String]) -> ExitCode
 (* Ownership of items and return values *)
 
 let () =
+  passes_in_order "a task borrows an element that a method lends from a read-only parameter"
+    ~count:3
+    {|type Bag(items: List[String])
+
+fn Bag.each(self) yields String {
+  var index: USize = 0
+  while index < self.items.length() {
+    yield self.items[index]
+    index += 1
+  }
+}
+
+fn total_length(words: List[String]) -> USize
+  uses Tasks
+{
+  concurrent for word in words {
+    if word.length() > 100 {
+      return word.length()
+    }
+  }
+  var total: USize = 0
+  for word in words {
+    total += word.length()
+  }
+  total
+}
+
+fn first_longer(bag: Bag, limit: USize) -> String
+  uses Tasks
+{
+  concurrent for word in bag {
+    if word.length() > limit {
+      return word.copy()
+    }
+  }
+  "none"
+}
+
+test "every element is still owned by the list after the loop" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  let length = provide mut tasks {
+    total_length(["a${1}", "bc${2}", "def${3}"])
+  }
+  assert length == 9
+}
+
+test "a task that returns ends the loop, and later elements are not spawned" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  let bag = Bag(items: ["a${1}", "abcdef${2}", "abc${3}", "abcdefgh${4}"])
+  let found = provide mut tasks {
+    first_longer(bag, limit: 4)
+  }
+  assert found == "abcdef2"
+  assert bag.items.length() == 4
+  assert bag.items[3] == "abcdefgh4"
+}
+
+test "no task returns" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  let bag = Bag(items: ["a${1}", "ab${2}"])
+  let found = provide mut tasks {
+    first_longer(bag, limit: 9)
+  }
+  assert found == "none"
+}
+|};
+  passes_in_order "a task owns a value that a method computes, and copies a plain one" ~count:2
+    {|type Counter(count: Int64)
+
+fn Counter.labels(self) yields String {
+  var index: Int64 = 0
+  while index < self.count {
+    yield "label ${index}"
+    index += 1
+  }
+}
+
+fn Counter.steps(mut self) yields Int64 {
+  while self.count > 0 {
+    yield self.count
+    self.count -= 1
+  }
+}
+
+fn label_lengths(counter: Counter, stop: Int64) -> USize
+  uses Tasks
+{
+  concurrent for label in counter.labels() {
+    if label == "label ${stop}" {
+      return label.length()
+    }
+  }
+  0
+}
+
+fn sum_steps(counter: mut Counter) -> Int64
+  uses Tasks, Tally
+{
+  concurrent for step in mut counter.steps() {
+    Tally.add(step)
+  }
+  Tally.total()
+}
+
+capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+}
+
+type Sum(total: Int64)
+
+impl Tally for Sum {
+  fn add(mut self, amount: Int64) {
+    self.total += amount
+  }
+
+  fn total(self) -> Int64 {
+    self.total
+  }
+}
+
+test "a computed value is dropped by its task or by the loop" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  provide mut tasks {
+    assert label_lengths(Counter(count: 4), stop: 2) == 7
+    assert label_lengths(Counter(count: 3), stop: 9) == 0
+  }
+}
+
+test "a plain value lent from a mut parameter is copied" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  var sum = Sum(total: 0)
+  var counter = Counter(count: 4)
+  let total = provide mut tasks, mut sum {
+    sum_steps(mut counter)
+  }
+  assert total == 10
+  assert counter.count == 0
+}
+|}
+
+let () =
   passes_in_order "a task owns its item, and an item whose task is not spawned is dropped" ~count:2
     {|fn longest(words: own List[String], limit: USize) -> String
   uses Tasks

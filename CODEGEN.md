@@ -1273,14 +1273,21 @@ the nested function's parameter.
   This is the only case where a task uses a place that the method lends.
 - **A `concurrent for` over any other yielding method, or over a cursor,**
   runs the method sequentially in the enclosing function and spawns a task
-  at each `yield`. The task outlives the `yield`, so it cannot borrow the
-  yielded place: the method could change or free the place when it
-  resumes, which would be a use after free. The task takes what a cursor's
-  `next` returns instead, an owned value or a bitwise copy of a trivial
-  one. Lowering moves the value into a heap block and passes the block's
-  address as `item`, and the task moves the value out and frees the block.
-  If `spawn` returns false, the enclosing code drops the value, frees the
-  block, and stops the method as a `break` does.
+  at each `yield`. The value's bytes go to the task in a heap block whose
+  address is `item`, and the task takes them out and frees the block. What
+  the task then holds depends on the `yield`:
+
+  | Yielded | The task |
+  |---|---|
+  | An `own` value, a value the method computed for the `yield`, or a value from a cursor | Owns the value and drops it |
+  | A read-only place, or a constructor of read-only places | Holds a bitwise copy that it never drops. The place still owns what the bytes point at |
+
+  The task outlives the `yield`. The ownership check has verified that a
+  borrowed place is inside a parameter the method takes read-only, or is
+  `Plain`, so the place stays valid and unchanged until the group is
+  joined. If `spawn` returns false, the enclosing code takes the value
+  back out of the block, drops it if it is owned, and stops the method as
+  a `break` does.
 - **The join is a scope cleanup.** The group has a scope of its own, and
   every exit from that scope joins the group, so no path skips the join.
   The scope's temporaries, such as the arguments of the yielding method,
@@ -2038,20 +2045,15 @@ a command line can hold.
   allocated by `from_template` too, and the copy writes no byte that
   `from_template` did not write.
 - **A template's list of literals as static data.** It is allocated.
-- **A `parallel for` or a `concurrent for` over the read-only `each` of a
-  `List`, a `Slice`, or an `Array`.** These methods are `while` loops that
-  keep an index between `yield`s. A `parallel for` over one runs
-  sequentially, and a `concurrent for` over one is reported as not built
-  unless the element type is trivial. Written as one `for` over a range
-  that only yields, as their `each(mut self)` methods are, they need no
-  change here.
+- **A `parallel for` over the read-only `each` of a `List`, a `Slice`, or
+  an `Array` in chunks.** These methods are `while` loops that keep an
+  index between `yield`s, so the loop runs sequentially. They cannot be
+  written as one `for` over a range yet: inside a `for`, `yielded` names
+  the loop's own cursor, so the method's `ensures` about `yielded` cannot
+  be proven.
 - **A `parallel for` over any other method at once.** A collection that
   cannot give its parts by position needs a way to split itself in two,
   as Rust's rayon and Java's `Spliterator` have.
-- **A `concurrent for` over a method that lends its elements and does not
-  yield by position.** Lowering reports it as not built. The type checker
-  is to reject it, and a `concurrent for` whose element type is a view,
-  with a diagnostic.
 - **A thread for each task.** The runtime is first to run each task on its
   own operating-system thread, so that the real capability implementations
   block as they do now. Later a task is to have its own stack and run on
