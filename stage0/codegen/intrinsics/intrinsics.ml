@@ -8,6 +8,12 @@ type types = { usize : Ground.ty; isize : Ground.ty; string_slice : Ground.ty }
 let operand = function Place place -> Lir.Copy place | Value operand -> operand
 let place = function Place place -> place | Value _ -> bug "an operation on storage given a value"
 
+(* Where a value that is only read is: it arrives as a place, or as a copy
+   of one. *)
+let read = function
+  | Place place | Value (Copy place) -> place
+  | Value _ -> bug "a value to read that is in no place"
+
 let scalar env (ty : Ground.ty) =
   match (Memory_layout.of_type env ty).form with
   | Scalar scalar -> scalar
@@ -39,7 +45,7 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
      operations, which take none. *)
   let element () =
     match operation with
-    | Intrinsic.Read_bytes | Random_fill | Write_float | Environment_variable | Handle_read ->
+    | Intrinsic.Read_bytes | Write_float | Environment_variable ->
         Ground.Named { path = Intrinsic.builtin_path UInt8; arguments = [] }
     | _ -> type_argument 0
   in
@@ -274,6 +280,7 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           let wanted = usize_local "wanted" in
           emit b (Assign (at wanted, Binary (Add, length storage, value 1)));
           grow_when Greater storage (Copy (at wanted))
+      | Storage_lengthen -> add_to_length (place (argument 0)) (value 1)
       | Storage_push ->
           let storage = place (argument 0) in
           let wanted = usize_local "wanted" in
@@ -350,7 +357,7 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
       | Crash ->
           (* The message is a [StringSlice], a record of one field: its view of
          bytes. *)
-          let message = place (argument 0) in
+          let message = read (argument 0) in
           let bytes =
             match (Memory_layout.of_type env types.string_slice).form with
             | Struct [ only ] -> message / Field only.name
@@ -365,10 +372,6 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                  site;
                });
           start b (block b)
-      | Write_bytes ->
-          let view = place (argument 1) in
-          call ?result:destination System_write
-            [ value 0; Copy (Storage.view_elements view); Copy (Storage.view_length view) ]
       | Read_bytes ->
           let storage = place (argument 1) in
           let count = value 2 in
@@ -402,55 +405,15 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           call ~result:(at count) Float_text
             [ value 1; Address { place = element_at storage (length storage); writable = true } ];
           add_to_length storage (Copy (at count))
-      | Open_file ->
-          let path = place (argument 0) in
-          let descriptor = local b ~name:"descriptor" (Raw (Integer Int32)) in
-          call ~result:(at descriptor) System_open
-            [
-              Copy (Storage.view_elements path);
-              Copy (Storage.view_length path);
-              value 1;
-              Address { place = place (argument 2); writable = true };
-            ];
+      | Handle_from ->
           set
             (Build
                {
                  ty = Named { path = Intrinsic.builtin_path Handle; arguments = [] };
                  variant = None;
-                 fields = [ ("descriptor", Copy (at descriptor)) ];
+                 fields = [ ("descriptor", value 0) ];
                })
-      | Handle_write ->
-          let view = place (argument 1) in
-          call ?result:destination System_write
-            [
-              Copy (place (argument 0) / Field "descriptor");
-              Copy (Storage.view_elements view);
-              Copy (Storage.view_length view);
-            ]
-      | Handle_read ->
-          let storage = place (argument 1) in
-          let count = value 2 in
-          let wanted = usize_local "wanted" in
-          emit b (Assign (at wanted, Binary (Add, length storage, count)));
-          grow_when Greater storage (Copy (at wanted));
-          let got = local b ~name:"got" (Value types.isize) in
-          call ~result:(at got) System_read
-            [
-              Copy (place (argument 0) / Field "descriptor");
-              Address { place = element_at storage (length storage); writable = true };
-              count;
-            ];
-          let read_some = local b (Raw Bool) in
-          emit b
-            (Assign
-               (at read_some, Binary (Greater, Copy (at got), Constant (Integer (ISize, Z.zero)))));
-          when_ b
-            (Copy (at read_some))
-            (fun () ->
-              let read = usize_local "read" in
-              emit b (Assign (at read, Convert (Copy (at got), Integer USize)));
-              add_to_length storage (Copy (at read)));
-          set (Use (Copy (at got)))
+      | Handle_descriptor -> set (Use (Copy (read (argument 0) / Field "descriptor")))
       | Run_process ->
           let program = place (argument 0) and packed = place (argument 1) in
           call ?result:destination System_run
@@ -488,35 +451,59 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                 ];
               add_to_length storage (Copy (at count)));
           set (Use (Copy (at present)))
-      | Clock_now -> call ?result:destination Clock_now []
-      | Random_fill ->
-          let storage = place (argument 0) in
-          let count = value 1 in
-          let wanted = usize_local "wanted" in
-          emit b (Assign (at wanted, Binary (Add, length storage, count)));
-          grow_when Greater storage (Copy (at wanted));
-          call Random_fill
-            [ Address { place = element_at storage (length storage); writable = true }; count ];
-          add_to_length storage count
       | Libc function_ -> (
           let ground scalar =
             Ground.Named
               { path = Intrinsic.builtin_path (Intrinsic.libc_builtin scalar); arguments = [] }
           in
           let { Libc.parameters; result } = Libc.signature function_ in
+          (* What goes on after the call: a structure's numbers to the
+             arguments they were written for. *)
+          let after = ref [] in
+          let next = ref 0 in
+          let taken () =
+            let index = !next in
+            incr next;
+            index
+          in
           let given =
-            List.mapi
-              (fun index (_, (passes : Libc.passes)) : Lir.operand ->
+            List.map
+              (fun (_, (passes : Libc.passes)) : Lir.operand ->
                 match passes with
-                | Value _ -> value index
-                | Elements _ -> Copy (Storage.view_elements (place (argument index)))
+                | Value _ -> value (taken ())
+                | Elements _ -> Copy (Storage.view_elements (place (argument (taken ()))))
                 | Room _ ->
-                    let storage = place (argument index) in
-                    Address { place = element_at storage (length storage); writable = true })
+                    let storage = place (argument (taken ())) in
+                    Address { place = element_at storage (length storage); writable = true }
+                | Written (scalar, names) ->
+                    let structure =
+                      local b
+                        (Value
+                           (Named
+                              {
+                                path = Intrinsic.builtin_path Array;
+                                arguments =
+                                  [ Type (ground scalar); Value (Z.of_int (List.length names)) ];
+                              }))
+                    in
+                    List.iteri
+                      (fun index _ ->
+                        let written = place (argument (taken ())) in
+                        after :=
+                          (fun () ->
+                            emit b
+                              (Assign (written, Use (Copy (at structure / Index (usize index))))))
+                          :: !after)
+                      names;
+                    Address { place = at structure; writable = true }
+                | Always number -> usize number)
               parameters
           in
           let target = Lir.Foreign (Libc.declaration (Memory_layout.target env).os function_) in
-          let call result = emit b (Call { target; arguments = given; result }) in
+          let call result =
+            emit b (Call { target; arguments = given; result });
+            List.iter (fun write -> write ()) (List.rev !after)
+          in
           match result with
           | Returns _ ->
               call (match destination with Some place -> Returned place | None -> Discarded)

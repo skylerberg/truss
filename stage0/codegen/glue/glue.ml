@@ -104,21 +104,13 @@ let drop t ty =
              result = Discarded;
            })
   | _, Handle ->
-      (* A handle whose file could not be opened holds no descriptor. *)
-      let descriptor = Lir.Copy (value / Field "descriptor") in
-      let opened = local b (Raw Bool) in
       emit b
-        (Assign (at opened, Binary (Greater_equal, descriptor, Constant (Integer (Int32, Z.zero)))));
-      when_ b
-        (Copy (at opened))
-        (fun () ->
-          emit b
-            (Call
-               {
-                 target = Foreign (Libc.declaration (Memory_layout.target t.env).os Close);
-                 arguments = [ descriptor ];
-                 result = Discarded;
-               }))
+        (Call
+           {
+             target = Foreign (Libc.declaration (Memory_layout.target t.env).os Close);
+             arguments = [ Copy (value / Field "descriptor") ];
+             result = Discarded;
+           })
   | _, Storage element ->
       if not (trivial t element) then
         loop t b

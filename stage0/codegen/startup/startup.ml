@@ -13,13 +13,11 @@ let headers =
 #include <string.h>
 #include <signal.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <spawn.h>
 #include <poll.h>
 #include <time.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/random.h>
 #include <sys/wait.h>
 |}
 
@@ -295,31 +293,6 @@ void t_runtime_storage_grow(void **buffer, t_usize length, t_usize *capacity, t_
   *capacity = wanted;
 }
 
-t_isize t_runtime_write(int32_t descriptor, const uint8_t *bytes, t_usize count) {
-  for (;;) {
-    ssize_t written = write(descriptor, bytes, count);
-    if (written < 0 && errno == EINTR) continue;
-    return written;
-  }
-}
-
-/* Opens a file: to read (flags 0), to write from empty (1), or to append
-   (2), creating it to write. On failure it returns -1 and writes the error
-   number. */
-int32_t t_runtime_open(const uint8_t *path, t_usize length, int32_t flags, int32_t *error) {
-  char *terminated = malloc(length + 1);
-  if (terminated == NULL) t_out_of_memory();
-  memcpy(terminated, path, length);
-  terminated[length] = 0;
-  int mode = flags == 0 ? O_RDONLY : flags == 1 ? O_WRONLY | O_CREAT | O_TRUNC : O_WRONLY | O_CREAT | O_APPEND;
-  int descriptor;
-  do descriptor = open(terminated, mode | O_CLOEXEC, 0666);
-  while (descriptor < 0 && errno == EINTR);
-  free(terminated);
-  *error = descriptor < 0 ? errno : 0;
-  return descriptor;
-}
-
 /* Runs a program, found on the PATH as a shell finds it, with the
    arguments, each ending in a zero byte, and waits for it. It returns the
    exit status, or 128 and the signal that ended it; on failure to start it,
@@ -402,24 +375,6 @@ t_isize t_runtime_read(int32_t descriptor, uint8_t *bytes, t_usize count) {
     ssize_t got = read(descriptor, bytes, count);
     if (got < 0 && errno == EINTR) continue;
     return got;
-  }
-}
-
-int64_t t_runtime_clock_now(void) {
-  struct timespec now;
-  clock_gettime(CLOCK_REALTIME, &now);
-  return (int64_t)now.tv_sec * 1000000000 + now.tv_nsec;
-}
-
-/* [getentropy] is in both glibc and macOS's libc, and gives at most 256
-   bytes a call. It fails only if the system has no source of randomness,
-   which nothing can go on from. */
-void t_runtime_random_fill(uint8_t *bytes, t_usize count) {
-  while (count > 0) {
-    t_usize part = count < 256 ? count : 256;
-    if (getentropy(bytes, part) != 0) abort();
-    bytes += part;
-    count -= part;
   }
 }
 

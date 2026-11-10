@@ -67,10 +67,8 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
         (helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
   | Grow -> Printf.sprintf "t_runtime_storage_grow((void **)%s)" all
-  | System_write -> "t_runtime_write(" ^ all ^ ")"
   | System_read -> "t_runtime_read(" ^ all ^ ")"
   | System_environment -> "t_runtime_environment(" ^ all ^ ")"
-  | System_open -> "t_runtime_open(" ^ all ^ ")"
   | System_run -> "t_runtime_run(" ^ all ^ ")"
   | Evidence_fill ->
       let slot = argument 0 in
@@ -87,8 +85,6 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
   | Float_text ->
       (if scalar 0 = Float32 then "t_runtime_float32_text(" else "t_runtime_float64_text(")
       ^ all ^ ")"
-  | Clock_now -> "t_runtime_clock_now()"
-  | Random_fill -> "t_runtime_random_fill(" ^ all ^ ")"
   | Debug_begin -> "t_runtime_debug_begin(" ^ all ^ ")"
   | Debug_text -> "t_runtime_debug_text(" ^ all ^ ")"
   | Debug_signed -> "t_runtime_debug_signed(" ^ all ^ ")"

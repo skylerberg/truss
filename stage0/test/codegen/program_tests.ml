@@ -176,6 +176,29 @@ let () =
       expect_string ~expected:"22 bytes\nstreamed one two\nfirst\nsecond line\nmissing\n" output)
 
 let () =
+  test "a path that holds a zero byte opens nothing, where C would open the path before it"
+    (fun () ->
+      let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in
+      Out_channel.with_open_text path (fun channel -> output_string channel "found");
+      let status, output, _ =
+        run_main ~arguments:[ path ]
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console, FileRead
+{
+  if FileRead.read_text(Path.new(arguments[1].slice())) is Ok(text) {
+    Console.print_line("${text}".slice())
+  }
+  if FileRead.read_text(Path.new("${arguments[1]}\0.hidden".slice())) is Err(_) {
+    Console.print_line("refused".slice())
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"found\nrefused\n" output)
+
+let () =
   test "a program runs other programs and reads their exit status" (fun () ->
       let status, output, _ =
         run_main

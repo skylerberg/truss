@@ -1,0 +1,74 @@
+use standard::intrinsic
+
+internal fn interrupted_by_signal() -> Bool {
+  intrinsic::libc_errno() == intrinsic::libc_eintr()
+}
+
+internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
+  let length = intrinsic::view_length(bytes)
+  var written: USize = 0
+  var error: Int32 = 0
+  while error == 0 && written < length {
+    let wrote = intrinsic::libc_write(
+      descriptor,
+      bytes: intrinsic::view_slice(bytes, start: written, stop: length),
+      count: length - written,
+    )
+    if wrote > 0 {
+      let count: USize = intrinsic::convert(wrote)
+      written += count
+    } else if wrote == 0 {
+      error = intrinsic::libc_eio()
+    } else if !interrupted_by_signal() {
+      error = intrinsic::libc_errno()
+    }
+  }
+  if error == 0 { Ok(Unit) } else { Err(error) }
+}
+
+internal fn read_onto_end(
+  descriptor: Int32,
+  buffer: mut intrinsic::Storage[UInt8],
+  count: USize,
+) -> Result[USize, Int32] {
+  intrinsic::storage_reserve(mut buffer, additional: count)
+  var got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)
+  while got < 0 && interrupted_by_signal() {
+    got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)
+  }
+  if got < 0 {
+    Err(intrinsic::libc_errno())
+  } else {
+    let read: USize = intrinsic::convert(got)
+    intrinsic::storage_lengthen(mut buffer, by: read)
+    Ok(read)
+  }
+}
+
+internal fn ended_with_zero_byte(bytes: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32] {
+  let length = intrinsic::view_length(bytes)
+  var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length + 1)
+  for index in 0..length {
+    let byte = intrinsic::view_at(bytes, index: index)
+    if byte == 0 {
+      return Err(intrinsic::libc_einval())
+    }
+    intrinsic::storage_push(mut copy, value: byte)
+  }
+  intrinsic::storage_push(mut copy, value: 0)
+  Ok(own copy)
+}
+
+internal fn open_file(path: intrinsic::View[UInt8], flags: Int32) -> Result[intrinsic::Handle, Int32] {
+  let name = ended_with_zero_byte(path)?
+  let closed_in_programs_it_runs = flags | intrinsic::libc_o_cloexec()
+  var descriptor = intrinsic::libc_open(intrinsic::storage_view(name), flags: closed_in_programs_it_runs, mode: 438)
+  while descriptor < 0 && interrupted_by_signal() {
+    descriptor = intrinsic::libc_open(intrinsic::storage_view(name), flags: closed_in_programs_it_runs, mode: 438)
+  }
+  if descriptor < 0 {
+    Err(intrinsic::libc_errno())
+  } else {
+    Ok(intrinsic::handle_from(descriptor))
+  }
+}

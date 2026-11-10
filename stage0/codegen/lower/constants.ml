@@ -233,21 +233,38 @@ let constant context path =
   | None -> Run ty
 
 (* Code run while compiling leaves what it works out in the debug buffer, in
-   its binary form, and writes the buffer to standard output as it ends. *)
+   its binary form, and writes the buffer to standard output as it ends,
+   with the standard library's function that writes every byte. *)
 let begin_output st =
   emit st.b (Call { target = Intrinsic Debug_begin; arguments = []; result = Discarded })
 
+let write_fully : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "system"; "calls" ] }; name = "write_fully" }
+
 let write_output st =
   let b = st.b in
-  let call intrinsic arguments result =
-    emit b (Call { target = Intrinsic intrinsic; arguments; result = Returned result })
+  let call intrinsic result =
+    emit b (Call { target = Intrinsic intrinsic; arguments = []; result = Returned result })
   in
   let bytes = local b (Raw (Pointer Opaque)) and length = temporary st st.context.types.usize in
-  call Debug_bytes [] (at bytes);
-  call Debug_length [] length;
-  call System_write
-    [ Constant (Integer (Int32, Z.one)); Copy (at bytes); Copy length ]
-    (temporary st st.context.types.isize)
+  call Debug_bytes (at bytes);
+  call Debug_length length;
+  let int32 = Monomorphic.builtin Int32 in
+  let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
+  let output = temporary st int32 and view = temporary st view_ty in
+  emit b (Assign (output, Use (Constant (Integer (Int32, Z.one)))));
+  emit b (Assign (view, Storage.view view_ty ~elements:(Copy (at bytes)) ~length:(Copy length)));
+  let signature = signature_of st.context write_fully in
+  let result =
+    match signature.output with
+    | Returns ty -> Monomorphic.ground st.context.monomorphic [] ty
+    | Yields _ | Lends _ -> bug "write_fully does not return"
+  in
+  call_instance st
+    (Code { path = write_fully; type_arguments = [] })
+    ~signature ~substitution:[]
+    ~arguments:[ (Read, int32, output); (Read, view_ty, view) ]
+    ~mask:0 ~destination:(temporary st result)
 
 (* Code run while compiling: works out a constant's value and writes its
    binary form to standard output. *)

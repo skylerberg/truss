@@ -8,8 +8,15 @@ let host =
   else if String.starts_with ~prefix:"linux" system then Some Linux
   else None
 
-type scalar = UInt8 | Int32 | Int64 | USize | ISize
-type passes = Value of scalar | Elements of scalar | Room of scalar
+type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize
+
+type passes =
+  | Value of scalar
+  | Elements of scalar
+  | Room of scalar
+  | Written of scalar * string list
+  | Always of int
+
 type result = Returns of scalar | Points_at of scalar
 type signature = { parameters : (string * passes) list; result : result }
 
@@ -94,7 +101,7 @@ let describe function_ =
           (* macOS makes [clockid_t] an enumeration with no negative member,
              which C gives the representation of this type. *)
           ("clock", Value Int32, function Linux -> "int" | Macos -> "unsigned int");
-          ("time", Room Int64, everywhere "struct timespec *");
+          ("time", Written (Int64, [ "seconds"; "nanoseconds" ]), everywhere "struct timespec *");
         ]
         ~headers:[ "time.h" ]
         ~layout:
@@ -106,8 +113,12 @@ let describe function_ =
             "sizeof(((struct timespec *)0)->tv_nsec) == 8";
           ]
   | Getentropy ->
+      (* Eight random bytes are a random [UInt64], whatever order the system
+         keeps a number's bytes in. *)
       row "int" (Returns Int32)
-        [ ("buffer", Room UInt8, everywhere "void *"); ("count", Value USize, size) ]
+        [
+          ("buffer", Written (UInt64, [ "value" ]), everywhere "void *"); ("count", Always 8, size);
+        ]
         ~headers:[ "sys/types.h"; "sys/random.h" ]
 
 let signature function_ =
@@ -171,16 +182,27 @@ type number =
   | O_wronly
   | O_creat
   | O_trunc
-  | O_append
   | O_cloexec
   | Eintr
   | Enoent
   | Eacces
+  | Eio
+  | Einval
   | Clock_realtime
 
 let numbers =
   [
-    O_rdonly; O_wronly; O_creat; O_trunc; O_append; O_cloexec; Eintr; Enoent; Eacces; Clock_realtime;
+    O_rdonly;
+    O_wronly;
+    O_creat;
+    O_trunc;
+    O_cloexec;
+    Eintr;
+    Enoent;
+    Eacces;
+    Eio;
+    Einval;
+    Clock_realtime;
   ]
 
 let number_name = function
@@ -188,18 +210,19 @@ let number_name = function
   | O_wronly -> "O_WRONLY"
   | O_creat -> "O_CREAT"
   | O_trunc -> "O_TRUNC"
-  | O_append -> "O_APPEND"
   | O_cloexec -> "O_CLOEXEC"
   | Eintr -> "EINTR"
   | Enoent -> "ENOENT"
   | Eacces -> "EACCES"
+  | Eio -> "EIO"
+  | Einval -> "EINVAL"
   | Clock_realtime -> "CLOCK_REALTIME"
 
 let number_type (_ : number) = Int32
 
 let number_headers = function
-  | O_rdonly | O_wronly | O_creat | O_trunc | O_append | O_cloexec -> [ "fcntl.h" ]
-  | Eintr | Enoent | Eacces -> [ "errno.h" ]
+  | O_rdonly | O_wronly | O_creat | O_trunc | O_cloexec -> [ "fcntl.h" ]
+  | Eintr | Enoent | Eacces | Eio | Einval -> [ "errno.h" ]
   | Clock_realtime -> [ "time.h" ]
 
 let value os number =
@@ -210,13 +233,13 @@ let value os number =
   | O_creat, Macos -> 0x200
   | O_trunc, Linux -> 0x200
   | O_trunc, Macos -> 0x400
-  | O_append, Linux -> 0x400
-  | O_append, Macos -> 0x8
   | O_cloexec, Linux -> 0x80000
   | O_cloexec, Macos -> 0x1000000
   | Eintr, (Linux | Macos) -> 4
   | Enoent, (Linux | Macos) -> 2
   | Eacces, (Linux | Macos) -> 13
+  | Eio, (Linux | Macos) -> 5
+  | Einval, (Linux | Macos) -> 22
   | Clock_realtime, (Linux | Macos) -> 0
 
 (* How many bytes a number the function reaches through an address takes,
@@ -225,7 +248,7 @@ let value os number =
 let bytes = function
   | UInt8 -> 1
   | Int32 -> 4
-  | Int64 -> 8
+  | Int64 | UInt64 -> 8
   | USize | ISize -> invalid_arg "a USize the C library reaches through an address"
 
 let check os =
