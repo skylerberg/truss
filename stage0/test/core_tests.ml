@@ -104,7 +104,7 @@ let () =
      standard::list::List.length[Int64](place items) }";
   builds "an owned collection is viewed where its view is expected"
     "fn greet(text: StringSlice) {}\n\nfn g(name: String) {\n  greet(name)\n}\n"
-    "{ app::main::greet(view through standard::text::String.slice(name)) }";
+    "{ app::main::greet(standard::text::String.slice(place name)) }";
   builds "a capability's method, and the compiler's copy"
     "fn g(count: Int64) -> Int64\n  uses Clock\n{\n  let _ = Clock.now()\n  count.copy()\n}\n"
     "{ let _ = standard::capabilities::Clock.now(); copy(place count) }";
@@ -125,13 +125,16 @@ let () =
     "{ Range[Int64](start: 1, stop: 5, inclusive: false) }";
   builds "an interpolated string is its pieces, each with its display"
     "fn g(name: String, count: Int64) -> String {\n  \"${name}: ${count}\"\n}\n"
-    "{ interpolated(name through Display.display for String by standard::text::impl Display for \
-     String, \": \", count through Display.display for Int64 by standard::numbers::signed::impl \
-     Display for Int64) }";
+    "{ interpolated(place name through Display.display for String by standard::text::impl Display \
+     for String, \": \", place count through Display.display for Int64 by \
+     standard::numbers::signed::impl Display for Int64) }";
   builds "a list literal, a slice, and an index"
     "fn g() -> Int64 {\n  let numbers = [1, 2, 3]\n  let _ = numbers[1..]\n  numbers[0]\n}\n"
-    "{ let own numbers = list[1, 2, 3]; let _ = numbers[1..]; lent Index.at for List[Int64] by \
-     standard::list::impl Index for List[Element](place numbers, 0) lends }";
+    "{ let own numbers = { let var own storage = intrinsic::storage_with_capacity(3); \
+     intrinsic::storage_push(mut place storage, own 1); intrinsic::storage_push(mut place storage, \
+     own 2); intrinsic::storage_push(mut place storage, own 3); \
+     standard::list::List.from_storage[Int64](own storage) }; let _ = numbers[1..]; lent Index.at \
+     for List[Int64] by standard::list::impl Index for List[Element](place numbers, 0) lends }";
   builds "`with` names the fields it replaces, and its shorthand the local"
     "type Config(port: Int64, host: String)\n\n\
      fn g(config: Config, port: Int64) -> Config {\n\
@@ -213,12 +216,16 @@ let () =
     \  type Part = String\n\n\
     \  fn from_template(template: Template[String]) -> Shout { todo }\n\
      }\n\n\
-     fn g(name: String) -> Shout {\n\
-    \  Shout\"hey ${name}!\"\n\
+     fn g(name: own String) -> Shout {\n\
+    \  Shout\"hey ${own name}!\"\n\
      }\n"
-    "{ FromTemplate.from_template for Shout by app::main::impl FromTemplate for \
-     Shout(Template[String](literals: list[Literal(text: \"hey \"), Literal(text: \"!\")], parts: \
-     list[name])) }";
+    "{ template(\"hey \", \"!\") made by FromTemplate.from_template for Shout by app::main::impl \
+     FromTemplate for Shout(own Template[String](literals: { let var own storage = \
+     intrinsic::storage_with_capacity(2); intrinsic::storage_push(mut place storage, own \
+     Literal(text: \"hey \")); intrinsic::storage_push(mut place storage, own Literal(text: \
+     \"!\")); standard::list::List.from_storage[Literal](own storage) }, parts: { let var own \
+     storage = intrinsic::storage_with_capacity(1); intrinsic::storage_push(mut place storage, own \
+     name); standard::list::List.from_storage[String](own storage) })) }";
   builds "a cursor is pulled, by a loop or by hand"
     "fn count_to(limit: Int64) yields Int64 {\n\
     \  yield limit\n\
@@ -331,8 +338,8 @@ let () =
   in
   builds "a capability parameter is the set that what is passed for it uses"
     (apply ^ "fn g()\n  uses Console\n{\n  apply(fn() { Console.print_line(\"inside\") })\n}\n")
-    "{ app::main::apply[{Console}](lambda() { standard::capabilities::Console.print_line(view \
-     through standard::text::String.slice(\"inside\")) }) }";
+    "{ app::main::apply[{Console}](lambda() { \
+     standard::capabilities::Console.print_line(standard::text::String.slice(\"inside\")) }) }";
   builds "a function passed for a capability parameter is passed as it is"
     (apply ^ "fn g()\n  uses Console\n{\n  apply(shout)\n}\n")
     "{ app::main::apply[{Console}](fn app::main::shout) }";

@@ -166,12 +166,7 @@ and list_literal state env ?expected (value : expression) items =
         (element, fun element -> T.Named { path = list_path; arguments = [ T.Type element ] })
   in
   List.iter (fun item -> check state env item element) items;
-  draft state value (fun () ->
-      Collection
-        {
-          elements = List.map (built state) items;
-          built = Form.collection (Form.type_of state value);
-        });
+  draft state value (fun () -> Form.collection_literal state value (List.map (built state) items));
   make element
 
 and map_literal state env ?expected (value : expression) entries =

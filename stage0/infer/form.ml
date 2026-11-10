@@ -58,7 +58,7 @@ let call_of state ~lends ?through (call : C.call) : Core.call =
   {
     callee =
       (match (call.callee, through) with
-      | Function_value, Some function_ -> Value function_
+      | Function_value, Some function_ -> Through (operand Read function_)
       | found, _ -> callee found);
     arguments = arguments state call;
     lends;
@@ -339,7 +339,7 @@ let interpolated state (literal : string_literal) : Core.kind =
         @ List.concat
             (List.map2
                (fun (part, after) (conversion : C.call option) ->
-                 let value = built state part in
+                 let value = operand Read (built state part) in
                  match conversion with
                  | Some call ->
                      Core.Displayed { value; display = callee call.callee } :: piece after
@@ -354,11 +354,79 @@ let interpolated state (literal : string_literal) : Core.kind =
           finish = builder_method "finish" Own;
         }
 
-let list_from_storage element : Core.callee =
-  Function
+(* A list of some elements: a storage with room for them, each pushed onto
+   it, made into the list. *)
+let list state ~origin (element : T.ty) (elements : Core.expression list) : Core.kind =
+  let make = make state ~origin in
+  let statement kind : Core.statement = { id = next_id state; origin; kind } in
+  let storage_type =
+    T.Named { path = Intrinsic.builtin_path Storage; arguments = [ T.Type element ] }
+  in
+  let storage = made_local state in
+  let intrinsic operation type_ arguments =
+    make type_
+      (Call
+         {
+           callee = Intrinsic { operation; type_arguments = [ T.Type element ] };
+           arguments;
+           lends = None;
+           uses = [];
+         })
+  in
+  let room = make (T.builtin USize) (Integer (Z.of_int (List.length elements))) in
+  let bound =
+    statement
+      (Let
+         {
+           pattern =
+             {
+               id = next_id state;
+               origin;
+               type_ = storage_type;
+               kind = Bind { local = storage; name = "storage"; mutable_ = true; mode = Own };
+             };
+           value =
+             Value
+               (intrinsic Storage_with_capacity storage_type
+                  [ Passed { mode = Read; value = Value room } ]);
+           otherwise = None;
+         })
+  in
+  let pushed =
+    List.map
+      (fun element ->
+        statement
+          (Evaluate
+             (intrinsic Storage_push T.unit
+                [
+                  Passed { mode = Mut; value = Place (Local storage) };
+                  Passed { mode = Own; value = Value element };
+                ])))
+      elements
+  in
+  Block
     {
-      path = Method { owner = list_path; name = "from_storage"; receiver = Static };
-      type_arguments = [ T.Type element ];
+      statements = bound :: pushed;
+      value =
+        Some
+          (make (T.named list_path [ element ])
+             (Call
+                {
+                  callee =
+                    Function
+                      {
+                        path =
+                          Method { owner = list_path; name = "from_storage"; receiver = Static };
+                        type_arguments = [ T.Type element ];
+                      };
+                  arguments =
+                    [
+                      Passed { mode = Own; value = Value (make storage_type (Use (Local storage))) };
+                    ];
+                  lends = None;
+                  uses = [];
+                }));
+      ends = true;
     }
 
 (* A tagged string: the tag's [from_template], given the template that
@@ -367,7 +435,7 @@ let template state (value : expression) (literal : string_literal) ~(part : T.ty
   let recorded = template_record state literal in
   let from_template =
     match recorded.from_template with
-    | Some call -> callee call.callee
+    | Some call -> call
     | None -> bug "a tagged string has no `from_template`"
   in
   let make = make state ~origin:value.id in
@@ -383,8 +451,7 @@ let template state (value : expression) (literal : string_literal) ~(part : T.ty
       }
   in
   let list element elements =
-    make (T.named list_path [ element ])
-      (Collection { elements; built = From_storage (list_from_storage element) })
+    make (T.named list_path [ element ]) (list state ~origin:value.id element elements)
   in
   let literal_type = T.named (text "Literal") [] in
   let texts =
@@ -404,13 +471,27 @@ let template state (value : expression) (literal : string_literal) ~(part : T.ty
         | None -> built state written)
       literal.rest recorded.part_conversions
   in
+  let texts = list literal_type texts in
+  let template =
+    make
+      (T.named (text "Template") [ part ])
+      (record (text "Template") [ T.Type part ] [ texts; list part parts ])
+  in
   Template
     {
-      from_template;
-      template =
-        make
-          (T.named (text "Template") [ part ])
-          (record (text "Template") [ T.Type part ] [ list literal_type texts; list part parts ]);
+      literals =
+        List.map
+          (fun (written : Syntax.text) -> written.value)
+          (literal.first :: List.map snd literal.rest);
+      made =
+        make from_template.result
+          (Call
+             {
+               callee = callee from_template.callee;
+               arguments = [ Passed { mode = Own; value = Value template } ];
+               lends = None;
+               uses = from_template.uses;
+             });
     }
 
 (* Patterns *)
@@ -574,7 +655,7 @@ let runs state (condition : Core.expression) =
           (fun (method_ : T.trait_method) ->
             method_.method_receiver = receiver && method_.method_signature.specification_only)
           (Members.trait_methods state.database trait.trait name)
-    | Capability_method _ | Intrinsic _ | Value _ -> false
+    | Capability_method _ | Intrinsic _ | Through _ -> false
   in
   Core_walk.expression
     {
@@ -684,7 +765,7 @@ let drive state (written : statement) (iterable : expression) : Core.drive =
                      })
             | None -> bug "a loop pulls `%s`, which is no cursor" (T.show cursor))
       in
-      Pull { cursor = built state iterable; next }
+      Pull { cursor = place_of (built state iterable); next }
   | _ -> bug "a `for` loop has no record of what it goes over"
 
 (* What a cost clause counts, with what its [calls] names resolved. *)
@@ -815,8 +896,6 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) : Core
 let collection (type_ : T.ty) : Core.collection =
   match type_ with
   | T.Named { path; _ } when Intrinsic.builtin_of_path path = Some Array -> Array
-  | T.Named { path; arguments = [ T.Type element ] } when Path.equal path list_path ->
-      From_storage (list_from_storage element)
   | T.Named { path; arguments } when Path.equal path set_path || Path.equal path map_path ->
       let method_ name receiver : Core.callee =
         Function { path = Method { owner = path; name; receiver }; type_arguments = arguments }
@@ -827,3 +906,11 @@ let collection (type_ : T.ty) : Core.collection =
          || Path.equal path finite_map_path ->
       Modelled
   | _ -> bug "a collection literal of type `%s`" (T.show type_)
+
+(* A collection literal: a list is built from its elements, and any other
+   is a node that says how it is built. *)
+let collection_literal state (value : expression) (elements : Core.expression list) : Core.kind =
+  match type_of state value with
+  | T.Named { path; arguments = [ T.Type element ] } when Path.equal path list_path ->
+      list state ~origin:value.id element elements
+  | type_ -> Collection { elements; built = collection type_ }

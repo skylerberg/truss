@@ -31,7 +31,6 @@ let block visit (body : block) =
 
 let collection visit = function
   | Array | Modelled -> ()
-  | From_storage from -> visit.callee from
   | Inserted { empty; insert } ->
       visit.callee empty;
       visit.callee insert
@@ -58,14 +57,12 @@ let expression_parts visit (node : expression) =
         (function
           | Text _ -> ()
           | Displayed { value; display } ->
-              visit.expression value;
+              operand visit value;
               visit.callee display)
         pieces;
       visit.callee write;
       visit.callee finish
-  | Template { from_template; template } ->
-      visit.expression template;
-      visit.callee from_template
+  | Template { made; _ } -> visit.expression made
   | Use found -> place visit found
   | Copy given -> operand visit given
   | Lambda { parameters; body; _ } ->
@@ -92,7 +89,7 @@ let expression_parts visit (node : expression) =
       Option.iter visit.expression stop
   | Call made ->
       (match made.callee with
-      | Value function_ -> visit.expression function_
+      | Through function_ -> operand visit function_
       | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> ());
       List.iter
         (function Passed { value; _ } -> operand visit value | Default -> ())
@@ -110,11 +107,7 @@ let expression_parts visit (node : expression) =
       operand visit value;
       visit.pattern matched
   | Next cursor -> place visit cursor
-  | Convert { conversion; value } -> (
-      visit.expression value;
-      match conversion with
-      | View view -> visit.callee view
-      | Widen | To_integer | From_integer -> ())
+  | Convert { value; _ } -> visit.expression value
   | If { condition; then_; else_ } ->
       visit.expression condition;
       block visit then_;
@@ -164,7 +157,7 @@ let statement_parts visit (node : statement) =
           visit.expression stop
       | Each each -> visit.expression each
       | Pull { cursor; next } ->
-          visit.expression cursor;
+          place visit cursor;
           Option.iter visit.callee next);
       visit.pattern bound;
       List.iter (loop_clause visit) clauses;

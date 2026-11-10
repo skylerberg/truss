@@ -48,7 +48,8 @@ type callee =
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
       (** An operation of [standard::intrinsic], called by name: exact when it returns, with nothing
           for the prover to show first. *)
-  | Value of expression  (** A function value, called by position. *)
+  | Through of operand
+      (** A function value, called by position: one held in a place is called where it is. *)
 
 and call = {
   callee : callee;
@@ -104,10 +105,15 @@ and kind =
       write : callee;  (** [TextBuilder.write], for a [Text] piece. *)
       finish : callee;  (** [TextBuilder.finish] *)
     }
-  | Template of { from_template : callee; template : expression }
-      (** A tagged string: the tag's [FromTemplate.from_template], and the template it is given, a
-          [Construct] with the texts and with the parts, each already the tag's [Part]. *)
-  | Use of place  (** The value at a place. Whether it is copied or moved is ownership's to say. *)
+  | Template of { literals : string list; made : expression }
+      (** A tagged string. [made] is what makes it: the call of the tag's [from_template] on the
+          template built from its texts and its parts, each already the tag's part. [literals] are
+          the texts between the parts, which that template holds, as they were written: one more
+          than there are parts. *)
+  | Use of place
+      (** The value at a place, taken from it: copied where its type copies implicitly, and moved
+          otherwise. What only reads a place, or changes it, is given the place itself, as an
+          {!operand}, and never this. *)
   | Copy of operand  (** [value.copy()] where the compiler implements [Copyable]. *)
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
       (** A named function or method as a value. A variant used as a function is a [Lambda] that
@@ -125,8 +131,9 @@ and kind =
           the type declares them. A field with no expression takes its default, which the type's
           core form holds. A range written as a value is one of these. *)
   | Collection of { elements : expression list; built : collection }
-      (** A list, array, or set literal, or a specification's sequence or set: the node's type says
-          which. *)
+      (** An array or a set literal, or a specification's sequence or set: the node's type says
+          which. A list literal is no node of its own: it is the storage its elements are pushed
+          onto, made into a list. *)
   | Entries of { entries : (expression * expression) list; built : collection }
       (** A map literal. *)
   | Updated of { base : expression; updates : (string list * expression) list }
@@ -192,21 +199,17 @@ and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
 
 and piece =
   | Text of string
-  | Displayed of { value : expression; display : callee }
-      (** A value written out by its [Display]. *)
+  | Displayed of { value : operand; display : callee }
+      (** A value written out by its [Display], which only reads it. *)
 
 (** How a collection literal is built, where it is one that runs. *)
 and collection =
   | Array  (** In place, at its size. *)
-  | From_storage of callee  (** A list: the storage its elements fill, handed to this. *)
   | Inserted of { empty : callee; insert : callee }  (** A set or a map. *)
   | Modelled  (** A specification's sequence, set, or map, which no code builds. *)
 
 (** The only conversions, each a node where it happens. *)
 and conversion =
-  | View of callee
-      (** A [List] seen as a [Slice], or a [String] as a [StringSlice], where the view type is
-          expected: the method that gives the view. *)
   | Widen
       (** A function value to a function type with more [uses] or weaker costs. The prover shows the
           costs imply: the value's type is what is given, and the node's what is expected. *)
@@ -269,7 +272,7 @@ and drive =
   | Each of expression
       (** A [Call] of a yielding method, with the loop's mode: [each] where the loop names a value,
           or the call the loop wrote out. *)
-  | Pull of { cursor : expression; next : callee option }
+  | Pull of { cursor : place; next : callee option }
       (** A cursor, pulled until it ends: by its [Cursor.next], or as [Next] does when it is the
           cursor of a yielding method's call. *)
 

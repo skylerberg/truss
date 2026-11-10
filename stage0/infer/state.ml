@@ -713,24 +713,6 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
     C.conversion option =
   (* What converts is the conversion's node from then on, of the type
      expected. *)
-  let convert (conversion : C.conversion) : Core.conversion option =
-    match conversion with
-    | From_never -> None
-    | Function_widening -> Some Widen
-    | To_integer -> Some To_integer
-    | From_integer -> Some From_integer
-    | Owned_to_view -> (
-        match normalize state found with
-        | T.Named { path; arguments } ->
-            Some
-              (View
-                 (Function
-                    {
-                      path = Method { owner = path; name = "slice"; receiver = Read };
-                      type_arguments = arguments;
-                    }))
-        | given -> bug "`%s` is viewed and has no view" (T.show given))
-  in
   let converted (conversion : C.conversion option) =
     (match (conversion, expression) with
     | Some conversion, Some id ->
@@ -740,14 +722,46 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
             (fun build () ->
               let inner : Core.expression = build () in
               let expected = final state expected in
-              match convert conversion with
+              let convert conversion =
+                make state ~origin:id expected (Convert { conversion; value = inner })
+              in
+              match conversion with
+              | From_never -> inner
               (* A function value whose type turned out to be the one
                  expected, once the unknown sets were solved, is not
                  widened. *)
-              | Some Widen when T.equal inner.type_ expected -> inner
-              | Some conversion ->
-                  make state ~origin:id expected (Convert { conversion; value = inner })
-              | None -> inner)
+              | Function_widening -> if T.equal inner.type_ expected then inner else convert Widen
+              | To_integer -> convert To_integer
+              | From_integer -> convert From_integer
+              (* An owned collection is seen as its view by its [slice],
+                 which reads it where it is. *)
+              | Owned_to_view -> (
+                  match inner.type_ with
+                  | T.Named { path; arguments } ->
+                      make state ~origin:id expected
+                        (Call
+                           {
+                             callee =
+                               Function
+                                 {
+                                   path = Method { owner = path; name = "slice"; receiver = Read };
+                                   type_arguments = arguments;
+                                 };
+                             arguments =
+                               [
+                                 Passed
+                                   {
+                                     mode = Read;
+                                     value =
+                                       (match inner.kind with
+                                       | Use place -> Place place
+                                       | _ -> Value inner);
+                                   };
+                               ];
+                             lends = None;
+                             uses = [];
+                           })
+                  | given -> bug "`%s` is viewed and has no view" (T.show given)))
             before
     | _ -> ());
     conversion

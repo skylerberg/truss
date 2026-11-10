@@ -1298,7 +1298,7 @@ let () =
         "prover.requires");
   test "a tagged template that does not meet its tag's requires" (fun () ->
       not_proven
-        (shout ^ "fn f(name: String) -> Shout {\n  Shout\"hey ${name}\"\n}\n")
+        (shout ^ "fn f(name: String) -> Shout {\n  Shout\"hey ${name.copy()}\"\n}\n")
         "prover.requires")
 
 (* Floats *)

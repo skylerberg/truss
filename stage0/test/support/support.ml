@@ -124,7 +124,7 @@ let form_holds database (key : Resolve.Names.key) (form : Core.t) =
         | Bound | Dynamic -> ())
     | Intrinsic { type_arguments; _ } ->
         List.iter (argument "an intrinsic's type argument") type_arguments
-    | Capability_method _ | Value _ -> ()
+    | Capability_method _ | Through _ -> ()
   in
   let rec place (found : Core.place) =
     match found with

@@ -175,7 +175,18 @@ and compound state flow (value : expression) : flow =
         (fun flow -> function Item item -> expression state flow item | Item_constraint _ -> flow)
         flow items
   | String literal ->
-      List.fold_left (fun flow (part, _) -> expression state flow part) flow literal.rest
+      (* A plain string's parts are read, to be written out. A tagged
+         string's are taken: each goes into the template its tag is given,
+         as it is or through the [from] that makes it the tag's part. *)
+      let tagged =
+        match context.checked.templates.(literal.id) with
+        | Some { from_template = Some _; _ } -> true
+        | _ -> false
+      in
+      List.fold_left
+        (fun flow (part, _) ->
+          if tagged then owned_value state flow part else expression state flow part)
+        flow literal.rest
   | Quantified _ -> flow
   | Integer _ | Float _ | True | False | Todo | Self_value | Self_type_value | Name _
   | Expression_error ->
