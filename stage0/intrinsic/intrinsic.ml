@@ -81,6 +81,7 @@ let builtin_of_path = function
 let libc_builtin : Libc.scalar -> builtin = function
   | UInt8 -> UInt8
   | Int32 -> Int32
+  | UInt32 -> UInt32
   | Int64 -> Int64
   | UInt64 -> UInt64
   | USize -> USize
@@ -141,6 +142,7 @@ type operation =
   | Storage_remove
   | Storage_swap
   | Storage_from_array
+  | Array_from_storage
   | Array_view
   | Array_at_mut
   | Storage_at
@@ -227,6 +229,7 @@ let operations =
     Storage_remove;
     Storage_swap;
     Storage_from_array;
+    Array_from_storage;
     Array_view;
     Array_at_mut;
     Storage_at;
@@ -313,6 +316,7 @@ let operation_name = function
   | Storage_remove -> "storage_remove"
   | Storage_swap -> "storage_swap"
   | Storage_from_array -> "storage_from_array"
+  | Array_from_storage -> "array_from_storage"
   | Array_view -> "array_view"
   | Array_at_mut -> "array_at_mut"
   | Storage_at -> "storage_at"

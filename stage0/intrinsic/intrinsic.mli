@@ -108,6 +108,10 @@ type operation =
   | Storage_from_array
       (** [storage_from_array(array)]: new storage that holds the elements of an [own] array, in
           order, with the array's length as its length and its capacity. The array is moved. *)
+  | Array_from_storage
+      (** [array_from_storage(storage)]: an array of the elements of an [own] storage, in order,
+          whose length is the array's. The storage is moved, and its buffer freed. A checked build
+          stops if the lengths differ. *)
   | Array_view
       (** [array_view(array)]: a view of an array's elements, in order, which is valid for as long
           as the array is *)

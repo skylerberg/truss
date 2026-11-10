@@ -44,7 +44,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
   in
   let unary output = make ~generics:[ "Value" ] ~output:(Returns output) [ input "value" value ] in
   (* An operation on an [Array[Element, count]], generic over both. *)
-  let over_array ?output parameters =
+  let over_array ?(output = fun _ -> T.Returns T.unit) parameters =
     let count = parameter operation "count" in
     let array =
       T.Named
@@ -54,7 +54,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
         }
     in
     {
-      (make ?output (parameters array)) with
+      (make ~output:(output array) (parameters array)) with
       generics = [ generic "Element"; { T.generic = count; kind = Value_generic } ];
     }
   in
@@ -109,12 +109,17 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Storage_swap -> with_storage ~mode:Mut [ input "first" usize; input "second" usize ]
   | Storage_from_array ->
       over_array
-        ~output:(Returns (storage element))
+        ~output:(fun _ -> Returns (storage element))
         (fun array -> [ input ~mode:Own "array" array ])
-  | Array_view -> over_array ~output:(Returns (view element)) (fun array -> [ input "array" array ])
+  | Array_from_storage ->
+      over_array
+        ~output:(fun array -> Returns array)
+        (fun _ -> [ input ~mode:Own "storage" (storage element) ])
+  | Array_view ->
+      over_array ~output:(fun _ -> Returns (view element)) (fun array -> [ input "array" array ])
   | Array_at_mut ->
       over_array
-        ~output:(Lends (Mut, element))
+        ~output:(fun _ -> Lends (Mut, element))
         (fun array -> [ input ~mode:Mut "array" array; input "index" usize ])
   | Storage_at -> with_storage ~output:(Lends (Read, element)) [ input "index" usize ]
   | Storage_at_mut -> with_storage ~mode:Mut ~output:(Lends (Mut, element)) [ input "index" usize ]
@@ -233,8 +238,8 @@ let cost (operation : Intrinsic.operation) =
   | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
   | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | Storage_view_mut
   | View_length | View_at | View_at_mut | View_swap | Storage_take_view | View_take_view
-  | Array_take_view | View_slice | View_address | Array_view | Array_at_mut | Storage_model
-  | View_model | Array_model | Crash | Storage_lengthen | Storage_push | Handle_from
+  | Array_take_view | View_slice | View_address | Array_view | Array_at_mut | Array_from_storage
+  | Storage_model | View_model | Array_model | Crash | Storage_lengthen | Storage_push | Handle_from
   | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks | Libc_number _
   | System_is_os _ | System_is_architecture _ ->
       { time = Constant_time; allocations = No_allocations }

@@ -629,6 +629,45 @@ let () =
               emit b (Assign (at status, Binary (Add, Copy (at status), Copy (at weighted))));
               status);
         ]);
+  test "an array made of a storage has its elements, and the storage's buffer is freed" (fun () ->
+      let open Lir_builder in
+      let storage_ty = Storage.of_elements int32 in
+      let array_ty =
+        Ground.Named
+          { path = Intrinsic.builtin_path Array; arguments = [ Type int32; Value (Z.of_int 3) ] }
+      in
+      let operate b ?destination operation arguments =
+        Intrinsics.lower ~checks:true
+          ~value_arguments:[ Z.of_int 3 ]
+          (shape_env ()) b intrinsic_types operation ~type_arguments:[ int32 ] arguments
+          ~destination
+          ~site:{ definition = definition "entry"; line = 0; column = 1 }
+      in
+      let anchors =
+        [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
+      in
+      let made pushed =
+        [
+          built_entry (fun b ->
+              let storage = local b (value storage_ty) in
+              ignore (operate b ~destination:(at storage) Storage_with_capacity [ Value (usize 3) ]);
+              List.iter
+                (fun n ->
+                  ignore (operate b Storage_push [ Place (at storage); Value (constant_int32 n) ]))
+                pushed;
+              let array = local b ~name:"array" (value array_ty) in
+              ignore (operate b ~destination:(at array) Array_from_storage [ Place (at storage) ]);
+              let status = local b (value int32) in
+              emit b (Assign (at status, Use (Copy (at array / Index (usize 0)))));
+              emit b
+                (Assign
+                   (at status, Binary (Add, Copy (at status), Copy (at array / Index (usize 2)))));
+              status);
+        ]
+      in
+      expect_status ~anchors 46 (made [ 40; 5; 6 ]);
+      (* A storage of another length stops a checked build. *)
+      expect_status ~anchors 101 (made [ 40; 5 ]));
   test "static storage given room is copied to the heap, where it can be pushed onto" (fun () ->
       let open Lir_builder in
       let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in

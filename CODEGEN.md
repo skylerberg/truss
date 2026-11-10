@@ -1073,7 +1073,7 @@ until both handle it.
 | Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits`, `from_bits` |
 | Storage | empty, with a capacity, from an array, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view, view to change the elements through, take a view back |
 | Views | length, lend an element, lend an element to change, swap, slice, take a view back |
-| Arrays | a view of the elements, lend an element to change, take a view back |
+| Arrays | from a storage, a view of the elements, lend an element to change, take a view back |
 | Operating system | the C library's functions and numbers, which system the program is built for, an entry of the environment, a handle from a descriptor and its descriptor, the address of a view, crash |
 | A test program | run a test by its number, have failures reported to a descriptor, how many blocks are allocated and not freed |
 
@@ -1114,6 +1114,14 @@ out one at a time: the elements are then popped from the storage, which
 stays valid after each pop, so a loop that ends early drops only the
 elements it has not taken.
 
+`array_from_storage` is the other way: it moves the elements of an `own`
+storage into a new array whose length is the storage's, and frees the
+storage's buffer. That is how an array whose length is a type parameter is
+made, since an array literal writes each element out: the elements are
+pushed onto a storage, which may stop partway and still be dropped, and
+become the array together. A build with checks stops if the storage's
+length is not the array's, which the prover is to show never happens.
+
 Storage never grows by itself. `storage_set_capacity` gives it a buffer of
 its own with room for exactly as many elements as it is told, and
 `storage_push` and `storage_insert` write into room it has. How much room
@@ -1150,7 +1158,7 @@ reaches it:
 | A number | Its value, converted to the parameter's C type |
 | A `View` | The address of its elements, which the function only reads |
 | A `mut Storage` | The address after its last element, for a function that fills room the storage has beyond its length; or, where the row says so, the address of its first element, for a function that reads the elements the storage has and changes some |
-| Several `mut` numbers of one type | The address of a structure of them, which the function writes; each number then goes to its argument |
+| Several `mut` numbers of one type | The address of a structure of them, which holds the arguments' values and which the function writes; each number then goes to its argument. A function that reads a number there before it writes it, as `accept` reads how much room an address has, finds the argument's value |
 
 Truss has no pointer type, so memory crosses to C only as a view, as
 storage, or as numbers to write. A small structure a function fills is the
@@ -1328,9 +1336,23 @@ holds the signals it is asked for back with `sigprocmask`, so that one
 that arrives does not end the program, and takes the next with `sigwait`.
 They stay held back afterwards, so one that arrives between two waits is
 there for the second. `SystemTasks.yield_now`
-does nothing, since tasks run one after another. `NetworkClient` and
-`NetworkServer` have no real implementation, and a `main` that uses one is
-refused with a message saying so. A handle's is the only drop that does more
+does nothing, since tasks run one after another. The real `NetworkServer`
+and `NetworkClient` are sockets. An address is a `sockaddr_in` or a
+`sockaddr_in6` as bytes, which the standard library writes and reads: the
+family is where the system keeps it, and the port and the address are high
+byte first. Listening is `socket`, `bind`, and `listen`, and the address
+the listener reports is the one `getsockname` gives, so a port asked for
+as 0 comes back as the port the system chose. Connecting with a limit puts
+the socket in the mode where `connect` does not wait, waits for it with
+`poll`, and reads how it went with `getsockopt`. A read or a write that
+runs past a timeout set with `setsockopt` is `TimedOut`. A datagram socket
+that is not bound to an address is an IPv6 socket that also carries IPv4,
+where the system has IPv6: an IPv4 address is sent to as the IPv6 address
+that stands for it, and a sender's is given back as IPv4. Every socket is
+closed in programs that are run. `NetworkClient.resolve` has no body: the C
+library gives the addresses of a name as a chain of structures that hold
+addresses of one another, which the table cannot describe. A handle's is
+the only drop that does more
 than free memory, and it runs no Truss code, as DESIGN.md requires.
 Standard-library types such as `File` hold one in a field, so their drop
 functions release the resource by dropping that field.
@@ -1754,8 +1776,7 @@ a command line can hold.
   tests runs tasks one at a time, and needs no threads or locks at all.
 - **`parallel` branches at once.** Branches can go to a thread pool with no
   change to the LIR above the statement that starts them.
-- **Handles for processes and threads, and real implementations of
-  `NetworkClient` and `NetworkServer`.**
+- **Finding a host's addresses by its name,** `NetworkClient.resolve`.
 - **Keeping an instance's C and a linked program.** The C is emitted again
   for each build, and found as an object by its text. It could be kept by
   the LIR's hash and the emitter's version, and a program by its objects,

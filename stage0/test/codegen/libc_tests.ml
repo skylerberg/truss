@@ -139,8 +139,8 @@ let () =
           let name = Libc.function_name function_ in
           let passed what parameter =
             match List.assoc_opt parameter parameters with
-            | Some (Libc.Value USize) -> ()
-            | _ -> fail "%s: %s is `%s`, which is no USize the call is passed" name what parameter
+            | Some (Libc.Value USize) | Some (Written (UInt32, [ _ ])) -> ()
+            | _ -> fail "%s: %s is `%s`, which is no count the call is passed" name what parameter
           in
           Option.iter (passed "the bound of the result") at_most;
           List.iter
@@ -288,6 +288,51 @@ let () =
               let status = local b (value int32) in
               emit b (Assign (at status, Convert (Copy (at recent), Integer Int32)));
               emit b (Assign (at status, Binary (Subtract, Copy (at status), Copy (at failed))));
+              status);
+        ]);
+  test "a number passed by address is read by the function and then written" (fun () ->
+      let open Lir_builder in
+      let uint32 = named "UInt32" in
+      let extra = extra @ [ (Ground.to_string uint32, Memory_layout.Scalar (Integer UInt32)) ] in
+      let operate b ?destination operation arguments =
+        ignore
+          (Intrinsics.lower (shape_env ~extra ()) b intrinsic_types operation ~type_arguments:[]
+             arguments ~destination
+             ~site:{ definition = definition "entry"; line = 0; column = 1 })
+      in
+      (* A new socket's name is 16 bytes. The system is told there is room
+         for 28, which it could not know from a number it only writes. *)
+      expect_status ~extra 16
+        [
+          built_entry (fun b ->
+              let domain = flags b [ Af_inet ] and kind = flags b [ Sock_stream ] in
+              let socket = local b (value int32) in
+              operate b ~destination:(at socket) (Libc Socket)
+                [ Value (Copy (at domain)); Value (Copy (at kind)); Value (constant_int32 0) ];
+              let name = local b (value bytes_ty) in
+              emit b
+                (Assign
+                   ( at name,
+                     Build
+                       {
+                         ty = bytes_ty;
+                         variant = None;
+                         fields =
+                           [
+                             ("buffer", Constant (Bytes (String.make 28 '\000')));
+                             ("length", usize 28);
+                             ("capacity", usize 0);
+                           ];
+                       } ));
+              let length = local b (value uint32) in
+              emit b (Assign (at length, Use (Constant (Integer (UInt32, Z.of_int 28)))));
+              let failed = local b (value int32) in
+              operate b ~destination:(at failed) (Libc Getsockname)
+                [ Value (Copy (at socket)); Place (at name); Place (at length) ];
+              let status = local b (value int32) in
+              emit b (Assign (at status, Convert (Copy (at length), Integer Int32)));
+              emit b (Assign (at status, Binary (Subtract, Copy (at status), Copy (at failed))));
+              free b (at name);
               status);
         ]);
   test "an argument a row fixes is no argument of the Truss call" (fun () ->
