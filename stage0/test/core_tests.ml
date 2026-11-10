@@ -195,8 +195,8 @@ let () =
     \    let _ = item\n\
     \  }\n\
      }\n"
-    "{ for item in each standard::list::List.each[Int64](app::main::make()) { let _ = place item \
-     } }"
+    "{ for item in each standard::list::List.each[Int64](app::main::make()) { let _ = place item } \
+     }"
 
 (* Specifications *)
 
@@ -483,11 +483,7 @@ let () =
 let () =
   test "the origin of a cost is its cost clause" (fun () ->
       let text =
-        "fn g(items: List[Int64]) -> USize\n\
-        \  cost time O(items.length())\n\
-         {\n\
-        \  items.length()\n\
-         }\n"
+        "fn g(items: List[Int64]) -> USize\n  cost time O(items.length())\n{\n  items.length()\n}\n"
       in
       let database = setup [ ("app::main", text) ] in
       List.iter
