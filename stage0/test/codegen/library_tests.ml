@@ -30,6 +30,10 @@ let () =
   if wanted checking then test checking load else load ();
   match !loaded with
   | None -> ()
+  | Some (database, _)
+    when List.exists (fun (module_, _) -> Type_checker.diagnostics database module_ <> []) modules
+    ->
+      ()
   | Some (database, compile) -> (
       let tests =
         List.concat_map (fun (module_, _) -> tests_in database module_) modules
