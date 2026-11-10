@@ -33,10 +33,14 @@ let implements state type_ trait =
 
 (* Bounds a type's arguments must meet *)
 
-(* The bounds each written type's arguments must meet, as [(span, message)]
-   for each that does not hold. Bodies check the types their annotations
-   write the same way. *)
-let unmet_bounds database ~bounds named =
+(* The bounds each written type's arguments must meet, each as a diagnostic
+   where it does not hold, or where the [impl] it is met by uses what its
+   package is not granted. Bodies check the types their annotations write
+   the same way. *)
+let bound_diagnostics database ~package ~bounds named =
+  let diagnostic code (span : span) message =
+    Diagnostic.make ~code (Source.span span.start span.stop) message
+  in
   List.concat_map
     (fun ((span : span), (type_ : T.ty)) ->
       match type_ with
@@ -49,23 +53,29 @@ let unmet_bounds database ~bounds named =
                   (T.substitution_of interface.type_generics arguments))
           with
           | Some required ->
-              List.filter_map
+              List.concat_map
                 (fun (argument, bound) ->
-                  if Option.is_none (Impls.implements database ~bounds argument bound) then
-                    Some
-                      ( span,
-                        Printf.sprintf "`%s` needs `%s: %s`, which does not hold here."
-                          (T.show type_) (T.show argument) (T.show_trait bound) )
-                  else None)
+                  match Impls.implements database ~bounds argument bound with
+                  | None ->
+                      [
+                        diagnostic (Types Unsatisfied_bound) span
+                          (Printf.sprintf "`%s` needs `%s: %s`, which does not hold here."
+                             (T.show type_) (T.show argument) (T.show_trait bound));
+                      ]
+                  | Some evidence ->
+                      List.map
+                        (diagnostic (Capabilities Not_granted) span)
+                        (Grants.evidence_messages database ~package ~bounds evidence))
                 required
           | None -> [])
       | _ -> [])
     named
 
 let check_bounds state =
-  List.iter
-    (fun (span, message) -> report state Unsatisfied_bound span message)
-    (unmet_bounds state.database ~bounds:(bounds state) state.lowered.named)
+  state.diagnostics <-
+    bound_diagnostics state.database ~package:state.key.module_.package ~bounds:(bounds state)
+      state.lowered.named
+    @ state.diagnostics
 
 (* Visibility *)
 
@@ -502,6 +512,14 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
     | Some { kind = Type_generic bounds; _ } -> bounds
     | _ -> bounds state parameter
   in
+  let check_evidence_grants (span : span) evidence =
+    state.diagnostics <-
+      List.map
+        (Diagnostic.make ~code:(Capabilities Not_granted) (Source.span span.start span.stop))
+        (Grants.evidence_messages database ~package:state.key.module_.package ~bounds:impl_bounds
+           evidence)
+      @ state.diagnostics
+  in
   if Path.equal impl.implements.trait panic_path then
     report state Implements_panic trait_path.span
       "Nothing can implement `Panic`, since a panic cannot be caught."
@@ -597,12 +615,13 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
                 List.iter
                   (fun bound ->
                     let bound = T.substitute_trait substitution bound in
-                    if Option.is_none (Impls.implements database ~bounds:impl_bounds chosen bound)
-                    then
-                      report state Unsatisfied_bound trait_path.span
-                        (Printf.sprintf "`%s` declares `type %s: %s`, and `%s` is not one."
-                           shown_trait associated.associated_name (T.show_trait bound)
-                           (T.show chosen)))
+                    match Impls.implements database ~bounds:impl_bounds chosen bound with
+                    | None ->
+                        report state Unsatisfied_bound trait_path.span
+                          (Printf.sprintf "`%s` declares `type %s: %s`, and `%s` is not one."
+                             shown_trait associated.associated_name (T.show_trait bound)
+                             (T.show chosen))
+                    | Some evidence -> check_evidence_grants trait_path.span evidence)
                   associated.associated_bounds)
           trait.associated_types;
         List.iter
@@ -748,11 +767,12 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
         List.iter
           (fun (required : T.trait_reference) ->
             let required = T.substitute_trait substitution required in
-            if Option.is_none (Impls.implements database ~bounds:impl_bounds impl.for_type required)
-            then
-              report state Missing_required_impl trait_path.span
-                (Printf.sprintf "`%s` requires `%s`, which `%s` does not implement." shown_trait
-                   (T.show_trait required) (T.show impl.for_type)))
+            match Impls.implements database ~bounds:impl_bounds impl.for_type required with
+            | None ->
+                report state Missing_required_impl trait_path.span
+                  (Printf.sprintf "`%s` requires `%s`, which `%s` does not implement." shown_trait
+                     (T.show_trait required) (T.show impl.for_type))
+            | Some evidence -> check_evidence_grants trait_path.span evidence)
           trait.requires;
         if (not trait.is_capability) && impl.impl_uses <> [] then
           report state Impl_uses trait_path.span

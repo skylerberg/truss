@@ -241,6 +241,40 @@ let () =
         ]
         "two/truss.toml: The package name `same` is already used by one/truss.toml")
 
+(* A dependency that nothing uses *)
+
+let () =
+  test "a dependency nothing uses is a problem, which check --fix fixes by deleting its entry"
+    (fun () ->
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n");
+            ( "app/truss.toml",
+              manifest_of "app" ^ "[dependencies]\nlibrary = []\nother = [\n  \"Clock\",\n]\n" );
+            ("app/main.truss", "use library::numbers\n\nfn one() -> Int64 {\n  numbers::one()\n}\n");
+            ("library/truss.toml", manifest_of "library");
+            ("library/numbers.truss", "public fn one() -> Int64 {\n  1\n}\n");
+            ("other/truss.toml", manifest_of "other");
+            ("other/nothing.truss", "public fn nothing() -> Int64 {\n  0\n}\n");
+          ]
+      in
+      let app = Filename.concat root "app" in
+      let report = Report.gather (Project.load app) in
+      if
+        not
+          (List.exists
+             (fun problem -> contains problem "app/truss.toml: Nothing in `app` uses `other`")
+             report.problems)
+      then fail "problems: [%s]" (String.concat "; " report.problems);
+      if quietly (fun () -> Check_command.run ~directory:app ~fix:true ~json:false) <> 0 then
+        fail "still has errors";
+      let manifest = read root "app/truss.toml" in
+      if
+        contains manifest "other" || contains manifest "Clock"
+        || not (contains manifest "library = []")
+      then fail "wrote %s" manifest)
+
 (* A package with an owner in its name *)
 
 let owned =

@@ -513,7 +513,7 @@ and any_ state env ?expected (value : expression) (inner : expression) =
   match Option.map (normalize state) expected with
   | Some (T.Any trait as any_type) ->
       let inner_type = expression state env inner in
-      require state inner_type trait ~unmet:(fun inner_type other ->
+      require state ~at:value.span inner_type trait ~unmet:(fun inner_type other ->
           report state No_impl value.span
             (match other with
             | None ->

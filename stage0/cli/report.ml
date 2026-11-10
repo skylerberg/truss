@@ -1,7 +1,8 @@
 (* The diagnostics of the packages a command is about, shown for people on
-   standard error or as JSON. A manifest that cannot be read, or a package
-   name used twice, is a problem in the code too, which the session finds
-   before any file is checked. *)
+   standard error or as JSON. What is wrong with a manifest is a problem in
+   the code too: what reading the manifests shows, which the session finds
+   before any file is checked, and what only a package's code shows of its
+   own. *)
 
 type file = { module_ : Path.module_; source : Source.t; diagnostics : Diagnostic.t list }
 type t = { files : file list; problems : string list }
@@ -23,7 +24,12 @@ let gather ?(proofs = false) (project : Project.t) =
           | [] -> None
           | diagnostics -> Some { module_; source = Project.source project module_; diagnostics })
         (Project.modules project);
-    problems = Database.problems project.session;
+    problems =
+      Database.problems project.session
+      @ List.map
+          (fun (file, package, problem) ->
+            Printf.sprintf "%s: %s" file (Type_checker.manifest_sentence ~package problem))
+          (Project.manifest_problems project);
   }
 
 let clean report = report.files = [] && report.problems = []
