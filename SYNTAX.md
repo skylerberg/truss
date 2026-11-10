@@ -2963,6 +2963,9 @@ forecast = []
 - **A dependency the package never uses is a compile error,** as an unused
   `use` is. A package uses a dependency by naming one of its modules, or by
   calling a method of one of its traits with a dot.
+- **A manifest is TOML, read strictly.** A table or a key that is not
+  described here is an error, and so is a version, which manifests in other
+  languages hold.
 
 A package's program starts at the `main` of its `main` module, the file
 `main.truss` beside the manifest. A package without that module is a library.

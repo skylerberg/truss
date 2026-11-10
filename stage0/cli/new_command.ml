@@ -1,15 +1,8 @@
 (* [truss new]: a directory with a manifest naming the package and a
    [main.truss] with an empty [main]. *)
 
-(* A package's name is the first part of every module path, so it must be
-   a [lower_snake_case] name: lowercase letters and digits in words joined
-   by single underscores, starting with a letter. *)
-let valid_name name =
-  name <> ""
-  && (match name.[0] with 'a' .. 'z' -> true | _ -> false)
-  && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) name
-  && List.for_all (( <> ) "") (String.split_on_char '_' name)
-
+(* The directory is named after the package, so the name has one part. *)
+let valid_name name = Type_checker.Manifest.name_parts name = Some [ name ]
 let manifest name = Printf.sprintf "[package]\nname = \"%s\"\n" name
 
 let main = {|fn main(arguments: List[String]) -> ExitCode {

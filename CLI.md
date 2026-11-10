@@ -575,10 +575,11 @@ It is left out of each command's help.
   where it is to act on those of its project, and finds a dependency among
   them by its name alone. `truss add`, `truss upgrade`, and `truss publish`
   are not built, no package is fetched, and no `truss.lock` is read.
-- **A manifest as SYNTAX.md's "Package manifest" writes it.** A dependency's
-  entry is a table with a `capabilities` list, where it is to be the list
-  itself, a name has one part, `truss` is not read, and a test's time limit
-  is its package's, where it is to be its project's.
+- **What a manifest's `truss` and `[project]` mean.** A manifest is read as
+  SYNTAX.md's "Package manifest" writes it, and a mistake in one is reported
+  with its line. But `truss` is not required or compared with the
+  toolchain, a `[project]` table changes nothing, and a test's time limit is
+  its package's, where it is to be its project's.
 - **An unused dependency as an error.**
 - **`truss fmt [--check] [FILE...]`,** which waits for the formatter. It is
   to rewrite the package's files, or the named ones, into the one layout

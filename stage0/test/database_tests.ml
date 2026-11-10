@@ -194,8 +194,7 @@ let () =
       let root = fresh "worktree" in
       write root "wide/truss.toml" "[package]\nname = \"wide\"\nusize_bits = 64\n";
       write root "wide/main.truss" program;
-      write root "app/truss.toml"
-        "[package]\nname = \"app\"\n\n[dependencies]\nwide = { version = \"1\" }\n";
+      write root "app/truss.toml" "[package]\nname = \"app\"\n\n[dependencies]\nwide = []\n";
       write root "app/main.truss" program;
       let session, _ = session root in
       if
