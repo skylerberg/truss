@@ -140,6 +140,7 @@ type operation =
   | Storage_insert
   | Storage_remove
   | Storage_swap
+  | Storage_from_array
   | Storage_at
   | Storage_at_mut
   | Storage_view
@@ -212,6 +213,7 @@ let operations =
     Storage_insert;
     Storage_remove;
     Storage_swap;
+    Storage_from_array;
     Storage_at;
     Storage_at_mut;
     Storage_view;
@@ -284,6 +286,7 @@ let operation_name = function
   | Storage_insert -> "storage_insert"
   | Storage_remove -> "storage_remove"
   | Storage_swap -> "storage_swap"
+  | Storage_from_array -> "storage_from_array"
   | Storage_at -> "storage_at"
   | Storage_at_mut -> "storage_at_mut"
   | Storage_view -> "storage_view"
