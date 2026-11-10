@@ -258,7 +258,7 @@ parameter. The emitter only prints.
 | Statement | Meaning |
 |---|---|
 | `place = rvalue` | Write a value to a place. A drop flag is a `Bool` local written this way. |
-| `call(target, arguments, destination)` | A call. The target is an instance or nested function with its C signature, a function value, a capability's entry through its evidence, an entry of an `any` value's table, or an intrinsic. The destination is where the result goes: nowhere, returned into a place, or written by the callee into a place through a pointer, which the emitter passes before the arguments. A function value's environment, an evidence pointer, and an `any` value's pointer are part of the target, which the emitter passes first, before any result pointer |
+| `call(target, arguments, destination)` | A call. The target is an instance or nested function with its C signature, a function value, a capability's entry through its evidence, an entry of an `any` value's table, an intrinsic, or a function of the C library with the declaration its system gives it. The destination is where the result goes: nowhere, returned into a place, or written by the callee into a place through a pointer, which the emitter passes before the arguments. A function value's environment, an evidence pointer, and an `any` value's pointer are part of the target, which the emitter passes first, before any result pointer |
 | `drop(place)` | Run the type's drop code. Before drop elaboration: drop whatever the place still owns |
 | `free_block(place, variant)` | Free the block of an `indirect` variant whose fields have all been moved out or dropped |
 | `echo(text, length, site)` | Record a value's debug output, with its position |
@@ -1008,6 +1008,46 @@ The libc functions used are declared by the compiler for each target, so the
 generated C still includes no headers. Allocation failure ends the process
 with a message, as DESIGN.md allows for running out of memory.
 
+### The C library
+
+The intrinsic module also holds functions of the system's C library for
+the standard library to call, one operation each, named `libc_` and the
+function's name: `libc_write(descriptor, bytes: view, count: length)` is
+`write`. They come from one table in the compiler. A row gives the
+function's symbol and C types on each system, and how each argument
+reaches it:
+
+| An argument | Is passed as |
+|---|---|
+| A number | Its value, converted to the parameter's C type |
+| A `View` | The address of its elements, which the function only reads |
+| A `mut Storage` | The address after its last element, for a function that fills room the storage has beyond its length |
+
+Truss has no pointer type, so memory crosses to C only as a view or as
+storage, and a structure a function fills is storage of the numbers it is
+made of: `clock_gettime` fills a `Storage[Int64]` with the two numbers of a
+`timespec`. A function's result is a number, or the number at the address
+it returns, which is how `errno` is reached.
+
+A call is written into the caller's LIR as a call of the C function
+itself, given each argument converted to its parameter's C type, and the C
+declares the function with the prototype the system's headers give it. A
+function with arguments C passes through `...`, such as `open`, is
+declared so, since some systems pass those differently from named ones.
+
+The numbers the headers define, such as `O_CREAT` and `EINTR`, are in the
+same table with their value on each system, and are operations that take
+nothing: `libc_o_creat()`. Lowering writes the value. So the type checker
+and the prover see the same signatures on every system, and only code
+generation's results depend on the system, which is part of the target.
+Stage0 builds for the system it runs on.
+
+A test compiles the table against the system's own headers: every number
+must have the value the table gives, every prototype must be the one the
+headers declare, and every structure must be laid out as the storage
+passed for it. A row that is wrong for the system the tests run on is
+therefore a failing test, not a program that misbehaves.
+
 ### Handles
 
 The intrinsic module also provides one handle type: `Handle`, a file
@@ -1201,7 +1241,8 @@ the tests that can reach the edited code, and costs what can reach it:
   an earlier phase than the keys, so an edit that changes no group costs the
   keys nothing but the keys of what can reach the edit.
 - **The test's key** is the key of everything the test's own instance can
-  reach, with the version of code generation and the target. `USize` is a
+  reach, with the version of code generation and the target: its widths
+  and its system. `USize` is a
   `typedef` in the generated C, so code that differs between 32-bit and
   64-bit targets only in a `USize` has the same LIR for both, while results
   such as `USize.maximum` are not the same. An instance is lowered for one
@@ -1283,8 +1324,8 @@ Code generation's lowering is a query, so a test run after an edit lowers
 only the instances the edit reached:
 
 - **An instance's LIR** is a query keyed by the instance and by how it is
-  lowered: the target's widths, and whether the program checks what the
-  prover would prove. A pulled method's version, whose locals make its
+  lowered: the target's widths and its system, and whether the program
+  checks what the prover would prove. A pulled method's version, whose locals make its
   cursor's fields, is a query of its own.
 - **Each computation lowers in a context of its own,** made from the
   query's reads. A layout or a piece of generated code worked out on the way
@@ -1385,6 +1426,14 @@ a command line can hold.
 - **Checkers shipped compiled.** The standard library's are to ship already
   compiled with the toolchain, for each host and both widths of `USize`, and
   a dependency's to be compiled once per version.
+- **The standard library written on the C library.** Its real
+  implementations still reach the system through the runtime's functions
+  for writing, reading, opening a file, the clock, random bytes, the
+  environment, and running a program; of the C library's functions in the
+  table, only `close` is called, by a handle's drop. The logic of those
+  runtime functions is to be Truss in the standard library over the table,
+  with storage's growth, debug output, and the test runner, leaving the
+  runtime only startup, failing, and allocation.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.

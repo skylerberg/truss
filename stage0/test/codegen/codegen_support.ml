@@ -53,6 +53,12 @@ let array element count = named "Array" ~arguments:[ Type element; Value (Z.of_i
 
 open Memory_layout
 
+(* The tests build programs and run them, so they build for this system. *)
+let host =
+  match Libc.host with Some os -> os | None -> failwith "these tests run only on Linux and macOS"
+
+let target_64 = target_64 host
+let target_32 = target_32 host
 let field name ty = (name, Typed ty)
 let variant ?(indirect = false) name fields : variant_shape = { name; indirect; fields }
 
@@ -173,10 +179,10 @@ let settings : Build.settings =
 
 (* Compiles the instances into a program whose [main] calls [entry], runs
    it, and returns its status, output, and errors. *)
-let run_program ?(extra = []) ?(anchors = []) (instances : Lir.t list) =
+let run_program ?(extra = []) ?env ?(anchors = []) ?input (instances : Lir.t list) =
   incr counter;
   let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "program%d" !counter) in
-  let env = shape_env ~extra () in
+  let env = match env with Some env -> env | None -> shape_env ~extra () in
   let sources =
     [
       ("main", Startup.main_calling (Instance.symbol (key "entry")));
@@ -188,7 +194,7 @@ let run_program ?(extra = []) ?(anchors = []) (instances : Lir.t list) =
       ~files:[ List.map (fun i -> Lir.Code i) instances ]
       ~sources ~output
   with
-  | Ok () -> Toolchain.run output []
+  | Ok () -> Toolchain.run ?input output []
   | Error message -> failwith message
 
 let expect_status ?extra ?anchors expected instances =

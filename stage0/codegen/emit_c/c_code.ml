@@ -71,7 +71,6 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
   | System_read -> "t_runtime_read(" ^ all ^ ")"
   | System_environment -> "t_runtime_environment(" ^ all ^ ")"
   | System_open -> "t_runtime_open(" ^ all ^ ")"
-  | System_close -> "t_runtime_close(" ^ all ^ ")"
   | System_run -> "t_runtime_run(" ^ all ^ ")"
   | Evidence_fill ->
       let slot = argument 0 in
@@ -127,6 +126,17 @@ let call_c context fc (target : Lir.target) arguments =
       Printf.sprintf "%s.f_code(%s)" value
         (String.concat ", " ((value ^ ".f_environment") :: List.map fst arguments))
   | Intrinsic intrinsic -> intrinsic_c context intrinsic arguments
+  | Foreign declaration ->
+      declare_prototype context declaration.symbol (Libc.prototype declaration);
+      let given =
+        try
+          List.map2
+            (fun c (text, _) -> Printf.sprintf "(%s)(%s)" c text)
+            declaration.takes arguments
+        with Invalid_argument _ ->
+          bug "a call of %s with an argument of zero size" declaration.symbol
+      in
+      Printf.sprintf "%s(%s)" declaration.symbol (String.concat ", " given)
   | Table_call { table; value; slot; signature } ->
       let table =
         match operand_c context fc table with

@@ -7,15 +7,16 @@
    their variants; and niches that remove the tag where a field has spare
    values. *)
 
-(* The width of the pointers of the machine the code runs on, and of [USize]
-   and [ISize]. They differ only for code built to run while compiling for
+(* What code is built for: the width of the pointers of the machine it runs
+   on, the width of [USize] and [ISize], and the system whose C library it
+   calls. The widths differ only for code built to run while compiling for
    a target whose [USize] is narrower than the host's pointers: such code
    runs on the host, with the target's [USize], so that it computes what the
    target would. *)
-type target = { pointer_bytes : int; usize_bytes : int }
+type target = { pointer_bytes : int; usize_bytes : int; os : Libc.os }
 
-val target_64 : target
-val target_32 : target
+val target_64 : Libc.os -> target
+val target_32 : Libc.os -> target
 
 type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
 

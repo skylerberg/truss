@@ -11,6 +11,7 @@ let storage element =
   T.Named { path = Intrinsic.builtin_path Storage; arguments = [ T.Type element ] }
 
 let view element = T.Named { path = Intrinsic.builtin_path View; arguments = [ T.Type element ] }
+let libc_scalar scalar = T.builtin (Intrinsic.libc_builtin scalar)
 
 let signature (operation : Intrinsic.operation) : T.signature =
   let generic name = { T.generic = parameter operation name; kind = Type_generic [] } in
@@ -155,6 +156,19 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Clock_now -> make ~output:(Returns (T.builtin Int64)) []
   | Random_fill ->
       make [ input ~mode:Mut "buffer" (storage (T.builtin UInt8)); input "count" usize ]
+  | Libc function_ ->
+      let { Libc.parameters; result } = Libc.signature function_ in
+      make
+        ~output:
+          (Returns (match result with Returns scalar | Points_at scalar -> libc_scalar scalar))
+        (List.map
+           (fun (name, (passes : Libc.passes)) ->
+             match passes with
+             | Value scalar -> input name (libc_scalar scalar)
+             | Elements scalar -> input name (view (libc_scalar scalar))
+             | Room scalar -> input ~mode:Mut name (storage (libc_scalar scalar)))
+           parameters)
+  | Libc_number number -> make ~output:(Returns (libc_scalar (Libc.number_type number))) []
 
 type cost = { constant_time : bool; allocation_free : bool }
 
@@ -171,10 +185,10 @@ let cost (operation : Intrinsic.operation) =
   | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
   | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
   | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
-  | View_slice | Crash ->
+  | View_slice | Crash | Libc_number _ ->
       { constant_time = true; allocation_free = true }
   | Compare_bytes | Storage_remove -> { constant_time = false; allocation_free = true }
   | Storage_with_capacity | Storage_reserve | Storage_push | Storage_insert | Write_bytes
   | Read_bytes | Write_float | Open_file | Handle_read | Handle_write | Environment_variable
-  | Run_process | Clock_now | Random_fill ->
+  | Run_process | Clock_now | Random_fill | Libc _ ->
       { constant_time = false; allocation_free = false }

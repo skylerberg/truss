@@ -90,7 +90,7 @@ let place_type env ~environment (f : function_) (place : place) =
 let target_operands = function
   | Indirect { value; _ } | Evidence_call { evidence = value; _ } -> [ value ]
   | Table_call { table; value; _ } -> [ table; value ]
-  | Direct _ | Intrinsic _ -> []
+  | Direct _ | Intrinsic _ | Foreign _ -> []
 
 (* Visits every place and every operand of a statement or a terminator,
    each after the places and operands inside it. *)
@@ -202,7 +202,7 @@ let map_target ~place ~block = function
           slot;
           signature;
         }
-  | (Direct _ | Intrinsic _) as target -> target
+  | (Direct _ | Intrinsic _ | Foreign _) as target -> target
 
 let map_destination ~place ~block = function
   | Discarded -> Discarded

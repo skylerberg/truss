@@ -78,6 +78,13 @@ let builtin_of_path = function
       List.find_opt (fun builtin -> builtin_name builtin = name) builtins
   | _ -> None
 
+let libc_builtin : Libc.scalar -> builtin = function
+  | UInt8 -> UInt8
+  | Int32 -> Int32
+  | Int64 -> Int64
+  | USize -> USize
+  | ISize -> ISize
+
 type operation =
   | Add
   | Subtract
@@ -147,6 +154,8 @@ type operation =
   | Run_process
   | Clock_now
   | Random_fill
+  | Libc of Libc.function_
+  | Libc_number of Libc.number
 
 let operations =
   [
@@ -219,6 +228,8 @@ let operations =
     Clock_now;
     Random_fill;
   ]
+  @ List.map (fun function_ -> Libc function_) Libc.functions
+  @ List.map (fun number -> Libc_number number) Libc.numbers
 
 let operation_name = function
   | Add -> "add"
@@ -289,6 +300,8 @@ let operation_name = function
   | Run_process -> "run_process"
   | Clock_now -> "clock_now"
   | Random_fill -> "random_fill"
+  | Libc function_ -> "libc_" ^ Libc.function_name function_
+  | Libc_number number -> "libc_" ^ String.lowercase_ascii (Libc.number_name number)
 
 let operation_path operation = Path.Top { module_; name = operation_name operation }
 

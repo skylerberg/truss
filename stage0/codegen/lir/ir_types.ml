@@ -122,7 +122,6 @@ type intrinsic =
   | System_open
       (** [(path, path length, flags, error's address) -> Int32]: a descriptor, -1 with the error
           number written when it fails *)
-  | System_close  (** [(descriptor)] *)
   | System_run
       (** [(program, length, arguments, length, error's address) -> Int32]: as [run_process] *)
   | Float_text
@@ -157,6 +156,8 @@ type target =
   | Indirect of { value : operand; signature : signature }
       (** A call through a function value: its code, given its environment first *)
   | Intrinsic of intrinsic
+  | Foreign of Libc.declaration
+      (** A function of the C library, given each argument converted to its parameter's C type *)
   | Evidence_call of { evidence : operand; slot : int; signature : signature }
       (** A capability's method: entry [slot] of the evidence's table, given the evidence first *)
   | Table_call of { table : operand; value : operand; slot : int; signature : signature }

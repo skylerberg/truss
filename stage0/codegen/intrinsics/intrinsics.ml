@@ -497,5 +497,47 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           grow_when Greater storage (Copy (at wanted));
           call Random_fill
             [ Address { place = element_at storage (length storage); writable = true }; count ];
-          add_to_length storage count);
+          add_to_length storage count
+      | Libc function_ -> (
+          let ground scalar =
+            Ground.Named
+              { path = Intrinsic.builtin_path (Intrinsic.libc_builtin scalar); arguments = [] }
+          in
+          let { Libc.parameters; result } = Libc.signature function_ in
+          let given =
+            List.mapi
+              (fun index (_, (passes : Libc.passes)) : Lir.operand ->
+                match passes with
+                | Value _ -> value index
+                | Elements _ -> Copy (Storage.view_elements (place (argument index)))
+                | Room _ ->
+                    let storage = place (argument index) in
+                    Address { place = element_at storage (length storage); writable = true })
+              parameters
+          in
+          let target = Lir.Foreign (Libc.declaration (Memory_layout.target env).os function_) in
+          let call result = emit b (Call { target; arguments = given; result }) in
+          match result with
+          | Returns _ ->
+              call (match destination with Some place -> Returned place | None -> Discarded)
+          | Points_at scalar ->
+              let address = local b (Raw (Pointer (Data (ground scalar)))) in
+              call (Returned (at address));
+              set (Use (Copy (at address / Deref))))
+      | Libc_number number ->
+          let integer =
+            match
+              scalar env
+                (Named
+                   {
+                     path =
+                       Intrinsic.builtin_path (Intrinsic.libc_builtin (Libc.number_type number));
+                     arguments = [];
+                   })
+            with
+            | Integer integer -> integer
+            | _ -> bug "a number of the C library that is not an integer"
+          in
+          let os = (Memory_layout.target env).os in
+          set (Use (Constant (Integer (integer, Z.of_int (Libc.value os number))))));
       None
