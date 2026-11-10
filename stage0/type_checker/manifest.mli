@@ -27,6 +27,10 @@ val parse : string -> t
 val has_project_table : string -> bool
 (** Whether a manifest's text has a [[project]] table, whatever else is in it. *)
 
+val with_dependency : string -> string -> string
+(** A manifest's text with an entry for a dependency that grants it nothing, after its other
+    entries, and the same text if it has one. Raises {!Malformed}. *)
+
 val without_dependency : string -> string -> string
 (** A manifest's text without the entry of a dependency, by its name, and the same text if it has
     none. Raises {!Malformed}. *)

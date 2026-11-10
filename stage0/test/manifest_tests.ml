@@ -160,4 +160,44 @@ let () =
   test "a manifest without a dependency it does not list is unchanged" (fun () ->
       if Manifest.without_dependency text "yaml" <> text then fail "changed")
 
+let () =
+  test "a dependency is added after a manifest's other entries, granted nothing" (fun () ->
+      let text =
+        "[package]\n\
+         name = \"a\"\n\n\
+         [dependencies]\n\
+         json = [\n\
+        \  \"Clock\",\n\
+         ]\n\n\
+         [test]\n\
+         time_limit = 3\n"
+      in
+      let added = Manifest.with_dependency text "acme::geometry" in
+      if
+        added
+        <> "[package]\n\
+            name = \"a\"\n\n\
+            [dependencies]\n\
+            json = [\n\
+           \  \"Clock\",\n\
+            ]\n\
+            \"acme::geometry\" = []\n\n\
+            [test]\n\
+            time_limit = 3\n"
+      then fail "wrote %S" added;
+      match Manifest.parse added with
+      | {
+       package = Some { dependencies = [ _; { package = "acme::geometry"; capabilities = [] } ]; _ };
+       _;
+      } ->
+          ()
+      | _ -> fail "read differently");
+  test "a dependency is added to a manifest with no dependencies, in a table of its own" (fun () ->
+      let added = Manifest.with_dependency "[package]\nname = \"a\"" "json" in
+      if added <> "[package]\nname = \"a\"\n\n[dependencies]\njson = []\n" then
+        fail "wrote %S" added);
+  test "a dependency a manifest already lists is not added again" (fun () ->
+      let text = "[package]\nname = \"a\"\n[dependencies]\njson = [\"Clock\"]\n" in
+      if Manifest.with_dependency text "json" <> text then fail "changed")
+
 let () = finish ()

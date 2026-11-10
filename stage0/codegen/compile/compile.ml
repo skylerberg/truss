@@ -229,6 +229,9 @@ type t = {
   cache : Build.cache;
   settings : Build.settings;
   file_name : Path.module_ -> string;  (** The file a position names, which the program reports *)
+  worked_on : string -> bool;
+      (** Whether a package is one of the project's own, whose code a development build never copies
+          into another's file *)
   mutable evaluated : (Path.t * Lir.static_value) list;
       (** Each constant worked out by running code, in this build *)
   checked : (string, template_check) Hashtbl.t;
@@ -371,18 +374,18 @@ let called (instance : Lir.t) =
 
 (* The small callees emitted beside an instance in a development build, so
    that the C compiler can inline them: functions from source that the
-   instance calls, of another package than its own, with little code and no
-   lambdas. A package's own small functions stay calls, so that an edit to
-   one compiles only it again. *)
-let small_callees ~find (instance : Lir.t) =
+   instance calls, of the standard library or a registry package, with
+   little code and no lambdas. Those change only with the toolchain or a
+   version in the lock file. The small functions of the project's own
+   packages stay calls, so that an edit to one compiles only it again. *)
+let small_callees ~find ~worked_on (instance : Lir.t) =
   match instance.key with
-  | Code { path; _ } ->
-      let package = Path.package path in
+  | Code _ ->
       List.filter_map
         (fun (key : Instance.key) ->
           match (key, find key) with
           | Code { path = callee; _ }, Some (Lir.Code copy)
-            when Path.package callee <> package
+            when (not (worked_on (Path.package callee)))
                  && Array.length copy.nested = 0
                  && weight copy.main <= small ->
               Some copy
@@ -413,7 +416,9 @@ let rec build ?progress ?tests t ~roots ~startup ~output =
   let sources = [ ("startup", startup); ("anchors", Positions.anchors_file target anchors) ] in
   let find key = Reachable.Keys.find_opt key found in
   let copied =
-    match t.settings.build with Development -> small_callees ~find | Release -> fun _ -> []
+    match t.settings.build with
+    | Development -> small_callees ~find ~worked_on:t.worked_on
+    | Release -> fun _ -> []
   in
   match
     Build.program ?progress ?tests ~copied t.toolchain t.cache t.context.env t.settings
@@ -869,8 +874,8 @@ let check_template ?results t ~time_limit ~from_template ~texts =
 
 let no_keys _ _ = bug "keys were asked for, and nothing was given to say which are wanted"
 
-let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys) database target
-    toolchain cache settings =
+let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys)
+    ?(worked_on = fun package -> package <> "standard") database target toolchain cache settings =
   let lowering = { target; checks } in
   {
     database;
@@ -881,6 +886,7 @@ let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys)
     cache;
     settings;
     file_name;
+    worked_on;
     evaluated = [];
     checked = Hashtbl.create 8;
   }

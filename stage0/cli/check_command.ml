@@ -60,6 +60,24 @@ let unused_dependencies (project : Project.t) =
       | Not_a_capability _ -> None)
     (Project.manifest_problems project)
 
+(* Writes the lock file the manifests give, when the one written is another,
+   which is that problem's only fix. No version is chosen by it: a line the
+   manifests need and no lock file or record gives is `truss add`'s. *)
+let lock_file (project : Project.t) =
+  match Database.lock_fix project.session with
+  | None -> []
+  | Some text ->
+      let path = Filename.concat (Database.root project.session) "truss.lock" in
+      Project.write_file path text;
+      [
+        Json.to_string
+          (Json.Object
+             [
+               ("file", Json.String (Project.shown path));
+               ("message", Json.String "This is not the lock file the manifests give.");
+             ]);
+      ]
+
 (* Applies fixes until none is left to apply, and returns the diagnostics
    they fixed, each as JSON in the file it was in when it was fixed. *)
 let fix (project : Project.t) =
@@ -81,7 +99,7 @@ let fix (project : Project.t) =
               Project.write_file (Project.file project module_) (apply (Source.text source) edits);
               List.map (fun diagnostic -> Diagnostic.to_json_object source diagnostic) chosen)
         (Project.modules project)
-      @ unused_dependencies project
+      @ unused_dependencies project @ lock_file project
     in
     if applied = [] || number = rounds then List.rev fixed
     else begin

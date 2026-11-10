@@ -1,0 +1,3 @@
+(library
+ (name registry)
+ (libraries unix blake3 workspace type_checker))
