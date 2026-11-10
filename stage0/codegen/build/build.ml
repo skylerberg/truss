@@ -31,11 +31,16 @@ let write path text = Out_channel.with_open_bin path (fun channel -> output_stri
 let object_path cache key = Filename.concat cache.directory (key ^ ".o")
 
 (* Writes the object under a temporary name and renames it into place, so a
-   build that stops partway never leaves a broken object in the cache. *)
+   build that stops partway never leaves a broken object in the cache. An
+   object that is found is given the present time, so its age is how long
+   ago a build last used it. *)
 let compile_one toolchain cache settings (name, text) =
   let key = object_key toolchain settings text in
   let output = object_path cache key in
-  if Sys.file_exists output then Ok output
+  if Sys.file_exists output then begin
+    (try Unix.utimes output 0. 0. with Unix.Unix_error _ -> ());
+    Ok output
+  end
   else
     let base = Filename.concat cache.directory (Printf.sprintf "%s.%d" key (Unix.getpid ())) in
     let source = base ^ ".c" in
