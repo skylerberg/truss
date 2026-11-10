@@ -217,6 +217,8 @@ let test_key_query =
                 Bytes (Query.demand database (Lazy.force reach) (lowering, Lower.test_key path));
               ])))
 
+type template_check = Ran of (int * bool) list | Ran_too_long
+
 type t = {
   database : Query.context;
   lowering : lowering;
@@ -229,6 +231,8 @@ type t = {
   file_name : Path.module_ -> string;  (** The file a position names, which the program reports *)
   mutable evaluated : (Path.t * Lir.static_value) list;
       (** Each constant worked out by running code, in this build *)
+  checked : (string, template_check) Hashtbl.t;
+      (** Each template check done in this build, by the key of the code that ran *)
 }
 
 let bug format = Compiler_bug.bug ~stage:"Compile" format
@@ -769,10 +773,6 @@ let build_program t ~main ~output =
    position among the clauses, with whether it holds. Results are kept for
    the compiler's run, and, with [results], under the key of the code that
    ran, as test results are, which the texts are part of. *)
-type template_check = Ran of (int * bool) list | Ran_too_long
-
-let checked_templates : (Instance.key, template_check) Hashtbl.t = Hashtbl.create 8
-
 let check_key t root =
   t.want t.lowering [ root ];
   Blake3.hash
@@ -788,38 +788,37 @@ let check_key t root =
 
 let check_template ?results t ~time_limit ~from_template ~texts =
   reporting t @@ fun () ->
-  let root = Instance.Template_check { from_template; texts } in
-  match Hashtbl.find_opt checked_templates root with
-  | Some found -> found
-  | None -> (
-      match Lower.template_checked t.context from_template with
-      | [] -> Ran []
-      | positions -> (
-          let key = Option.map (fun results -> (results, check_key t root)) results in
+  match Lower.template_checked t.context from_template with
+  | [] -> Ran []
+  | positions -> (
+      let root = Instance.Template_check { from_template; texts } in
+      let key = check_key t root in
+      match Hashtbl.find_opt t.checked key with
+      | Some found -> found
+      | None ->
           let status, output, errors =
-            match Option.bind key (fun ((results : results), key) -> results.find key) with
+            match Option.bind results (fun (results : results) -> results.find key) with
             | Some output -> (0, output, "")
             | None ->
                 build_and_run t ~time_limit ~roots:[ root ]
                   ~startup:(Startup.evaluator_calling (Instance.symbol root))
                   ~arguments:[]
           in
-          match status with
-          | 0 when String.length output = List.length positions ->
-              Option.iter (fun ((results : results), key) -> results.add key output) key;
-              let found =
+          let found =
+            match status with
+            | 0 when String.length output = List.length positions ->
+                Option.iter (fun (results : results) -> results.add key output) results;
                 Ran
                   (List.mapi (fun index position -> (position, output.[index] <> '\000')) positions)
-              in
-              Hashtbl.replace checked_templates root found;
-              found
-          | 137 ->
-              (* Killed at its time limit. *)
-              Hashtbl.replace checked_templates root Ran_too_long;
-              Ran_too_long
-          | status ->
-              cannot_build "Checking a template of %s ended with status %d: %s"
-                (Path.show from_template) status errors))
+            | 137 ->
+                (* Killed at its time limit. *)
+                Ran_too_long
+            | status ->
+                cannot_build "Checking a template of %s ended with status %d: %s"
+                  (Path.show from_template) status errors
+          in
+          Hashtbl.replace t.checked key found;
+          found)
 
 let no_keys _ _ = bug "keys were asked for, and nothing was given to say which are wanted"
 
@@ -836,4 +835,5 @@ let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys)
     settings;
     file_name;
     evaluated = [];
+    checked = Hashtbl.create 8;
   }
