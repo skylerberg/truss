@@ -46,7 +46,7 @@ let checked ~check database name =
    - a parameter that changes its argument is given a place, or the slice
      through which part of one is changed, and one that takes its argument
      is given a value. *)
-let form_holds database (key : Resolve.Names.key) (form : Core.t) =
+let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   let module T = Types in
   let wrong format =
     Printf.ksprintf (fun message -> fail "%s: %s" (Resolve.Names.show_key key) message) format
@@ -124,7 +124,7 @@ let form_holds database (key : Resolve.Names.key) (form : Core.t) =
         | Bound | Dynamic -> ())
     | Intrinsic { type_arguments; _ } ->
         List.iter (argument "an intrinsic's type argument") type_arguments
-    | Capability_method _ | Through _ -> ()
+    | Capability_method _ | Indirect _ -> ()
   in
   let rec place (found : Core.place) =
     match found with
@@ -134,14 +134,14 @@ let form_holds database (key : Resolve.Names.key) (form : Core.t) =
         type_ "a field" field;
         place base
   in
-  Core_walk.parts
+  Core_walk.definition
     {
       expression =
         (fun (node : Core.expression) ->
           once node.id;
           type_ "an expression" node.type_;
           match node.kind with
-          | Use found | Next found -> place found
+          | Use found | Cursor_next found -> place found
           | Function_value { type_arguments; _ } ->
               List.iter (argument "a function value's type argument") type_arguments
           | Generic_value named -> parameter "a value" named
@@ -169,7 +169,7 @@ let form_holds database (key : Resolve.Names.key) (form : Core.t) =
         (fun (node : Core.statement) ->
           once node.id;
           match node.kind with
-          | Assign { target; _ } | Update { target; _ } -> place target
+          | Assign { target; _ } | Compound_assign { target; _ } -> place target
           | For { drive = Each { kind = Call { callee = called; _ }; _ }; _ } -> (
               let output =
                 match called with
@@ -181,7 +181,7 @@ let form_holds database (key : Resolve.Names.key) (form : Core.t) =
                     Option.map
                       (fun (method_ : T.trait_method) -> method_.method_signature.output)
                       (Infer.Members.trait_method database reference.trait name receiver)
-                | Capability_method _ | Intrinsic _ | Through _ -> None
+                | Capability_method _ | Intrinsic _ | Indirect _ -> None
               in
               match output with
               | Some (Yields _) -> ()
@@ -198,13 +198,13 @@ let form_holds database (key : Resolve.Names.key) (form : Core.t) =
 
 (* Every core form a module's definitions have holds to what a form
    promises. *)
-let forms_hold database (module_ : Path.module_) =
+let check_module_core_invariants database (module_ : Path.module_) =
   List.fold_left
     (fun count (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.key_of declaration in
       match Query.demand database Infer.core key with
       | Some form ->
-          form_holds database key form;
+          check_core_invariants database key form;
           count + 1
       | None -> count)
     0
@@ -224,7 +224,7 @@ let no_diagnostics ~check files =
                (List.map
                   (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code ^ " " ^ d.message)
                   found)));
-      ignore (forms_hold database (module_of name)))
+      ignore (check_module_core_invariants database (module_of name)))
     files
 
 let one_diagnostic ~check ?(others = []) ?fixed text code =

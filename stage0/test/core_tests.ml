@@ -368,9 +368,9 @@ let () =
           if Path.show key.path = "app::main::g" then
             match Query.demand database Infer.core key with
             | Some form ->
-                Core_walk.parts
+                Core_walk.definition
                   {
-                    Core_walk.nothing with
+                    Core_walk.ignore_all with
                     expression =
                       (fun (node : Core.expression) ->
                         match node.kind with
@@ -409,9 +409,9 @@ let () =
           if Path.show key.path = "app::main::g" then
             match Query.demand database Infer.core key with
             | Some form ->
-                Core_walk.parts
+                Core_walk.definition
                   {
-                    Core_walk.nothing with
+                    Core_walk.ignore_all with
                     pattern =
                       (fun (node : Core.pattern) ->
                         match node.kind with
@@ -449,13 +449,13 @@ let () =
           with
           | Some form, Some spans, Some written ->
               let found = ref [] in
-              Core_walk.parts
+              Core_walk.definition
                 {
-                  Core_walk.nothing with
+                  Core_walk.ignore_all with
                   statement =
                     (fun (node : Core.statement) ->
                       match node.kind with
-                      | Update _ ->
+                      | Compound_assign _ ->
                           let span = spans.(node.origin) in
                           found := String.sub written span.start (span.stop - span.start) :: !found
                       | _ -> ());
@@ -516,7 +516,7 @@ let () =
     (fun ((module_ : Path.module_), _) ->
       test
         (Printf.sprintf "%s's core forms hold together" (Path.show_module module_))
-        (fun () -> forms := !forms + forms_hold database module_))
+        (fun () -> forms := !forms + check_module_core_invariants database module_))
     Standard_library.modules;
   test "the standard library has core forms" (fun () ->
       if !forms < 500 then fail "only %d of its definitions have one" !forms)
@@ -688,7 +688,7 @@ let () =
       | Some (From_impl { impl; _ }) -> impl
       | _ -> failwith "no impl"
     in
-    match Query.demand database Infer.core_at (Method { owner; name; receiver = Read }) with
+    match Query.demand database Infer.core_of_path (Method { owner; name; receiver = Read }) with
     | Some (form, substitution) ->
         ( List.hd (List.rev (String.split_on_char '\n' (Core_print.show form))),
           List.map
@@ -718,8 +718,8 @@ let () =
           }
       in
       match
-        ( Query.demand database Infer.core_at (Method { owner; name = "equal"; receiver = Read }),
-          Query.demand database Infer.core_at
+        ( Query.demand database Infer.core_of_path (Method { owner; name = "equal"; receiver = Read }),
+          Query.demand database Infer.core_of_path
             (Method { owner; name = "not_equal"; receiver = Read }) )
       with
       | Some (_, []), Some (_, [ _ ]) -> ()

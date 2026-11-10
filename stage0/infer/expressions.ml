@@ -42,12 +42,12 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   match value.kind with
   | Integer number ->
       state.tables.literals.(value.id) <- Some (Integer_value number);
-      draft state value (fun () -> Form.literal state value.id);
+      register_expression state value (fun () -> Form.literal state value.id);
       let type_ = literal_type state ~expected Integer_literal in
       check_literal_fits state value number type_;
       type_
   | Float number ->
-      draft state value (fun () -> Form.literal state value.id);
+      register_expression state value (fun () -> Form.literal state value.id);
       let type_ = literal_type state ~expected Float_literal in
       let significand = number.significand and exponent = number.exponent in
       (* Rounded once, from the exact decimal, to the type the statement
@@ -73,23 +73,23 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | String literal -> (
       match character_tag state literal with
       | Some builtin ->
-          draft state value (fun () -> Form.literal state value.id);
+          register_expression state value (fun () -> Form.literal state value.id);
           character_literal state value.id literal builtin
       | None -> string_literal state env ?expected value literal)
   | True | False ->
-      draft state value (fun () -> Boolean (value.kind = True));
+      register_expression state value (fun () -> Boolean (value.kind = True));
       T.bool
   | Todo -> (
-      draft state value (fun () -> Todo);
+      register_expression state value (fun () -> Todo);
       match expected with Some expected -> expected | None -> T.Hole)
   | Unreachable | Break | Continue ->
-      draft state value (fun () ->
+      register_expression state value (fun () ->
           match value.kind with Break -> Break | Continue -> Continue | _ -> Unreachable);
       T.Never
   | Self_value -> (
       (* A lambda that reads [self] captures it, named by the definition's id. *)
       state.references <- state.definition.id :: state.references;
-      draft state value (fun () -> Use (Local Self));
+      register_expression state value (fun () -> Use (Local Self));
       match env.self with
       | Some self -> self
       | None ->
@@ -116,18 +116,18 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       | None -> ());
       let type_ = expression state env ?expected inner in
       if mode = Mut && Option.is_none (marked_call state inner) then mutable_place state inner;
-      same state value inner;
+      alias_expression state value inner;
       type_
   | Any inner -> any_ state env ?expected value inner
   | Binary { operator; left; right; _ } -> binary state env ?expected value operator left right
   | Is { value = tested; pattern = written; _ } ->
       let tested_type = expression state env tested in
       pattern state env written tested_type ~mode:T.Read;
-      draft state value (fun () ->
+      register_expression state value (fun () ->
           Matches
             {
-              value = Form.operand Read (built state tested);
-              pattern = built_pattern state written;
+              value = Form.operand Read (build_expression state tested);
+              pattern = build_pattern state written;
             });
       T.bool
   | Range { start; stop; inclusive; _ } ->
@@ -143,7 +143,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
         | Some only, None | None, Some only -> expression state env only
         | None, None -> fresh state
       in
-      draft state value (fun () -> Form.range state value start stop ~inclusive);
+      register_expression state value (fun () -> Form.range state value start stop ~inclusive);
       T.Named { path = range_path; arguments = [ T.Type element ] }
   | Quantified { quantifier; binder; body } ->
       (match binder with
@@ -157,34 +157,34 @@ and expression_kind state env ?expected (value : expression) : T.ty =
                bodies of functions for specifications only. Quantify over a range or a collection.";
           declare state bound (Lower.type_ state.context written) ~mutable_:false ~mode:T.Read);
       check state env body T.bool;
-      draft state value (fun () ->
+      register_expression state value (fun () ->
           let binder : Core.binder =
             match binder with
             | Binder_type (bound, _) ->
                 Over_type
                   {
-                    local = Bound bound.id;
+                    local = Named bound.id;
                     name = bound.text;
                     type_ = Form.local_type state bound.id;
                   }
             | Binder_in
                 (written, { kind = Range { start = Some start; stop = Some stop; inclusive; _ }; _ })
               ->
-                let pattern = built_pattern state written in
-                let start = built state start in
-                Over_range { pattern; start; stop = built state stop; inclusive }
+                let pattern = build_pattern state written in
+                let start = build_expression state start in
+                Over_range { pattern; start; stop = build_expression state stop; inclusive }
             | Binder_in (written, collection) ->
-                let pattern = built_pattern state written in
-                Over_collection { pattern; collection = built state collection }
+                let pattern = build_pattern state written in
+                Over_collection { pattern; collection = build_expression state collection }
           in
-          Quantified { quantifier; binder; body = built state body });
+          Quantified { quantifier; binder; body = build_expression state body });
       T.bool
   | Echo inner ->
       let type_ = expression state env ?expected inner in
-      draft state value (fun () -> Echo (built state inner));
+      register_expression state value (fun () -> Echo (build_expression state inner));
       type_
   | Return inner ->
-      draft state value (fun () -> Return (Option.map (built state) inner));
+      register_expression state value (fun () -> Return (Option.map (build_expression state) inner));
       (match (inner, env.output) with
       | Some inner, Some (Returns output) -> check state env inner output
       | None, Some (Returns output) ->
@@ -195,7 +195,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       T.Never
   | Parenthesized inner ->
       let type_ = expression state env ?expected inner in
-      same state value inner;
+      alias_expression state value inner;
       type_
   | List items -> list_literal state env ?expected value items
   | Map entries -> map_literal state env ?expected value entries
@@ -204,10 +204,10 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | Match { scrutinees; arms } -> match_ state env ?expected value scrutinees arms
   | Provide { implementations; body } ->
       List.iter (fun implementation -> ignore (expression state env implementation)) implementations;
-      draft state value (fun () -> Form.provide state implementations body);
+      register_expression state value (fun () -> Form.provide state implementations body);
       block_value state env ?expected body
   | Block body ->
-      draft state value (fun () -> Block (built_block state body));
+      register_expression state value (fun () -> Block (build_block state body));
       block_value state env ?expected body
   | Expression_error -> T.Error (Resolve.Parts.error_node value.span)
 
@@ -223,11 +223,11 @@ and member_value state env (value : expression) (base : expression) (member : na
       match base_type with
       | T.Error _ | T.Hole -> base_type
       | _ ->
-          draft state value (fun () ->
+          register_expression state value (fun () ->
               Use
                 (Field
                    {
-                     base = place_of (built state base);
+                     base = place_of (build_expression state base);
                      field = member.text;
                      type_ = Form.type_of state value;
                    }));
@@ -273,14 +273,14 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
       Option.iter (fun start -> check state env start (T.builtin USize)) start;
       Option.iter (fun stop -> check state env stop (T.builtin USize)) stop;
       record state range (T.Named { path = range_path; arguments = [ T.Type (T.builtin USize) ] });
-      draft state value (fun () ->
-          let base = place_of (built state base) in
-          let start = Option.map (built state) start in
+      register_expression state value (fun () ->
+          let base = place_of (build_expression state base) in
+          let start = Option.map (build_expression state) start in
           Slice
             {
               base;
               start;
-              stop = Option.map (built state) stop;
+              stop = Option.map (build_expression state) stop;
               inclusive = (match range.kind with Range { inclusive; _ } -> inclusive | _ -> false);
             });
       match base_type with
@@ -343,7 +343,7 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                       uses = [];
                       result = output;
                     };
-                Form.draft_index state value;
+                Form.register_index state value;
                 output
             | None ->
                 ignore (expression state env key);

@@ -28,16 +28,18 @@ type env = {
       *)
 }
 
-(* One set of capabilities that must be within another, where either holds
-   an unknown: a function value's [uses] within those of the function type
-   it meets, and what a call needs within what is available where it is.
-   An unknown in [wanted] is made to hold what [given] has and [wanted]
-   lacks; once every unknown is solved, [lacking] reports what [wanted]
-   still does not hold. *)
-type within = {
-  given : T.capability list;
-  wanted : T.capability list;
-  lacking : T.capability list -> unit;
+(* A constraint between two capability sets: every capability in [subset]
+   must be in [superset]. Either set may contain capability variables.
+
+   Constraints are collected while a definition is checked and solved at
+   the end ([Capabilities.solve]). Solving grows each variable in a
+   [superset] until the constraint holds. If a constraint still fails after
+   solving (because its [superset] has no variable to grow), the solver
+   calls [report_missing] with the capabilities that [superset] lacks. *)
+type subset_constraint = {
+  subset : T.capability list;
+  superset : T.capability list;
+  report_missing : T.capability list -> unit;
 }
 
 type frame = {
@@ -60,12 +62,12 @@ type frame = {
    set where checking decides what the node is, and run once the whole
    definition has checked, when every type and every choice is final. *)
 type form = {
-  expressions : (unit -> Core.expression) option array;
-  statements : (unit -> Core.statement) option array;
-  patterns : (unit -> Core.pattern) option array;
-  mutable parts : (unit -> Core.parts) option;
-  mutable next : int;  (** The next node's id. *)
-  mutable made : int;  (** How many locals checking has made. *)
+  expression_builders : (unit -> Core.expression) option array;
+  statement_builders : (unit -> Core.statement) option array;
+  pattern_builders : (unit -> Core.pattern) option array;
+  mutable definition_builder : (unit -> Core.definition) option;
+  mutable next_node_id : int;
+  mutable synthetic_local_count : int;
 }
 
 type state = {
@@ -90,11 +92,10 @@ type state = {
   mutable lambdas : span list;  (** The lambdas being checked, innermost first. *)
   mutable unsolved : Diagnostic.reported option;
       (** The report of the first statement whose types could not be worked out. *)
-  mutable within : within list;
-      (** What the unknown sets of capabilities must hold, and be held within. *)
-  mutable capabilities : (int, T.capability list) Hashtbl.t option;
-      (** What each unknown set of capabilities is, once they are solved: one with no entry is
-          empty. *)
+  mutable capability_constraints : subset_constraint list;
+  mutable capability_solution : (int, T.capability list) Hashtbl.t option;
+      (** The set each capability variable was solved to. [None] until the constraints are solved.
+          A variable with no entry is the empty set. *)
   mutable evidence : string list;  (** The packages whose [impl]s met a bound here. *)
 }
 
@@ -123,67 +124,67 @@ let source state (span : span) =
 
 (* The core form *)
 
-let next_id state =
-  let id = state.form.next in
-  state.form.next <- id + 1;
+let fresh_node_id state =
+  let id = state.form.next_node_id in
+  state.form.next_node_id <- id + 1;
   id
 
 (* A node that no expression of the syntax tree is: one an expansion makes. *)
-let make state ~origin type_ kind : Core.expression = { id = next_id state; origin; type_; kind }
+let synthetic_expression state ~origin type_ kind : Core.expression = { id = fresh_node_id state; origin; type_; kind }
 
 (* Says how an expression's node is built. Its type is the one checking
    records for it. *)
-let draft state (value : expression) kind =
-  state.form.expressions.(value.id) <-
+let register_expression state (value : expression) kind =
+  state.form.expression_builders.(value.id) <-
     Some
       (fun () ->
-        let id = next_id state in
+        let id = fresh_node_id state in
         match state.tables.types.(value.id) with
         | Some type_ -> { Core.id; origin = value.id; type_; kind = kind () }
         | None -> bug "`%s` has a node and no type" (source state value.span))
 
-let built state (value : expression) : Core.expression =
-  match state.form.expressions.(value.id) with
+let build_expression state (value : expression) : Core.expression =
+  match state.form.expression_builders.(value.id) with
   | Some build -> build ()
   | None -> bug "`%s` has no node in the core form" (source state value.span)
 
-let draft_statement state (written : statement) kind =
-  state.form.statements.(written.id) <-
-    Some (fun () -> { Core.id = next_id state; origin = written.id; kind = kind () })
+let register_statement state (written : statement) kind =
+  state.form.statement_builders.(written.id) <-
+    Some (fun () -> { Core.id = fresh_node_id state; origin = written.id; kind = kind () })
 
-let built_statement state (written : statement) : Core.statement =
-  match state.form.statements.(written.id) with
+let build_statement state (written : statement) : Core.statement =
+  match state.form.statement_builders.(written.id) with
   | Some build -> build ()
   | None -> bug "`%s` has no node in the core form" (source state written.span)
 
 (* Says how a pattern's node is built. Its type is that of what it matches. *)
-let draft_pattern state (written : pattern) kind =
-  state.form.patterns.(written.id) <-
+let register_pattern state (written : pattern) kind =
+  state.form.pattern_builders.(written.id) <-
     Some
       (fun () ->
-        let id = next_id state in
+        let id = fresh_node_id state in
         match state.tables.pattern_types.(written.id) with
         | Some type_ -> { Core.id; origin = written.id; type_; kind = kind () }
         | None -> bug "`%s` has a node and no type" (source state written.span))
 
-let built_pattern state (written : pattern) : Core.pattern =
-  match state.form.patterns.(written.id) with
+let build_pattern state (written : pattern) : Core.pattern =
+  match state.form.pattern_builders.(written.id) with
   | Some build -> build ()
   | None -> bug "`%s` has no node in the core form" (source state written.span)
 
 (* An expression whose node is another's: parentheses, and a mark. *)
-let same state (value : expression) (inner : expression) =
-  state.form.expressions.(value.id) <- Some (fun () -> built state inner)
+let alias_expression state (value : expression) (inner : expression) =
+  state.form.expression_builders.(value.id) <- Some (fun () -> build_expression state inner)
 
 (* Where a node's value is: the place it reads, or one that holds it for
    the statement. *)
 let place_of (node : Core.expression) : Core.place =
   match node.kind with Use place -> place | _ -> Temporary node
 
-let made_local state : Core.local =
-  let number = state.form.made in
-  state.form.made <- number + 1;
-  Made number
+let fresh_synthetic_local state : Core.local =
+  let number = state.form.synthetic_local_count in
+  state.form.synthetic_local_count <- number + 1;
+  Synthetic number
 
 let fix title edits = Diagnostic.fix title edits
 let replace (span : span) text = Diagnostic.replace (Source.span span.start span.stop) text
@@ -230,9 +231,9 @@ let unsolved state =
 (* A set of capabilities as the finished definition has it: each unknown
    in it replaced by what it was solved as. Until they are solved, the set
    as it is. *)
-let final_capabilities state (capabilities : T.capability list) =
-  match state.capabilities with
-  | Some solution when T.unknown_capabilities capabilities ->
+let resolve_capabilities state (capabilities : T.capability list) =
+  match state.capability_solution with
+  | Some solution when T.has_capability_variable capabilities ->
       List.sort_uniq compare
         (List.concat_map
            (function
@@ -248,8 +249,8 @@ let final state type_ =
       (function T.Variable _ | T.Literal _ -> Some (unsolved state) | _ -> None)
       (normalize state type_)
   in
-  match state.capabilities with
-  | Some _ -> T.map_capabilities (final_capabilities state) type_
+  match state.capability_solution with
+  | Some _ -> T.map_capabilities (resolve_capabilities state) type_
   | None -> type_
 
 let final_argument state = function
@@ -258,7 +259,7 @@ let final_argument state = function
       match Unify.resolve_value state.unifier value with
       | T.Value_variable _ -> T.Type (unsolved state)
       | value -> T.Value value)
-  | T.Capabilities capabilities -> T.Capabilities (final_capabilities state capabilities)
+  | T.Capabilities capabilities -> T.Capabilities (resolve_capabilities state capabilities)
 
 (* Projections whose base is known are normalized first, so [C.Key] meets
    the type the [impl] chooses. *)
@@ -273,10 +274,10 @@ let unify state left right =
    while they are. It decides nothing about sets of capabilities, which may
    differ where a function value is widened: those are held where the value
    is converted. *)
-let hint state found expected =
-  let agreements = state.unifier.agreements in
+let unify_as_hint state found expected =
+  let deferred_capability_equalities = state.unifier.deferred_capability_equalities in
   ignore (unify state found expected);
-  state.unifier.agreements <- agreements
+  state.unifier.deferred_capability_equalities <- deferred_capability_equalities
 
 (* A trait as it is asked about: with its arguments in their normal form,
    as a type is, so that an associated type among them is what it stands
@@ -368,24 +369,25 @@ let is_named path type_ =
    error. What still mentions an enclosing statement's variables is left to
    that statement. *)
 let settle state frame =
-  (* The sets of capabilities the statement's types hold in one place must
-     turn out the same, each within the other. *)
+  (* Unification deferred these equalities between capability sets because
+     one side had a capability variable. An equality is two subset
+     constraints. *)
   List.iter
     (fun (left, right) ->
-      let lacking _ =
+      let report_missing _ =
         report state Mismatch frame.span
           (Printf.sprintf
              "Two function types here must use the same capabilities, and one uses `%s` where the \
               other uses `%s`."
-             (T.show_argument (T.Capabilities (final_capabilities state left)))
-             (T.show_argument (T.Capabilities (final_capabilities state right))))
+             (T.show_argument (T.Capabilities (resolve_capabilities state left)))
+             (T.show_argument (T.Capabilities (resolve_capabilities state right))))
       in
-      state.within <-
-        { given = left; wanted = right; lacking }
-        :: { given = right; wanted = left; lacking }
-        :: state.within)
-    state.unifier.agreements;
-  state.unifier.agreements <- [];
+      state.capability_constraints <-
+        { subset = left; superset = right; report_missing }
+        :: { subset = right; superset = left; report_missing }
+        :: state.capability_constraints)
+    state.unifier.deferred_capability_equalities;
+  state.unifier.deferred_capability_equalities <- [];
   let run_pending () =
     let rec loop pending =
       let left = List.filter (fun check -> not (check ())) pending in
@@ -522,15 +524,15 @@ and contains_break (written : block) =
 
 (* A block's node: its statements, and the expression it ends with when
    that was checked as its value and not as a statement. *)
-let built_block state (written : block) : Core.block =
+let build_block state (written : block) : Core.block =
   let rec go (statements : statement list) =
     match statements with
     | [] -> ([], None)
     | [ ({ kind = Expression value; _ } as last) ]
-      when Option.is_none state.form.statements.(last.id) ->
-        ([], Some (built state value))
+      when Option.is_none state.form.statement_builders.(last.id) ->
+        ([], Some (build_expression state value))
     | first :: rest ->
-        let first = built_statement state first in
+        let first = build_statement state first in
         let rest, value = go rest in
         (first :: rest, value)
   in
@@ -538,10 +540,10 @@ let built_block state (written : block) : Core.block =
   {
     statements;
     value;
-    ends =
+    diverges =
       (match List.rev written.statements with
-      | last :: _ -> not (statement_never state last)
-      | [] -> true);
+      | last :: _ -> statement_never state last
+      | [] -> false);
   }
 
 (* Locals *)
@@ -634,7 +636,7 @@ let rec called (value : expression) =
 
 (* The error of an expression that is not what its place needs: the name's
    own report when resolution found nothing by it, so that is the one
-   report, and a new one otherwise. *)
+   report, and a new one else_. *)
 let error_at state ?fixes code (value : expression) message =
   match head state value with
   | Some { target = Unknown report; _ } -> T.Error report
@@ -708,7 +710,7 @@ type static_ =
      its view and, in a specification, a built-in integer becomes an
      [Integer] or an [Integer] a built-in integer that it fits.
 
-   Anything else must be the type expected. *)
+   Wildcard else must be the type expected. *)
 let convert state env ?(argument = false) ?expression (span : span) ~found ~expected :
     C.conversion option =
   (* What converts is the conversion's node from then on, of the type
@@ -716,14 +718,14 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
   let converted (conversion : C.conversion option) =
     (match (conversion, expression) with
     | Some conversion, Some id ->
-        let before = state.form.expressions.(id) in
-        state.form.expressions.(id) <-
+        let before = state.form.expression_builders.(id) in
+        state.form.expression_builders.(id) <-
           Option.map
             (fun build () ->
               let inner : Core.expression = build () in
               let expected = final state expected in
               let convert conversion =
-                make state ~origin:id expected (Convert { conversion; value = inner })
+                synthetic_expression state ~origin:id expected (Convert { conversion; value = inner })
               in
               match conversion with
               | From_never -> inner
@@ -738,7 +740,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
               | Owned_to_view -> (
                   match inner.type_ with
                   | T.Named { path; arguments } ->
-                      make state ~origin:id expected
+                      synthetic_expression state ~origin:id expected
                         (Call
                            {
                              callee =
@@ -800,7 +802,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
          within the type's is known once the unknowns are solved: one in the
          type is made to hold what the value uses beyond the rest. *)
       let unknown =
-        T.unknown_capabilities given_function.uses || T.unknown_capabilities wanted_function.uses
+        T.has_capability_variable given_function.uses || T.has_capability_variable wanted_function.uses
       in
       let proven = T.costs_imply ~given:given_function.costs ~wanted:wanted_function.costs in
       if
@@ -811,15 +813,15 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
         && (proven || argument || Option.is_some expression)
       then begin
         if unlisted <> [] then
-          state.within <-
+          state.capability_constraints <-
             {
-              given = given_function.uses;
-              wanted = wanted_function.uses;
-              lacking =
+              subset = given_function.uses;
+              superset = wanted_function.uses;
+              report_missing =
                 (fun _ ->
                   mismatch state span ~expected:(final state expected) ~found:(final state found));
             }
-            :: state.within;
+            :: state.capability_constraints;
         Option.iter
           (fun expression ->
             if not (proven || argument) then
@@ -903,7 +905,7 @@ let fresh_arguments state (path : Path.t) =
           match generic.kind with
           | Value_generic -> T.Value (Unify.fresh_value state.unifier)
           | Type_generic _ -> T.Type (fresh state)
-          | Capability_generic -> T.Capabilities (Unify.fresh_capabilities state.unifier))
+          | Capability_generic -> T.Capabilities (Unify.fresh_capability_variable state.unifier))
         interface.type_generics
   | None -> []
 
@@ -1013,7 +1015,7 @@ let instantiate state (span : span) ?(extra = []) (signature : T.signature) =
           match generic.kind with
           | Value_generic -> T.Value (Unify.fresh_value state.unifier)
           | Type_generic _ -> T.Type (fresh state)
-          | Capability_generic -> T.Capabilities (Unify.fresh_capabilities state.unifier) ))
+          | Capability_generic -> T.Capabilities (Unify.fresh_capability_variable state.unifier) ))
       signature.generics
     @ extra
   in

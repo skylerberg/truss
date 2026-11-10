@@ -25,17 +25,17 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
   let recurse = pattern_with state env ~mutable_ ~mode in
   let unknown type_ = unknown_pattern state env written type_ ~mutable_ ~mode in
   let binds id (bound : name) =
-    draft_pattern state written (fun () ->
-        Bind { local = Bound id; name = bound.text; mutable_; mode })
+    register_pattern state written (fun () ->
+        Bind { local = Named id; name = bound.text; mutable_; mode })
   in
   let constant () =
-    draft_pattern state written (fun () ->
-        Form.equals state ~origin:written.id
+    register_pattern state written (fun () ->
+        Form.equal_to_pattern state ~origin:written.id
           (Form.pattern_type state written.id)
           (Form.pattern_constant state written.id))
   in
   match written.kind with
-  | Wildcard | Pattern_error -> draft_pattern state written (fun () -> Anything)
+  | Wildcard | Pattern_error -> register_pattern state written (fun () -> Wildcard)
   | Binding_or_constant bound -> (
       match target state bound with
       | Some Binding ->
@@ -58,8 +58,8 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
           constant ();
           constant_pattern state written.id written.span path type_
       | Some (Value_parameter parameter) ->
-          draft_pattern state written (fun () ->
-              Literal (make state ~origin:written.id (T.builtin USize) (Generic_value parameter)));
+          register_pattern state written (fun () ->
+              Literal (synthetic_expression state ~origin:written.id (T.builtin USize) (Generic_value parameter)));
           if not (unify state (T.builtin USize) type_) then
             mismatch state written.span ~expected:type_ ~found:(T.builtin USize)
       | _ -> ())
@@ -67,22 +67,22 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
       constant ();
       qualified_constant state written.id written.span written_constant type_
   | Literal literal ->
-      draft_pattern state written (fun () ->
-          Form.equals state ~origin:written.id
+      register_pattern state written (fun () ->
+          Form.equal_to_pattern state ~origin:written.id
             (Form.pattern_type state written.id)
             (Form.pattern_literal state written.id literal));
       literal_pattern state written.id written.span literal type_
   | Pattern_range { start; stop; inclusive } -> (
-      draft_pattern state written (fun () ->
+      register_pattern state written (fun () ->
           let end_ (written_end : range_end) =
-            make state ~origin:written_end.id
+            synthetic_expression state ~origin:written_end.id
               (Form.pattern_type state written.id)
               (match written_end.kind with
               | End_literal literal -> Form.pattern_literal state written_end.id literal
               | End_constant _ | End_name _ -> Form.pattern_constant state written_end.id)
           in
           let start = end_ start in
-          Within { start; stop = end_ stop; inclusive });
+          Range { start; stop = end_ stop; inclusive });
       (* Only integers and characters are ordered so that a range of them
          can be matched; a range of anything else is one error, and its ends
          are not checked against the type. *)
@@ -135,7 +135,7 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                     pattern_fields state env written declared (Option.value ~default:[] fields)
                       ~mutable_ ~mode
                   in
-                  draft_pattern state written (fun () ->
+                  register_pattern state written (fun () ->
                       Variant
                         {
                           variant = variant.variant_name;
@@ -183,7 +183,7 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                      (T.show type_));
               state.tables.patterns.(written.id) <- Some (Record_pattern { type_ });
               let matched = pattern_fields state env written record_fields fields ~mutable_ ~mode in
-              draft_pattern state written (fun () ->
+              register_pattern state written (fun () ->
                   Record (Form.pattern_fields state record_fields matched))
           | None -> (
               match Members.broken state.database path with
@@ -199,8 +199,8 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                (Printf.sprintf "`%s` is not a record." (show state type_))))
   | Alternatives alternatives ->
       List.iter (fun alternative -> recurse alternative type_) alternatives;
-      draft_pattern state written (fun () ->
-          Alternatives (List.map (built_pattern state) alternatives))
+      register_pattern state written (fun () ->
+          Alternatives (List.map (build_pattern state) alternatives))
 
 and pattern_fields state env (written : pattern) (fields : T.field list)
     (written_fields : pattern_field list) ~mutable_ ~mode =

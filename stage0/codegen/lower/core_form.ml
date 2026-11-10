@@ -28,14 +28,14 @@ let site_of st (origin : Core.origin) = site st (spans st).(origin)
 let local_place st (local : Core.local) : Lir.place =
   let found = function Some place -> place | None -> bug "a name that nothing binds" in
   match local with
-  | Bound id -> found (Hashtbl.find_opt st.frame.bindings id)
+  | Named id -> found (Hashtbl.find_opt st.frame.bindings id)
   | Self -> found st.frame.self_place
-  | Made number -> found (Hashtbl.find_opt st.frame.made number)
+  | Synthetic number -> found (Hashtbl.find_opt st.frame.made number)
 
 let bind_local st (local : Core.local) place =
   match local with
-  | Bound id -> Hashtbl.replace st.frame.bindings id place
-  | Made number -> Hashtbl.replace st.frame.made number place
+  | Named id -> Hashtbl.replace st.frame.bindings id place
+  | Synthetic number -> Hashtbl.replace st.frame.made number place
   | Self -> bug "a pattern that binds self"
 
 (* The kinds of node that are lowered only from the syntax tree, by name. *)
@@ -46,13 +46,13 @@ let expression_kind : Core.kind -> string = function
   | Function_value _ -> "a function as a value"
   | Generic_value _ -> "a generic value"
   | Lambda _ -> "a lambda"
-  | Collection _ | Entries _ -> "a collection literal"
-  | Updated _ -> "a record with fields replaced"
+  | Collection_literal _ | Map_literal _ -> "a collection literal"
+  | Record_update _ -> "a record with fields replaced"
   | Slice _ -> "a slice"
   | Matches _ -> "a test against a pattern"
-  | Next _ -> "the next part of a cursor"
+  | Cursor_next _ -> "the next part of a cursor"
   | Convert _ -> "a conversion"
-  | Any _ -> "a value made any"
+  | To_any _ -> "a value made any"
   | Match _ -> "a match"
   | Provide _ -> "a provide"
   | Break | Continue -> "a break or a continue"
@@ -63,7 +63,7 @@ let expression_kind : Core.kind -> string = function
 
 let statement_kind : Core.statement_kind -> string = function
   | Let _ -> "a let with a pattern or an else"
-  | Update _ -> "a compound assignment"
+  | Compound_assign _ -> "a compound assignment"
   | For _ -> "a for loop"
   | While _ -> "a while loop"
   | Parallel _ -> "a parallel block"
@@ -142,7 +142,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
   | Compare { comparison; left; right } ->
       assign (Binary (binary comparison, operand st left, operand st right))
   | Not inner -> assign (Unary (Not, operand st inner))
-  | Both _ | Either _ ->
+  | And _ | Or _ ->
       (* A condition's value: whether its jumps reach [yes]. *)
       in_scope st (fun () ->
           let yes = block st.b and no = block st.b and after = block st.b in
@@ -253,7 +253,7 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
       | Some _ -> not_ported "an operation that lends"
       | None -> ())
   | Capability_method _ -> not_ported "a call of a capability's method"
-  | Through _ -> not_ported "a call through a function value"
+  | Indirect _ -> not_ported "a call through a function value"
 
 and return_ st (returned : Core.expression option) =
   (match st.frame.exit with
@@ -288,12 +288,12 @@ and if_ st ~(condition : Core.expression) ~(then_ : Core.block) ~(else_ : Core.b
    not. *)
 and branch st (condition : Core.expression) ~yes ~no =
   match condition.kind with
-  | Both (left, right) ->
+  | And (left, right) ->
       let middle = block st.b in
       branch st left ~yes:middle ~no;
       start st.b middle;
       branch st right ~yes ~no
-  | Either (left, right) ->
+  | Or (left, right) ->
       let middle = block st.b in
       branch st left ~yes ~no:middle;
       start st.b middle;
@@ -322,7 +322,7 @@ and statement st (written : Core.statement) =
       match written.kind with
       | Evaluate { kind = Use found; _ } -> ignore (place st found)
       | Evaluate value -> ignore (value_place st value)
-      | Let { pattern = { kind = Anything; _ }; value; otherwise = None } -> (
+      | Let { pattern = { kind = Wildcard; _ }; value; else_ = None } -> (
           match value with
           | Place found -> ignore (place st found)
           | Value value -> ignore (value_place st value))
@@ -330,7 +330,7 @@ and statement st (written : Core.statement) =
           {
             pattern = { kind = Bind { local; name; mutable_; _ }; type_; _ };
             value;
-            otherwise = None;
+            else_ = None;
           } -> (
           let ty = ground st type_ in
           match value with

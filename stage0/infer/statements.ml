@@ -36,7 +36,7 @@ let rec block_value state env ?expected (written : block) =
 and statement state env (written : statement) ~last : unit =
   match written.kind with
   | Expression value ->
-      draft_statement state written (fun () -> Evaluate (built state value));
+      register_statement state written (fun () -> Evaluate (build_expression state value));
       let type_ = expression state env value in
       if not last then
         defer state (fun () ->
@@ -74,10 +74,10 @@ and statement state env (written : statement) ~last : unit =
                  or `unreachable`.")
       | None -> ());
       let mode = if mutable_ then T.Own else if borrowed state value then T.Read else T.Own in
-      draft_statement state written (fun () ->
-          let value = Form.operand mode (built state value) in
-          let pattern = built_pattern state written_pattern in
-          Let { pattern; value; otherwise = Option.map (built_block state) else_ });
+      register_statement state written (fun () ->
+          let value = Form.operand mode (build_expression state value) in
+          let pattern = build_pattern state written_pattern in
+          Let { pattern; value; else_ = Option.map (build_block state) else_ });
       binding_pattern state env written_pattern type_ ~mutable_ ~mode
   | Assignment { target = written_target; operator; value } -> (
       let target_type = expression state env written_target in
@@ -85,9 +85,9 @@ and statement state env (written : statement) ~last : unit =
       mutable_place state written_target;
       match operator with
       | Assign ->
-          draft_statement state written (fun () ->
-              let target = place_of (built state written_target) in
-              Assign { target; value = built state value });
+          register_statement state written (fun () ->
+              let target = place_of (build_expression state written_target) in
+              Assign { target; value = build_expression state value });
           check state env value target_type
       | _ -> (
           let right_type = expression state env ~expected:target_type value in
@@ -106,8 +106,8 @@ and statement state env (written : statement) ~last : unit =
             | Shift_right_assign -> Shift_right
             | Assign -> Add
           in
-          draft_statement state written (fun () ->
-              Form.update state written written_target value binary_operator);
+          register_statement state written (fun () ->
+              Form.compound_assign state written written_target value binary_operator);
           match binary_operator with
           | Add | Subtract | Multiply | Divide | Remainder ->
               let trait, method_ =
@@ -190,41 +190,41 @@ and statement state env (written : statement) ~last : unit =
       List.iter
         (loop_clause state { env with loop_element = Option.map (resolve state) !loop_element })
         clauses;
-      draft_statement state written (fun () ->
-          let drive = Form.drive state written inner in
-          let pattern = built_pattern state written_pattern in
+      register_statement state written (fun () ->
+          let iteration = Form.iteration state written inner in
+          let pattern = build_pattern state written_pattern in
           let clauses = List.map (Form.loop_clause state) clauses in
           For
             {
               pattern;
-              drive;
+              iteration;
               clauses;
-              body = built_block state body;
+              body = build_block state body;
               parallel = (match written.kind with For { parallel; _ } -> parallel | _ -> false);
             });
       loop_body state env body
   | While { condition = test; clauses; body } ->
       in_statement state env test.span (fun () -> check state env test T.bool);
       List.iter (loop_clause state env) clauses;
-      draft_statement state written (fun () ->
-          let condition = built state test in
+      register_statement state written (fun () ->
+          let condition = build_expression state test in
           let clauses = List.map (Form.loop_clause state) clauses in
-          While { condition; clauses; body = built_block state body });
+          While { condition; clauses; body = build_block state body });
       loop_body state env body
   | Parallel body ->
-      draft_statement state written (fun () ->
-          Parallel (List.map (built_statement state) body.statements));
+      register_statement state written (fun () ->
+          Parallel (List.map (build_statement state) body.statements));
       List.iter
         (fun (branch : statement) ->
           in_statement state env branch.span (fun () -> statement state env branch ~last:false))
         body.statements
   | Proof body ->
-      draft_statement state written (fun () -> Proof (built_block state body));
+      register_statement state written (fun () -> Proof (build_block state body));
       loop_body state { env with specification = true } body
   | Assert value ->
-      draft_statement state written (fun () ->
-          let value = built state value in
-          Assert { value; runs = Form.runs state value });
+      register_statement state written (fun () ->
+          let value = build_expression state value in
+          Assert { value; executable = Form.is_executable state value });
       check state env value T.bool
   | Yield value -> (
       match env.output with
@@ -241,13 +241,13 @@ and statement state env (written : statement) ~last : unit =
           (match env.output with
           | Some (Yields (Mut, _) | Lends (Mut, _)) -> mutable_place state inner
           | _ -> ());
-          draft_statement state written (fun () ->
+          register_statement state written (fun () ->
               let mode =
                 match env.output with
                 | Some (Yields (mode, _) | Lends (mode, _)) -> mode
                 | _ -> T.Read
               in
-              Yield { mode; part = Form.operand mode (built state inner) });
+              Yield { mode; part = Form.operand mode (build_expression state inner) });
           ignore (coerce state env inner ~found ~expected:element)
       | _ ->
           ignore (expression state env value);

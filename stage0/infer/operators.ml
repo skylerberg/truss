@@ -20,7 +20,7 @@ let rec try_ state env (value : expression) (inner : expression) =
   let output =
     match env.output with Some (Returns output) -> Some (normalize state output) | _ -> None
   in
-  draft state value (fun () ->
+  register_expression state value (fun () ->
       match output with
       | Some output -> Form.try_ state value inner ~output:(final state output)
       | None -> bug "`?` where nothing is returned");
@@ -99,9 +99,9 @@ and with_ state env (value : expression) (base : expression) updates =
           )
       | Update_error -> ())
     updates;
-  draft state value (fun () ->
-      let base = built state base in
-      Updated
+  register_expression state value (fun () ->
+      let base = build_expression state base in
+      Record_update
         {
           base;
           updates =
@@ -112,10 +112,10 @@ and with_ state env (value : expression) (base : expression) updates =
                     Some
                       ( List.map (fun (name : name) -> name.text) (first :: rest),
                         match (new_value, target state first) with
-                        | Some new_value, _ -> built state new_value
+                        | Some new_value, _ -> build_expression state new_value
                         | None, Some (Local id) ->
-                            make state ~origin:update.id (Form.local_type state id)
-                              (Use (Local (Bound id)))
+                            synthetic_expression state ~origin:update.id (Form.local_type state id)
+                              (Use (Local (Named id)))
                         | None, _ -> bug "`with (%s)` names no local" first.text )
                 | Update_error -> None)
               updates;
@@ -127,12 +127,12 @@ and prefix state env ?expected (value : expression) operator (inner : expression
   | Not ->
       check state env inner T.bool;
       built_in_operator state value [ inner ] T.bool;
-      draft state value (fun () -> Not (built state inner));
+      register_expression state value (fun () -> Not (build_expression state inner));
       T.bool
   | Complement ->
       let type_ = expression state env ?expected inner in
       built_in_operator state value [ inner ] type_;
-      draft state value (fun () -> Form.operator state value Complement [ inner ]);
+      register_expression state value (fun () -> Form.operator state value Complement [ inner ]);
       if
         not
           (T.is_integer_type (normalize state type_)
@@ -149,7 +149,7 @@ and prefix state env ?expected (value : expression) operator (inner : expression
           (* The negation is the value: [-128] is one literal. *)
           state.tables.literals.(inner.id) <- Some (Integer_value number);
           state.tables.literals.(value.id) <- Some (Integer_value (Z.neg number));
-          draft state value (fun () -> Form.literal state value.id);
+          register_expression state value (fun () -> Form.literal state value.id);
           let type_ = literal_type state ~expected Integer_literal in
           record state inner type_;
           defer state (fun () ->
@@ -177,11 +177,11 @@ and prefix state env ?expected (value : expression) operator (inner : expression
             type_
           end
           else if env.specification && (T.is_integer_type resolved || resolved = T.Integer) then begin
-            draft state value (fun () -> Form.operator state value Negate [ inner ]);
+            register_expression state value (fun () -> Form.operator state value Negate [ inner ]);
             T.Integer
           end
           else begin
-            Form.draft_call state value;
+            Form.register_call state value;
             operator_call
               ~operands:
                 [ { C.expression = inner.id; parameter = 0; mode = T.Read; conversion = None } ]
@@ -315,19 +315,19 @@ and binary state env ?expected (value : expression) operator (left : expression)
       check state env left T.bool;
       check state env right T.bool;
       built_in_operator state value [ left; right ] T.bool;
-      draft state value (fun () ->
-          let first = built state left in
-          let second = built state right in
+      register_expression state value (fun () ->
+          let first = build_expression state left in
+          let second = build_expression state right in
           match operator with
-          | And -> Both (first, second)
-          | Or -> Either (first, second)
+          | And -> And (first, second)
+          | Or -> Or (first, second)
           | _ -> Implies (first, second));
       T.bool
   | Bit_and | Bit_or | Bit_xor ->
       let left_type = expression state env ?expected left in
       let right_type = expression state env ~expected:left_type right in
       built_in_operator state value [ left; right ] left_type;
-      draft state value (fun () ->
+      register_expression state value (fun () ->
           Form.operator state value (Form.operation_of operator) [ left; right ]);
       literal_operands state ~left:left_type ~right:right_type;
       if not (unify state left_type right_type) then
@@ -346,7 +346,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
       let left_type = expression state env ?expected left in
       let right_type = expression state env right in
       built_in_operator state value [ left; right ] left_type;
-      draft state value (fun () ->
+      register_expression state value (fun () ->
           Form.operator state value (Form.operation_of operator) [ left; right ]);
       (match resolve state right_type with
       | T.Literal (Integer_literal, _) -> ignore (unify state right_type (T.builtin USize))
@@ -371,7 +371,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
       left_type
   | (Equal | Not_equal | Less | Less_equal | Greater | Greater_equal)
     when operands_hole state env left right ->
-      draft state value (fun () -> Form.compare_values state operator left right);
+      register_expression state value (fun () -> Form.compare_values state operator left right);
       T.bool
   | Equal | Not_equal | Less | Less_equal | Greater | Greater_equal ->
       let left_type = Option.get state.tables.types.(left.id) in
@@ -383,11 +383,11 @@ and binary state env ?expected (value : expression) operator (left : expression)
         || match resolve state type_ with T.Literal (Integer_literal, _) -> true | _ -> false
       in
       if env.specification && integers left_type && integers right_type then begin
-        draft state value (fun () -> Form.compare_values state operator left right);
+        register_expression state value (fun () -> Form.compare_values state operator left right);
         T.bool
       end
       else begin
-        draft state value (fun () -> Form.comparison state value operator left right);
+        register_expression state value (fun () -> Form.comparison state value operator left right);
         if not (unify state left_type right_type) then
           ignore (mismatched_operands state value left right ~left_type ~right_type);
         (* An ordering is its [compare], whose [Ordering] the operator
@@ -425,7 +425,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
   | (Add | Subtract | Multiply | Divide | Remainder) when operands_hole state env left right ->
       (* Every operation on a [todo] whose type is not decided is accepted,
          and gives such a value. *)
-      draft state value (fun () ->
+      register_expression state value (fun () ->
           Form.operator state value (Form.operation_of operator) [ left; right ]);
       T.Hole
   | Add | Subtract | Multiply | Divide | Remainder ->
@@ -478,7 +478,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
             (match resolve state right_type with
             | T.Literal _ -> unify state right_type T.Integer
             | _ -> true);
-          draft state value (fun () ->
+          register_expression state value (fun () ->
               Form.operator state value (Form.operation_of operator) [ left; right ]);
           T.Integer
         end
@@ -504,7 +504,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
             && not (T.equal (normalize state left_type) (normalize state right_type))
           then T.Error (mismatched_operands state value left right ~left_type ~right_type)
           else begin
-            Form.draft_call state value;
+            Form.register_call state value;
             let result =
               operator_call
                 ~operands:
@@ -564,11 +564,11 @@ and any_ state env ?expected (value : expression) (inner : expression) =
   match Option.map (normalize state) expected with
   | Some (T.Any trait as any_type) ->
       let inner_type = expression state env inner in
-      draft state value (fun () ->
-          let inner = built state inner in
+      register_expression state value (fun () ->
+          let inner = build_expression state inner in
           match (Form.type_of state value, implements state inner.type_ trait) with
           | T.Any trait, Some found ->
-              Any { value = inner; trait; evidence = Form.evidence (evidence_of found) }
+              To_any { value = inner; trait; evidence = Form.evidence (evidence_of found) }
           | _ -> bug "`any` of a value whose type does not implement the trait");
       require state ~at:value.span inner_type trait ~unmet:(fun inner_type other ->
           report state No_impl value.span

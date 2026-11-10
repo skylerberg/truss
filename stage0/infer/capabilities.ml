@@ -114,7 +114,7 @@ let check_grants checking (origin : Core.origin) (callee : Core.callee) =
                 interface.impl_methods
           | None -> ())
       | Bound | Dynamic -> ())
-  | Capability_method _ | Intrinsic _ | Through _ -> ()
+  | Capability_method _ | Intrinsic _ | Indirect _ -> ()
 
 (* What code needs must be within what is available where it is. *)
 let need checking scope (origin : Core.origin) ?(implementation = false) ?(through_value = false)
@@ -155,7 +155,7 @@ let need checking scope (origin : Core.origin) ?(implementation = false) ?(throu
                   `provide` an implementation."
                  shown shown))
   in
-  if needed <> [] then state.within <- { given = needed; wanted; lacking } :: state.within
+  if needed <> [] then state.capability_constraints <- { given = needed; wanted; lacking } :: state.capability_constraints
 
 (* What is called without being a call of its own: what a piece is
    displayed by, the method that gives a view, what builds a collection.
@@ -174,7 +174,7 @@ let callee_needs checking scope (origin : Core.origin) (callee : Core.callee) =
         | Some method_ -> method_.method_signature.uses
         | None -> [])
     | Capability_method { capability; _ } -> [ T.Capability capability ]
-    | Intrinsic _ | Through _ -> [])
+    | Intrinsic _ | Indirect _ -> [])
 
 let rec expression checking scope (node : Core.expression) =
   match node.kind with
@@ -200,7 +200,7 @@ let rec expression checking scope (node : Core.expression) =
          own. *)
       check_grants checking node.origin call.callee;
       need checking scope node.origin
-        ~through_value:(match call.callee with Through _ -> true | _ -> false)
+        ~through_value:(match call.callee with Indirect _ -> true | _ -> false)
         call.uses
   | _ -> inside checking scope (`Expression node)
 
@@ -221,9 +221,9 @@ and inside checking scope node =
     }
   in
   match node with
-  | `Expression inner -> Core_walk.expression_parts visit inner
-  | `Statement inner -> Core_walk.statement_parts visit inner
-  | `Pattern inner -> Core_walk.pattern_parts visit inner
+  | `Expression inner -> Core_walk.expression_children visit inner
+  | `Statement inner -> Core_walk.statement_children visit inner
+  | `Pattern inner -> Core_walk.pattern_children visit inner
 
 and block checking scope (body : Core.block) =
   List.iter (statement checking scope) body.statements;
@@ -242,7 +242,7 @@ and statement checking scope (written : Core.statement) =
           expression checking scope stop
       | Each each -> expression checking scope each
       | Pull { cursor; next } ->
-          Core_walk.place { Core_walk.nothing with expression = expression checking scope } cursor;
+          Core_walk.place { Core_walk.ignore_all with expression = expression checking scope } cursor;
           Option.iter (callee_needs checking scope written.origin) next);
       inside checking scope (`Pattern pattern);
       specifications checking clauses;
@@ -259,7 +259,7 @@ and statement checking scope (written : Core.statement) =
 and specifications checking (clauses : Core.loop_clause list) =
   List.iter
     (Core_walk.loop_clause
-       { Core_walk.nothing with expression = expression checking (pure_only "a specification") })
+       { Core_walk.ignore_all with expression = expression checking (pure_only "a specification") })
     clauses
 
 (* [provide]: each implementation's type provides every capability it
@@ -271,7 +271,7 @@ and provide checking scope implementations body =
   List.iter
     (fun (implementation : Core.implementation) ->
       Core_walk.operand
-        { Core_walk.nothing with expression = expression checking scope }
+        { Core_walk.ignore_all with expression = expression checking scope }
         implementation.value;
       let impls = Form.capability_impls state implementation.type_ in
       if impls = [] then
@@ -349,16 +349,16 @@ let solve (state : state) =
                     (union lacking (Option.value ~default:[] (Hashtbl.find_opt solution unknown))))
                 unknowns;
               true)
-        false state.within
+        false state.capability_constraints
     in
     if grew then grow ()
   in
   grow ();
-  state.capabilities <- Some solution;
+  state.capability_solution <- Some solution;
   List.iter
     (fun (constraint_ : within) ->
       match lacking constraint_ with [] -> () | lacking -> constraint_.lacking lacking)
-    (List.rev state.within)
+    (List.rev state.capability_constraints)
 
 let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
   let checking = { state; spans = Syntax_walk.spans state.definition } in
@@ -372,10 +372,10 @@ let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
       List.iter
         (fun (parameter : Core.parameter) ->
           Option.iter
-            (fun (accepted : Core.accepts) -> List.iter specification accepted.requires)
+            (fun (accepted : Core.callback_contract) -> List.iter specification accepted.requires)
             parameter.accepts)
         parameters;
-      List.iter (fun (clause : Core.clause) -> specification clause.value) contract.requires;
+      List.iter (fun (clause : Core.condition) -> specification clause.value) contract.requires;
       List.iter specification contract.ensures;
       List.iter specification contract.decreases;
       List.iter

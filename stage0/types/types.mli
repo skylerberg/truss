@@ -116,7 +116,7 @@ val map_capabilities : (capability list -> capability list) -> ty -> ty
 
 val map_argument_capabilities : (capability list -> capability list) -> argument -> argument
 
-val unknown_capabilities : capability list -> bool
+val has_capability_variable : capability list -> bool
 (** Whether a set has a {!Capability_variable} in it, so that what it holds is not known yet. *)
 
 val equal : ty -> ty -> bool
@@ -187,9 +187,10 @@ val substitute_signature : substitution -> signature -> signature
 (** A signature with a substitution made throughout: in its types, in the bounds of its generic
     parameters, and in its [uses]. *)
 
-val inside : generics:generic list -> uses:capability list -> signature -> signature
-(** A method's signature inside an [impl] that has these generic parameters and [uses]: generic over
-    the [impl]'s parameters and then its own, and using what the [impl] uses as well. *)
+val method_in_impl :
+  impl_generics:generic list -> impl_uses:capability list -> signature -> signature
+(** The full signature of a method defined in an [impl]: the [impl]'s generic parameters come
+    before the method's own, and the [impl]'s [uses] are added to the method's. *)
 
 val function_type_of : signature -> function_type
 (** A signature as the type of a function value, with [self] as its first input. *)
