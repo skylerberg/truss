@@ -1124,6 +1124,8 @@ Each obligation the prover could not prove is an error, with the shared
   reads back as the same bits, and a record or a variant is its name with
   its fields. An agent can turn these values into a test, which then fails
   at its run-time check if the code is wrong.
+- **A note at the clause.** A call's `requires` that may not hold has a
+  note at that clause, where the callee is in the same file.
 - **A state for every obligation.** Each obligation, shown or not, has a
   state at its position, for a language server to show; the diagnostics
   are the states that were not shown.
@@ -1229,8 +1231,8 @@ test the prover itself:
 - **Code the prover cannot read yet.** Among what is reported as
   `prover.unsupported`: a loop over a cursor, or a `mut` loop over a
   place, that is not a local or a field of one.
-- **More in a diagnostic.** A note at the clause an obligation comes from,
-  the branches a counterexample's path takes, listed by position, and a
+- **More in a diagnostic.** A note at a clause in another file, the
+  branches a counterexample's path takes, listed by position, and a
   fix that adds an obligation about parameters alone to the function as a
   `requires`. DESIGN.md's other fixes, checking it with an `if`, using the
   checked version of the operation, and `uses Panic`, change what the code

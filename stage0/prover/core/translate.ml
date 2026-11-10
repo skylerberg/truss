@@ -53,6 +53,9 @@ type obligation = {
   code : Code.prover;
   span : span;  (** Relative to the definition being proven. *)
   message : string;
+  cited : (Names.key * span) option;
+      (** The clause it comes from, in the definition that states it, where that is not the one
+          being proven: a callee's [requires]. *)
   query : L.query;
   contracts_alone : L.query option;
       (** The query without what unfolding callees' definitions gave, where it has any: asked when
@@ -326,10 +329,10 @@ let assume context frame term =
    after it. Inside a quantifier it is shown for each value the
    quantifier's premise admits, which is how a quantifier's body is shown
    to be well defined. *)
-let rec oblige ?evaluation context frame code span message goal =
+let rec oblige ?evaluation ?cited context frame code span message goal =
   match obligation_at ?evaluation context frame code span message goal with
   | Some obligation ->
-      context.obligations <- obligation :: context.obligations;
+      context.obligations <- { obligation with cited } :: context.obligations;
       assume context frame goal
   | None -> ()
 
@@ -385,6 +388,7 @@ and make_obligation ?evaluation context frame code span message goal =
     code;
     span;
     message;
+    cited = None;
     query;
     contracts_alone;
     values = context.values;
@@ -4636,6 +4640,8 @@ and contract_call context frame (node : expression) (call_ : call) path contract
           (fun (clause : expression) ->
             let _, term = clause_value context entry clause in
             oblige context frame Requires span
+              ?cited:
+                (Option.map (fun key -> (key, span_of part.callee clause.origin)) part.callee.key)
               (Printf.sprintf "`%s` may not hold for this call to `%s`."
                  (quote part.callee clause.origin) (Path.show path))
               term;
