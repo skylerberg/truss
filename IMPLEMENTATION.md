@@ -54,6 +54,16 @@ develop as well as make it easier to bootstrap the compiler in parts.
     the step limit. A run restores the cache from `main` and solves only
     the queries whose text changed. Only pushes to `main` save the cache.
   - **A new push to a pull request cancels the run it replaces.**
+- **A pull request that takes out a recent merge fails,** before anything is
+  built (`.github/scripts/reverts.sh`). Several sessions fetch into one
+  repository, so `origin/main` can move between a branch's merge of it and
+  a squash onto it, and the squashed commit then carries the branch's older
+  tree onto the newer `main`: every merge the tree lacks is undone, with no
+  conflict. The check fails a pull request that changes every file one of
+  the last merges changed and puts one of them back to what it was before
+  that merge. A pull request that means to do so has a title that starts
+  with "Revert". To squash safely, read `origin/main` once into a variable,
+  merge that commit, and squash onto that commit.
 
 ### Documents
 
