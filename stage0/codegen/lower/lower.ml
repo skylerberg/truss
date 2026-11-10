@@ -227,13 +227,14 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
       Constants.write_output st output);
   { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
 
-(* The code of a function or a test that is written in source, with what
-   stopped its body from being lowered from its core form, if anything did:
-   it is lowered from the form where the form holds only what [Core_form]
-   knows, and otherwise from the syntax tree. *)
-let written_code context key ~path ~type_arguments : Lir.t * string option =
+(* Lowers a function or a test that has a body in source. The body is
+   lowered from its core form where [Core_form] handles every node in it,
+   and from the syntax tree otherwise. Also returns the reason for the
+   fallback to the syntax tree, if there was one. *)
+let source_code context key ~path ~type_arguments : Lir.t * string option =
   let code = code_of context path type_arguments in
-  (* The function with its body written by [body], or why [body] cannot. *)
+  (* Lowers the function with [body] lowering its body, or returns the error
+     that [body] returns. *)
   let lowered body : (Lir.t, string) result =
     let st = enter context (frame_of code ~inlined:[ path ]) in
     let convention, returns = result_of context code.substitution code.result in
@@ -255,15 +256,15 @@ let written_code context key ~path ~type_arguments : Lir.t * string option =
   in
   match from_core with
   | Ok instance -> (instance, None)
-  | Error stopped -> (
+  | Error reason -> (
       match lowered (fun st -> Ok (block_into st code.body (result_place st))) with
-      | Ok instance -> (instance, Some stopped)
+      | Ok instance -> (instance, Some reason)
       | Error _ -> bug "a body that was not lowered")
 
-let not_from_core context (key : Instance.key) =
+let core_fallback_reason context (key : Instance.key) =
   match key with
-  | Code { path; type_arguments } -> snd (written_code context key ~path ~type_arguments)
-  | _ -> Some "an instance that no source writes"
+  | Code { path; type_arguments } -> snd (source_code context key ~path ~type_arguments)
+  | _ -> Some "an instance with no body in source"
 
 let instance context (key : Instance.key) : Lir.t =
   match key with
@@ -278,5 +279,5 @@ let instance context (key : Instance.key) : Lir.t =
       }
     when not (trait_provides context ~trait ~name ~receiver) ->
       derived context ~key ~type_path ~trait ~name ~type_arguments
-  | Code { path; type_arguments } -> fst (written_code context key ~path ~type_arguments)
+  | Code { path; type_arguments } -> fst (source_code context key ~path ~type_arguments)
   | _ -> bug "%s is not code from source" (Instance.to_string key)

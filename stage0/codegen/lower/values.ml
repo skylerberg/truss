@@ -328,7 +328,7 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
       {
         st.frame with
         bindings = Hashtbl.copy st.frame.bindings;
-        made = Hashtbl.copy st.frame.made;
+        synthetic = Hashtbl.copy st.frame.synthetic;
         on_yield = None;
         exit = None;
         (* What the lambda returns, which a [?] in it returns early. *)
@@ -430,10 +430,7 @@ and interpolate st (literal : S.string_literal) destination =
   let write text =
     if text <> "" then begin
       let slice = temporary st slice_ty in
-      (match Monomorphic.shape st.context.monomorphic slice_ty with
-      | Record [ (field, Typed view) ] ->
-          emit st.b (Assign (slice / Field field, text_view view text))
-      | _ -> bug "a StringSlice that is not a view");
+      string_literal st slice_ty text ~destination:slice;
       call (method_ "write" Mut)
         [ (Mut, builder_ty, builder); (Read, slice_ty, slice) ]
         (temporary st unit)

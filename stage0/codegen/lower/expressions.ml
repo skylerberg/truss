@@ -150,10 +150,7 @@ and into st (e : S.expression) (destination : Lir.place) =
       (* A tagged character, such as [Character"a"] or [UInt8"\n"]: a number. *)
       assign (Use (constant_of st (ty ()) (literal st e.id)))
   | String literal when literal.rest = [] && literal.tag = None ->
-      let field, storage_ty, storage = string_value st (ty ()) literal.first.value in
-      let built = temporary st storage_ty in
-      emit st.b (Assign (built, storage));
-      assign (Build { ty = ty (); variant = None; fields = [ (field, Move built) ] })
+      string_literal st (ty ()) literal.first.value ~destination
   | Name _ | Self_value | Member _ -> (
       match place_expression st e with
       | Some place -> take st place (ty ()) ~destination
