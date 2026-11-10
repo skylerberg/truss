@@ -127,8 +127,8 @@ let prove database (key : Names.key) =
                   List.concat_map (fun (o : Translate.outcome) -> o.obligations) outcomes;
                 holes = List.concat_map (fun (o : Translate.outcome) -> o.holes) outcomes;
               }
-        | Type, Type { potential = Some _; _ } ->
-            Obligations (Translate.type_potential database source ~path:key.path)
+        | Type, Type { invariants = _ :: _; _ } | Type, Type { potential = Some _; _ } ->
+            Obligations (Translate.type_ database source ~path:key.path)
         | _ -> Not_proven_here
       with
       | Translate.Unsupported (span, message) -> Unsupported (span, message)

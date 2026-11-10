@@ -2260,6 +2260,17 @@ let () =
         \  run(quick)\n\
          }\n"
         "prover.unsupported");
+  test "a type's invariant must be well defined" (fun () ->
+      not_proven "type Ratio(top: Int64, bottom: Int64)\n  invariant top / bottom > 0\n"
+        "prover.division");
+  test "a type's invariant is well defined given the ones before it" (fun () ->
+      proven
+        "type Ratio(top: Int64, bottom: Int64)\n\
+        \  invariant bottom > 0\n\
+        \  invariant top / bottom >= 0\n");
+  test "a cost clause's bound must be well defined" (fun () ->
+      let found = codes "fn f(items: List[Int64]) -> Int64\n  cost time O(items[0])\n{\n  0\n}\n" in
+      if not (List.mem "prover.requires" found) then fail "found [%s]" (String.concat "; " found));
   test "alternatives bind each name to the part that matched" (fun () ->
       proven
         "type Side =\n\

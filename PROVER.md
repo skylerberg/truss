@@ -112,7 +112,7 @@ Every fact the prover must show, and where it comes from:
 | An `impl` keeps its trait's or its capability's contract | Each method of an `impl` |
 | A replacement gives the provided result | Each method that replaces a provided one |
 | `assert` holds | Each `assert` in a theorem or a proof |
-| A specification is well defined | Each call's `requires`, index, and division in a function's `requires` and `ensures` and in a loop's invariants |
+| A specification is well defined | Each call's `requires`, index, and division in a function's `requires`, `ensures`, and cost bounds, in a loop's invariants and cost bounds, in a lending or yielding method's clauses, and in a type's invariants and potential |
 | An `Integer` fits where a built-in integer is expected | Recorded by the type checker |
 | Two indexes or ranges do not overlap | Recorded by the ownership check, for places lent together and for `parallel` branches |
 | A `FiniteMap` literal's keys are distinct | Each `FiniteMap` literal in a specification |
@@ -1051,10 +1051,6 @@ sanitized runs, test the trusted base against real executions.
   made, so nothing checks that a quantifier's body is well defined. A fact
   that names one, such as what a callee's `ensures` says of a call on it,
   is not kept.
-- **Other specifications checked to be well defined.** A type's
-  invariants, a cost clause's bound, and a lending or yielding method's
-  clauses about how it ends are read without obligations for the calls,
-  indexes, and divisions in them.
 - **Choosing triggers.** A quantified fact helps the solver only when it
   knows when to use it, which SMT solvers decide by triggers: terms that,
   when they appear, make the solver use the fact. Truss has no syntax for
