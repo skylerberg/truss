@@ -1245,6 +1245,21 @@ let () =
         \  first.join(second)\n\
          }\n"
         "types.not_callable");
+  test "a method whose result holds Self cannot be called through any" (fun () ->
+      one_diagnostic
+        "fn f(items: List[Int64]) -> USize {\n\
+        \  var boxed: any Cursor[Element = Int64] = any items.each()\n\
+        \  let _ = own boxed.skip(1)\n\
+        \  0\n\
+         }\n"
+        "types.not_callable");
+  test "a cursor's own step and its counting can be called through any" (fun () ->
+      fine
+        "fn f(items: List[Int64]) -> USize {\n\
+        \  var boxed: any Cursor[Element = Int64] = any items.each()\n\
+        \  let _ = mut boxed.next()\n\
+        \  own boxed.count()\n\
+         }\n");
   test "a method that names an associated type can be called through any" (fun () ->
       fine
         (source

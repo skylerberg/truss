@@ -282,6 +282,45 @@ type evidence =
           worked out yet. A trait whose definition did not parse is accepted of every type, as the
           [Error] of its report. *)
 
+(* Whether a trait's method can be called through an [any] value, and if
+   not, why. An [any] value has one compiled version of each method, for
+   the type that it hides. *)
+type through_any =
+  | Callable
+  | Has_generics
+      (** The method has generic parameters of its own, so it has a version for each set of type
+          arguments. *)
+  | Names_self
+      (** A parameter's type or the result's type names [Self], the hidden type, at any depth. An
+          associated type of [Self] does not count: the [any] type fixes it. *)
+
+let through_any ~(trait : Path.t) (method_ : T.trait_method) : through_any =
+  let self : T.parameter = { owner = trait; name = "Self" } in
+  let names_self type_ =
+    let found = ref false in
+    ignore
+      (T.map
+         (function
+           | T.Projection { base = T.Parameter base; _ } as projected when base = self ->
+               Some projected
+           | T.Parameter parameter as named when parameter = self ->
+               found := true;
+               Some named
+           | _ -> None)
+         type_);
+    !found
+  in
+  let signature = method_.method_signature in
+  let result =
+    match signature.output with T.Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
+  in
+  if signature.generics <> [] then Has_generics
+  else if
+    List.exists (fun (info : T.parameter_info) -> names_self info.type_) signature.parameters
+    || names_self result
+  then Names_self
+  else Callable
+
 (* What a pulled yielding method's cursor gives: what the method yields,
    with the method's type arguments. *)
 let cursor_element database (method_ : Path.t) arguments =

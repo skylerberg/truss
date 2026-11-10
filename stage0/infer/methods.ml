@@ -666,44 +666,23 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
     (({ owner = trait.trait; name = "Self" } : T.parameter), T.Type receiver_type)
     :: Option.value ~default:[] (T.substitution_of trait_generics trait_arguments)
   in
-  (* An [any] value has one compiled version of each method, for the type it
-     hides. A method with generic parameters of its own would need a version
-     for each set of type arguments, and a method that takes or returns
-     [Self] names the hidden type. Neither can be called on an [any] value. *)
   (match receiver_type with
-  | T.Any _ ->
-      let self : T.parameter = { owner = trait.trait; name = "Self" } in
-      let names_self type_ =
-        let found = ref false in
-        ignore
-          (T.map
-             (function
-               | T.Projection { base = T.Parameter base; _ } as projected when base = self ->
-                   Some projected
-               | T.Parameter parameter as named when parameter = self ->
-                   found := true;
-                   Some named
-               | _ -> None)
-             type_);
-        !found
-      in
-      let signature = method_.method_signature in
-      if signature.generics <> [] then
-        report state Not_callable value.span
-          (Printf.sprintf
-             "`%s` has generic parameters of its own, so it cannot be called through `%s`: an \
-              `any` value holds one version of each method, and this one has a version for each \
-              set of arguments. Call it on a value whose type is known."
-             method_.method_name (show state receiver_type))
-      else if
-        List.exists (fun (info : T.parameter_info) -> names_self info.type_) signature.parameters
-        || names_self (output_type signature.output)
-      then
-        report state Not_callable value.span
-          (Printf.sprintf
-             "`%s` takes or returns `Self`, which is the type `%s` hides, so it cannot be called \
-              through it. Call it on a value whose type is known."
-             method_.method_name (show state receiver_type))
+  | T.Any _ -> (
+      match Impls.through_any ~trait:trait.trait method_ with
+      | Callable -> ()
+      | Has_generics ->
+          report state Not_callable value.span
+            (Printf.sprintf
+               "`%s` has generic parameters of its own, so it cannot be called through `%s`: an \
+                `any` value holds one version of each method, and this one has a version for each \
+                set of arguments. Call it on a value whose type is known."
+               method_.method_name (show state receiver_type))
+      | Names_self ->
+          report state Not_callable value.span
+            (Printf.sprintf
+               "`%s` takes or returns a type that names `Self`, which is the type `%s` hides, so \
+                it cannot be called through it. Call it on a value whose type is known."
+               method_.method_name (show state receiver_type)))
   | _ -> ());
   let instance = instantiate state value.span ~extra method_.method_signature in
   explicit_type_arguments state value instance type_arguments;
