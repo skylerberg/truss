@@ -18,8 +18,8 @@ env:
   DUNE_CACHE: enabled
 
 jobs:
-  # The build, the formatting, the opam file, and every test, in one dune
-  # run so that they overlap.
+  # The build, the formatting, the opam file, and every test but the
+  # standard library's proofs, in one dune run so that they overlap.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -51,15 +51,6 @@ jobs:
 
       - uses: ./.github/actions/z3
 
-      # The solver's answers to the standard library's proofs, each kept by
-      # the text of its query, the solver's version, and its limit. A run
-      # starts from main's and solves only the queries main did not.
-      - uses: actions/cache/restore@v6.1.0
-        with:
-          path: ~/.cache/truss-solver
-          key: solver-${{ github.sha }}
-          restore-keys: solver-
-
       # The objects of the C that the tests generate, each kept by the text
       # of its C, the compiler, and its flags. A run starts from main's and
       # compiles only the C that main did not.
@@ -70,21 +61,12 @@ jobs:
           restore-keys: objects-
 
       - name: Build, check formatting and truss.opam, and test
-        run: TRUSS_SOLVER_CACHE="$HOME/.cache/truss-solver" TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune build @default @install @fmt @runtest
+        env:
+          TRUSS_SKIP_LIBRARY_PROOFS: "1"
+        run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune build @default @install @fmt @runtest
 
       - name: Check that truss.opam matches dune-project
         run: git diff --exit-code truss.opam
-
-      # An answer no run has written for two weeks is dropped, so the cache
-      # holds the queries that are still asked and not every one that was.
-      - if: github.event_name == 'push'
-        run: mkdir -p ~/.cache/truss-solver && find ~/.cache/truss-solver -type f -mtime +14 -delete
-
-      - if: github.event_name == 'push'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: ~/.cache/truss-solver
-          key: solver-${{ github.sha }}
 
       # An object compiled more than two weeks ago is dropped, and compiled
       # again by the next run that needs it, so the cache holds the objects
@@ -108,6 +90,54 @@ jobs:
         with:
           path: ~/.cache/dune
           key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
+
+  # The standard library's proofs: the longest test, and the one that grows
+  # with the library, so it has a runner of its own, beside the check.
+  proofs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - id: opam
+        uses: ./.github/actions/opam
+        with:
+          opam-version: ${{ env.OPAM_VERSION }}
+          opam-sha256: ${{ env.OPAM_SHA256 }}
+          ocaml-version: ${{ env.OCAML_VERSION }}
+
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/dune
+          key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
+          restore-keys: dune-${{ steps.opam.outputs.key }}-
+
+      - uses: ./.github/actions/z3
+
+      # The solver's answers, each kept by the text of its query, the
+      # solver's version, and its limit. A run starts from main's and solves
+      # only the queries main did not.
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/truss-solver
+          key: solver-${{ github.sha }}
+          restore-keys: solver-
+
+      - name: Prove the standard library
+        run: |
+          opam exec -- dune build ./stage0/test/standard_library_tests.exe
+          cd _build/default/stage0/test
+          TRUSS_SOLVER_CACHE="$HOME/.cache/truss-solver" ./standard_library_tests.exe
+
+      # An answer no run has written for two weeks is dropped, so the cache
+      # holds the queries that are still asked and not every one that was.
+      - if: github.event_name == 'push'
+        run: mkdir -p ~/.cache/truss-solver && find ~/.cache/truss-solver -type f -mtime +14 -delete
+
+      - if: github.event_name == 'push'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.cache/truss-solver
+          key: solver-${{ github.sha }}
 
   # Every codegen test again, with its C built under AddressSanitizer and
   # UndefinedBehaviorSanitizer: a report is a compiler bug. Leaks are left to
