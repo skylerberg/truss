@@ -60,7 +60,8 @@ public fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool
   ensures result == contains_equal(self.model(), value: element)
   cost time O(self.length() * time(Element.equal))
 {
-  self.position(element) < self.elements.length()
+  var found = self.position(element) < self.elements.length()
+  found
 }
 
 internal fn Set[Element: Hash + Ordered].insert_absent(mut self, element: own Element)
@@ -156,6 +157,9 @@ public fn Set[Element: Hash + Ordered].remove(mut self, element: Element)
   if position < self.elements.length() {
     let _ = mut self.elements.remove_at(position)
   }
+  proof {
+    assert self.position(element) == self.elements.length()
+  }
 }
 
 public fn Set[Element: Hash + Ordered].take(mut self, element: Element) -> Option[Element]
@@ -164,11 +168,14 @@ public fn Set[Element: Hash + Ordered].take(mut self, element: Element) -> Optio
   cost time O(old(self.length()) * time(Element.equal))
 {
   let position = self.position(element)
-  if position < self.elements.length() {
-    Some(mut self.elements.remove_at(position))
-  } else {
-    None
+  if position == self.elements.length() {
+    return None
   }
+  let removed = mut self.elements.remove_at(position)
+  proof {
+    assert self.position(element) == self.elements.length()
+  }
+  Some(own removed)
 }
 
 public fn Set[Element: Hash + Ordered].clear(mut self)
@@ -401,10 +408,7 @@ internal fn Set[Element: Hash + Ordered].within(self, other: Set[Element]) -> Bo
 }
 
 impl Equal for Set[Element: Hash + Ordered] {
-  fn equal(self, other: Set[Element]) -> Bool
-    ensures result == (self.elements.length() == other.elements.length()
-      && self.within(other) && other.within(self))
-  {
+  fn equal(self, other: Set[Element]) -> Bool {
     self.elements.length() == other.elements.length() && self.within(other) && other.within(self)
   }
 }

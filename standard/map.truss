@@ -137,7 +137,8 @@ public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
   ensures result == contains_equal_key(self.model(), key: key)
   cost time O(self.length() * time(Key.equal))
 {
-  self.position(key) < self.entries.length()
+  var found = self.position(key) < self.entries.length()
+  found
 }
 
 public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: own Value)
@@ -157,11 +158,26 @@ public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: 
   if position < self.entries.length() {
     let _ = mut self.exchange_value(position, value: own value)
   } else {
-    mut self.insert_absent(own key, value: own value)
+    mut self.append(own key, value: own value)
   }
 }
 
 internal fn Map[Key: Hash + Ordered, Value].insert_absent(mut self, key: own Key, value: own Value)
+  requires !contains_equal_key(self.model(), key: key)
+  ensures exists other: Key =>
+    self.model().contains_key(other) && other == key && identical(self.model().get(other), value)
+  ensures forall other: Key =>
+    !(other == key) ==> self.model().contains_key(other) == old(self.model()).contains_key(other)
+  ensures forall other: Key =>
+    !(other == key) && old(self.model()).contains_key(other) ==>
+      identical(self.model().get(other), old(self.model()).get(other))
+  ensures self.length() == old(self.length()) + 1
+  cost time O(1 + old(self.length()))
+{
+  mut self.append(own key, value: own value)
+}
+
+internal fn Map[Key: Hash + Ordered, Value].append(mut self, key: own Key, value: own Value)
   requires !contains_equal_key(self.model(), key: key)
   ensures exists other: Key =>
     self.model().contains_key(other) && other == key && identical(self.model().get(other), value)
@@ -229,7 +245,7 @@ internal fn Map[Key: Hash + Ordered, Value].settle(mut self, key: own Key, defau
 {
   let position = self.position(key)
   if position == self.entries.length() {
-    mut self.insert_absent(own key, value: own default)
+    mut self.append(own key, value: own default)
   }
   position
 }
@@ -285,7 +301,7 @@ public fn Map[Key: Hash + Ordered, Value].replace(mut self, key: own Key, value:
   if position < self.entries.length() {
     Some(mut self.exchange_value(position, value: own value))
   } else {
-    mut self.insert_absent(own key, value: own value)
+    mut self.append(own key, value: own value)
     None
   }
 }
@@ -320,6 +336,9 @@ public fn Map[Key: Hash + Ordered, Value].remove(mut self, key: Key)
   if position < self.entries.length() {
     let _ = mut self.entries.remove_at(position)
   }
+  proof {
+    assert self.position(key) == self.entries.length()
+  }
 }
 
 public fn Map[Key: Hash + Ordered, Value].take(mut self, key: Key) -> Option[Value]
@@ -328,12 +347,14 @@ public fn Map[Key: Hash + Ordered, Value].take(mut self, key: Key) -> Option[Val
   cost time O(old(self.length()) * time(Key.equal))
 {
   let position = self.position(key)
-  if position < self.entries.length() {
-    let removed = mut self.entries.remove_at(position)
-    Some(own removed.value)
-  } else {
-    None
+  if position == self.entries.length() {
+    return None
   }
+  let removed = mut self.entries.remove_at(position)
+  proof {
+    assert self.position(key) == self.entries.length()
+  }
+  Some(own removed.value)
 }
 
 public fn Map[Key: Hash + Ordered, Value].clear(mut self)
@@ -530,10 +551,7 @@ internal fn Map[Key: Hash + Ordered, Value: Equal].within(self, other: Map[Key, 
 }
 
 impl Equal for Map[Key: Hash + Ordered, Value: Equal] {
-  fn equal(self, other: Map[Key, Value]) -> Bool
-    ensures result == (self.entries.length() == other.entries.length()
-      && self.within(other) && other.within(self))
-  {
+  fn equal(self, other: Map[Key, Value]) -> Bool {
     self.entries.length() == other.entries.length() && self.within(other) && other.within(self)
   }
 }
