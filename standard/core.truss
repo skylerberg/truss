@@ -1,7 +1,24 @@
+use standard::cursors
 use standard::intrinsic
 
 public type Ordering = Less | Equal | Greater
   derives Equal
+
+public fn Ordering.reversed(self) -> Ordering
+  cost time O(1)
+{
+  match self {
+    Less => Ordering.Greater
+    Equal => Ordering.Equal
+    Greater => Ordering.Less
+  }
+}
+
+public fn Ordering.then(self, next: Ordering) -> Ordering
+  cost time O(1)
+{
+  if self == Ordering.Equal { next } else { self }
+}
 
 public trait Equal {
   fn equal(self, other: Self) -> Bool
@@ -21,6 +38,18 @@ public trait Ordered: Equal {
   fn min(own self, other: own Self) -> Self {
     if self.compare(other) == Ordering.Greater { other } else { self }
   }
+
+  fn clamp(own self, low: own Self, high: own Self) -> Self
+    requires low <= high
+  {
+    if self.compare(low) == Ordering.Less {
+      low
+    } else if self.compare(high) == Ordering.Greater {
+      high
+    } else {
+      self
+    }
+  }
 }
 
 public trait Hash: Equal {
@@ -36,6 +65,12 @@ public fn Hasher.new() -> Hasher {
 
 public fn Hasher.write(mut self, value: UInt64) {
   self.state = intrinsic::wrapping_multiply(intrinsic::bit_xor(self.state, right: value), right: 1099511628211)
+}
+
+public fn Hasher.write_bytes(mut self, bytes: Slice[UInt8])
+  cost time O(bytes.length())
+{
+  todo
 }
 
 public fn Hasher.finish(self) -> UInt64 {
@@ -111,19 +146,166 @@ public trait Index {
 
 public trait Iterable {
   type Element
+
   fn each(self) yields Self.Element
+    cost time finite
+
+  fn fold[Total, capability Granted](
+    self,
+    initial: own Total,
+    combine: (fn(own Total, Self.Element) -> Total uses Granted cost time finite),
+  ) -> Total
+    uses Granted
+    cost time finite
+  {
+    todo
+  }
+
+  fn map[Output, capability Granted](
+    self,
+    transform: (fn(Self.Element) -> Output uses Granted cost time finite),
+  ) -> List[Output]
+    uses Granted
+    cost time finite
+  {
+    var results: List[Output] = []
+    for item in self {
+      mut results.push(transform(item))
+    }
+    results
+  }
+
+  fn filter_map[Output, capability Granted](
+    self,
+    transform: (fn(Self.Element) -> Option[Output] uses Granted cost time finite),
+  ) -> List[Output]
+    uses Granted
+    cost time finite
+  {
+    todo
+  }
+
+  fn flat_map[Output, capability Granted](
+    self,
+    transform: (fn(Self.Element) -> List[Output] uses Granted cost time finite),
+  ) -> List[Output]
+    uses Granted
+    cost time finite
+  {
+    todo
+  }
+
+  fn count(self, matching: (fn(Self.Element) -> Bool cost time finite)) -> USize
+    cost time finite
+  {
+    todo
+  }
+
+  fn find(self, matching: (fn(Self.Element) -> Bool cost time finite)) lends Option[Self.Element]
+    cost time finite
+  {
+    todo
+  }
+
+  fn min_by(
+    self,
+    compare: (fn(Self.Element, Self.Element) -> Ordering cost time finite),
+  ) lends Option[Self.Element]
+    cost time finite
+  {
+    todo
+  }
+
+  fn max_by(
+    self,
+    compare: (fn(Self.Element, Self.Element) -> Ordering cost time finite),
+  ) lends Option[Self.Element]
+    cost time finite
+  {
+    todo
+  }
 }
 
 public trait Cursor {
   type Element
+
   fn next(mut self) -> Option[Self.Element]
+
+  fn to_list(own self) -> List[Self.Element] {
+    todo
+  }
+
+  fn count(own self) -> USize {
+    todo
+  }
+
+  fn last(own self) -> Option[Self.Element] {
+    todo
+  }
+
+  fn fold[Total, capability Granted](
+    own self,
+    initial: own Total,
+    combine: (fn(own Total, own Self.Element) -> Total uses Granted),
+  ) -> Total
+    uses Granted
+  {
+    todo
+  }
+
+  fn find(mut self, matching: fn(Self.Element) -> Bool) -> Option[Self.Element] {
+    todo
+  }
+
+  fn skip(own self, count: USize) -> cursors::Skip[Self] {
+    todo
+  }
+
+  fn take(own self, count: USize) -> cursors::Take[Self] {
+    todo
+  }
+
+  fn step_by(own self, step: USize) -> cursors::StepBy[Self]
+    requires step > 0
+  {
+    todo
+  }
+
+  fn chain[Other: Cursor[Element = Self.Element]](own self, other: own Other) -> cursors::Chain[Self, Other] {
+    todo
+  }
+
+  fn zip[Other: Cursor](own self, other: own Other) -> cursors::Zip[Self, Other] {
+    todo
+  }
+
+  fn enumerate(own self) -> cursors::Enumerate[Self] {
+    todo
+  }
+
+  fn peekable(own self) -> cursors::Peekable[Self] {
+    todo
+  }
+}
+
+public trait Countable: Ordered + Plain {
+  fn successor(self) -> Option[Self]
+    cost time O(1)
+
+  fn predecessor(self) -> Option[Self]
+    cost time O(1)
+
+  fn advanced(self, by: USize) -> Option[Self]
+    cost time O(1)
+
+  fn retreated(self, by: USize) -> Option[Self]
+    cost time O(1)
+
+  fn steps_to(self, other: Self) -> Option[USize]
+    cost time O(1)
 }
 
 public type Range[Value](start: Value, stop: Value, inclusive: Bool)
-
-public fn Range[Value].reverse(own self) -> Range[Value] {
-  todo
-}
 
 public type Indexed[Element](index: USize, element: Element)
 

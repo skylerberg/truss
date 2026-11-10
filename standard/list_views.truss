@@ -1,0 +1,304 @@
+use standard::slice
+
+public fn List[Element].get(self, index: USize) lends Option[Element]
+  cost time O(1)
+{
+  todo
+}
+
+public fn List[Element].first(self) lends Option[Element]
+  cost time O(1)
+{
+  todo
+}
+
+public fn List[Element].last(self) lends Option[Element]
+  cost time O(1)
+{
+  todo
+}
+
+public fn List[Element].split_first(self) lends Option[slice::SplitFirst[Element]]
+  cost time O(1)
+{
+  todo
+}
+
+public fn List[Element].split_last(self) lends Option[slice::SplitLast[Element]]
+  cost time O(1)
+{
+  todo
+}
+
+public fn List[Element].split_at(self, index: USize) -> Pair[Slice[Element], Slice[Element]]
+  requires index <= self.length()
+  ensures result.first.length() == index
+  ensures result.second.length() == self.length() - index
+  cost time O(1)
+{
+  self.slice().split_at(index)
+}
+
+public fn List[Element: Equal].contains(self, item: Element) -> Bool
+  ensures result == (exists i in 0..self.length() => self[i] == item)
+  cost time O(self.length())
+{
+  self.slice().contains(item)
+}
+
+public fn List[Element: Equal].index_of(self, item: Element) -> Option[USize]
+  ensures match result {
+    Some(index) => index < self.length() && self[index] == item
+    None => !self.contains(item)
+  }
+  cost time O(self.length())
+{
+  self.slice().index_of(item)
+}
+
+public fn List[Element: Equal].last_index_of(self, item: Element) -> Option[USize]
+  ensures match result {
+    Some(index) => index < self.length() && self[index] == item
+    None => !self.contains(item)
+  }
+  cost time O(self.length())
+{
+  self.slice().last_index_of(item)
+}
+
+public fn List[Element].find_index(self, matching: (fn(Element) -> Bool cost time finite)) -> Option[USize]
+  ensures match result {
+    Some(index) => index < self.length()
+    None => true
+  }
+  cost time O(self.length() * time(matching))
+{
+  self.slice().find_index(matching)
+}
+
+public fn List[Element: Equal].starts_with(self, prefix: Slice[Element]) -> Bool
+  cost time O(prefix.length())
+{
+  self.slice().starts_with(prefix)
+}
+
+public fn List[Element: Equal].ends_with(self, suffix: Slice[Element]) -> Bool
+  cost time O(suffix.length())
+{
+  self.slice().ends_with(suffix)
+}
+
+public fn List[Element: Equal].find_slice(self, needle: Slice[Element]) -> Option[USize]
+  ensures match result {
+    Some(index) => index + needle.length() <= self.length()
+    None => true
+  }
+  cost time O(self.length() + needle.length())
+{
+  self.slice().find_slice(needle)
+}
+
+public fn List[Element: Ordered].is_sorted(self) -> Bool
+  cost time O(self.length())
+{
+  self.slice().is_sorted()
+}
+
+public fn List[Element: Ordered].binary_search(self, target: Element) -> Option[USize]
+  requires self.is_sorted()
+  ensures match result {
+    Some(index) => index < self.length() && self[index] == target
+    None => !self.contains(target)
+  }
+  cost time O(log(self.length()))
+{
+  self.slice().binary_search(target)
+}
+
+public fn List[Element: Ordered].minimum(self) lends Option[Element]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn List[Element: Ordered].maximum(self) lends Option[Element]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn List[Element: Copyable].to_list(self) -> List[Element]
+  ensures result.length() == self.length()
+  cost time O(self.length())
+{
+  self.slice().to_list()
+}
+
+public fn List[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+  ensures result.length() <= self.length()
+  cost time O(self.length() * time(keep))
+{
+  self.slice().filter(keep)
+}
+
+public fn List[Element: Ordered + Copyable].sorted(self) -> List[Element]
+  ensures result.length() == self.length()
+  ensures result.is_sorted()
+  cost time O(self.length() * log(self.length()))
+{
+  self.slice().sorted()
+}
+
+public fn List[Element: Copyable].repeated(self, count: USize) -> List[Element]
+  ensures result.length() == self.length() * count
+  cost time O(self.length() * count)
+{
+  self.slice().repeated(count)
+}
+
+public fn List[Element: Display].join(self, separator: StringSlice) -> String
+  cost time finite
+{
+  self.slice().join(separator)
+}
+
+public fn List[Element].enumerate(self) yields Indexed[Element]
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn List[Element].enumerate(mut self) yields mut Indexed[Element]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn List[Element].reversed(self) yields Element
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn List[Element].reversed(mut self) yields mut Element
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn List[Element].windows(self, size: USize) yields Slice[Element]
+  requires size > 0
+  ensures result.length() == size
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn List[Element].chunks(self, size: USize) yields Slice[Element]
+  requires size > 0
+  ensures result.length() <= size
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn List[Element: Equal].split(self, separator: Element) yields Slice[Element]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn List[Element].zip[Other](self, other: Slice[Other]) yields Pair[Element, Other]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn List[Element].zip[Other](mut self, other: mut Slice[Other]) yields mut Pair[Element, Other]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn List[Element].swap(mut self, first: USize, second: USize)
+  requires first < self.length()
+  requires second < self.length()
+  ensures self.length() == old(self.length())
+  cost time O(1)
+{
+  mut self[..].swap(first, second)
+}
+
+public fn List[Element].reverse(mut self)
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+{
+  mut self[..].reverse()
+}
+
+public fn List[Element].rotate_left(mut self, by: USize)
+  requires by <= self.length()
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+{
+  mut self[..].rotate_left(by)
+}
+
+public fn List[Element].rotate_right(mut self, by: USize)
+  requires by <= self.length()
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+{
+  mut self[..].rotate_right(by)
+}
+
+public fn List[Element: Copyable].fill(mut self, value: Element)
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+{
+  mut self[..].fill(value)
+}
+
+public fn List[Element: Copyable].copy_from(mut self, source: Slice[Element])
+  requires source.length() == self.length()
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+{
+  mut self[..].copy_from(source)
+}
+
+public fn List[Element].update_each[capability Granted](
+  mut self,
+  change: (fn(mut Element) uses Granted cost time finite),
+)
+  uses Granted
+  ensures self.length() == old(self.length())
+  cost calls(change) == self.length()
+  cost time O(self.length() * time(change))
+{
+  mut self[..].update_each(change)
+}
+
+public fn List[Element: Ordered].sort(mut self)
+  ensures self.length() == old(self.length())
+  ensures self.is_sorted()
+  cost time O(self.length() * log(self.length()))
+{
+  mut self[..].sort()
+}
+
+public fn List[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
+  ensures self.length() == old(self.length())
+  cost time O(self.length() * log(self.length()) * time(compare))
+{
+  mut self[..].sort_by(compare)
+}
+
+public fn List[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
+  ensures self.length() == old(self.length())
+  cost time O(self.length() * log(self.length()) * time(key))
+{
+  mut self[..].sort_by_key(key)
+}

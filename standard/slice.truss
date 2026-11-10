@@ -1,0 +1,344 @@
+public type SplitFirst[Element](first: Element, rest: Slice[Element])
+
+public type SplitLast[Element](last: Element, rest: Slice[Element])
+
+public fn Slice[Element].is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
+  cost time O(1)
+{
+  self.length() == 0
+}
+
+public fn Slice[Element].get(self, index: USize) lends Option[Element]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Slice[Element].first(self) lends Option[Element]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Slice[Element].last(self) lends Option[Element]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Slice[Element].split_first(self) lends Option[SplitFirst[Element]]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Slice[Element].split_last(self) lends Option[SplitLast[Element]]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Slice[Element].split_at(self, index: USize) -> Pair[Slice[Element], Slice[Element]]
+  requires index <= self.length()
+  ensures result.first.length() == index
+  ensures result.second.length() == self.length() - index
+  cost time O(1)
+{
+  todo
+}
+
+public fn Slice[Element: Equal].contains(self, item: Element) -> Bool
+  ensures result == (exists i in 0..self.length() => self[i] == item)
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element: Equal].index_of(self, item: Element) -> Option[USize]
+  ensures match result {
+    Some(index) => index < self.length() && self[index] == item
+    None => !self.contains(item)
+  }
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element: Equal].last_index_of(self, item: Element) -> Option[USize]
+  ensures match result {
+    Some(index) => index < self.length() && self[index] == item
+    None => !self.contains(item)
+  }
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element].find_index(self, matching: (fn(Element) -> Bool cost time finite)) -> Option[USize]
+  ensures match result {
+    Some(index) => index < self.length()
+    None => true
+  }
+  cost time O(self.length() * time(matching))
+{
+  todo
+}
+
+public fn Slice[Element: Equal].starts_with(self, prefix: Slice[Element]) -> Bool
+  cost time O(prefix.length())
+{
+  todo
+}
+
+public fn Slice[Element: Equal].ends_with(self, suffix: Slice[Element]) -> Bool
+  cost time O(suffix.length())
+{
+  todo
+}
+
+public fn Slice[Element: Equal].find_slice(self, needle: Slice[Element]) -> Option[USize]
+  ensures match result {
+    Some(index) => index + needle.length() <= self.length()
+    None => true
+  }
+  cost time O(self.length() + needle.length())
+{
+  todo
+}
+
+public fn Slice[Element: Ordered].is_sorted(self) -> Bool
+  cost time O(self.length())
+{
+  forall i in 1..self.length() => self[i - 1] <= self[i]
+}
+
+public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option[USize]
+  requires self.is_sorted()
+  ensures match result {
+    Some(index) => index < self.length() && self[index] == target
+    None => !self.contains(target)
+  }
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn Slice[Element].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> USize
+  ensures result <= self.length()
+  cost time O(log(self.length()) * time(before))
+{
+  todo
+}
+
+public fn Slice[Element: Ordered].minimum(self) lends Option[Element]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element: Ordered].maximum(self) lends Option[Element]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element: Copyable].to_list(self) -> List[Element]
+  ensures result.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+  ensures result.length() <= self.length()
+  cost time O(self.length() * time(keep))
+{
+  todo
+}
+
+public fn Slice[Element: Ordered + Copyable].sorted(self) -> List[Element]
+  ensures result.length() == self.length()
+  ensures result.is_sorted()
+  cost time O(self.length() * log(self.length()))
+{
+  todo
+}
+
+public fn Slice[Element: Copyable].repeated(self, count: USize) -> List[Element]
+  ensures result.length() == self.length() * count
+  cost time O(self.length() * count)
+{
+  todo
+}
+
+public fn Slice[Element: Display].join(self, separator: StringSlice) -> String
+  cost time finite
+{
+  todo
+}
+
+public fn Slice[Element].enumerate(self) yields Indexed[Element]
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element].enumerate(mut self) yields mut Indexed[Element]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element].reversed(self) yields Element
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element].reversed(mut self) yields mut Element
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element].windows(self, size: USize) yields Slice[Element]
+  requires size > 0
+  ensures result.length() == size
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element].chunks(self, size: USize) yields Slice[Element]
+  requires size > 0
+  ensures result.length() <= size
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element: Equal].split(self, separator: Element) yields Slice[Element]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element].zip[Other](self, other: Slice[Other]) yields Pair[Element, Other]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element].zip[Other](mut self, other: mut Slice[Other]) yields mut Pair[Element, Other]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element].swap(mut self, first: USize, second: USize)
+  requires first < self.length()
+  requires second < self.length()
+  ensures self.length() == old(self.length())
+  cost time O(1)
+{
+  todo
+}
+
+public fn Slice[Element].reverse(mut self)
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element].rotate_left(mut self, by: USize)
+  requires by <= self.length()
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element].rotate_right(mut self, by: USize)
+  requires by <= self.length()
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element: Copyable].fill(mut self, value: Element)
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element: Copyable].copy_from(mut self, source: Slice[Element])
+  requires source.length() == self.length()
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Slice[Element].update_each[capability Granted](
+  mut self,
+  change: (fn(mut Element) uses Granted cost time finite),
+)
+  uses Granted
+  ensures self.length() == old(self.length())
+  cost calls(change) == self.length()
+  cost time O(self.length() * time(change))
+{
+  todo
+}
+
+public fn Slice[Element: Ordered].sort(mut self)
+  ensures self.length() == old(self.length())
+  ensures self.is_sorted()
+  cost time O(self.length() * log(self.length()))
+{
+  todo
+}
+
+public fn Slice[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
+  ensures self.length() == old(self.length())
+  cost time O(self.length() * log(self.length()) * time(compare))
+{
+  todo
+}
+
+public fn Slice[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
+  ensures self.length() == old(self.length())
+  cost time O(self.length() * log(self.length()) * time(key))
+{
+  todo
+}
+
+impl Equal for Slice[Element: Equal] {
+  fn equal(self, other: Slice[Element]) -> Bool {
+    todo
+  }
+}
+
+impl Ordered for Slice[Element: Ordered] {
+  fn compare(self, other: Slice[Element]) -> Ordering {
+    todo
+  }
+}
+
+impl Hash for Slice[Element: Hash] {
+  fn hash(self, hasher: mut Hasher) {
+    todo
+  }
+}
+
+impl Display for Slice[Element: Display] {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
