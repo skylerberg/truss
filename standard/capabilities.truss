@@ -53,6 +53,7 @@ public capability NetworkServer {
 public capability Handles {
   fn read(handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
   fn write(handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+    ensures !(result is Ok(count) && count > bytes.length())
   fn read_at(
     handle: streams::Handle,
     offset: UInt64,
@@ -60,6 +61,7 @@ public capability Handles {
     limit: USize,
   ) -> Result[USize, SystemError]
   fn write_at(handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+    ensures !(result is Ok(count) && count > bytes.length())
   fn seek(handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError]
   fn set_length(handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError]
   fn synchronize(handle: streams::Handle) -> Result[Unit, SystemError]
@@ -143,6 +145,7 @@ public type SystemError =
   | Interrupted
   | TimedOut
   | BrokenPipe
+  | NothingWritten
   | ConnectionRefused
   | ConnectionReset
   | ConnectionAborted

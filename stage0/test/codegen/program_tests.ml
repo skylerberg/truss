@@ -150,7 +150,8 @@ fn main(arguments: List[String]) -> ExitCode
   let streamed = Path.new("${arguments[1]}.streamed".slice())
   let wrote = files::write_with(streamed, write: fn(writer) {
     mut writer.write("one ".slice())?
-    mut writer.write("two".slice())
+    mut writer.write_line("two".slice())?
+    mut writer.write_bytes("three".slice().bytes())
   })
   if wrote is Ok(_) && FileRead.read_text(streamed) is Ok(text) {
     Console.print_line("streamed ${text}".slice())
@@ -175,7 +176,8 @@ fn main(arguments: List[String]) -> ExitCode
 |}
       in
       expect_int ~expected:0 status;
-      expect_string ~expected:"22 bytes\nstreamed one two\nfirst\nsecond line\nmissing\n" output)
+      expect_string ~expected:"22 bytes\nstreamed one two\nthree\nfirst\nsecond line\nmissing\n"
+        output)
 
 let () =
   test "a program opens a file to update it, writes and reads at offsets, and closes it" (fun () ->
