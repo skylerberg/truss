@@ -56,3 +56,11 @@ test "decoding says what is wrong with text that is not base64" {
     == Err(base64::DecodeError.InvalidCharacter(offset: 0))
   assert "${base64::DecodeError.InvalidCharacter(offset: 2)}" == "the byte at offset 2 is not in the alphabet"
 }
+
+test "bytes are encoded onto text that is being built" {
+  var builder = TextBuilder.new()
+  mut builder.write("data:")
+  base64::encode_onto("foobar".bytes(), output: mut builder)
+  base64::encode_onto("f".bytes(), output: mut builder, padding: false)
+  assert own builder.finish() == "data:Zm9vYmFyZg"
+}
