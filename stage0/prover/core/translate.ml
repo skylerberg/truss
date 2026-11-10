@@ -1326,17 +1326,15 @@ and binary context frame (written : expression) operator left right =
            answer, which is what their laws state. *)
           let frame, left_value = value context frame left in
           let frame, right_value = value context frame right in
-          let sort = sort_of context operand_type in
-          let key = type_key operand_type in
           if operator = Equal || operator = Not_equal then begin
             let equal = equal_of context frame operand_type left_value right_value in
-            ignore (sort, key);
             Some (frame, if operator = Equal then equal else L.not_ equal)
           end
           else begin
+            let sort = sort_of context operand_type in
             let ordering = substituted frame call_.result in
             ignore (sort_of context ordering);
-            let symbol = "compare." ^ key in
+            let symbol = "compare." ^ type_key operand_type in
             declare context (L.Function (symbol, [ sort; sort ], sort_of context ordering));
             let compared = L.Apply (symbol, [ left_value; right_value ]) in
             let is variant =
