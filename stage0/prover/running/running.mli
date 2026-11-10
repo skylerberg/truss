@@ -1,6 +1,6 @@
 (** Running compiled code for the prover, through code generation: a tagged template's check, and a
     call whose arguments are known. The prover does not depend on code generation, so a driver gives
-    it this. See PROVER.md, "Running code while proving". *)
+    it this. *)
 
 val through : ?results:Compile.results -> ?time_limit:int -> Compile.t Lazy.t -> Prover.running
 (** With the compiler, made only when something is run; [results] keeps each run's results under the

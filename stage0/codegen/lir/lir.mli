@@ -226,7 +226,14 @@ type terminator =
           lending method's [yield] has none, since it always continues. *)
 
 type basic_block = { statements : statement list; terminator : terminator }
-type local_info = { ty : ty; name : string option }
+
+type local_info = {
+  ty : ty;
+  name : string option;
+  borrowed : bool;
+      (** Holds the bits of a value that something else owns, as a read-only parameter passed by
+          value does: nothing here drops it *)
+}
 
 type function_ = {
   parameters : local list;  (** Locals that arrive as the parameters, in order *)
@@ -271,8 +278,7 @@ val signature : function_ -> signature
 
 (* The type of a projection of a place of the given type, or [None] where it
    has zero size and so is erased. [environment] gives the fields of a
-   nested function's environment. Raises [Invalid_argument] for a projection
-   that does not fit the type, which is a compiler bug. *)
+   nested function's environment. *)
 val projection_type :
   Memory_layout.env -> environment:(int -> (string * ty) list) -> ty -> projection -> ty option
 
@@ -284,6 +290,13 @@ val place_type :
    after the places inside its indexes, and every block number by [block]. *)
 val map_statement : place:(place -> place) -> block:(block -> block) -> statement -> statement
 val map_terminator : place:(place -> place) -> block:(block -> block) -> terminator -> terminator
+
+(* Visits every place and every operand of a statement or a terminator,
+   each after the places and operands inside it. *)
+type visitor = { place : place -> unit; operand : operand -> unit }
+
+val visit_statement : visitor -> statement -> unit
+val visit_terminator : visitor -> terminator -> unit
 
 (* The blocks a terminator may go to, in order. *)
 val successors : terminator -> block list
@@ -312,6 +325,9 @@ val encode_table : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t
 
 val encode_evidence :
   ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> evidence -> Cbor.t
+
+(* Whether two signatures are the same, by their canonical encoding. *)
+val equal_signature : signature -> signature -> bool
 
 (* The BLAKE3 hash of the canonical form's encoding and [version], which
    early cutoff compares. *)

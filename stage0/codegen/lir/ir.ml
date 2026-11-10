@@ -217,7 +217,14 @@ type terminator =
           lending method's [yield] has none, since it always continues. *)
 
 type basic_block = { statements : statement list; terminator : terminator }
-type local_info = { ty : ty; name : string option }
+
+type local_info = {
+  ty : ty;
+  name : string option;
+  borrowed : bool;
+      (** Holds the bits of a value that something else owns, as a read-only parameter passed by
+          value does: nothing here drops it *)
+}
 
 type function_ = {
   parameters : local list;  (** Locals that arrive as the parameters, in order *)
@@ -265,7 +272,7 @@ let signature (f : function_) =
     returns = f.returns;
   }
 
-let bug format = Printf.ksprintf (fun message -> invalid_arg ("Lir: " ^ message)) format
+let bug format = Compiler_bug.bug ~stage:"Lir" format
 
 (* A cursor always holds its state, which lets code over a cursor that holds
    another be lowered before the cursor's fields are known. *)
@@ -346,6 +353,53 @@ let target_operands = function
   | Indirect { value; _ } | Evidence_call { evidence = value; _ } -> [ value ]
   | Table_call { table; value; _ } -> [ table; value ]
   | Direct _ | Intrinsic _ -> []
+
+(* Visits every place and every operand of a statement or a terminator,
+   each after the places and operands inside it. *)
+type visitor = { place : place -> unit; operand : operand -> unit }
+
+let rec visit_place v (p : place) =
+  List.iter
+    (function Index o -> visit_operand v o | Field _ | Variant_field _ | Deref -> ())
+    p.projections;
+  v.place p
+
+and visit_operand v (o : operand) =
+  (match o with
+  | Copy p | Move p | Address { place = p; _ } | Moved_address p -> visit_place v p
+  | Constant _ -> ());
+  v.operand o
+
+let visit_rvalue v = function
+  | Use o | Unary (_, o) | Convert (o, _) -> visit_operand v o
+  | Binary (_, a, b) ->
+      visit_operand v a;
+      visit_operand v b
+  | Build { fields; _ } -> List.iter (fun (_, o) -> visit_operand v o) fields
+  | Is_variant (p, _) -> visit_place v p
+  | Function_value { environment; _ } -> Option.iter (visit_operand v) environment
+
+let visit_statement v = function
+  | Assign (p, rvalue) ->
+      visit_rvalue v rvalue;
+      visit_place v p
+  | Call { target; arguments; result } -> (
+      List.iter (visit_operand v) (target_operands target);
+      List.iter (visit_operand v) arguments;
+      match result with Returned p | Written p -> visit_place v p | Discarded -> ())
+  | Drop p | Free_block { place = p; _ } -> visit_place v p
+  | Echo { text; length; _ } ->
+      visit_operand v text;
+      visit_operand v length
+
+let visit_terminator v = function
+  | Switch { value; _ } | Yield { value; _ } -> visit_operand v value
+  | Switch_variant { place; _ } -> visit_place v place
+  | Return value -> Option.iter (visit_operand v) value
+  | Fail { message; length; _ } ->
+      visit_operand v message;
+      visit_operand v length
+  | Goto _ | Unreachable -> ()
 
 let successors = function
   | Goto block -> [ block ]
@@ -483,7 +537,7 @@ let canonical (f : function_) =
         statements;
       ignore (map_terminator ~place:(rename number) ~block:identity terminator))
     order;
-  let locals = Array.make !next { ty = Raw Bool; name = None } in
+  let locals = Array.make !next { ty = Raw Bool; name = None; borrowed = false } in
   Array.iteri (fun old index -> if index >= 0 then locals.(index) <- f.locals.(old)) local_number;
   let map_local local = local_number.(local) in
   let map_block block = block_number.(block) in

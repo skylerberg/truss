@@ -1,12 +1,11 @@
 # Truss Code Generator
 
-This document designs stage0's code generation: everything between the type
-checker's output and a program that runs. It follows the decisions in
-[DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and
-[IMPLEMENTATION.md](IMPLEMENTATION.md). It reads the checked form that
-[TYPECHECKER.md](TYPECHECKER.md) describes, and relies on the proofs that
-[PROVER.md](PROVER.md) describes. It is being built in
-[`stage0/codegen/`](stage0/codegen).
+This document describes stage0's code generation, in
+[`stage0/codegen/`](stage0/codegen): everything between the type checker's
+output and a program that runs. It follows the decisions in
+[DESIGN.md](DESIGN.md) and [SYNTAX.md](SYNTAX.md), reads the checked form
+that [TYPECHECKER.md](TYPECHECKER.md) describes, and relies on the proofs
+that [PROVER.md](PROVER.md) describes.
 
 ## What code generation does
 
@@ -33,8 +32,9 @@ Code generation:
 
 It does not:
 
-- check anything about the program. Every error a user can see is reported
-  by an earlier stage. A failure here is a compiler bug.
+- check anything about the program. Every error in a program is reported
+  by an earlier stage. A failure here is a bug in the compiler, or a valid
+  program that stage0 cannot build yet (see [Failures](#failures)).
 - insert run-time checks into a program. Indexes, overflow, division,
   shifts, and `unreachable` have all been proven before a program is built.
   The only checks in a program are the ones it asks for, such as
@@ -58,50 +58,16 @@ checked definitions
                             └──────────── LIR, cached per instance ────────┘
 ```
 
-| OCaml module | Job |
-|---|---|
-| `Ground` | Ground types: the fully monomorphic types that instances, layouts, and the LIR are written in |
-| `Instance` | Instance keys, their C symbols, and collecting the instances reachable from a root |
-| `Convention` | How each Truss parameter and result becomes C parameters and results, for lowering and the emitter alike |
-| `Monomorphic` | The type checker's types, after substitution, as ground types, and the shape of each ground type |
-| `Lir_builder` | Writing a function's LIR a statement at a time, for lowering, generated functions, and intrinsics |
-| `Intrinsics` | The operations of `standard::intrinsic`, written into the caller's LIR |
-| `Reachable` | The instances a root reaches, and test keys |
-| `Build` | Emitting, compiling through the object cache, and linking |
-| `Memory_layout` | Sizes, alignment, field placement, tags, and niches for every ground type |
-| `Lir` | The lowered IR's types, and printing and hashing it canonically |
-| `Lower` | Checked form to LIR: expressions, conditions, patterns, calls, capabilities and `provide`, defaults, derived traits, constants and their evaluators, and the checks in place of proofs |
-| `Drops` | Drop elaboration: what each drop lowering wrote still owns, with flags for conditional moves and field-by-field drops for partial ones |
-| `Yields` | Yielding methods to continuation calls, and pulled cursors to state machines |
-| `Glue` | Generated code for each type: drop, copy, debug output, the binary form code run while compiling writes, and an `any` table's drop |
-| `Emit_c` | LIR to C text |
-| `Toolchain` | Finding and identifying the C compiler and linker, and running them |
-| `Positions` | The table from definitions to files and lines, built at link time |
-| `Startup` | The runtime, and the generated C `main` for programs, test runners, and code run while compiling |
-| `Compile` | The driver: what each instance compiles to, made once, with its drops elaborated; running constants' evaluators; building and running tests and programs; and keeping test results |
+### Why C
 
-Each is its own dune library, like the lexer's modules, under
-`stage0/codegen/`. The larger ones are split into modules of their own,
-each building on the ones before it, and the library's main module lists
-them:
-- **`Lower`:**
-  - `Definitions` (the context, and finding an instance's code and signature)
-  - `Lowering` (one function's state and scopes)
-  - `Targets` (what a call reaches, and evidence)
-  - `Matching` (patterns)
-  - `Calls`, `Values`, `Expressions`, `Statements`
-  - `Constants`, `Derived`, `Generated` (the instances lowering makes)
-
-  The four mutually recursive parts call forward through `Forward`, which
-  `Lower` ties.
-- **`Emit_c`:** `C_runtime`, `C_types`, `C_values`, `C_code`, `C_data`.
-- **`Lir`:** `Ir`, the types and the canonical form; `Encoding`; and
-  `Printing`.
-
-The codegen tests are split the same way, by the part they test, and share
-`Codegen_support`. `Memory_layout` is not called `Layout`, which is the
-lexer's layout stage. Only `Emit_c` and
-`Toolchain` know about C.
+Truss has no foreign code, so the standard library's hashing, crypto, and
+text handling run on Truss's own generated code, and nothing can drop to C
+for speed. The backend must therefore optimize well. QBE, the obvious small
+backend, has no inliner, no 128-bit multiply, no bit-counting, rotate, or
+byte-swap instructions, no `sqrt`, no SIMD, no atomics, and no way to say
+that pointers do not alias. C compilers have all of these, and Truss proves
+no aliasing, which C expresses with `restrict`. Linking libc already needs
+the platform's C toolchain, so emitting C adds almost no dependency.
 
 ### Why one IR before C
 
@@ -158,8 +124,7 @@ about an overflow or a shift:
 
 Division by zero and `Int64.minimum / -1` are proven impossible. Making them
 defined would cost a test per division, so they are the one place where a
-prover bug could still reach undefined behavior. `--check-proofs` catches it
-(see [Testing](#testing)).
+prover bug could still reach undefined behavior.
 
 **Test builds check instead of waiting for proofs.** A test build, and code
 run while compiling, is built with the checks below whether or not the
@@ -184,11 +149,7 @@ An overflow or division check reports the operator's position in the
 code that wrote it, since operators on built-in types are lowered where
 they are written. A `requires` check of an inlined lending or
 yielding method, such as the `List` index's, reports the call's position,
-and one of a function called reports the clause's own. Reporting the
-caller's position there too is left for later; Rust's `#[track_caller]`
-does it by passing the caller's location. `Compile.create ~checks:false` builds
-without the checks, which is how programs are built once the prover
-exists.
+and one of a function called reports the clause's own.
 
 Other flags: `-std=c11 -fno-common -fvisibility=hidden -fno-exceptions
 -fno-asynchronous-unwind-tables`, since nothing unwinds, and
@@ -196,6 +157,13 @@ Other flags: `-std=c11 -fno-common -fvisibility=hidden -fno-exceptions
 might set `errno`; it changes no result. Programs link with `-lm`, since
 `fma` is a call into libm on processors without the instruction, such as
 baseline x86-64.
+
+The emitted C compiles without warnings under `-Wall -Wextra -Werror`,
+which every test that emits C enforces. Two warnings are turned off:
+`-Wno-unused-parameter`, since an adapter ignores its environment and a
+trait's implementation may not read every parameter, and
+`-Wno-unused-but-set-variable`, since `let _ = ...` computes a value that
+nothing reads.
 
 ## Instances
 
@@ -206,9 +174,10 @@ A build starts from roots and compiles only what they can reach:
 - **A program:** its `main`.
 - **A test run:** each test that must run, that is, each test without a
   cached result.
-- **Code run while compiling:** each tagged-template check, each value of a
-  template without interpolation, and each `Map` or `Set` constant to build
-  (see [Code run while compiling](#code-run-while-compiling)).
+- **Code run while compiling:** each constant whose value cannot be folded
+  from its expression, such as a `Map` or a `Set`, and each tagged
+  template's check (see
+  [Code run while compiling](#code-run-while-compiling)).
 
 ### Instance keys
 
@@ -313,9 +282,12 @@ has a ground type, and the layout of each is computed from it.
 **The LIR is canonical.** Locals are numbered with the parameters first and
 then by first use, blocks in reverse postorder from the entry, unused locals
 and unreachable blocks are removed, and every list is in source order. Two
-builds of the same definition give byte-identical LIR, as DESIGN.md requires
-of every stored result. The LIR is stored and hashed in deterministic CBOR,
-like the other stored forms, with the version of code generation. A
+builds of the same definition give byte-identical LIR, as DATABASE.md
+requires of every result. The LIR is hashed in deterministic CBOR (RFC 8949,
+section 4.2), with the version of code generation. The encoder is small
+enough to write directly, which keeps the exact byte format under the
+project's control, and the same one must later be written in Truss and
+produce the same bytes. A
 reference to another instance is encoded by its key, or by a number in a
 test key (see [Test results](#test-results)).
 
@@ -436,7 +408,9 @@ capture nothing, so storing one never stores a pointer into a stack.
 A cursor is the state machine of one pulled yielding method (see
 [Cursors](#cursors-1)). Its layout is a state number, the method's
 parameters, and the locals that are live across a `yield`, with the states
-of any cursors it pulls from inside it. An `own` argument is held as a
+of any cursors it pulls from inside it. A parameter's field is named by its
+place among the parameters that have a size, in `Convention`, which is how
+the code that makes a cursor and the method's state machine agree on it. An `own` argument is held as a
 value the cursor owns and drops, whatever its size, since the cursor may
 outlive the statement that made it. Other arguments are held as their
 parameters take them, a view or a pointer to the caller's place. The type has no name in Truss, and
@@ -499,16 +473,37 @@ use of a moved place. The LIR states each move explicitly. A move is a
 memory copy of the value's bytes, after which the source place holds nothing
 to drop.
 
+### Who owns a value
+
+Every value lowering makes has an owner from its first moment, so that no
+way out of the code can forget it:
+
+- **A scope owns what is dropped as it ends.** A block's scope owns the
+  names bound in it. Each statement has a scope of its own, which owns the
+  statement's temporaries: an argument evaluated before the call, a value a
+  pattern looks into, the text an interpolation builds. Scopes are one
+  stack, so `return`, `?`, `break`, `continue`, and a loop's `stop` at a
+  `yield` each leave exactly the scopes inside where they go, the
+  statements' among them.
+- **A local for a value is made with its owner.** Lowering has no way to
+  make one without: a temporary belongs to the statement being lowered, and
+  a binding to the names around it. The one exception is the slot for the
+  function's result, which is the caller's once the function returns.
+- **A parameter says whose it is.** The function owns an `own` parameter,
+  and drops it unless it gives it away. Any other is the caller's, and one
+  passed by value is marked *borrowed* in the LIR: it holds the bits of a
+  value something else owns, and nothing drops it. An `own` parameter with a
+  default may arrive holding nothing, so its name is bound to a local the
+  function owns, which takes the argument or the default.
+
 ### Drop elaboration
 
-Lowering writes `drop(place)` wherever an owned local goes out of scope, on
-every path out of the scope, including `return`, `?`, `break`, and a loop's
-`stop` at a `yield`, since lowering is where scopes are known. Such a drop
-means "drop whatever this place still owns here", which lowering cannot
-always tell. `Drops` works it out, as Rust's drop elaboration does over MIR:
-a dataflow analysis over each function finds, at each point, which places,
-and which fields of places, may own a value and which may not. Then each
-`drop(place)` becomes:
+Lowering writes `drop(place)` wherever a scope ends, on every path out of
+it, for each thing the scope owns. Such a drop means "drop whatever this
+place still owns here", which lowering cannot always tell. `Drops` works it
+out, as Rust's drop elaboration does over MIR: a dataflow analysis over
+each function finds, at each point, which places, and which fields of
+places, may own a value and which may not. Then each `drop(place)` becomes:
 
 - **nothing,** where the place was moved out on every path
 - **a drop of the whole place,** where nothing in it was moved out
@@ -531,16 +526,30 @@ it. A drop of an element reached through an index stays as it is, since
 elements are never moved out, which is how a `Storage`'s drop drops each
 element.
 
-A function starts with every parameter holding a value, except what the
-pointer for a large result points to: the LIR names that parameter, so the
-first write of the result drops nothing, whatever the caller's memory held
-before.
+A function starts with every parameter it owns holding a value, except
+what the pointer for a large result points to: the LIR names that
+parameter, so the first write of the result drops nothing, whatever the
+caller's memory held before.
 
-An assignment to a place that may still own a value drops that value first,
-after the assignment's own moves, so `items = rebuild(own items)` drops
-nothing and `name = other_name` drops the old `name`. The new value is
-computed into a temporary first, so the old one is dropped only once
-nothing can read it.
+**A write gives a place a value and drops nothing.** Whatever replaces a
+value drops it first, with a `drop` of its own. So an assignment works its
+new value out into a temporary, drops what the place still owns, and moves
+the temporary in: `items = rebuild(own items)` drops nothing, since the
+place was moved from, `name = other_name` drops the old `name`, and
+`names[0] = other_name` drops the old element. A compound assignment and a
+field written by `with` do the same, and each evaluates the place it
+names once. The temporary is also what keeps a call's result apart from
+its arguments: a callee writes a large result through a `restrict` pointer,
+which must not be to a place the callee was also given, as in
+`point = moved(point)`.
+
+`Drops` checks what it is given, so that a mistake in lowering is a
+compiler bug in whatever code has it, not a leak in the runs that reach
+it:
+- no write is to a place that may still own a value
+- where a function returns, none of its locals owns a value still. What a
+  pointer points at is not looked at, since it may be the caller's or a
+  block's.
 
 Drops of types with nothing to drop, such as plain data, are removed.
 Values are dropped in reverse order of declaration. No program can observe
@@ -632,10 +641,6 @@ and its siblings. Full-width multiplication, used by hashing and
   the method. The tree is built deterministically from the arms in order.
 - **`?`** is a tag test and an early return, with the drops elaboration
   inserted.
-- **A quantifier in code** is a loop over its range or collection, through
-  the same `each` a `for` loop calls, that stops at the first element that
-  decides the answer: `forall` at the first false body, `exists` at the
-  first true one. Lowering it is not built yet.
 - **Conditions are lowered as jumps.** `if`, `while`, a guard, and a
   boolean built with `&&`, `||`, `!`, and `is` all go through one lowering
   that branches to a true block and a false one. `&&` and `||` short-circuit
@@ -670,16 +675,10 @@ and its siblings. Full-width multiplication, used by hashing and
 - **Other tags build a `Template`** with the literal text as constant data,
   which costs nothing, and the parts in a list that the tag usually keeps,
   as `SqlQuery` does. Each part becomes the tag's `Part` through the `From`
-  the type checker chose. Stage0 allocates the list of `Literal`s too,
-  each a view of static bytes; making that list static data is left for
-  later.
-- **A template without interpolation is a constant.** Its value is computed
-  while compiling and placed in static memory. `Character"a"` and
-  `UInt8"\n"` are plain numbers. A `Regex"[a-z]+"` that is only read is used
-  in place. Where an owned value is needed, the static value is copied with
-  its copy function. This is never more expensive than building it: every
-  heap block the copy makes was allocated by `from_template` too, and the
-  copy writes no byte that `from_template` did not write.
+  the type checker chose. The list of `Literal`s is allocated too, each a
+  view of static bytes.
+- **`Character"a"` and `UInt8"\n"` are plain numbers.** Every other tagged
+  template calls its tag's `from_template` when it runs.
 
 ### Literals and constants
 
@@ -800,8 +799,16 @@ on after the `yield`, and `break` takes the `yield`'s `stop` path, so the
 method's locals are dropped as the loop leaves them. This gives the plain
 loop the C compiler would make of the loop form, and needs no rewriting of
 the caller into continuation-passing style. The caller then reads the
-method's body, and depends on it. A lending method's `yield` must be
-its last statement, which needs the loop form above to lift.
+method's body, and depends on it.
+
+An inlined lending method runs to its end before the caller's statement
+uses the part, where DESIGN.md has it go on only after that statement. So
+stage0 lowers a lending method only when the two cannot be told apart, and
+refuses any other as one it cannot build yet:
+- each `yield` is the last thing its path does, so nothing of the method is
+  left to run
+- what it lends is none of the method's own values, which are dropped as its
+  body ends
 
 A loop over a yielding method that is already inlined around it, as a
 tree's `each` loops over its subtrees, would be inlined forever. Stage0
@@ -899,9 +906,7 @@ for `parallel` code.
   direct call into the runtime.
 
 A capability call costs one indirect call, which is small next to the I/O
-behind most capabilities. Release builds could call `main`'s real
-implementations directly, since `main` gets exactly the ones it declares.
-Stage0 does not.
+behind most capabilities.
 
 ### `main` and the real implementations
 
@@ -913,20 +918,13 @@ capabilities the same way.
 
 ### Tasks
 
-Stage0 runs each task on an operating-system thread. DESIGN.md requires that
-calls into one implementation never overlap. When a task is spawned, each
-piece of evidence it receives is wrapped in evidence whose vtable takes that
-implementation's lock around every call. Code in the task cannot tell the
-difference, and a fake implementation in a test needs no locking of its own.
-Tests provide a seeded `Tasks` implementation that runs tasks one at a time,
-which needs no threads or locks at all.
+Stage0 runs tasks one after another. The standard library's `Tasks` has
+only `yield_now`, which does nothing, and nothing runs on a second thread.
 
 ## Parallelism
 
 Stage0 runs `parallel` blocks and `parallel for` loops one branch after
-another, which DESIGN.md allows. The type checker and the prover have
-already shown the branches disjoint. A later compiler can hand branches to a thread pool with
-no change to the LIR above the statement that starts them.
+another, which DESIGN.md allows.
 
 ## The system interface
 
@@ -972,22 +970,21 @@ with a message, as DESIGN.md allows for running out of memory.
 
 ### Handles
 
-The intrinsic module also provides a few handle types, such as a file
-descriptor, a process, and a thread. Their drop functions call the
-operating system to release them, such as `close`. Stage0 has the first:
-`Handle`, a file descriptor in an `Int32`, which is neither `Copyable` nor
-`Plain`, with `open_file`, `handle_read`, and `handle_write`. The standard
+The intrinsic module also provides one handle type: `Handle`, a file
+descriptor in an `Int32`, which is neither `Copyable` nor `Plain`, with
+`open_file`, `handle_read`, and `handle_write`. Its drop function calls the
+operating system to release it, with `close`. The standard
 library's `SystemFileRead` and `SystemFileWrite`, and its `FileReader` and
 `FileWriter`, are written on them, as `SystemEnvironment` is on
 `environment_variable`, `SystemProcesses` on `run_process`, which spawns
 a program found on the `PATH` and waits for it, `SystemClock` on
 `clock_now`, and `SystemRandom` on `random_fill`. `SystemTasks.yield_now`
-does nothing, since stage0 runs tasks one after another. `NetworkClient` and
-`NetworkServer` have no real implementation yet, and a `main` that uses one
-is refused with a message saying so. They are the only drops
-that do more than free memory, and they run no Truss code, as DESIGN.md
-requires. Standard-library types such as `File` hold one in a field, so
-their drop functions release the resource by dropping that field.
+does nothing, since tasks run one after another. `NetworkClient` and
+`NetworkServer` have no real implementation, and a `main` that uses one is
+refused with a message saying so. A handle's is the only drop that does more
+than free memory, and it runs no Truss code, as DESIGN.md requires.
+Standard-library types such as `File` hold one in a field, so their drop
+functions release the resource by dropping that field.
 
 ## Program startup and failure
 
@@ -1046,28 +1043,24 @@ again, so absolute lines cost nothing there.
 
 ## Code run while compiling
 
-DESIGN.md runs pure, terminating Truss code while compiling: tagged-template
-checks, the values of templates without interpolation, and the tables of
-`Map` and `Set` constants. That code goes through this same generator, and
-runs in the test runner's workers.
+DESIGN.md runs pure, terminating Truss code while compiling. That code goes
+through this same generator. Stage0 runs it for two things: a constant whose
+value cannot be folded from its expression, and a tagged template's check.
 
 - **It is built for the host, with the target's `USize`.** `USize` is a
   `typedef` in the generated C, so code built to run while compiling for a
   32-bit target uses 32 bits on a 64-bit host and computes what the target
   would compute.
-- **Results are written out by their debug-output functions** in a binary
-  form, and the compiler turns them into static data in C. Values are never
-  shared, so every value is a tree, and writing it out is a simple walk.
-- **The standard library's checkers ship already compiled** with the
-  toolchain, for each host and both widths of `USize`. A dependency's are
-  compiled once per version. A package's own are compiled when they change,
-  like any other instance.
-- **Results are cached** by the hash of the code that ran and its input, so
-  a check runs again only when its literal or its code changes.
+- **Results are written out in a binary form,** and the compiler turns them
+  into static data in C. Values are never shared, so every value is a tree,
+  and writing it out is a simple walk.
+- **A constant's evaluator runs with no time limit,** since DESIGN.md
+  requires its code to be pure and to terminate. A run that fails, as on a
+  stack overflow, is reported as an error.
 
-**What stage0 does.** A constant whose value cannot be folded from its
-expression, such as one that calls a function or is a `Map` or a `Set`, has
-an `Evaluator` instance: it works the value out, writes its binary form with
+A constant whose value cannot be folded from its expression, such as one
+that calls a function or is a `Map` or a `Set`, has an `Evaluator`
+instance: it works the value out, writes its binary form with
 the generated `Encode` functions into the debug buffer, and writes that to
 standard output. The compiler builds it, with everything it reaches, into a
 program for the host, runs it, and reads the bytes back into static data by
@@ -1080,7 +1073,7 @@ the type's shape. The binary form is:
 - a value of zero size writes nothing
 
 The value is worked out once in a compiler's run, and its program's objects
-are cached as any others are. Stage0 has no result cache for constants yet.
+are cached as any others are.
 
 A tagged template's check has a `Template_check` instance, of the tag's
 `from_template` and the template's literal texts: it builds a template of
@@ -1144,19 +1137,33 @@ finds test results already done, so the key contains no names. It is
 composed from the instances' own keys, so that an edit changes the keys of
 the tests that can reach the edited code, and costs what can reach it:
 
-- **An instance's own hash** is the hash of its LIR with every reference to
-  another instance replaced by that instance's place in the list of what it
-  refers to, and every path, in a type or a position, replaced by a number
-  given in the order paths are first met, since a type's path is a name too.
-- **The key of everything an instance can reach** is the hash of its own
-  hash and of the key of each instance it refers to, in order.
-- **Instances that reach each other are keyed as a group,** since a key
-  cannot be made of keys that are made of it. The groups are found among
-  everything the wanted tests reach, and an instance of a group is keyed by
-  the whole group, as a walk from the instance reaches it: each of the
-  group's instances as its own hash and what it refers to, a number for an
-  instance of the group and a key for any other. DATABASE.md's "Composed
-  keys" describes the queries.
+- **An instance's own hash** is the hash of its LIR with each instance it
+  refers to written as that instance's place in the list of what it refers
+  to, and each path as a number given in the order paths are first met. It
+  holds no name, so renaming or moving a definition changes no hash. A
+  constant worked out by running code refers to its evaluator, whose code is
+  what decides its value.
+- **The key of everything an instance can reach** is its own hash and the
+  key of each instance it refers to, in order.
+- **Instances that reach each other are keyed as a group.** A key cannot be
+  made of keys that are made of it. So the groups of instances that reach
+  each other are found, by Tarjan's algorithm, among everything the wanted
+  tests and programs reach, and an instance of a group is keyed by the group
+  as a walk from the instance reaches it: each of the group's instances, in
+  the order the walk first reaches them, as its own hash and what it refers
+  to, a number for an instance of the group and a key for any other. An
+  instance that refers only to itself is no group, since its own hash marks
+  that.
+- **The wanted tests and programs are an input.** Finding groups needs
+  somewhere to start, and starting from every test would lower every test's
+  code when one test is asked about. So a driver says which tests' keys it
+  wants before it asks for them, and the database adds them to this input.
+  A key asked for without that is an error wherever the code reaches itself.
+- **The groups come out the same unless one forms or changes.** Finding them
+  reads what every reached instance refers to, which changes when a call is
+  added or removed, and its result changes only when a group does. It is of
+  an earlier phase than the keys, so an edit that changes no group costs the
+  keys nothing but the keys of what can reach the edit.
 - **The test's key** is the key of everything the test's own instance can
   reach, with the version of code generation and the target. `USize` is a
   `typedef` in the generated C, so the LIR is the same for 32-bit and 64-bit
@@ -1167,6 +1174,11 @@ what the test can run changes it. A layout change appears in the LIR of
 every instance that uses the layout, so it changes the key too. A function
 that a thousand tests reach is hashed once, and an edit to it makes its own
 hash again, and the keys of what reaches it.
+
+Finding the groups walks every instance the wanted tests reach, when what
+any of them refers to changes. That is the one step here whose cost follows
+the tests asked about and not the change, and it reads only lists of what
+instances refer to.
 
 `truss test` keeps results in the code database's store, as
 [DATABASE.md](DATABASE.md#exact-keys) describes, and builds and runs only
@@ -1179,28 +1191,91 @@ which the key leaves out so that moving code keeps its results, so those
 tests run again, as do tests that ran out of time or crashed, which the
 machine may have caused. A sanitized run keeps nothing.
 
+## Failures
+
+Code generation fails in three ways, and tells them apart, since each is
+for someone else to act on:
+
+| Failure | What it is | How it is reported |
+|---|---|---|
+| A compiler bug | An invariant of code generation does not hold: a pass met LIR it cannot have been given, or the verifier refused what a pass made | An exception that carries the stage that found it, what it found, and what the compiler was doing, such as the instance being lowered. Nothing in code generation catches it: the command line reports it once and exits with status 2. |
+| A program stage0 cannot build yet | The program is valid, and lowering has no code for something in it, which [Not built](#not-built) lists | An exception that carries what it is and its position. The driver gives it as the build's error, with the file and line. |
+| A build that cannot be done | The C compiler or the linker refused, or a program run while compiling ended badly | The build's error, with what they wrote |
+
+The two exceptions are every stage's to use. A broken invariant that the
+OCaml standard library finds first, such as a missing list element, is
+turned into a bug where an instance is lowered, so no failure of the
+compiler reads as a failure of the program.
+
+### The verifier
+
+`Verify` checks the LIR, so that a mistake in lowering or in a pass is a
+compiler bug that names its instance, instead of C that is wrong in a way
+the C compiler cannot see. Each instance is a C file of its own, which
+declares what it calls from its own side, so a caller and a callee that
+disagree compile and link without complaint.
+
+Each instance is checked as it is lowered, once its passes have run:
+- every block a terminator goes to and every local a place names exists,
+  and every place fits the type it projects from
+- no `yield` is left
+- a function with a result returns one on every `return`, and one without
+  returns none
+- a call gives its target as many arguments as the target's signature
+  takes, and writes a large result to a place it does not also pass by
+  address
+- a value that has a size is built as a record or a variant its type has,
+  with fields the type has, since the emitter leaves out a field it does
+  not find in the layout, as it must for a field of no size
+- a call of a nested function names it with the signature it has
+
+Everything a build links is checked together before any C is emitted:
+- each call names its callee with the signature the callee has, as does
+  each entry of a table and each named function used as a value
+- a drop reaches a drop function
+- each address of static evidence, of a table, or of a constant reaches one
+- what an instance compiles to is the instance that was asked for
+
 ## Building
+
+### Lowering
+
+Code generation's lowering is a query, so a test run after an edit lowers
+only the instances the edit reached:
+
+- **An instance's LIR** is a query keyed by the instance and by how it is
+  lowered: the target's widths, and whether the program checks what the
+  prover would prove. A pulled method's version, whose locals make its
+  cursor's fields, is a query of its own.
+- **Each computation lowers in a context of its own,** made from the
+  query's reads. A layout or a piece of generated code worked out on the way
+  is read through that query, never cached where another query could use it
+  without reading what it came from.
+- **A constant that is worked out by running code** is the one result a
+  query cannot make, since running code is not a function of reads. Its
+  query says so instead, and the build runs the constant's evaluator, whose
+  code is lowered by the same query, and puts the value in the program. Only
+  that constant's data depends on running code; every instance that uses it
+  refers to it by name.
 
 ### Caching
 
-Lowering is a query, kept current by the code database as DATABASE.md's
-"Lowering" describes, and so are each instance's own hash, what it refers
-to, and its key. Each of these results is kept in the store under what it
-read, so a worktree that reaches an instance another worktree lowered finds
-it done. The steps after lowering are kept under exact keys, the hash of
+Lowering is a query of the code database, and so are each instance's own
+hash, what it refers to, and its key (see [Lowering](#lowering) and
+[Test results](#test-results)). [DATABASE.md](DATABASE.md) describes how
+such results are kept current, and found by any worktree that reads the
+same. The steps after lowering are kept under exact keys, the hash of
 exactly the input each consumed:
 
 | Output | Kept by |
 |---|---|
 | An instance's LIR | A query on the instance, which reads the checked forms it lowers, the signatures it calls, the layouts it uses, and the bodies it inlines |
-| An instance's C | The LIR's hash and the emitter's version |
 | An object file | The C's text, the C compiler's identity (its `--version` output and path), and the flags, which name the target |
-| A program | The objects, the anchors file, and the linker's identity |
 
-Early cutoff happens at the LIR: if an instance's LIR comes out the same, no
-C is written, nothing is compiled, and no test that reaches it runs again.
-The C compiler's identity is only in the object key, so upgrading clang
-recompiles objects but invalidates no test result.
+Early cutoff happens at the LIR: if an instance's LIR comes out the same, so
+does its C, so its object is found, nothing is compiled, and no test that
+reaches it runs again. The C compiler's identity is only in the object key,
+so upgrading clang recompiles objects but invalidates no test result.
 
 ### C files and optimization
 
@@ -1242,64 +1317,79 @@ reaches, as a build does, without compiling them, and `build` refuses an
 
 ### Linking
 
-Stage0 links in full every time, as IMPLEMENTATION.md records: with lld or
-mold on Linux and the system linker on macOS, against the platform's libc.
-The standard library is linked from its cached objects. The linker is given
-the objects' names in a file, since a program of a few thousand instances
-names more objects than a command line can hold. Making linking incremental
-is deferred.
+Stage0 links in full every time: with lld or mold on Linux and the system
+linker on macOS, against the platform's libc. It is the one step of an
+everyday edit whose cost grows with the whole program. The standard library
+is linked from its cached objects. The linker is given the objects' names in
+a file, since a program of a few thousand instances names more objects than
+a command line can hold.
 
-## Testing
+## Not built
 
-The tests follow IMPLEMENTATION.md's rules for testing: each states one
-fact about a small input, and there are no golden files.
-
-- **Focused tests.** A test gives a small definition and asserts exact facts
-  about what code generation makes of it, rather than comparing a dump of
-  its whole LIR. For example: a `for` over a range of `Int64` lowers to a
-  loop with no call; a field moved out with `own` is dropped exactly once,
-  on every path; `Option[List[Int64]]` has no tag; a `mut` parameter becomes
-  a `restrict` pointer. A test that runs a small program asserts its output
-  and exit status.
-- **The generated C is checked strictly.** Every focused test that emits C
-  compiles it with `-Wall -Wextra -Werror` and a list of warnings known not
-  to apply to generated code, which catches emitter bugs that a C compiler
-  would otherwise accept quietly. The list is `-Wno-unused-parameter`, since
-  an adapter ignores its environment and a trait's implementation may not
-  read every parameter, and `-Wno-unused-but-set-variable`, since
-  `let _ = ...` computes a value that nothing reads.
-- **Output is deterministic.** A test lowers and emits the same definition
-  twice and checks that the LIR and C are byte-identical.
-- **The documents' complete programs build and run,** each as a test of its
-  own.
-- **Tools, run by hand, in `stage0/tools/`:**
-  - **Sanitizers.** Build programs with AddressSanitizer and
-    UndefinedBehaviorSanitizer. A memory error in Truss code can only come
-    from a bug in the compiler or the prover, so any report is one. Being
-    able to do this is one benefit of emitting C. `truss test --sanitize` and
-    `truss run --sanitize` build this way, and `TRUSS_SANITIZE=1 dune test`
-    builds every codegen test this way.
-  - **`--check-proofs`.** A compiler flag, for testing the compiler only,
-    that builds a program with the checks a test build has. A failed check
-    in code whose obligations were all proven reports a prover bug with the
-    obligation's position, which checks the prover against real
-    executions.
-  - **Development and release agree.** Run programs built both ways and
-    compare their outputs. Later, the compiler written in Truss is checked
-    against stage0 the same way.
-
-  Each problem a tool finds becomes a focused test of its own.
-
-## Open questions
-
-- **Program arguments that are not UTF-8.** `main` takes `List[String]`, and
-  a `String` is always UTF-8, but a Unix argument can be any bytes. Rust's
-  `std::env::args` panics on such an argument, Python substitutes escapes,
-  and some programs replace bad sequences with U+FFFD. The language should
-  decide. Until then, stage0 replaces bad sequences with U+FFFD.
-- **Static or dynamic libc on Linux.** Stage0 links dynamically on both
-  platforms. A static program with musl would match IMPLEMENTATION.md's
-  "single binary" more closely.
+- **Programs built without checks.** A program is to be built without the
+  checks a test build has, once its proofs are done. Stage0 builds programs
+  with the checks too. A flag for testing the compiler, `--check-proofs`, is
+  then to build a program with the checks: a failed check in code whose
+  obligations were all proven reports a prover bug with the obligation's
+  position, which checks the prover against real executions.
+- **A `requires` check that reports its caller's position.** One of a
+  function called reports the clause's own. Rust's `#[track_caller]` does
+  this by passing the caller's location.
+- **A constant's value kept between runs.** It is worked out again in each
+  run of the compiler.
+- **Checkers shipped compiled.** The standard library's are to ship already
+  compiled with the toolchain, for each host and both widths of `USize`, and
+  a dependency's to be compiled once per version.
+- **A quantifier in code.** It is to be a loop over its range or collection,
+  through the same `each` a `for` loop calls, that stops at the first
+  element that decides the answer: `forall` at the first false body,
+  `exists` at the first true one.
+- **A lending method that goes on after the caller's statement.** One that
+  does more after its `yield`, or lends a value it made, or lends through a
+  call to itself, is refused (see
+  [Loops and lending calls](#loops-and-lending-calls)).
+- **A lambda in a yielding method that is pulled,** and in a pulled method
+  a default for a parameter that is passed by address or is a view.
+- **A range without both of its ends, as a value.**
+- **A template without interpolation as a constant.** Its value is to be
+  computed while compiling and placed in static memory. A `Regex"[a-z]+"`
+  that is only read is then used in place, and where an owned value is
+  needed, the static value is copied with its copy function. This is never
+  more expensive than building it: every heap block the copy makes was
+  allocated by `from_template` too, and the copy writes no byte that
+  `from_template` did not write.
+- **A template's list of literals as static data.** It is allocated.
+- **Tasks on threads.** Each task is to run on an operating-system thread.
+  DESIGN.md requires that calls into one implementation never overlap, so
+  when a task is spawned, each piece of evidence it receives is wrapped in
+  evidence whose vtable takes that implementation's lock around every call.
+  Code in the task cannot tell the difference, and a fake implementation in
+  a test needs no locking of its own. A seeded `Tasks` implementation for
+  tests runs tasks one at a time, and needs no threads or locks at all.
+- **`parallel` branches at once.** Branches can go to a thread pool with no
+  change to the LIR above the statement that starts them.
+- **Handles for processes and threads, and real implementations of
+  `NetworkClient` and `NetworkServer`.**
+- **Keeping an instance's C and a linked program.** The C is emitted again
+  for each build, and found as an object by its text. It could be kept by
+  the LIR's hash and the emitter's version, and a program by its objects,
+  the anchors file, and the linker's identity.
+- **Incremental linking.** The likely way is a long-running test runner that
+  keeps the program loaded, loads only the definitions that changed as a
+  small shared library, and forks test workers from itself. Truss has no
+  mutable global state, so swapping code in a running process needs no state
+  to be carried over.
 - **Release-only optimizations:** calling `main`'s real capability
-  implementations directly, and giving proven `requires` clauses to the C
-  compiler as assumptions. Both are deferred.
+  implementations directly, since `main` gets exactly the ones it declares,
+  and giving proven `requires` clauses to the C compiler as assumptions.
+- **Comparing development and release builds.** A tool would run programs
+  built both ways and compare their outputs, and later check the compiler
+  written in Truss against stage0 the same way.
+- **Program arguments that are not UTF-8** are not decided. `main` takes
+  `List[String]`, and a `String` is always UTF-8, but a Unix argument can be
+  any bytes. Rust's `std::env::args` panics on such an argument, Python
+  substitutes escapes, and some programs replace bad sequences with U+FFFD.
+  Stage0 replaces bad sequences with U+FFFD.
+- **Static or dynamic libc on Linux** is not decided. Stage0 links
+  dynamically on both platforms. A static program with musl would match
+  IMPLEMENTATION.md's "single binary" more closely.

@@ -1,5 +1,5 @@
 (* The prover deciding a tagged template's check by running it, through
-   code generation. See PROVER.md, "Running code while proving". *)
+   code generation. *)
 
 open Harness
 open Codegen_support

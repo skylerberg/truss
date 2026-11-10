@@ -1,4 +1,4 @@
-let bug format = Printf.ksprintf (fun message -> invalid_arg ("Glue: " ^ message)) format
+let bug format = Compiler_bug.bug ~stage:"Glue" format
 
 type kind =
   | Shape of Memory_layout.shape
@@ -225,7 +225,7 @@ let copy t ty =
     | Returned _ | Nothing -> None
   in
   let parameter = Convention.parameter t.env Read ty in
-  let self_local = Option.map (fun ty -> local b ~name:"self" ty) parameter in
+  let self_local = Option.map (fun ty -> local b ~name:"self" ~borrowed:true ty) parameter in
   let self : Lir.place =
     match (parameter, self_local) with
     | Some (Pointer _), Some local -> { root = Local local; projections = [ Deref ] }

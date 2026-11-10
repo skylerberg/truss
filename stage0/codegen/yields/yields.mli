@@ -14,10 +14,10 @@
    it calls the body and always goes on. *)
 val loop_form : Memory_layout.env -> body:Ground.function_type -> Lir.function_ -> Lir.function_
 
-(* The fields of a cursor over the method: [state], a [UInt32], then each
-   parameter and each local live where a [yield] resumes or stops, named
-   [local] and its number. This is the shape of the method's [Cursor]
-   type. *)
+(* The fields of a cursor over the method: its state, a [UInt32], then each
+   parameter, named as [Convention.cursor_parameter] names it, and each
+   local live where a [yield] resumes or stops, named [local] and its
+   number. This is the shape of the method's [Cursor] type. *)
 val cursor_fields : Memory_layout.env -> Lir.function_ -> (string * Memory_layout.member) list
 
 (* [next]: takes a writable pointer to the cursor, of type [cursor], and
@@ -28,6 +28,12 @@ val cursor_next :
 
 (* The cursor's drop function: in each state, the [stop] path of the
    [yield] the method stopped at; before it starts, a drop of each
-   parameter in [owned]; once it has ended, nothing. *)
+   parameter in [owned]; once it has ended, nothing. A parameter in
+   [owned] with a mask's local and a bit is one with a default: its
+   argument is there, to drop, only when the mask has that bit. *)
 val cursor_drop :
-  Memory_layout.env -> cursor:Ground.ty -> owned:Lir.local list -> Lir.function_ -> Lir.function_
+  Memory_layout.env ->
+  cursor:Ground.ty ->
+  owned:(Lir.local * (Lir.local * int) option) list ->
+  Lir.function_ ->
+  Lir.function_

@@ -1,10 +1,10 @@
 # Truss Parser
 
-This document designs the stage0 parser. It implements the syntactic grammar
-in [GRAMMAR.md](GRAMMAR.md), reads the tokens described in
-[LEXER.md](LEXER.md), and follows the rules in [SYNTAX.md](SYNTAX.md) and
-[DESIGN.md](DESIGN.md). Where this design departs from those documents, it
-says so. The parser is built, in [`stage0/`](stage0).
+This document describes the stage0 parser, in [`stage0/`](stage0). It
+implements the syntactic grammar in [GRAMMAR.md](GRAMMAR.md), reads the
+tokens described in [LEXER.md](LEXER.md), and follows the rules in
+[SYNTAX.md](SYNTAX.md) and [DESIGN.md](DESIGN.md). Where it departs from
+those documents, it says so.
 
 ## What the parser does
 
@@ -54,50 +54,9 @@ token array ──▶ Split ──one token slice per definition──▶ Parse 
                   └──────────────────▶ diagnostics ◀────────┴──────────┘
 ```
 
-The tree has libraries of its own, so that name resolution, the formatter,
-and the language server depend on it without depending on the parser:
-
-| Library | Job |
-|---|---|
-| `Syntax` | The tree types, shared by every later stage |
-| `Syntax_walk` | Visits the expressions of a tree, for checks that look at every one |
-| `Syntax_print` | Prints a tree as a compact S-expression, for tests and `stage0/tools/debug` |
-
-The parser is one dune library, which depends on `Token`, `Source`,
-`Diagnostic`, and the tree, and holds:
-
-| Module | Job |
-|---|---|
-| `Split` | Finds the `use` lines and each definition's token slice |
-| `Cursor` | Reads a token slice: the current token, lookahead, reporting errors, and the jumps recovery makes |
-| `Atoms` | Tree nodes, names, module prefixes, string literals, what can start an expression or a statement, and modes, which every part of the grammar uses |
-| `Cost_word` | The words of `cost` clauses, with the one table of their spellings, and reading one, with a fix for a misspelling |
-| `Parse_pattern` | Patterns |
-| `Parse_type` | Types, generic parameters and bounds, and clauses |
-| `Parse_expression` | Expressions, with the operators' levels |
-| `Parse_statement` | Blocks and statements |
-| `Parse_hooks` | The entry points an earlier part calls in a later one, since types, clauses, expressions, and statements contain each other; `Parse_statement` sets them |
-| `Parse_definition` | Definitions, and the members of traits, `impl`s, and capabilities |
-| `Operators` | The check for combinations of operators that need parentheses |
-| `Habits` | The messages and fixes for syntax from other languages |
-| `Check` | Rules that need the whole tree of a definition |
-| `Parser` | The entry points, for a whole file and for each piece of it |
-
-`Parser.parse : Source.t -> Token.t array -> Syntax.file * Diagnostic.t list`
-parses a whole file. The background process parses a file one piece at a
-time instead: `Parser.split` finds the pieces, a piece being a `use` line or
-a definition, and `Parser.definition` and `Parser.use_line` each parse one
-piece, so a piece whose text did not change keeps what it parsed to. See
-[Parsing one definition](#parsing-one-definition).
-
-Types, clauses, and expressions are one module because they contain each
-other: a statement has a type annotation, a function type in parentheses can
-carry a `cost` clause, and a clause holds expressions. Patterns contain none
-of them, and are their own module.
-
-`stage0/tools/debug`, a tool of this repository that is not part of the
-`truss` command, prints a file's trees and its diagnostics with `tree FILE`,
-or with `--json`, only the diagnostics, as JSON.
+A file is parsed whole, or one piece at a time: a piece is a `use` line or a
+definition, and a piece whose text did not change keeps what it parsed to.
+See [Parsing one definition](#parsing-one-definition).
 
 ### Splitting a file into definitions
 
@@ -150,9 +109,11 @@ Each definition is parsed from its own token slice, with a fresh `Cursor`.
 
 ### Recursive descent with no backtracking
 
-IMPLEMENTATION.md chose a hand-written recursive-descent parser for its error
-messages, with `grammar/truss.mly` as a reference. The grammar makes that
-cheap. Every type position and every pattern position is known from the
+The parser is hand-written recursive descent, for its error messages. A
+second parser, built by Menhir from `grammar/truss.mly` for tests and tools
+only, is the reference it is checked against: both must accept every piece
+of every example in the documents, and accept and reject the same mutated
+pieces. The grammar makes a hand-written parser cheap. Every type position and every pattern position is known from the
 keyword or punctuation before it, so the parser never has to guess which
 sub-grammar it is in. The parser never backtracks, and never looks more than
 three tokens ahead:
@@ -189,14 +150,14 @@ whitespace, and `truss fmt` decides all whitespace. What the formatter needs
 beyond the program is small, and the tree keeps it:
 
 - **How each literal was written,** through its span into the definition's
-  source text. Values are in the tree too, for hashing.
+  source text. Values are in the tree too.
 - **Blank lines.** A statement, member, `match` arm, and definition records
   whether a blank line came before it, from the lexer's `blank_line_before`.
   `truss fmt` keeps them, collapsing a run of blank lines to one, as Go,
-  Rust, and Gleam do. Hashing ignores this.
+  Rust, and Gleam do.
 - **Parentheses.** A parenthesized expression is a `Parenthesized` node, so
   that the check for operators that need parentheses can see them, and the
-  formatter can keep them. Hashing ignores the node and hashes what is inside.
+  formatter can keep them.
 
 Everything else, such as trailing commas, the optional `|` before the first
 variant, and where lines break, is layout. The formatter decides it, so the
@@ -551,20 +512,7 @@ as if the code had been fixed.
 
 Habits that are names, such as `null`, `nil`, and a second argument without a
 label, depend on what names mean, so name resolution and type checking
-report them (see [TYPECHECKER.md](TYPECHECKER.md)). These are
-added once the compiler works:
-
-| Written *Later* | Fix |
-|---|---|
-| `(a, b)` as an expression | "Truss has no tuples", pointing to a record |
-| `pair.0` | "Truss has no tuples" |
-| `Shape.Circle(radius)` in a pattern | `Circle(radius)` |
-| `Shape::Circle` | `Shape.Circle` |
-| `fn first<T>(...)`, `List<String>` in a type | `fn first[T](...)`, `List[String]` |
-| `fn(x: Int64) { ... }` | `fn(x) { ... }`, since lambdas have no annotations |
-| `println!(...)`, `vec![...]` | "Truss has no macros", with `Console.print_line(...)` and `[...]` |
-| `!response is Ok(_)` | `!(response is Ok(_))`, because `!` binds tighter than `is` |
-| `a ?? b`, `a ?: b` | `a.unwrap_or(b)` |
+report them (see [TYPECHECKER.md](TYPECHECKER.md)).
 
 ## Interfaces to other stages
 
@@ -602,66 +550,28 @@ added once the compiler works:
   code cannot be added without deciding. TYPECHECKER.md decides how
   resolution registers a broken definition and which of its parts it
   checks.
-- **Hashing** walks the tree and ignores spans, node ids, `Parenthesized`
-  nodes, blank lines, and how literals were written, as DESIGN.md's hash
-  format says. Ids follow from the tree's structure, so hashing them would
-  add nothing.
-- **`truss fmt`** prints the tree, taking literals from the definition's
-  source text and keeping a blank line where one was. A file with any parse
-  error is left unchanged.
-- **The language server** maps a position to a node through the spans, after
-  adding each definition's base.
-- **Incremental work.** The background process re-lexes a changed file, and
-  `Parser.split` finds its pieces. A definition whose source text is
-  unchanged keeps its tree and its diagnostics, which are the same because
-  both are relative to the definition. Only the definitions whose text
-  changed are parsed again, with `Parser.definition`.
+- **The formatter and the language server,** which are not built, are
+  served by what the tree keeps: a literal is printed from the definition's
+  source text, a blank line is kept where one was, and a position maps to a
+  node through the spans, after adding each definition's base.
+- **The code database** lexes a changed file again and splits it into its
+  pieces. A definition whose source text is unchanged keeps its tree and its
+  diagnostics, which are the same because both are relative to the
+  definition. Only the definitions whose text changed are parsed again.
 
-## Testing
+## Not built
 
-The tests follow IMPLEMENTATION.md's rules for testing: each states one fact
-about a small input, and there are no golden files.
+- **Extra help for more habits from other languages.** Each is already an
+  error, and until it is built gets the plain error the grammar implies:
 
-- **Focused tests** in `stage0/test/parser_tests.ml`, for each piece of the
-  grammar, and `parser_rules_tests.ml`, for whole definitions, precedence,
-  checks, recovery, and other languages' habits, grouped by section of this
-  document and sharing `parse_support`. `parser_documents_tests.ml` checks the
-  documents' examples and the reference grammar. A test gives a small input and asserts its tree, printed
-  compactly by `Syntax_print`, or its one diagnostic: the code, where it
-  starts, and the exact text each fix produces, which must parse cleanly.
-- **The documents' examples parse cleanly.** Each ```` ```truss ```` block in
-  a Markdown document at the root of the repository is a test of its own.
-  Many blocks mix definitions with statements, or show a signature with no
-  body to focus on it, so these tests split a block into pieces the way a
-  file is split, and parse each as a `use` line, a definition, a signature
-  without a body, or a statement. `Parser.example_definition` and
-  `Parser.example_statement` parse the last three, and exist only for these
-  tests and the tools that use the examples. Telling the kinds of piece
-  apart is the job of `Reference.Snippet`, in the test-only `Reference`
-  library.
-- **Both parsers agree on the documents.** The `Reference` library is a
-  parser built by Menhir from `grammar/truss.mly`, only for tests and tools.
-  It parses each piece of each example with the grammar's entry point for its
-  kind, and must accept every piece the hand-written parser accepts. A
-  disagreement points at a bug in one of them, or at a difference between
-  the code and GRAMMAR.md.
-- **The documents agree with the code.** A test checks GRAMMAR.md's list of
-  words the parser recognizes by spelling against the parser's own list.
-- **Moving a definition changes nothing.** Adding lines above a definition
-  gives an identical tree, with identical ids, and identical diagnostics
-  for it.
-- **Ids are unique and come after the ids of their children,** checked on
-  a definition by a test, and on mutated examples by the fuzzer.
-- **The fuzzer**, `stage0/tools/fuzz`, is run by hand. It also checks that
-  mutated examples never make the parser raise, that every tree's spans are
-  in bounds and inside the node around them, that every fix removes its
-  diagnostic and adds no other, and that both parsers accept and reject the
-  same mutated pieces. A lexer's fix is judged by the lexer's diagnostics
-  alone, since closing a bracket can bring back a parser error the inserted
-  closer was hiding. The reference grammar cannot judge everything: it
-  accepts any name where a cost word goes, and reads a string as one token,
-  so a piece whose error is in a `cost` clause or is about an interpolation
-  is not compared, nor is one holding a closer the lexer inserted. Each
-  problem the fuzzer finds becomes a focused test.
-- **The benchmark**, `stage0/tools/benchmark`, measures how fast files lex
-  and parse.
+  | Written | Fix |
+  |---|---|
+  | `(a, b)` as an expression | "Truss has no tuples", pointing to a record |
+  | `pair.0` | "Truss has no tuples" |
+  | `Shape.Circle(radius)` in a pattern | `Circle(radius)` |
+  | `Shape::Circle` | `Shape.Circle` |
+  | `fn first<T>(...)`, `List<String>` in a type | `fn first[T](...)`, `List[String]` |
+  | `fn(x: Int64) { ... }` | `fn(x) { ... }`, since lambdas have no annotations |
+  | `println!(...)`, `vec![...]` | "Truss has no macros", with `Console.print_line(...)` and `[...]` |
+  | `!response is Ok(_)` | `!(response is Ok(_))`, because `!` binds tighter than `is` |
+  | `a ?? b`, `a ?: b` | `a.unwrap_or(b)` |

@@ -7,7 +7,7 @@ module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
 
-let bug format = Printf.ksprintf (fun message -> invalid_arg ("Lower: " ^ message)) format
+let bug format = Compiler_bug.bug ~stage:"Lower" format
 
 type context = {
   database : Query.context;
@@ -88,6 +88,26 @@ type code = {
 }
 
 let demand context query key = Query.demand context.database query key
+
+(* The code of a function lowering writes itself, which has no source: only
+   what its positions are relative to, what its generic parameters stand
+   for, and its result. *)
+let unwritten ~definition_key ~anchor ~substitution ~result =
+  {
+    definition_key;
+    anchor;
+    text = "";
+    checked = Checked.create 0;
+    parameters = [];
+    body = { statements = []; span = S.Span.make 0 0; id = 0 };
+    result;
+    parameter_types = [];
+    substitution;
+    uses = [];
+    real = [];
+    has_defaults = false;
+    requires = [];
+  }
 
 let key_of context path =
   match demand context Interface.Summary.key path with
@@ -407,15 +427,18 @@ let evidence_for (substitution : T.substitution) (uses : T.capability list) =
   |> List.filter (fun path -> not (Path.equal path panic_path))
   |> List.sort_uniq Path.compare
 
+(* How a function's result is passed, and whether it returns at all. *)
+let result_of context substitution (result : T.result) =
+  match result with
+  | Returns Never -> (Convention.Nothing, false)
+  | Returns ty ->
+      (Convention.result context.env (Monomorphic.ground context.monomorphic substitution ty), true)
+  | Yields _ | Lends _ -> (Convention.Nothing, true)
+
 let lir_signature context substitution ~(parameters : (T.mode * T.ty) list) ~has_defaults
     ?(uses = []) (result : T.result) : Lir.signature * Convention.result =
   let ground ty = Monomorphic.ground context.monomorphic substitution ty in
-  let result_ty, returns =
-    match result with
-    | Returns Never -> (Convention.Nothing, false)
-    | Returns ty -> (Convention.result context.env (ground ty), true)
-    | Yields _ | Lends _ -> (Convention.Nothing, true)
-  in
+  let result_ty, returns = result_of context substitution result in
   let written =
     List.filter_map
       (fun (mode, ty) -> Convention.parameter context.env (Monomorphic.mode mode) (ground ty))

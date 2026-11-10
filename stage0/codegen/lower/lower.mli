@@ -29,8 +29,7 @@ type context = {
 val context : ?checks:bool -> Query.context -> Memory_layout.target -> context
 
 (* The LIR of an instance of a function, a method, an [impl]'s method, or a
-   test, before drop elaboration. Raises [Invalid_argument] for an instance
-   that is not code from source. *)
+   test, before drop elaboration. *)
 val instance : context -> Instance.key -> Lir.t
 
 (* A constant's static data: its value worked out exactly from its
@@ -43,10 +42,10 @@ val constant : context -> Path.t -> Lir.data
 val evaluator : context -> Path.t -> Lir.t
 
 (* The pulled version of a yielding method, before drop elaboration: its
-   body with each [yield] left in place for yield lowering, and the locals of
-   its parameters that the cursor's drop must drop when the method never
-   started. *)
-val pulled : context -> Ground.yielding -> Lir.function_ * Lir.local list
+   body with each [yield] left in place for yield lowering, and what a
+   cursor that has not started owns, as [Yields.cursor_drop] takes it. *)
+val pulled :
+  context -> Ground.yielding -> Lir.function_ * (Lir.local * (Lir.local * int) option) list
 
 (* What a cursor's [next] returns: an [Option] of what the method yields. *)
 val cursor_result : context -> Ground.yielding -> Ground.ty

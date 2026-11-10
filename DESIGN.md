@@ -2,40 +2,43 @@
 
 This document records what Truss code means and why. For how code is written,
 see [SYNTAX.md](SYNTAX.md). For the goals behind these decisions, see
-[GOALS.md](GOALS.md). Nothing is built yet. This is the design agreed so far.
+[GOALS.md](GOALS.md). It describes the language, not a compiler: what
+stage0 builds of it, and what it does not yet, is in the documents of
+stage0's stages, which [IMPLEMENTATION.md](IMPLEMENTATION.md) lists.
 
 ## Source code
 
 - **Text files are the source of truth.** Programmers and tools edit ordinary
   files.
-- **The compiler keeps each top-level definition by its content.** It splits
-  a file into definitions, parses each, and resolves its names. A
-  definition's tree holds no whitespace, no position in the file, and not
-  the order of different kinds of clause, so reformatting a file, or moving
-  a definition within it, changes no tree and never triggers a rebuild. The
-  order of clauses of one kind is part of the tree: each `requires` may rely
-  on the ones before it, as in Dafny, so swapping two of them can change
-  what they mean.
-- **The compiler knows what each result read, and keeps each result under
-  what it read.** A change is pushed to the results that read what changed,
-  so builds, tests, and proofs redo only the work a change actually affects.
-  A result that any worktree, branch, or process already computed from the
-  same content is found, not computed again. See
-  [Incremental builds](#incremental-builds) and [DATABASE.md](DATABASE.md).
-- **A function's signature and body are separate results.** Type checking and
-  proofs in callers read only the signature. Changing a body without
-  changing its signature, such as filling in a `todo`, re-checks no callers.
-  Only code generation and the affected tests run again. The signature is
-  itself two results: its interface, which callers' types depend on, and its
-  contract, the `requires`, `ensures`, `decreases`, and `cost` clauses, which
-  only callers' proofs depend on. Strengthening an `ensures` re-proves
-  callers but type-checks none of them again.
+- **A change costs what it changes.** GOALS.md asks that building, testing,
+  and proving cost O(change), not O(project). The rules in this section are
+  what the language promises so that they can. How the toolchain keeps
+  results, and finds what a change reaches, is in
+  [DATABASE.md](DATABASE.md).
+- **Each top-level definition stands on its own.** What a definition is does
+  not depend on where it is in its file, on the definitions around it, or on
+  how it is laid out, so reformatting a file, or moving a definition within
+  it, changes nothing that depends on it. See
+  [What a definition is](#what-a-definition-is).
+- **Code refers to other code by name, never by its content.** Unison refers
+  to code by hash, so a function's hash covers its callees' hashes, and
+  changing one body changes the hash of everything that reaches it. A Truss
+  definition names what it uses by module path and name, so changing a body
+  changes nothing about what refers to it.
+- **A function's signature and body are apart.** Type checking and proofs in
+  callers depend only on the signature. Changing a body without changing its
+  signature, such as filling in a `todo`, re-checks no callers. Only code
+  generation and the affected tests run again. The signature is itself two
+  parts: its interface, which callers' types depend on, and its contract, the
+  `requires`, `ensures`, `decreases`, and `cost` clauses, which only callers'
+  proofs depend on. Strengthening an `ensures` re-proves callers but
+  type-checks none of them again.
 - **The order of a type's fields is not part of its shape.** Reordering fields
   rebuilds nothing, except code that uses a derived `Ordered`, which compares
   fields in declaration order. The compiler chooses memory layout, and a record
   with more than one field is always built with named arguments, so field
   order is otherwise never observable.
-- **A parameter's default is kept apart from the signature.** The signature
+- **A parameter's default is apart from the signature.** The signature
   records only that the parameter has a default. Type checking in callers
   depends only on that, so changing a default re-type-checks nothing. Callers
   that leave the argument out depend on the default itself, so their proofs
@@ -47,118 +50,62 @@ see [SYNTAX.md](SYNTAX.md). For the goals behind these decisions, see
   trait, the shape of `Point`, and the compiler's rule for deriving `Hash`,
   and depends on nothing else. The generated code is never stored. Adding a
   derive changes nothing that already exists. Changing a field re-checks only
-  code that compares, hashes, or orders the type. A compiler release that
-  improves a derivation rule invalidates only the implementations made with
-  it.
-
-### Incremental builds
-
-Each step of compiling a definition is a query: its tree, its resolved
-names, its interface and contract, and its checked form, which holds the type
-of every expression and the exact method, variant, field, `impl`, or
-associated type each name turned out to mean, with code generation after
-them. The compiler records what each query read as it runs, and gives each
-result a *fingerprint*, the hash of its value, which is what tells whether
-it changed. The records form a graph, and a change is *pushed* along it:
-editing a file marks the results that read it, and only those are computed
-again. Jane Street's Incremental and spreadsheets recalculate the same way. A
-compiler that instead pulls, checking each result's inputs whenever the
-result is asked for, as Salsa and Rust's incremental compiler do, spends time
-in proportion to what is asked for, which for a whole build is the whole
-project. Pushing spends time in proportion to what changed.
-[DATABASE.md](DATABASE.md) designs it.
-
-- **A result is kept under what it read.** A query is a function of what it
-  reads, so its result is stored under the query, what it was asked about,
-  the version of the stage that computed it, and the fingerprint of each
-  thing it read. Any state that reads the same finds it: another worktree, a
-  branch gone back to, a commit, a new process. Bazel and Nix keep build
-  steps this way. Truss keeps every result of the compiler this way, so
-  nothing is computed twice.
-- **A fingerprint covers a result's own value, and names other definitions
-  by their module path and name, never by their fingerprints.** Unison
-  refers to code by hash, so a function's hash covers its callees' hashes,
-  and changing one body changes the hash of everything that reaches it.
-  Truss keeps a fingerprint to the result's own value, and the record of
-  what the result read says what it depends on.
-- **A result reads two kinds of thing about other definitions:** the parts
-  of the definitions it uses, such as an interface or a shape, and lookups,
-  keyed by where and what name: the members of `List` named `length`, the
-  `impl`s of `Add` for `Instant`, the constants named `not_found` in a file.
-  A lookup that found nothing is read too. When a definition is added,
-  removed, or renamed, only the lookups with its scope and name are made
-  again. Swift's incremental builds keyed such lookups by name alone, and
-  rebuilt far too much. Truss's rules keep each lookup to a few places:
-  methods live with their type, an `impl` lives with its trait, its type, or
-  a type its trait's arguments name, and an unqualified constant can only
-  come from the same file.
-- **Work stops as soon as an output comes out the same.** When a re-checked
-  definition's signature is unchanged, its callers are not checked again;
-  when generated code is unchanged, tests are not run again. This *early
-  cutoff* is what makes editing a body cost O(change).
-- **Proofs, tests, and compiled C are kept under exact keys.** Each is kept
-  under the hash of exactly the input it consumed: a proof under the query
-  sent to the solver, a test under the code it can reach, an object file
-  under its C. A test's key is composed from the hash of each function's own
-  code and the keys of the functions it refers to, so an edit changes the
-  keys of the tests that can reach the edited code, and no others.
-  References to other definitions in these keys are numbered rather than
-  named, so renaming a definition or moving it to another module re-checks
-  its callers' types, which is cheap, but finds their proofs and test
-  results already done. Every worktree on a machine shares them.
+  code that compares, hashes, or orders the type.
+- **A name is looked up in few places.** A definition depends on the parts
+  of the definitions it uses, such as an interface or a shape, and on
+  lookups, keyed by where and what name: the members of `List` named
+  `length`, the `impl`s of `Add` for `Instant`, the constants named
+  `not_found` in a file. A lookup that found nothing is depended on too.
+  When a definition is added, removed, or renamed, only the lookups with its
+  scope and name are made again. Swift's incremental builds keyed such
+  lookups by name alone, and rebuilt far too much. Truss's rules keep each
+  lookup to a few places: methods live with their type, an `impl` lives with
+  its trait, its type, or a type its trait's arguments name, and an
+  unqualified constant can only come from the same file.
+- **Renaming or moving a definition redoes little.** Its users name it, so
+  their types are checked again, which is cheap. Their proofs, their test
+  results, and their compiled code are found already done, because those are
+  kept by what the code is and not by what it is called.
 - **Positions are relative to their definition.** Panics, `echo`, failed
   asserts, and debug information record where they are within their
   definition, and a table built at the end of the build turns that into a
   file and line. Otherwise adding a line at the top of a file would change
   the output of every definition below it.
-- **Every stored result is deterministic and canonical,** with no fresh
-  numbering, no hash-map iteration order, and no timestamps. Early cutoff
-  and fingerprints compare outputs, so any instability would defeat both.
-- **Optimizations record the bodies they read.** Inlining one definition into
-  another makes the caller's code depend on the callee's body, so the caller
-  reads that body like anything else it depends on. Development builds do not inline across
-  definitions of the packages being worked on, which keeps rebuilds narrow.
-  They do inline from the standard library and from dependencies, whose
-  bodies change only with a new toolchain or a new version in the manifest,
-  so this never widens a rebuild while editing. Cargo users get the same
-  effect by hand, by optimizing dependencies in development profiles.
-  Release builds inline across everything.
-- **Each stage of the compiler is versioned on its own:** the parser, the type
-  checker, the prover with its pinned solver, code generation, and each rule
-  for deriving. A result's key holds the version of the stage that computed
-  it, so a release that changes code generation leaves every proof valid, and
-  a new solver re-proves only what that solver checked.
+- **Development builds do not inline across the definitions being worked
+  on.** Inlining one definition into another makes the caller's code depend
+  on the callee's body. Development builds inline only from the standard
+  library and from dependencies, whose bodies change only with a new
+  toolchain or a new version in the manifest, so inlining never widens a
+  rebuild while editing. Cargo users get the same effect by hand, by
+  optimizing dependencies in development profiles. Release builds inline
+  across everything.
+- **A new compiler release redoes only what it changed.** Each stage of the
+  compiler is versioned on its own: the parser, the type checker, the prover
+  with its pinned solver, code generation, and each rule for deriving. A
+  release that changes code generation leaves every proof valid, a new
+  solver re-proves only what that solver checked, and a release that
+  improves a derivation rule redoes only the implementations made with it.
 
-### Fingerprints and keys
+### What a definition is
 
-Fingerprints and keys last: they are stored, shared between worktrees and
-compiler releases, may later be shared between machines, and are used to
-tell whether code changed. So they are defined over a specified encoding of
-each result, not over any compiler's data structures.
+A definition is its kind, its structure, the names it resolves to, its local
+variable names, its literal values, and the order of clauses within each
+kind. A change to any of those is a change to the definition, and nothing
+else is.
 
-- **The encoding is specified, and has one byte form for each value,** so two
-  builds of a compiler, on any machine, produce the same bytes for the same
-  result. Deterministic CBOR (RFC 8949, section 4.2) is a suitable base. Git
-  and Nix specify their formats the same way.
-- **A key covers what made the result:** the version of the stage that
-  computed it, which covers the encoding of what that stage produces, and
-  the hash algorithm. A change to any of them makes new keys, so an old
-  result is never read as a new one, and a new compiler release changes no
-  key of a stage it did not change.
-- **What a definition's tree holds:** the kind of definition, its structure,
-  its resolved names, local variable names, literal values, and the order of
-  clauses within each kind. Field order is part of it only for types with a
-  derived `Ordered`.
-- **What it does not:** whitespace and layout, the order between kinds of
-  clause, positions in the file, which are kept apart and relative to their
-  definition, and how a literal is written. `0xFF` and `255` are the same
-  tree, and so are a raw string and an ordinary one with the same text. The
-  parsed file keeps how each literal was written, so `truss fmt` can print
-  it back that way.
+- **Not part of it:** whitespace and layout, the order between kinds of
+  clause, its position in the file, and how a literal is written. `0xFF` and
+  `255` are the same, and so are a raw string and an ordinary one with the
+  same text. The file keeps how each literal was written, so `truss fmt` can
+  print it back that way.
+- **The order of clauses of one kind is part of it.** Each `requires` may
+  rely on the ones before it, as in Dafny, so swapping two of them can
+  change what they mean.
+- **Field order is part of it only for types with a derived `Ordered`.**
 - **Local names are part of it,** unlike in Unison, which hashes no names at
   all. Truss shows local names in compiler messages and `echo` output, and a
-  result kept under a key that ignored them would show an old name. Renaming
-  a local re-checks one body.
+  result that ignored them would show an old name. Renaming a local
+  re-checks one body.
 
 ### What you see is what compiles
 
@@ -1593,7 +1540,8 @@ stable and checking O(change). The prover's design is in
 
 **Proof checking is deterministic.** The solver runs within fixed limits
 measured in steps, never in wall-clock time, and its version is pinned as part
-of the toolchain. A result is kept under the hash of the query that was sent
+of the toolchain. Z3's `rlimit` and cvc5's `--rlimit` count work in this
+way. A result is kept under the hash of the query that was sent
 to the solver. A proof that passes once keeps passing, and a slow machine
 never fails a proof that a fast one passes. Solver-based tools are known for
 proofs that break for unrelated reasons, so Truss designs against this from

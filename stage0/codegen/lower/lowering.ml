@@ -9,7 +9,11 @@ open Lir_builder
 (* What leaving a scope does: drop what a place still owns, or free the
    heap block a pointer points at, once what is in it has been dropped. *)
 type cleanup = Drop_value of Lir.place | Free_pointed of Lir.place
-type scope = { mutable owned : cleanup list  (** Most recent first *) }
+
+(* A scope owns what is dropped as it ends: the scope of a block's names,
+   or the scope of one statement, whose temporaries end with it. *)
+type scope_kind = Bindings | Statement
+type scope = { kind : scope_kind; mutable owned : cleanup list  (** Most recent first *) }
 
 (* Where [continue] and [break] go, and how many scopes each keeps. *)
 type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; break_depth : int }
@@ -27,20 +31,40 @@ type frame = {
       (** In an inlined method, where its [return] goes and how many scopes that keeps *)
 }
 
+(* Where a function's result goes: through the pointer it is given, into a
+   local it returns, or nowhere. *)
+type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
+
 type state = {
   context : context;
   mutable frame : frame;
   b : Lir_builder.t;
   mutable scopes : scope list;  (** Innermost first *)
   mutable loops : loop list;
-  mutable temporaries : Lir.place list list;
-      (** Of each statement being lowered, innermost first *)
-  return_ : Lir.place option;  (** Where a result too large to return is written *)
-  result_local : Lir.local option;
+  mutable result : result_slot;
   nested : Lir.function_ option list ref;  (** The instance's lambdas, in order *)
   mutable evidence : (Path.t * Lir.operand) list;  (** The evidence for each capability available *)
   pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
 }
+
+(* The code a function starts lowering: its own, with nothing bound yet. *)
+let frame_of code ~inlined =
+  { code; bindings = Hashtbl.create 16; self_place = None; on_yield = None; inlined; exit = None }
+
+(* The state to write one function in: a builder of its own and the
+   function's scope. A lambda shares [nested] with the function around it. *)
+let enter context ?(pulling = false) ?(nested = ref []) frame =
+  {
+    context;
+    frame;
+    b = Lir_builder.create ();
+    scopes = [ { kind = Bindings; owned = [] } ];
+    loops = [];
+    result = No_result;
+    nested;
+    evidence = [];
+    pulling;
+  }
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
 
@@ -92,32 +116,113 @@ let site st (span : S.span) : Lir.site =
     text;
   { definition = st.frame.code.anchor; line = !line; column = !column }
 
+(* A valid program stage0 cannot lower yet, at a place in the code being
+   lowered. *)
+let at_site ({ definition; line; column } : Lir.site) : Compiler_bug.site =
+  { definition; line; column }
+
+let unsupported st (span : S.span) format =
+  Compiler_bug.unsupported ~at:(at_site (site st span)) format
+
 let source st (span : S.span) =
   let text = st.frame.code.text in
   let start = min span.start (String.length text) in
   String.sub text start (min span.stop (String.length text) - start)
 
-let new_local st ?name ty = at (local st.b ?name (Value ty))
-
-(* A temporary that holds an owned value for the rest of the statement. *)
-let temporary st ty =
-  let place = new_local st ty in
-  (match st.temporaries with
-  | current :: rest -> st.temporaries <- (place :: current) :: rest
-  | [] -> ());
-  place
-
-let own_in_scope st place =
-  match st.scopes with
-  | scope :: _ -> scope.owned <- Drop_value place :: scope.owned
+(* The scope a new name belongs to: the innermost that holds names. *)
+let rec binding_scope = function
+  | ({ kind = Bindings; _ } as scope) :: _ -> scope
+  | { kind = Statement; _ } :: rest -> binding_scope rest
   | [] -> bug "no scope"
+
+let innermost_scope st = match st.scopes with scope :: _ -> scope | [] -> bug "no scope"
+
+(* Has the scope of the names around own what is at a place. *)
+let own_in_scope st place =
+  let scope = binding_scope st.scopes in
+  scope.owned <- Drop_value place :: scope.owned
 
 (* A heap block the scope frees as it ends, after the drops of what is in it,
    which are owned later and so come first. *)
 let free_in_scope st pointer =
-  match st.scopes with
-  | scope :: _ -> scope.owned <- Free_pointed pointer :: scope.owned
-  | [] -> bug "no scope"
+  let scope = binding_scope st.scopes in
+  scope.owned <- Free_pointed pointer :: scope.owned
+
+(* A new local for a value, owned from the start, so that every way out of
+   its owner drops whatever it still holds, and nothing it is given can be
+   forgotten. A type with nothing to drop needs no owner. *)
+let owned_local st ?name (scope : scope) ty =
+  let place = at (local st.b ?name (Value ty)) in
+  if not (trivial st ty) then scope.owned <- Drop_value place :: scope.owned;
+  place
+
+(* A local that lasts for the statement being lowered, or for the scope
+   around when no statement is. *)
+let temporary st ?name ty = owned_local st ?name (innermost_scope st) ty
+
+(* A local that lasts as long as the names around it. *)
+let binding st ?name ty = owned_local st ?name (binding_scope st.scopes) ty
+
+(* A parameter of the function being written, as the calling convention
+   passes it, or as [how] does: the local it arrives in, unless it has no
+   size, and the place its value is read at. The function owns it when
+   [owned]; otherwise it is the caller's, and one passed by value is
+   borrowed. *)
+let parameter st ?how ~owned (mode : Ground.mode) ty =
+  let how = Option.value how ~default:(Convention.parameter st.context.env) in
+  let own place = if owned && not (trivial st ty) then own_in_scope st place in
+  match how mode ty with
+  | None -> (None, temporary st ty)
+  | Some (Lir.Pointer _ as pointer) ->
+      let arrives = local st.b pointer in
+      let place : Lir.place = { root = Local arrives; projections = [ Deref ] } in
+      own place;
+      (Some arrives, place)
+  | Some passed ->
+      let arrives = local st.b ~borrowed:(not owned) passed in
+      own (at arrives);
+      (Some arrives, at arrives)
+
+(* A parameter for the evidence of each capability, which the code then
+   reaches by it. Gives the parameters, in order. *)
+let evidence_parameters st capabilities =
+  let arriving =
+    List.map
+      (fun capability -> (capability, local st.b ~name:"evidence" Convention.evidence))
+      capabilities
+  in
+  st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) arriving;
+  List.map snd arriving
+
+(* Makes the slot for the function's result, as the convention passes one.
+   Nothing here owns it: it is the caller's once the function returns. *)
+let result_slot st (convention : Convention.result) =
+  st.result <-
+    (match convention with
+    | Through_pointer pointer -> Through (local st.b ~name:"result" pointer)
+    | Returned ty -> Returned_in (local st.b ~name:"result" ty)
+    | Nothing -> No_result)
+
+(* Where the function's result is written, if it has one with a size. *)
+let result_place st : Lir.place option =
+  match st.result with
+  | Through pointer -> Some { root = Local pointer; projections = [ Deref ] }
+  | Returned_in local -> Some (at local)
+  | No_result -> None
+
+(* Drops what the result's slot holds, before it is written again: an early
+   [return] can come after part of the result was written. *)
+let clear_result st =
+  match (st.result, result_place st) with
+  | (Through slot | Returned_in slot), Some place -> (
+      match local_type st.b slot with
+      | Value ty | Pointer { target = Value ty; _ } ->
+          if not (trivial st ty) then emit st.b (Drop place)
+      | _ -> ())
+  | _ -> ()
+
+let return_result st : Lir.terminator =
+  Return (match st.result with Returned_in local -> Some (Move (at local)) | _ -> None)
 
 let drop_scope st (scope : scope) =
   List.iter
@@ -128,35 +233,61 @@ let drop_scope st (scope : scope) =
             (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded }))
     scope.owned
 
-let drop_temporaries st temporaries = List.iter (fun place -> emit st.b (Drop place)) temporaries
-
-(* Drops everything owned in the scopes inside the [depth] outermost, and
-   every pending temporary, as a [return], [break], or [continue] leaves
-   them. *)
+(* Drops everything owned in the scopes inside the [depth] outermost, as a
+   [return], [break], or [continue] leaves them. *)
 let leave_to st depth =
-  List.iter (drop_temporaries st) st.temporaries;
   List.iteri
     (fun i scope -> if List.length st.scopes - i > depth then drop_scope st scope)
     st.scopes
 
-(* A scope opened here and closed, with its drops, by [close_scope], for a
-   condition's names, whose scope ends on more than one path. *)
-let open_scope st =
-  let scope = { owned = [] } in
+(* A scope opened here and ended by [close_scope], with its drops, or by
+   [pop_scope], whose caller writes the drops on each path the scope ends
+   on. *)
+let open_scope st kind =
+  let scope = { kind; owned = [] } in
   st.scopes <- scope :: st.scopes;
   scope
 
-let close_scope st scope =
-  drop_scope st scope;
+let pop_scope st scope =
   match st.scopes with
   | top :: rest when top == scope -> st.scopes <- rest
   | _ -> bug "a scope closed out of order"
 
-let in_scope st f =
-  let scope = open_scope st in
+let close_scope st scope =
+  drop_scope st scope;
+  pop_scope st scope
+
+let within st kind f =
+  let scope = open_scope st kind in
   let result = f () in
   close_scope st scope;
   result
+
+let in_scope st f = within st Bindings f
+let in_statement st f = within st Statement f
+
+(* Ends the function being written: what its scope still owns is dropped
+   and its result returned. Its parameters are [first], which it is given
+   before anything else, the pointer its result is written through, if it
+   has one, and [rest]. *)
+let finish_function st ?(returns = true) ~first ~rest () : Lir.function_ =
+  (match st.scopes with [ scope ] -> drop_scope st scope | _ -> bug "a function ended in a scope");
+  finish st.b (if returns then return_result st else Unreachable);
+  let pointer = match st.result with Through pointer -> Some pointer | _ -> None in
+  let result =
+    match st.result with Returned_in local -> Some (local_type st.b local) | _ -> None
+  in
+  let built =
+    Lir_builder.build st.b ?written_result:pointer
+      ~parameters:(first @ Option.to_list pointer @ rest)
+      ~result
+  in
+  { built with returns }
+
+(* The lambdas the function made, in order. *)
+let nested_functions st =
+  Array.of_list
+    (List.map (function Some f -> f | None -> bug "a lambda left unfinished") !(st.nested))
 
 let unreachable_block st =
   finish st.b Unreachable;
@@ -166,6 +297,14 @@ let unreachable_block st =
    returned value. The type checker has made sure a place there is a
    temporary or was marked [own], or copies implicitly. *)
 let owned st place ty = if trivial st ty then Lir.Copy place else Lir.Move place
+
+(* Replaces the value at a place the program names with one worked out
+   beforehand: what the place still owns is dropped, and the new value moved
+   in. *)
+let replace st place ty ~by =
+  if not (trivial st ty) then emit st.b (Drop place);
+  emit st.b (Assign (place, Use (owned st by ty)))
+
 let constant_int integer value = Lir.Constant (Integer (integer, value))
 
 let integer_of st ty =
@@ -177,11 +316,3 @@ let scalar_of st ty =
   match (Memory_layout.of_type st.context.env ty).form with
   | Scalar scalar -> scalar
   | _ -> bug "%s is not a number" (Ground.to_string ty)
-
-(* Ends a statement: drops its temporaries. *)
-let end_statement st =
-  match st.temporaries with
-  | current :: rest ->
-      drop_temporaries st current;
-      st.temporaries <- rest
-  | [] -> ()

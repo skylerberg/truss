@@ -6,8 +6,14 @@ type t
 
 val create : unit -> t
 
-(* A new local, numbered after every earlier one. *)
-val local : t -> ?name:string -> Lir.ty -> Lir.local
+(* A new local, numbered after every earlier one. A [borrowed] one holds the
+   bits of a value something else owns. *)
+val local : t -> ?name:string -> ?borrowed:bool -> Lir.ty -> Lir.local
+
+(* How many locals there are, which is the number the next one gets, and
+   the type of one. *)
+val local_count : t -> int
+val local_type : t -> Lir.local -> Lir.ty
 
 (* A new block, which nothing jumps to yet. *)
 val block : t -> Lir.block

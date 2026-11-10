@@ -1,10 +1,10 @@
-(* A checked body as obligations. See PROVER.md, "Verification conditions".
+(* A checked body as obligations.
 
    The body is executed symbolically, forward, in passive form: every value
    is a term, every fact is guarded by the condition of the path it holds
    on, and where paths join, each local that differs gets a fresh symbol
    that each path defines. So the verification condition grows with the
-   body, not with its number of paths, as PROVER.md asks of [Vc].
+   body, not with its number of paths.
 
    Each obligation becomes one query: the facts gathered before it, and its
    goal, guarded by its path. Once made, an obligation is a fact for the
@@ -35,7 +35,7 @@ let unsupported span format =
 
 (* A clause that running compiled code can decide: one of a tag's
    [from_template]'s, by its position, for a template of these literal
-   texts. See PROVER.md, "Running code while proving". *)
+   texts. *)
 type evaluation = { from_template : Path.t; texts : string list; clause : int }
 
 (* A call whose arguments are all known, of a function that is compiled and
@@ -351,9 +351,8 @@ let float_literal (exponent, significand) value =
       ] )
 
 (* IEEE 754 arithmetic, rounding to nearest with ties to even, and the
-   lawful [==] and ordering DESIGN.md gives floats: every NaN is equal to
-   every other and ordered after every number, and otherwise IEEE's, so
-   [-0.0 == 0.0]. See DESIGN.md, "Equality, ordering, and deriving". *)
+   lawful [==] and ordering of floats: every NaN is equal to every other
+   and ordered after every number, and otherwise IEEE's, so [-0.0 == 0.0]. *)
 let float_operation name left right = L.Apply (name, [ L.Apply ("RNE", []); left; right ])
 let is_nan value = L.Apply ("fp.isNaN", [ value ])
 let float_equal left right = L.(Apply ("fp.eq", [ left; right ]) ||| (is_nan left &&& is_nan right))
@@ -483,8 +482,7 @@ let rec sort_of context (ty : T.ty) : L.sort =
       end
 
 (* Whether [==] on a type is the solver's equality: built in with identity
-   semantics, or derived from fields that all are. See DESIGN.md,
-   "Equality, ordering, and deriving". *)
+   semantics, or derived from fields that all are. *)
 let rec structural context ?(seen = []) (ty : T.ty) =
   if is_numeric ty || is_bool ty || T.is_builtin Character ty then true
   else if List.exists (T.equal ty) seen then true
@@ -732,8 +730,7 @@ let name_of (signature : signature) =
 (* Whether a body is functional, so that it can be the function's
    definition: [let], [if], [match], [is], calls, fields, building values,
    [with], operators, and quantifiers, with no [var], assignment, loop,
-   [return], or argument passed [mut] or [own]. See DESIGN.md, "What a
-   function means to the prover". *)
+   [return], or argument passed [mut] or [own]. *)
 let rec functional_block (written : block) = List.for_all functional_statement written.statements
 
 and functional_statement (written : statement) =
@@ -829,7 +826,7 @@ let capability_part database (capability : Path.t) name =
 
 (* A capability's method's contract. Its calls are never a function in the
    logic: two calls may give different results, since the prover never
-   models an implementation's state. See PROVER.md, "Values are values". *)
+   models an implementation's state. *)
 let capability_contract database (capability : Path.t) name =
   Option.map
     (fun (part, (signature : signature)) ->
@@ -858,8 +855,7 @@ let provided_body database (trait : Path.t) name receiver =
 
 (* A trait method's contract: the [impl]'s own clauses with the trait's,
    when the call is known to reach one [impl], and the trait's alone
-   through a bound or [any]. See DESIGN.md, "An [impl] can promise more
-   than its trait". *)
+   through a bound or [any]. *)
 let method_contract database (trait : T.trait_reference) name receiver (evidence : C.evidence) =
   let trait_side = trait_part database trait.trait name receiver in
   match evidence with
@@ -1083,7 +1079,7 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
       None
   | Todo when context.proving ->
       (* A hole in a proof: what follows it on this path is not shown, and
-         a build refuses what can reach it. See PROVER.md, "Holes". *)
+         a build refuses what can reach it. *)
       context.holes <- (source.key, written.span) :: context.holes;
       Some
         ( { frame with condition = L.Boolean false },
@@ -1242,8 +1238,7 @@ and name context frame (written : expression) (path : path) =
 (* [a == b] on a type: the solver's equality where it is structural, the
    lawful equality of floats, and otherwise the type's [Equal] as a
    function of the two, which a derived [Equal] defines field by field
-   with each field's own [==], unfolded once for each two it compares.
-   See PROVER.md, "Equality". *)
+   with each field's own [==], unfolded once for each two it compares. *)
 and equal_of context frame (ty : T.ty) a b =
   if structural context ty then L.equal a b
   else if float_format ty <> None then float_equal a b
@@ -1292,7 +1287,7 @@ and equal_of context frame (ty : T.ty) a b =
     | _ -> ());
     equal
 
-(* An operator on two floats, as IEEE 754 and DESIGN.md's lawful [==] and
+(* An operator on two floats, as IEEE 754 and the lawful [==] and
    ordering give it. A remainder, which IEEE defines differently from
    Truss, is known only by its type. *)
 and float_binary context frame (written : expression) operator left right =
@@ -2266,7 +2261,7 @@ and check_callback_requires context frame (written : expression) values =
 
 (* Whether a call is to a private method that takes [mut self], which is a
    step of an update: its receiver's invariant is neither shown at the call
-   nor assumed after. See DESIGN.md, "Type invariants". *)
+   nor assumed after. *)
 and updating_helper context (call_ : C.call) =
   match call_.callee with
   | Function { path = Method { receiver = Mut; _ } as path; _ } -> is_updating_helper context path
@@ -2303,7 +2298,7 @@ and concrete_impl context trait (ty : T.ty) =
 (* A trait's laws, and those of the traits it requires, as facts about a
    type, each quantified over its parameters. A law is shown for each
    [impl] written by hand, by the [impl], so it is a fact wherever the
-   trait's methods are used. See PROVER.md, "Proofs". *)
+   trait's methods are used. *)
 and assume_laws context frame trait (ty : T.ty) =
   let key = Path.show trait ^ " for " ^ type_key ty in
   if not (List.mem key context.laws_assumed) then begin
@@ -2629,7 +2624,7 @@ and viewed_type (owned : T.ty) =
   | _ -> None
 
 (* A [List] passed as a [Slice], or a [String] as a [StringSlice]: a view
-   of the value, with the same model. See DESIGN.md, "Views". *)
+   of the value, with the same model. *)
 and view_of context frame (owned : T.ty) term =
   match viewed_type owned with
   | Some view_type -> (
@@ -2690,7 +2685,7 @@ and template_trait : Path.t =
    template: its literal texts, each a [Literal] whose model is its bytes,
    and its parts, each turned into the tag's [Part] by its [From]. The
    call's [requires], such as that the text is one character, is shown of
-   that template. See DESIGN.md, "Tagged templates". *)
+   that template. *)
 and tagged_template context frame (written : expression) (literal : string_literal) tag_type =
   let template =
     match frame.source.checked.templates.(literal.id) with
@@ -2864,7 +2859,7 @@ and set_of context frame (ty : T.ty) ~element values =
 
 (* A [Map] or a [FiniteMap] written out: each key with its value, and no
    other keys. Its keys must be distinct. A non-empty map is one
-   allocation. See PROVER.md, "Obligations". *)
+   allocation. *)
 and map_literal context frame (written : expression) entries =
   let ty = type_of frame written in
   let map_path : Path.t =
@@ -3003,8 +2998,7 @@ and model_as context (ty : T.ty) term ~(model : T.ty) =
   | [] -> None
 
 (* Cursors. A cursor carries what it has handed out and whether it has
-   ended as ghost parts of its value. See PROVER.md, "Lending and yielding
-   methods". *)
+   ended as ghost parts of its value. *)
 and cursor_trait : Path.t =
   Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Cursor" }
 
@@ -3194,8 +3188,7 @@ and global_value context frame (written : expression) path type_arguments =
 (* A function named as a value is a value of its type known by what it
    promises of its calls: one unit of time per call when its [time] is a
    constant. Naming it is an edge of the call graph that passes no
-   arguments, so in a function that must end, it must not reach back.
-   See PROVER.md, "Termination". *)
+   arguments, so in a function that must end, it must not reach back. *)
 and named_function context frame (written : expression) path type_arguments contract =
   if
     context.terminates && frame.checking
@@ -3248,8 +3241,7 @@ and named_function_of context frame (expression_ : expression) =
 
 (* A function named as a value and passed for a function-typed parameter
    must accept every argument the parameter's type promises it, and keep
-   the cost clauses the type asks of what is passed. See PROVER.md,
-   "Obligations". *)
+   the cost clauses the type asks of what is passed. *)
 and check_named_callback context frame (call_ : C.call) (argument : C.argument)
     (passed : expression) path (contract : contract) evaluated =
   let own = List.hd contract.parts in
@@ -3729,7 +3721,7 @@ and with_ context frame (written : expression) base updates =
   check_built context frame written ty term;
   Some (frame, term)
 
-(* Type invariants. See PROVER.md, "Type invariants". *)
+(* Type invariants. *)
 
 (* A type's invariants, and the definition to read them in. *)
 and invariants_of context (ty : T.ty) =
@@ -4172,8 +4164,7 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
 
 (* A call that running code could give a value: a function that is
    compiled and not generic, reached directly, with every argument an
-   integer or [Bool] literal and a result of one of those. See PROVER.md,
-   "Running code while proving". *)
+   integer or [Bool] literal and a result of one of those. *)
 and note_known_call context (call_ : C.call) path term arguments =
   let direct =
     match call_.callee with
@@ -4239,7 +4230,7 @@ and smaller before after =
         &&& (Apply ("<", [ a; b ]) ||| (equal a b &&& smaller before after)))
   | _ -> L.Boolean true
 
-(* Costs: what each step spends. See PROVER.md, "Costs". *)
+(* Costs: what each step spends. *)
 
 (* The counters a body's loops' [cost] clauses count, outside lambdas,
    which count on their own. *)
@@ -4905,7 +4896,7 @@ and held_by context (frame : frame) (changed : changed) =
             | `Self, None -> total)
           Costs.zero typed)
 
-(* Potentials. See PROVER.md, "Amortized bounds". *)
+(* Potentials. *)
 
 (* A type's own [cost potential], from its definition. *)
 and potential_clause context (ty : T.ty) =
@@ -6248,8 +6239,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
   (* An [impl]'s method also keeps its trait's contract: the trait's
      [requires] is what callers through a bound show, so it is assumed,
      and implies the method's own; the trait's [ensures] is what they
-     assume, so it is shown. See DESIGN.md, "An [impl] can promise more
-     than its trait". *)
+     assume, so it is shown. *)
   let own_terms =
     (match start.self with Some self -> [ self ] | None -> [])
     @ List.filter_map
@@ -6326,8 +6316,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
       when List.length part.binding = List.length own_terms
            (* A tag's [from_template] may require more than its trait, since
               only a template calls it, where the tag is known; a call through
-              a bound is an error, which keeps that sound. See DESIGN.md,
-              "Tagged templates". *)
+              a bound is an error, which keeps that sound. *)
            && not (Path.equal part.callee.key.path template_trait) ->
         List.iter
           (fun (clause : expression) -> assume context start (snd (value context inside clause)))
@@ -6587,7 +6576,7 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
 
 (* A type's [cost potential] is never below zero for a value that meets
    its invariants, which is what makes each potential a fact about every
-   valid value. See PROVER.md, "Amortized bounds". *)
+   valid value. *)
 let type_potential database (source : source) ~path ~(written : expression) =
   let context =
     new_context database ~home:source.key ~current:path ~terminates:false ~measures:[]

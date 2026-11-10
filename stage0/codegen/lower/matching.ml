@@ -16,17 +16,17 @@ let rec static_constant st path : Lir.place =
 
 (* A [String] or [StringSlice] of a literal's text, in a new local. *)
 and string_place st ty text =
-  let place = new_local st ty in
+  let place = temporary st ty in
   (match ty with
   | Named { path = Top { name = "String"; _ }; _ } ->
       let field, storage_ty, storage = string_value st ty text in
-      let built = new_local st storage_ty in
+      let built = temporary st storage_ty in
       emit st.b (Assign (built, storage));
       emit st.b (Assign (place, Build { ty; variant = None; fields = [ (field, Move built) ] }))
   | _ -> (
       match Monomorphic.shape st.context.monomorphic ty with
       | Record [ (field, Typed view) ] ->
-          let bytes = new_local st view in
+          let bytes = temporary st view in
           emit st.b
             (Assign
                ( bytes,
@@ -100,7 +100,7 @@ and test_pattern st (pattern : S.pattern) place ty ~matched ~failed =
   in
   (* A value matches a constant or a string when it is equal to it. *)
   let equal_to other =
-    let ok = new_local st st.context.bool in
+    let ok = temporary st st.context.bool in
     trait_call st ~trait:(core "Equal") ~name:"equal" ~receiver:Read ~self:ty
       ~arguments:[ (Read, ty, place); (Read, ty, other) ]
       ~destination:ok;
@@ -183,11 +183,10 @@ and bind_pattern ?(changed = false) st (pattern : S.pattern) place ty ~owned =
       | Some (Constant_pattern _) -> ()
       | _ ->
           if owned || (trivial st ty && not changed) then begin
-            let local = at (local st.b ~name:name.text (Value ty)) in
+            let local = binding st ~name:name.text ty in
             emit st.b
               (Assign (local, Use (if owned then owned_operand st place ty else Copy place)));
-            Hashtbl.replace st.frame.bindings name.id local;
-            if not (trivial st ty) then own_in_scope st local
+            Hashtbl.replace st.frame.bindings name.id local
           end
           else Hashtbl.replace st.frame.bindings name.id place)
   | Wildcard | Literal _ | Pattern_range _ | Qualified_constant _ -> ()

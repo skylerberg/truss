@@ -1,0 +1,3 @@
+(library
+ (name compiler_bug)
+ (libraries path))

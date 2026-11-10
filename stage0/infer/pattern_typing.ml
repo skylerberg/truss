@@ -246,8 +246,7 @@ and constant_pattern state id span path type_ =
   | None -> ()
 
 (* Whether two equal values of a type cannot be told apart: built-in
-   identity equality, or a derived [Equal] over fields that all have it.
-   See DESIGN.md, "Equality, ordering, and deriving". *)
+   identity equality, or a derived [Equal] over fields that all have it. *)
 and structural ?(seen = []) state (type_ : T.ty) =
   if
     T.is_integer_type type_ || T.is_builtin Bool type_ || T.is_builtin Character type_

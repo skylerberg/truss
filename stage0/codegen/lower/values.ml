@@ -39,7 +39,7 @@ and list_into st (ty : Ground.ty) (elements : S.expression list) destination ~sp
       | Record [ (_, Typed _) ] ->
           list_of st ty destination ~span
             (List.map (fun (e : S.expression) value -> into st e value) elements)
-      | _ -> bug "a list literal of %s, which is not lowered yet" (Ground.to_string ty))
+      | _ -> unsupported st span "a list literal of %s" (Ground.to_string ty))
 
 (* A [List] in [destination], with storage of exactly its length, holding
    what each fill writes to the element's place it is given. *)
@@ -57,7 +57,7 @@ and list_of st ty destination ~span fills =
           lower Storage_with_capacity [ Value (usize (List.length fills)) ] (Some storage_place);
           List.iter
             (fun fill ->
-              let value = new_local st element in
+              let value = temporary st element in
               fill value;
               lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
             fills
@@ -157,7 +157,7 @@ and collection_into st ty destination ~span items =
       let values =
         List.map
           (fun ((e : S.expression), part_ty) ->
-            let value = new_local st part_ty in
+            let value = temporary st part_ty in
             into st e value;
             (T.Own, part_ty, value))
           parts
@@ -167,7 +167,7 @@ and collection_into st ty destination ~span items =
         ~signature ~substitution
         ~arguments:((T.Mut, ty, destination) :: values)
         ~mask:0
-        ~destination:(new_local st (Monomorphic.builtin Unit)))
+        ~destination:(temporary st (Monomorphic.builtin Unit)))
     items
 
 (* [provide]: each implementation evaluated once, as a place or a temporary
@@ -277,15 +277,12 @@ and try_ st (inner : S.expression) destination =
         | Raw _ -> bug "a raw field")
       (fields failure)
   in
-  let built = new_local st result_ty in
+  let built = temporary st result_ty in
   emit st.b (Assign (built, Build { ty = result_ty; variant = Some failure; fields = returned }));
-  (match (st.return_, st.result_local) with
-  | Some pointer, _ -> emit st.b (Assign (pointer, Use (Move built)))
-  | None, Some local -> emit st.b (Assign (at local, Use (Move built)))
-  | None, None -> ());
+  clear_result st;
+  Option.iter (fun result -> emit st.b (Assign (result, Use (Move built)))) (result_place st);
   leave_to st 0;
-  finish st.b
-    (Return (match st.result_local with Some local -> Some (Move (at local)) | None -> None));
+  finish st.b (return_result st);
   start st.b stay;
   match fields success with
   | [ (name, Typed field_ty) ] ->
@@ -299,6 +296,7 @@ and try_ st (inner : S.expression) destination =
    local it reads, made on the caller's stack, so making one never
    allocates. *)
 and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block) destination =
+  if st.pulling then unsupported st e.span "a lambda in a yielding method that is pulled";
   let f =
     match type_of st e.id with Function f -> f | ty -> bug "a lambda of %s" (Ground.to_string ty)
   in
@@ -340,63 +338,34 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
              code = Nested index;
              environment = Some (Address { place = environment_local; writable = false });
            } ));
-  (* The lambda itself. *)
-  let b = Lir_builder.create () in
+  (* The lambda itself: it is given its environment, then what its type
+     takes, then the evidence for what its type uses, passed by whoever
+     calls it, which is the only evidence its code can reach. *)
+  let inner =
+    enter st.context ~pulling:st.pulling ~nested:st.nested
+      {
+        st.frame with
+        bindings = Hashtbl.copy st.frame.bindings;
+        on_yield = None;
+        exit = None;
+        (* What the lambda returns, which a [?] in it returns early. *)
+        code =
+          (match raw_type_of st e.id with
+          | Some (T.Function f) -> { st.frame.code with result = f.output }
+          | _ -> st.frame.code);
+      }
+  in
+  let b = inner.b in
   let environment_parameter = local b ~name:"environment" (Raw (Nullable_pointer Opaque)) in
   let result_ty = match f.result with Returns ty -> ty | _ -> bug "a lambda that yields" in
-  let result = Convention.result st.context.env result_ty in
-  let return_pointer =
-    match result with Through_pointer pointer -> Some (local b ~name:"result" pointer) | _ -> None
-  in
-  let parameter_places =
+  result_slot inner (Convention.result st.context.env result_ty);
+  let taken =
     List.map
-      (fun ((mode : Ground.mode), ty) ->
-        match Convention.parameter st.context.env mode ty with
-        | Some (Pointer _ as pointer) ->
-            let l = local b pointer in
-            (Some l, { Lir.root = Local l; projections = [ Deref ] }, mode, ty)
-        | Some lir_ty ->
-            let l = local b lir_ty in
-            (Some l, at l, mode, ty)
-        | None -> (None, at (local b (Value ty)), mode, ty))
+      (fun ((mode : Ground.mode), ty) -> (parameter inner ~owned:(mode = Own) mode ty, mode, ty))
       f.parameters
   in
-  let result_local =
-    match result with Returned ty -> Some (local b ~name:"result" ty) | _ -> None
-  in
-  (* The evidence for what the lambda's type uses, passed by whoever calls
-     it, after its own parameters: the only evidence its code can reach. *)
-  let evidence =
-    List.map (fun capability -> (capability, local b ~name:"evidence" Convention.evidence)) f.uses
-  in
+  let evidence = evidence_parameters inner f.uses in
   let environment_pointer = local b (Pointer { target = Environment index; writable = false }) in
-  let inner =
-    {
-      st with
-      evidence = List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
-      frame =
-        {
-          st.frame with
-          bindings = Hashtbl.copy st.frame.bindings;
-          on_yield = None;
-          exit = None;
-          (* What the lambda returns, which a [?] in it returns early. *)
-          code =
-            (match raw_type_of st e.id with
-            | Some (T.Function f) -> { st.frame.code with result = f.output }
-            | _ -> st.frame.code);
-        };
-      b;
-      scopes = [ { owned = [] } ];
-      loops = [];
-      temporaries = [];
-      return_ =
-        Option.map
-          (fun pointer -> { Lir.root = Local pointer; projections = [ Deref ] })
-          return_pointer;
-      result_local;
-    }
-  in
   start b (block b);
   emit b (Assign (at environment_pointer, Use (Copy (at environment_parameter))));
   List.iter
@@ -405,25 +374,14 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
         { Lir.root = Local environment_pointer; projections = [ Deref; Field name; Deref ] })
     captured;
   List.iter2
-    (fun (pattern : S.pattern) (_, place, (mode : Ground.mode), ty) ->
+    (fun (pattern : S.pattern) ((_, place), (mode : Ground.mode), ty) ->
       bind_pattern inner pattern place ty ~owned:(mode = Own))
-    parameters parameter_places;
-  let destination =
-    match (inner.return_, result_local) with
-    | Some pointer, _ -> Some pointer
-    | None, Some local -> Some (at local)
-    | None, None -> None
-  in
-  block_into inner body destination;
-  drop_scope inner (List.hd inner.scopes);
-  finish b (Return (Option.map (fun local -> Lir.Move (at local)) result_local));
+    parameters taken;
+  block_into inner body (result_place inner);
   let function_ =
-    Lir_builder.build b ?written_result:return_pointer
-      ~parameters:
-        ((environment_parameter :: Option.to_list return_pointer)
-        @ List.filter_map (fun (l, _, _, _) -> l) parameter_places
-        @ List.map snd evidence)
-      ~result:(match result with Returned ty -> Some ty | _ -> None)
+    finish_function inner ~first:[ environment_parameter ]
+      ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken @ evidence)
+      ()
   in
   st.nested :=
     List.mapi (fun i f -> if i = index then Some { function_ with environment } else f) !(st.nested)
@@ -445,7 +403,11 @@ and with_ st (base : S.expression) (updates : S.update list) destination =
               destination (field :: path)
           in
           match value with
-          | Some value -> into st value target
+          | Some value ->
+              let field_ty = type_of st value.id in
+              let fresh = temporary st field_ty in
+              into st value fresh;
+              replace st target field_ty ~by:fresh
           | None -> (
               (* [with (x)] uses the local named [x]. *)
               let resolved = demand st.context Resolve.resolved st.frame.code.definition_key in
@@ -458,7 +420,7 @@ and with_ st (base : S.expression) (updates : S.update list) destination =
                         | Some ty -> ground st ty
                         | None -> bug "a local with no type"
                       in
-                      emit st.b (Assign (target, Use (owned st place field_ty)))
+                      replace st target field_ty ~by:place
                   | None -> bug "an unbound local in with")
               | _ -> bug "with (x) names no local"))
       | Update_error -> bug "an update that did not parse")
@@ -479,12 +441,12 @@ and interpolate st (literal : S.string_literal) destination =
       (Code { path; type_arguments = [] })
       ~signature ~substitution:[] ~arguments ~mask:0 ~destination
   in
-  let builder = new_local st builder_ty in
+  let builder = temporary st builder_ty in
   call (method_ "new" Static) [] builder;
   let unit = Monomorphic.builtin Unit in
   let write text =
     if text <> "" then begin
-      let slice = new_local st slice_ty in
+      let slice = temporary st slice_ty in
       (match Monomorphic.shape st.context.monomorphic slice_ty with
       | Record [ (field, Typed view) ] ->
           emit st.b
@@ -502,7 +464,7 @@ and interpolate st (literal : S.string_literal) destination =
       | _ -> bug "a StringSlice that is not a view");
       call (method_ "write" Mut)
         [ (Mut, builder_ty, builder); (Read, slice_ty, slice) ]
-        (new_local st unit)
+        (temporary st unit)
     end
   in
   write literal.first.value;
@@ -514,7 +476,7 @@ and interpolate st (literal : S.string_literal) destination =
         ~trait:(Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Display" })
         ~name:"display" ~receiver:Read ~self:ty
         ~arguments:[ (Read, ty, place); (Mut, builder_ty, builder) ]
-        ~destination:(new_local st unit);
+        ~destination:(temporary st unit);
       write text.value)
     literal.rest;
   call (method_ "finish" Own) [ (Own, builder_ty, builder) ] destination
@@ -552,20 +514,21 @@ and any_value st (e : S.expression) (inner : S.expression) destination =
         | None -> bug "an unbound parameter of %s" (Path.show impl))
       interface.impl_generics
   in
-  let layout = Memory_layout.of_type st.context.env inner_ty in
+  (* The value is worked out before its block is made, so that leaving
+     early on the way leaves no block behind. *)
+  let value = expression st inner in
   let block = local st.b (Raw (Pointer Opaque)) in
-  if layout.size = 0 then emit st.b (Assign (at block, Use (Constant (Bytes ""))))
+  if zero_size st inner_ty then emit st.b (Assign (at block, Use (Constant (Bytes ""))))
   else begin
     emit st.b
       (Call
          {
            target = Intrinsic Allocate;
-           arguments = [ usize layout.size; usize layout.alignment ];
+           arguments = [ Constant (Size_of inner_ty); Constant (Alignment_of inner_ty) ];
            result = Returned (at block);
          });
     let typed = local st.b (Pointer { target = Value inner_ty; writable = true }) in
     emit st.b (Assign (at typed, Use (Copy (at block))));
-    let value = expression st inner in
     emit st.b
       (Assign ({ root = Local typed; projections = [ Deref ] }, Use (owned st value inner_ty)))
   end;
@@ -637,7 +600,7 @@ and name_value st (e : S.expression) destination =
                  Function_value { code = Instance (Adapter { function_; ty }); environment = None }
                ))
       | ty -> bug "a global of %s" (Ground.to_string ty))
-  | Some meaning -> bug "this name is not lowered yet: %s" (C.show_meaning meaning)
+  | Some meaning -> unsupported st e.span "this name as a value: %s" (C.show_meaning meaning)
   | None -> bug "a name with no meaning: %s" (source st e.span)
 
 and return_ st value =
@@ -649,12 +612,12 @@ and return_ st value =
       finish st.b (Goto exit);
       start st.b (block st.b)
   | None ->
-      (match (value, st.return_, st.result_local) with
-      | Some e, Some pointer, _ -> into st e pointer
-      | Some e, None, Some local -> into st e (at local)
-      | Some e, None, None -> ignore (expression st e)
-      | None, _, _ -> ());
+      (match (value, result_place st) with
+      | Some e, Some result ->
+          clear_result st;
+          into st e result
+      | Some e, None -> ignore (expression st e)
+      | None, _ -> ());
       leave_to st 0;
-      finish st.b
-        (Return (match st.result_local with Some local -> Some (Move (at local)) | None -> None));
+      finish st.b (return_result st);
       start st.b (block st.b)

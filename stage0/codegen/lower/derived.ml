@@ -51,79 +51,28 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
   let path = match key with Code { path; _ } -> path | _ -> bug "a derived method's key" in
   let signature = signature_of context path in
   let code =
-    {
-      definition_key = key_of context type_path;
-      anchor = type_path;
-      text = "";
-      checked = Checked.create 0;
-      parameters = [];
-      body = { statements = []; span = S.Span.make 0 0; id = 0 };
-      result = signature.output;
-      parameter_types = [];
-      substitution = bind signature.generics type_arguments;
-      uses = [];
-      real = [];
-      has_defaults = false;
-      requires = [];
-    }
+    unwritten ~definition_key:(key_of context type_path) ~anchor:type_path
+      ~substitution:(bind signature.generics type_arguments)
+      ~result:signature.output
   in
-  let b = Lir_builder.create () in
-  let st =
-    {
-      context;
-      frame =
-        {
-          code;
-          bindings = Hashtbl.create 1;
-          self_place = None;
-          on_yield = None;
-          inlined = [];
-          exit = None;
-        };
-      b;
-      scopes = [ { owned = [] } ];
-      loops = [];
-      temporaries = [];
-      return_ = None;
-      result_local = None;
-      nested = ref [];
-      evidence = [];
-      pulling = false;
-    }
-  in
-  let lir_signature, result =
-    lir_signature context code.substitution ~parameters:(interface_parameters signature)
-      ~has_defaults:false signature.output
-  in
-  let result_pointer =
-    match result with Through_pointer pointer -> Some (local b ~name:"result" pointer) | _ -> None
-  in
-  let parameter (mode : T.mode) ty =
-    match Convention.parameter context.env (Monomorphic.mode mode) ty with
-    | Some (Pointer _ as pointer) ->
-        let local = local b pointer in
-        (Some local, { Lir.root = Local local; projections = [ Deref ] })
-    | Some lir_ty ->
-        let local = local b lir_ty in
-        (Some local, at local)
-    | None -> (None, new_local st ty)
-  in
+  let st = enter context (frame_of code ~inlined:[]) in
+  let b = st.b in
+  let convention, _ = result_of context code.substitution signature.output in
+  result_slot st convention;
   let ground_parameters =
-    List.map
-      (fun (mode, t) -> (mode, Monomorphic.ground context.monomorphic code.substitution t))
-      (interface_parameters signature)
+    List.map (fun (mode, t) -> (mode, ground st t)) (interface_parameters signature)
   in
-  let locals_and_places = List.map (fun (mode, t) -> parameter mode t) ground_parameters in
-  let places = List.map snd locals_and_places in
+  let taken =
+    List.map
+      (fun (mode, t) -> parameter st ~owned:(mode = T.Own) (Monomorphic.mode mode) t)
+      ground_parameters
+  in
+  let places = List.map snd taken in
   let result_ty =
-    match signature.output with
-    | Returns t -> Monomorphic.ground context.monomorphic code.substitution t
-    | _ -> bug "a derived method that yields"
+    match signature.output with Returns t -> ground st t | _ -> bug "a derived method that yields"
   in
   let result_place =
-    match result_pointer with
-    | Some pointer -> { Lir.root = Local pointer; projections = [ Deref ] }
-    | None -> new_local st result_ty
+    match result_place st with Some place -> place | None -> temporary st result_ty
   in
   start b (block b);
   let field_place place variant field =
@@ -154,7 +103,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
             (fun () ->
               List.iter
                 (fun (field, field_ty) ->
-                  let equal = new_local st bool in
+                  let equal = temporary st bool in
                   trait_call st ~trait:(core "Equal") ~name:"equal" ~receiver:Read ~self:field_ty
                     ~arguments:
                       [
@@ -170,14 +119,14 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
       let write value =
         let path = Path.Method { owner = hasher_path; name = "write"; receiver = Mut } in
         let signature = signature_of context path in
-        let word = new_local st (Monomorphic.builtin UInt64) in
+        let word = temporary st (Monomorphic.builtin UInt64) in
         emit b (Assign (word, Use value));
         call_instance st
           (Code { path; type_arguments = [] })
           ~signature ~substitution:[]
           ~arguments:[ (Mut, hasher_ty, hasher); (Read, Monomorphic.builtin UInt64, word) ]
           ~mask:0
-          ~destination:(new_local st (Monomorphic.builtin Unit))
+          ~destination:(temporary st (Monomorphic.builtin Unit))
       in
       each_variant st ty self (fun variant index ->
           if variant <> None then write (constant_int UInt64 (Z.of_int index));
@@ -186,7 +135,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
               trait_call st ~trait:(core "Hash") ~name:"hash" ~receiver:Read ~self:field_ty
                 ~arguments:
                   [ (Read, field_ty, field_place self variant field); (Mut, hasher_ty, hasher) ]
-                ~destination:(new_local st (Monomorphic.builtin Unit)))
+                ~destination:(temporary st (Monomorphic.builtin Unit)))
             (typed_fields (shape_fields st ty variant)))
   | "Ordered", "compare", [ self; other ] ->
       let ordering = result_ty in
@@ -241,7 +190,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
           let fields =
             List.map
               (fun (field, field_ty) ->
-                let value = new_local st field_ty in
+                let value = temporary st field_ty in
                 trait_call st ~trait:(core "Default") ~name:"default" ~receiver:Static
                   ~self:field_ty ~arguments:[] ~destination:value;
                 (field, Lir.Move value))
@@ -249,14 +198,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
           in
           emit b (Assign (result_place, Build { ty; variant = None; fields })))
   | _ -> bug "%s cannot be derived" (Path.show path));
-  finish b (Return (match result with Returned _ -> Some (Lir.Move result_place) | _ -> None));
-  ignore lir_signature;
-  let main =
-    Lir_builder.build b ?written_result:result_pointer
-      ~parameters:(Option.to_list result_pointer @ List.filter_map fst locals_and_places)
-      ~result:(match result with Returned t -> Some t | _ -> None)
-  in
-  { key; main; nested = [||] }
+  { key; main = finish_function st ~first:[] ~rest:(List.filter_map fst taken) (); nested = [||] }
 
 (* Capabilities: entries, tables, and the real implementations *)
 

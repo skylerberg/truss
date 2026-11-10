@@ -2,7 +2,7 @@
 
 open Ir
 
-let version = 10
+let version = 11
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -88,6 +88,12 @@ and encode_constant instance = function
 let encode_signature instance (s : signature) =
   Cbor.Array
     [ list (encode_ty instance) s.parameters; option (encode_ty instance) s.result; Bool s.returns ]
+
+let equal_signature a b =
+  let encoders = { path = Ground.encode_path; instance = Instance.encode } in
+  String.equal
+    (Cbor.encode (encode_signature encoders a))
+    (Cbor.encode (encode_signature encoders b))
 
 let unary_tag = function Negate -> 0 | Not -> 1 | Complement -> 2
 
@@ -257,7 +263,12 @@ let encode_function instance (f : function_) =
       Bool f.returns;
       list
         (fun (local : local_info) ->
-          Cbor.Array [ encode_ty instance local.ty; option (fun n -> Cbor.Text n) local.name ])
+          Cbor.Array
+            [
+              encode_ty instance local.ty;
+              option (fun n -> Cbor.Text n) local.name;
+              Bool local.borrowed;
+            ])
         (Array.to_list f.locals);
       list
         (fun (b : basic_block) ->

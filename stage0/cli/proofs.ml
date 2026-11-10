@@ -1,6 +1,5 @@
 (* The prover's part of a command: each definition's obligations, solved by
-   the pinned solver, with a tagged template's check decided by running it.
-   See PROVER.md and CLI.md, "Checking". *)
+   the pinned solver, with a tagged template's check decided by running it. *)
 
 (* The solver, found once. A check cannot be done without it, as a build
    cannot without a C compiler. Its answers are kept in the store. *)
@@ -21,7 +20,7 @@ let diagnostics (project : Project.t) =
   fun module_ -> Prover.diagnostics ~running project.context solver module_
 
 (* Each definition [main] can reach whose proofs have a hole, which a
-   program cannot be built with, as PROVER.md's "Holes" says. *)
+   program cannot be built with. *)
 let holes_reached (project : Project.t) main =
   let seen = Project.reachable (Database.dependencies project.session) main in
   List.concat_map

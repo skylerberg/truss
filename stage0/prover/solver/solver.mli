@@ -1,4 +1,4 @@
-(** Running the pinned solver on one query. See PROVER.md, "The solver".
+(** Running the pinned solver on one query.
 
     Each query runs in a fresh process, with a fixed limit in steps and a fixed seed, so its answer
     depends only on its text and the solver's version. *)

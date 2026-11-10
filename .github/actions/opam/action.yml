@@ -2,10 +2,12 @@ name: OCaml and the dependencies
 description: >
   Restores opam with the OCaml switch and every dependency already built,
   from a cache keyed by the opam and OCaml versions, the runner's image, and
-  truss.opam. Only a change to one of those builds anything: the opam binary
-  is downloaded and checked against its pinned hash, and the switch and the
-  dependencies are built and cached. Nothing comes from apt, so a slow
-  package mirror cannot slow a run.
+  truss.opam. When truss.opam changed, it starts from the newest cache with
+  the same opam, OCaml, and image, and installs only what changed, so a new
+  dependency costs what building it costs. Only a new opam, OCaml, or image
+  builds the switch from nothing: the opam binary is downloaded and checked
+  against its pinned hash. Nothing comes from apt, so a slow package mirror
+  cannot slow a run.
 
 inputs:
   opam-version:
@@ -25,9 +27,10 @@ runs:
   steps:
     - id: key
       shell: bash
-      run: >
-        echo "key=opam-${{ runner.os }}-${{ runner.arch }}-${ImageOS}-${{ inputs.opam-version }}-${{ inputs.ocaml-version }}-${{ hashFiles('truss.opam') }}"
-        >> "$GITHUB_OUTPUT"
+      run: |
+        base="opam-${{ runner.os }}-${{ runner.arch }}-${ImageOS}-${{ inputs.opam-version }}-${{ inputs.ocaml-version }}-"
+        echo "base=$base" >> "$GITHUB_OUTPUT"
+        echo "key=${base}${{ hashFiles('truss.opam') }}" >> "$GITHUB_OUTPUT"
 
     - id: restore
       uses: actions/cache/restore@v6.1.0
@@ -36,8 +39,10 @@ runs:
           ~/.opam
           ~/.local/bin/opam
         key: ${{ steps.key.outputs.key }}
+        restore-keys: ${{ steps.key.outputs.base }}
 
-    - if: steps.restore.outputs.cache-hit != 'true'
+    # Nothing restored: opam, the switch, and every dependency from nothing.
+    - if: steps.restore.outputs.cache-matched-key == ''
       shell: bash
       env:
         OPAMYES: "1"
@@ -49,6 +54,18 @@ runs:
         chmod +x ~/.local/bin/opam
         ~/.local/bin/opam init --bare --disable-sandboxing --no-setup
         ~/.local/bin/opam switch create default "ocaml-base-compiler.${{ inputs.ocaml-version }}"
+
+    # Anything but an exact match: the dependencies truss.opam asks for now.
+    # A restored switch's package list is brought up to date first, so that a
+    # version released since it was made can be installed.
+    - if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        OPAMYES: "1"
+      run: |
+        if [ -n "${{ steps.restore.outputs.cache-matched-key }}" ]; then
+          ~/.local/bin/opam update --repositories
+        fi
         ~/.local/bin/opam install . --deps-only --with-test --with-dev-setup
         ~/.local/bin/opam clean --all-switches --download-cache --logs
 

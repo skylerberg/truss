@@ -19,7 +19,7 @@ let rec expression st (e : S.expression) : Lir.place =
   | Todo | Unreachable | Return _ | Break | Continue ->
       (* These never give a value, so what they are written into is never
          read. *)
-      let nowhere = new_local st (Monomorphic.builtin Unit) in
+      let nowhere = temporary st (Monomorphic.builtin Unit) in
       into st e nowhere;
       nowhere
   | Name _ | Member _ | Self_value | Bracket _ | Call _ -> (
@@ -151,7 +151,7 @@ and into st (e : S.expression) (destination : Lir.place) =
       assign (Use (constant_of st (ty ()) (literal st e.id)))
   | String literal when literal.rest = [] && literal.tag = None ->
       let field, storage_ty, storage = string_value st (ty ()) literal.first.value in
-      let built = new_local st storage_ty in
+      let built = temporary st storage_ty in
       emit st.b (Assign (built, storage));
       assign (Build { ty = ty (); variant = None; fields = [ (field, Move built) ] })
   | Name _ | Self_value | Member _ -> (
@@ -247,7 +247,8 @@ and into st (e : S.expression) (destination : Lir.place) =
              fields = [ ("start", start); ("stop", stop); ("inclusive", Constant (Bool inclusive)) ];
            })
   | Provide { implementations; body } -> provide st e implementations body destination
-  | Range _ | Quantified _ -> bug "this expression is not lowered yet: %s" (source st e.span)
+  | Range _ -> unsupported st e.span "a range without both of its ends, as a value"
+  | Quantified _ -> unsupported st e.span "a quantifier in code that runs"
   | Self_type_value -> bug "Self as a value"
   | Expression_error -> bug "an expression that did not parse"
 
@@ -316,7 +317,7 @@ and operator st (e : S.expression) operands destination =
          tests. *)
       let test variant ~negate =
         let ordering =
-          new_local st
+          temporary st
             (Named
                {
                  path =
@@ -337,7 +338,7 @@ and operator st (e : S.expression) operands destination =
       | Binary { operator = Greater; _ } -> test "Greater" ~negate:false
       | Binary { operator = Greater_equal; _ } -> test "Less" ~negate:true
       | Binary { operator = Not_equal; _ } ->
-          let equal = new_local st st.context.bool in
+          let equal = temporary st st.context.bool in
           call_with st call_ ~expressions:operands ~arguments equal ~span:e.span;
           emit st.b (Assign (destination, Unary (Not, Copy equal)))
       | _ -> call_with st call_ ~expressions:operands ~arguments destination ~span:e.span)

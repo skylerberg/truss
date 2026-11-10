@@ -48,6 +48,11 @@ jobs:
       - name: Check that truss.opam matches dune-project
         run: git diff --exit-code truss.opam
 
+      # Each save starts from the last one, so the cache is trimmed to keep it
+      # quick to restore.
+      - if: github.event_name == 'push'
+        run: opam exec -- dune cache trim --size=200MB
+
       - if: github.event_name == 'push'
         uses: actions/cache/save@v6.1.0
         with:
