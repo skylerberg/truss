@@ -498,7 +498,7 @@ is `Plain` exactly when `Value` is.
 |---|---|---|
 | `Copyable` | every type except the standard library's handles and types that hold one | call `copy()` |
 | `Plain` | integers, floats, `Bool`, `Character`, `Unit`, arrays, records, and sum types made only of `Plain` parts, with no heap data and no handle | copy implicitly. `Plain` requires `Copyable`. |
-| View | `Slice`, `StringSlice`, a cursor from a `self` method, every function type, an `any` that holds a view, and anything holding a view anywhere, in a field, a variant, an element, or a type argument | nothing extra; values of view types stay within their function (see [Views](#views)) |
+| View | `Slice`, `StringSlice`, a cursor from a `self` method, every function type, every `any` type, and anything holding a view anywhere, in a field, a variant, an element, or a type argument | nothing extra; values of view types stay within their function (see [Views](#views)) |
 | Structural equality | the built-in integers, `Bool`, `Character`, `Unit`, `String`, the types of specifications, and a type that derives `Equal` whose fields all have it; never floats, a hand-written `Equal`, or, outside its package, an opaque type | be a constant in a pattern; the prover substitutes through `==` |
 
 - **`Copyable` and `Plain` are prelude traits that the compiler implements.**
@@ -1224,14 +1224,25 @@ all read from one account of what a value views:
   `holder.view = data[0..2]`, `holder` views `data`. A variable assigned
   again still views what it viewed before, since the checker follows no
   path one at a time.
-- **A local that is a view stands for what it views.** A value read from
-  `part`, after `let part = items[0..2]`, views `items` and not `part`, so a
-  function may return it when `items` is a parameter.
+- **A value taken out of a place views what the place's root views, and a
+  value that refers to a place views the place too.** A value is taken out
+  when it is copied or moved: after `let part = items[0..2]`, a value read
+  from `part` views `items` and not `part`, so a function may return it
+  when `items` is a parameter. A value refers to a place when it borrows
+  it, or is a slice of an owning collection. So for a value that both owns
+  data and holds a view, such as a record with a `String` and a `Slice`, a
+  borrow of it and a slice of its string view the record itself, and the
+  record cannot change while they are in use.
+- **A name bound by a `match` or an `is` on a place views that place,**
+  because the name refers to a part of it. `slot = None` inside the
+  `Some(inner)` arm of `match slot` is an error while `inner` is in use.
 - **A function returns views only of what reached it through its
   parameters.** A returned view-typed value may hold loans only of its
   parameters and of what they view, never of what ends with the function:
-  its locals, and a parameter or `self` it takes `own`, unless that is
-  itself a view. A method returning `self.items[1..4]` and
+  its locals, and a parameter or `self` it takes `own`. A value taken out
+  of an `own` parameter, such as a slice that the parameter held, views
+  what the caller has, so it can be returned; a reference into the
+  parameter cannot. A method returning `self.items[1..4]` and
   `Option.unwrap_or` both meet this.
 - **What the caller keeps views only the same.** A `mut` parameter, and
   `self` in a `mut self` method, outlive the function, so a view put in one,
@@ -1271,8 +1282,15 @@ required, such as an `own` function-typed parameter. Putting a view into a
 record or a list makes that record or list a view, so "a view cannot be
 stored" holds by construction.
 
+An `any Trait` type does not say what the value inside holds, so every
+`any` type is a view type. A conversion to `any` views what the converted
+value views, so a record that holds a slice of a local cannot be returned
+inside an `any`, and an `any` made from owned data views nothing.
+
 A function type does not say whether a function captures, so every function
-type is a view type, and the value decides what it views:
+type is a view type, and the value decides what it views. A conversion to a
+function type with more `uses` or weaker costs views what the converted
+function views:
 
 - **A named function, or a lambda that captures nothing, views nothing.** It
   can be returned and stored like any plain value.

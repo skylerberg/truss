@@ -156,7 +156,9 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (ty
           then Some []
           else None
       | Plain -> None
-      | View -> each (List.map snd trait.associated))
+      (* The type does not say what the value inside holds, so every [any]
+         is a view. *)
+      | View -> None)
   (* A cursor from an [own self] method owns what it goes over; one from a
      [self] method views it. *)
   | T.Cursor { method_ = Method { receiver = Own; _ }; arguments } when property = View ->

@@ -13,57 +13,42 @@ open Moves
 
 (* What each holder may view. A holder with an entry is known to hold a
    view, even if the entry is empty. *)
-type holdings = (Place.root * Place.t list) list
+type holdings = (Place.root * view list) list
 
 let held (holdings : holdings) (holder : Place.root) = List.assoc_opt holder holdings
 
-let hold (holdings : holdings) holder places : holdings =
+let hold (holdings : holdings) holder views : holdings =
   let known = Option.value ~default:[] (held holdings holder) in
-  let added = List.filter (fun place -> not (List.mem place known)) places in
+  let added = List.filter (fun view -> not (List.mem view known)) views in
   (holder, known @ added) :: List.remove_assoc holder holdings
 
-let local_type context local = Hashtbl.find_opt context.types local
-
-(* Whether a root has a value of its own that a view of it refers to. A
-   local that is itself a view, or that only views another place, has
-   none: a value read from it views what the local views. *)
-let has_own_value context (root : Place.root) =
-  match root with
-  | Constant _ | Environment | Local Self -> true
-  | Local local -> (
-      List.mem local context.parameters
-      || kind context root = Owned
-         &&
-         match local_type context local with
-         | Some type_ -> not (is_view context type_)
-         | None -> true)
-
-(* The places that a value views, given the places it names. *)
-let resolve context (holdings : holdings) (places : Place.t list) : Place.t list =
+(* What a value views, given the places it names. A value that refers to a
+   place views the place and what the place's root is known to view. A
+   value taken out of a place views only what the root is known to view. If
+   nothing is known of the root, as for a parameter, the place stands for
+   what was taken out of it. *)
+let resolve (holdings : holdings) (views : view list) : view list =
   List.concat_map
-    (fun (place : Place.t) ->
-      match held holdings place.root with
-      | Some viewed when not (has_own_value context place.root) -> viewed
-      | known -> Option.value ~default:[] known @ [ place ])
-    places
+    (fun (view : view) ->
+      match (held holdings view.place.root, view.taken) with
+      | Some known, true -> known
+      | Some known, false -> known @ [ view ]
+      | None, _ -> [ view ])
+    views
 
-(* Whether a place is gone when the function returns, so that nothing the
-   caller keeps may view it: a local, and a parameter or [self] that the
-   function owns. An owned view stands for what it views, which the caller
-   has. *)
-let ends_with_function context (place : Place.t) =
-  match place.root with
+(* Whether what is viewed is gone when the function returns, so that
+   nothing the caller keeps may view it: a local, the environment of a
+   lambda, and a parameter or [self] that the function owns. A value taken
+   out of an owned parameter is a view that the parameter held, which views
+   what the caller has. *)
+let ends_with_function context (view : view) =
+  match view.place.root with
   | Constant _ -> false
   | Environment -> true
   | Local local ->
-      let owned =
-        kind context place.root = Owned
-        &&
-        match local_type context local with
-        | Some type_ -> not (is_view context type_)
-        | None -> true
-      in
-      if local = Self || List.mem local context.parameters then owned else true
+      if local = Self || List.mem local context.parameters then
+        kind context view.place.root = Owned && not view.taken
+      else true
 
 (* Whether the caller keeps the place after the function returns: a [mut]
    parameter, or [self] in a [mut self] method. *)
@@ -81,15 +66,13 @@ let transfer context (point : point) (before : holdings) : holdings =
         (fun (holder, _) -> not (List.exists (fun local -> holder = Place.Local local) locals))
         before
   | Hold { holders; views } ->
-      let viewed = resolve context before views in
+      let viewed = resolve before views in
       List.fold_left
         (fun holdings holder ->
           (Place.Local holder, viewed) :: List.remove_assoc (Place.Local holder) holdings)
         before holders
   | Store { place; views } -> (
-      match resolve context before views with
-      | [] -> before
-      | viewed -> hold before place.root viewed)
+      match resolve before views with [] -> before | viewed -> hold before place.root viewed)
   | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Assign _ | Ends _ | Suspend | Exit
   | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Gives_function _ | Write_through _
   | Arguments _ ->
@@ -215,8 +198,8 @@ let check context (graph : Graph.t) =
     if overlaps loan.lent place then Some false
     else if
       List.exists
-        (fun viewed -> overlaps viewed place)
-        (resolve context before.(index) [ loan.lent ])
+        (fun (viewed : view) -> overlaps viewed.place place)
+        (resolve before.(index) [ { place = loan.lent; taken = false } ])
     then Some true
     else None
   in
@@ -255,7 +238,8 @@ let check context (graph : Graph.t) =
                   List.mem local after.(index)
               | Local _ | Constant _ | Environment -> true
             in
-            if in_use && List.exists (fun viewed -> overlaps viewed place) viewed then
+            if in_use && List.exists (fun (viewed : view) -> overlaps viewed.place place) viewed
+            then
               report context Changed_while_viewed at
                 (Printf.sprintf "`%s` cannot %s while `%s`, which views it, is still in use."
                    (show context place) what (show_root context holder)))
@@ -308,13 +292,13 @@ let check context (graph : Graph.t) =
              it views. *)
           List.iter
             (fun (position, viewed, view_at) ->
-              let viewed = resolve context before.(index) viewed in
+              let viewed = resolve before.(index) viewed in
               List.iter
                 (fun (passed : passed) ->
                   if
                     passed.position <> position && passed.mode = Mut
                     && List.exists
-                         (fun viewed -> Place.overlap viewed passed.place = Overlap)
+                         (fun (viewed : view) -> Place.overlap viewed.place passed.place = Overlap)
                          viewed
                   then
                     report context Conflicting_loan
@@ -349,14 +333,14 @@ let check context (graph : Graph.t) =
              value that is not owned here may be a lambda that captures. *)
           match
             List.find_opt
-              (fun (viewed : Place.t) ->
-                match viewed.root with
+              (fun (viewed : view) ->
+                match viewed.place.root with
                 | Environment -> true
                 | Constant _ -> false
-                | Local _ -> kind context viewed.root <> Owned)
-              (resolve context before.(index) views)
+                | Local _ -> kind context viewed.place.root <> Owned)
+              (resolve before.(index) views)
           with
-          | Some { root = Environment; _ } ->
+          | Some { place = { root = Environment; _ }; _ } ->
               report context Stores_local_view at
                 "This lambda captures, and an `own` parameter may keep the function it is given \
                  after this function returns. Only a function that captures nothing can be given \
@@ -367,13 +351,11 @@ let check context (graph : Graph.t) =
                    "`%s` is not owned here, so it may be a lambda that captures, and an `own` \
                     parameter may keep the function it is given. Only a function that captures \
                     nothing can be given to an `own` parameter."
-                   (show context viewed))
+                   (show context viewed.place))
           | None -> ())
       | Return_view views -> (
-          match
-            List.find_opt (ends_with_function context) (resolve context before.(index) views)
-          with
-          | Some { root = Environment; _ } ->
+          match List.find_opt (ends_with_function context) (resolve before.(index) views) with
+          | Some { place = { root = Environment; _ }; _ } ->
               report context Returns_local_view at
                 "This returns a lambda that captures. What a lambda captures is kept in the \
                  function that the lambda is written in, so the lambda would outlive it. Only a \
@@ -384,14 +366,12 @@ let check context (graph : Graph.t) =
                 (Printf.sprintf
                    "This returns a view of `%s`, which is local to the function, so it would \
                     outlive it. A function returns views only of its parameters."
-                   (show_root context local.root))
+                   (show_root context local.place.root))
           | None -> ())
       | Store { place; views } -> (
           if kept_by_caller context place then
-            match
-              List.find_opt (ends_with_function context) (resolve context before.(index) views)
-            with
-            | Some { root = Environment; _ } ->
+            match List.find_opt (ends_with_function context) (resolve before.(index) views) with
+            | Some { place = { root = Environment; _ }; _ } ->
                 report context Stores_local_view at
                   (Printf.sprintf
                      "This puts a lambda that captures in `%s`, which the caller keeps. What a \
@@ -405,8 +385,9 @@ let check context (graph : Graph.t) =
                      "This puts a view of `%s` in `%s`, which the caller keeps, so the view would \
                       outlive `%s`. What the caller keeps views only what reached the function \
                       through its parameters."
-                     (show_root context local.root) (show_root context place.root)
-                     (show_root context local.root))
+                     (show_root context local.place.root)
+                     (show_root context place.root)
+                     (show_root context local.place.root))
             | None -> ())
       | Write_through slice -> (
           (* Writing through a slice changes what the slice views, so every
@@ -434,15 +415,16 @@ let check context (graph : Graph.t) =
           | _ -> (
               match
                 List.find_opt
-                  (fun (viewed : Place.t) -> viewed <> slice && not (mutable_root viewed.root))
-                  (resolve context before.(index) [ slice ])
+                  (fun (viewed : view) ->
+                    viewed.place <> slice && not (mutable_root viewed.place.root))
+                  (resolve before.(index) [ { place = slice; taken = true } ])
               with
               | Some viewed ->
                   report context Read_only_view at
                     (Printf.sprintf
                        "`%s` views `%s`, which is read-only here, so nothing can be changed \
                         through `%s`."
-                       (show context slice) (show context viewed) (show context slice))
+                       (show context slice) (show context viewed.place) (show context slice))
               | None -> ()))
       | Enter | Take_lent _ | Bind _ | Ends _ | Suspend | Exit | Hold _ -> ())
     graph.points;

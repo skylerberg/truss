@@ -292,6 +292,96 @@ let () =
     \  apply(handlers.first, to: 1) + apply(fn(value) { value + amount }, to: 2)\n\
      }\n"
 
+(* Values that refer to a place, and values taken out of one *)
+
+let () =
+  let types =
+    "type Labeled(view: Slice[Int64], name: String)\n\n\
+     trait Runner {\n\
+    \  fn run(self) -> USize\n\
+     }\n\n\
+     type Window(view: Slice[Int64])\n\n\
+     impl Runner for Window {\n\
+    \  fn run(self) -> USize {\n\
+    \    self.view.length()\n\
+    \  }\n\
+     }\n\n\
+     type Owner(items: List[Int64])\n\n\
+     impl Runner for Owner {\n\
+    \  fn run(self) -> USize {\n\
+    \    self.items.length()\n\
+    \  }\n\
+     }\n\n"
+  in
+  let rejected name body code = test name (fun () -> one_diagnostic (types ^ body) code) in
+  let accepted name body = test name (fun () -> fine (types ^ body)) in
+  rejected "a borrow of a value that owns data and holds a view views the value"
+    "fn f(items: List[Int64]) -> USize {\n\
+    \  var labeled = Labeled(view: items[..], name: \"a\".copy())\n\
+    \  let borrowed = labeled\n\
+    \  labeled = Labeled(view: items[..], name: \"b\".copy())\n\
+    \  borrowed.name.length()\n\
+     }\n"
+    "ownership.changed_while_viewed";
+  rejected "a slice of a part of a value that owns data and holds a view views the value"
+    "fn f(items: List[Int64]) -> USize {\n\
+    \  var labeled = Labeled(view: items[..], name: \"a\".copy())\n\
+    \  let name = labeled.name.slice()\n\
+    \  labeled = Labeled(view: items[..], name: \"b\".copy())\n\
+    \  name.length()\n\
+     }\n"
+    "ownership.changed_while_viewed";
+  rejected "a reference into a parameter that the function owns cannot be returned"
+    "fn f(labeled: own Labeled) -> StringSlice {\n  labeled.name.slice()\n}\n"
+    "ownership.returns_local_view";
+  accepted "a view taken out of a parameter that the function owns can be returned"
+    "fn f(labeled: own Labeled) -> Slice[Int64] {\n  labeled.view\n}\n";
+  rejected "an `any` that holds a view of a local cannot be returned"
+    "fn f() -> any Runner {\n\
+    \  let items: List[Int64] = [1, 2, 3]\n\
+    \  any Window(view: items[..])\n\
+     }\n"
+    "ownership.returns_local_view";
+  rejected "what an `any` views cannot change while the `any` is in use"
+    "fn f(items: mut List[Int64]) -> USize {\n\
+    \  let runner: any Runner = any Window(view: items[..])\n\
+    \  mut items.push(4)\n\
+    \  runner.run()\n\
+     }\n"
+    "ownership.changed_while_viewed";
+  accepted "an `any` made from owned data can be returned"
+    "fn f() -> any Runner {\n  any Owner(items: [1, 2, 3])\n}\n";
+  rejected "a lambda that captures cannot be returned as a wider function type"
+    "fn adder(amount: Int64) -> (fn(Int64) -> Int64 uses Clock) {\n\
+    \  let add: fn(Int64) -> Int64 = fn(value) { value + amount }\n\
+    \  add\n\
+     }\n"
+    "ownership.returns_local_view";
+  rejected "a place cannot change while a name that a `match` on it binds is in use"
+    "fn f() -> USize {\n\
+    \  var slot: Option[String] = Some(\"a\".copy())\n\
+    \  match slot {\n\
+    \    Some(inner) => {\n\
+    \      slot = None\n\
+    \      inner.length()\n\
+    \    }\n\
+    \    None => 0\n\
+    \  }\n\
+     }\n"
+    "ownership.changed_while_viewed";
+  accepted "a place can change in an arm once the names the `match` binds are not used"
+    "fn f() -> USize {\n\
+    \  var slot: Option[String] = Some(\"a\".copy())\n\
+    \  match slot {\n\
+    \    Some(inner) => {\n\
+    \      let length = inner.length()\n\
+    \      slot = None\n\
+    \      length\n\
+    \    }\n\
+    \    None => 0\n\
+    \  }\n\
+     }\n"
+
 (* Constants *)
 
 let () =
