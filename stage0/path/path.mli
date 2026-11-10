@@ -4,7 +4,15 @@
 
 type module_ = { package : string; modules : string list }
 (** [weather::forecast::hourly] is the package [weather] and the modules [forecast; hourly]. A
-    package's root module has no modules. *)
+    package's root module has no modules. A package from the registry has an owner in its name, so
+    [acme::geometry::vector] is the package [acme::geometry] and the module [vector]. *)
+
+val package_parts : string -> string list
+(** A package's name as the names a path writes it with: [acme::geometry] is [acme] and [geometry].
+*)
+
+val module_parts : module_ -> string list
+(** The names a module's full path is written with: its package's, then its modules'. *)
 
 val show_module : module_ -> string
 

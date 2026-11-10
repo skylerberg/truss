@@ -37,7 +37,8 @@ let write directory file text =
   let now = Unix.gettimeofday () in
   Unix.utimes path now (now +. float_of_int !counter)
 
-let manifest name = Printf.sprintf "[package]\nname = \"%s\"\n" name
+let manifest name = Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"0.1\"\n" name
+let project = "[project]\n"
 
 let program =
   {|internal fn double(value: Int64) -> Int64 {
@@ -191,21 +192,23 @@ let () =
   test "a package cannot depend on one that runs only on 64-bit targets unless it does too"
     (fun () ->
       fresh_store ();
-      let root = fresh "worktree" in
-      write root "wide/truss.toml" "[package]\nname = \"wide\"\nusize_bits = 64\n";
+      let root = fresh "project" in
+      write root "truss.toml" project;
+      write root "wide/truss.toml" (manifest "wide" ^ "usize_bits = 64\n");
       write root "wide/main.truss" program;
-      write root "app/truss.toml" "[package]\nname = \"app\"\n\n[dependencies]\nwide = []\n";
+      write root "app/truss.toml" (manifest "app" ^ "\n[dependencies]\nwide = []\n");
       write root "app/main.truss" program;
       let session, _ = session root in
       if
         not
           (List.exists
-             (fun p -> contains p "wide runs only on 64-bit targets")
+             (fun p -> contains p "runs only on 64-bit targets")
              (Database.problems session))
-      then fail "no problem");
+      then fail "problems: [%s]" (String.concat "; " (Database.problems session)));
   test "a session opened in a package's directory is about that package alone" (fun () ->
       fresh_store ();
-      let root = fresh "worktree" in
+      let root = fresh "project" in
+      write root "truss.toml" project;
       write root "good/truss.toml" (manifest "good");
       write root "good/main.truss" program;
       write root "bad/truss.toml" (manifest "bad");
@@ -392,6 +395,45 @@ let () =
                       | Reads { this_worktree; change; reads } ->
                           Printf.sprintf "%b %s %s" this_worktree change.label reads.label)
                     overlaps)));
+  test "a project below the top of its worktree is compared with itself in another worktree"
+    (fun () ->
+      fresh_store ();
+      let top = fresh "repository" in
+      git top [ "init"; "-q"; "-b"; "main" ];
+      let root = Filename.concat top "services/app" in
+      write root "truss.toml" (manifest "app");
+      write root "main.truss" program;
+      write top "tools/truss.toml" (manifest "tools");
+      write top "tools/main.truss" program;
+      git top [ "add"; "-A" ];
+      git top [ "commit"; "-q"; "-m"; "base" ];
+      let other_top = Filename.concat (Lazy.force scratch) (Printf.sprintf "nested-%d" !counter) in
+      git top [ "worktree"; "add"; "-q"; other_top; "-b"; "other" ];
+      let other = Filename.concat other_top "services/app" in
+      change_interface root;
+      add_caller other;
+      let mine, _ = session root in
+      let theirs, _ = session other in
+      let _ = session (Filename.concat top "tools") in
+      (match Database.other_worktrees theirs with
+      | [ found ] when Database.root found = Unix.realpath root -> ()
+      | found -> fail "compared with [%s]" (String.concat "; " (List.map Database.root found)));
+      (match Database.overlap_with theirs mine with
+      | Error message -> fail "%s" message
+      | Ok overlaps ->
+          if
+            not
+              (List.exists
+                 (function
+                   | Database.Reads { this_worktree = true; reads; _ } -> reads.path = Some double
+                   | _ -> false)
+                 overlaps)
+          then fail "no overlap found");
+      match Database.merge_preview mine theirs with
+      | Error message -> fail "%s" message
+      | Ok found ->
+          if not (List.exists (fun (file, _, _) -> file = "main.truss") found) then
+            fail "no error found in the merge");
   test "a merge preview finds the errors the merge would have" (fun () ->
       fresh_store ();
       let root = repository () in

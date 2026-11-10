@@ -221,7 +221,8 @@ the order they appear in the LIR, so the result is the same on every run.
 Each instance gets a C symbol made from its key: a `t_` prefix, the module
 path with `__` between its parts, a type's method after a single `_`, and
 the type arguments between markers, such as
-`t_standard__list__List_each_Of_standard__Int64_End_`. Names stay readable
+`t_standard__list__List_each_Of_standard__Int64_End_`. A package with an
+owner in its name gives two parts, as in `t_acme__geometry__vector__length`. Names stay readable
 in profilers and debuggers. A marker is `_`, an `UpperCamelCase` word, and
 `_`, such as `_Of_`, `_Mut_`, or `_Drop_`, which no Truss name can contain,
 since a name with `_` has no uppercase letter and an `UpperCamelCase` name
