@@ -968,8 +968,8 @@ It proves, with one canonical, numbered, hashed query per obligation:
 - records and sum types whose fields the package sees, as algebraic
   datatypes with their variants and fields sorted by name: building them,
   with fields defaulted, reading fields, variants with no fields,
-  constants, `with`, `match` with guards and every pattern but strings and
-  alternatives that bind, `is`, `?` on a `Result` or an `Option`, and `==`
+  constants, `with`, `match` with guards and every pattern but alternatives
+  that bind, with a string pattern matching text by its bytes, `is`, `?` on a `Result` or an `Option`, and `==`
   as the solver's equality for types with structural equality. Each field
   read is in its type's range, and a counterexample shows a value by its
   variant and fields.

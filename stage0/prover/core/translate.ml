@@ -3314,7 +3314,7 @@ and pattern_match context frame (written : pattern) term ty : L.term * frame =
                  path),
             frame )
       | _ -> unsupported written.span "this constant in a pattern")
-  | Literal literal -> (literal_condition written literal term, frame)
+  | Literal literal -> (literal_condition context written literal term ty, frame)
   | Pattern_range { start; stop; inclusive } ->
       let end_ (range_end : range_end) =
         match range_end.kind with
@@ -3363,12 +3363,24 @@ and pattern_match context frame (written : pattern) term ty : L.term * frame =
       (L.disjunction conditions, frame)
   | Pattern_error -> unsupported written.span "this pattern"
 
-and literal_condition (written : pattern) literal term =
+and literal_condition context (written : pattern) literal term ty =
   match literal with
   | Literal_integer value -> L.equal term (L.Integer value)
   | Literal_true -> term
   | Literal_false -> L.not_ term
-  | Literal_string _ -> unsupported written.span "a string pattern"
+  | Literal_string { tag = None; first; rest = []; _ } -> (
+      (* Text matches when its bytes are the pattern's. *)
+      let byte = T.builtin UInt8 in
+      match model_of context ty term ~element:byte with
+      | Some model ->
+          L.conjunction
+            (L.equal (sequence_length context byte model) (L.int (String.length first.value))
+            :: List.init (String.length first.value) (fun index ->
+                match sequence_at context byte model (L.int index) with
+                | Some at -> L.equal at (L.int (Char.code first.value.[index]))
+                | None -> L.Boolean false))
+      | None -> unsupported written.span "a string pattern on `%s`" (T.show ty))
+  | Literal_string _ -> unsupported written.span "a string pattern with a tag or interpolations"
 
 and fields_match context frame (written : pattern) type_ variant term fields =
   let declared =

@@ -1149,6 +1149,16 @@ let () =
         \  mut text.push(\"cde\")\n\
         \  text.length()\n\
          }\n");
+  test "a string pattern matches text with its bytes" (fun () ->
+      proven
+        "fn f(text: String) -> USize\n\
+        \  ensures result <= 3\n\
+         {\n\
+        \  match text {\n\
+        \    \"yes\" => text.length()\n\
+        \    _ => 0\n\
+        \  }\n\
+         }\n");
   test "an interpolated string is a string about which little is known" (fun () ->
       not_proven
         "fn f(count: Int64) -> USize\n  ensures result == 1\n{\n  \"${count}\".length()\n}\n"
