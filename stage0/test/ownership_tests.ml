@@ -877,6 +877,38 @@ let () =
      }\n"
     "ownership.field_not_restored"
 
+(* Guards *)
+
+let () =
+  let bump = "fn bump(count: mut Int64) -> Bool {\n  count = 1\n  false\n}\n\n" in
+  test "a guard cannot change what the `match` matches" (fun () ->
+      one_diagnostic
+        (bump
+       ^ "fn f() -> Int64 {\n\
+         \  var n: Int64 = 0\n\
+         \  match n {\n\
+         \    0 if bump(mut n) => 1\n\
+         \    0 => 2\n\
+         \    _ => 3\n\
+         \  }\n\
+          }\n")
+        "ownership.changed_while_viewed");
+  test "a guard can change another place, and an arm's body can change what was matched" (fun () ->
+      fine
+        (bump
+       ^ "fn f() -> Int64 {\n\
+         \  var n: Int64 = 0\n\
+         \  var other: Int64 = 0\n\
+         \  match n {\n\
+         \    0 if bump(mut other) => 1\n\
+         \    0 => {\n\
+         \      n = 5\n\
+         \      n + other\n\
+         \    }\n\
+         \    _ => 3\n\
+         \  }\n\
+          }\n"))
+
 (* Constants *)
 
 let () =
@@ -1609,6 +1641,24 @@ let () =
           \    items[first] = 1\n\
           \    items[second] = 2\n\
           \  }\n\
+           }\n"
+      in
+      if found <> 1 then fail "%d obligations" found);
+  test "a slice lent `mut` beside a slice that is viewed leaves an obligation" (fun () ->
+      let found =
+        disjoint_obligations
+          "fn f(first: mut Slice[Int64], other: Slice[Int64]) {}\n\n\
+           fn g(items: mut List[Int64]) {\n\
+          \  f(mut items[0..2], other: items[0..2])\n\
+           }\n"
+      in
+      if found <> 1 then fail "%d obligations" found);
+  test "an element lent `mut` beside a slice that is viewed leaves an obligation" (fun () ->
+      let found =
+        disjoint_obligations
+          "fn f(first: mut Int64, other: Slice[Int64]) {}\n\n\
+           fn g(items: mut List[Int64]) {\n\
+          \  f(mut items[0], other: items[1..2])\n\
            }\n"
       in
       if found <> 1 then fail "%d obligations" found)

@@ -101,10 +101,14 @@ let check database (key : Resolve.Names.key) : result option =
                 compare (left.span, left.message) (right.span, right.message))
               context.diagnostics;
           moves = List.sort_uniq compare context.moves;
+          (* One pair can be found by more than one rule, in either order. *)
           obligations =
-            List.rev_map
+            List.map
               (fun (first, second) -> Checked.Disjoint { first; second })
-              context.disjoint;
+              (List.sort_uniq compare
+                 (List.map
+                    (fun (first, second) -> (min first second, max first second))
+                    context.disjoint));
         }
   | _ -> None
 
