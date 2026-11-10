@@ -3,12 +3,47 @@
 
 open Harness
 
-(* CI proves the library on a runner of its own, beside the other tests. *)
+(* CI proves the library on runners of its own, beside the other tests. *)
 let () =
   if Sys.getenv_opt "TRUSS_SKIP_LIBRARY_PROOFS" = Some "1" then begin
-    print_endline "skipped: the library's proofs run in a job of their own";
+    print_endline "skipped: the library's proofs run in jobs of their own";
     exit 0
   end
+
+(* CI proves the library on several runners at once. [TRUSS_PROOF_SHARE]
+   names this run's share as [index/count], and the run checks and proves
+   only its own modules: what they use of the others is worked out as it is
+   needed. The modules are dealt out by the size of their source, largest
+   first, each to the share with the least so far, so that the shares take
+   about as long as each other. *)
+let share =
+  match Sys.getenv_opt "TRUSS_PROOF_SHARE" with
+  | None | Some "" -> None
+  | Some text -> (
+      match List.map int_of_string_opt (String.split_on_char '/' text) with
+      | [ Some index; Some count ] when 0 <= index && index < count -> Some (index, count)
+      | _ ->
+          prerr_endline ("TRUSS_PROOF_SHARE is `index/count`, such as `0/2`, not `" ^ text ^ "`.");
+          exit 2)
+
+let modules =
+  match share with
+  | None -> Standard_library.modules
+  | Some (index, count) ->
+      let totals = Array.make count 0 in
+      let mine =
+        List.fold_left
+          (fun mine ((_, source) as entry) ->
+            let least = ref 0 in
+            Array.iteri (fun other total -> if total < totals.(!least) then least := other) totals;
+            totals.(!least) <- totals.(!least) + String.length source;
+            if !least = index then entry :: mine else mine)
+          []
+          (List.stable_sort
+             (fun (_, first) (_, second) -> compare (String.length second) (String.length first))
+             Standard_library.modules)
+      in
+      List.filter (fun entry -> List.memq entry mine) Standard_library.modules
 
 (* Solver answers are kept by the text of the query, the solver's version
    and its limit, so with a directory to keep them in, a run solves only
@@ -33,7 +68,7 @@ let () =
   let checked =
     List.map
       (fun ((module_ : Path.module_), _) -> (module_, Type_checker.diagnostics database module_))
-      Standard_library.modules
+      modules
   in
   test "the code database kept every result of checking the standard library current" (fun () ->
       List.iter (fun problem -> fail "%s" problem) (Engine.audit engine));

@@ -48,17 +48,23 @@ develop as well as make it easier to bootstrap the compiler in parts.
   - **The build, formatting, the opam file, and the tests are one dune run,**
     so they overlap. Two things run beside it, each on a runner of its own:
     the codegen tests under sanitizers, and the standard library's proofs.
-  - **The standard library's proofs have their own job.** They are the
+  - **The standard library's proofs have their own jobs.** They are the
     longest test, and the one that grows with the library, so they do not
     share a runner's cores with the rest. The dune run sets
     `TRUSS_SKIP_LIBRARY_PROOFS`, which makes `standard_library_tests` say it
-    is skipped and stop, and the proofs' job builds and runs that one
+    is skipped and stop, and the proofs' jobs build and run that one
     executable.
+  - **The proofs are dealt out to several runners.** `TRUSS_PROOF_SHARE`
+    names a run's share as `index/count`, and `standard_library_tests` then
+    checks and proves only that share's modules. The modules are dealt out
+    by the size of their source, so the shares take about as long as each
+    other. When the proofs' jobs become the longest again, add a share: one
+    more entry in the workflow's list.
   - **Solver answers are cached between runs.** Most of proving the
     standard library is the solver. The cache key of an answer is the query
     text, the solver version, and the step limit. A run restores the cache
     from `main` and solves only the queries whose text changed. Only pushes
-    to `main` save the cache.
+    to `main` save the cache. Each share of the proofs keeps its own.
   - **A new push to a pull request cancels the run it replaces.**
 - **A pull request that takes out a recent merge fails,** before anything is
   built (`.github/scripts/reverts.sh`). Several sessions fetch into one
