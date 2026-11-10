@@ -306,6 +306,27 @@ let declare state (name : name) type_ ~mutable_ ~mode =
 
 let target state (name : name) = state.resolved.names.(name.id)
 
+(* A literal that is a receiver has its default type, as in
+   [5.wrapping_add(3)], since nothing else can decide it before the method
+   is looked up. *)
+let default_literal state type_ =
+  let decide default =
+    ignore (Unify.unify state.unifier type_ default);
+    default
+  in
+  match Unify.resolve state.unifier type_ with
+  | T.Literal (Integer_literal, _) -> decide (T.builtin Int64)
+  | T.Literal (Float_literal, _) -> decide (T.builtin Float64)
+  | _ -> type_
+
+(* What an expression names, when it is a name: the one reading of it that
+   every part of checking shares. *)
+let head state (value : expression) = Resolve.head state.resolved value
+
+(* A name after a dot is a variant when it is written as a type is. *)
+let names_variant (member : name) =
+  member.text <> "" && member.text.[0] >= 'A' && member.text.[0] <= 'Z'
+
 (* Showing types and fixes *)
 
 let show state type_ = T.show (zonk state type_)
@@ -332,9 +353,7 @@ let rec is_place state (value : expression) =
   match value.kind with
   | Name path -> (
       match target state path.last with
-      | Some (Local _ | Field _) -> true
-      | Some (Definition (Top _ as path_)) ->
-          Interface.Summary.kind_of state.database path_ = Some Constant
+      | Some (Local _ | Field _ | Definition (Constant, _)) -> true
       | _ -> false)
   | Self_value -> true
   | Member (base, _) -> is_place state base
@@ -346,14 +365,6 @@ let rec is_place state (value : expression) =
       | _ -> false)
   | Parenthesized inner -> is_place state inner
   | _ -> false
-
-let rec place_root state (value : expression) =
-  match value.kind with
-  | Name path -> (
-      match target state path.last with Some (Local id) -> Some (`Local id) | _ -> None)
-  | Self_value -> Some `Self
-  | Member (base, _) | Bracket (base, _) | Parenthesized base -> place_root state base
-  | _ -> None
 
 (* The first method call in a marked expression whose receiver is the
    place, which the mark gives its mode. *)
@@ -372,26 +383,21 @@ let rec called (value : expression) =
   | Mode (_, inner) | Parenthesized inner -> called inner
   | _ -> None
 
-(* The report of a name resolution found nothing by, under parentheses and
-   brackets. *)
-let rec unknown_name state (value : expression) =
-  match value.kind with
-  | Name path -> (
-      match target state path.last with Some (Unknown report) -> Some report | _ -> None)
-  | Parenthesized inner | Bracket (inner, _) -> unknown_name state inner
-  | _ -> None
-
 (* The error of an expression that is not what its place needs: the name's
    own report when resolution found nothing by it, so that is the one
    report, and a new one otherwise. *)
 let error_at state ?fixes code (value : expression) message =
-  match unknown_name state value with
-  | Some report -> T.Error report
-  | None -> error state ?fixes code value.span message
+  match head state value with
+  | Some { target = Unknown report; _ } -> T.Error report
+  | _ -> error state ?fixes code value.span message
 
 (* Static references: an expression that names a type or a trait rather
    than a value, before a [.] or a [(]. *)
-type static_ = Static_type of T.ty | Static_trait of Path.t | Static_capability of Path.t
+type static_ =
+  | Static_type of T.ty
+  | Static_trait of Path.t * T.argument list option
+      (** With the trait's arguments, when they are written. *)
+  | Static_capability of Path.t
 
 let fresh_arguments state (path : Path.t) =
   match Query.demand state.database Environment.type_interface path with
@@ -406,91 +412,78 @@ let fresh_arguments state (path : Path.t) =
   | None -> []
 
 let rec static_ state (value : expression) : static_ option =
-  match value.kind with
-  | Self_type_value -> Option.map (fun self -> Static_type self) state.context.self_type
-  | Parenthesized inner -> static_ state inner
-  | Name path -> (
-      match target state path.last with
-      | Some (Definition definition_path) -> (
-          match Intrinsic.builtin_of_path definition_path with
-          | Some Never -> Some (Static_type T.Never)
-          | Some Integer -> Some (Static_type T.Integer)
-          | Some _ ->
-              Some
-                (Static_type
-                   (T.Named
-                      { path = definition_path; arguments = fresh_arguments state definition_path }))
-          | None -> (
-              match Interface.Summary.kind_of state.database definition_path with
-              | Some Type ->
-                  Some
-                    (Static_type
-                       (T.Named
-                          {
-                            path = definition_path;
-                            arguments = fresh_arguments state definition_path;
-                          }))
-              | Some Trait -> Some (Static_trait definition_path)
-              | Some Capability -> Some (Static_capability definition_path)
-              | _ -> None))
-      | Some (Generic id) -> (
-          match Hashtbl.find_opt state.context.parameters id with
-          | Some parameter when path.last.text.[0] >= 'A' && path.last.text.[0] <= 'Z' ->
-              Some (Static_type (T.Parameter parameter))
-          | _ -> None)
-      | _ -> None)
-  | Bracket (base, items) when state.resolved.brackets.(value.id) = Some Type_arguments -> (
-      match static_ state base with
-      | Some (Static_type (Named { path; _ })) ->
-          let arguments =
-            List.filter_map
-              (function
-                | Item item -> Some (type_argument_of_expression state item)
-                | Item_constraint _ -> None)
-              items
-          in
-          (match Query.demand state.database Interface.Summary.generics_of path with
-          | Some expected when List.length expected <> List.length arguments ->
-              report state Arity value.span
-                (Printf.sprintf "`%s` takes %d %s, and %d %s given."
-                   (T.show (Named { path; arguments = [] }))
-                   (List.length expected)
-                   (if List.length expected = 1 then "argument" else "arguments")
-                   (List.length arguments)
-                   (if List.length arguments = 1 then "is" else "are"))
-          | _ -> ());
-          Some (Static_type (Named { path; arguments }))
-      | other -> other)
+  match (value.kind, head state value) with
+  | Self_type_value, _ -> Option.map (fun self -> Static_type self) state.context.self_type
+  | _, Some { target = Definition (Type, path); type_arguments; _ } ->
+      Some (Static_type (named_type state value path type_arguments))
+  | _, Some { target = Type_parameter id; name; type_arguments } ->
+      if Option.is_some type_arguments then
+        report state Arity value.span
+          (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." name.text);
+      Some (Static_type (T.Parameter (Lower.declared state.context id name)))
+  | _, Some { target = Definition (Trait, path); type_arguments; _ } ->
+      Some (Static_trait (path, Option.map (written_arguments state) type_arguments))
+  | _, Some { target = Definition (Capability, path); _ } -> Some (Static_capability path)
+  | Parenthesized inner, None -> static_ state inner
   | _ -> None
 
-(* A type written as an expression, as in [List[String].with_capacity]. *)
-and type_argument_of_expression state (value : expression) : T.argument =
-  let type_ () =
-    match static_ state value with
-    | Some (Static_type type_) -> T.Type type_
-    | Some (Static_trait _ | Static_capability _) | None ->
-        T.Type (error_at state Not_a_type value "A type argument is a type, or a `USize` value.")
+(* A type named in an expression: with the arguments written after it, or
+   with unknown ones for the statement to work out. *)
+and named_type state (value : expression) path type_arguments =
+  let type_ arguments =
+    match Intrinsic.builtin_of_path path with
+    | Some Never -> T.Never
+    | Some Integer -> T.Integer
+    | _ -> T.Named { path; arguments }
   in
-  match value.kind with
-  | Integer value -> T.Value (Known value)
-  | Name path -> (
-      match target state path.last with
-      | Some (Generic id) when path.last.text.[0] >= 'a' && path.last.text.[0] <= 'z' ->
-          T.Value (Value_parameter (Lower.declared state.context id path.last))
-      | Some (Definition path_) when Interface.Summary.kind_of state.database path_ = Some Constant
-        -> (
-          match Query.demand state.database Interface.Constants.value_of path_ with
-          | Some value -> T.Value (Known value)
-          | None ->
-              T.Type
-                (error state Arity value.span
-                   (Printf.sprintf
-                      "The value of `%s` cannot be worked out: a constant used in a type cannot \
-                       refer to itself, and is made of literals, arithmetic, and other such \
-                       constants."
-                      path.last.text)))
-      | _ -> type_ ())
-  | _ -> type_ ()
+  match type_arguments with
+  | None -> type_ (fresh_arguments state path)
+  | Some items ->
+      let arguments = written_arguments state items in
+      (match Query.demand state.database Interface.Summary.generics_of path with
+      | Some expected when List.length expected <> List.length arguments ->
+          report state Arity value.span
+            (Printf.sprintf "`%s` takes %d %s, and %d %s given."
+               (T.show (Named { path; arguments = [] }))
+               (List.length expected)
+               (if List.length expected = 1 then "argument" else "arguments")
+               (List.length arguments)
+               (if List.length arguments = 1 then "is" else "are"))
+      | _ -> ());
+      type_ arguments
+
+(* Type arguments written in an expression, as in [List[String].new()]. *)
+and written_arguments state items =
+  List.filter_map
+    (function
+      | Item item -> Some (type_argument_of_expression state item)
+      | Item_constraint (name, _) ->
+          report state Arity name.span
+            "An associated type is fixed where a type is written, as in `any Trait[Name = Type]`, \
+             not among type arguments in an expression.";
+          None)
+    items
+
+and type_argument_of_expression state (value : expression) : T.argument =
+  match (value.kind, head state value) with
+  | Integer value, _ -> T.Value (Known value)
+  | _, Some { target = Value_parameter id; name; _ } ->
+      T.Value (Value_parameter (Lower.declared state.context id name))
+  | _, Some { target = Definition (Constant, path); name; _ } -> (
+      match Query.demand state.database Interface.Constants.value_of path with
+      | Some value -> T.Value (Known value)
+      | None ->
+          T.Type
+            (error state Arity value.span
+               (Printf.sprintf
+                  "The value of `%s` cannot be worked out: a constant used in a type cannot refer \
+                   to itself, and is made of literals, arithmetic, and other such constants."
+                  name.text)))
+  | _ -> (
+      match static_ state value with
+      | Some (Static_type type_) -> T.Type type_
+      | Some (Static_trait _ | Static_capability _) | None ->
+          T.Type (error_at state Not_a_type value "A type argument is a type, or a `USize` value."))
 
 (* Instantiating signatures *)
 

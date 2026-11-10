@@ -159,14 +159,15 @@ and constant_value context (resolved : Resolve.resolved) type_ seen (value : exp
     | Name path -> (
         match resolved.names.(path.last.id) with
         | Some (Variant (_, name)) -> Some (Variant name)
-        | Some (Definition definition) -> (
+        | Some (Definition (_, definition)) -> (
             match type_ with
             | T.Named { path; _ } when Path.equal path definition -> Some Record
             | _ -> None)
         | _ -> None)
     | Member ({ kind = Name owner; _ }, member) -> (
         match resolved.names.(owner.last.id) with
-        | Some (Definition owner) when variant_named owner member.text -> Some (Variant member.text)
+        | Some (Definition (_, owner)) when variant_named owner member.text ->
+            Some (Variant member.text)
         | _ -> None)
     | _ -> None
   in
@@ -215,14 +216,14 @@ and constant_value context (resolved : Resolve.resolved) type_ seen (value : exp
   | Name path -> (
       match resolved.names.(path.last.id) with
       | Some (Variant (_, name)) -> built (Variant name) []
-      | Some (Definition definition) -> (
+      | Some (Definition (_, definition)) -> (
           match constant ~seen context type_ definition with
           | Constructed (Opaque_constant _, _) -> None
           | space -> Some space)
       | _ -> None)
   | Member ({ kind = Name owner; _ }, member) -> (
       match resolved.names.(owner.last.id) with
-      | Some (Definition owner) -> (
+      | Some (Definition (_, owner)) -> (
           if variant_named owner member.text then built (Variant member.text) []
           else
             match constant ~seen context type_ (Member_constant { owner; name = member.text }) with

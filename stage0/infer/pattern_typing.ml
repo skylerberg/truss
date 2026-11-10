@@ -42,8 +42,9 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                       binds it with one type."
                      bound.text (show state local.type_) (show state type_))
           | None -> ())
-      | Some (Definition path) -> constant_pattern state written.id written.span path type_
-      | Some (Generic _) ->
+      | Some (Definition (Constant, path)) ->
+          constant_pattern state written.id written.span path type_
+      | Some (Value_parameter _) ->
           if not (unify state (T.builtin USize) type_) then
             mismatch state written.span ~expected:type_ ~found:(T.builtin USize)
       | _ -> ())
@@ -67,7 +68,8 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
               | End_constant constant -> qualified_constant state end_.id end_.span constant type_
               | End_name bound -> (
                   match target state bound with
-                  | Some (Definition path) -> constant_pattern state end_.id end_.span path type_
+                  | Some (Definition (Constant, path)) ->
+                      constant_pattern state end_.id end_.span path type_
                   | _ -> ()))
             [ start; stop ])
   | Variant { name = variant_name; fields } -> (
@@ -332,10 +334,12 @@ and qualified_constant state id span constant type_ =
   let path =
     match constant with
     | Module_constant written_path -> (
-        match target state written_path.last with Some (Definition path) -> Some path | _ -> None)
+        match target state written_path.last with
+        | Some (Definition (Constant, path)) -> Some path
+        | _ -> None)
     | Type_constant (written_path, member) -> (
         match target state written_path.last with
-        | Some (Definition owner) -> Members.own_constant state.database owner member.text
+        | Some (Definition (Type, owner)) -> Members.own_constant state.database owner member.text
         | _ -> None)
   in
   match path with
@@ -389,7 +393,7 @@ and character_tag state (literal : string_literal) =
   match literal.tag with
   | Some tag -> (
       match target state tag.last with
-      | Some (Definition path) -> (
+      | Some (Definition (Type, path)) -> (
           match Intrinsic.builtin_of_path path with
           | Some ((Character | UInt8) as builtin) -> Some builtin
           | _ -> None)

@@ -3370,7 +3370,7 @@ and pattern_match context frame (written : pattern) term ty : L.term * frame =
       | Some (Local id) ->
           (* A later alternative's name for the binding the first one made. *)
           (L.Boolean true, { frame with locals = Ids.add id term frame.locals })
-      | Some (Definition path) ->
+      | Some (Definition (_, path)) ->
           ( L.equal term
               (constant_value context frame
                  { kind = True; span = written.span; id = written.id }
@@ -4189,11 +4189,11 @@ and target_in (source : source) locals (written : call_target) : Costs.target op
       | _ -> None)
   | Call_capability path_type -> (
       match source.resolved.names.(path_type.path.last.id) with
-      | Some (Definition path) -> Some (Costs.Capability path)
+      | Some (Definition (_, path)) -> Some (Costs.Capability path)
       | _ -> None)
   | Call_method (path_type, method_) -> (
       match source.resolved.names.(path_type.path.last.id) with
-      | Some (Definition path) -> Some (Costs.Capability_method (path, method_.text))
+      | Some (Definition (_, path)) -> Some (Costs.Capability_method (path, method_.text))
       | _ -> None)
 
 (* What a clause promises of a counter, in the counter's way of counting:

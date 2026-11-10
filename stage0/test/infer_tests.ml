@@ -776,10 +776,20 @@ let () =
 let identity = "fn identity[Value](value: own Value) -> Value {\n  value\n}\n\n"
 
 let () =
-  test "type arguments after a parenthesized name are an error" (fun () ->
-      one_diagnostic
-        (identity ^ "fn f() -> String {\n  (identity)[Int64](5)\n}\n")
-        "types.not_a_value");
+  test "type arguments after a parenthesized name are read as after the name" (fun () ->
+      fine (identity ^ "fn f() -> Int64 {\n  (identity)[Int64](5)\n}\n");
+      one_diagnostic (identity ^ "fn f() -> String {\n  (identity)[Int64](5)\n}\n") "types.mismatch");
+  test "a parenthesized name with type arguments is a value of that function" (fun () ->
+      fine (identity ^ "fn f() -> Int64 {\n  let same = (identity)[Int64]\n  same(5)\n}\n"));
+  test "a trait's written arguments are the ones its call uses" (fun () ->
+      let database = setup [ ("app::main", "fn f() -> Int64 {\n  Add[String].add(1, 2)\n}\n") ] in
+      if not (List.mem "types.no_impl" (codes (check database (module_of "app::main")))) then
+        fail "the written argument was ignored");
+  test "a literal is the receiver of a trait method written in full" (fun () ->
+      fine "fn f() -> Int64 {\n  Add[Int64].add(1, 2)\n}\n");
+  test "a generic parameter takes no type arguments" (fun () ->
+      one_diagnostic "fn f[Element: Default]() -> Element {\n  Element[Int64].default()\n}\n"
+        "types.arity");
   test "a member of a generic parameter that it does not have is an error" (fun () ->
       one_diagnostic "fn f[Element](value: Element) -> Int64 {\n  Element.anything\n}\n"
         "types.unknown_member");

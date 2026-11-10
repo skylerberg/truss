@@ -19,7 +19,20 @@ type kind =
   | Test
   | Law_proof
 
-let kind_name = function
+(* What a name can mean: the definitions that have a name of their own, which
+   is every kind but a method, a member constant, an [impl], a test, and a
+   law's proof. *)
+type named = Function | Type | Trait | Capability | Constant | Theorem
+
+let kind_of_named : named -> kind = function
+  | Function -> Function
+  | Type -> Type
+  | Trait -> Trait
+  | Capability -> Capability
+  | Constant -> Constant
+  | Theorem -> Theorem
+
+let kind_name : kind -> string = function
   | Function -> "a function"
   | Type -> "a type"
   | Trait -> "a trait"
@@ -160,7 +173,18 @@ let top module_ name : Path.t = Top { module_; name }
    that resolving a method's head can read them. *)
 (* An entry carries nothing about where in the file its definition is, so
    that moving a definition changes no lookup of it. *)
-type entry = { name : string; kind : kind; visibility : visibility; generic : bool }
+type entry = { name : string; kind : named; visibility : visibility; generic : bool }
+
+(* What a definition whose header did not parse was meant to be, by the
+   keyword it starts with. *)
+let named_of_keyword : Token.keyword option -> named option = function
+  | Some Fn -> Some Function
+  | Some Type -> Some Type
+  | Some Trait -> Some Trait
+  | Some Capability -> Some Capability
+  | Some Let -> Some Constant
+  | Some Theorem -> Some Theorem
+  | _ -> None
 
 let plain_items (definitions : definition Syntax.item list) =
   List.concat_map
@@ -178,14 +202,7 @@ let plain_items (definitions : definition Syntax.item list) =
       | Constant { name = Plain_name name; _ } -> plain name.text Constant false
       | Theorem { name; generics; _ } -> plain name.text Theorem (generics <> [])
       | Definition_error { name = Some (Plain_name name); keyword } -> (
-          match keyword with
-          | Some Fn -> plain name.text Function false
-          | Some Type -> plain name.text Type false
-          | Some Trait -> plain name.text Trait false
-          | Some Capability -> plain name.text Capability false
-          | Some Let -> plain name.text Constant false
-          | Some Theorem -> plain name.text Theorem false
-          | _ -> [])
+          match named_of_keyword keyword with Some kind -> plain name.text kind false | None -> [])
       | Function _ | Constant _ | Impl _ | Test _ | Law_proof _ | Definition_error _ -> [])
     definitions
 
@@ -236,8 +253,11 @@ let find =
         String_map.find_opt name (Query.demand database entry_index module_)
       else None)
 
-let is_type_kind = function Type | Trait | Capability -> true | _ -> false
-let is_value_kind = function Function | Constant | Theorem -> true | _ -> false
+let is_type_kind : named -> bool = function
+  | Type | Trait | Capability -> true
+  | Function | Constant | Theorem -> false
+
+let is_value_kind kind = not (is_type_kind kind)
 
 (* Whether code in [from] can see a definition of [module_] with this
    visibility. *)
@@ -373,18 +393,8 @@ let declarations =
                       })
                    Law_proof false
              | Definition_error { name = Some (Plain_name name); keyword } -> (
-                 let kind =
-                   match keyword with
-                   | Some Fn -> Some Function
-                   | Some Type -> Some Type
-                   | Some Trait -> Some Trait
-                   | Some Capability -> Some Capability
-                   | Some Let -> Some Constant
-                   | Some Theorem -> Some Theorem
-                   | _ -> None
-                 in
-                 match kind with
-                 | Some kind -> declare (top module_ name.text) kind false
+                 match named_of_keyword keyword with
+                 | Some kind -> declare (top module_ name.text) (kind_of_named kind) false
                  | None -> None)
              | Definition_error { name = Some (Member_name (head, name)); keyword } ->
                  let owner = owner database ~from:module_ head in

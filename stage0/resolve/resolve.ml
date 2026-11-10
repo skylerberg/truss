@@ -7,8 +7,10 @@ type cost_function = Walk.cost_function = Log | Power | Time | Calls
 type target = Walk.target =
   | Binding
   | Local of Syntax.id
-  | Generic of Syntax.id
-  | Definition of Path.t
+  | Type_parameter of Syntax.id
+  | Capability_parameter of Syntax.id
+  | Value_parameter of Syntax.id
+  | Definition of Names.named * Path.t
   | Variant of Path.t * string
   | Module of Path.module_
   | Field of string
@@ -33,6 +35,23 @@ type resolved = {
   holes : (Syntax.id * (string * value) list) list;
   diagnostics : Diagnostic.t list;
 }
+
+type head = {
+  name : Syntax.name;
+  target : target;
+  type_arguments : Syntax.bracket_item list option;
+}
+
+let rec head resolved (value : Syntax.expression) =
+  match value.kind with
+  | Name path ->
+      Option.map
+        (fun target -> { name = path.last; target; type_arguments = None })
+        resolved.names.(path.last.id)
+  | Parenthesized inner -> head resolved inner
+  | Bracket (base, items) when resolved.brackets.(value.id) = Some Type_arguments ->
+      Option.map (fun found -> { found with type_arguments = Some items }) (head resolved base)
+  | _ -> None
 
 (* The name a definition declares, for reporting a duplicate. *)
 let declared_name (definition : Syntax.definition) : Syntax.name option =

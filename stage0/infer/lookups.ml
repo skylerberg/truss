@@ -22,65 +22,51 @@ and literal_type state ~expected kind =
   | Some expected when Unify.literal_fits kind expected -> expected
   | _ -> Unify.fresh_literal state.unifier kind
 
-and name state env (value : expression) (path : path) =
-  match target state path.last with
-  | Some (Local id) -> (
+(* What a name is as a value, by what it means. *)
+and named state env (value : expression) ({ name; target; type_arguments } : Resolve.head) =
+  let text = name.text in
+  match target with
+  | Local id -> (
       state.references <- id :: state.references;
       state.tables.meanings.(value.id) <- Some (Local_value id);
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
-      | None -> bug "the local `%s` has no type" path.last.text)
-  | Some (Generic id) -> (
-      match Hashtbl.find_opt state.context.parameters id with
-      | Some parameter when path.last.text.[0] >= 'a' && path.last.text.[0] <= 'z' ->
-          state.tables.meanings.(value.id) <- Some (Generic_value parameter);
-          T.builtin USize
-      | _ ->
-          error state Not_a_value value.span
-            (Printf.sprintf "`%s` is a type, not a value." path.last.text))
-  | Some (Definition definition_path) -> (
-      match intrinsic_signature definition_path with
-      | Some signature ->
+      | None -> bug "the local `%s` has no type" text)
+  | Value_parameter id ->
+      state.tables.meanings.(value.id) <-
+        Some (Generic_value (Lower.declared state.context id name));
+      T.builtin USize
+  | Type_parameter _ | Capability_parameter _ ->
+      error state Not_a_value value.span (Printf.sprintf "`%s` is a type, not a value." text)
+  | Definition ((Function | Theorem), path) -> (
+      match function_signature state path with
+      | Some (Ok signature) ->
           let instance = instantiate state ~span:value.span signature in
+          Option.iter (explicit_type_arguments state value instance) type_arguments;
           state.tables.meanings.(value.id) <-
-            Some (Global { path = definition_path; type_arguments = instance.type_arguments });
+            Some (Global { path; type_arguments = instance.type_arguments });
           T.Function (T.function_type_of instance.signature)
-      | None -> (
-          match Interface.Summary.kind_of state.database definition_path with
-          | Some (Function | Theorem) -> (
-              match function_signature state definition_path with
-              | Some (Ok signature) ->
-                  let instance = instantiate state ~span:value.span signature in
-                  state.tables.meanings.(value.id) <-
-                    Some
-                      (Global { path = definition_path; type_arguments = instance.type_arguments });
-                  T.Function (T.function_type_of instance.signature)
-              | Some (Error report) -> T.Error report
-              | None -> bug "`%s` has no signature" (Path.show definition_path))
-          | Some Constant -> (
-              state.tables.meanings.(value.id) <-
-                Some (Global { path = definition_path; type_arguments = [] });
-              match Query.demand state.database Environment.constant_type definition_path with
-              | Some type_ -> type_
-              | None -> bug "the constant `%s` has no type" (Path.show definition_path))
-          | Some (Type | Trait | Capability) | None ->
-              if Intrinsic.builtin_of_path definition_path = Some Unit then begin
-                state.tables.meanings.(value.id) <-
-                  Some (Variant_value { type_ = T.unit; variant = "Unit" });
-                T.unit
-              end
-              else if Interface.Summary.kind_of state.database definition_path = Some Type then
-                error state Not_a_value value.span
-                  (Printf.sprintf "`%s` is a type. Build a value with `%s(...)`." path.last.text
-                     path.last.text)
-              else
-                error state Not_a_value value.span
-                  (Printf.sprintf "`%s` is not a value." path.last.text)
-          | Some (Method | Member_constant | Impl | Test | Law_proof) ->
-              bug "`%s` is not what a name can mean" (Path.show definition_path)))
-  | Some (Variant (type_path, variant)) ->
+      | Some (Error report) -> T.Error report
+      | None -> bug "`%s` has no signature" (Path.show path))
+  | Definition (Constant, path) -> (
+      state.tables.meanings.(value.id) <- Some (Global { path; type_arguments = [] });
+      match Query.demand state.database Environment.constant_type path with
+      | Some type_ -> type_
+      | None -> bug "the constant `%s` has no type" (Path.show path))
+  | Definition (Type, path) ->
+      if Intrinsic.builtin_of_path path = Some Unit then begin
+        state.tables.meanings.(value.id) <-
+          Some (Variant_value { type_ = T.unit; variant = "Unit" });
+        T.unit
+      end
+      else
+        error state Not_a_value value.span
+          (Printf.sprintf "`%s` is a type. Build a value with `%s(...)`." text text)
+  | Definition ((Trait | Capability), _) ->
+      error state Not_a_value value.span (Printf.sprintf "`%s` is not a value." text)
+  | Variant (type_path, variant) ->
       variant_value state value type_path variant ~arguments:(fresh_arguments state type_path)
-  | Some (Field field) -> (
+  | Field field -> (
       match env.self with
       | Some (T.Named { path = self_path; arguments }) -> (
           match Members.fields state.database self_path arguments with
@@ -92,17 +78,16 @@ and name state env (value : expression) (path : path) =
               | None -> bug "the field `%s` is not in its record" field)
           | None -> bug "the field `%s` is not in a record" field)
       | _ -> bug "the field `%s` is named outside its type" field)
-  | Some Result_value -> (
+  | Result_value -> (
       state.tables.meanings.(value.id) <- Some Specification_value;
       match env.output with
       | Some output -> output_type output
       | None -> bug "`result` is named where nothing is returned")
-  | Some (Old | Identical | Cost_function _) ->
+  | Old | Identical | Cost_function _ ->
       state.tables.meanings.(value.id) <- Some Specification_value;
       error state Not_a_value value.span
-        (Printf.sprintf "`%s` is applied to what it is about, as in `%s(...)`." path.last.text
-           path.last.text)
-  | Some Yielded -> (
+        (Printf.sprintf "`%s` is applied to what it is about, as in `%s(...)`." text text)
+  | Yielded -> (
       (* The parts handed out so far, in order. *)
       state.tables.meanings.(value.id) <- Some Specification_value;
       let part =
@@ -114,11 +99,11 @@ and name state env (value : expression) (path : path) =
       match part with
       | Some part -> T.Named { path = sequence_path; arguments = [ T.Type part ] }
       | None -> bug "`yielded` is named where nothing is handed out")
-  | Some Finished ->
+  | Finished ->
       state.tables.meanings.(value.id) <- Some Specification_value;
       T.bool
-  | Some (Unknown report) -> T.Error report
-  | Some (Binding | Module _) | None -> bug "the name `%s` is not resolved" path.last.text
+  | Unknown report -> T.Error report
+  | Binding | Module _ -> bug "the name `%s` is not resolved" text
 
 (* A variant used as a value: one with no fields is a value, and one with
    fields is a function that builds it. *)
@@ -201,8 +186,7 @@ and field state (value : expression) base_type (member : name) =
 and static_member state (value : expression) type_ (member : name) =
   match type_ with
   | T.Named { path; arguments } ->
-      if member.text.[0] >= 'A' && member.text.[0] <= 'Z' then
-        variant_value state value path member.text ~arguments
+      if names_variant member then variant_value state value path member.text ~arguments
       else
         begin match Members.own_constant state.database path member.text with
         | Some constant -> (

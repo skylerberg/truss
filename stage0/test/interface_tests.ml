@@ -539,6 +539,10 @@ let () =
       one_diagnostic "capability Logger {\n  fn log(message: Self)\n}\n" "types.misplaced_self_type");
   test "`Self` in a function that is not a method is an error" (fun () ->
       one_diagnostic "fn f(value: Self) {}\n" "types.misplaced_self_type");
+  test "a trait is not the head of a method" (fun () ->
+      one_diagnostic "fn Ordered.twice(self) -> Bool {\n  true\n}\n" "types.not_a_type");
+  test "a capability parameter is not a type" (fun () ->
+      one_diagnostic "fn f[capability Granted](value: Granted) {}\n" "types.not_a_type");
   test "a method of an unknown type keeps its head's generic parameters" (fun () ->
       one_diagnostic "fn Missing[Element].first(self) -> Element {\n  todo\n}\n"
         "resolve.unknown_name")

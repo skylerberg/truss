@@ -54,7 +54,12 @@ let declared context id (name : name) =
 
 let parameter_of context (name : name) =
   match target context name with
-  | Some (Generic id) -> Ok (declared context id name)
+  | Some (Type_parameter id) -> Ok (declared context id name)
+  | Some (Capability_parameter _) ->
+      Error
+        (reported context Unknown_associated_type name.span
+           (Printf.sprintf "`%s` is a capability parameter, which has no associated types."
+              name.text))
   | Some (Unknown report) -> Error report
   | _ -> bug "`%s` is not resolved as a generic parameter" name.text
 
@@ -190,8 +195,8 @@ and arguments context (path : path_type) =
 
 and count_name context (name : name) : T.argument =
   match target context name with
-  | Some (Generic id) -> T.Value (T.Value_parameter (declared context id name))
-  | Some (Definition path) -> (
+  | Some (Value_parameter id) -> T.Value (T.Value_parameter (declared context id name))
+  | Some (Definition (Constant, path)) -> (
       if not (Constants.is_usize context.database path) then
         T.Type
           (error context Arity name.span
@@ -243,36 +248,31 @@ and check_arity context (path : path_type) shown expected =
 and path_type context (path : path_type) : T.ty =
   let shown = show_path path.path in
   match target context path.path.last with
-  | Some (Generic id) ->
+  | Some (Type_parameter id) ->
       if path.arguments <> [] then begin
         report context Arity path.span
           (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." shown)
       end;
       T.Parameter (declared context id path.path.last)
-  | Some (Definition definition_path) -> (
+  | Some (Capability_parameter _) ->
+      error context Not_a_type path.span
+        (Printf.sprintf "`%s` is a capability parameter, not a type." shown)
+  | Some (Definition (Type, definition_path)) -> (
       match Intrinsic.builtin_of_path definition_path with
       | Some Never -> T.Never
       | Some Integer -> T.Integer
-      | Some _ ->
+      | Some _ | None ->
           check_arity context path shown
             (Query.demand context.database Summary.generics_of definition_path);
           let type_ = T.Named { path = definition_path; arguments = arguments context path } in
           context.named := (path.span, type_) :: !(context.named);
-          type_
-      | None -> (
-          match Summary.kind_of context.database definition_path with
-          | Some Type ->
-              check_arity context path shown
-                (Query.demand context.database Summary.generics_of definition_path);
-              let type_ = T.Named { path = definition_path; arguments = arguments context path } in
-              context.named := (path.span, type_) :: !(context.named);
-              type_
-          | Some (Trait | Capability) ->
-              error context Not_a_type path.span
-                (Printf.sprintf
-                   "`%s` is a trait, not a type. A value of any type with it is `any %s`." shown
-                   shown)
-          | _ -> error context Not_a_type path.span (Printf.sprintf "`%s` is not a type." shown)))
+          type_)
+  | Some (Definition (Trait, _)) ->
+      error context Not_a_type path.span
+        (Printf.sprintf "`%s` is a trait, not a type. A value of any type with it is `any %s`."
+           shown shown)
+  | Some (Definition (Capability, _)) ->
+      error context Not_a_type path.span (Printf.sprintf "`%s` is a capability, not a type." shown)
   | Some (Unknown report) -> T.Error report
   | _ -> bug "`%s` is not resolved as a type" shown
 
@@ -281,25 +281,24 @@ and path_type context (path : path_type) : T.ty =
 and trait_reference ?(capability = false) context (path : path_type) :
     (T.trait_reference, Diagnostic.reported) Stdlib.result =
   let shown = show_path path.path in
+  let found trait : (T.trait_reference, Diagnostic.reported) Stdlib.result =
+    check_arity context path shown (Query.demand context.database Summary.generics_of trait);
+    let associated =
+      List.sort compare
+        (List.filter_map
+           (function
+             | Constraint (name, written) -> Some (name.text, type_ context written)
+             | Type_argument _ | Count _ | Count_name _ -> None)
+           path.arguments)
+    in
+    Ok { trait; trait_arguments = arguments context path; associated }
+  in
   match target context path.path.last with
-  | Some (Definition trait) -> (
-      match Summary.kind_of context.database trait with
-      | (Some Trait | Some Capability)
-        when capability || Summary.kind_of context.database trait = Some Trait ->
-          check_arity context path shown (Query.demand context.database Summary.generics_of trait);
-          let associated =
-            List.sort compare
-              (List.filter_map
-                 (function
-                   | Constraint (name, written) -> Some (name.text, type_ context written)
-                   | Type_argument _ | Count _ | Count_name _ -> None)
-                 path.arguments)
-          in
-          Ok { trait; trait_arguments = arguments context path; associated }
-      | _ ->
-          Error
-            (reported context Not_a_trait path.span (Printf.sprintf "`%s` is not a trait." shown)))
-  | Some (Generic _) ->
+  | Some (Definition (Trait, trait)) -> found trait
+  | Some (Definition (Capability, trait)) when capability -> found trait
+  | Some (Definition _) ->
+      Error (reported context Not_a_trait path.span (Printf.sprintf "`%s` is not a trait." shown))
+  | Some (Type_parameter _ | Capability_parameter _) ->
       Error
         (reported context Not_a_trait path.span
            (Printf.sprintf "`%s` is a generic parameter, not a trait." shown))
@@ -312,22 +311,20 @@ and trait_bounds context paths =
 and capability context (path : path_type) : T.capability option =
   let shown = show_path path.path in
   match target context path.path.last with
-  | Some (Generic id) ->
-      let parameter = declared context id path.path.last in
-      if Hashtbl.mem context.bounds parameter then begin
-        report context Not_a_capability path.span
-          (Printf.sprintf
-             "`%s` is a type parameter. A capability parameter is declared `capability %s`."
-             parameter.name parameter.name);
-        None
-      end
-      else Some (T.Capability_parameter parameter)
-  | Some (Definition path_) when Summary.kind_of context.database path_ = Some Capability ->
-      Some (T.Capability path_)
+  | Some (Capability_parameter id) ->
+      Some (T.Capability_parameter (declared context id path.path.last))
+  | Some (Type_parameter _) ->
+      report context Not_a_capability path.span
+        (Printf.sprintf
+           "`%s` is a type parameter. A capability parameter is declared `capability %s`." shown
+           shown);
+      None
+  | Some (Definition (Capability, path_)) -> Some (T.Capability path_)
   | Some (Definition _) ->
       report context Not_a_capability path.span (Printf.sprintf "`%s` is not a capability." shown);
       None
-  | _ -> None
+  | Some (Unknown _) -> None
+  | _ -> bug "`%s` is not resolved as a capability" shown
 
 and capabilities context paths = List.sort_uniq compare (List.filter_map (capability context) paths)
 and mode = function None -> T.Read | Some Mut -> T.Mut | Some Own -> T.Own
