@@ -40,11 +40,9 @@ let bind_local st (local : Core.local) place =
 
 (* Descriptions of the node kinds that are not handled yet. *)
 let expression_kind : Core.kind -> string = function
-  | Function_value _ -> "a function as a value"
   | Lambda _ -> "a lambda"
   | Slice _ -> "a slice"
   | Cursor_next _ -> "a cursor's next value"
-  | Convert _ -> "a conversion"
   | _ -> "a specification-only expression"
 
 let binary : Core.comparison -> Lir.binary = function
@@ -218,6 +216,30 @@ and into st (value : Core.expression) (destination : Lir.place) =
         pieces;
       call_with_places st builder_finish [ builder ] ~destination
   | Template { call; _ } -> into st call destination
+  | Function_value { path; type_arguments } -> (
+      (* A named function as a value: an adapter that takes an environment
+         and ignores it. *)
+      match ty with
+      | Function function_type ->
+          let function_ =
+            Instance.Code
+              {
+                path;
+                type_arguments =
+                  List.map
+                    (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
+                    type_arguments;
+              }
+          in
+          assign
+            (Function_value
+               { code = Instance (Adapter { function_; ty = function_type }); environment = None })
+      | _ -> bug "a function value of type %s" (Ground.to_string ty))
+  | Convert { conversion = Widen; value = inner } ->
+      (* A function value has the same representation at a wider type. *)
+      into st inner destination
+  | Convert { conversion = To_integer | From_integer; _ } ->
+      bug "a conversion that exists only in specifications"
   | Copy source ->
       Glue.copy_into st.context.glue st.b ~destination ~source:(operand_place st source) ty
   | Value_parameter parameter -> (
@@ -410,16 +432,20 @@ and resolve_callee st (callee : Core.callee) : (Path.t * Ground.argument list) o
 and call_into st (value : Core.expression) (call : Core.call) destination =
   if call.lends <> None then bug "a lending call that is not a lent place";
   match (resolve_callee st call.callee, call.callee) with
-  | Some (path, type_arguments), _ ->
+  | Some (path, type_arguments), _ -> (
       let signature = signature_of st.context path in
-      (match signature.output with
-      | Returns _ -> ()
-      | Yields _ | Lends _ -> unhandled "a call of a yielding method outside a loop");
       let substitution = bind signature.generics type_arguments in
       let arguments, mask = evaluate_arguments st signature substitution call.arguments in
-      call_instance st
-        (Code { path; type_arguments })
-        ~signature ~substitution ~arguments ~mask ~destination
+      match signature.output with
+      | Returns _ ->
+          call_instance st
+            (Code { path; type_arguments })
+            ~signature ~substitution ~arguments ~mask ~destination
+      | Yields _ ->
+          (* A yielding method called outside a [for] loop makes a cursor,
+             which holds its arguments. *)
+          cursor_into st ~path ~type_arguments ~signature ~substitution ~arguments ~mask destination
+      | Lends _ -> bug "a lending call that is not a lent place")
   | None, Intrinsic { operation; type_arguments } -> (
       match
         intrinsic st operation ~type_arguments call.arguments ~destination:(Some destination)
@@ -462,6 +488,12 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
         if not lir_signature.returns then unreachable_block st
       end
   | None, _ -> unhandled "a call through a function value"
+
+(* The type that the current frame's method yields. *)
+and yielded_type_of_frame st =
+  match st.frame.code.result with
+  | Yields (_, ty) | Lends (_, ty) -> ground st ty
+  | Returns _ -> bug "a yield in %s, which does not yield" (Path.show st.frame.code.anchor)
 
 (* The function or method that a callee resolves to, with its type
    arguments, its signature, and the substitution for its generic
@@ -671,7 +703,7 @@ and statement st (node : Core.statement) =
           | Place source when not (trivial st ty) ->
               (* A [let] of a place aliases it. A [var] never has a place
                  here: it takes the value. *)
-              bind_local st local (Statements.snapshot st (place st source))
+              bind_local st local (snapshot st (place st source))
           | Place source ->
               let variable = binding st ~name ty in
               take st (place st source) ty ~destination:variable;
@@ -743,8 +775,7 @@ and statement st (node : Core.statement) =
           finish st.b (Goto after);
           start st.b inside;
           drop_scope st tested;
-          Statements.looping st ~continue_:test ~break_:after ~depth (fun () ->
-              block_into st body None);
+          looping st ~continue_:test ~break_:after ~depth (fun () -> block_into st body None);
           close_scope st names;
           finish st.b (Goto test);
           start st.b after
@@ -773,8 +804,7 @@ and statement st (node : Core.statement) =
               let bound = binding st element in
               emit st.b (Assign (bound, Use (Copy index)));
               match_patterns st [ (pattern, bound) ] ~failed:(block st.b);
-              Statements.looping st ~continue_:step ~break_:after ~depth (fun () ->
-                  block_into st body None));
+              looping st ~continue_:step ~break_:after ~depth (fun () -> block_into st body None));
           finish st.b (Goto step);
           start st.b step;
           (* An inclusive range stops after its last value without adding
@@ -791,13 +821,24 @@ and statement st (node : Core.statement) =
             (Assign (index, Binary (Add, Copy index, constant_int (integer_of st element) Z.one)));
           finish st.b (Goto test);
           start st.b after
-      | For { pattern; iteration = Yielding_call { kind = Call call; _ }; body; _ } -> (
+      | For { pattern; iteration = Yielding_call ({ kind = Call call; _ } as iterated); body; _ }
+        -> (
           (* The yielding method is inlined here, with the loop body at each
              of its [yield]s. *)
           match resolve_callee st call.callee with
           | None -> unhandled "a loop over a call through an any value"
-          | Some (path, _) when List.exists (Path.equal path) st.frame.inlined ->
-              unhandled "a loop over a recursive yielding method"
+          | Some (path, type_arguments) when List.exists (Path.equal path) st.frame.inlined ->
+              (* The method is already inlined around this loop, so inlining
+                 it again would never end. The loop pulls a cursor over the
+                 call instead. *)
+              let yielding : Ground.yielding = { method_ = path; type_arguments } in
+              in_scope st (fun () ->
+                  let cursor = boxed_cursor st yielding in
+                  call_into st iterated call cursor;
+                  own_in_scope st cursor;
+                  pull_loop st yielding cursor ~body:(fun value ->
+                      match_patterns st [ (pattern, value) ] ~failed:(block st.b);
+                      block_into st body None))
           | Some (path, type_arguments) ->
               (match (signature_of st.context path).output with
               | Yields _ -> ()
@@ -845,7 +886,31 @@ and statement st (node : Core.statement) =
                   finish st.b (Goto exit)
               | None -> finish st.b Unreachable);
               start st.b resume
-          | None -> unhandled "a yield in a method that is not inlined"))
+          | None when st.pulling ->
+              (* In the pulled version of a method a [yield] stays in the
+                 code, and yield lowering makes it a state of the cursor.
+                 [next] gives its caller a value of its own: a value the
+                 method made, or a copy of a place it yields. *)
+              let ty = yielded_type_of_frame st in
+              let value =
+                match part with
+                | Value value -> value_place st value
+                | Place source when trivial st ty -> place st source
+                | Place source ->
+                    let copy = temporary st ty in
+                    Glue.copy_into st.context.glue st.b ~destination:copy ~source:(place st source)
+                      ty;
+                    copy
+              in
+              let resume = block st.b and stop = block st.b in
+              finish st.b (Yield { value = owned st value ty; resume; stop = Some stop });
+              (* On the [stop] path the cursor is dropped before it ended, so
+                 the method drops what it owns and returns. *)
+              start st.b stop;
+              leave_to st 0;
+              finish st.b (Return None);
+              start st.b resume
+          | None -> bug "a yield outside a yielding method"))
 
 (* Falls through where the value at a place matches a pattern, and goes to
    [failed] where it does not. Binds nothing and moves nothing. *)
