@@ -241,6 +241,10 @@ public fn Slice[Element].swap(mut self, first: USize, second: USize)
   requires first < self.length()
   requires second < self.length()
   ensures self.length() == old(self.length())
+  ensures identical(self.model()[first], old(self.model())[second])
+  ensures identical(self.model()[second], old(self.model())[first])
+  ensures forall i in 0..self.length() =>
+    i == first || i == second || identical(self.model()[i], old(self.model())[i])
   cost time O(1)
 {
   todo
@@ -248,6 +252,8 @@ public fn Slice[Element].swap(mut self, first: USize, second: USize)
 
 public fn Slice[Element].reverse(mut self)
   ensures self.length() == old(self.length())
+  ensures forall i in 0..self.length() =>
+    identical(self.model()[i], old(self.model())[self.length() - 1 - i])
   cost time O(self.length())
 {
   todo
