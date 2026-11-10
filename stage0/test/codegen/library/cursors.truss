@@ -1,0 +1,124 @@
+fn same_items(found: Slice[Int64], expected: Slice[Int64]) -> Bool {
+  if found.length() != expected.length() {
+    return false
+  }
+  for index in 0..found.length() {
+    if found[index] != expected[index] {
+      return false
+    }
+  }
+  true
+}
+
+type Counter(next: Int64, stop: Int64)
+
+impl Cursor for Counter {
+  type Element = Int64
+
+  fn next(mut self) -> Option[Int64] {
+    if self.next >= self.stop {
+      None
+    } else {
+      let value = self.next
+      self.next += 1
+      Some(value)
+    }
+  }
+}
+
+fn count_to(stop: Int64) -> Counter {
+  Counter(next: 1, stop: stop + 1)
+}
+
+test "a cursor is collected, counted, and folded, and gives its last value" {
+  assert same_items(count_to(3).to_list(), expected: [1, 2, 3])
+  assert count_to(5).count() == 5
+  assert count_to(5).last() == Some(5)
+  assert count_to(5).fold(0, combine: fn(total, item) { total + item }) == 15
+  assert count_to(0).count() == 0
+  assert count_to(0).last() is None
+  assert count_to(0).to_list().length() == 0
+}
+
+test "find takes values up to the first that matches, and the cursor goes on from there" {
+  var cursor = count_to(6)
+  assert mut cursor.find(fn(item) { item > 3 }) == Some(4)
+  assert mut cursor.next() == Some(5)
+  assert mut cursor.find(fn(item) { item > 9 }) is None
+  assert mut cursor.next() is None
+}
+
+test "skip, take, and step_by choose which values a cursor gives" {
+  assert same_items(count_to(7).skip(2).to_list(), expected: [3, 4, 5, 6, 7])
+  assert same_items(count_to(7).skip(9).to_list(), expected: [])
+  assert same_items(count_to(7).take(3).to_list(), expected: [1, 2, 3])
+  assert same_items(count_to(7).take(0).to_list(), expected: [])
+  assert same_items(count_to(7).take(9).to_list(), expected: [1, 2, 3, 4, 5, 6, 7])
+  assert same_items(count_to(7).step_by(3).to_list(), expected: [1, 4, 7])
+  assert same_items(count_to(7).step_by(1).to_list(), expected: [1, 2, 3, 4, 5, 6, 7])
+  assert same_items(count_to(7).skip(1).step_by(2).take(2).to_list(), expected: [2, 4])
+}
+
+test "chain gives one cursor's values and then another's" {
+  assert same_items(count_to(2).chain(Counter(next: 7, stop: 9)).to_list(), expected: [1, 2, 7, 8])
+  assert same_items(count_to(0).chain(count_to(1)).to_list(), expected: [1])
+  assert same_items(count_to(2).chain(count_to(0)).to_list(), expected: [1, 2])
+}
+
+test "zip pairs two cursors up to the shorter, and enumerate counts from zero" {
+  var total = 0
+  var pairs: USize = 0
+  var zipped = Counter(next: 10, stop: 13).zip(count_to(2))
+  while mut zipped.next() is Some(pair) {
+    total += pair.first * pair.second
+    pairs += 1
+  }
+  assert pairs == 2
+  assert total == 32
+  var counted = Counter(next: 10, stop: 13).enumerate()
+  var weighted = 0
+  var last_index: USize = 0
+  while mut counted.next() is Some(indexed) {
+    last_index = indexed.index
+    weighted += indexed.element
+  }
+  assert last_index == 2
+  assert weighted == 33
+}
+
+test "a peekable cursor shows the next value without taking it" {
+  var cursor = Counter(next: 7, stop: 9).peekable()
+  assert mut cursor.peek() == Some(7)
+  assert mut cursor.peek() == Some(7)
+  assert mut cursor.next() == Some(7)
+  assert mut cursor.next() == Some(8)
+  assert mut cursor.peek() is None
+  assert mut cursor.next() is None
+}
+
+type Letters(left: USize)
+
+impl Cursor for Letters {
+  type Element = Character
+
+  fn next(mut self) -> Option[Character] {
+    if self.left == 0 {
+      None
+    } else {
+      self.left -= 1
+      Some(if self.left % 2 == 0 { Character"\u{e9}" } else { Character"h" })
+    }
+  }
+}
+
+test "a list and a string are collected from a cursor, and a list is extended by one" {
+  let collected: List[Int64] = List.collect(count_to(4).skip(1))
+  assert same_items(collected, expected: [2, 3, 4])
+  var longer: List[Int64] = [0]
+  mut longer.extend(count_to(9).take(2))
+  assert same_items(longer, expected: [0, 1, 2])
+  mut longer.extend(count_to(0))
+  assert same_items(longer, expected: [0, 1, 2])
+  let text: String = String.collect(Letters(left: 4))
+  assert text == "h\u{e9}h\u{e9}"
+}

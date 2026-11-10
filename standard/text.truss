@@ -505,7 +505,12 @@ public fn String.from_utf16(units: Slice[UInt16]) -> Result[String, Utf16Error]
 }
 
 public fn String.collect[Source: Cursor[Element = Character]](source: own Source) -> String {
-  todo
+  var cursor = own source
+  var text: String = ""
+  while mut cursor.next() is Some(character) {
+    mut text.push_character(character)
+  }
+  text
 }
 
 public fn String.capacity(self) -> USize

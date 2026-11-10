@@ -5,8 +5,16 @@ public opaque type Skip[Source: Cursor](source: Source, left: USize)
 impl Cursor for Skip[Source: Cursor] {
   type Element = Source.Element
 
-  fn next(mut self) -> Option[Source.Element] {
-    todo
+  fn next(mut self) -> Option[Source.Element]
+  {
+    while self.left > 0 {
+      self.left -= 1
+      match mut self.source.next() {
+        Some(_) => {}
+        None => return None
+      }
+    }
+    mut self.source.next()
   }
 }
 
@@ -15,8 +23,13 @@ public opaque type Take[Source: Cursor](source: Source, left: USize)
 impl Cursor for Take[Source: Cursor] {
   type Element = Source.Element
 
-  fn next(mut self) -> Option[Source.Element] {
-    todo
+  fn next(mut self) -> Option[Source.Element]
+  {
+    if self.left == 0 {
+      return None
+    }
+    self.left -= 1
+    mut self.source.next()
   }
 }
 
@@ -25,8 +38,21 @@ public opaque type StepBy[Source: Cursor](source: Source, step: USize, started: 
 impl Cursor for StepBy[Source: Cursor] {
   type Element = Source.Element
 
-  fn next(mut self) -> Option[Source.Element] {
-    todo
+  fn next(mut self) -> Option[Source.Element]
+  {
+    if !self.started {
+      self.started = true
+      return mut self.source.next()
+    }
+    var skipped: USize = 1
+    while skipped < self.step {
+      match mut self.source.next() {
+        Some(_) => {}
+        None => return None
+      }
+      skipped += 1
+    }
+    mut self.source.next()
   }
 }
 
@@ -39,8 +65,17 @@ public opaque type Chain[First: Cursor, Second: Cursor[Element = First.Element]]
 impl Cursor for Chain[First: Cursor, Second: Cursor[Element = First.Element]] {
   type Element = First.Element
 
-  fn next(mut self) -> Option[First.Element] {
-    todo
+  fn next(mut self) -> Option[First.Element]
+  {
+    if !self.first_ended {
+      match mut self.first.next() {
+        Some(item) => return Some(own item)
+        None => {
+          self.first_ended = true
+        }
+      }
+    }
+    mut self.second.next()
   }
 }
 
@@ -49,8 +84,15 @@ public opaque type Zip[First: Cursor, Second: Cursor](first: First, second: Seco
 impl Cursor for Zip[First: Cursor, Second: Cursor] {
   type Element = core::Pair[First.Element, Second.Element]
 
-  fn next(mut self) -> Option[core::Pair[First.Element, Second.Element]] {
-    todo
+  fn next(mut self) -> Option[core::Pair[First.Element, Second.Element]]
+  {
+    match mut self.first.next() {
+      Some(left) => match mut self.second.next() {
+        Some(right) => Some(core::Pair(first: own left, second: own right))
+        None => None
+      }
+      None => None
+    }
   }
 }
 
@@ -59,8 +101,18 @@ public opaque type Enumerate[Source: Cursor](source: Source, index: USize)
 impl Cursor for Enumerate[Source: Cursor] {
   type Element = core::Indexed[Source.Element]
 
-  fn next(mut self) -> Option[core::Indexed[Source.Element]] {
-    todo
+  fn next(mut self) -> Option[core::Indexed[Source.Element]]
+  {
+    match mut self.source.next() {
+      Some(element) => {
+        let index = self.index
+        if self.index < USize.maximum {
+          self.index += 1
+        }
+        Some(core::Indexed(index: index, element: own element))
+      }
+      None => None
+    }
   }
 }
 
@@ -69,11 +121,21 @@ public opaque type Peekable[Source: Cursor](source: Source, peeked: Option[Optio
 impl Cursor for Peekable[Source: Cursor] {
   type Element = Source.Element
 
-  fn next(mut self) -> Option[Source.Element] {
-    todo
+  fn next(mut self) -> Option[Source.Element]
+  {
+    match mut self.peeked.take() {
+      Some(item) => item
+      None => mut self.source.next()
+    }
   }
 }
 
 public fn Peekable[Source: Cursor].peek(mut self) lends Option[Source.Element] {
-  todo
+  if self.peeked is None {
+    self.peeked = Some(mut self.source.next())
+  }
+  match self.peeked {
+    Some(item) => yield item
+    None => yield None
+  }
 }
