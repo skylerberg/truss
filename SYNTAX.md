@@ -1211,6 +1211,13 @@ checks this within each function, with no annotations.
   result as viewing everything its read-only and view arguments view: after
   `let chosen = found.unwrap_or(default: backup[..])`, `backup` is frozen
   while `chosen` is in use.
+- A function keeps only the views that it is given. To keep a view of an
+  argument in a `mut` parameter or in `mut self`, take the argument as a
+  `Slice`, a `StringSlice`, or a function. An argument that is only lent is
+  never kept, so after `mut reader.read(mut buffer, limit: 64)` the reader
+  does not view the buffer, and the next read can use the same buffer. A
+  value cannot keep a view of its own part either:
+  `self.recent = self.items[0..1]` is an error.
 - A `var` can hold a view, such as a cursor over a list (see
   [Lending and yielding methods](#lending-and-yielding-methods)), as long as
   the view never leaves the function.

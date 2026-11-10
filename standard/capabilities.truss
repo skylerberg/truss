@@ -52,6 +52,8 @@ public capability NetworkServer {
 
 public capability Handles {
   fn read(handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
+    ensures !(result is Err(_) && buffer.length() != old(buffer.length()))
   fn write(handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError]
     ensures !(result is Ok(count) && count > bytes.length())
   fn read_at(
@@ -60,6 +62,8 @@ public capability Handles {
     buffer: mut List[UInt8],
     limit: USize,
   ) -> Result[USize, SystemError]
+    ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
+    ensures !(result is Err(_) && buffer.length() != old(buffer.length()))
   fn write_at(handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError]
     ensures !(result is Ok(count) && count > bytes.length())
   fn seek(handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError]
