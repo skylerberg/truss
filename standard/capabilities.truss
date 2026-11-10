@@ -166,7 +166,38 @@ public type SystemError =
   derives Equal
 
 impl Display for SystemError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      NotFound => mut output.write("no such file or directory")
+      PermissionDenied => mut output.write("permission denied")
+      AlreadyExists => mut output.write("already exists")
+      NotADirectory => mut output.write("not a directory")
+      IsADirectory => mut output.write("is a directory")
+      DirectoryNotEmpty => mut output.write("the directory is not empty")
+      InvalidInput => mut output.write("invalid input")
+      InvalidData => mut output.write("invalid data")
+      UnexpectedEnd => mut output.write("the input ended early")
+      Interrupted => mut output.write("interrupted")
+      TimedOut => mut output.write("timed out")
+      BrokenPipe => mut output.write("the other end is closed")
+      NothingWritten => mut output.write("nothing could be written")
+      ConnectionRefused => mut output.write("connection refused")
+      ConnectionReset => mut output.write("connection reset")
+      ConnectionAborted => mut output.write("connection aborted")
+      NotConnected => mut output.write("not connected")
+      AddressInUse => mut output.write("the address is in use")
+      AddressNotAvailable => mut output.write("the address is not available")
+      HostNotFound => mut output.write("no such host")
+      Unreachable => mut output.write("unreachable")
+      OutOfStorage => mut output.write("no space left")
+      TooManyOpen => mut output.write("too many open files")
+      Unsupported => mut output.write("not supported")
+      Closed => mut output.write("closed")
+      Other(code) => {
+        mut output.write("system error ")
+        code.display(mut output)
+      }
+    }
   }
 }

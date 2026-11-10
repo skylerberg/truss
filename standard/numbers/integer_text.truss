@@ -35,6 +35,7 @@ internal fn digit_count(value: UInt64, base: UInt64) -> USize
   requires base >= 2
   ensures result >= 1
   ensures result <= log(value) + 1
+  ensures result <= 65
   decreases value
   cost time O(log(value))
 {
@@ -67,6 +68,8 @@ internal fn format_magnitude(
   uppercase: Bool,
 ) -> String
   requires 2 <= radix && radix <= 36
+  ensures result.length() >= 1
+  ensures result.length() <= minimum_digits + 66
   cost time O(minimum_digits + 64)
 {
   if minimum_digits > USize.maximum / 2 {

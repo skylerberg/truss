@@ -32,14 +32,16 @@ impl From[StringSlice] for Argument {
 }
 
 impl From[Path] for Argument {
-  fn from(value: own Path) -> Argument {
-    todo
+  fn from(value: own Path) -> Argument
+  {
+    Argument(text: own value.text)
   }
 }
 
 impl From[Int64] for Argument {
-  fn from(value: own Int64) -> Argument {
-    todo
+  fn from(value: own Int64) -> Argument
+  {
+    Argument(text: value.format())
   }
 }
 
@@ -179,7 +181,8 @@ public type Output(status: ExitStatus, output: List[UInt8], error_output: List[U
 public fn Output.text(self) -> Result[String, text::Utf8Error]
   cost time O(self.output.length())
 {
-  todo
+  let copied = StringSlice(bytes: self.output.slice().elements).to_string()
+  String.from_utf8(own copied.to_bytes())
 }
 
 public opaque type Child(

@@ -185,7 +185,13 @@ public fn Option[Value].replace(mut self, value: own Value) -> Option[Value]
 public fn Option[Value].get_or_insert(mut self, value: own Value) lends mut Value
   cost time O(1)
 {
-  todo
+  if self is None {
+    self = Some(own value)
+  }
+  match mut self {
+    Some(inner) => yield mut inner
+    None => unreachable
+  }
 }
 
 public fn Option[Value].unwrap(own self) -> Value
