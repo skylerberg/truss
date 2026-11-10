@@ -137,7 +137,9 @@ let rec expression names (node : expression) =
               (if inclusive then "..=" else "..")
               (expression stop)
         | Over_collection { pattern = matched; collection } ->
-            Printf.sprintf "%s in %s" (pattern names matched) (expression collection))
+            Printf.sprintf "%s in %s" (pattern names matched) (expression collection)
+        | Over_each { pattern = matched; call } ->
+            Printf.sprintf "%s in yielding_call %s" (pattern names matched) (expression call))
         (expression body)
   | Yielded -> "yielded"
   | Finished -> "finished"

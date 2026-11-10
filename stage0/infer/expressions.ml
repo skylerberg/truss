@@ -154,7 +154,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | Quantified { quantifier; binder; body } ->
       (match binder with
       | Binder_in (written, collection) ->
-          let element = element_of_collection state env collection in
+          let element = element_of_collection state env ~quantifier:value collection in
           pattern state env written element ~mode:T.Read
       | Binder_type (bound, written) ->
           if not env.specification then
@@ -179,9 +179,12 @@ and expression_kind state env ?expected (value : expression) : T.ty =
                 let pattern = build_pattern state written in
                 let start = build_expression state start in
                 Over_range { pattern; start; stop = build_expression state stop; inclusive }
-            | Binder_in (written, collection) ->
+            | Binder_in (written, collection) -> (
                 let pattern = build_pattern state written in
-                Over_collection { pattern; collection = build_expression state collection }
+                match state.tables.loops.(value.id) with
+                | Some (Yielding { call; mode }) ->
+                    Over_each { pattern; call = Form.each_of state call mode collection }
+                | _ -> Over_collection { pattern; collection = build_expression state collection })
           in
           Quantified { quantifier; binder; body = build_expression state body });
       T.bool

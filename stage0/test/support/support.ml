@@ -246,6 +246,10 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           type_ "an expression" node.type_;
           match node.kind with
           | Use found -> place found
+          | Quantified { binder = Over_each { call; _ }; _ } -> (
+              match call.kind with
+              | Call { arguments = [ Passed { mode = Read; _ } ]; _ } -> ()
+              | _ -> wrong "an `Over_each` does not hold a read-only call with one argument")
           | Construct { fields; _ } ->
               List.iter
                 (fun (_, (field : Core.operand option)) ->

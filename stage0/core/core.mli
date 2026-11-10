@@ -293,6 +293,12 @@ and binder =
   | Over_type of { local : local; name : string; type_ : Types.ty }  (** [value: Int64] *)
   | Over_range of { pattern : pattern; start : expression; stop : expression; inclusive : bool }
   | Over_collection of { pattern : pattern; collection : expression }
+      (** The elements of a collection, in a specification. *)
+  | Over_each of { pattern : pattern; call : expression }
+      (** The elements of a collection, in code that runs. [call] is the read-only {!Call} of the
+          collection's [each] that a [for] loop over the collection makes, so the quantifier runs as
+          that loop does and stops at the first answer. The collection is the call's one argument.
+      *)
 
 and implementation = {
   origin : origin;

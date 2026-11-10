@@ -797,6 +797,18 @@ let cursor_type (call : C.call) : T.ty =
   | _ -> bug "a loop iterates over a call that cannot yield"
 
 (* What a [for] loop iterates over. *)
+(* The call of a value's [each] that a loop over the value makes. *)
+let each_of state (call : C.call) (mode : T.mode) (iterable : expression) : Core.expression =
+  let receiver = build_expression state iterable in
+  synthetic_expression state ~origin:iterable.id (cursor_type call)
+    (Call
+       {
+         callee = callee call.callee;
+         arguments = [ Passed { mode; value = operand mode receiver } ];
+         lends = None;
+         uses = call.uses;
+       })
+
 let iteration state (written : statement) (iterable : expression) : Core.iteration =
   match (state.tables.loops.(written.id), iterable.kind) with
   | Some (Integer_range { inclusive; _ }), Range { start = Some start; stop = Some stop; _ } ->
@@ -810,16 +822,7 @@ let iteration state (written : statement) (iterable : expression) : Core.iterati
       | _ ->
           (* The iterable is a value, even if a call computes it: the loop
              calls the value's [each]. *)
-          let receiver = build_expression state iterable in
-          Yielding_call
-            (synthetic_expression state ~origin:iterable.id (cursor_type call)
-               (Call
-                  {
-                    callee = callee call.callee;
-                    arguments = [ Passed { mode; value = operand mode receiver } ];
-                    lends = None;
-                    uses = call.uses;
-                  })))
+          Yielding_call (each_of state call mode iterable))
   | Some (Pulled { cursor }), _ ->
       let next : Core.callee option =
         match cursor with

@@ -431,14 +431,21 @@ and arm_value state env ?expected (body : statement) =
       ignore (statement state env body ~last:false);
       T.unit
 
-and element_of_collection state env (collection : expression) =
+(* The type of the elements that a quantifier goes over. In code that runs,
+   a quantifier over a collection is a loop, so the call of the
+   collection's [each] is recorded for the quantifier, as for a [for]
+   loop. *)
+and element_of_collection state env ~(quantifier : expression) (collection : expression) =
   let collection_type = normalize state (expression state env collection) in
   match collection_type with
   | T.Named { path; arguments = [ T.Type element ] } when Path.equal path range_path -> element
   | T.Error _ | T.Hole -> collection_type
   | _ -> (
-      match yielded state collection.span collection_type T.Read with
-      | Some element -> element
+      match each_call state collection.span collection_type T.Read with
+      | Some (call, element) ->
+          if runs env then
+            state.tables.loops.(quantifier.id) <- Some (Yielding { call; mode = Read });
+          element
       | None ->
           error state Not_indexable collection.span
             (Printf.sprintf "`%s` cannot be looped over." (T.show collection_type)))
