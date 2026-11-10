@@ -129,7 +129,10 @@ let pullable =
             let found = ref false in
             each_statement body (fun (node : Core.statement) ->
                 match node.kind with
-                | Yield { part = Place part; _ } when Option.is_some (Place.of_core part) ->
+                | Yield { part; _ }
+                  when List.exists
+                         (fun lent -> Option.is_some (Place.of_core lent))
+                         (Core_walk.lent_places part) ->
                     found := true
                 | _ -> ());
             !found

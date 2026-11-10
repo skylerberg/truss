@@ -237,8 +237,11 @@ and statement state env (written : statement) ~last : unit =
             | Mode (_, inner) when Option.is_none (marked_call state inner) -> inner
             | _ -> value
           in
+          Hashtbl.replace state.yielded inner.id
+            (match env.output with Some (Yields (Mut, _) | Lends (Mut, _)) -> Mut | _ -> Read);
           let found = expression state env ~expected:element inner in
           if inner != value then record state value found;
+          check_lent_value state env inner;
           (* A part that is yielded or lent [mut] is mutated, so the index
              expressions in it use the [mut self] version of [at]. *)
           (match env.output with

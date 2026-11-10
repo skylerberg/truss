@@ -167,7 +167,7 @@ let kind_of_call ?lends ?function_value state (value : expression) : Core.kind =
                 ( field.field_name,
                   Option.map
                     (fun (argument : C.argument) ->
-                      build_expression_by_id state argument.expression)
+                      operand argument.mode (build_expression_by_id state argument.expression))
                     (List.find_opt
                        (fun (argument : C.argument) -> argument.parameter = index)
                        recorded.arguments) ))
@@ -250,11 +250,15 @@ let variant_value state (value : expression) type_path variant : Core.kind =
                               (fun ((field : T.field), local) ->
                                 ( field.field_name,
                                   Some
-                                    (synthetic_expression state ~origin:value.id field.field_type
-                                       (Core.Use
-                                          (Local
-                                             { local; type_ = field.field_type; origin = value.id })))
-                                ))
+                                    (Core.Value
+                                       (synthetic_expression state ~origin:value.id field.field_type
+                                          (Core.Use
+                                             (Local
+                                                {
+                                                  local;
+                                                  type_ = field.field_type;
+                                                  origin = value.id;
+                                                })))) ))
                               fields;
                         }));
               diverges = false;
@@ -307,7 +311,7 @@ let range_record state (value : expression) start stop ~inclusive : Core.kind =
           variant = None;
           fields =
             List.map2
-              (fun (field : T.field) given -> (field.field_name, Some given))
+              (fun (field : T.field) given -> (field.field_name, Some (Core.Value given)))
               (constructor_fields state path None arguments)
               [ start; stop; inclusive ];
         }
@@ -501,7 +505,7 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
         variant = None;
         fields =
           List.map2
-            (fun (field : T.field) given -> (field.field_name, Some given))
+            (fun (field : T.field) given -> (field.field_name, Some (Core.Value given)))
             (constructor_fields state path None arguments)
             given;
       }
@@ -960,7 +964,7 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) : Core
                                    fields =
                                      List.map2
                                        (fun (field : T.field) (_, field_value) ->
-                                         (field.field_name, Some field_value))
+                                         (field.field_name, Some (Core.Value field_value)))
                                        (Option.value ~default:[] returned_failure.fields)
                                        failure_fields;
                                  })))));

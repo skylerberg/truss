@@ -55,9 +55,14 @@ type action =
   | Write_through of Place.t
       (** A mutation writes through a slice that is held in this place. The mutation changes
           everything that the slice views. *)
-  | Arguments of { places : passed list; views : (int * Place.t list * Core.origin) list }
+  | Arguments of {
+      places : passed list;
+      views : (int * Place.t list * Core.origin) list;
+      yielded : bool;
+    }
       (** The places that one call borrows, in argument order. [views] lists the arguments of a view
-          type: the argument's position and the places it views. *)
+          type: the argument's position and the places it views. If [yielded], the places are
+          instead the ones that a yielded construct lends, and there are no views. *)
 
 (* The points with an index from [first] up to, but not including, [limit].
    Points are numbered in the order they are created, so the points of a
@@ -153,9 +158,10 @@ let rec viewed builder (value : Core.expression) : Place.t list =
   | Call call -> List.concat_map (viewed_operand builder) (lent_arguments builder call)
   | Construct { fields; _ } ->
       List.concat_map
-        (fun (_, (field : Core.expression option)) ->
+        (fun (_, (field : Core.operand option)) ->
           match field with
-          | Some field when builder.is_view field.type_ -> viewed builder field
+          | Some (Value field) when builder.is_view field.type_ -> viewed builder field
+          | Some (Place found) -> viewed_place builder found
           | _ -> [])
         fields
   | Echo inner -> viewed builder inner
@@ -196,9 +202,9 @@ let rec viewed_temporaries builder (value : Core.expression) : Core.expression l
         call.arguments
   | Construct { fields; _ } ->
       List.concat_map
-        (fun (_, (field : Core.expression option)) ->
+        (fun (_, (field : Core.operand option)) ->
           match field with
-          | Some field when builder.is_view field.type_ -> viewed_temporaries builder field
+          | Some (Value field) when builder.is_view field.type_ -> viewed_temporaries builder field
           | _ -> [])
         fields
   | _ -> []
@@ -311,7 +317,7 @@ let rec expression builder frontier (node : Core.expression) : int list =
       builder.loans <- loans;
       builder.captured <- captured;
       frontier
-  | Construct { fields; _ } -> all frontier (List.filter_map snd fields)
+  | Construct { fields; _ } -> construct builder frontier Read fields
   | Collection_literal { elements; _ } -> all frontier elements
   | Map_literal { entries } ->
       all frontier (List.concat_map (fun (key, value) -> [ key; value ]) entries)
@@ -354,6 +360,19 @@ let rec expression builder frontier (node : Core.expression) : int list =
       in
       ignore (emit builder frontier Exit node.origin);
       []
+
+(* The fields of a construct, evaluated in order. A field that is a place
+   is lent to the constructed value with the mode of the [yield] that
+   yields it. A [mut] lend begins at the [yield], after every field is
+   evaluated, as a [mut] borrow for an argument begins at the call. *)
+and construct builder frontier (mode : T.mode) fields =
+  in_order builder frontier (List.filter_map snd fields)
+    ~evaluate:(fun frontier (field : Core.operand) ->
+      match field with
+      | Value { kind = Construct { fields; _ }; _ } -> construct builder frontier mode fields
+      | _ -> evaluated builder frontier mode field)
+    ~pending:(fun field ->
+      pending builder field @ List.filter_map Place.of_core (Core_walk.lent_places field))
 
 (* The arms of a [match], after its scrutinees. [body] builds the body of
    an arm. *)
@@ -421,7 +440,7 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
   in
   let frontier =
     if List.length places > 1 || (places <> [] && views <> []) then
-      emit builder frontier (Arguments { places; views }) node.origin
+      emit builder frontier (Arguments { places; views; yielded = false }) node.origin
     else frontier
   in
   (* A place passed [mut] that can hold views may keep a view of what the
@@ -673,6 +692,29 @@ and statement_parts builder frontier (node : Core.statement) =
       frontier
   | Proof _ -> frontier
   | Assert { value; _ } -> expression builder frontier value
+  | Yield { mode; part = Value { kind = Construct { fields; _ }; _ } as part } ->
+      let frontier = construct builder frontier mode fields in
+      let lent = Core_walk.lent_places part in
+      if mode = Mut then
+        let frontier =
+          List.fold_left
+            (fun frontier found -> mutated builder frontier (Place found))
+            frontier lent
+        in
+        (* The places that the yielded value is lent [mut] must not overlap. *)
+        let places =
+          List.concat
+            (List.mapi
+               (fun position (found : Core.place) ->
+                 match Place.of_core found with
+                 | Some place -> [ { place; mode; at = Core_walk.place_origin found; position } ]
+                 | None -> [])
+               lent)
+        in
+        if List.length places > 1 then
+          emit builder frontier (Arguments { places; views = []; yielded = true }) node.origin
+        else frontier
+      else frontier
   | Yield { mode; part } -> operand builder frontier mode part
 
 (* A [let]: its value, then what its names come to view. *)
