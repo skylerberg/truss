@@ -39,7 +39,22 @@ let header =
      (set-option :rlimit %d)\n"
     steps
 
-let key query = Logic.hash (Printf.sprintf "z3 %s\n%s%s" version header (Logic.text query))
+let key_of_text text = Logic.hash (Printf.sprintf "z3 %s\n%s%s" version header text)
+let key query = key_of_text (Logic.text query)
+
+(* A query's text, its symbols' canonical names, and its key, made once for
+   each query asked, which a run asks again: once ahead with the others,
+   and again for its answer. *)
+module Asked = Hashtbl.Make (struct
+  type t = Logic.query
+
+  let equal = ( == )
+  let hash = Hashtbl.hash
+end)
+
+type rendered = { text : string; named : (string * string) list; text_key : string }
+
+let rendered_queries : rendered Asked.t = Asked.create 1024
 
 (* A small reader of the s-expressions [get-value] prints. *)
 type sexp = Atom of string | List of sexp list
@@ -94,15 +109,24 @@ let rec make_directories directory =
     try Sys.mkdir directory 0o755 with Sys_error _ when Sys.file_exists directory -> ()
   end
 
+let render query =
+  match locked (fun () -> Asked.find_opt rendered_queries query) with
+  | Some rendered -> rendered
+  | None ->
+      let text = Logic.text query in
+      let rendered = { text; named = Logic.symbols query; text_key = key_of_text text } in
+      locked (fun () -> Asked.replace rendered_queries query rendered);
+      rendered
+
 let solve solver ?(values = []) query =
-  let named = Logic.symbols query in
+  let { text; named; text_key } = render query in
   let requested =
     List.filter_map
       (fun symbol ->
         List.assoc_opt symbol named |> Option.map (fun canonical -> (symbol, canonical)))
       values
   in
-  let key = key query ^ String.concat "," (List.map snd requested) in
+  let key = text_key ^ String.concat "," (List.map snd requested) in
   let file = Option.map (fun directory -> Filename.concat directory key) solver.cache in
   let stored =
     match file with
@@ -132,7 +156,6 @@ let solve solver ?(values = []) query =
   match (locked (fun () -> Hashtbl.find_opt cache key), stored) with
   | Some answer, _ | None, Some answer -> answer
   | None, None ->
-      let text = Logic.text query in
       let input =
         header ^ text
         ^
