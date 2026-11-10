@@ -1662,8 +1662,12 @@ type. The error is reported at the `impl`, wherever it is.
 - **`any Trait` fixes every associated type** of the trait, as Rust requires
   of `dyn`, since a method mentioning one could not otherwise be called.
 - **A method can be called through `any`** when it takes `self`, `mut self`,
-  or `own self`, has no generic parameters of its own, and neither takes nor
-  returns `Self`. Calling any other method is an error at the call.
+  or `own self`, has no generic parameters of its own, and no parameter's
+  type or result type names `Self`, at any depth. So `Cursor.skip`, which
+  returns `Skip[Self]`, cannot be. An associated type of `Self`, such as
+  `Self.Element`, does not count, because the `any` type fixes it. Calling
+  any other method is an error at the call. Code generation gives an `any`
+  value's table a slot for exactly these methods, by the same function.
 
 ### Instantiation cycles
 
