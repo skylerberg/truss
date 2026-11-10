@@ -52,7 +52,8 @@ let checked ~check database name =
      types and modes;
    - every use of a local has the type of the parameter or the pattern
      that binds it;
-   - a [Yielding_call] is a call of a yielding method. *)
+   - a [Yielding_call] is a call of a yielding method;
+   - the call of a [Slice] takes the slice's base as its first argument. *)
 let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   let module T = Types in
   let wrong format =
@@ -210,7 +211,12 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           match node.kind with
           | Use found -> place found
           | Cursor_next cursor -> mutable_place "a `Cursor_next`" cursor
-          | Slice { base; _ } -> place base
+          | Slice { base; call } -> (
+              place base;
+              match call.kind with
+              | Call { arguments = Passed { value = Place first; _ } :: _; _ } when first == base ->
+                  ()
+              | _ -> wrong "the call of a `Slice` does not take the base as its first argument")
           | Matches { value; pattern } -> binds_own "an `is`" value pattern
           | Match { scrutinees; arms; _ } ->
               List.iter

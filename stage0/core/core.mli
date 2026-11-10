@@ -176,8 +176,14 @@ and kind =
   | Record_update of { base : expression; updates : (string list * expression) list }
       (** [base with (...)]: a copy of the record [base] with some fields replaced. Each update
           gives the path to a field (for a nested field, several names) and the new value. *)
-  | Slice of { base : place; start : expression option; stop : expression option; inclusive : bool }
-      (** [items[start..stop]]: a view of a range of a list, slice, or array. *)
+  | Slice of { base : place; call : expression }
+      (** [base[start..stop]]: a view of a range of a list, a slice, or an array. The view borrows
+          [base]: it is some of the elements of that place.
+
+          [call] creates the view. It is a call of the base type's [slice_range] with three
+          arguments: [base], the start, and the stop, which is exclusive. The bounds are already
+          computed: a missing start is [0], a missing stop is the length of [base], and an inclusive
+          stop is [stop + 1]. The two bounds are passed as values. *)
   (* Calls and operators *)
   | Call of call
   | Operator of { operation : Intrinsic.operation; arguments : expression list }
