@@ -1,16 +1,12 @@
 # Truss Command Line
 
-This document designs `truss`, the one program people and agents run to work
-on Truss code: checking, testing, running, building, formatting, and the
-tools that let an agent see what a change touches. It follows
-[GOALS.md](GOALS.md) and the decisions in [DESIGN.md](DESIGN.md), and drives
-the stages that [TYPECHECKER.md](TYPECHECKER.md) and
-[CODEGEN.md](CODEGEN.md) describe, through the code database that
-[DATABASE.md](DATABASE.md) designs. It is built in
-[`stage0/cli/`](stage0/cli), which [`stage0/bin/truss.ml`](stage0/bin/truss.ml)
-only starts, except `truss fmt` and `truss lsp`, which wait for the
-formatter and the language server. The prover is not built either, so what
-the commands will do with proofs is stated where it matters.
+This document describes `truss`, the one program people and agents run to
+work on Truss code, in [`stage0/cli/`](stage0/cli): checking, testing,
+running, building, and the tools that let an agent see what a change
+touches. It follows [GOALS.md](GOALS.md) and the decisions in
+[DESIGN.md](DESIGN.md), and drives the stages that
+[TYPECHECKER.md](TYPECHECKER.md) and [CODEGEN.md](CODEGEN.md) describe,
+through the code database that [DATABASE.md](DATABASE.md) describes.
 
 ## Principles
 
@@ -51,7 +47,6 @@ the commands will do with proofs is stated where it matters.
 | `truss test` | Checks the packages, then runs the tests whose results are not kept |
 | `truss run` | Checks the package, builds its program for development, and runs it |
 | `truss build` | Checks the package and builds its program for release, refusing any `todo` or `echo` `main` can reach |
-| `truss fmt` | Formats the packages' files (not built yet) |
 | `truss holes` | Lists every `todo`, with its type, the names in scope, and what it blocks |
 | `truss show` | Prints the signatures of a package, module, type, or definition |
 | `truss impact` | Lists what the worktree's changes from a base commit change, and what they reach |
@@ -61,15 +56,12 @@ the commands will do with proofs is stated where it matters.
 | `truss rename` | Renames a definition, method, or module, and every reference to it in the worktree |
 | `truss new` | Makes a new package |
 | `truss sync`, `truss status`, `truss stop` | Brings a worktree's session up to date, lists the background process's sessions, and stops it |
-| `truss lsp` | Runs the language server on standard input and output (not built yet) |
 | `truss clean` | Stops the background process and deletes the store |
 
 `truss --version` prints the version of each stage that has one: code
 generation and the Unicode tables. Those are the versions in exact keys, so a
 report of a stale result can say which stage it came from. Every other
 result is kept under the compiler's identity, the hash of its executable.
-The parser, the type checker, and the prover, with its solver, are to have
-versions of their own as DESIGN.md's "Incremental builds" asks.
 
 ### Finding the packages
 
@@ -102,8 +94,8 @@ in the code, reported with the diagnostics, and the exit status is 1.
 ### Common options
 
 - **`--json`** writes one JSON document to standard output in place of the
-  report for people, for every command except `run`, `fmt`, `new`, `lsp`,
-  and `clean`, whose output is a program's, a list of files, or nothing.
+  report for people, for every command except `run`, `new`, and `clean`,
+  whose output is a program's or nothing.
   Its fields are listed with each command. Every document has
   `"format": 1`, which changes only when a field is removed or changes
   meaning, and `"diagnostics"`, an array of diagnostics as
@@ -155,9 +147,9 @@ truss check [--fix] [--json]
 
 `truss check` runs every stage that can report a diagnostic: lexing,
 parsing, name resolution, type checking, ownership, capabilities and
-dependency grants, package-wide checks, and proofs, once the prover exists.
-Proofs are part of checking, not a separate command, because DESIGN.md
-makes every promise in a signature something the compiler proves; a package
+dependency grants, and package-wide checks. Proofs are to be part of
+checking, not a separate command, because DESIGN.md makes every promise in a
+signature something the compiler proves; a package
 whose proofs have not been checked has not been checked. Proofs are modular
 and cached, so this costs O(change) like the rest. Code generation reports
 nothing, so `check` never builds.
@@ -299,9 +291,8 @@ begins with `-`. **`--release`** builds as `truss build` does, refusing an
 **`truss build`** builds a release program, as CODEGEN.md's "C files and
 optimization" describes: at `-O2`, optimized across every file as they are
 linked, with ThinLTO where the C compiler is clang. It refuses a program
-whose `main` can reach a `todo` or an `echo`, in code or, once the prover
-exists, in a proof, and lists each one with the definitions on the way from
-`main` to it:
+whose `main` can reach a `todo` or an `echo`, and lists each one with the
+definitions on the way from `main` to it:
 
 ```text
 render.truss:12:14: `todo` can be reached from `main`, so the program cannot be built.
@@ -318,20 +309,6 @@ kind, `todo` or `echo`, its file, line, and column, and its way from
 Building for another target, which CODEGEN.md allows through the target's
 `USize`, would add `--target` to `build`. Stage0 builds for the host only.
 
-## Formatting
-
-```text
-truss fmt [--check] [FILE...]
-```
-
-`truss fmt` is not built yet; it waits for the formatter. It rewrites the
-package's files, or the named ones, into the one
-layout SYNTAX.md describes, and prints the names of the files it changed.
-It has no options for style. **`--check`** changes nothing and exits with 1,
-listing the files that are not formatted, for CI, as `gofmt -l` and
-`cargo fmt --check` do. A file with a syntax error is reported and left as
-it is. Formatting changes no hash, so it rebuilds nothing.
-
 ## Tools for agents
 
 These commands answer the questions that GOALS.md says dominate fast
@@ -347,9 +324,8 @@ truss holes [--json] [FILE_OR_DIRECTORY...]
 Lists every `todo` in the package, or in the named files, as DESIGN.md's
 "Unfinished code" asks: its position, the type it must have, the names in
 scope with their types, and what it blocks, which is `main`, if `main` can
-reach it, and each test that can, and once the prover exists, each proof
-that depends on it. Each hole is a task a person or agent can take on its
-own. A type defined as `todo` is listed too.
+reach it, and each test that can. Each hole is a task a person or agent can
+take on its own. A type defined as `todo` is listed too.
 
 ```text
 render.truss:12:14: hole of type String
@@ -375,8 +351,7 @@ truss show [--body] [--json] PATH...
 ```
 
 Prints the signatures at each path, each after its file and line. A
-signature is the definition's text with every body left out; once the
-formatter exists, it is printed as `truss fmt` writes it.
+signature is the definition's text with every body left out.
 
 - for a definition, such as `weather::forecast::parse`, its signature with
   every clause: generic parameters, parameters with their defaults, the
@@ -406,7 +381,8 @@ truss impact [--base REVISION] [--json]
 Compares the worktree as it is with a base commit: the one `--base` names,
 or else where the worktree's branch left the default branch, so that a
 branch's every change is what it shows, uncommitted ones included. The code
-database compares the two sessions, as its "Impact" section describes:
+database compares the two sessions, as DATABASE.md's "Comparing two states"
+describes:
 every result a changed file can reach is brought up to date in both and
 compared, so a part checked again that came out the same is told apart
 from one that changed, and reformatting, or moving a definition within its
@@ -420,8 +396,7 @@ changed, it shows:
 
 Then it lists the tests whose code changed, which are the only tests the
 change can affect, each with whether its result is already kept, so an
-agent knows the cost of its change before running anything. Once the
-prover exists, the proofs to check again are listed the same way.
+agent knows the cost of its change before running anything.
 
 ```text
 Changed since 3f2a9c1e04b7:
@@ -495,8 +470,8 @@ it is run from. `TO` is a new name, as in `truss
 rename weather::forecast::parse read`, or a full path that keeps the
 definition in its module and a method with its type. Renaming a module, as
 in `truss rename weather::forecast weather::outlook`, moves its file, and
-every `use` of it and every full path to it changes. Renaming a field or a
-variant is not built yet. The rename is made in a trial, a state that
+every `use` of it and every full path to it changes. The rename is made in
+a trial, a state that
 starts from the worktree's session and holds only what the rename changes,
 and is checked there first; it is refused, changing nothing, if it would
 cause any diagnostic, such as for a name that is taken, breaks a naming
@@ -534,12 +509,11 @@ part of every module path.
 
 ## The background process
 
-IMPLEMENTATION.md notes that starting fresh costs O(files), because a fresh
-process must at least read every file to learn which changed, and that a
-long-running process that watches the files and keeps the query results in
-memory makes each command O(change). The code database's background
-process is that process, as DATABASE.md's "The background process"
-describes, and the command line is its client:
+A fresh process must at least read every file to learn which changed, which
+costs O(files). A long-running process that watches the files and keeps
+results in memory makes each command O(change). The code database's
+background process is that process, as DATABASE.md's "The background
+process" describes, and the command line is its client:
 
 - **A command that reads code starts it if it is not running,** as Bazel
   and Gradle do, sends it the command line and the current directory, and
@@ -563,26 +537,17 @@ describes, and the command line is its client:
 Sessions, test results, object files, and programs built to run are kept in
 the code database's store, under `$TRUSS_CACHE`, or else
 `$XDG_CACHE_HOME/truss`, or else `~/.cache/truss`, as DATABASE.md's "The
-store" describes. Every entry is named by a key of
-what it was made from, so entries never go stale, the store collects old
-entries itself to keep within its budget, and nothing in it is ever needed
-for a correct answer. **`truss clean`** stops the background process and
+store" describes. Every entry is named by a key of what it was made from, so
+entries never go stale, the store collects old entries itself to keep within
+its budget, and nothing in it is ever needed for a correct answer. **`truss clean`** stops the background process and
 deletes the store, which only costs time.
 
 ## For working on the compiler
 
-- **`--sanitize`,** on `test` and `run`, builds with AddressSanitizer and
-  UndefinedBehaviorSanitizer and keeps no test results, as CODEGEN.md's
-  "Testing" describes. It is left out of each command's help.
-- **`--check-proofs`,** on `test`, `run`, and `build`, is to emit a run-time
-  check for every proven obligation once the prover exists. Stage0 has no
-  prover, so all its builds check what a prover would prove, and the flag
-  comes with the prover.
-- **`stage0/tools/debug`** prints a file's tokens, one a line, or each
-  definition's syntax tree as an S-expression, with its diagnostics, as
-  `dune exec stage0/tools/debug/debug.exe -- tokens FILE` or `tree FILE`.
-  It is a tool of this repository, like the fuzzer and the benchmarks, and
-  not part of `truss`.
+**`--sanitize`,** on `test` and `run`, builds with AddressSanitizer and
+UndefinedBehaviorSanitizer and keeps no test results. A memory error in
+Truss code can only come from a bug in the compiler, so any report is one.
+It is left out of each command's help.
 
 ## Left out
 
@@ -600,31 +565,23 @@ deletes the store, which only costs time.
   already runs only the tests whose code changed, and exactly those, so a
   selection by files changed could only be less exact.
 
-## Implementation in stage0
+## Not built
 
-- **`stage0/bin/truss.ml` only starts the command line,** as the command a
-  person or agent runs, or with `__serve`, as the background process. All
-  of it is the `cli` library, so tests drive commands directly.
-- **Arguments are parsed with Cmdliner,** the usual OCaml library, which
-  gives every command `--help` and a manual page from the same
-  definitions. `Cli.Main.evaluate` parses a command line and runs it, in
-  either process. Before parsing, `Cli.Arguments` moves a leading `-C
-  DIRECTORY` after the command and marks where `run`'s program arguments
-  start, which Cmdliner's own rules would read differently.
-- **Commands write through `Output`,** which is the process's own standard
-  output and error, or in the background process, a buffer for the output
-  and the client's progress for the errors.
-- **`Project` is the packages a command is about,** from the database's
-  session, with their files and manifests and how paths are shown; `Report`
-  writes diagnostics for people or as JSON; and each command has a module
-  of its own. `References`, which finds every place a definition or module
-  is named from resolution's names and the checked form's calls and
-  members, gives `rename` its edits; `Signatures`, which cuts the bodies
-  out of a definition's text, serves `show`, `impact`, and `explain`.
-- **The test program reports each test as it starts and ends,** with its
-  duration, as CODEGEN.md's "The test program" describes, and
-  `Compile.run_tests` reads those records while the program runs, handing
-  each to `truss test` for the status line.
-- **The tests** are in [`stage0/test/cli/`](stage0/test/cli): each makes a
-  small package, or a git repository, in a temporary directory, with a store
-  of its own, and states one fact about what a command does with it.
+- **`truss fmt [--check] [FILE...]`,** which waits for the formatter. It is
+  to rewrite the package's files, or the named ones, into the one layout
+  SYNTAX.md describes, and print the names of the files it changed, with no
+  options for style. `--check` changes nothing and exits with 1, listing the
+  files that are not formatted, for CI, as `gofmt -l` and `cargo fmt
+  --check` do. A file with a syntax error is reported and left as it is.
+  Formatting changes no definition, so it rebuilds nothing. `truss show` is
+  then to print a signature as `truss fmt` writes it.
+- **`truss lsp`,** which is to run the language server on standard input and
+  output.
+- **Renaming a field or a variant** with `truss rename`.
+- **What the commands do with proofs.** There is no prover. `check` is to
+  report proofs with every other diagnostic, `build` to refuse a `todo` in a
+  proof that `main` can reach, `holes` to list each proof a hole blocks, and
+  `impact` to list the proofs to check again. A flag for working on the
+  compiler, `--check-proofs`, on `test`, `run`, and `build`, is to emit a
+  run-time check for every proven obligation; until then every build checks
+  what a prover would prove.
