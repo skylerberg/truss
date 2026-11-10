@@ -164,16 +164,22 @@ public fn Option[Value].ok_or_else[Error, capability Granted](
 
 public fn Option[Value].take(mut self) -> Option[Value]
   ensures self is None
+  ensures identical(result, old(self))
   cost time O(1)
 {
-  todo
+  let taken = own self
+  self = None
+  taken
 }
 
 public fn Option[Value].replace(mut self, value: own Value) -> Option[Value]
   ensures self is Some(_)
+  ensures identical(result, old(self))
   cost time O(1)
 {
-  todo
+  let previous = own self
+  self = Some(own value)
+  previous
 }
 
 public fn Option[Value].get_or_insert(mut self, value: own Value) lends mut Value
