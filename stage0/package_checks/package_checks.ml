@@ -26,8 +26,12 @@ let at database (key : Names.key) ?(fixes = []) code (span : span) message =
         }
   | None -> None
 
-let declarations database (package : Workspace.package) =
-  List.concat_map (fun module_ -> Query.demand database Names.declarations module_) package.modules
+let declarations database package = Query.demand database Names.package_declarations package
+
+let dependencies database package =
+  List.map
+    (fun (dependency : Workspace.dependency) -> dependency.package)
+    (Query.demand database Workspace.dependencies package)
 
 let header_span (definition : definition) =
   match definition.kind with
@@ -324,7 +328,7 @@ let instantiation_edges database (key : Names.key) =
           | _ -> None)
         (Array.to_list result.checked.calls)
 
-let check_instantiation database (package : Workspace.package) =
+let check_instantiation database (package : string) =
   let generic =
     List.filter
       (fun (declaration : Names.declaration) ->
@@ -369,7 +373,7 @@ let check_instantiation database (package : Workspace.package) =
 
 (* Two tests with one name in one file are already a duplicate definition;
    this is for two in different files of the package. *)
-let check_tests database (package : Workspace.package) =
+let check_tests database (package : string) =
   let tests =
     List.filter
       (fun (declaration : Names.declaration) -> declaration.kind = Test && declaration.ordinal = 0)
@@ -396,128 +400,111 @@ let check_tests database (package : Workspace.package) =
 let check =
   Query.query ~name:"package_checks" ~phase:Checks ~show:Fun.id ~saved:true
     (fun database package_name ->
-      match Workspace.package database package_name with
-      | None -> []
-      | Some package ->
-          let declarations = declarations database package in
-          let impls =
-            List.filter_map
-              (fun (declaration : Names.declaration) ->
-                if declaration.kind = Impl && declaration.ordinal = 0 then
-                  match
-                    ( Query.demand database Environment.impl_interface declaration.path,
-                      Query.demand database Names.definition (Names.key_of declaration) )
-                  with
-                  | Some impl, Some definition when not impl.impl_broken ->
-                      Some (declaration, definition, impl)
-                  | _ -> None
-                else None)
-              declarations
-          in
-          let location =
-            List.filter_map
-              (fun (declaration, definition, impl) ->
-                check_location database declaration definition impl)
-              impls
-          in
-          (* An impl in the wrong place reports that alone. *)
-          let placed =
-            List.filter
-              (fun ((declaration : Names.declaration), _, impl) ->
-                List.mem declaration.module_.package (outer_packages impl))
-              impls
-          in
-          let names =
-            List.concat_map
-              (fun (declaration, definition, impl) ->
-                check_method_names database declaration definition impl)
-              impls
-          in
-          (* The impls of the packages this one depends on, directly or not:
+      let package = package_name in
+      let declarations = declarations database package in
+      let impls =
+        List.filter_map
+          (fun (declaration : Names.declaration) ->
+            if declaration.kind = Impl && declaration.ordinal = 0 then
+              match
+                ( Query.demand database Environment.impl_interface declaration.path,
+                  Query.demand database Names.definition (Names.key_of declaration) )
+              with
+              | Some impl, Some definition when not impl.impl_broken ->
+                  Some (declaration, definition, impl)
+              | _ -> None
+            else None)
+          declarations
+      in
+      let location =
+        List.filter_map
+          (fun (declaration, definition, impl) ->
+            check_location database declaration definition impl)
+          impls
+      in
+      (* An impl in the wrong place reports that alone. *)
+      let placed =
+        List.filter
+          (fun ((declaration : Names.declaration), _, impl) ->
+            List.mem declaration.module_.package (outer_packages impl))
+          impls
+      in
+      let names =
+        List.concat_map
+          (fun (declaration, definition, impl) ->
+            check_method_names database declaration definition impl)
+          impls
+      in
+      (* The impls of the packages this one depends on, directly or not:
              one of this package's may overlap one of theirs, though each
              is where the location rule lets it be. *)
-          let dependency_impls =
-            let rec packages seen = function
-              | [] -> seen
-              | name :: rest when List.mem name seen -> packages seen rest
-              | name :: rest ->
-                  let direct =
-                    match Workspace.package database name with
-                    | Some found ->
-                        List.map
-                          (fun (dependency : Workspace.dependency) -> dependency.package)
-                          found.dependencies
-                    | None -> []
-                  in
-                  packages (name :: seen) (direct @ rest)
-            in
-            let direct =
-              List.map
-                (fun (dependency : Workspace.dependency) -> dependency.package)
-                package.dependencies
-            in
-            let standard =
-              if package_name = Resolve.Prelude.standard then [] else [ Resolve.Prelude.standard ]
-            in
-            List.concat_map
-              (fun name ->
-                List.filter_map
-                  (fun (_, impl) -> Query.demand database Environment.impl_interface impl)
-                  (Query.demand database Interface.Impls.index name))
-              (List.filter (fun name -> name <> package_name) (packages [] (standard @ direct)))
-          in
-          (* Two impls can overlap only if they implement one trait for one
+      let dependency_impls =
+        let rec packages seen = function
+          | [] -> seen
+          | name :: rest when List.mem name seen -> packages seen rest
+          | name :: rest -> packages (name :: seen) (dependencies database name @ rest)
+        in
+        let direct = dependencies database package in
+        let standard =
+          if package_name = Resolve.Prelude.standard then [] else [ Resolve.Prelude.standard ]
+        in
+        List.concat_map
+          (fun name ->
+            List.filter_map
+              (fun (_, impl) -> Query.demand database Environment.impl_interface impl)
+              (Query.demand database Interface.Impls.index name))
+          (List.filter (fun name -> name <> package_name) (packages [] (standard @ direct)))
+      in
+      (* Two impls can overlap only if they implement one trait for one
              type, since an impl's type is always a named type: so each is
              compared only with the impls before it in its trait and type's
              group, here and in the packages depended on. *)
-          let group (impl : T.impl_interface) =
-            (impl.implements.trait, Interface.Impls.head impl.for_type)
-          in
-          let grouped impls =
-            let table = Hashtbl.create 64 in
-            List.iter
-              (fun impl ->
-                let key = group impl in
-                Hashtbl.replace table key
-                  (impl :: Option.value ~default:[] (Hashtbl.find_opt table key)))
-              impls;
-            fun impl -> List.rev (Option.value ~default:[] (Hashtbl.find_opt table (group impl)))
-          in
-          let dependencies_like = grouped dependency_impls in
-          let earlier = Hashtbl.create 64 in
-          let overlaps =
-            List.concat_map
-              (fun ((declaration : Names.declaration), definition, (impl : T.impl_interface)) ->
-                let key = group impl in
-                let before = List.rev (Option.value ~default:[] (Hashtbl.find_opt earlier key)) in
-                Hashtbl.replace earlier key
-                  (impl :: Option.value ~default:[] (Hashtbl.find_opt earlier key));
-                List.filter_map
-                  (fun (other : T.impl_interface) ->
-                    if overlap impl other then
-                      at database (Names.key_of declaration) Overlapping_impls
-                        (header_span definition)
-                        (Printf.sprintf
-                           "This `impl` overlaps another `impl` of `%s` for `%s`: a type has at \
-                            most one `impl` of a trait for each set of its arguments."
-                           (T.show_trait other.implements) (T.show other.for_type))
-                    else None)
-                  (before @ dependencies_like impl))
-              placed
-          in
-          let recursion =
+      let group (impl : T.impl_interface) =
+        (impl.implements.trait, Interface.Impls.head impl.for_type)
+      in
+      let grouped impls =
+        let table = Hashtbl.create 64 in
+        List.iter
+          (fun impl ->
+            let key = group impl in
+            Hashtbl.replace table key (impl :: Option.value ~default:[] (Hashtbl.find_opt table key)))
+          impls;
+        fun impl -> List.rev (Option.value ~default:[] (Hashtbl.find_opt table (group impl)))
+      in
+      let dependencies_like = grouped dependency_impls in
+      let earlier = Hashtbl.create 64 in
+      let overlaps =
+        List.concat_map
+          (fun ((declaration : Names.declaration), definition, (impl : T.impl_interface)) ->
+            let key = group impl in
+            let before = List.rev (Option.value ~default:[] (Hashtbl.find_opt earlier key)) in
+            Hashtbl.replace earlier key
+              (impl :: Option.value ~default:[] (Hashtbl.find_opt earlier key));
             List.filter_map
-              (fun (declaration : Names.declaration) ->
-                if declaration.kind = Type && declaration.ordinal = 0 then
-                  match Query.demand database Names.definition (Names.key_of declaration) with
-                  | Some definition -> check_recursion database declaration definition
-                  | None -> None
+              (fun (other : T.impl_interface) ->
+                if overlap impl other then
+                  at database (Names.key_of declaration) Overlapping_impls (header_span definition)
+                    (Printf.sprintf
+                       "This `impl` overlaps another `impl` of `%s` for `%s`: a type has at most \
+                        one `impl` of a trait for each set of its arguments."
+                       (T.show_trait other.implements) (T.show other.for_type))
                 else None)
-              declarations
-          in
-          location @ names @ overlaps @ recursion
-          @ check_instantiation database package
-          @ check_tests database package)
+              (before @ dependencies_like impl))
+          placed
+      in
+      let recursion =
+        List.filter_map
+          (fun (declaration : Names.declaration) ->
+            if declaration.kind = Type && declaration.ordinal = 0 then
+              match Query.demand database Names.definition (Names.key_of declaration) with
+              | Some definition -> check_recursion database declaration definition
+              | None -> None
+            else None)
+          declarations
+      in
+      location @ names @ overlaps @ recursion
+      @ check_instantiation database package
+      @ check_tests database package)
 
 (* The manifest *)
 
@@ -560,16 +547,14 @@ let used_packages =
 let code_packages =
   Query.query ~name:"code_packages" ~phase:Checks ~saved:true ~show:Fun.id
     (fun database package_name ->
-      match Workspace.package database package_name with
-      | None -> []
-      | Some package ->
-          List.sort_uniq compare
-            (List.concat_map
-               (fun (declaration : Names.declaration) ->
-                 match declaration.path with
-                 | Test _ -> []
-                 | _ -> Query.demand database used_packages (Names.key_of declaration))
-               (declarations database package)))
+      let package = package_name in
+      List.sort_uniq compare
+        (List.concat_map
+           (fun (declaration : Names.declaration) ->
+             match declaration.path with
+             | Test _ -> []
+             | _ -> Query.demand database used_packages (Names.key_of declaration))
+           (declarations database package)))
 
 (* What only a package's code shows to be wrong with its manifest. *)
 type manifest_problem =
@@ -593,26 +578,24 @@ let manifest_sentence ~package = function
 let manifest_problems =
   Query.query ~name:"manifest_problems" ~phase:Checks ~saved:true ~show:Fun.id
     (fun database package_name ->
-      match Workspace.package database package_name with
-      | None -> []
-      | Some package ->
-          let keys = List.map Names.key_of (declarations database package) in
-          let checks = List.for_all (fun key -> Infer.clean database key <> None) keys in
-          let used = List.concat_map (Query.demand database used_packages) keys in
-          List.concat_map
-            (fun (dependency : Workspace.dependency) ->
-              (match
-                 Query.demand database Interface.Grants.granted (package_name, dependency.package)
-               with
-                | Some grant ->
-                    List.map
-                      (fun name -> Not_a_capability { dependency = dependency.package; name })
-                      grant.unknown
-                | None -> [])
-              @
-              if checks && not (List.mem dependency.package used) then [ Unused dependency.package ]
-              else [])
-            package.dependencies)
+      let package = package_name in
+      let keys = List.map Names.key_of (declarations database package) in
+      let checks = List.for_all (fun key -> Infer.clean database key <> None) keys in
+      let used = List.concat_map (Query.demand database used_packages) keys in
+      List.concat_map
+        (fun (dependency : Workspace.dependency) ->
+          (match
+             Query.demand database Interface.Grants.granted (package_name, dependency.package)
+           with
+            | Some grant ->
+                List.map
+                  (fun name -> Not_a_capability { dependency = dependency.package; name })
+                  grant.unknown
+            | None -> [])
+          @
+          if checks && not (List.mem dependency.package used) then [ Unused dependency.package ]
+          else [])
+        (Query.demand database Workspace.dependencies package))
 
 let diagnostics database (module_ : Path.module_) =
   List.filter_map

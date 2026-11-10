@@ -404,6 +404,13 @@ let rec mentions_integer = function
 
 (* A signature, given the generics of the head before it and the type of
    [self]. *)
+(* Whether a signature's clauses say it ends: it has a [time] clause. *)
+let terminates (clauses : clause list) =
+  List.exists
+    (fun (clause : clause) ->
+      match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
+    clauses
+
 let signature context ~owner ~head ~self_type (written : signature) : T.signature =
   let own = generics context owner written.generics in
   let generics_ = head @ own in
@@ -444,12 +451,7 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
          (fun (clause : clause) -> match clause.kind with Uses paths -> paths | _ -> [])
          written.clauses)
   in
-  let terminates =
-    List.exists
-      (fun (clause : clause) ->
-        match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
-      written.clauses
-  in
+  let terminates = terminates written.clauses in
   let result_type =
     match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
   in

@@ -680,30 +680,8 @@ let instantiate state (span : span) ?(extra = []) (signature : T.signature) =
     @ extra
   in
   require_bounds state span signature.generics substitution;
-  let substitute = T.substitute substitution in
-  let output =
-    match signature.output with
-    | Returns type_ -> T.Returns (substitute type_)
-    | Yields (mode, type_) -> T.Yields (mode, substitute type_)
-    | Lends (mode, type_) -> T.Lends (mode, substitute type_)
-  in
   {
-    signature =
-      {
-        signature with
-        receiver =
-          Option.map (fun (receiver, type_) -> (receiver, substitute type_)) signature.receiver;
-        parameters =
-          List.map
-            (fun (parameter : T.parameter_info) ->
-              { parameter with type_ = substitute parameter.type_ })
-            signature.parameters;
-        output;
-        uses =
-          (T.substitute_function substitution
-             { inputs = []; output; uses = signature.uses; costs = [] })
-            .uses;
-      };
+    signature = T.substitute_signature substitution signature;
     substitution;
     type_arguments =
       List.map

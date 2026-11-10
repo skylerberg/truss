@@ -120,6 +120,27 @@ let () =
       match checked.calls.(value.id) with
       | Some { callee = Trait_method { evidence = Impl _; name = "add"; _ }; _ } -> ()
       | _ -> fail "no impl recorded");
+  test "an ordering on Self in a trait's law is its compare" (fun () ->
+      let text =
+        "trait Ranked: Ordered {\n\
+        \  law transitive(first: Self, second: Self, third: Self)\n\
+        \    requires first < second\n\
+        \    requires second < third\n\
+        \  {\n\
+        \    first < third\n\
+        \  }\n\
+         }\n"
+      in
+      List.iter
+        (fun written ->
+          let value, checked = expression_at text written 1 in
+          match checked.calls.(value.id) with
+          | Some { callee = Trait_method { name = "compare"; evidence = Bound; _ }; result; _ } ->
+              if Types.show result <> "Ordering" then
+                fail "`%s` calls a `compare` that gives `%s`" written (Types.show result)
+          | Some _ -> fail "`%s` is another call" written
+          | None -> fail "`%s` has no call" written)
+        [ "first < second"; "second < third"; "first < third" ]);
   test "a type without the operator's trait is an error" (fun () ->
       one_diagnostic "type Point(x: Int64)\n\nfn f(point: Point) -> Point {\n  point + point\n}\n"
         "types.no_impl")

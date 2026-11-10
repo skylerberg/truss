@@ -613,7 +613,17 @@ checked apart, and neither waits on the other:
   trait, its type, and its `uses`. This reads only its own tree.
 - **Each method is lowered with that header,** which is what `Self`, its
   associated types, and the generic parameters around the method mean, and
-  gives a signature as any function's.
+  gives a signature as any function's. An `impl`'s method is generic over
+  the `impl`'s parameters and then its own, and uses what the `impl` uses,
+  as a method written `fn List[Element].push` is generic over its head's
+  parameters first. A trait's method is generic over its own alone: `Self`
+  and the trait's parameters are given where it is called.
+- **A method an `impl` leaves to its trait has a signature too,** though it
+  is written nowhere of its own, and so has one of a derived `impl`: the
+  trait's method's, with `Self` and the trait's parameters replaced by what
+  the `impl` gives them, generic over the `impl`'s parameters and then its
+  own. Code generation and the prover compile and prove a method at an
+  `impl`, so they ask for this one.
 - **Its interface is put together** from the header and the signature of
   each method written inside it. A trait's method is provided when it has a
   body, and one whose own signature is broken is listed as broken.
@@ -641,8 +651,10 @@ checked apart, and neither waits on the other:
   under conditions no stronger than the `impl`'s.
 - **A capability `impl`'s methods** take the capability's parameters plus a
   receiver, `self` or `mut self`. Only a capability `impl` may have a
-  `uses` clause; a trait `impl`'s methods can use only what the trait's
-  methods declare. Implementing `Panic` is an error.
+  `uses` clause, and its methods use what it declares and no more: whoever
+  calls a capability holds the capability alone, so a method there has no
+  `uses` of its own to add. A trait `impl`'s methods can use only what the
+  trait's methods declare. Implementing `Panic` is an error.
 - **Methods that replace a provided method** must have its exact signature,
   and the provided method must be pure, have a `time` clause, and change
   none of its arguments, which is what lets its body be its definition.
@@ -748,13 +760,14 @@ values between. A range pattern's type must be an integer type or
 ### Operators
 
 Each operator becomes a call, so the checked form needs no operator rules of
-its own:
+its own. The call recorded is the one made, and gives what its method gives,
+which for a comparison is not the operator's own `Bool`:
 
 | Operators | Checked as |
 |---|---|
 | `+ - * / %`, and `-` for negation | The trait method, such as `Add[Right].add`. The `impl` is chosen by the type of the left operand and the type of the right operand, once both are known, and the result is the `impl`'s `Output`. |
-| `==` `!=` | `Equal.equal`. Both sides have one type. |
-| `<` `<=` `>` `>=` | `Ordered.compare`. Both sides have one type. |
+| `==` `!=` | `Equal.equal`, whose `Bool` `!=` negates. Both sides have one type. |
+| `<` `<=` `>` `>=` | `Ordered.compare`, whose `Ordering` the operator tests. Both sides have one type. |
 | `&&` `\|\|` `!` | Built in, on `Bool` |
 | `& \| ^ ~` | Built in, on one built-in integer type |
 | `<< >>` | Built in. The left side is a built-in integer, and the amount any unsigned integer type. |
@@ -1200,12 +1213,13 @@ another branch uses, with disjointness obligations for indexes as above. A
 At each point in a body, a set of capabilities is *available*: the
 function's `uses`, its capability parameters, and the capabilities provided
 by each enclosing `provide`. Inside a capability `impl`'s methods, it is the
-`impl`'s `uses`. A call there through a function value may also use the
-capability itself, which means this implementation, so a method can hand
-it on, as `write_with` passes `FileWrite` to the function it lends the
-writer to; code generation passes the implementation's own evidence. A
-direct call of the capability would call the implementation itself, so it
-still needs the capability among the `impl`'s `uses`, from outside.
+`impl`'s `uses`, which are each method's own. A call there through a
+function value may also use the capability itself, which means this
+implementation, so a method can hand it on, as `write_with` passes
+`FileWrite` to the function it lends the writer to; code generation passes
+the implementation's own evidence. A direct call of the capability would
+call the implementation itself, so it still needs the capability among the
+`impl`'s `uses`, from outside.
 
 - **A capability call,** such as `Clock.now()`, needs its capability
   available.
@@ -1506,10 +1520,28 @@ pushes a change in any of these to the results that read it:
 | The names a file defines with one name | The definitions named `count` in `report.truss` |
 | A module | Whether `standard::json` exists, and its visible names named `parse` |
 | The members of a type with one name | The members of `List` named `length` |
+| The traits of a package that declare a method with one name | The traits of `standard` with a method `compare` |
+| One thing a package's manifest says | The modules of `weather`, or its dependencies, or the width of its `USize` |
 | The `impl`s of a trait for a type constructor, in one package | `Add` for `Instant`, in the package of `Duration` |
 | The capability `impl`s of a type | The capabilities `MemoryFiles` implements |
 | A body fact | Whether `Tree.each` can be pulled |
 | A manifest entry | The capabilities granted to `http`, each as the definition its name means |
+
+A lookup across a package is a lookup in an index built from what the
+package's files declare, and from nothing else:
+
+- **A package's declarations are listed once,** and each index is one pass
+  over that list: its methods and member constants by owner and name, its
+  traits by the names of their methods, its `impl`s by trait and type, and
+  its types by the groups that contain each other. A method written inside
+  a trait is declared as that trait's, so finding the traits with a method
+  `compare` reads no trait's interface.
+- **Each question about an index is a result of its own,** so a definition
+  that asked for the members of `List` named `length` is checked again only
+  when that answer changes, though the index is rebuilt whenever the package
+  declares something new.
+- **What a manifest says is read one thing at a time.** A result that reads
+  a package's modules is not worked out again when its dependencies change.
 
 What each kind of result depends on:
 

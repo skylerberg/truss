@@ -42,16 +42,33 @@ let file =
 
 let package database name = Query.find database packages name
 
+(* What a package's manifest says, one thing at a time: a result that reads
+   only a package's modules is not worked out again when its dependencies
+   change, and the other way round. *)
+let modules =
+  Query.query ~name:"package_modules" ~phase:Syntax ~show:Fun.id (fun database name ->
+      match package database name with Some package -> package.modules | None -> [])
+
+let dependencies =
+  Query.query ~name:"package_dependencies" ~phase:Syntax ~show:Fun.id (fun database name ->
+      match package database name with Some package -> package.dependencies | None -> [])
+
+let usize_bits =
+  Query.query ~name:"package_usize_bits" ~phase:Syntax ~show:Fun.id (fun database name ->
+      match package database name with Some package -> package.usize_bits | None -> 32)
+
+let exists =
+  Query.query ~name:"package_exists" ~phase:Syntax ~show:Fun.id (fun database name ->
+      Option.is_some (package database name))
+
 let split_path database (names : string list) =
   match names with
-  | owner :: name :: rest when package database (owner ^ "::" ^ name) <> None ->
+  | owner :: name :: rest when Query.demand database exists (owner ^ "::" ^ name) ->
       Some (owner ^ "::" ^ name, rest)
-  | name :: rest when package database name <> None -> Some (name, rest)
+  | name :: rest when Query.demand database exists name -> Some (name, rest)
   | _ -> None
 
 let module_exists =
   Query.query ~name:"module_exists" ~phase:Syntax ~saved:true ~show:Path.show_module
     (fun database (module_ : Path.module_) ->
-      match package database module_.package with
-      | None -> false
-      | Some package -> List.mem module_ package.modules)
+      List.mem module_ (Query.demand database modules module_.package))

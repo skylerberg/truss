@@ -394,12 +394,9 @@ let check (state : state) (lowered : Environment.lowered) =
   let run_in scope (body : block) =
     List.iter (fun written -> ignore (statement state scope written)) body.statements
   in
-  let run (signature : T.signature) body =
-    run_in (scope ~own:(T.capability_parameters signature.generics) signature.uses) body
-  in
   if not (broken Header || broken Body) then
     match (definition.kind, lowered.interface) with
-    | Function { body; signature = written }, Function_interface signature -> (
+    | Function { body; signature = written }, Function_interface signature ->
         (* A function's clauses are specifications, with only [Panic]. *)
         List.iter
           (fun (clause : clause) ->
@@ -412,30 +409,26 @@ let check (state : state) (lowered : Environment.lowered) =
             | Cost { bound = Big_o value | At_most value | Exactly value; _ } -> check value
             | Cost { bound = Finite; _ } | Uses _ | Clause_error -> ())
           written.clauses;
-        (* Inside an implementation of a capability, what is available is
-           what the [impl] declares, and a function value it calls may use
-           the capability, which there means this implementation, as
-           [write_with] hands [FileWrite] to its callback. A direct call of
-           the capability would call the implementation itself, so it still
-           needs [uses]. *)
-        let implemented =
+        (* Inside an implementation of a capability, a function value it
+           calls may use the capability, which there means this
+           implementation, as [write_with] hands [FileWrite] to its
+           callback. A direct call of the capability would call the
+           implementation itself, so it still needs [uses]. *)
+        let handed_on =
           Option.bind (Query.demand state.database Names.container state.key) (fun container ->
               match Query.demand state.database Environment.lowered container with
               | Some { interface = Impl_interface impl; _ }
                 when Interface.Summary.kind_of state.database impl.implements.trait
                      = Some Capability ->
-                  Some impl
+                  Some (T.Capability impl.implements.trait)
               | _ -> None)
         in
-        match implemented with
-        | Some impl ->
-            run_in
-              {
-                (scope ~own:(T.capability_parameters signature.generics) impl.impl_uses) with
-                handed_on = Some (T.Capability impl.implements.trait);
-              }
-              body
-        | None -> run signature body)
+        run_in
+          {
+            (scope ~own:(T.capability_parameters signature.generics) signature.uses) with
+            handed_on;
+          }
+          body
     | Test { body; _ }, Test_interface uses -> run_in (scope (union uses [ panic ])) body
     | Theorem { body; _ }, _ | Law_proof { body; _ }, _ ->
         run_in (pure_only (scope []) "a proof") body

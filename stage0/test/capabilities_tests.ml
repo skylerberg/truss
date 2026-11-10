@@ -476,6 +476,41 @@ let () =
       in
       expect_codes ~expected:[] (database, found);
       if problems database <> [] then fail "reported");
+  test "a dependency nothing uses is reported whatever kinds of definition the package holds"
+    (fun () ->
+      let database, found =
+        codes_with_grants
+          [
+            ( "app::main",
+              "public type Square(side: Int64)\n\
+              \  derives Equal\n\n\
+               public trait Sided {\n\
+              \  fn sides(self) -> Int64\n\n\
+              \  fn corners(self) -> Int64 {\n\
+              \    self.sides()\n\
+              \  }\n\
+               }\n\n\
+               impl Sided for Square {\n\
+              \  fn sides(self) -> Int64 {\n\
+              \    4\n\
+              \  }\n\
+               }\n\n\
+               public capability Ledger {\n\
+              \  fn record(amount: Int64)\n\
+               }\n\n\
+               public let limit: Int64 = 10\n\n\
+               fn Square.width(self) -> Int64 {\n\
+              \  self.side\n\
+               }\n\n\
+               test \"a square has four sides\" {\n\
+              \  assert Square(1).sides() == 4\n\
+               }\n" );
+            time;
+          ]
+          [ ("clock_library", []) ]
+      in
+      expect_codes ~expected:[] (database, found);
+      match problems database with [ Unused "clock_library" ] -> () | _ -> fail "not reported");
   test "a package with an error is not told that a dependency is unused" (fun () ->
       let database, _ =
         codes_with_grants

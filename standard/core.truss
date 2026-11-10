@@ -56,10 +56,10 @@ public trait Ordered: Equal {
   }
 
   law transitive(first: Self, second: Self, third: Self)
-    requires first.compare(second) == Ordering.Less
-    requires second.compare(third) == Ordering.Less
+    requires first < second
+    requires second < third
   {
-    first.compare(third) == Ordering.Less
+    first < third
   }
 }
 
