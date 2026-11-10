@@ -35,7 +35,20 @@ val file : (Path.module_, file) Query.query
 (** A module's file, lexed and parsed. Raises [Not_found] if the module has no text. *)
 
 val package : Query.context -> string -> package option
-(** A package, or [None] if there is no such package. *)
+(** A package, or [None] if there is no such package. Reading it reads the whole of what the
+    manifest says, so a result that needs one thing of it asks for that thing below. *)
+
+val modules : (string, Path.module_ list) Query.query
+(** A package's modules, and none for a package there is not. *)
+
+val dependencies : (string, dependency list) Query.query
+(** A package's dependencies, each with what it is granted. *)
+
+val usize_bits : (string, int) Query.query
+(** The width of [USize] a package's code must hold for. *)
+
+val exists : (string, bool) Query.query
+(** Whether there is a package of that name. *)
 
 val split_path : Query.context -> string list -> (string * string list) option
 (** The package that the names of a full path start with, which is two of them when it has an owner,

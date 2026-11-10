@@ -22,11 +22,7 @@ let public (declaration : Names.declaration) =
   | Public | Public_opaque -> true
   | Private | Internal -> false
 
-let declarations database package =
-  match Workspace.package database package with
-  | Some (package : Workspace.package) ->
-      List.concat_map (Query.demand database Names.declarations) package.modules
-  | None -> []
+let declarations database package = Query.demand database Names.package_declarations package
 
 let definition database declaration =
   Query.demand database Names.definition (Names.key_of declaration)
@@ -335,9 +331,10 @@ let compare ~before ~after package =
         new_impls
   in
   let targets =
-    match (Workspace.package before package, Workspace.package after package) with
-    | Some was, Some is when was.usize_bits = 32 && is.usize_bits = 64 -> true
-    | _ -> false
+    Query.demand before Workspace.exists package
+    && Query.demand after Workspace.exists package
+    && Query.demand before Workspace.usize_bits package = 32
+    && Query.demand after Workspace.usize_bits package = 64
   in
   (definitions @ added @ impl_changes, targets)
 

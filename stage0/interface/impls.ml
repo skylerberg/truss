@@ -25,38 +25,32 @@ let derivable (trait : Path.t) =
    constructor. *)
 let index =
   Query.query ~name:"impl_index" ~phase:Interfaces ~show:Fun.id (fun database package ->
-      match Workspace.package database package with
-      | None -> []
-      | Some package ->
-          List.concat_map
-            (fun module_ ->
-              List.concat_map
-                (fun (declaration : Names.declaration) ->
-                  if declaration.ordinal <> 0 then []
-                  else
-                    match declaration.kind with
-                    | Impl -> (
-                        match Query.demand database Environment.impl_interface declaration.path with
-                        | Some impl when not impl.impl_broken -> (
-                            match head impl.for_type with
-                            | Some type_ -> [ ((impl.implements.trait, type_), declaration.path) ]
-                            | None -> [])
-                        | _ -> [])
-                    | Type -> (
-                        match Query.demand database Environment.type_interface declaration.path with
-                        | Some type_interface ->
-                            List.filter_map
-                              (fun trait ->
-                                if derivable trait then
-                                  Some
-                                    ( (trait, declaration.path),
-                                      (Derived { type_ = declaration.path; trait } : Path.t) )
-                                else None)
-                              type_interface.derives
-                        | None -> [])
-                    | _ -> [])
-                (Query.demand database Names.declarations module_))
-            package.modules)
+      List.concat_map
+        (fun (declaration : Names.declaration) ->
+          if declaration.ordinal <> 0 then []
+          else
+            match declaration.kind with
+            | Impl -> (
+                match Query.demand database Environment.impl_interface declaration.path with
+                | Some impl when not impl.impl_broken -> (
+                    match head impl.for_type with
+                    | Some type_ -> [ ((impl.implements.trait, type_), declaration.path) ]
+                    | None -> [])
+                | _ -> [])
+            | Type -> (
+                match Query.demand database Environment.type_interface declaration.path with
+                | Some type_interface ->
+                    List.filter_map
+                      (fun trait ->
+                        if derivable trait then
+                          Some
+                            ( (trait, declaration.path),
+                              (Derived { type_ = declaration.path; trait } : Path.t) )
+                        else None)
+                      type_interface.derives
+                | None -> [])
+            | _ -> [])
+        (Query.demand database Names.package_declarations package))
 
 (* A package's impls by the type they are for: each with its trait. *)
 let by_type =

@@ -315,7 +315,7 @@ and trait_static_method state path name =
               then Some (reference, method_)
               else None
           | None -> None)
-        (Query.demand state.database Members.traits_declaring (package, name)))
+        (Query.demand state.database Names.traits_declaring (package, name)))
     (Members.visible_packages state.database state.package)
 
 (* The [impl] a trait method call means is found once its types are known,
@@ -397,7 +397,7 @@ and trait_candidates state receiver_type name =
                  in
                  ignore has_generics;
                  if could_implement state receiver_type trait then with_method reference else None)
-               (Query.demand state.database Members.traits_declaring (package, name)))
+               (Query.demand state.database Names.traits_declaring (package, name)))
            (Members.visible_packages state.database state.package))
 
 and each_call state (span : span) type_ mode =

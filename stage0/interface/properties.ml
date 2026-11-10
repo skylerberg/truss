@@ -282,17 +282,11 @@ let facts_from database ~facts_of (interface : T.type_interface) =
 let groups =
   Query.query ~name:"type_groups" ~phase:Interfaces ~show:Fun.id (fun database package ->
       let types =
-        match Workspace.package database package with
-        | None -> []
-        | Some found ->
-            List.concat_map
-              (fun module_ ->
-                List.filter_map
-                  (fun (declaration : Resolve.Names.declaration) ->
-                    if declaration.kind = Type && declaration.ordinal = 0 then Some declaration.path
-                    else None)
-                  (Query.demand database Resolve.Names.declarations module_))
-              found.modules
+        List.filter_map
+          (fun (declaration : Resolve.Names.declaration) ->
+            if declaration.kind = Type && declaration.ordinal = 0 then Some declaration.path
+            else None)
+          (Query.demand database Resolve.Names.package_declarations package)
       in
       let known = Path.Set.of_list types in
       let named type_ =

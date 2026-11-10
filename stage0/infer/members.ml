@@ -5,42 +5,14 @@ module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
 
-(* The traits that declare a method with this name, among those a dot-call
-   may find: the standard library's, the calling package's, and those of
-   the packages its manifest lists. One query per package and name. *)
-let traits_declaring =
-  Query.query ~name:"traits_declaring" ~phase:Interfaces ~saved:true
-    ~show:(fun (package, name) -> package ^ " " ^ name)
-    (fun database (package, name) ->
-      match Workspace.package database package with
-      | None -> []
-      | Some package ->
-          List.concat_map
-            (fun module_ ->
-              List.filter_map
-                (fun (declaration : Names.declaration) ->
-                  if declaration.kind <> Trait || declaration.ordinal <> 0 then None
-                  else
-                    match Query.demand database Environment.trait_interface declaration.path with
-                    | Some trait
-                      when List.exists
-                             (fun (method_ : T.trait_method) -> method_.method_name = name)
-                             trait.methods ->
-                        Some declaration.path
-                    | _ -> None)
-                (Query.demand database Names.declarations module_))
-            package.modules)
-
+(* The packages whose traits a dot-call may find: the standard library, the
+   calling package, and those its manifest lists. *)
 let visible_packages database (package : string) =
-  let dependencies =
-    match Workspace.package database package with
-    | Some package ->
-        List.map
-          (fun (dependency : Workspace.dependency) -> dependency.package)
-          package.dependencies
-    | None -> []
-  in
-  List.sort_uniq compare ("standard" :: package :: dependencies)
+  List.sort_uniq compare
+    ("standard" :: package
+    :: List.map
+         (fun (dependency : Workspace.dependency) -> dependency.package)
+         (Query.demand database Workspace.dependencies package))
 
 (* A type's own methods with a name: one per receiver. *)
 let own_methods database owner name =
