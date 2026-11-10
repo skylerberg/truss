@@ -65,6 +65,7 @@ internal fn symbol_value(byte: UInt8, alphabet: Alphabet) -> UInt8
 }
 
 public fn encode(bytes: Slice[UInt8], alphabet: Alphabet = Alphabet.Standard, padding: Bool = true) -> String
+  ensures result.length() <= 4 * ((bytes.length() + 2) / 3)
   cost time O(bytes.length())
   cost allocations <= 1
 {
@@ -119,9 +120,10 @@ public fn encode_onto(
   alphabet: Alphabet = Alphabet.Standard,
   padding: Bool = true,
 )
-  cost time O(bytes.length())
+  cost amortized time O(bytes.length())
 {
-  todo
+  let text = encode(bytes, alphabet: alphabet, padding: padding)
+  mut output.write(text.slice())
 }
 
 internal fn unpadded_length(text: StringSlice) -> USize

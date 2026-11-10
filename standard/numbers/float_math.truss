@@ -1,4 +1,5 @@
 use standard::core
+use standard::growth
 use standard::intrinsic
 use standard::text
 
@@ -336,16 +337,205 @@ public fn Float32.sum(items: Slice[Float32]) -> Float32
   if lost.is_finite() { total + lost } else { total }
 }
 
+fn format_with(value: Float64, format: intrinsic::View[UInt8], precision: Int32) -> String
+  requires intrinsic::view_length(format) > 0
+  requires intrinsic::view_model(format)[intrinsic::view_length(format) - 1] == 0
+  cost time finite
+{
+  var text: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(64)
+  let length = intrinsic::libc_snprintf(mut text, size: 64, format: format, precision: precision, value: value)
+  if length < 0 {
+    return ""
+  }
+  let needed: USize = intrinsic::convert(length)
+  if needed < 64 {
+    intrinsic::storage_lengthen(mut text, by: needed)
+    return String(storage: own text)
+  }
+  let room = needed + 1
+  var long: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
+  let again = intrinsic::libc_snprintf(mut long, size: room, format: format, precision: precision, value: value)
+  var written: USize = 0
+  if again > 0 {
+    written = intrinsic::convert(again)
+  }
+  if written > needed {
+    written = needed
+  }
+  intrinsic::storage_lengthen(mut long, by: written)
+  String(storage: own long)
+}
+
+fn pad_with_zeros(text: own String, count: USize) -> String
+  cost time finite
+{
+  var padded = own text
+  var left = count
+  while left > 0
+    decreases left
+  {
+    mut padded.push("0")
+    left -= 1
+  }
+  padded
+}
+
+fn format_fixed(value: Float64, decimals: USize) -> String
+  cost time finite
+{
+  if value.is_nan() {
+    return "NaN"
+  }
+  if !value.is_finite() {
+    return if value < 0.0 { "-infinity" } else { "infinity" }
+  }
+  let shown: USize = if decimals > 1100 { 1100 } else { decimals }
+  let text = format_with(value, format: "%.*f\0".slice().bytes, precision: intrinsic::convert(shown))
+  pad_with_zeros(own text, count: decimals - shown)
+}
+
+fn format_scientific(value: Float64, decimals: USize) -> String
+  cost time finite
+{
+  if value.is_nan() {
+    return "NaN"
+  }
+  if !value.is_finite() {
+    return if value < 0.0 { "-infinity" } else { "infinity" }
+  }
+  let shown: USize = if decimals > 800 { 800 } else { decimals }
+  let text = format_with(value, format: "%.*e\0".slice().bytes, precision: intrinsic::convert(shown))
+  if decimals == shown {
+    return text
+  }
+  match text.slice().split_once("e") {
+    Some(parts) => {
+      var padded = pad_with_zeros(parts.first.to_string(), count: decimals - shown)
+      mut padded.push("e")
+      mut padded.push(parts.second)
+      padded
+    }
+    None => text
+  }
+}
+
+fn skip_digits(text: StringSlice, from: USize) -> USize
+  requires from <= text.length()
+  ensures from <= result
+  ensures result <= text.length()
+  cost time finite
+{
+  var index = from
+  while index < text.length() && 48 <= text.byte(index) && text.byte(index) <= 57
+    invariant from <= index
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    index += 1
+  }
+  index
+}
+
+fn validate_decimal(text: StringSlice, from: USize) -> Option[core::ParseFloatError]
+  requires from <= text.length()
+  cost time finite
+{
+  let whole_end = skip_digits(text, from: from)
+  var end = whole_end
+  var digits = whole_end - from
+  if end < text.length() && text.byte(end) == 46 {
+    let fraction_end = skip_digits(text, from: end + 1)
+    digits += fraction_end - (end + 1)
+    end = fraction_end
+  }
+  if digits == 0 {
+    return Some(core::ParseFloatError.Invalid(offset: from))
+  }
+  if end < text.length() && (text.byte(end) == 101 || text.byte(end) == 69) {
+    var exponent = end + 1
+    if exponent < text.length() && (text.byte(exponent) == 43 || text.byte(exponent) == 45) {
+      exponent += 1
+    }
+    let exponent_end = skip_digits(text, from: exponent)
+    if exponent_end == exponent {
+      return Some(core::ParseFloatError.Invalid(offset: exponent))
+    }
+    end = exponent_end
+  }
+  if end < text.length() {
+    return Some(core::ParseFloatError.Invalid(offset: end))
+  }
+  None
+}
+
+fn null_terminated(text: StringSlice) -> intrinsic::Storage[UInt8]
+  ensures intrinsic::storage_length(result) > 0
+  ensures intrinsic::storage_model(result)[intrinsic::storage_length(result) - 1] == 0
+  cost time finite
+{
+  var buffer: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(0)
+  growth::reserve(mut buffer, additional: text.length())
+  for index in 0..text.length()
+    invariant intrinsic::storage_length(buffer) == yielded.length()
+    invariant intrinsic::storage_capacity(buffer) >= text.length()
+  {
+    intrinsic::storage_push(mut buffer, value: text.byte(index))
+  }
+  growth::reserve(mut buffer, additional: 1)
+  intrinsic::storage_push(mut buffer, value: 0)
+  buffer
+}
+
+type FloatText =
+  | Decimal(from: USize)
+  | Special(value: Float64)
+  | Invalid(error: core::ParseFloatError)
+
+fn classify_float_text(text: StringSlice) -> FloatText
+  ensures !(result is Decimal(from) && from > text.length())
+  cost time finite
+{
+  if text.length() == 0 {
+    return FloatText.Invalid(error: core::ParseFloatError.Empty)
+  }
+  let negative = text.byte(0) == 45
+  let from: USize = if negative || text.byte(0) == 43 { 1 } else { 0 }
+  let named = text.length() - from
+  if named == 3 && text.ends_with("NaN") {
+    return FloatText.Special(value: Float64.not_a_number)
+  }
+  if named == 8 && text.ends_with("infinity") {
+    return FloatText.Special(value: if negative { Float64.negative_infinity } else { Float64.infinity })
+  }
+  FloatText.Decimal(from: from)
+}
+
+internal fn parse_float64(text: StringSlice) -> Result[Float64, core::ParseFloatError]
+  cost time finite
+{
+  match classify_float_text(text) {
+    Invalid(error) => Err(error)
+    Special(value) => Ok(value)
+    Decimal(from) => {
+      if validate_decimal(text, from: from) is Some(error) {
+        return Err(error)
+      }
+      let buffer = null_terminated(text)
+      Ok(intrinsic::libc_strtod(intrinsic::storage_view(buffer)))
+    }
+  }
+}
+
 public fn Float32.to_fixed(self, decimals: USize) -> String
   cost time finite
 {
-  todo
+  format_fixed(intrinsic::convert(self), decimals: decimals)
 }
 
 public fn Float32.to_scientific(self, decimals: USize) -> String
   cost time finite
 {
-  todo
+  format_scientific(intrinsic::convert(self), decimals: decimals)
 }
 
 impl text::Parse for Float32 {
@@ -1380,20 +1570,20 @@ public fn Float64.sum(items: Slice[Float64]) -> Float64
 public fn Float64.to_fixed(self, decimals: USize) -> String
   cost time finite
 {
-  todo
+  format_fixed(self, decimals: decimals)
 }
 
 public fn Float64.to_scientific(self, decimals: USize) -> String
   cost time finite
 {
-  todo
+  format_scientific(self, decimals: decimals)
 }
 
 impl text::Parse for Float64 {
   type Error = core::ParseFloatError
 
   fn parse(text: StringSlice) -> Result[Float64, core::ParseFloatError] {
-    todo
+    parse_float64(text)
   }
 }
 

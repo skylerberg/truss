@@ -1,15 +1,17 @@
-(* Moves, checked on the control-flow graph of a core form.
+(* Moves, checked on the control-flow graph of a core form. The check
+   prevents use after move.
 
-   A forward analysis finds, for each point, the places that may have been
-   moved on some path to it. A use of a place that overlaps a moved place
-   is an error. The rules on what may be moved need no flow: they depend
-   on the place and on how its root is bound. *)
+   A forward dataflow analysis computes, for each point, the places that may
+   have been moved on some path to it. A use of a place that overlaps a
+   moved place is an error. Whether a place can be moved at all needs no
+   dataflow: it depends on the place and on how its root is bound. *)
 
 module T = Types
 open Graph
 open Context
 
-(* What a [Move] point does, by the place and the kind of its root. *)
+(* The effect of a [Move] point, decided from the place and from how its
+   root is bound. *)
 type verdict =
   | Moves  (** The place is moved. *)
   | Reads  (** A view is returned: the place is only read. *)
@@ -26,7 +28,7 @@ let verdict context (place : Place.t) ~type_ ~returned ~captured : verdict =
       (fun context at type_ ->
         report context Not_owned at ~fixes:(copy "Pass a copy." type_ at) message)
   in
-  let root_kind = if captured then Viewing else kind context place.root in
+  let root_kind = if captured then Borrowed else kind context place.root in
   if returned && root_kind <> Owned then
     if is_view context type_ then Reads
     else
@@ -43,15 +45,15 @@ let verdict context (place : Place.t) ~type_ ~returned ~captured : verdict =
          shown)
   else
     match (root_kind, place.root) with
-    | Viewing, Constant _ ->
+    | Borrowed, Constant _ ->
         refuse
           (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
              (if place.steps = [] then "a constant" else "part of a constant"))
-    | Viewing, _ ->
+    | Borrowed, _ ->
         refuse
-          (Printf.sprintf "`%s` is a view, not owned here, so it cannot be moved. Copy it instead."
+          (Printf.sprintf "`%s` is borrowed, not owned, so it cannot be moved. Copy it instead."
              shown)
-    | (Owned | Mut_access), _ -> Moves
+    | (Owned | Borrowed_mut), _ -> Moves
 
 (* A moved place, with the point that moved it. *)
 type moved = Place.t * int
@@ -61,19 +63,20 @@ let transfer verdicts (index : int) (point : point) (before : moved list) : move
   | Move { place; _ } when verdicts.(index) = Some Moves ->
       if List.mem (place, index) before then before else (place, index) :: before
   | Assign place -> List.filter (fun (moved, _) -> not (Place.is_prefix place moved)) before
-  | Bind locals | Ends locals ->
+  | Bind locals | Scope_end locals ->
       List.filter
         (fun ((moved : Place.t), _) ->
           match moved.root with
           | Local local -> not (List.mem local locals)
           | Constant _ | Environment -> true)
         before
-  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Exit | Task_end _ | Suspend _ | Hold _
-  | Store _ | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Gives_function _
-  | Write_through _ | Arguments _ ->
+  | Enter | Read _ | Move _ | Move_out_of_lent _ | Mutate _ | Exit | Task_end _ | Yield_point _
+  | Bind_views _ | Store _ | Return_view _ | View_of_temporary _ | Bind_lent_part _
+  | Pass_owned_function _ | Write_through _ | Arguments _ ->
       before
 
-(* The places that may have been moved before each point. *)
+(* The places that may have been moved before each point: a forward
+   may-analysis. *)
 let moved_before (graph : Graph.t) verdicts : moved list array =
   let count = Array.length graph.points in
   let before = Array.make count [] in
@@ -117,9 +120,9 @@ let check context (graph : Graph.t) =
   in
   let before = moved_before graph verdicts in
   let reported = Hashtbl.create 8 in
-  (* A use of a place that overlaps a moved place. One report for each
-     moved place. *)
-  let used index (place : Place.t) =
+  (* Reports a use of a place that overlaps a moved place: a use after move.
+     Each moved place is reported once. *)
+  let check_not_moved index (place : Place.t) =
     match
       List.find_opt
         (fun ((moved : Place.t), _) -> Place.is_prefix moved place || Place.is_prefix place moved)
@@ -136,15 +139,16 @@ let check context (graph : Graph.t) =
           (Printf.sprintf "`%s` is used after it was moved." shown)
     | _ -> ()
   in
-  (* A place that is lent [mut] goes back to its owner, so what is moved
-     out of it must be given a value again before it goes back. [roots]
-     says which of the moved places go back at the point. *)
+  (* A [mut] borrow must end with the place fully initialized, because its
+     owner uses the place afterwards. So a place that is moved out of a
+     [mut] borrow must be reinitialized before the borrow ends. [roots]
+     selects the roots whose borrows end at the point. *)
   let reported = Hashtbl.create 8 in
-  let reinitialized ?(moved_within = fun _ -> true) index ~roots ~at message =
+  let check_reinitialized ?(moved_within = fun _ -> true) index ~roots ~at message =
     List.iter
       (fun ((moved : Place.t), moved_at) ->
         if
-          kind context moved.root = Mut_access
+          kind context moved.root = Borrowed_mut
           && roots moved.root && moved_within moved_at
           && not (Hashtbl.mem reported moved)
         then begin
@@ -165,21 +169,21 @@ let check context (graph : Graph.t) =
     (fun index (point : point) ->
       let at = span context point.origin in
       match point.action with
-      | Read place | Mutate place -> used index place
+      | Read place | Mutate place -> check_not_moved index place
       | Move { place; use; type_; _ } -> (
-          used index place;
+          check_not_moved index place;
           match verdicts.(index) with
           | Some Moves -> context.moves <- use :: context.moves
           | Some (Refused refuse) -> refuse context at type_
           | Some Reads | None -> ())
-      | Take_lent type_ ->
+      | Move_out_of_lent type_ ->
           report context Not_owned at
             ~fixes:
               (if copyable context type_ then
                  [ Diagnostic.fix "Copy it." [ Diagnostic.insert at.stop ".copy()" ] ]
                else [])
-            "This part is lent, so it cannot be given up: it goes back when the statement is done. \
-             Copy it instead."
+            "This part is lent, so it cannot be moved: the loan ends when the statement ends. Copy \
+             it instead."
       | Assign place -> (
           (* Assigning a part of a moved place uses the moved place. *)
           match
@@ -187,46 +191,46 @@ let check context (graph : Graph.t) =
               (fun (moved, _) -> Place.is_prefix moved place && moved <> place)
               before.(index)
           with
-          | Some (moved, _) -> used index moved
+          | Some (moved, _) -> check_not_moved index moved
           | None -> ())
       | Exit ->
-          reinitialized index
+          check_reinitialized index
             ~roots:(fun _ -> true)
             ~at:(Some at)
             (fun moved _ ->
               Printf.sprintf
-                "`%s` belongs to the caller, so it must be given a value again before the function \
-                 returns."
+                "`%s` is moved out and not reinitialized. The caller owns it, so assign it a value \
+                 before the function returns."
                 moved)
       | Task_end { first; limit } ->
-          reinitialized index
+          check_reinitialized index
             ~moved_within:(fun point -> first <= point && point < limit)
             ~roots:(fun _ -> true)
             ~at:None
             (fun moved _ ->
               Printf.sprintf
-                "`%s` is moved out in this branch and is not given a value again in it. If another \
-                 branch leaves early, the code after the `concurrent` block does not run, so a \
-                 branch puts back what it takes out of a place that is lent `mut`."
+                "`%s` is moved out in this branch and not reinitialized in it. If another branch \
+                 exits the `concurrent` block early, the code after the block does not run, so \
+                 each branch must reinitialize what it moves out of a `mut` borrow."
                 moved)
-      | Suspend _ ->
+      | Yield_point _ ->
           if context.yields then
-            reinitialized index
+            check_reinitialized index
               ~roots:(fun _ -> true)
               ~at:(Some at)
               (fun moved _ ->
                 Printf.sprintf
-                  "`%s` must be given a value again before this `yield`, because a loop may stop \
-                   the method here."
+                  "`%s` is moved out and not reinitialized before this `yield`. The caller's loop \
+                   may `break` here, and then the method never resumes."
                   moved)
-      | Bind locals | Ends locals ->
-          reinitialized index ~roots:(bound locals) ~at:None (fun moved root ->
+      | Bind locals | Scope_end locals ->
+          check_reinitialized index ~roots:(bound locals) ~at:None (fun moved root ->
               Printf.sprintf
-                "`%s` is moved out here and is not given a value again. `%s` is lent `mut`, so \
-                 every part of it must have a value when its loop iteration, its `match` arm, or \
-                 its lambda ends."
+                "`%s` is moved out here and not reinitialized. `%s` is borrowed `mut`, so every \
+                 part of it must be initialized when its loop iteration, its `match` arm, or its \
+                 lambda ends."
                 moved root)
-      | Enter | Hold _ | Store _ | Return_view _ | Views_temporary _ | Keeps_lent_part _
-      | Gives_function _ | Write_through _ | Arguments _ ->
+      | Enter | Bind_views _ | Store _ | Return_view _ | View_of_temporary _ | Bind_lent_part _
+      | Pass_owned_function _ | Write_through _ | Arguments _ ->
           ())
     points

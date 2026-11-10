@@ -523,7 +523,7 @@ let () =
      \  Sessions.touch(session)\n\
       }\n\n"
    in
-   test "a capability whose calls take turns has no method that takes a function that uses one"
+   test "a capability implemented by a monitor has no method with a callback that uses a capability"
      (fun () ->
        one_diagnostic
          (sessions
@@ -538,8 +538,9 @@ let () =
           \    }\n\
           \  }\n\
            }\n")
-         "capabilities.function_in_turn");
-   test "calls take no turns where the code inside the `provide` cannot use `Tasks`" (fun () ->
+         "capabilities.callback_may_deadlock");
+   test "an implementation is not a monitor if the body of its `provide` cannot use `Tasks`"
+     (fun () ->
        fine
          (sessions
         ^ "fn f() {\n\

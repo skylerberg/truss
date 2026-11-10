@@ -38,10 +38,10 @@ test "a map holds a value under each key that was inserted" {
   assert ages.length() == 2 && ages.get("ada") == Some(37)
 }
 
-test "a map literal is indexed by its keys, and assigning to a key it holds replaces the value" {
+test "a map literal is indexed by its keys, and assigning to a key inserts or replaces" {
   var ports: Map[String, Int64] = ["http": 80, "https": 443]
   assert ports.length() == 2 && ports["http"] == 80 && ports["https"] == 443
-  mut ports.insert("ftp", value: 21)
+  ports["ftp"] = 21
   ports["http"] = 8080
   assert ports.length() == 3 && ports["ftp"] == 21 && ports["http"] == 8080
   let empty: Map[String, Int64] = [:]
