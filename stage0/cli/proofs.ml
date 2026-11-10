@@ -14,9 +14,11 @@ let solver =
 let running (project : Project.t) =
   Running.through ~results:(Database.test_results ()) (lazy (Compiler.create project Development))
 
-(* The proofs' diagnostics of each file, by module. *)
-let diagnostics (project : Project.t) =
+(* The proofs' diagnostics of each of the modules, by module, with every
+   module's queries solved first, together. *)
+let diagnostics (project : Project.t) modules =
   let solver = Lazy.force solver and running = running project in
+  Prover.solve_ahead ~running project.context solver modules;
   fun module_ -> Prover.diagnostics ~running project.context solver module_
 
 (* Each definition [main] can reach whose proofs have a hole, which a

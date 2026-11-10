@@ -11,19 +11,30 @@ type t = { files : file list; problems : string list }
    none, and with [proofs], the prover's too. Each file lists at most
    [Diagnostic.limit]. *)
 let gather ?(proofs = false) (project : Project.t) =
-  let proven = if proofs then Proofs.diagnostics project else fun _ -> [] in
+  let checked =
+    List.map
+      (fun module_ -> (module_, Database.diagnostics project.session module_))
+      (Project.modules project)
+  in
+  (* A file is proven once it checks, since the prover reads what type
+     checking makes. *)
+  let proven =
+    if proofs then
+      Proofs.diagnostics project
+        (List.filter_map
+           (fun (module_, found) -> if found = [] then Some module_ else None)
+           checked)
+    else fun _ -> []
+  in
   {
     files =
       List.filter_map
-        (fun module_ ->
-          let found = Database.diagnostics project.session module_ in
-          (* A file is proven once it checks, since the prover reads what
-             type checking makes. *)
+        (fun (module_, found) ->
           let found = if found = [] then proven module_ else found in
           match Diagnostic.shown found with
           | [] -> None
           | diagnostics -> Some { module_; source = Project.source project module_; diagnostics })
-        (Project.modules project);
+        checked;
     problems =
       Database.problems project.session
       @ List.map

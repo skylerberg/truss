@@ -33,6 +33,10 @@ val solve : t -> ?values:string list -> Logic.query -> answer
     those the query does not mention are left out. Results are cached by {!key} for the life of the
     process, and solving the same text twice gives the same answer. *)
 
+val solve_all : t -> (string list * Logic.query) list -> answer list
+(** Runs each query, as {!solve} does, with [values] given with it, several at once, one for each
+    core. The answers are in the queries' order, and are what solving them one at a time gives. *)
+
 val solved : t -> int
 (** How many queries this solver has run itself, leaving out those answered from a cache: what
     incremental work's tests count. *)

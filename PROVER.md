@@ -723,6 +723,13 @@ A query's text is canonical, so that its hash can be its cache key:
 - **One process per query,** given the query's text through SMT-LIB, with a
   fixed random seed. A solver that answered earlier queries carries state
   that can change later answers, so no state is shared.
+- **Many queries at once,** one for each core. Before any proof is read,
+  the queries of every definition being checked are solved together, and
+  each definition then finds its answers solved. Since an answer depends
+  only on its text, solving them at once gives what solving them one after
+  another does. A query asked only after another's answer, such as a bound
+  with another choice of constants, or a bitwise query asked again exactly,
+  is solved when it is asked.
 - **An answer is a fact about the text.** Its key is the hash of the
   query's text, the solver's version, its options, and its limit, so an
   answer can be reused whenever the text is the same. The command line
@@ -1163,8 +1170,6 @@ sanitized runs, test the trusted base against real executions.
   without applying them. An obligation that the same failure makes
   unprovable on another path, such as a second index into the same list
   with the same index, is to be reported once.
-- **Solving many queries at once,** one for each core. They are solved one
-  after another.
 - **Proof programs as a data structure of their own,** made from a body
   and then turned into verification conditions by weakest preconditions,
   which would keep reading Truss apart from the logic. One walk does both.
