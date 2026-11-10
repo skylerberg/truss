@@ -102,6 +102,33 @@ let () =
       one_diagnostic
         "fn f() -> Slice[Int64] {\n  let items: List[Int64] = [1, 2, 3]\n  items[0..2]\n}\n"
         "ownership.returns_local_view");
+  test "a function cannot return a view of its local nested in a type nested in itself" (fun () ->
+      one_diagnostic
+        "type Holder[Value](value: Value)\n\n\
+         fn f() -> Holder[Holder[Slice[Int64]]] {\n\
+        \  let items: List[Int64] = [1, 2, 3]\n\
+        \  Holder(Holder(items[0..2]))\n\
+         }\n"
+        "ownership.returns_local_view");
+  test "a function cannot return a view of its local kept as an associated type" (fun () ->
+      one_diagnostic
+        "trait Shown {\n\
+        \  type Part\n\
+        \  fn part(self) -> Self.Part\n\
+         }\n\n\
+         type Numbers(items: List[Int64])\n\n\
+         impl Shown for Numbers {\n\
+        \  type Part = Slice[Int64]\n\n\
+        \  fn part(self) -> Slice[Int64] {\n\
+        \    self.items[0..2]\n\
+        \  }\n\
+         }\n\n\
+         type Kept[Source: Shown](part: Source.Part)\n\n\
+         fn f() -> Kept[Numbers] {\n\
+        \  let numbers = Numbers([1, 2, 3])\n\
+        \  Kept(numbers.part())\n\
+         }\n"
+        "ownership.returns_local_view");
   test "a function can return a view of its parameter" (fun () ->
       fine "fn f(items: List[Int64]) -> Slice[Int64] {\n  items[0..2]\n}\n");
   test "a var needs an owned value, with fixes that give up or copy the place" (fun () ->

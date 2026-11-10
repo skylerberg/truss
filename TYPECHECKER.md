@@ -86,7 +86,8 @@ the type checker adds is which results there are, and what each reads:
   ordinary mutual recursion between functions never makes a query cycle. The
   few real cycles are the subject of a rule: constants that refer to each
   other, types that contain each other (checked for `indirect` by a package
-  check), and traits that require each other.
+  check, and with their facts worked out for the whole group in one
+  result), and traits that require each other.
 
 ### Deterministic results
 
@@ -435,7 +436,7 @@ inside a type argument, so `List[fn(Item)]` and
 
 ### Properties of types
 
-Three facts about a type decide what code may do with it. Each is worked out
+Four facts about a type decide what code may do with it. Each is worked out
 from the type's shape, as a condition on its type parameters: `Option[Value]`
 is `Plain` exactly when `Value` is.
 
@@ -465,6 +466,34 @@ is `Plain` exactly when `Value` is.
 - **Whether a type is a view is part of its shape.** Making a type hold a
   view changes how every user of it is checked, which reaches every reader
   of the shape like any other change of shape.
+
+The first three, and what a type holds in place (see
+[Recursive types](#recursive-types)), are *facts of the type's definition*,
+worked out once for each definition and kept as a result of their own:
+
+- **A fact is a list of conditions.** For `Copyable` and `Plain` it is what
+  must have the property for the type to have it, or that it never does. For
+  a view it is what makes the type one when any of it is, or that it always
+  is. `Option` is `Plain` on the condition `Value`, and a view on the
+  condition `Value`.
+- **A question about a type asks its definition's conditions of its
+  arguments.** Whether `Option[Option[List[Int64]]]` is `Plain` is `Option`'s
+  condition asked of `Option[List[Int64]]`, then of `List[Int64]`, which never
+  is. No question walks a type's fields, so none can take a type nested in
+  itself for a type that contains itself.
+- **Types that contain each other are worked out together.** Such a type is
+  `Copyable` and `Plain` when nothing in it says otherwise, and is a view, or
+  holds something in place, only when something in it does. So a group
+  starts with the facts of types that have no fields, and each member's
+  facts are worked out from the others' until nothing changes.
+- **An associated type is a condition too.** In
+  `type Kept[Source: Shown](part: Source.Part)` nothing is known of
+  `Source.Part`, so `Kept` is a view on the condition `Source.Part`. Where
+  `Kept[Numbers]` is asked about, the condition is `Numbers`'s `Part`, which
+  the `impl` of `Shown` for `Numbers` chooses. Inside generic code, an
+  associated type of a parameter has a property only when its trait bounds
+  it, as a parameter does. One that no `impl` answers is taken not to be
+  `Copyable` or `Plain`, and to be a view.
 
 ## Checking signatures and definitions
 
@@ -570,15 +599,20 @@ the definition's interface: the types of its parameters and result, its
 
 A type that contains itself in place would be infinitely large. The checker
 finds every cycle of types that contain each other in place, through fields,
-variants, and type arguments held in place, and reports any cycle that does
-not pass through an `indirect` variant, with a fix that adds `indirect` to
-the variant where the cycle re-enters.
+variants, type arguments held in place, and associated types, and reports
+any cycle that does not pass through an `indirect` variant, with a fix that
+adds `indirect` to the variant where the cycle re-enters.
 
-Whether a type argument is held in place comes from the generic type's
-shape: `Option` holds its `Value` in place, while `List` holds its elements
-through a `Buffer`, which the intrinsic module declares as heap storage. This
-is a package check, over the type definitions of one package: packages do not
-depend on each other in a cycle, so neither can their types.
+Whether a type argument is held in place is a fact of the generic type's
+definition (see [Properties of types](#properties-of-types)): `Option` holds
+its `Value` in place, while `List` holds its elements through a `Buffer`,
+which the intrinsic module declares as heap storage. A type that holds an
+associated type of a parameter in place, as
+`type Kept[Source: Shown](part: Source.Part)` does, holds whatever the
+`impl` chooses for each argument, so `type Tree(kept: Kept[Marker])` contains
+itself when `Marker`'s `Part` is `Tree`. This is a package check, over the
+type definitions of one package: packages do not depend on each other in a
+cycle, so neither can their types.
 
 A generic type that contains itself with different arguments, as in
 `type Nested[Element] = Leaf(value: Element) | indirect Node(inner: Nested[List[Element]])`,
@@ -1166,6 +1200,13 @@ trait arguments' outermost types. Each lookup is one query, such as "the
 `impl`s of `Add` for `Instant` in the package of `Duration`", so adding an
 `impl` re-checks only the definitions that asked that question.
 
+An associated type is read from the `impl` that matches the type, whether or
+not the bounds on that `impl`'s parameters hold. `impl`s do not overlap, so
+no other `impl` could answer, and a bound that does not hold is reported
+where the trait is asked for. Reading the type therefore asks nothing of
+the type's arguments, which is what lets a type's properties turn on an
+associated type without a question coming back to itself.
+
 ### Method names
 
 A type's own method and a method of any trait the type implements cannot
@@ -1305,6 +1346,7 @@ pushes a change in any of these to the results that read it:
 | The resolved form of a definition, or a part of it | The body of `parse_config` |
 | The interface of a definition | The interface of `List.push` |
 | The shape of a type | The shape of `Point` |
+| The facts of a type's definition | What must be `Plain` for `Option` to be |
 | The value of a constant | `digest_size` |
 | The names a file defines with one name | The definitions named `count` in `report.truss` |
 | A module | Whether `standard::json` exists, and its visible names named `parse` |
@@ -1335,7 +1377,7 @@ So the costs of everyday edits follow from what each result reads:
 | A method added to `List` | Definitions that looked up a member of `List` with that name |
 | An `impl` added | Definitions that looked up `impl`s of that trait for that type in that package |
 | A definition added to a file | Definitions in that file that looked up that name, including bindings checked for hiding |
-| A field added to a type | Definitions that used its shape |
+| A field added to a type | Definitions that used its shape, and those that asked a fact of it that came out different |
 | A definition moved to another module | Its users' names, which re-checks their types. Their test results are already done, because a test's key holds no names, as CODEGEN.md describes. |
 
 ## Diagnostics

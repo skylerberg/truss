@@ -11,7 +11,6 @@
 open Syntax
 module T = Types
 module C = Checked
-module Properties = Interface.Properties
 open Context
 open Flow
 open Walk
