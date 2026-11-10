@@ -908,7 +908,75 @@ let () =
     \  holder.items = own taken\n\
     \  Ok(first + second)\n\
      }\n"
-    "ownership.not_reinitialized"
+    "ownership.not_reinitialized";
+  (* A [concurrent for] over a yielding method. [Pair.each] does not yield
+     by position: its body is not a single loop over a range. *)
+  let pair =
+    "type Pair(first: List[Int64], second: List[Int64], text: String)\n\n\
+     fn look[Value](value: Value) {}\n\n"
+  in
+  let rejected_loop name ~says method_ loop =
+    test name (fun () ->
+        one_diagnostic ~says
+          (pair ^ method_ ^ "\nfn f(pair: mut Pair)\n  uses Tasks\n{\n" ^ loop ^ "}\n")
+          "ownership.task_outlives_yield")
+  in
+  rejected_loop "a `concurrent for` cannot iterate over a method that yields `mut` borrows"
+    ~says:"`mut` borrows"
+    "fn Pair.each(mut self) yields mut List[Int64] {\n\
+    \  yield mut self.first\n\
+    \  yield mut self.second\n\
+     }\n"
+    "  concurrent for list in mut pair.each() {\n    look(list)\n  }\n";
+  rejected_loop "a `concurrent for` cannot iterate over borrowed elements that are not Plain"
+    ~says:"borrowed elements of type `List[Int64]`"
+    "fn Pair.each(self) yields List[Int64] {\n  yield self.first\n  yield self.second\n}\n"
+    "  concurrent for list in pair.each() {\n    look(list)\n  }\n";
+  rejected_loop "a `concurrent for` cannot iterate over owned views" ~says:"`StringSlice` is a view"
+    "fn Pair.words(mut self) yields own StringSlice {\n\
+    \  yield self.text.slice()\n\
+    \  mut self.text.clear()\n\
+     }\n"
+    "  concurrent for word in mut pair.words() {\n    look(word)\n  }\n";
+  test "a `concurrent for` cannot iterate over a cursor of views" (fun () ->
+      one_diagnostic ~says:"`Slice[Int64]` is a view"
+        (pair
+       ^ "fn f(parts: List[Slice[Int64]])\n\
+         \  uses Tasks\n\
+          {\n\
+         \  var cursor = parts.each()\n\
+         \  concurrent for part in cursor {\n\
+         \    look(part)\n\
+         \  }\n\
+          }\n")
+        "ownership.task_outlives_yield");
+  test "a `concurrent for` can iterate over owned values and Plain copies" (fun () ->
+      fine
+        (pair
+       ^ "fn Pair.lengths(self) yields own USize {\n\
+         \  yield self.first.length()\n\
+         \  yield self.second.length()\n\
+          }\n\n\
+          fn f(pair: Pair, numbers: List[Int64])\n\
+         \  uses Tasks\n\
+          {\n\
+         \  concurrent for length in pair.lengths() {\n\
+         \    look(length)\n\
+         \  }\n\
+         \  concurrent for number in numbers {\n\
+         \    look(number)\n\
+         \  }\n\
+          }\n"));
+  test "a `concurrent for` can iterate over a method that yields by position" (fun () ->
+      fine
+        (pair
+       ^ "fn f(rows: mut List[List[Int64]])\n\
+         \  uses Tasks\n\
+          {\n\
+         \  concurrent for row in mut rows {\n\
+         \    look(row)\n\
+         \  }\n\
+          }\n"))
 
 (* Guards *)
 
@@ -1270,6 +1338,26 @@ let () =
         \  }\n\
          }\n"
         "ownership.lends_count");
+  (let grid = "type Grid(cells: List[Int64], count: USize)\n\n" in
+   test "a lending method can yield in one branch of a `parallel` block" (fun () ->
+       fine
+         (grid
+        ^ "fn Grid.cell(self) lends Int64 {\n\
+          \  parallel {\n\
+          \    yield self.cells[0]\n\
+          \    let _ = self.count\n\
+          \  }\n\
+           }\n"));
+   test "a lending method cannot yield in two branches of a `parallel` block" (fun () ->
+       one_diagnostic
+         (grid
+        ^ "fn Grid.cell(self) lends Int64 {\n\
+          \  parallel {\n\
+          \    yield self.cells[0]\n\
+          \    yield self.cells[1]\n\
+          \  }\n\
+           }\n")
+         "ownership.lends_count"));
   test "a yielding method that yields through recursion cannot be pulled" (fun () ->
       one_diagnostic
         "type Tree =\n\

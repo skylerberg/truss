@@ -1422,9 +1422,10 @@ fixes.
 
 - **A `lends` method yields exactly once on every path,** as Swift checks its
   `_read` and `_modify` accessors. The checker reports a path that has no
-  `yield` or more than one. The yielded part has the mode that the signature
-  states, and can be a part of `self` or a value that the method created. A
-  `lends` method cannot drive a `for` loop or be pulled.
+  `yield` or more than one. Every branch of a `parallel` block runs, so the
+  yields of its branches are added. The yielded part has the mode that the
+  signature states, and can be a part of `self` or a value that the method
+  created. A `lends` method cannot drive a `for` loop or be pulled.
 - **A lending call borrows its whole receiver,** for the rest of the caller's
   statement, read-only or `mut` according to how the method takes `self`. The
   condition of a `while` loop counts as a statement of its own, so a loan that
@@ -1517,8 +1518,9 @@ locals.
 ### `concurrent`
 
 The branches of a `concurrent` block and the iterations of a `concurrent for`
-follow the same data race rule as `parallel`. They differ in that `?`,
-`return`, `break`, and `continue` can exit a branch early, which adds one rule:
+follow the same data race rule as `parallel`. They differ in two ways: `?`,
+`return`, `break`, and `continue` can exit a branch early, and a task of a
+`concurrent for` outlives the `yield` that started it. That adds these rules:
 
 - **A branch reinitializes every place that it moves out of a `mut` borrow.**
   When a branch exits early, the other branches finish along their own paths,
@@ -1531,6 +1533,23 @@ follow the same data race rule as `parallel`. They differ in that `?`,
   `concurrent` code,** for this check: a `return` ends the function, and a
   `break` or a `continue` goes to its loop. By then each other branch has
   either not started or run to one of its ends, and each end is checked.
+- **A task cannot borrow what the method of a `concurrent for` yields.** Each
+  iteration runs as a task, and the task outlives the `yield` that started it:
+  the yielding method resumes while the task still runs. If the task borrowed
+  the yielded element, the method could mutate or drop the element after it
+  resumes, which would be a use after free. So a `concurrent for` is rejected
+  (`ownership.task_outlives_yield`) in three cases:
+  - the method yields `mut`;
+  - the method yields read-only, and the element type is not `Plain`;
+  - the element type is a view type. This case also applies to a method that
+    yields owned values and to a loop over a cursor.
+
+  A method that yields by position is exempt. Its body is a single `for` loop
+  over a range of integers, and the loop body is a single `yield`. The tasks
+  run as the iterations of that loop, and the method does nothing after the
+  loop. `Core_walk.yields_by_position` decides this. A `parallel for` needs no
+  such rule: over a method that does not yield by position, the method runs
+  sequentially and each loop body runs inline at its `yield`.
 
 ## Capabilities
 

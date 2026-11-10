@@ -33,9 +33,9 @@ let yield_counts (body : Core.block) : count list =
         if block [ Zero ] body <> [ Zero ] then
           List.concat_map (fun count -> [ count; add count Many ]) counts
         else counts
-    | Let { value = Place _; _ }
-    | Assign _ | Compound_assign _ | Parallel _ | Concurrent _ | Proof _ | Assert _ ->
-        counts
+    (* Every branch runs, so the yields of the branches add up. *)
+    | Parallel branches | Concurrent branches -> List.fold_left statement counts branches
+    | Let { value = Place _; _ } | Assign _ | Compound_assign _ | Proof _ | Assert _ -> counts
   and expression counts (value : Core.expression) =
     match value.kind with
     | If { then_; else_; _ } ->
@@ -205,6 +205,86 @@ let check_cursors context (definition : Core.definition) =
               Option.iter
                 (check_cursor context (span context node.origin) method_)
                 (Interface.Impls.cursor_element context.database method_ arguments)
+          | _ -> ());
+    }
+    definition
+
+(* How a callee yields: the mode of its [yields] clause, if it has one. *)
+let yield_mode context (callee : Core.callee) : T.mode option =
+  let of_output : T.result -> T.mode option = function
+    | Yields (mode, _) -> Some mode
+    | Returns _ | Lends _ -> None
+  in
+  match callee with
+  | Function { path; _ } ->
+      Option.bind (Interface.Impls.signature context.database path)
+        (fun (signature : T.signature) -> of_output signature.output)
+  | Trait_method { trait; name; receiver; _ } ->
+      Option.bind (Infer.Members.trait_method context.database trait.trait name receiver)
+        (fun (method_ : T.trait_method) -> of_output method_.method_signature.output)
+  | Capability_method _ | Intrinsic _ | Indirect _ -> None
+
+(* Use after free in a [concurrent for]. Each iteration runs as a task, and
+   the task outlives the [yield] that started it: the yielding method
+   resumes while the task still runs. So the task cannot borrow what the
+   method yields, because the method could mutate or drop it after it
+   resumes. The task needs an owned element that is not a view, or a
+   [Plain] copy of a read-only one.
+
+   A method that yields by position is exempt. Its body is a single loop
+   over a range, the tasks run as that loop's iterations, and the method
+   does nothing after the loop. *)
+let check_concurrent_loops context (definition : Core.definition) =
+  let by_position : Core.callee -> bool = function
+    | Function { path; _ } -> (
+        match body_of context.database path with
+        | Some body -> Core_walk.yields_by_position body
+        | None -> false)
+    | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
+  in
+  Core_walk.definition
+    {
+      Core_walk.ignore_all with
+      statement =
+        (fun (node : Core.statement) ->
+          match node.kind with
+          | For { mode = Concurrent_loop; pattern; iteration; _ } -> (
+              let element = pattern.type_ in
+              let reject (at : Core.origin) problem =
+                report context Task_outlives_yield (span context at)
+                  (Printf.sprintf
+                     "Each iteration of a `concurrent for` runs as a task that outlives the \
+                      `yield` that started it. %s Use a `for` loop, or iterate over a method that \
+                      yields owned values that are not views."
+                     problem)
+              in
+              let view at =
+                if is_view context element then
+                  reject at
+                    (Printf.sprintf
+                       "The element type `%s` is a view, and the method could invalidate what it \
+                        views when it resumes, which would leave the task with a dangling view."
+                       (T.show element))
+              in
+              match iteration with
+              | Integer_range _ -> ()
+              | Yielding_call { kind = Call { callee; _ }; origin; _ } -> (
+                  if not (by_position callee) then
+                    match yield_mode context callee with
+                    | Some Mut ->
+                        reject origin
+                          "This method yields `mut` borrows, which it could invalidate when it \
+                           resumes, so the task would have a dangling borrow."
+                    | Some Read when not (plain context element) ->
+                        reject origin
+                          (Printf.sprintf
+                             "This method yields borrowed elements of type `%s`, which it could \
+                              mutate or drop when it resumes, so the task would have a dangling \
+                              borrow."
+                             (T.show element))
+                    | _ -> view origin)
+              | Yielding_call _ -> ()
+              | Cursor { cursor; _ } -> view (Core_walk.place_origin cursor))
           | _ -> ());
     }
     definition
