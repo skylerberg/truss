@@ -715,12 +715,13 @@ and its siblings. Full-width multiplication, used by hashing and
   their type, and on `Bool`, and records, variants, strings, lists, and
   arrays of parts that fold. Another constant's value, where it folds, is
   written in place, since C cannot initialize static data from another
-  object. Whatever the folder does not know, or cannot give exactly, such
-  as a sum that does not fit its type, is not folded: the constant's
-  evaluator is run (see [Code run while compiling](#code-run-while-compiling)),
-  so folding can be incomplete and never wrong. A constant made of one that
-  is run is run too, and its evaluator copies that one's static data,
-  since nothing is moved out of a constant.
+  object. Whatever the folder does not know, such as a `Map` literal, or
+  cannot give exactly, such as a shift whose result does not fit its type,
+  is not folded: the constant's evaluator is run (see
+  [Code run while compiling](#code-run-while-compiling)), so folding can be
+  incomplete and never wrong. A constant made of one that is run is run
+  too, and its evaluator copies that one's static data, since nothing is
+  moved out of a constant.
 - **A list or map literal in a function body** allocates its buffer and
   fills it, which is the one allocation DESIGN.md counts. A literal whose
   parts are all constant, and which is only read, can be static data
