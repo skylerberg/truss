@@ -1,5 +1,4 @@
-(** The solver's logic: sorts, terms, and queries, and their canonical text in SMT-LIB. See
-    PROVER.md, "The logic" and "Queries".
+(** The solver's logic: sorts, terms, and queries, and their canonical text in SMT-LIB.
 
     Symbols here are the prover's own names, chosen to be readable while a query is built. A query's
     canonical text never contains them: {!text} numbers every declared symbol by its first
@@ -73,8 +72,7 @@ val prune : query -> query
 (** The query with only the facts its goal can depend on: starting from the goal's declared symbols,
     each fact that mentions one of them is kept, with its symbols, until no more are added. Dropping
     a fact is always sound, and a fact about symbols the goal never reaches cannot help to prove it,
-    so a change to such a fact leaves the query's text, and its cached result, as they were. See
-    PROVER.md, "Pruning". *)
+    so a change to such a fact leaves the query's text, and its cached result, as they were. *)
 
 (** {1 Canonical text} *)
 

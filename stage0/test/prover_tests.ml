@@ -1,6 +1,5 @@
 (* The prover, against the pinned solver. Each test gives a few small
-   definitions and states which obligation is proven or is not. See
-   PROVER.md, "Testing". *)
+   definitions and states which obligation is proven or is not. *)
 
 open Harness
 
