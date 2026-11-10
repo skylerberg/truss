@@ -123,6 +123,8 @@ type number =
   | Istrip
   | Opost
   | Cs8
+  | Sigset_size
+  | Sig_block
 
 type extent =
   | Counted of { by : string; each : int }
@@ -202,6 +204,10 @@ type function_ =
   | Ioctl_tiocgwinsz
   | Tcgetattr
   | Tcsetattr
+  | Sigemptyset
+  | Sigaddset
+  | Sigprocmask_block
+  | Sigwait
 
 let functions =
   [
@@ -257,6 +263,10 @@ let functions =
     Ioctl_tiocgwinsz;
     Tcgetattr;
     Tcsetattr;
+    Sigemptyset;
+    Sigaddset;
+    Sigprocmask_block;
+    Sigwait;
   ]
 
 let function_name = function
@@ -312,6 +322,10 @@ let function_name = function
   | Ioctl_tiocgwinsz -> "ioctl_tiocgwinsz"
   | Tcgetattr -> "tcgetattr"
   | Tcsetattr -> "tcsetattr"
+  | Sigemptyset -> "sigemptyset"
+  | Sigaddset -> "sigaddset"
+  | Sigprocmask_block -> "sigprocmask_block"
+  | Sigwait -> "sigwait"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -823,6 +837,40 @@ let describe function_ =
         ]
         ~named:[ ("settings", "const struct termios *") ]
         ~headers:[ "termios.h" ]
+  | Sigemptyset ->
+      (* A set of signals is storage of as many bytes as a [sigset_t]
+         takes, which only these functions read. *)
+      row (everywhere "int") (Returns Int32)
+        [ ("set", Elements_to_change (UInt8, Number Sigset_size), everywhere "void *") ]
+        ~named:[ ("set", "sigset_t *") ]
+        ~headers:[ "signal.h" ]
+  | Sigaddset ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("set", Elements_to_change (UInt8, Number Sigset_size), everywhere "void *");
+          ("signal", Value Int32, everywhere "int");
+        ]
+        ~named:[ ("set", "sigset_t *") ]
+        ~headers:[ "signal.h" ]
+  | Sigprocmask_block ->
+      (* Has the signals of a set held back until something waits for
+         them, in place of what each does when it arrives. *)
+      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "sigprocmask")
+        [
+          ("how", Fixed Sig_block, everywhere "int");
+          ("set", Elements (UInt8, Number Sigset_size), everywhere "const void *");
+          ("before", Always 0, everywhere "void *");
+        ]
+        ~named:[ ("set", "const sigset_t *"); ("before", "sigset_t *") ]
+        ~headers:[ "signal.h" ]
+  | Sigwait ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("set", Elements (UInt8, Number Sigset_size), everywhere "const void *");
+          ("signal", Written (Int32, [ "signal" ]), everywhere "int *");
+        ]
+        ~named:[ ("set", "const sigset_t *") ]
+        ~headers:[ "signal.h" ]
 
 let available system function_ = (describe function_).on system.os
 
@@ -985,6 +1033,8 @@ let numbers =
     Istrip;
     Opost;
     Cs8;
+    Sigset_size;
+    Sig_block;
   ]
 
 let number_name = function
@@ -1088,6 +1138,8 @@ let number_name = function
   | Istrip -> "ISTRIP"
   | Opost -> "OPOST"
   | Cs8 -> "CS8"
+  | Sigset_size -> "SIGSET_SIZE"
+  | Sig_block -> "SIG_BLOCK"
 
 (* A size or an offset in a structure is a [USize], and the bits of a
    file's mode are compared with a number read out of the structure. *)
@@ -1100,7 +1152,7 @@ let number_type = function
   | Path_max | Spawn_file_actions_size | Dirent_length_offset | Dirent_kind_offset
   | Dirent_name_offset | Termios_size | Termios_iflag_offset | Termios_oflag_offset
   | Termios_cflag_offset | Termios_lflag_offset | Termios_flag_size | Termios_cc_offset | Vmin
-  | Vtime ->
+  | Vtime | Sigset_size ->
       USize
   | Tiocgwinsz | Icanon | Echo | Isig | Iexten | Ixon | Icrnl | Brkint | Inpck | Istrip | Opost
   | Cs8 ->
@@ -1121,7 +1173,7 @@ let number_headers = function
   | Clock_realtime | Clock_monotonic -> [ "time.h" ]
   | Sc_nprocessors_onln -> [ "unistd.h" ]
   | Pollin | Pollhup -> [ "poll.h" ]
-  | Sigkill | Sigusr1 | Sigusr2 -> [ "signal.h" ]
+  | Sigkill | Sigusr1 | Sigusr2 | Sigset_size | Sig_block -> [ "signal.h" ]
   | Spawn_file_actions_size -> [ "spawn.h" ]
   | Stat_size | Stat_mode_offset | Stat_mode_size | Stat_length_offset | Stat_accessed_offset
   | Stat_modified_offset | Stat_created_offset | S_ifmt | S_ifreg | S_ifdir | S_iflnk | Utime_omit
@@ -1149,6 +1201,7 @@ let number_expression (system : system) number =
   let offset_of field = Some (Printf.sprintf "__builtin_offsetof(struct stat, %s)" field) in
   match (number, system.os) with
   | Stat_size, _ -> Some "sizeof(struct stat)"
+  | Sigset_size, _ -> Some "sizeof(sigset_t)"
   | Termios_size, _ -> Some "sizeof(struct termios)"
   | Termios_iflag_offset, _ -> Some "__builtin_offsetof(struct termios, c_iflag)"
   | Termios_oflag_offset, _ -> Some "__builtin_offsetof(struct termios, c_oflag)"
@@ -1327,6 +1380,10 @@ let value (system : system) number =
   | Opost, (Linux | Macos) -> 1
   | Cs8, Linux -> 48
   | Cs8, Macos -> 768
+  | Sigset_size, Linux -> 128
+  | Sigset_size, Macos -> 4
+  | Sig_block, Linux -> 0
+  | Sig_block, Macos -> 1
   | Vreg, Macos -> 1
   | Vdir, Macos -> 2
   | Vlnk, Macos -> 5
@@ -1373,6 +1430,12 @@ let check system =
        "#undef _FORTIFY_SOURCE\n#define _FORTIFY_SOURCE 0\n#define _GNU_SOURCE\n";
      ]
     @ List.map (fun header -> Printf.sprintf "#include <%s>\n" header) headers
+    (* A header may also define a function as a macro, as macOS does
+       [sigaddset]. The function is what a program calls. *)
+    @ List.sort_uniq String.compare
+        (List.map
+           (fun function_ -> Printf.sprintf "#undef %s\n" (declaration system function_).symbol)
+           functions)
     @ List.filter_map
         (fun number ->
           Option.map

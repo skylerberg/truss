@@ -1323,7 +1323,11 @@ the other is read, and then waits with `waitpid`. A spawned child is a
 handle whose number is the process's and whose descriptor is none;
 `Handles.wait` reads the exit status, or the signal that ended the
 program, out of `waitpid`'s status, and `Handles.signal` is `kill`, which
-is refused for a handle that is not one process. `SystemTasks.yield_now`
+is refused for a handle that is not one process. `SystemSignals.wait`
+holds the signals it is asked for back with `sigprocmask`, so that one
+that arrives does not end the program, and takes the next with `sigwait`.
+They stay held back afterwards, so one that arrives between two waits is
+there for the second. `SystemTasks.yield_now`
 does nothing, since tasks run one after another. `NetworkClient` and
 `NetworkServer` have no real implementation, and a `main` that uses one is
 refused with a message saying so. A handle's is the only drop that does more
@@ -1723,6 +1727,11 @@ a command line can hold.
   element that decides the answer: `forall` at the first false body,
   `exists` at the first true one.
 - **A lending method that lends through a call to itself.**
+- **Waiting for a signal that the system ignores unless it is asked for,**
+  such as a terminal's change of size. macOS throws such a signal away
+  while it is held back, so `Signals.wait` never sees it there. It needs a
+  handler installed for the signal, and so a function of the runtime's to
+  be the handler.
 - **A cursor over a method that lends places to be changed.** `next` would
   have to hand out a value it takes back.
 - **A lambda in a yielding method that is pulled,** and in a pulled method

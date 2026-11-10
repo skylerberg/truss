@@ -872,6 +872,51 @@ fn main(arguments: List[String]) -> ExitCode
             (without ()))
 
 let () =
+  test "a program waits for the signals it is sent" (fun () ->
+      (* The program is started with the two signals held back, as a child
+         is started with its parent's, so that the first, sent before the
+         program waits for it, does not end the program. *)
+      let before = Unix.sigprocmask SIG_BLOCK [ Sys.sigusr1; Sys.sigterm ] in
+      let status, output, _ =
+        Fun.protect
+          ~finally:(fun () -> ignore (Unix.sigprocmask SIG_SETMASK before))
+          (fun () ->
+            run_main
+              {|use standard::processes
+
+fn name_of(signal: processes::Signal) -> String {
+  if signal == processes::Signal.User1 {
+    "user 1".copy()
+  } else if signal == processes::Signal.Terminate {
+    "terminate".copy()
+  } else {
+    "another".copy()
+  }
+}
+
+fn send(signal: String) -> Bool
+  uses Processes
+{
+  let sender = processes::Command.new("sh").argument("-c").argument("kill -${signal} $PPID")
+  Processes.run(sender) is Ok(output) && output.status.is_success()
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes, Signals
+{
+  let either = [processes::Signal.User1, processes::Signal.Terminate]
+  Console.print_line("sent ${send("USR1")}")
+  Console.print_line("first ${name_of(Signals.wait(either.slice()))}")
+  Console.print_line("sent ${send("TERM")}")
+  Console.print_line("second ${name_of(Signals.wait(either.slice()))}")
+  ExitCode(0)
+}
+|})
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"sent true\nfirst user 1\nsent true\nsecond terminate\n" output)
+
+let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"
     (fun () ->
       let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in
