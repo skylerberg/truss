@@ -20,6 +20,7 @@ internal type Decoded(character: Character, length: USize)
 internal fn sequence_length(first: UInt8) -> USize
   ensures result <= 4
   cost time O(1)
+  cost allocations == 0
 {
   if first < 128 {
     1
@@ -40,6 +41,7 @@ internal fn StringSlice.continuation(self, index: USize) -> UInt32
   requires index < self.length()
   ensures result <= 64
   cost time O(1)
+  cost allocations == 0
 {
   let byte = self.byte(index)
   if byte >= 128 && byte <= 191 { intrinsic::convert(byte - 128) } else { 64 }
@@ -51,6 +53,7 @@ internal fn StringSlice.decode(self, offset: USize) -> Decoded
   ensures result.length <= self.length() - offset
   ensures result.length < 4 ==> result.character.code() < 65536
   cost time O(1)
+  cost allocations == 0
 {
   let invalid = Decoded(character: Character.replacement, length: 1)
   let first = self.byte(offset)
@@ -228,9 +231,28 @@ public fn StringSlice.graphemes(self) yields StringSlice
 }
 
 public fn StringSlice.lines(self) yields StringSlice
+  ensures yielded.length() <= self.length() + 1
   cost time O(self.length())
 {
-  todo
+  var start: USize = 0
+  var index: USize = 0
+  while index < self.length()
+    invariant start <= index
+    invariant index <= self.length()
+    invariant yielded.length() <= index
+    decreases self.length() - index
+    cost time O(index)
+  {
+    if self.byte(index) == 10 {
+      let end = if index > start && self.byte(index - 1) == 13 { index - 1 } else { index }
+      yield self.part(start, to: end)
+      start = index + 1
+    }
+    index += 1
+  }
+  if start < self.length() {
+    yield self.part(start, to: self.length())
+  }
 }
 
 public fn StringSlice.substring(self, from: USize, to: USize) -> StringSlice
@@ -423,7 +445,19 @@ public fn StringSlice.find_character(
   }
   cost time O(self.length() * time(matching))
 {
-  todo
+  var offset: USize = 0
+  while offset < self.length()
+    invariant offset <= self.length()
+    decreases self.length() - offset
+    cost time O(offset * time(matching))
+  {
+    let decoded = self.decode(offset)
+    if matching(decoded.character) && self.is_boundary(offset) {
+      return Some(offset)
+    }
+    offset += decoded.length
+  }
+  None
 }
 
 public fn StringSlice.occurrences(self, pattern: StringSlice) -> USize
@@ -542,11 +576,57 @@ public fn StringSlice.trim_end(self) -> StringSlice
   self.part(0, to: self.trailing_whitespace_start())
 }
 
+internal fn StringSlice.leading_matching(self, matching: (fn(Character) -> Bool cost time finite)) -> USize
+  ensures result <= self.length()
+  cost time O(self.length() * time(matching))
+{
+  var start: USize = 0
+  while start < self.length()
+    invariant start <= self.length()
+    decreases self.length() - start
+    cost time O(start * time(matching))
+  {
+    let decoded = self.decode(start)
+    if !matching(decoded.character) {
+      return start
+    }
+    start += decoded.length
+  }
+  start
+}
+
+internal fn StringSlice.trailing_matching_start(
+  self,
+  matching: (fn(Character) -> Bool cost time finite),
+  from: USize,
+) -> USize
+  requires from <= self.length()
+  ensures from <= result
+  ensures result <= self.length()
+  cost time O(self.length() * time(matching))
+{
+  var end = self.length()
+  while end > from
+    invariant from <= end
+    invariant end <= self.length()
+    decreases end
+    cost time O((self.length() - end) * time(matching))
+  {
+    let start = self.previous_start(end)
+    if start < from || !matching(self.decode(start).character) {
+      return end
+    }
+    end = start
+  }
+  end
+}
+
 public fn StringSlice.trim_matching(self, matching: (fn(Character) -> Bool cost time finite)) -> StringSlice
   ensures result.length() <= self.length()
   cost time O(self.length() * time(matching))
 {
-  todo
+  let start = self.leading_matching(matching)
+  self.part(start, to: self.trailing_matching_start(matching, from: start))
 }
 
 public fn StringSlice.split(self, separator: StringSlice) yields StringSlice
@@ -622,15 +702,57 @@ public fn StringSlice.split_at_most(self, separator: StringSlice, parts: USize) 
 }
 
 public fn StringSlice.split_matching(self, matching: (fn(Character) -> Bool cost time finite)) yields StringSlice
+  ensures yielded.length() <= self.length() + 1
   cost time O(self.length() * time(matching))
 {
-  todo
+  var start: USize = 0
+  var offset: USize = 0
+  while offset < self.length()
+    invariant start <= offset
+    invariant offset <= self.length()
+    invariant yielded.length() <= offset
+    decreases self.length() - offset
+    cost time O(offset * time(matching))
+  {
+    let decoded = self.decode(offset)
+    if matching(decoded.character) {
+      yield self.part(start, to: offset)
+      start = offset + decoded.length
+    }
+    offset += decoded.length
+  }
+  yield self.part(start, to: self.length())
 }
 
 public fn StringSlice.split_whitespace(self) yields StringSlice
+  ensures yielded.length() <= self.length() + 1
   cost time O(self.length())
 {
-  todo
+  var start: USize = 0
+  var inside = false
+  var offset: USize = 0
+  while offset < self.length()
+    invariant start <= offset
+    invariant offset <= self.length()
+    invariant yielded.length() <= offset
+    decreases self.length() - offset
+    cost time O(offset)
+  {
+    let decoded = self.decode(offset)
+    if decoded.character.is_whitespace() {
+      if inside {
+        yield self.part(start, to: offset)
+        inside = false
+      }
+    } else if !inside {
+      start = offset
+      inside = true
+    }
+    offset += decoded.length
+  }
+  if inside {
+    yield self.part(start, to: self.length())
+  }
 }
 
 public fn StringSlice.split_once(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]

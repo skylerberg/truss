@@ -5883,16 +5883,13 @@ and handing_out context frame (node : statement) (mode : T.mode) (part : operand
       in
       show each ~at:frame ~result:(Some handed) ~yielded:before ~finished:None
         ~when_:"for the part handed out here";
-      (* What the caller leaves in a part lent [mut] is stored back where it
-         came from. *)
+      (* What the caller leaves in a part lent [mut] is stored back in each
+         place it lends. *)
       let frame, part_after =
-        match (mode, part) with
-        | T.Mut, Place place ->
-            let part_after = arrive context frame "lent" part_type in
-            (store context frame place part_after, part_after)
-        | T.Mut, Value { kind = Construct _; _ } when Core_walk.lent_places part <> [] ->
-            unsupported span "a `yield` of a constructor that lends places `mut`"
-        | _ -> (frame, handed)
+        if mode = T.Mut && Core_walk.lent_places part <> [] then
+          let part_after = arrive context frame "lent" part_type in
+          (written_back context frame part part_type part_after, part_after)
+        else (frame, handed)
       in
       let after = appended context frame part_type before part_after in
       let frame = { frame with handed_out = Some after } in
@@ -5907,6 +5904,37 @@ and handing_out context frame (node : statement) (mode : T.mode) (part : operand
       end;
       Some frame
   | _ -> unsupported span "`yield` outside a lending or yielding method's body"
+
+(* The frame after a [mut] lend of [part] ends with the value [after]: a
+   lent place has its part of [after], and a field built from a value is
+   discarded. A variant's field is its part only where [after] is still
+   that variant, and is otherwise a value nothing more is known about. *)
+and written_back context frame (part : operand) ty after =
+  match part with
+  | Place place -> store context frame place after
+  | Value { kind = Construct { variant; fields }; _ } -> (
+      match constructors context ty with
+      | Some shape ->
+          let shaped = Option.value (List.assoc_opt variant shape) ~default:[] in
+          List.fold_left
+            (fun frame (name, field) ->
+              match (field, List.assoc_opt name shaped) with
+              | Some field, Some field_type when Core_walk.lent_places field <> [] ->
+                  let selected = field_of context frame ty variant name field_type after in
+                  let value =
+                    match variant with
+                    | None -> selected
+                    | Some _ ->
+                        L.ite
+                          (L.Apply (L.tester (constructor_name ty variant), [ after ]))
+                          selected
+                          (arrive context frame "lent" field_type)
+                  in
+                  written_back context frame field field_type value
+              | _ -> frame)
+            frame fields
+      | None -> raise (Foreign_unsupported (Printf.sprintf "the fields of `%s`" (T.show ty))))
+  | Value _ -> frame
 
 (* A storage whose element at [index] is [part], and which is otherwise the
    one it was. *)
@@ -6152,7 +6180,7 @@ and changed_places frame (body : block) : changed =
           (match node.kind with
           | Assign { target; _ } | Compound_assign { target; _ } -> note target
           | For { iteration = Cursor { cursor = place; _ }; _ } -> note place
-          | Yield { mode = T.Mut; part = Place place } -> note place
+          | Yield { mode = T.Mut; part } -> List.iter note (Core_walk.lent_places part)
           | _ -> ());
           Core_walk.statement_children visit node);
       pattern = (fun node -> Core_walk.pattern_children visit node);

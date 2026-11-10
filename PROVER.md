@@ -500,7 +500,12 @@ call uses the capability method's contract.
   then takes a fresh value that meets its type invariant, since the caller
   may have changed it, which is stored back into its place, through a
   collection's `lends mut` index for an element, and the part is appended
-  to `yielded`. In a yielding method, each `yield` also asserts the clauses
+  to `yielded`. A constructor that lends places, as
+  `yield Indexed(index: index, element: mut self[index])` does, stores back
+  each field it lends into its place and discards the fields it built from
+  values; a variant's field is stored back only where the caller left the
+  part that variant, and otherwise its place takes a value nothing more is
+  known about. In a yielding method, each `yield` also asserts the clauses
   that hold where the method ends, with `finished` false, and the invariant
   of `self`, since a loop may stop there. At the end of the body, those
   clauses are asserted with `finished` true.

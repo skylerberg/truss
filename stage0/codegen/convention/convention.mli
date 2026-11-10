@@ -6,8 +6,10 @@
 val by_value_limit : int
 
 (* How a parameter of a type and mode arrives: by value, or as a pointer,
-   [writable] for [mut] and large [own] parameters. [None] for a type of
-   zero size, which is not passed at all. *)
+   [writable] for [mut] and large [own] parameters. A read-only value that
+   holds an array's elements in its own bytes arrives as a pointer whatever
+   its size, since a view of the elements must be a view of the caller's.
+   [None] for a type of zero size, which is not passed at all. *)
 val parameter : Memory_layout.env -> Ground.mode -> Ground.ty -> Lir.ty option
 
 (* How a cursor holds an argument for its method's parameter: an [own]

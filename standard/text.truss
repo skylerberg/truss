@@ -53,6 +53,7 @@ impl Model for Literal {
 public fn String.length(self) -> USize
   ensures result == self.model().length()
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::storage_length(self.storage)
 }
@@ -83,6 +84,7 @@ public fn String.push(mut self, text: StringSlice)
 public fn String.slice(self) -> StringSlice
   ensures identical(result.model(), self.model())
   cost time O(1)
+  cost allocations == 0
 {
   StringSlice(bytes: intrinsic::storage_view(self.storage))
 }
@@ -165,6 +167,7 @@ fn utf8_sequence(bytes: intrinsic::View[UInt8], at: USize) -> USize
 public fn StringSlice.length(self) -> USize
   ensures result == self.model().length()
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::view_length(self.bytes)
 }
@@ -173,6 +176,7 @@ public fn StringSlice.byte(self, index: USize) -> UInt8
   requires index < self.length()
   ensures result == self.model()[index]
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::view_at(self.bytes, index: index)
 }
@@ -301,7 +305,21 @@ public fn String.from_utf8(bytes: own List[UInt8]) -> Result[String, Utf8Error]
   cost time O(bytes.length())
   cost allocations == 0
 {
-  todo
+  let text = String(storage: own bytes.storage)
+  var offset: USize = 0
+  while offset < text.length()
+    invariant offset <= text.length()
+    decreases text.length() - offset
+    cost time O(offset)
+    cost allocations == 0
+  {
+    let decoded = text.slice().decode(offset)
+    if decoded.length == 1 && text.slice().byte(offset) >= 128 {
+      return Err(Utf8Error(valid_up_to: offset))
+    }
+    offset += decoded.length
+  }
+  Ok(own text)
 }
 
 public fn String.from_utf8_lossy(bytes: Slice[UInt8]) -> String
@@ -338,14 +356,29 @@ public fn String.clear(mut self)
   cost time O(1)
   cost allocations == 0
 {
-  todo
+  self.storage = intrinsic::storage_empty()
 }
 
 public fn String.push_character(mut self, character: Character)
   ensures self.length() == old(self.length()) + character.utf8_length()
   cost amortized time O(1)
 {
-  todo
+  let code = character.code()
+  if code < 128 {
+    growth::push(mut self.storage, value: intrinsic::convert(code))
+  } else if code < 2048 {
+    growth::push(mut self.storage, value: intrinsic::convert(192 + code / 64))
+    growth::push(mut self.storage, value: intrinsic::convert(128 + code % 64))
+  } else if code < 65536 {
+    growth::push(mut self.storage, value: intrinsic::convert(224 + code / 4096))
+    growth::push(mut self.storage, value: intrinsic::convert(128 + code / 64 % 64))
+    growth::push(mut self.storage, value: intrinsic::convert(128 + code % 64))
+  } else {
+    growth::push(mut self.storage, value: intrinsic::convert(240 + code / 262144))
+    growth::push(mut self.storage, value: intrinsic::convert(128 + code / 4096 % 64))
+    growth::push(mut self.storage, value: intrinsic::convert(128 + code / 64 % 64))
+    growth::push(mut self.storage, value: intrinsic::convert(128 + code % 64))
+  }
 }
 
 public fn String.pop_character(mut self) -> Option[Character]
@@ -394,8 +427,11 @@ impl Default for String {
 }
 
 impl From[Character] for String {
-  fn from(value: own Character) -> String {
-    todo
+  fn from(value: own Character) -> String
+  {
+    var text = String(storage: intrinsic::storage_with_capacity(4))
+    mut text.push_character(value)
+    text
   }
 }
 

@@ -245,3 +245,132 @@ test "split_once splits at the first separator and split_once_last at the last" 
   assert "none".split_once_last("=") is None
   assert "=".split_once("=") is Some(pair) && pair.first.is_empty() && pair.second.is_empty()
 }
+
+fn collected(parts: List[String], expected: Slice[String]) -> Bool {
+  if parts.length() != expected.length() {
+    return false
+  }
+  for index in 0..parts.length() {
+    if parts[index] != expected[index] {
+      return false
+    }
+  }
+  true
+}
+
+test "find_character gives the byte offset of the first character that matches" {
+  let text = "caf\u{e9} 42"
+  assert text.find_character(fn(character) { character.is_ascii_digit() }) == Some(6)
+  assert text.find_character(fn(character) { character == Character"\u{e9}" }) == Some(3)
+  assert text.find_character(fn(character) { character == Character"c" }) == Some(0)
+  assert text.find_character(fn(character) { character == Character"z" }) is None
+  assert "".find_character(fn(character) { character.is_ascii() }) is None
+}
+
+test "trim_matching removes matching characters from both ends" {
+  assert same("xxhixx".trim_matching(fn(character) { character == Character"x" }), expected: "hi")
+  assert same("123abc456".trim_matching(fn(character) { character.is_ascii_digit() }), expected: "abc")
+  assert same("xxxx".trim_matching(fn(character) { character == Character"x" }), expected: "")
+  assert same("hi".trim_matching(fn(character) { character == Character"x" }), expected: "hi")
+  assert same("\u{e9}a\u{e9}".trim_matching(fn(character) { character == Character"\u{e9}" }), expected: "a")
+  assert same("".trim_matching(fn(character) { character == Character"x" }), expected: "")
+}
+
+test "split_matching splits at each character that matches" {
+  var parts: List[String] = []
+  for part in "a1b22c".split_matching(fn(character) { character.is_ascii_digit() }) {
+    mut parts.push(part.to_string())
+  }
+  assert collected(parts, expected: ["a", "b", "", "c"])
+  var one: List[String] = []
+  for part in "plain".split_matching(fn(character) { character.is_ascii_digit() }) {
+    mut one.push(part.to_string())
+  }
+  assert collected(one, expected: ["plain"])
+}
+
+test "split_whitespace yields the words, however much white space is between them" {
+  var words: List[String] = []
+  for word in "  the quick\t\tbrown\u{a0}fox \n".split_whitespace() {
+    mut words.push(word.to_string())
+  }
+  assert collected(words, expected: ["the", "quick", "brown", "fox"])
+  var none = 0
+  for _ in "   \n ".split_whitespace() {
+    none += 1
+  }
+  assert none == 0
+  var empty = 0
+  for _ in "".split_whitespace() {
+    empty += 1
+  }
+  assert empty == 0
+  var single: List[String] = []
+  for word in "word".split_whitespace() {
+    mut single.push(word.to_string())
+  }
+  assert collected(single, expected: ["word"])
+}
+
+test "lines yields each line without its line break" {
+  var lines: List[String] = []
+  for line in "first\nsecond\r\nthird".lines() {
+    mut lines.push(line.to_string())
+  }
+  assert collected(lines, expected: ["first", "second", "third"])
+  var ended: List[String] = []
+  for line in "one\n\ntwo\n".lines() {
+    mut ended.push(line.to_string())
+  }
+  assert collected(ended, expected: ["one", "", "two"])
+  var none = 0
+  for _ in "".lines() {
+    none += 1
+  }
+  assert none == 0
+  var only = 0
+  for line in "\n".lines() {
+    only += 1
+    assert line.is_empty()
+  }
+  assert only == 1
+}
+
+test "characters are pushed onto a string as UTF-8" {
+  var text = "a${1}"
+  mut text.push_character(Character"b")
+  mut text.push_character(Character"\u{e9}")
+  mut text.push_character(Character"\u{20ac}")
+  mut text.push_character(Character"\u{1F600}")
+  assert text == "a1b\u{e9}\u{20ac}\u{1F600}"
+  assert text.length() == 12
+  assert String.from(Character"\u{e9}") == "\u{e9}"
+  assert String.from(Character"z").length() == 1
+}
+
+test "clear empties a string, which can then be added to" {
+  var text = "abc${1}"
+  mut text.clear()
+  assert text.is_empty()
+  mut text.push("x")
+  assert text == "x"
+}
+
+test "from_utf8 takes valid bytes and says where invalid ones start" {
+  let valid: List[UInt8] = [104, 195, 169]
+  assert String.from_utf8(own valid) is Ok(text) && text == "h\u{e9}"
+  let none: List[UInt8] = []
+  assert String.from_utf8(own none) is Ok(text) && text.is_empty()
+  let replacement: List[UInt8] = [239, 191, 189]
+  assert String.from_utf8(own replacement) is Ok(text) && text.length() == 3
+  let cut_short: List[UInt8] = [104, 195]
+  assert String.from_utf8(own cut_short) is Err(error) && error.valid_up_to == 1
+  let stray: List[UInt8] = [97, 128, 98]
+  assert String.from_utf8(own stray) is Err(error) && error.valid_up_to == 1
+  let overlong: List[UInt8] = [192, 128]
+  assert String.from_utf8(own overlong) is Err(error) && error.valid_up_to == 0
+  let surrogate: List[UInt8] = [97, 98, 237, 160, 128]
+  assert String.from_utf8(own surrogate) is Err(error) && error.valid_up_to == 2
+  let too_large: List[UInt8] = [244, 144, 128, 128]
+  assert String.from_utf8(own too_large) is Err(error) && error.valid_up_to == 0
+}
