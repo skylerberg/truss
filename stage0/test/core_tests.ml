@@ -683,4 +683,80 @@ let () =
                 interface.impl_methods)
         derived)
 
+(* The form at a path *)
+
+let () =
+  let text =
+    "trait Described {\n\
+    \  fn describe(self) -> Int64\n\n\
+    \  fn twice(self) -> Int64 {\n\
+    \    self.describe() + self.describe()\n\
+    \  }\n\
+     }\n\n\
+     type Both[Value](first: Value, second: Value)\n\
+    \  derives Equal\n\n\
+     impl Described for Both[Value: Described] {\n\
+    \  fn describe(self) -> Int64 {\n\
+    \    self.first.describe()\n\
+    \  }\n\
+     }\n"
+  in
+  let both : Path.t = Top { module_ = module_of "app::main"; name = "Both" } in
+  let described : Types.trait_reference =
+    {
+      trait = Top { module_ = module_of "app::main"; name = "Described" };
+      trait_arguments = [];
+      associated = [];
+    }
+  in
+  let at name =
+    let database = setup [ ("app::main", text) ] in
+    let parameter : Types.parameter = { owner = both; name = "Value" } in
+    let bounds (found : Types.parameter) = if found = parameter then [ described ] else [] in
+    let owner =
+      match
+        Interface.Impls.implements database ~bounds
+          (Types.named both [ Types.Parameter parameter ])
+          described
+      with
+      | Some (From_impl { impl; _ }) -> impl
+      | _ -> failwith "no impl"
+    in
+    match Query.demand database Infer.core_at (Method { owner; name; receiver = Read }) with
+    | Some (form, substitution) ->
+        ( List.hd (List.rev (String.split_on_char '\n' (Core_print.show form))),
+          List.map
+            (fun ((parameter : Types.parameter), argument) ->
+              parameter.name ^ " = " ^ Types.show_argument argument)
+            substitution )
+    | None -> failwith "no form"
+  in
+  test "a method an impl writes has its own form" (fun () ->
+      match at "describe" with
+      | "{ Described.describe for Value by a bound(place self.first) }", [] -> ()
+      | found, _ -> fail "found %s" found);
+  test "a method an impl leaves to its trait has the trait's form, with what Self is" (fun () ->
+      match at "twice" with
+      | ( "{ add(Described.describe for Self by a bound(place self), Described.describe for Self \
+           by a bound(place self)) }",
+          [ "Self = Both[Value]" ] ) ->
+          ()
+      | found, substitution -> fail "found %s with [%s]" found (String.concat "; " substitution));
+  test "a method a derived impl gives has the form made from the type" (fun () ->
+      let database = setup [ ("app::main", text) ] in
+      let owner : Path.t =
+        Derived
+          {
+            type_ = both;
+            trait = Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Equal" };
+          }
+      in
+      match
+        ( Query.demand database Infer.core_at (Method { owner; name = "equal"; receiver = Read }),
+          Query.demand database Infer.core_at
+            (Method { owner; name = "not_equal"; receiver = Read }) )
+      with
+      | Some (_, []), Some (_, [ _ ]) -> ()
+      | _ -> fail "the derived method and the one left to the trait are not both found")
+
 let () = finish ()

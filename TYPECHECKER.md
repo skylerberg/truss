@@ -1641,6 +1641,12 @@ for. A method the trait itself gives a body, such as `not_equal`, has the
 trait's form, as in any `impl` that leaves it to the trait, and a type
 that is still `todo` has none.
 
+So the form of a function or a method is found by its path, for every path
+that code is compiled or proven at: a written one has its own, a method a
+derived `impl` gives has the one made from the type, and a method an `impl`
+leaves to its trait has the trait's, together with what `Self` and the
+trait's parameters stand for at that `impl`.
+
 ### Obligations the type checker creates
 
 Most proof obligations come from the program itself: every index, every
