@@ -207,6 +207,9 @@ and `reads` clauses):
   `array_view` is a view whose model is the array's, and `array_at_mut`
   lends the element at an index below `count`, which goes back into the
   array where the lend ends, as `storage_at_mut`'s does into its storage.
+  `storage_from_array` is a storage whose model is the array's, with
+  `count` as its capacity, and `array_from_storage` is an array whose model
+  is the storage's, which must hold exactly `count` elements.
 - **A storage and a view are sequences.** Each is known by its model, a
   `Sequence` of its elements whose length fits a `USize`, which
   `storage_model` and `view_model`, intrinsics for specifications only,
