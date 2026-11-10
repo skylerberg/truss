@@ -139,18 +139,18 @@ let check context (graph : Graph.t) =
   (* A place that is lent [mut] goes back to its owner, so what is moved
      out of it must be given a value again before it goes back. [roots]
      says which of the moved places go back at the point. *)
-  let unrestored = Hashtbl.create 8 in
-  let restored ?(moved_within = fun _ -> true) index ~roots ~at message =
+  let reported = Hashtbl.create 8 in
+  let reinitialized ?(moved_within = fun _ -> true) index ~roots ~at message =
     List.iter
       (fun ((moved : Place.t), moved_at) ->
         if
           kind context moved.root = Mut_access
           && roots moved.root && moved_within moved_at
-          && not (Hashtbl.mem unrestored moved)
+          && not (Hashtbl.mem reported moved)
         then begin
-          Hashtbl.replace unrestored moved ();
+          Hashtbl.replace reported moved ();
           let moved_span = span context points.(moved_at).origin in
-          report context Field_not_restored
+          report context Not_reinitialized
             (Option.value ~default:moved_span at)
             ~notes:(if at = None then [] else [ (moved_span, "It is moved out here.") ])
             (message (show context moved) (show_root context moved.root))
@@ -190,7 +190,7 @@ let check context (graph : Graph.t) =
           | Some (moved, _) -> used index moved
           | None -> ())
       | Exit ->
-          restored index
+          reinitialized index
             ~roots:(fun _ -> true)
             ~at:(Some at)
             (fun moved _ ->
@@ -199,7 +199,7 @@ let check context (graph : Graph.t) =
                  returns."
                 moved)
       | Task_end { first; limit } ->
-          restored index
+          reinitialized index
             ~moved_within:(fun point -> first <= point && point < limit)
             ~roots:(fun _ -> true)
             ~at:None
@@ -211,7 +211,7 @@ let check context (graph : Graph.t) =
                 moved)
       | Suspend _ ->
           if context.yields then
-            restored index
+            reinitialized index
               ~roots:(fun _ -> true)
               ~at:(Some at)
               (fun moved _ ->
@@ -220,7 +220,7 @@ let check context (graph : Graph.t) =
                    the method here."
                   moved)
       | Bind locals | Ends locals ->
-          restored index ~roots:(bound locals) ~at:None (fun moved root ->
+          reinitialized index ~roots:(bound locals) ~at:None (fun moved root ->
               Printf.sprintf
                 "`%s` is moved out here and is not given a value again. `%s` is lent `mut`, so \
                  every part of it must have a value when its loop iteration, its `match` arm, or \
