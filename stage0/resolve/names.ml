@@ -500,10 +500,6 @@ let base =
       | Some (module_, declaration) ->
           Some (module_, (Query.demand database items module_).(declaration.index).base))
 
-(* A compiler bug met while working on a definition says which one. *)
-let within key work =
-  try work () with Invalid_argument message -> invalid_arg (show_key key ^ ": " ^ message)
-
 (* A stage's diagnostics for a file: each definition's, which [of_definition]
    gives in the definition's own offsets, moved to the file's, in order. *)
 let per_definition database module_ of_definition =

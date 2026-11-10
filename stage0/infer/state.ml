@@ -76,7 +76,7 @@ let report state ?fixes code span message = ignore (reported state ?fixes code s
 (* What resolution, the interfaces, and checking agree on cannot fail; if it
    does, that is a bug in the compiler, and stopping is better than
    accepting the code. *)
-let bug format = Printf.ksprintf (fun message -> invalid_arg ("Infer: " ^ message)) format
+let bug format = Compiler_bug.bug ~stage:"Infer" format
 
 (* The type of what did not check: its report is what lets everything be
    accepted of it. *)

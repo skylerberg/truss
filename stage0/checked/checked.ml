@@ -116,7 +116,7 @@ let create size =
   }
 
 let undecided what (span : Syntax.span) =
-  invalid_arg (Printf.sprintf "Checked: the %s at %d..%d has no type" what span.start span.stop)
+  Compiler_bug.bug ~stage:"Checked" "the %s at %d..%d has no type" what span.start span.stop
 
 let type_of checked (value : Syntax.expression) =
   match checked.types.(value.id) with

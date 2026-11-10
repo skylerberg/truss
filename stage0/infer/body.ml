@@ -486,7 +486,8 @@ let check database (key : Names.key) =
 let checked =
   Query.query ~name:"checked" ~phase:Bodies ~show:Names.show_key ~saved:true
     ~about:(fun (key : Names.key) -> Some { Query.path = key.path; part = Some "body" })
-    (fun database key -> Names.within key (fun () -> check database key))
+    (fun database key ->
+      Compiler_bug.within ~stage:"Infer" (Names.show_key key) (fun () -> check database key))
 
 (* Every body error of a file, in its offsets and in order. *)
 let diagnostics database module_ =

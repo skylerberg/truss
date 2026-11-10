@@ -151,9 +151,9 @@ val create : int -> t
 (** Empty tables for a definition with that many nodes. *)
 
 val type_of : t -> Syntax.expression -> Types.ty
-(** The type of an expression of a body that checked, where every expression has one. Raises
-    [Invalid_argument] for one without: the stages after checking run on what it decided, and never
-    guess where it decided nothing. *)
+(** The type of an expression of a body that checked, where every expression has one. One without is
+    a bug in the compiler, raised as one: the stages after checking run on what it decided, and
+    never guess where it decided nothing. *)
 
 val pattern_type : t -> Syntax.pattern -> Types.ty
 (** The type of the value a pattern matches, as {!type_of}. *)
