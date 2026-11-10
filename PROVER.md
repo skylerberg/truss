@@ -200,7 +200,15 @@ and `reads` clauses):
   to one must fit, since the compiled cast is undefined otherwise, and is
   the float cut toward zero. An integer's `convert` to a float is the float nearest it,
   ties to even, as the compiled cast rounds, so exactly it where the float
-  can hold it. The standard library's integer methods each
+  can hold it. The rest of a float's operations are IEEE 754's: the
+  `ieee_` comparisons, `square_root` and `fused_multiply_add` rounding to
+  nearest, ties to even, `floor`, `ceiling`, `truncate`, and
+  `round_to_even` rounding to an integer as their names say, and
+  `is_nan`. `from_bits` is the float the bits encode, and `to_bits` gives
+  bits that encode the float, for any float but a NaN. `multiply_high` is
+  the upper word of the exact product. `rotate_left`, `rotate_right`, and
+  `swap_bytes` are known first only by their range, as the bitwise
+  operations are, and exactly when a query asks again. The standard library's integer methods each
   have a `time` clause, so `wrapping_add`, `saturating_add`,
   `checked_add`, `try_from`, and the rest are definitions their callers
   unfold.
@@ -1167,13 +1175,10 @@ sanitized runs, test the trusted base against real executions.
 
 ## Not built
 
-- **Contracts for the intrinsic module's floats and system calls.** Only
-  the integer operations, float arithmetic and comparisons, `fits` and
-  `convert` between floats and integers, storage, views, and what a C
-  function keeps of the storages it is lent have meanings. A call of any other intrinsic, and
-  what a C function returns beyond the counts `read`, `write`, and
-  `snprintf` give, is known only by its type, and what the standard library states no contract for, such as
-  the `ieee_` comparisons, is known only by its type.
+- **Contracts for the intrinsic module's system calls.** A handle's
+  descriptor, the environment's entries, the operating system and
+  architecture, a view's address, and what a C function returns beyond
+  what its row of the table says are known only by their types.
 - **Facts under a quantifier.** A fact that names a quantifier's bound
   name, such as what a callee's `ensures` says of a call on it, is not
   kept. Closed over the quantifier it would be true, but the standard
