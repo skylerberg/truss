@@ -10,6 +10,7 @@ type phase =
   | Interfaces
   | Bodies
   | Checks
+  | Proofs
   | Diagnostics
   | Lowering
   | Linking
@@ -24,11 +25,12 @@ let rank = function
   | Interfaces -> 4
   | Bodies -> 5
   | Checks -> 6
-  | Diagnostics -> 7
-  | Lowering -> 8
-  | Linking -> 9
-  | Recursion -> 10
-  | Keys -> 11
+  | Proofs -> 7
+  | Diagnostics -> 8
+  | Lowering -> 9
+  | Linking -> 10
+  | Recursion -> 11
+  | Keys -> 12
 
 let phase_name = function
   | Syntax -> "syntax"
@@ -37,6 +39,7 @@ let phase_name = function
   | Interfaces -> "interfaces"
   | Bodies -> "bodies"
   | Checks -> "checks"
+  | Proofs -> "proofs"
   | Diagnostics -> "diagnostics"
   | Lowering -> "lowering"
   | Linking -> "linking"

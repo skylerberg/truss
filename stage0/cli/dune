@@ -29,4 +29,6 @@
   lir
   unicode
   compile
+  solver
+  prover
   database))

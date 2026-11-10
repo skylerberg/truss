@@ -198,6 +198,7 @@ phases are the compiler's own order:
 | Interfaces | Signatures, shapes, constants' values, and the `impl`s found for a type |
 | Bodies | Checked bodies, moves and loans, patterns, and what else is found in a body |
 | Checks | The rules that span a package |
+| Proofs | Each package's call graph, and each definition's obligations as the solver's queries, which PROVER.md designs |
 | Diagnostics | Every stage's diagnostics for a file |
 | Lowering | What each instance compiles to |
 | Linking | Each instance's own hash, and what it refers to |

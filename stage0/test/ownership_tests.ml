@@ -486,4 +486,45 @@ let () =
          \  }\n\
           }\n"))
 
+(* The prover's part *)
+
+(* How many [Disjoint] obligations a definition leaves to the prover. *)
+let disjoint_obligations text =
+  let database = setup [ ("app::main", text) ] in
+  let module_ = module_of "app::main" in
+  List.fold_left
+    (fun total declaration ->
+      match Query.demand database Ownership.ownership (Resolve.Names.key_of declaration) with
+      | Some result ->
+          total
+          + List.length
+              (List.filter
+                 (function Checked.Disjoint _ -> true | _ -> false)
+                 result.Ownership.obligations)
+      | None -> total)
+    0
+    (Query.demand database Resolve.Names.declarations module_)
+
+let () =
+  test "two slices of one list lent together are left to the prover" (fun () ->
+      let found =
+        disjoint_obligations
+          "fn both(first: mut Slice[Int64], second: mut Slice[Int64]) {}\n\n\
+           fn f(items: mut List[Int64], middle: USize) {\n\
+          \  both(mut items[..middle], second: mut items[middle..])\n\
+           }\n"
+      in
+      if found <> 1 then fail "%d obligations" found);
+  test "parallel branches that change two elements are left to the prover" (fun () ->
+      let found =
+        disjoint_obligations
+          "fn f(items: mut List[Int64], first: USize, second: USize) {\n\
+          \  parallel {\n\
+          \    items[first] = 1\n\
+          \    items[second] = 2\n\
+          \  }\n\
+           }\n"
+      in
+      if found <> 1 then fail "%d obligations" found)
+
 let () = finish ()

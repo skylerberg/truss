@@ -255,7 +255,7 @@ let () =
       expect_string ~expected:"0: first\n1: second \xef\xbf\xbd line\n2: last\n" output)
 
 (* The documents' examples: in every block that checks cleanly, each
-   function that is not generic lowers, and each test passes or reaches a
+   function that is not generic, and not only for specifications, lowers, and each test passes or reaches a
    [todo]. Most blocks are excerpts, which do not check alone. *)
 let () =
   let root = "../../.." in
@@ -279,7 +279,7 @@ let () =
                     match
                       (d.path, Query.demand database Interface.Environment.signature d.path)
                     with
-                    | Top _, Some { generics = []; _ } ->
+                    | Top _, Some { generics = []; specification_only = false; _ } ->
                         ignore
                           (Compile.compiled compile (Code { path = d.path; type_arguments = [] }))
                     | _ -> ())

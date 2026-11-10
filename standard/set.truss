@@ -1,18 +1,33 @@
 public opaque type Set[Element: Hash + Ordered](elements: List[Element])
   derives Copyable
 
+impl Model for Set[Element: Hash + Ordered] {
+  type Value = FiniteSet[Element]
+
+  fn model(self) -> FiniteSet[Element]
+    cost time finite
+  {
+    todo
+  }
+}
+
 public fn Set[Element: Hash + Ordered].length(self) -> USize
+  ensures result == self.model().size()
   cost time O(1)
 {
   self.elements.length()
 }
 
-public fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool {
+public fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool
+  ensures result == self.model().contains(element)
+{
   let position = self.elements.partition_point(fn(existing) { existing < element })
   position < self.elements.length() && self.elements[position] == element
 }
 
-public fn Set[Element: Hash + Ordered].insert(mut self, element: own Element) {
+public fn Set[Element: Hash + Ordered].insert(mut self, element: own Element)
+  ensures identical(self.model(), old(self.model()).insert(element))
+{
   let position = self.elements.partition_point(fn(existing) { existing < element })
   if !(position < self.elements.length() && self.elements[position] == element) {
     mut self.elements.insert_at(position, item: own element)

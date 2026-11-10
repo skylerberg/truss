@@ -30,8 +30,8 @@ let main (project : Project.t) =
         (String.concat ", " (List.map (fun path -> "`" ^ Path.show path ^ "`") several));
       raise (Stop 1)
 
-let stop_at_diagnostics ~json project =
-  let report = Report.gather project in
+let stop_at_diagnostics ?proofs ~json project =
+  let report = Report.gather ?proofs project in
   if not (Report.clean report) then begin
     if json then Json.print (Report.document report []) else Report.print report;
     raise (Stop 1)
@@ -71,6 +71,37 @@ let refuse_unshippable ~json ~echo (project : Project.t) compile main =
           found;
       raise (Stop 1)
 
+(* Refuses a program whose [main] can reach a definition whose proofs have
+   a hole, naming each. *)
+let refuse_holes ~json (project : Project.t) main =
+  match Proofs.holes_reached project main with
+  | [] -> ()
+  | found ->
+      if json then
+        Json.print
+          (Json.document ~diagnostics:[]
+             [
+               ( "unshippable",
+                 Json.List
+                   (List.map
+                      (fun path ->
+                        Json.Object
+                          [
+                            ("kind", Json.String "proof hole");
+                            ("definition", Json.String (Path.show path));
+                          ])
+                      found) );
+             ])
+      else
+        List.iter
+          (fun path ->
+            Output.eprintf
+              "`%s` has a `todo` in a proof and can be reached from `main`, so the program cannot \
+               be built.\n"
+              (Path.show path))
+          found;
+      raise (Stop 1)
+
 let catching f = try f () with Stop status -> Outcome.Exit status
 
 (* [truss run]: a development build, unless [release], of the one package
@@ -102,8 +133,10 @@ let build ~directory ~output ~json =
   catching (fun () ->
       let project = Project.load directory in
       let package = Project.package project in
-      stop_at_diagnostics ~json project;
+      (* A program is built only once its proofs are done. *)
+      stop_at_diagnostics ~proofs:true ~json project;
       let main = main project in
+      refuse_holes ~json project main;
       let compile = Compiler.create project Release in
       refuse_unshippable ~json ~echo:true project compile main;
       let output = Project.normalize (Option.value output ~default:package.name) in

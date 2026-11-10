@@ -7,6 +7,7 @@ type key =
   | Any_drop of Ground.ty
   | Encode of Ground.ty
   | Evaluator of Path.t
+  | Template_check of { from_template : Path.t; texts : string list }
   | Cursor_next of Ground.yielding
   | Adapter of { function_ : key; ty : Ground.function_type }
   | Entry of key
@@ -41,6 +42,7 @@ let rank = function
   | Encode _ -> 13
   | Evaluator _ -> 14
   | Any_drop _ -> 15
+  | Template_check _ -> 16
 
 let ( >>= ) c next = if c <> 0 then c else next ()
 
@@ -65,6 +67,9 @@ let rec compare a b =
       Ground.compare_arguments a.type_arguments b.type_arguments
   | Real_evidence a, Real_evidence b | Program_main a, Program_main b | Evaluator a, Evaluator b ->
       Path.compare a b
+  | Template_check a, Template_check b ->
+      Path.compare a.from_template b.from_template >>= fun () ->
+      List.compare String.compare a.texts b.texts
   | _ -> Int.compare (rank a) (rank b)
 
 let equal a b = compare a b = 0
@@ -82,6 +87,8 @@ let rec encode ?(path = Ground.encode_path) key =
   | Encode t -> tagged 13 [ ty t ]
   | Any_drop t -> tagged 15 [ ty t ]
   | Evaluator p -> tagged 14 [ path p ]
+  | Template_check { from_template; texts } ->
+      tagged 16 [ path from_template; Cbor.Array (List.map (fun text -> Cbor.Text text) texts) ]
   | Cursor_next yielding -> tagged 5 [ ty (Cursor yielding) ]
   | Adapter { function_; ty } ->
       tagged 6 [ encode ~path function_; Ground.encode ~path (Function ty) ]
@@ -181,6 +188,9 @@ let rec mangle = function
   | Encode ty -> marker "Encode" ^ mangle_ty ty
   | Any_drop ty -> marker "Any_drop" ^ mangle_ty ty
   | Evaluator p -> marker "Evaluator" ^ path p
+  | Template_check { from_template; texts } ->
+      marker "Check" ^ path from_template
+      ^ String.concat "" (List.map (fun t -> marker "Text" ^ text t ^ marker "End") texts)
   | Cursor_next yielding -> marker "Next" ^ mangle_yielding yielding
   | Adapter { function_; ty } ->
       marker "Adapter" ^ mangle function_ ^ marker "As" ^ mangle_ty (Function ty)
@@ -214,6 +224,9 @@ let rec to_string = function
   | Encode ty -> "encode " ^ Ground.to_string ty
   | Any_drop ty -> "any drop " ^ Ground.to_string ty
   | Evaluator path -> "evaluator " ^ Path.show path
+  | Template_check { from_template; texts } ->
+      "template check " ^ Path.show from_template ^ " of "
+      ^ String.concat ", " (List.map (Printf.sprintf "%S") texts)
   | Cursor_next yielding -> "next " ^ Ground.to_string (Cursor yielding)
   | Adapter { function_; _ } -> "adapter " ^ to_string function_
   | Any_entry key -> "any entry " ^ to_string key

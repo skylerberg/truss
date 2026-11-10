@@ -232,7 +232,71 @@ and constant_pattern state id span path type_ =
   | Some constant_type ->
       if not (unify state constant_type type_) then
         mismatch state span ~expected:type_ ~found:constant_type
+      else if not (structural state (resolve state constant_type)) then
+        report state Not_structural span
+          (Printf.sprintf
+             "A constant in a pattern needs a type with structural equality, so that matching it \
+              and `==` agree, and `%s` does not have it: its equality is hand-written, or it holds \
+              a float, whose `==` treats `-0.0` and `0.0` as equal. Match with a guard instead, as \
+              in `value if value == %s`."
+             (show state constant_type)
+             (match path with
+             | Top { name; _ } | Member_constant { name; _ } | Method { name; _ } -> name
+             | _ -> "the_constant"))
   | None -> ()
+
+(* Whether two equal values of a type cannot be told apart: built-in
+   identity equality, or a derived [Equal] over fields that all have it.
+   See DESIGN.md, "Equality, ordering, and deriving". *)
+and structural ?(seen = []) state (type_ : T.ty) =
+  if
+    T.is_integer_type type_ || T.is_builtin Bool type_ || T.is_builtin Character type_
+    || T.is_builtin Unit type_ || is_named string_path type_
+  then true
+  else if T.is_float_type type_ then false
+  else if List.exists (T.equal type_) seen then true
+  else
+    match type_ with
+    | T.Named { path; arguments } -> (
+        match Query.demand state.database Environment.interface path with
+        | Some (Environment.Type_interface interface)
+          when (not interface.opaque) || Path.package path = state.package ->
+            let derives_equal =
+              List.exists
+                (fun (derived : Path.t) ->
+                  match derived with
+                  | Top { module_ = { package = "standard"; _ }; name = "Equal" } -> true
+                  | _ -> false)
+                interface.derives
+            in
+            let substitution =
+              try
+                List.combine
+                  (List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics)
+                  arguments
+              with Invalid_argument _ -> []
+            in
+            let fields_structural (fields : T.field list) =
+              List.for_all
+                (fun (field : T.field) ->
+                  structural ~seen:(type_ :: seen) state
+                    (T.substitute substitution field.field_type))
+                fields
+            in
+            derives_equal
+            && begin match interface.shape with
+            | Record fields -> fields_structural fields
+            | Sum variants ->
+                List.for_all
+                  (fun (variant : T.variant) ->
+                    match variant.fields with
+                    | Some fields -> fields_structural fields
+                    | None -> true)
+                  variants
+            | Todo_type | Builtin_type _ | Error_shape -> false
+            end
+        | _ -> false)
+    | _ -> false
 
 and qualified_constant state id span constant type_ =
   let path =

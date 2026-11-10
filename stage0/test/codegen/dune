@@ -8,7 +8,8 @@
   build_tests
   source_tests
   feature_tests
-  program_tests)
+  program_tests
+  evaluate_tests)
  (modules
   codegen_support
   layout_tests
@@ -19,7 +20,8 @@
   build_tests
   source_tests
   feature_tests
-  program_tests)
+  program_tests
+  evaluate_tests)
  (libraries
   harness
   zarith
@@ -55,6 +57,8 @@
   lower
   compile
   type_checker
+  prover
+  solver
   documents)
  (deps
   (glob_files %{workspace_root}/*.md)))

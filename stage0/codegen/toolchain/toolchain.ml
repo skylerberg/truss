@@ -49,7 +49,7 @@ let read_streaming channel on_output =
   loop ();
   Buffer.contents buffer
 
-let run ?input ?on_output program arguments =
+let run ?input ?on_output ?time_limit program arguments =
   let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
   let stderr_read, stderr_write = Unix.pipe ~cloexec:true () in
   let stdin_read, stdin_write =
@@ -82,6 +82,21 @@ let run ?input ?on_output program arguments =
                try close_out channel with Sys_error _ -> ()))
     | _ -> None
   in
+  (* A program that runs past its time limit is killed, and its status is
+     that of [SIGKILL]. *)
+  let ended = Atomic.make false in
+  let watchdog =
+    Option.map
+      (fun limit ->
+        Domain.spawn (fun () ->
+            let deadline = Unix.gettimeofday () +. (float_of_int limit /. 1000.) in
+            while (not (Atomic.get ended)) && Unix.gettimeofday () < deadline do
+              Unix.sleepf 0.01
+            done;
+            if not (Atomic.get ended) then
+              try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ()))
+      time_limit
+  in
   (* Read standard error on another domain, so neither pipe fills while the
      other is read. *)
   let errors = Domain.spawn (fun () -> read_all (Unix.in_channel_of_descr stderr_read)) in
@@ -96,6 +111,8 @@ let run ?input ?on_output program arguments =
   Unix.close stdout_read;
   Unix.close stderr_read;
   let _, status = Unix.waitpid [] pid in
+  Atomic.set ended true;
+  Option.iter Domain.join watchdog;
   (exit_code status, output, errors)
 
 let identify compiler =

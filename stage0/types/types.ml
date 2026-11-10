@@ -34,7 +34,11 @@ and function_type = {
 
 and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
 and capability = Capability of Path.t | Capability_parameter of parameter
-and cost = { amortized : bool; resource : string; bound : string }
+and cost = { amortized : bool; resource : string; bound : cost_bound }
+
+(* A function type's parameters have no names, so its bounds are
+   constants: the number, when it is written as one. *)
+and cost_bound = Finite_cost | Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
 let builtin builtin = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
 let unit = builtin Unit
@@ -253,7 +257,19 @@ and show_function (function_type : function_type) =
       function_type.uses
   in
   let costs =
-    List.map (fun (cost : cost) -> "cost " ^ cost.resource ^ " " ^ cost.bound) function_type.costs
+    List.map
+      (fun (cost : cost) ->
+        let bound =
+          match cost.bound with
+          | Finite_cost -> "finite"
+          | Order_of -> "O(...)"
+          | No_more_than (Some value) -> "<= " ^ Z.to_string value
+          | No_more_than None -> "<= ..."
+          | Exactly_cost (Some value) -> "== " ^ Z.to_string value
+          | Exactly_cost None -> "== ..."
+        in
+        "cost " ^ cost.resource ^ " " ^ bound)
+      function_type.costs
   in
   match (uses, costs) with
   | [], [] -> base
@@ -293,7 +309,8 @@ let function_type_of (signature : signature) =
     output = signature.output;
     uses = signature.uses;
     costs =
-      (if signature.terminates then [ { amortized = false; resource = "time"; bound = "finite" } ]
+      (if signature.terminates then
+         [ { amortized = false; resource = "time"; bound = Finite_cost } ]
        else []);
   }
 

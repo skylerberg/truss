@@ -172,13 +172,45 @@ let () =
         package
           [
             ( "main.truss",
-              "fn twice(value: Int64) -> Int64 {\n  let unused = value\n  value * 2\n}\n" );
+              "fn twice(value: Int64) -> Int64\n\
+              \  requires value < 1000 && value > -1000\n\
+               {\n\
+              \  let unused = value\n\
+              \  value * 2\n\
+               }\n" );
           ]
       in
       let status = quietly (fun () -> Check_command.run ~directory:root ~fix:true ~json:false) in
       if status <> 0 then fail "status %d" status;
       if not (contains (read root "main.truss") "let _ = value") then
         fail "wrote %s" (read root "main.truss"))
+
+let () =
+  test "check proves, and reports what it cannot prove" (fun () ->
+      let root = package [ ("main.truss", "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n") ] in
+      let status, output =
+        captured (fun () -> Check_command.run ~directory:root ~fix:false ~json:false)
+      in
+      if status <> 1 then fail "status %d" status;
+      if not (contains output "prover.overflow") then fail "%s" output);
+  test "build refuses a program that can reach a hole in a proof" (fun () ->
+      let root =
+        package
+          [
+            ( "main.truss",
+              "fn main(arguments: List[String]) -> ExitCode {\n\
+              \  proof {\n\
+              \    todo\n\
+              \  }\n\
+              \  ExitCode.success\n\
+               }\n" );
+          ]
+      in
+      let outcome, output =
+        captured (fun () -> Program_command.build ~directory:root ~output:None ~json:false)
+      in
+      if outcome <> Outcome.Exit 1 then fail "did not refuse";
+      if not (contains output "a `todo` in a proof") then fail "%s" output)
 
 (* The test runner's report *)
 
@@ -451,7 +483,9 @@ let git root arguments =
     fail "git %s failed" (String.concat " " arguments)
 
 let doubling =
-  {|internal fn double(value: Int64) -> Int64 {
+  {|internal fn double(value: Int64) -> Int64
+  requires value < 1000 && value > -1000
+{
   value * 2
 }
 
@@ -555,7 +589,7 @@ let () =
       let status, output =
         captured (fun () ->
             Explain_command.run ~directory:root
-              ~position:(Filename.concat root "main.truss" ^ ":6:3")
+              ~position:(Filename.concat root "main.truss" ^ ":8:3")
               ~json:false)
       in
       if status <> 0 then fail "status %d" status;
@@ -610,6 +644,6 @@ let () =
       if quietly (fun () -> New_command.run ~directory:root ~name:"weather") <> 0 then
         fail "not made";
       let project = Project.load (Filename.concat root "weather") in
-      if not (Report.clean (Report.gather project)) then fail "has diagnostics")
+      if not (Report.clean (Report.gather ~proofs:true project)) then fail "has diagnostics")
 
 let () = Harness.finish ()

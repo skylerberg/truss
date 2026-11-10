@@ -5,11 +5,12 @@ between the parser's trees and the checked form that the prover and code
 generation read. It follows the decisions in [DESIGN.md](DESIGN.md),
 [SYNTAX.md](SYNTAX.md), and [GRAMMAR.md](GRAMMAR.md), reads the trees
 described in [PARSER.md](PARSER.md), and produces what
-[CODEGEN.md](CODEGEN.md) expects. The prover is not designed yet, so this
-document states what it hands to it. Every stage described here is built,
-in [`stage0/`](stage0), and `truss check` runs them over a package's
+[CODEGEN.md](CODEGEN.md) expects, and what the prover in
+[PROVER.md](PROVER.md) reads. Every stage described here is built, in
+[`stage0/`](stage0), and `truss check` runs them over a package's
 directory. The queries run on the code database's engine, which
-[DATABASE.md](DATABASE.md) designs.
+[DATABASE.md](DATABASE.md) designs. Storing checked forms in CBOR is not
+built yet.
 
 ## What the type checker does
 
@@ -238,8 +239,15 @@ can have a version for each mode.
 - **Specification words** get their meaning by where they are. `result`
   names the return value inside `ensures` and `cost`; `old(...)` is the
   value on entry inside specifications and proofs; `log`, `power`,
-  `time(...)`, and `calls(...)` are the cost functions inside a `cost` bound.
-  Anywhere else, they are ordinary names.
+  `time(...)`, and `calls(...)` are the cost functions inside a `cost` bound;
+  `identical(a, b)` is identity, for two values of one type, inside
+  specifications;
+  `yielded` and `finished` are what a lending or yielding method has handed
+  out and whether it ran to its end, inside its `ensures`, and `yielded` is
+  what a `for` loop's earlier iterations received, inside its `invariant`.
+  Anywhere else, they are ordinary names. Where one has its meaning, a
+  visible variable with the same name would be hidden, which is an error as
+  everywhere else.
 
 ### Decisions the parser left open
 
@@ -331,7 +339,10 @@ The type checker uses that as follows:
 - **Builds and tests skip what cannot run.** A build refuses a program that
   can reach a definition with any error, broken or not. A test that can
   reach one does not run, and is reported as blocked by it; every other test
-  runs as usual.
+  runs as usual. An obligation the prover has not proven, or could not prove,
+  is not an error of this kind for tests: a test build checks every
+  operation that could fail as it runs, as CODEGEN.md describes, so tests run
+  without waiting for proofs. A build of a program still needs every proof.
 
 ## Parts of a definition
 
@@ -437,6 +448,7 @@ is `Plain` exactly when `Value` is.
 | `Copyable` | every type except the standard library's handles and types that hold one | call `copy()` |
 | `Plain` | integers, floats, `Bool`, `Character`, `Unit`, arrays, records, and sum types made only of `Plain` parts, with no heap data and no handle | copy implicitly. `Plain` requires `Copyable`. |
 | View | `Slice`, `StringSlice`, a cursor from a `self` method, a lambda that captures locals, an `any` that holds a view, and anything holding a view anywhere, in a field, a variant, an element, or a type argument | nothing extra; values of view types stay within their function (see [Views](#views)) |
+| Structural equality | the built-in integers, `Bool`, `Character`, `Unit`, `String`, the types of specifications, and a type that derives `Equal` whose fields all have it; never floats, a hand-written `Equal`, or, outside its package, an opaque type | be a constant in a pattern; the prover substitutes through `==` |
 
 - **`Copyable` and `Plain` are prelude traits that the compiler implements.**
   No `impl` of them can be written. A generic parameter has them only when
@@ -480,6 +492,12 @@ the definition's interface: the types of its parameters and result, its
   error.
 - **An `own` function-typed parameter** accepts only functions that capture
   nothing. That is recorded in the interface, for checking callers.
+- **A function-typed parameter's `requires`** is a specification, a `Bool`
+  over the type's named inputs, with the types its inputs have, and the
+  parameters before it. It is not part of the parameter's type: two function
+  types that differ only in it are the same type, and the prover reads it
+  from the signature, both to show the function meets it at each call
+  through the parameter and to give a lambda passed there its facts.
 - **A private type in a public signature is an error,** and so is a private
   or `internal` type in a public type's visible fields, as in Rust and
   Swift. Callers in other packages could never name the type.
@@ -528,15 +546,21 @@ the definition's interface: the types of its parameters and result, its
   bounds; and `uses` that are a subset of the trait method's. Parameter
   names must match because they are part of how a method is called, as
   Swift requires of protocol requirements. Defaults are written only in the
-  trait.
+  trait. A method may add `ensures` and `cost` clauses, and may state a
+  `requires`; the prover shows that its clauses are no weaker than the
+  trait's, as DESIGN.md describes. The `impl`'s clauses are part of its
+  contract, which a call resolved to the `impl` depends on.
 - **The traits a trait requires** must be implemented for the same type,
   under conditions no stronger than the `impl`'s.
 - **A capability `impl`'s methods** take the capability's parameters plus a
   receiver, `self` or `mut self`. Only a capability `impl` may have a
   `uses` clause; a trait `impl`'s methods can use only what the trait's
   methods declare. Implementing `Panic` is an error.
-- **Methods that replace a provided method** must have its exact signature.
-  That they give the same result is the prover's job.
+- **Methods that replace a provided method** must have its exact signature,
+  and the provided method must be pure, have a `time` clause, and change
+  none of its arguments, which is what lets its body be its definition.
+  That the body is functional, and that the replacement gives the same
+  result, is the prover's job.
 
 ### Recursive types
 
@@ -768,6 +792,8 @@ type of a bound.
   writes `let _ =`, as DESIGN.md requires. An `if` without an `else` has type
   `Unit`. The arms of an `if` or `match` are unified, ignoring arms of type
   `Never`.
+- **Loop clauses** are specifications: an `invariant` is a `Bool`, and a
+  `decreases` measure and a `cost` bound are integers, as in a signature.
 - **`while`** takes a `Bool`. A `while` whose condition is the literal
   `true`, and which no `break` leaves, has type `Never`, as Java and Kotlin
   treat it. Any other loop is a statement of type `Unit`.
@@ -832,9 +858,10 @@ A pattern is checked against the type of the value it matches:
   field, the only field of a single-field record or variant, and `..` for the
   rest.
 - **A literal or constant** must have the matched type. A constant used as a
-  pattern must have a type whose equality is built in or derived, so that
-  matching it is structural, as Rust requires for constants in patterns. A
-  hand-written `Equal` could disagree with matching.
+  pattern must have a type with structural equality (see
+  [Properties of types](#properties-of-types)), so that matching it and `==`
+  agree, as Rust requires for constants in patterns. A hand-written `Equal`,
+  or a derived one over floats, could disagree with matching.
 - **A range** has two ends of the matched type, an integer type or
   `Character`.
 - **Every alternative of an or-pattern** binds the same names with the same
@@ -1040,9 +1067,10 @@ still needs the capability among the `impl`'s `uses`, from outside.
   against. A capability parameter, such as `Granted` in `for_each`, is solved
   as the union of what the lambdas passed for it use, and that set must then
   be available at the call.
-- **Specifications, `parallel` branches, and `parallel for` bodies** have
-  only `Panic` available. A test without `uses` has only `Panic`, and
-  whatever it provides.
+- **Specifications and quantifiers' bodies** have no capabilities at all,
+  not even `Panic`, since what they mean must be a value. **`parallel`
+  branches and `parallel for` bodies** have only `Panic` available. A test
+  without `uses` has only `Panic`, and whatever it provides.
 - **A `uses` clause that is never needed is not an error,** since a function
   may declare a capability its later versions will use, and callers already
   provide it.
@@ -1151,16 +1179,23 @@ checks them like code, with these differences:
   in `items[i + 1]`, and the checker records an obligation that it fits. A
   literal that nothing else decides is an `Integer`. Float arithmetic keeps
   its types, since it follows IEEE 754 in specifications too.
-- **Functions that mention `Integer`** in their signature can be called only
-  from specifications, and are never compiled. That is how a specification
-  function such as `fn sum(items: Slice[Int64]) -> Integer` is written.
-- **Everything is pure.** No capability is available but `Panic`, and `echo`
-  is not allowed.
-- **Every function called must have a `time` clause,** so that it is known to
-  terminate, as DESIGN.md requires. That is a fact of the callee's
-  interface.
+- **The types of specifications** are `Integer`, `Sequence`, `FiniteSet`,
+  `FiniteMap`, and `Multiset`, which the compiler declares. A function that
+  mentions one in its signature, or a method of `Model`, can be called only
+  from specifications, and is never compiled. Its body is a specification.
+  That is how a specification function such as
+  `fn sum(items: Slice[Int64]) -> Integer` is written. A `[...]` literal is
+  a `Sequence`, a `FiniteSet`, or a `FiniteMap` where one is expected.
+- **Everything is pure.** No capability is available, not even `Panic`, and
+  `echo` is not allowed.
+- **Every function called must be pure and have a `time` clause,** so that
+  it is known to terminate, as DESIGN.md requires. Both are facts of the
+  callee's interface.
 - **`forall` and `exists`** bind a pattern over a range or a collection, or a
-  name over a type. Their bodies, and `==>`, are `Bool`.
+  name over a type. Their bodies, and `==>`, are `Bool`. A quantifier over a
+  range or a collection is an expression in code as well; one over a type,
+  and `==>`, are errors in a body that is compiled, which the parser leaves
+  to this stage since only the signature's types say whether a body is.
 - **Theorems** are called only from proofs, and a call makes their `ensures`
   available. `assert` is only in tests, theorems, and proofs.
 
@@ -1323,8 +1358,9 @@ gives an exact fix whenever it knows what was meant:
   checker relies on it as [Broken definitions](#broken-definitions)
   describes.
 - **The prover** reads checked forms, the interfaces and contracts of what
-  they call, the bodies of pure functions used in specifications, and the
-  type checker's obligations. It discharges every `requires` and invariant,
+  they call, the functional bodies it reads as definitions, and the type
+  checker's obligations, as [PROVER.md](PROVER.md) describes. It discharges
+  every `requires` and invariant,
   every operation that could fail, every cost, termination, and every
   obligation above.
 - **Code generation** reads checked forms, the shapes of types, and which

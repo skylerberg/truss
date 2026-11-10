@@ -50,6 +50,9 @@ module Code = struct
     | Repeated_clause
     | Cost_word
     | Finite_not_time
+    | Loop_cost_bound
+    | Function_type_names
+    | Misplaced_requires
     | Misplaced_potential
     | Increment
     | Double_negation
@@ -123,6 +126,8 @@ module Code = struct
     | Wrong_yield
     | Specification_only
     | Not_in_specification
+    | Not_structural
+    | Not_replaceable
     | Wrong_receiver
     | Not_indexable
     | Implements_built_in
@@ -173,6 +178,22 @@ module Code = struct
     | Provide_mark
     | Not_an_implementation
 
+  type prover =
+    | Overflow
+    | Division
+    | Shift
+    | Fits
+    | Requires
+    | Ensures
+    | Invariant
+    | Termination
+    | Assertion
+    | Law
+    | Cost
+    | Disjoint
+    | Unreachable
+    | Unsupported
+
   type package =
     | Impl_location
     | Overlapping_impls
@@ -193,6 +214,7 @@ module Code = struct
     | Ownership of ownership
     | Capabilities of capabilities
     | Package of package
+    | Prover of prover
     | Too_many_diagnostics
 
   let lexer_name code =
@@ -246,6 +268,9 @@ module Code = struct
     | Repeated_clause -> "repeated_clause"
     | Cost_word -> "cost_word"
     | Finite_not_time -> "finite_not_time"
+    | Loop_cost_bound -> "loop_cost_bound"
+    | Function_type_names -> "function_type_names"
+    | Misplaced_requires -> "misplaced_requires"
     | Misplaced_potential -> "misplaced_potential"
     | Increment -> "increment"
     | Double_negation -> "double_negation"
@@ -319,6 +344,8 @@ module Code = struct
     | Not_a_record -> "not_a_record"
     | Unknown_variant -> "unknown_variant"
     | Wrong_yield -> "wrong_yield"
+    | Not_structural -> "not_structural"
+    | Not_replaceable -> "not_replaceable"
     | Specification_only -> "specification_only"
     | Not_in_specification -> "not_in_specification"
     | Wrong_receiver -> "wrong_receiver"
@@ -390,6 +417,23 @@ module Code = struct
     | Instantiation_cycle -> "instantiation_cycle"
     | Duplicate_test -> "duplicate_test"
 
+  let prover_name code =
+    match code with
+    | Overflow -> "overflow"
+    | Division -> "division"
+    | Shift -> "shift"
+    | Fits -> "fits"
+    | Requires -> "requires"
+    | Ensures -> "ensures"
+    | Invariant -> "invariant"
+    | Termination -> "termination"
+    | Assertion -> "assertion"
+    | Law -> "law"
+    | Cost -> "cost"
+    | Disjoint -> "disjoint"
+    | Unreachable -> "unreachable"
+    | Unsupported -> "unsupported"
+
   let name = function
     | Lexer code -> "lexer." ^ lexer_name code
     | Parser code -> "parser." ^ parser_name code
@@ -400,6 +444,7 @@ module Code = struct
     | Ownership code -> "ownership." ^ ownership_name code
     | Capabilities code -> "capabilities." ^ capabilities_name code
     | Package code -> "package." ^ package_name code
+    | Prover code -> "prover." ^ prover_name code
     | Too_many_diagnostics -> "too_many_diagnostics"
 end
 

@@ -9,8 +9,8 @@ the stages that [TYPECHECKER.md](TYPECHECKER.md) and
 [DATABASE.md](DATABASE.md) designs. It is built in
 [`stage0/cli/`](stage0/cli), which [`stage0/bin/truss.ml`](stage0/bin/truss.ml)
 only starts, except `truss fmt` and `truss lsp`, which wait for the
-formatter and the language server. The prover is not built either, so what
-the commands will do with proofs is stated where it matters.
+formatter and the language server. The prover, which
+[PROVER.md](PROVER.md) designs, is part of `check` and `build`.
 
 ## Principles
 
@@ -155,12 +155,17 @@ truss check [--fix] [--json]
 
 `truss check` runs every stage that can report a diagnostic: lexing,
 parsing, name resolution, type checking, ownership, capabilities and
-dependency grants, package-wide checks, and proofs, once the prover exists.
+dependency grants, package-wide checks, and proofs.
 Proofs are part of checking, not a separate command, because DESIGN.md
 makes every promise in a signature something the compiler proves; a package
 whose proofs have not been checked has not been checked. Proofs are modular
-and cached, so this costs O(change) like the rest. Code generation reports
-nothing, so `check` never builds.
+and cached, so this costs O(change) like the rest. A file is proven once it
+type-checks, since the prover reads what type checking makes. `check` needs
+the pinned solver, as `run` needs a C compiler, and without it cannot do its
+job. Code generation reports nothing, so `check` builds only the checks of
+tagged templates, which PROVER.md's "Running code while proving" runs, kept
+under the key of their code as test results are. `test` and `run` do not
+wait for proofs, as DESIGN.md's "Tests do not wait for proofs" says.
 
 It prints each diagnostic as `Diagnostic.render` does, at most
 `Diagnostic.limit` of them in each file, and then a count. The JSON document
@@ -299,9 +304,9 @@ begins with `-`. **`--release`** builds as `truss build` does, refusing an
 **`truss build`** builds a release program, as CODEGEN.md's "C files and
 optimization" describes: at `-O2`, optimized across every file as they are
 linked, with ThinLTO where the C compiler is clang. It refuses a program
-whose `main` can reach a `todo` or an `echo`, in code or, once the prover
-exists, in a proof, and lists each one with the definitions on the way from
-`main` to it:
+whose proofs are not done, as `check` reports them, and one whose `main` can
+reach a `todo` or an `echo`, in code or in a proof, and lists each one, a
+`todo` in code with the definitions on the way from `main` to it:
 
 ```text
 render.truss:12:14: `todo` can be reached from `main`, so the program cannot be built.
@@ -347,8 +352,8 @@ truss holes [--json] [FILE_OR_DIRECTORY...]
 Lists every `todo` in the package, or in the named files, as DESIGN.md's
 "Unfinished code" asks: its position, the type it must have, the names in
 scope with their types, and what it blocks, which is `main`, if `main` can
-reach it, and each test that can, and once the prover exists, each proof
-that depends on it. Each hole is a task a person or agent can take on its
+reach it, and each test that can. A `todo` in a theorem or a `proof` block
+is a hole in a proof, listed the same way. Each hole is a task a person or agent can take on its
 own. A type defined as `todo` is listed too.
 
 ```text
@@ -575,9 +580,9 @@ deletes the store, which only costs time.
   UndefinedBehaviorSanitizer and keeps no test results, as CODEGEN.md's
   "Testing" describes. It is left out of each command's help.
 - **`--check-proofs`,** on `test`, `run`, and `build`, is to emit a run-time
-  check for every proven obligation once the prover exists. Stage0 has no
-  prover, so all its builds check what a prover would prove, and the flag
-  comes with the prover.
+  check for every proven obligation. Stage0's builds keep every run-time
+  check whether or not its proofs are done, so they all check what the
+  prover proves, and the flag is not built yet.
 - **`stage0/tools/debug`** prints a file's tokens, one a line, or each
   definition's syntax tree as an S-expression, with its diagnostics, as
   `dune exec stage0/tools/debug/debug.exe -- tokens FILE` or `tree FILE`.

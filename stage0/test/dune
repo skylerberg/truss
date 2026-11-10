@@ -19,6 +19,7 @@
   package_checks_tests
   documents_tests
   manifest_tests
+  prover_tests
   scale_tests)
  (libraries
   harness
@@ -46,6 +47,9 @@
   resolve
   standard_library
   support
+  logic
+  solver
+  prover
   parse_support
   types
   intrinsic

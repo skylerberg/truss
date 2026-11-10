@@ -74,7 +74,7 @@ let fix (project : Project.t) =
 let run ~directory ~fix:fixing ~json =
   let project = Project.load directory in
   let fixed = if fixing then fix project else [] in
-  let report = Report.gather project in
+  let report = Report.gather ~proofs:true project in
   let overlaps = Overlap_command.with_other_worktrees project.session in
   if json then
     Json.print

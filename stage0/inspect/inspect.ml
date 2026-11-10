@@ -84,6 +84,9 @@ let describe_target (target : Resolve.target) =
   | Field name -> (Printf.sprintf "the field %s" name, None)
   | Result_value -> ("the result, in a specification", None)
   | Old -> ("a value as it was when the function was called", None)
+  | Identical -> ("identity of two values, in a specification", None)
+  | Yielded -> ("the parts handed out so far, in a specification", None)
+  | Finished -> ("whether the method has ended, in a specification", None)
   | Cost_function _ -> ("a cost function", None)
   | Unknown -> ("nothing: the name is not known", None)
 

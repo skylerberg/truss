@@ -58,6 +58,9 @@ module Code : sig
     | Repeated_clause
     | Cost_word
     | Finite_not_time
+    | Loop_cost_bound
+    | Function_type_names
+    | Misplaced_requires
     | Misplaced_potential
     | Increment
     | Double_negation
@@ -131,6 +134,8 @@ module Code : sig
     | Wrong_yield
     | Specification_only
     | Not_in_specification
+    | Not_structural
+    | Not_replaceable
     | Wrong_receiver
     | Not_indexable
     | Implements_built_in
@@ -181,6 +186,22 @@ module Code : sig
     | Provide_mark
     | Not_an_implementation
 
+  type prover =
+    | Overflow
+    | Division
+    | Shift
+    | Fits
+    | Requires
+    | Ensures
+    | Invariant
+    | Termination
+    | Assertion
+    | Law
+    | Cost
+    | Disjoint
+    | Unreachable
+    | Unsupported
+
   type package =
     | Impl_location
     | Overlapping_impls
@@ -201,6 +222,7 @@ module Code : sig
     | Ownership of ownership
     | Capabilities of capabilities
     | Package of package
+    | Prover of prover
     | Too_many_diagnostics
 
   val name : t -> string

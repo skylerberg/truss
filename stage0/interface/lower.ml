@@ -329,12 +329,15 @@ and costs clauses =
             | Allocated_bytes -> "allocated_bytes"
             | Calls _ -> "calls"
           in
-          let bound =
+          let constant (value : expression) =
+            match value.kind with Integer value -> Some value | _ -> None
+          in
+          let bound : T.cost_bound =
             match cost.bound with
-            | Finite -> "finite"
-            | Big_o _ -> "O(...)"
-            | At_most _ -> "<= ..."
-            | Exactly _ -> "== ..."
+            | Finite -> Finite_cost
+            | Big_o _ -> Order_of
+            | At_most value -> No_more_than (constant value)
+            | Exactly value -> Exactly_cost (constant value)
           in
           Some { T.amortized = cost.amortized; resource; bound }
       | _ -> None)
@@ -364,8 +367,16 @@ let generics context owner (written : generic_parameter list) : T.generic list =
       | `Capability -> { T.generic = parameter; kind = Capability_generic })
     declared
 
+(* The types that exist only in specifications: [Integer], and the
+   mathematical collections of [standard::specification]. *)
+let specification_type (path : Path.t) =
+  match path with
+  | Top { module_ = { package = "standard"; modules = [ "specification" ] }; _ } -> true
+  | _ -> false
+
 let rec mentions_integer = function
   | T.Integer -> true
+  | T.Named { path; _ } when specification_type path -> true
   | T.Named { arguments; _ } | T.Cursor { arguments; _ } ->
       List.exists
         (function T.Type type_ -> mentions_integer type_ | T.Value _ | T.Capabilities _ -> false)
@@ -437,7 +448,11 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
     uses;
     terminates;
     specification_only =
-      mentions_integer result_type
+      (* [Model]'s method gives a value in mathematical terms. *)
+      (match owner with
+        | Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Model" } -> true
+        | _ -> false)
+      || mentions_integer result_type
       || List.exists
            (fun (parameter : T.parameter_info) -> mentions_integer parameter.type_)
            parameters;

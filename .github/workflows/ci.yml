@@ -40,6 +40,8 @@ jobs:
           key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
           restore-keys: dune-${{ steps.opam.outputs.key }}-
 
+      - uses: ./.github/actions/z3
+
       - name: Build, check formatting and truss.opam, and test
         run: opam exec -- dune build @default @install @fmt @runtest
 
@@ -73,6 +75,9 @@ jobs:
           path: ~/.cache/dune
           key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
           restore-keys: dune-${{ steps.opam.outputs.key }}-
+
+      # The codegen tests include running the prover on templates.
+      - uses: ./.github/actions/z3
 
       - name: Test generated code under sanitizers
         env:

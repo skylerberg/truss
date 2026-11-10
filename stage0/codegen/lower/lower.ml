@@ -151,6 +151,93 @@ let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list
       ~result:None,
     List.rev !owned )
 
+(* Code run while compiling, for a tagged template's check: a template of
+   the literal texts and no parts, given to the tag's [from_template]'s
+   clauses that can run, each worked out and written out as a [Bool], in
+   order. A clause that reads the template's parts is not asked of it; the
+   prover asks only those that read its literals. See CODEGEN.md, "Code run
+   while compiling". *)
+let check_state context from_template =
+  let code = code_of context from_template [] in
+  let st =
+    {
+      context;
+      frame =
+        {
+          code;
+          bindings = Hashtbl.create 4;
+          self_place = None;
+          on_yield = None;
+          inlined = [ from_template ];
+          exit = None;
+        };
+      b = Lir_builder.create ();
+      scopes = [ { owned = [] } ];
+      loops = [];
+      temporaries = [];
+      return_ = None;
+      result_local = None;
+      nested = ref [];
+      evidence = [];
+      pulling = false;
+    }
+  in
+  (st, code)
+
+(* The positions, among a tag's [from_template]'s clauses, of those a
+   template check works out. *)
+let template_checked context from_template =
+  let st, code = check_state context from_template in
+  List.concat
+    (List.mapi (fun index clause -> if executable st clause then [ index ] else []) code.requires)
+
+let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
+  let st, code = check_state context from_template in
+  let b = st.b in
+  start b (block b);
+  let call ?result intrinsic arguments =
+    emit b
+      (Call
+         {
+           target = Intrinsic intrinsic;
+           arguments;
+           result = (match result with Some r -> Lir.Returned r | None -> Discarded);
+         })
+  in
+  in_scope st (fun () ->
+      (match code.parameter_types with
+      | [ (_, ty, (parameter : S.parameter)) ] -> (
+          let ty = Monomorphic.ground context.monomorphic code.substitution ty in
+          let built = Values.template_value st ty texts ~span:code.body.span ~parts:[] in
+          if not (trivial st ty) then own_in_scope st built;
+          match parameter.kind with
+          | Named_parameter { name; _ } -> Hashtbl.replace st.frame.bindings name.id built
+          | _ -> bug "a from_template without a named parameter")
+      | _ -> bug "from_template takes one template");
+      call Debug_begin [];
+      List.iter
+        (fun clause ->
+          if executable st clause then begin
+            let holds = new_local st context.bool in
+            into st clause holds;
+            Glue.encode_call context.glue b context.bool holds
+          end)
+        code.requires;
+      let bytes = local b (Raw (Pointer Opaque)) and length = new_local st context.types.usize in
+      call ~result:(at bytes) Debug_bytes [];
+      call ~result:length Debug_length [];
+      let written = new_local st context.types.isize in
+      call ~result:written System_write
+        [ Constant (Integer (Int32, Z.one)); Copy (at bytes); Copy length ]);
+  finish b (Return None);
+  {
+    key;
+    main = Lir_builder.build b ~parameters:[] ~result:None;
+    nested =
+      Array.of_list
+        (List.map (function Some f -> f | None -> bug "a lambda left unfinished") !(st.nested));
+  }
+
 let instance context (key : Instance.key) : Lir.t =
   match key with
   | Entry method_key -> entry context key method_key
