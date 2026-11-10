@@ -6,6 +6,7 @@ use standard::processes
 use standard::streams
 use standard::system::calls
 use standard::system::clock
+use standard::system::terminals
 
 internal fn file_error(number: Int32) -> SystemError {
   if number == intrinsic::libc_enoent() {
@@ -332,10 +333,24 @@ impl Handles for SystemHandles {
   }
 
   fn terminal_size(self, terminal: streams::Handle) -> Result[console::Size, SystemError] {
-    todo
+    var size: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(8)
+    for _ in 0..8
+      invariant intrinsic::storage_length(size) == yielded.length()
+      invariant intrinsic::storage_capacity(size) == 8
+    {
+      intrinsic::storage_push(mut size, value: 0)
+    }
+    with_file_error(calls::done(intrinsic::libc_ioctl_tiocgwinsz(descriptor_of(terminal), size: mut size)))?
+    let bytes = intrinsic::storage_view(size)
+    let rows = calls::number_at(bytes, offset: 0, size: 2)
+    let columns = calls::number_at(bytes, offset: 2, size: 2)
+    if rows > 65535 || columns > 65535 {
+      return Err(SystemError.InvalidInput)
+    }
+    Ok(console::Size(columns: intrinsic::convert(columns), rows: intrinsic::convert(rows)))
   }
 
   fn set_raw_mode(self, terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError] {
-    todo
+    with_file_error(terminals::set_raw_mode(descriptor_of(terminal), enabled: enabled))
   }
 }
