@@ -1,4 +1,8 @@
+use standard::console
+use standard::files
 use standard::intrinsic
+use standard::network
+use standard::processes
 
 public opaque type Handle(descriptor: intrinsic::Handle, number: UInt64)
 
@@ -233,5 +237,102 @@ impl Reader for Limited[Source: Reader] {
     uses Handles
   {
     todo
+  }
+}
+
+public type NoHandles()
+
+impl Handles for NoHandles {
+  fn read(self, handle: Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn write(self, handle: Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn read_at(
+    self,
+    handle: Handle,
+    offset: UInt64,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[USize, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn write_at(self, handle: Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn seek(self, handle: Handle, to: Position) -> Result[UInt64, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn set_length(self, handle: Handle, length: UInt64) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn synchronize(self, handle: Handle) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn metadata(self, handle: Handle) -> Result[files::Metadata, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn close(self, handle: own Handle) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn shut_down(self, handle: Handle, direction: network::Direction) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn set_timeout(
+    self,
+    handle: Handle,
+    direction: network::Direction,
+    timeout: Option[Duration],
+  ) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn accept(self, listener: Handle) -> Result[network::Accepted, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn send_to(
+    self,
+    socket: Handle,
+    bytes: Slice[UInt8],
+    address: network::SocketAddress,
+  ) -> Result[USize, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn receive_from(
+    self,
+    socket: Handle,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[network::Datagram, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn wait(self, process: Handle) -> Result[processes::ExitStatus, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn signal(self, process: Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn terminal_size(self, terminal: Handle) -> Result[console::Size, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn set_raw_mode(self, terminal: Handle, enabled: Bool) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
   }
 }

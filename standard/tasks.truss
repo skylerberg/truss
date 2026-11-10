@@ -114,3 +114,9 @@ public fn sleep(duration: Duration)
 }
 
 public type SeededTasks(seed: UInt64)
+
+impl Tasks for SeededTasks {
+  fn yield_now(mut self) {
+    todo
+  }
+}

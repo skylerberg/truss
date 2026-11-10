@@ -1,4 +1,7 @@
+use standard::console
 use standard::intrinsic
+use standard::network
+use standard::processes
 use standard::streams
 use standard::system::handles
 use standard::system::lines
@@ -659,6 +662,101 @@ impl FileWrite for MemoryFiles {
   }
 
   fn set_modified(mut self, path: Path, time: Instant) -> Result[Unit, SystemError] {
+    todo
+  }
+}
+
+impl Handles for MemoryFiles {
+  fn read(mut self, handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn write(mut self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn read_at(
+    mut self,
+    handle: streams::Handle,
+    offset: UInt64,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn write_at(mut self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn seek(mut self, handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError] {
+    todo
+  }
+
+  fn set_length(mut self, handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn synchronize(mut self, handle: streams::Handle) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn metadata(mut self, handle: streams::Handle) -> Result[Metadata, SystemError] {
+    todo
+  }
+
+  fn close(mut self, handle: own streams::Handle) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn shut_down(mut self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn set_timeout(
+    mut self,
+    handle: streams::Handle,
+    direction: network::Direction,
+    timeout: Option[Duration],
+  ) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn accept(mut self, listener: streams::Handle) -> Result[network::Accepted, SystemError] {
+    todo
+  }
+
+  fn send_to(
+    mut self,
+    socket: streams::Handle,
+    bytes: Slice[UInt8],
+    address: network::SocketAddress,
+  ) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn receive_from(
+    mut self,
+    socket: streams::Handle,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[network::Datagram, SystemError] {
+    todo
+  }
+
+  fn wait(mut self, process: streams::Handle) -> Result[processes::ExitStatus, SystemError] {
+    todo
+  }
+
+  fn signal(mut self, process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn terminal_size(mut self, terminal: streams::Handle) -> Result[console::Size, SystemError] {
+    todo
+  }
+
+  fn set_raw_mode(mut self, terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError] {
     todo
   }
 }
