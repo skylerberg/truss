@@ -2647,6 +2647,23 @@ let () =
 (* Queries *)
 
 let () =
+  test "an answer read from the cache is marked as asked now" (fun () ->
+      let directory = Filename.temp_dir "truss-answers" "" in
+      let query =
+        {
+          Logic.declarations = [ Logic.Constant ("asked.now", Logic.Int) ];
+          facts = [];
+          goal = Logic.Apply (">=", [ Logic.Symbol "asked.now"; Logic.Symbol "asked.now" ]);
+        }
+      in
+      let file = Filename.concat directory (Solver.key query) in
+      Out_channel.with_open_bin file (fun channel -> output_string channel "proven\n");
+      Unix.utimes file 1. 1.;
+      match Solver.find ~cache:directory () with
+      | Error message -> fail "%s" message
+      | Ok cached ->
+          if Solver.solve cached query <> Solver.Proven then fail "expected the stored answer";
+          if (Unix.stat file).st_mtime < 2. then fail "the answer's file was not marked as asked");
   test "a query's text names nothing by its Truss name" (fun () ->
       let database =
         Support.setup [ ("app::main", "fn f(count: UInt8) -> UInt8 {\n  count + 1\n}\n") ]
