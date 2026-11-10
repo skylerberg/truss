@@ -125,6 +125,28 @@ public fn List[Element].slice(self) -> Slice[Element]
   Slice(elements: intrinsic::storage_view(self.storage))
 }
 
+internal fn List[Element].slice_range(self, start: USize, stop: USize) -> Slice[Element]
+  requires start <= stop
+  requires stop <= self.length()
+  ensures result.length() == stop - start
+  ensures forall index in 0..result.length() =>
+    identical(result.model()[index], self.model()[start + index])
+  cost time O(1)
+{
+  self.slice().slice_range(start, stop: stop)
+}
+
+internal fn Slice[Element].slice_range(self, start: USize, stop: USize) -> Slice[Element]
+  requires start <= stop
+  requires stop <= self.length()
+  ensures result.length() == stop - start
+  ensures forall index in 0..result.length() =>
+    identical(result.model()[index], self.model()[start + index])
+  cost time O(1)
+{
+  Slice(elements: intrinsic::view_slice(self.elements, start, stop))
+}
+
 impl Iterable for List[Element] {
   type Element = Element
 
