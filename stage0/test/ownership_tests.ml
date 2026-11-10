@@ -72,6 +72,14 @@ let () =
           }\n"))
 
 let () =
+  test "the default of a parameter of a view type views a value that lasts for the call" (fun () ->
+      fine
+        "fn greet(name: StringSlice = \"world\", tags: Slice[Int64] = [1, 2]) -> USize {\n\
+        \  name.length() + tags.length()\n\
+         }\n\n\
+         fn f() -> USize {\n\
+        \  greet() + greet(\"you\")\n\
+         }\n");
   test "a moved place cannot be used, with a fix that copies at the move" (fun () ->
       one_diagnostic
         (keep ^ "fn f(items: own List[Int64]) {\n  keep(own items)\n  look(items)\n}\n")

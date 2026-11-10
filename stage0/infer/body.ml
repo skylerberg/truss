@@ -143,7 +143,12 @@ let check_defaults state env (written : parameter list) (signature : T.signature
               signature.parameters
           with
           | Some info ->
-              in_statement state env value.span (fun () -> check state env value info.type_);
+              (* A default is the argument of a call that leaves the
+                 parameter out, so it converts as an argument does: an owned
+                 collection becomes its view. *)
+              in_statement state env value.span (fun () ->
+                  let found = expression state env ~expected:info.type_ value in
+                  ignore (Lookups.coerce state env ~argument:true value ~found ~expected:info.type_));
               Constant.check state ~default:true value
           | None -> ())
       | _ -> ())
