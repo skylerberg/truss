@@ -929,6 +929,22 @@ let source_at database (path : Path.t) =
                      (Method { owner = impl.implements.trait; name; receiver })))
         | None, _ -> None)
 
+(* What a trait's clauses and laws are read with for a type: [Self] the
+   type, and each of the trait's parameters its argument. *)
+let trait_substitution database (trait : T.trait_reference) (ty : T.ty) =
+  let generics =
+    match Query.demand database Interface.Environment.interface trait.trait with
+    | Some (Interface.Environment.Trait_interface interface) ->
+        List.map (fun (generic : T.generic) -> generic.generic) interface.trait_generics
+    | _ -> []
+  in
+  let rec pair generics arguments =
+    match (generics, arguments) with
+    | generic :: generics, argument :: arguments -> (generic, argument) :: pair generics arguments
+    | _ -> []
+  in
+  ({ T.owner = trait.trait; name = "Self" }, T.Type ty) :: pair generics trait.trait_arguments
+
 (* A form's clauses about what it defines. *)
 let part_of ?(inherited = false) callee =
   match callee.core.definition with
@@ -950,6 +966,71 @@ let part_of ?(inherited = false) callee =
   | _ -> None
 
 let body_of callee = match callee.core.definition with Function { body; _ } -> body | _ -> None
+
+let holds_todo (body : block) =
+  let found = ref false in
+  Core_walk.block
+    (Core_walk.deep
+       {
+         Core_walk.ignore_all with
+         expression =
+           (fun (node : Core.expression) -> match node.kind with Todo -> found := true | _ -> ());
+       })
+    body;
+  !found
+
+(* The [proof]s written for a trait's laws on a type, in the package: each
+   law's name, with the proof's source and body. *)
+let law_proofs database package (trait : T.trait_reference) (for_type : T.ty) =
+  let same_argument (left : T.argument) (right : T.argument) =
+    match (left, right) with Type left, Type right -> T.equal left right | _ -> left = right
+  in
+  let head = match for_type with Named { path; _ } -> Some path | _ -> None in
+  List.concat_map
+    (fun module_ ->
+      List.filter_map
+        (fun (declaration : Names.declaration) ->
+          match
+            ( declaration.kind,
+              Query.demand database Interface.Environment.interface declaration.path )
+          with
+          | Law_proof, Some (Interface.Environment.Law_proof_interface proven)
+            when Path.equal proven.trait.trait trait.trait
+                 && List.equal same_argument proven.trait.trait_arguments trait.trait_arguments
+                 &&
+                 match (proven.for_type, head) with
+                 | Named { path; _ }, Some head -> Path.equal path head
+                 | _ -> false -> (
+              match source_at_key database (Names.key_of declaration) with
+              | Some ({ core = { definition = Law_proof body; _ }; _ } as source) ->
+                  Some (proven.law, (source, body))
+              | _ -> None)
+          | _ -> None)
+        (Query.demand database Names.declarations module_))
+    (Query.demand database Workspace.modules package)
+
+(* Whether an [impl] writes a method whose body holds a [todo]. Its laws
+   are about what its methods return, so they wait, as the methods'
+   contracts do. *)
+let impl_unfinished database (key : Names.key) =
+  List.exists
+    (fun (method_ : Names.key) ->
+      match source_at_key database method_ with
+      | Some { core = { definition = Function { body = Some body; _ }; _ }; _ } -> holds_todo body
+      | _ -> false)
+    (Query.demand database Names.contained key)
+
+(* Whether an [impl]'s law is not shown: the [impl] is unfinished, so its
+   laws wait, or the law's proof holds a [todo]. A proof that assumes it
+   has a hole there. *)
+let law_unshown database (impl : Path.t) (trait : T.trait_reference) for_type name =
+  match Query.demand database Interface.Summary.key impl with
+  | Some key ->
+      impl_unfinished database key
+      || List.exists
+           (fun (law, (_, body)) -> law = name && holds_todo body)
+           (law_proofs database (Path.package impl) trait for_type)
+  | None -> false
 
 (* Whether a body is functional, so that it can be the function's
    definition: [let], [if], [match], [is], calls, fields, building values,
@@ -2120,17 +2201,18 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
   | Trait_method { trait; name; receiver; evidence; self_type; type_arguments } -> (
       let arguments = arguments_of type_arguments in
       let self_type = substituted context frame self_type in
+      let trait = { trait with trait_arguments = arguments_of trait.trait_arguments } in
       (* A bound on [Self], read where [Self] is a known type, as in a law
          proven for one [impl], reaches that type's [impl]. *)
       let evidence : evidence =
         match evidence with
         | Bound -> (
-            match concrete_impl context trait.trait self_type with
+            match concrete_impl context trait self_type with
             | Some (impl, arguments) -> Impl { impl; arguments }
             | None -> evidence)
         | _ -> evidence
       in
-      assume_laws context frame trait.trait self_type;
+      assume_laws context frame ~at:span trait self_type;
       let operands () = List.map (fun (passed : passed) -> passed.term) values in
       match (name, evidence, operands ()) with
       | "equal", _, [ a; b ] when Path.equal trait.trait equal_trait && structural context self_type
@@ -2154,17 +2236,8 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
           let trait_path = Path.Method { owner = trait.trait; name; receiver } in
           (* The trait's clauses are about [Self] and the trait's parameters. *)
           let trait_substitution =
-            let trait_generics =
-              match Query.demand context.database Interface.Environment.interface trait.trait with
-              | Some (Interface.Environment.Trait_interface interface) ->
-                  List.map (fun (generic : T.generic) -> generic.generic) interface.trait_generics
-              | _ -> []
-            in
-            let given =
-              ({ T.owner = trait.trait; name = "Self" }, T.Type self_type)
-              :: pair trait_generics (arguments_of trait.trait_arguments) ~given:[]
-            in
-            pair (generics_of trait_path) arguments ~given
+            pair (generics_of trait_path) arguments
+              ~given:(trait_substitution context.database trait self_type)
           in
           let path, own_substitution =
             match evidence with
@@ -3125,8 +3198,10 @@ and updating_helper context (call_ : call) =
 (* The [impl] of a trait for a known type, with what its generic parameters
    stand for there. An [impl] whose parameters have bounds is taken only in
    its own proofs, where they are what is assumed: elsewhere this cannot
-   tell whether they hold. *)
-and concrete_impl context trait (ty : T.ty) =
+   tell whether they hold. The [impl] is of the trait with these arguments,
+   so a type with an [impl] of [Scale[Int64]] and one of [Scale[Bool]]
+   reaches each by its own. *)
+and concrete_impl context (trait : T.trait_reference) (ty : T.ty) =
   match ty with
   | Named { path; _ } ->
       let packages = List.sort_uniq compare [ Path.package context.current; Path.package path ] in
@@ -3146,13 +3221,18 @@ and concrete_impl context trait (ty : T.ty) =
                   let variables =
                     List.map (fun (generic : T.generic) -> generic.generic) interface.impl_generics
                   in
-                  match Interface.Impls.match_type ~variables [] interface.for_type ty with
+                  match
+                    Option.bind (Interface.Impls.match_type ~variables [] interface.for_type ty)
+                      (fun arguments ->
+                        Interface.Impls.match_arguments ~variables arguments
+                          interface.implements.trait_arguments trait.trait_arguments)
+                  with
                   | Some arguments -> Some (impl, arguments)
                   | None -> None)
               | _ -> None)
             (Call_graph.impls_for
                (Query.demand context.database Call_graph.package_impls package)
-               [ trait ] ty))
+               [ trait.trait ] ty))
         packages
   | _ -> None
 
@@ -3160,20 +3240,33 @@ and concrete_impl context trait (ty : T.ty) =
    type, each quantified over its parameters. A law is shown for each
    [impl] written by hand, by the [impl], so it is a fact wherever the
    trait's methods are used. *)
-and assume_laws context frame trait (ty : T.ty) =
-  let key = Path.show trait ^ " for " ^ type_key ty in
+and assume_laws context frame ~at (trait : T.trait_reference) (ty : T.ty) =
+  let key = laws_key trait ty in
   if not (List.mem key context.laws_assumed) then begin
     context.laws_assumed <- key :: context.laws_assumed;
     List.iter
-      (fun trait ->
+      (fun path ->
+        let required =
+          if Path.equal path trait.trait then trait
+          else { T.trait = path; trait_arguments = []; associated = [] }
+        in
+        let substitution = trait_substitution context.database required ty in
+        let impl = Option.map fst (concrete_impl context required ty) in
         List.iter
           (fun (source, (law : law)) ->
-            match law_fact context frame source trait ty law with
-            | Some law -> fact context frame law
+            match law_fact context frame source ~substitution law with
+            | Some fact_ ->
+                (match impl with
+                | Some impl when law_unshown context.database impl required ty law.name ->
+                    context.holes <- (context.home, at) :: context.holes
+                | _ -> ());
+                fact context frame fact_
             | None -> ())
-          (laws_of context trait))
-      (Call_graph.traits_with_required context.database trait)
+          (laws_of context path))
+      (Call_graph.traits_with_required context.database trait.trait)
   end
+
+and laws_key (trait : T.trait_reference) ty = T.show_trait trait ^ " for " ^ type_key ty
 
 and laws_of context trait =
   match
@@ -3185,9 +3278,10 @@ and laws_of context trait =
       List.map (fun (law : law) -> (source, law)) laws
   | _ -> []
 
-(* A law's frame: its parameters as the given terms, with [Self] the type. *)
-and law_frame frame source trait ty (law : law) terms =
-  let types = law_parameter_types source trait ty law in
+(* A law's frame: its parameters as the given terms, with [Self] and the
+   trait's parameters as the substitution says. *)
+and law_frame frame source ~substitution (law : law) terms =
+  let types = law_parameter_types ~substitution law in
   let locals, types =
     List.fold_left2
       (fun (locals, types_) ((parameter : Core.parameter), ty) term ->
@@ -3208,18 +3302,17 @@ and law_frame frame source trait ty (law : law) terms =
     checking = false;
     loop = None;
     updating = None;
-    substitution = [ ({ T.owner = trait; name = "Self" }, T.Type ty) ];
+    substitution;
     self_type = None;
   }
 
-and law_parameter_types _source trait ty (law : law) =
+and law_parameter_types ~substitution (law : law) =
   List.map
-    (fun (parameter : Core.parameter) ->
-      T.substitute [ ({ T.owner = trait; name = "Self" }, T.Type ty) ] parameter.type_)
+    (fun (parameter : Core.parameter) -> T.substitute substitution parameter.type_)
     law.parameters
 
-and law_fact context frame source trait ty (law : law) =
-  let types = law_parameter_types source trait ty law in
+and law_fact context frame source ~substitution (law : law) =
+  let types = law_parameter_types ~substitution law in
   if List.exists (fun ty -> T.is_error ty) types then None
   else begin
     context.fresh <- context.fresh + 1;
@@ -3227,7 +3320,7 @@ and law_fact context frame source trait ty (law : law) =
     let inside =
       law_frame
         { frame with bound = symbols @ frame.bound }
-        source trait ty law
+        source ~substitution law
         (List.map (fun s -> L.Symbol s) symbols)
     in
     try
@@ -7164,10 +7257,17 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
            call reaches one and otherwise by the trait's, with [Self] the
            type it is called on. *)
         let self_type = substituted context frame self_type in
+        let trait =
+          {
+            trait with
+            trait_arguments =
+              List.map (T.substitute_argument frame.substitution) trait.trait_arguments;
+          }
+        in
         let evidence : evidence =
           match evidence with
           | Bound -> (
-              match concrete_impl context trait.trait self_type with
+              match concrete_impl context trait self_type with
               | Some (impl, arguments) -> Impl { impl; arguments }
               | None -> evidence)
           | _ -> evidence
@@ -8032,13 +8132,13 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
   let home = match source.key with Some key -> key | None -> invalid_arg "Translate.laws" in
   let context = new_context database ~home ~current:impl ~terminates:false ~measures:[] in
   let start = empty_frame source in
+  let substitution = trait_substitution database trait for_type in
   List.iter
     (fun (law_source, (law : law)) ->
-      let types = law_parameter_types law_source trait for_type law in
+      let types = law_parameter_types ~substitution law in
       if not (List.exists (fun ty -> T.is_error ty) types) then begin
         (* The other laws are facts here, and this one is not. *)
-        context.laws_assumed <-
-          (Path.show trait ^ " for " ^ type_key for_type) :: context.laws_assumed;
+        context.laws_assumed <- laws_key trait for_type :: context.laws_assumed;
         let terms =
           List.map
             (fun ty ->
@@ -8060,18 +8160,19 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
                (fun (name, proof) -> if name = law.name then Some proof else None)
                proofs)
         in
-        let inside = law_frame start law_source trait for_type law terms in
+        let inside = law_frame start law_source ~substitution law terms in
         List.iter
           (fun clause -> assume context start (snd (clause_value context inside clause)))
           law.requires;
         match block_value context inside law.body with
         | Some (_, holds) ->
             oblige context start Law at
-              (Printf.sprintf "The law `%s` may not hold for `%s`." law.name (T.show for_type))
+              (Printf.sprintf "The law `%s.%s` may not hold for `%s`." (T.show_trait trait) law.name
+                 (T.show for_type))
               holds
         | None -> ()
       end)
-    (laws_of context trait);
+    (laws_of context trait.trait);
   outcome context
 
 (* A type's own clauses. Each invariant is well defined for a value whose

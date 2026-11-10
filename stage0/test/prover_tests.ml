@@ -2512,7 +2512,83 @@ let () =
          {\n\
         \  Box().scale(0)\n\
          }\n"
-        "prover.ensures")
+        "prover.ensures");
+  test "a law of an unfinished impl is a hole where it is assumed" (fun () ->
+      let text =
+        "trait Sized {\n\
+        \  fn measure(self) -> Int64\n\
+        \    cost time finite\n\
+        \  fn label(self) -> Int64\n\
+        \    cost time finite\n\n\
+        \  law positive(value: Self) { value.measure() > 0 }\n\
+         }\n\n\
+         type Box(size: Int64)\n\n\
+         impl Sized for Box {\n\
+        \  fn measure(self) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    self.size\n\
+        \  }\n\n\
+        \  fn label(self) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    todo\n\
+        \  }\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  ensures result > 0\n\
+         {\n\
+        \  Box(size: 0).measure()\n\
+         }\n"
+      in
+      if holes text <> 1 then fail "%d holes" (holes text));
+  test "a law whose proof holds a todo is a hole where it is assumed" (fun () ->
+      let text =
+        "trait Zero {\n\
+        \  fn zero(self) -> UInt8\n\
+        \    cost time finite\n\n\
+        \  law is_zero(value: Self) { value.zero() == 0 }\n\
+         }\n\n\
+         impl Zero for UInt8 {\n\
+        \  fn zero(self) -> UInt8\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    self\n\
+        \  }\n\
+         }\n\n\
+         proof Zero.is_zero for UInt8 {\n\
+        \  todo\n\
+         }\n\n\
+         fn f(x: UInt8) -> UInt8\n\
+        \  ensures result == 0\n\
+         {\n\
+        \  x.zero()\n\
+         }\n"
+      in
+      if holes text <> 2 then fail "%d holes" (holes text));
+  test "each impl of a trait with arguments keeps its own laws" (fun () ->
+      not_proven
+        "trait Scale[Factor] {\n\
+        \  fn scale(self, by: Factor) -> Int64\n\
+        \    cost time finite\n\n\
+        \  law zero(value: Self, by: Factor) { value.scale(by) == 0 }\n\
+         }\n\n\
+         type Box()\n\n\
+         impl Scale[Int64] for Box {\n\
+        \  fn scale(self, by: Int64) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    0\n\
+        \  }\n\
+         }\n\n\
+         impl Scale[Bool] for Box {\n\
+        \  fn scale(self, by: Bool) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    1\n\
+        \  }\n\
+         }\n"
+        "prover.law")
 
 (* Concurrent code *)
 
