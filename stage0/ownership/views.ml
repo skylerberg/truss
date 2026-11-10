@@ -456,11 +456,20 @@ let check context (graph : Graph.t) =
     let changes = ref [] and uses = ref [] in
     for index = range.first to range.limit - 1 do
       let point = graph.points.(index) in
+      (* A use of a view is a use of what it views, and a write through a
+         slice changes what the slice views. *)
+      let viewed place =
+        List.map
+          (fun (view : view) -> view.place)
+          (resolve before.(index) [ { place; taken = true } ])
+      in
       match point.action with
-      | Read place -> uses := place :: !uses
+      | Read place -> uses := (place :: viewed place) @ !uses
       | Mutate place ->
-          uses := place :: !uses;
+          uses := (place :: viewed place) @ !uses;
           changes := (place, point.origin) :: !changes
+      | Write_through place ->
+          changes := List.map (fun viewed -> (viewed, point.origin)) (viewed place) @ !changes
       | Assign place -> changes := (place, point.origin) :: !changes
       | Move { place; type_; returned; captured; _ } -> (
           uses := place :: !uses;
