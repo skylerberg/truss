@@ -1083,6 +1083,18 @@ let () =
          \  let _ = check\n\
           }\n")
         "types.unsatisfied_bound");
+  test "an `is` test settles the type of what it tests before its pattern is checked" (fun () ->
+      fine
+        "type Span(ticks: Int64)\n\n\
+         impl Divide[Int64] for Span {\n\
+        \  type Output = Option[Span]\n\n\
+        \  fn divide(self, right: Int64) -> Option[Span] {\n\
+        \    todo\n\
+        \  }\n\
+         }\n\n\
+         fn f(span: Span) -> Bool {\n\
+        \  span / 0 is None\n\
+         }\n");
   test "a `for` over a call to `each` binds what the call yields" (fun () ->
       fine
         "fn total(items: List[Int64]) -> Int64 {\n\

@@ -125,7 +125,11 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | Any inner -> any_ state env ?expected value inner
   | Binary { operator; left; right; _ } -> binary state env ?expected value operator left right
   | Is { value = tested; pattern = written; _ } ->
-      let tested_type = expression state env tested in
+      (* The type of the tested value is inferred before the pattern is
+         checked, as for the scrutinees of a [match]. *)
+      let tested_type =
+        in_statement state env tested.span (fun () -> expression state env tested)
+      in
       let mode = scrutinee_mode state tested in
       pattern state env written tested_type ~mode;
       register_expression state value (fun () ->
