@@ -277,7 +277,13 @@ public trait Iterable {
   fn find(self, matching: (fn(Self.Element) -> Bool cost time finite)) lends Option[Self.Element]
     cost time finite
   {
-    todo
+    for item in self {
+      if matching(item) {
+        yield Some(item)
+        return
+      }
+    }
+    yield None
   }
 
   fn min_by(
