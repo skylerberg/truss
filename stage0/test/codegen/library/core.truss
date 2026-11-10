@@ -86,3 +86,22 @@ test "find lends the first element that matches" {
   let none: List[String] = []
   assert none.find(fn(word) { word.is_empty() }) is None
 }
+
+test "get_or_insert fills an empty option and lends what it holds to change" {
+  var slot: Option[Int64] = None
+  mut slot.get_or_insert(5) += 1
+  assert slot == Some(6)
+  mut slot.get_or_insert(100) += 1
+  assert slot == Some(7)
+  var name: Option[String] = None
+  mut name.get_or_insert("a${1}").push("b")
+  assert name == Some("a1b")
+}
+
+test "a system error says what went wrong" {
+  assert "${SystemError.NotFound}" == "no such file or directory"
+  assert "${SystemError.PermissionDenied}" == "permission denied"
+  assert "${SystemError.TimedOut}" == "timed out"
+  assert "${SystemError.Closed}" == "closed"
+  assert "${SystemError.Other(code: 71)}" == "system error 71"
+}

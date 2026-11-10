@@ -2,8 +2,14 @@ public type Level = Debug | Information | Warning | Error
   derives Equal, Hash, Ordered
 
 impl Display for Level {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Debug => mut output.write("debug")
+      Information => mut output.write("information")
+      Warning => mut output.write("warning")
+      Error => mut output.write("error")
+    }
   }
 }
 
@@ -135,8 +141,13 @@ public type WithFields(fields: List[Field])
 impl Log for WithFields
   uses Log
 {
-  fn record(self, record: Record) {
-    todo
+  fn record(self, record: Record)
+  {
+    var fields = self.fields.copy()
+    for field in record.fields {
+      mut fields.push(field.copy())
+    }
+    Log.record(Record(level: record.level, message: record.message.copy(), fields: own fields))
   }
 
   fn enabled(self, level: Level) -> Bool {

@@ -23,3 +23,12 @@ test "a command's builders each return the command with one thing set" {
   assert command.argument_list().length() == 1
   assert command.program().length() == 4
 }
+
+test "a finished command's output is text when it is UTF-8" {
+  let finished = processes::Output(status: processes::ExitStatus.Exited(code: 0), output: [104, 195, 169], error_output: [])
+  assert finished.text() is Ok(text) && text == "h\u{e9}"
+  let broken = processes::Output(status: processes::ExitStatus.Exited(code: 1), output: [104, 255], error_output: [])
+  assert broken.text() is Err(error) && error.valid_up_to == 1
+  let silent = processes::Output(status: processes::ExitStatus.Exited(code: 0), output: [], error_output: [33])
+  assert silent.text() is Ok(text) && text.is_empty()
+}
