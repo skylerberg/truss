@@ -284,6 +284,14 @@ let () =
   test "a statement's value must be used, with a fix that discards it" (fun () ->
       one_diagnostic "fn f(items: List[Int64]) {\n  items.length()\n}\n" "types.unused_value"
         ~fixed:"fn f(items: List[Int64]) {\n  let _ = items.length()\n}\n");
+  test "the default of a parameter of a view type can be an owned value" (fun () ->
+      fine
+        "fn greet(name: StringSlice = \"world\", tags: Slice[Int64] = [1, 2]) -> USize {\n\
+        \  name.length() + tags.length()\n\
+         }\n\n\
+         fn f() -> USize {\n\
+        \  greet() + greet(\"you\")\n\
+         }\n");
   test "a let cannot be assigned" (fun () ->
       one_diagnostic "fn f() {\n  let count = 0\n  count = 1\n}\n" "types.not_assignable");
   List.iter
