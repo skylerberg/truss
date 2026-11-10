@@ -5,6 +5,7 @@
  (name cli)
  (libraries
   unix
+  compiler_bug
   cmdliner
   zarith
   source

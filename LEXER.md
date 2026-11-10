@@ -29,8 +29,8 @@ It does not:
 **The lexer is a pure function of one file's text.** It gets no feedback from
 the parser and has no modes beyond brackets and strings. This is what lets the
 line-break rule be explained by tokens alone, as DESIGN.md promises. It makes
-lexing results cacheable by the file's hash, and it lets the lexer be ported
-directly when the compiler is rewritten in Truss. For the same reason the lexer
+a file's tokens a function of its text, which the code database keeps, and
+it lets the lexer be ported directly when the compiler is rewritten in Truss. For the same reason the lexer
 has no contextual keywords: the words of `cost` clauses, `result`, and `old`
 are ordinary names to it, and the parser recognizes them by their spelling.
 
@@ -68,29 +68,6 @@ line-break rule is a small function of two adjacent tokens and the bracket
 stack, which can be tested and explained on its own, and the scanner needs no
 lookahead across lines.
 
-| OCaml module | Job |
-|---|---|
-| `Unicode` | Character properties, from tables generated for the pinned Unicode version |
-| `Source` | A file's path and bytes, and a table of line starts for turning offsets into lines and columns |
-| `Diagnostic` | Errors with spans and fixes, shared by every stage of the compiler |
-| `Token` | The token types, and the lists of keywords and punctuation |
-| `Scanner` | Bytes to raw tokens |
-| `Layout` | `NEWLINE` tokens and bracket matching |
-| `Lexer` | The entry point: `Lexer.lex : Source.t -> Token.t array * Diagnostic.t list` |
-
-Each module is its own dune library under `stage0/`, so the parser depends
-only on `Token`, `Source`, and `Diagnostic`, and the formatter and language
-server can reuse `Source` and `Diagnostic`. The scanner's library holds:
-
-| Module | Job |
-|---|---|
-| `Cursor` | The scanner's state and byte-level helpers |
-| `Source_text` | UTF-8, forbidden characters, line breaks, and removing trivia |
-| `Trivia` | Comments, `;`, and characters Truss does not use |
-| `Strings` | Ordinary and raw strings, escapes, interpolations, and character literals |
-| `Names`, `Numbers` | The checks on one name or one number literal |
-| `Scanner` | The loop that finds the next token, and punctuation |
-
 The scanner's loop looks at each position once and decides there whether
 it holds trivia or the start of a token, so no second place has to agree
 with it. It stops at every line break: between tokens, the line break is
@@ -98,11 +75,7 @@ trivia, and in an interpolation it is an error. Each scanner for a
 construct that must end on its line, such as an interpolation or an
 ordinary string, returns whether it was `Closed` or `Cut_off` by an error
 already reported, and an enclosing construct that must end on its line
-then ends too, without another error. The dune
-project is at the repository root, so that tests can read the documents.
-`stage0/tools/debug`, a tool of this repository that is not part of the
-`truss` command, prints a file's tokens and its diagnostics with `tokens
-FILE`, or with `--json`, only the diagnostics, as JSON.
+then ends too, without another error.
 
 The scanner uses Layout too: it lays out each interpolation's tokens as it
 reads them, as [Interpolation](#interpolation) asks, so `Layout` defines the
@@ -187,7 +160,7 @@ language does and the rules would have to know every emoji and script.
   always byte ranges. The language server converts to whatever column
   encoding its client asks for.
 - Spans are absolute within the file. Positions relative to a definition (see
-  [DESIGN.md](DESIGN.md#incremental-builds)) are the job of the stage that
+  [DESIGN.md](DESIGN.md#source-code)) are the job of the stage that
   splits a file into definitions. The lexer does not know where definitions
   start.
 
@@ -230,9 +203,7 @@ and interpolation = { tokens : token array; span : span }
 ```
 
 - **Literals keep their value.** A literal's spelling is always the source
-  text under its span, which is what `truss fmt` prints back. Hashes use
-  values, so `0xFF` and `255` hash the same, and so do a raw string and an
-  ordinary string with the same text.
+  text under its span, which is what `truss fmt` prints back.
 - **Integers are Zarith integers of any size.** Whether one fits its type is
   decided by the type checker.
 - **Floats are kept exact.** A float literal takes its type from context.
@@ -258,7 +229,7 @@ and interpolation = { tokens : token array; span : span }
   `::` are ordinary tokens before the string, and the parser joins them.
 - **`line_break_before` drives the layout pass.** `blank_line_before` lets
   `truss fmt` keep blank lines, which it does, collapsing a run of them to
-  one, as Go, Rust, and Gleam do. Hashes ignore both.
+  one, as Go, Rust, and Gleam do.
 - **`keyword`, `reserved`, `punctuation`, and `foreign` have one constructor
   per item,** each built from a single list in `Token`. A test reads the
   keyword and punctuation blocks in GRAMMAR.md and checks them against these
@@ -335,14 +306,6 @@ is `1.0`, `.`, `max`.
 | `0b102`, `0o8`, `0xFG` | The error points at the digit the base does not allow. |
 | `1__000`, `1_`, `0x_FF` | `_` goes only between digits. The fix removes the stray `_`. |
 | `0755`, `007`, `00` | A leading zero. When every digit is 0 to 7, the fixes write `0o755` or `755`. Otherwise the fix drops the zeros. Digits after the `.` and in an exponent may start with zeros. |
-| `1.` *Later* | The fix writes `1.0`. This applies when nothing that could follow a `.` comes after it. |
-| `.5` *Later* | The fix writes `0.5`. This applies when the `.` follows a token that cannot end an expression. |
-| `0x1p3`, `0x1.8` *Later* | Truss has no hexadecimal floats. Write a decimal float. |
-| `1'000` *Later* | The fix writes `1_000`. |
-
-Rows marked *Later* are extra help for habits from other languages, added once
-the compiler works (see [Diagnostics](#diagnostics)). Until then those inputs
-get the plain error that the grammar implies.
 
 When a number has an error, the token keeps the value of its valid prefix, or
 0, so parsing can go on.
@@ -362,11 +325,6 @@ When a number has an error, the token keeps the value of its valid prefix, or
 - `'a'` is a character literal from another language, and SYNTAX.md gives
   its fix, `Character"a"`. The lexer emits the tagged string, so parsing goes
   on.
-
-*Later:* string prefixes from other languages. A `Lower` name followed
-directly by `"` or `'` would be reported with a fix, and the string lexed as
-if it had no prefix. Until then `f"..."` lexes as the name `f` followed by a
-string, which the parser rejects.
 
 | Written | From | Fix |
 |---|---|---|
@@ -388,16 +346,7 @@ line, and the string ends there. Ordinary strings fit on one line, so this
 recovery is almost always right.
 
 The value is the text in UTF-8, with escapes applied. Any other `\` sequence
-is an error. *Later:* escapes from other languages get exact fixes:
-
-| Written | Fix |
-|---|---|
-| `\x41` | `\u{41}` |
-| `\u00E9`, `\U0001F600` | `\u{00E9}`, `\u{1F600}` (leading zeros dropped to fit six digits) |
-| `\'` | `'` |
-| `\a`, `\b`, `\f`, `\v`, `\e` | `\u{7}`, `\u{8}`, `\u{C}`, `\u{B}`, `\u{1B}` |
-| `\(name)` | Swift interpolation: `${name}` |
-| `\` at the end of a line | No fix. The message suggests a raw string. |
+is an error.
 | `\u{D800}`, `\u{110000}`, `\u{}`, `\u{1234567}` | Not a Unicode scalar value, so no fix. |
 
 ### Raw strings
@@ -476,10 +425,8 @@ longest-match tables.
 
 ### Rejected sequences
 
-The first version handles the sequences SYNTAX.md lists: comments, `;`,
-`===`, `!==`, `'`, `` ` ``, `@`, `++`, and `--`. Rows marked *Later* are extra
-help for other habits. None of them changes what the language accepts, since
-each sequence is already an error. Habits fall into two groups:
+The lexer handles the sequences SYNTAX.md lists: comments, `;`, `===`,
+`!==`, `'`, `` ` ``, `@`, `++`, and `--`. Habits fall into two groups:
 
 - **Local fixes.** The fix depends only on the sequence itself. The lexer
   reports it, and applies the fix to its own output, so parsing goes on as if
@@ -492,18 +439,10 @@ each sequence is already an error. Habits fall into two groups:
 |---|---|---|---|
 | `// ...`, `/// ...`, `# ...` | local | Nothing, up to the end of the line | Remove the comment |
 | `/* ... */`, nested | local | Nothing. If the comment spans lines, the next token counts as starting a new line. | Remove the comment. An unterminated one runs to the end of the file and has no fix. |
-| `#[derive(...)]`, `#![...]` *Later* | local | Nothing, up to the end of the line | "Truss has no attributes", pointing to `derives` |
 | `;` | local | At the end of a line, nothing. Mid-line, the next token counts as starting a new line. | Remove the `;`, or replace it with a line break |
 | `===`, `!==` | local | `==`, `!=` | `==`, `!=`. A longer run, such as `====`, is not this habit, and lexes as `==`s. |
-| `<>` *Later* | local | `!=` | `!=` |
-| `...` *Later* | local | `..=` between two operands, otherwise `todo` | `..=`, or `todo` for a placeholder body |
-| `..<` *Later* | local | `..` | `..` |
 | `@`, `` ` `` | local | Nothing | "Not used in Truss" |
-| Look-alike punctuation *Later* | local | The ASCII token | The ASCII character |
 | `++`, `--` | context | `Foreign` | `i += 1`, `i -= 1`, `-(-x)` |
-| `**` *Later* | context | `Foreign` | No fix. Truss has no power operator. |
-| `:=` *Later* | context | `Foreign` | `let name = value` |
-| `\|>` *Later* | context | `Foreign` | Write the call: `function(value)` |
 
 - **Comments.** The fix deletes from the start of the comment, together with
   the whitespace before it, to the end of the line. A line left empty is
@@ -519,12 +458,6 @@ each sequence is already an error. Habits fall into two groups:
 - **`'`.** A character literal from another language, `'a'` or `'\n'`,
   becomes the tagged string `Character"a"`, with a fix. Any other `'` is an
   error without a fix, and is skipped.
-- **Look-alike punctuation** (*Later*) is a small, hand-picked table: curly quotes
-  `“ ” ‘ ’` become `"` and `'`; fullwidth `（ ） ［ ］ ｛ ｝ ， ： ； ＝` become
-  their ASCII forms; no-break and other Unicode spaces become a space; `–` and
-  `—` become `-`; `≤ ≥ ≠ → ⇒` become `<= >= != -> =>`; and `∀ ∃` become
-  `forall` and `exists`. These come from pasted documents, input methods, and
-  habits from Lean and Agda. A curly-quoted `“text”` lexes as a string.
 - **`...` in documentation.** `...` lexes as `..` and `.`, which the parser
   rejects, so the examples in the documents write `todo` for code that is
   left out, as SYNTAX.md recommends for unwritten bodies.
@@ -625,9 +558,8 @@ type t = {
 ```
 
 - Every diagnostic is an error. Truss has no warnings.
-- The first version gives exact fixes for the habits SYNTAX.md lists, and a
-  plain error for any other invalid input. The fixes marked *Later* in this
-  document are added once the compiler works.
+- The habits SYNTAX.md lists get exact fixes, and any other invalid input a
+  plain error.
 - Codes are stable, descriptive names, so tools and agents match on codes, not
   on message text.
 - A diagnostic may offer alternative fixes, as `0755` does.
@@ -688,41 +620,10 @@ type t = {
   does not check interpolations, which are ordinary expressions anyway.
 - **`truss fmt`** prints literals from their spans, and reads
   `blank_line_before`.
-- **Hashing** uses literal values, never spellings or positions.
-- **Incremental work.** The lexer works on whole files, and the background
-  process lexes again only the files that changed. Lexing is linear in the
-  file's size and takes far less time than any later stage, so lexing a file
-  does not threaten the O(change) goal. Lexing one definition at a time could
-  be added later if it were ever needed. Outside strings and brackets, the
-  lexer's state at a definition keyword in column 0 is empty, so tokens before
-  and after an edit could be reused.
-
-## Testing
-
-The tests follow IMPLEMENTATION.md's rules for testing: each states one
-fact about a small input.
-
-- **Focused tests** in `stage0/test/lexer_tests.ml`, grouped by section of
-  this document. A test gives an input and asserts its tokens, shown
-  compactly, or its one diagnostic: the code, where it starts, and the exact
-  text each fix produces, which must lex cleanly.
-- **The documents agree with the code.** Tests read the keyword lists, the
-  punctuation list, and the line-break sets from GRAMMAR.md and compare them
-  with `Token` and `Layout`.
-- **The documents' examples lex cleanly.** Each ` ```truss ` block in a
-  Markdown document at the root of the repository is a test of its own, so a
-  new document is covered without being listed.
-- **The fuzzer**, `stage0/tools/fuzz`, is run by hand. It checks that no
-  input raises or gives spans out of bounds or out of order, that for one
-  mistake inserted into a document example every fix removes its error and
-  adds no other, and that valid tokens round-trip. Each problem it finds becomes a
-  focused test.
-- **The benchmark**, `stage0/tools/benchmark`, measures throughput on given
-  files.
-- **Unicode conformance** runs with `regenerate.sh` (see
-  [Unicode data](#unicode-data)).
-- **Both parsers.** The documents' tokens go to the reference grammar as well
-  as to the parser, as [PARSER.md](PARSER.md#testing) describes.
+- **The code database** lexes again only the files that changed. The lexer
+  works on whole files: lexing is linear in the file's size and takes far
+  less time than any later stage, so it does not threaten the O(change)
+  goal.
 
 ## Left out on purpose
 
@@ -737,3 +638,56 @@ cost:
 - **Contextual keywords for `test`, `proof`, `law`, `theorem`, and
   `capability`.** They stay reserved, so that the line-break rule can be
   decided from the tokens alone.
+
+## Not built
+
+- **Extra help for habits from other languages.** None of these changes what
+  the language accepts, since each is already an error, and until it is
+  built each gets the plain error the grammar implies.
+  - **Numbers:**
+
+    | Written | Error and fix |
+    |---|---|
+    | `1.` | The fix writes `1.0`. This applies when nothing that could follow a `.` comes after it. |
+    | `.5` | The fix writes `0.5`. This applies when the `.` follows a token that cannot end an expression. |
+    | `0x1p3`, `0x1.8` | Truss has no hexadecimal floats. Write a decimal float. |
+    | `1'000` | The fix writes `1_000`. |
+
+  - **String prefixes.** A `Lower` name followed directly by `"` or `'` would
+    be reported with a fix, and the string lexed as if it had no prefix.
+    Today `f"..."` lexes as the name `f` followed by a string, which the
+    parser rejects.
+  - **Escapes:**
+
+    | Written | Fix |
+    |---|---|
+    | `\x41` | `\u{41}` |
+    | `\u00E9`, `\U0001F600` | `\u{00E9}`, `\u{1F600}` (leading zeros dropped to fit six digits) |
+    | `\'` | `'` |
+    | `\a`, `\b`, `\f`, `\v`, `\e` | `\u{7}`, `\u{8}`, `\u{C}`, `\u{B}`, `\u{1B}` |
+    | `\(name)` | Swift interpolation: `${name}` |
+    | `\` at the end of a line | No fix. The message suggests a raw string. |
+
+  - **Other sequences:**
+
+    | Written | Group | What the lexer emits | Fix |
+    |---|---|---|---|
+    | `#[derive(...)]`, `#![...]` | local | Nothing, up to the end of the line | "Truss has no attributes", pointing to `derives` |
+    | `<>` | local | `!=` | `!=` |
+    | `...` | local | `..=` between two operands, otherwise `todo` | `..=`, or `todo` for a placeholder body |
+    | `..<` | local | `..` | `..` |
+    | Look-alike punctuation | local | The ASCII token | The ASCII character |
+    | `**` | context | `Foreign` | No fix. Truss has no power operator. |
+    | `:=` | context | `Foreign` | `let name = value` |
+    | `\|>` | context | `Foreign` | Write the call: `function(value)` |
+
+  - **Look-alike punctuation** is a small, hand-picked table: curly quotes
+    `“ ” ‘ ’` become `"` and `'`; fullwidth `（ ） ［ ］ ｛ ｝ ， ： ； ＝`
+    become their ASCII forms; no-break and other Unicode spaces become a
+    space; `–` and `—` become `-`; `≤ ≥ ≠ → ⇒` become `<= >= != -> =>`; and
+    `∀ ∃` become `forall` and `exists`. These come from pasted documents,
+    input methods, and habits from Lean and Agda. A curly-quoted `“text”`
+    would lex as a string.
+- **Lexing one definition at a time.** Outside strings and brackets, the
+  lexer's state at a definition keyword in column 0 is empty, so tokens
+  before and after an edit could be reused. Nothing needs it yet.

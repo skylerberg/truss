@@ -10,6 +10,18 @@ val by_value_limit : int
    zero size, which is not passed at all. *)
 val parameter : Memory_layout.env -> Ground.mode -> Ground.ty -> Lir.ty option
 
+(* How a cursor holds an argument for its method's parameter: an [own]
+   argument as a value of its own, whatever its size, since the cursor owns
+   it and may outlive the caller's statement, and any other as the
+   parameter takes it. *)
+val held : Memory_layout.env -> Ground.mode -> Ground.ty -> Lir.ty option
+
+(* A cursor's fields that whoever makes one fills in: its state number, and
+   what it holds for each of its method's parameters that has a size, by
+   the parameter's place among them. *)
+val cursor_state : string
+val cursor_parameter : int -> string
+
 type result =
   | Nothing  (** Zero size or [Never]: the C function returns [void] *)
   | Returned of Lir.ty

@@ -1,16 +1,13 @@
 # Truss Type Checker
 
-This document designs stage0's name resolution and type checking: everything
-between the parser's trees and the checked form that the prover and code
-generation read. It follows the decisions in [DESIGN.md](DESIGN.md),
-[SYNTAX.md](SYNTAX.md), and [GRAMMAR.md](GRAMMAR.md), reads the trees
-described in [PARSER.md](PARSER.md), and produces what
-[CODEGEN.md](CODEGEN.md) expects, and what the prover in
-[PROVER.md](PROVER.md) reads. Every stage described here is built, in
-[`stage0/`](stage0), and `truss check` runs them over a package's
-directory. The queries run on the code database's engine, which
-[DATABASE.md](DATABASE.md) designs. Storing checked forms in CBOR is not
-built yet.
+This document describes stage0's name resolution and type checking, in
+[`stage0/`](stage0): everything between the parser's trees and the checked
+form that the prover and code generation read. It follows the decisions in
+[DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and
+[GRAMMAR.md](GRAMMAR.md), reads the trees described in
+[PARSER.md](PARSER.md), and produces what [CODEGEN.md](CODEGEN.md) expects
+and what the prover in [PROVER.md](PROVER.md) reads. Its queries run on the
+code database, which [DATABASE.md](DATABASE.md) describes.
 
 ## What the type checker does
 
@@ -26,8 +23,8 @@ The type checker:
 - resolves every name to what it means, and decides the constructs the
   parser left open: `name[...]`, a bare name in a pattern, and a place after
   `mut` or `own`
-- makes each part of a definition a result of its own, so that each later
-  result depends only on the parts it reads
+- keeps what other definitions read of a definition apart from the rest of
+  it, so that a change to a body re-checks no caller
 - checks every signature, type definition, trait, `impl`, and capability on
   its own
 - infers the types of every expression in a body, and chooses the method,
@@ -66,72 +63,24 @@ syntax tree ──▶ Resolve ──▶ Interface ──▶ Body ──▶ check
         Package checks ───────────┘   (impls, cycles, instantiation)
 ```
 
-| Library | Job |
-|---|---|
-| `Path` | What definitions are named by, in every stage: package, module, and name, and a method's receiver |
-| `Workspace` | The inputs of a build: packages, their manifests and modules, and each module's text, which it lexes and parses as queries |
-| `Intrinsic` | `standard::intrinsic`, which the compiler declares: the built-in types and the operations the standard library is written on |
-| `Resolve` | Names to definitions, locals, and modules; the scope rules; unused imports; what each file declares, and the prelude |
-| `Types` | The type representation, substitution, and equality, and the interfaces of definitions |
-| `Interface` | Checking signatures, type definitions, traits, `impl`s, and capabilities: `Summary` for what a definition's syntax alone says, so a recursive type makes no cycle of queries; `Lower` for written types; `Constants` for the integer constants types use; `Environment` for every query a definition makes about others; `Properties` for `Copyable`, `Plain`, and views; `Impls` for finding an `impl` and normalizing associated types; and `Check` |
-| `Checked` | The checked form's types |
-| `Infer` | Bidirectional checking of bodies, one statement at a time: `Unify` for a statement's inference variables, `Members` for lookups after a dot, `Literals` for literals' values and float rounding, `State` for what checking works with, and `Expressions` for checking an expression, which calls `Lookups`, `Pattern_typing`, `Calls`, `Methods`, `Operators`, `Statements`, and `Values`, each a part of it that calls the parts before it directly and `Expressions` through `Hooks`; then `Capabilities` for what may be called at each point, `provide`, and dependency grants, and `Body` for each definition's bodies |
-| `Intrinsic_signatures` | The signatures of `standard::intrinsic`'s operations, which code generation reads too |
-| `Patterns` | Exhaustiveness, reachability, and irrefutability |
-| `Usage` | Unused variables and unreachable code |
-| `Ownership` | Moves, loans, and views, and which `yields` methods can be pulled |
-| `Package_checks` | Where an `impl` may live, overlap, method names, `indirect`, growing types, instantiation cycles, and test names |
-| `Type_checker` | The entry point: loading packages, reading `truss.toml`, and every stage's diagnostics for a file |
-| `Standard_library` | The `standard` package's source, built into the compiler |
-
-Each stage is its own dune library, as in the lexer and code generation, and
-the libraries link together into one program; no stage reads another's
-output from text. Modules that need each other's queries share a library:
-`Interface` holds `Lower`, `Constants`, `Environment`, `Properties`,
-`Impls`, and `Check`, since checking a bound needs the `impl`s of other
-definitions and finding an `impl` needs their interfaces, and `Infer` holds
-`Capabilities`, which runs over each body's checked form as body checking
-finishes. Each stage gives its diagnostics for a file as
-`diagnostics database module_`.
-
-`truss check`, as [CLI.md](CLI.md) describes, finds a package's
-`truss.toml`, checks every module against the standard library, and prints
-every diagnostic, as JSON with `--json`. It exits with 1 when there are
-diagnostics and 2 when it cannot check. It does not load the manifest's
-other dependencies yet, since there is no package registry to find them in.
-Resolution also records the names in scope at each `todo`, which `truss
-holes` lists with their types from the checked form. `Types` and
-`Checked` are separate from the rest, so that the prover and code
-generation depend on the checked form without depending on the checker.
-
 ### One definition at a time, through queries
 
-DESIGN.md asks that a change cost O(change). The type checker meets this by
-never reading anything about another definition except through a query.
-The code database, designed in [DATABASE.md](DATABASE.md), records each read
-as an edge from the reader to what it read, and pushes each change along
-those edges to the results it affects.
+The type checker never reads anything about another definition except
+through a query of the code database, which keeps each result current and
+finds what a change reaches, as [DATABASE.md](DATABASE.md) describes. What
+the type checker adds is which results there are, and what each reads:
 
 - **Each check is a query** with a key: the resolved form of a definition,
   its interface, its checked body, the shape of a type, the members of a type
-  with a given name, and so on (see [Dependencies](#dependencies)). A query
-  is a pure function of what it reads through `Query`, which is all the type
-  checker sees of the database.
-- **A query that nobody has asked for is computed on demand.** Checking a
-  body asks for the interfaces of what it calls, which checks those
-  signatures if they have not been checked yet, but never their bodies. A
-  check of a package asks for the checked body of every definition in it.
-- **A query that has been asked for is kept current.** When a file changes,
-  the database computes again only the results that read what changed.
-- **Early cutoff happens at every query.** A query whose result comes out
-  the same as before stops the push there: a body edit that leaves the
-  interface alone re-checks no caller.
-- **Every query says its phase,** which is its place in the compiler's own
-  order: a file's trees, what files declare, what names mean, interfaces,
-  bodies, the rules that span a package, and diagnostics. A query reads its
-  own phase and earlier ones, never a later one, which is what lets the
-  database stop a change exactly where a result comes out the same (see
-  DATABASE.md, "Phases").
+  with a given name, and so on (see [Dependencies](#dependencies)).
+- **Checking a body asks for the interfaces of what it calls,** which checks
+  those signatures if they have not been checked yet, but never their
+  bodies. A check of a package asks for the checked body of every definition
+  in it.
+- **Each query is of the compiler's phase it belongs to:** a file's trees,
+  what files declare, what names mean, interfaces, bodies, the rules that
+  span a package, and diagnostics. A query reads its own phase and earlier
+  ones.
 - **Cycles between queries are errors or are designed away.** Signatures
   depend only on other signatures and type shapes, never on bodies, so
   ordinary mutual recursion between functions never makes a query cycle. The
@@ -141,7 +90,7 @@ those edges to the results it affects.
 
 ### Deterministic results
 
-Every stored result is canonical, as DESIGN.md requires:
+Every result is canonical, as DATABASE.md requires of a query:
 
 - inference variables are numbered in the order they are created within one
   statement, and none survive into a stored result
@@ -366,31 +315,26 @@ The type checker uses that as follows:
 
 ## Parts of a definition
 
-A definition is not one result. Its tree is split into parts, each read
-through a query of its own, so that a result that reads only one part
-depends only on that part, and a change to another part comes out the same
-there and goes no further:
+A definition is not one result. What type checking another definition reads
+of it is apart from the rest, so that a change to the rest comes out the
+same there and goes no further:
 
-| Definition | Parts |
-|---|---|
-| Function or method | *Interface:* generic parameters and bounds, parameter names, types, and modes, which parameters have defaults, the result or `yields` or `lends` form, `uses`, and visibility. *Contract:* `requires`, `ensures`, `decreases`, and `cost`. *Each default.* *Body.* *Each `proof` block.* |
-| Type | *Shape:* generic parameters, fields and variants with their types and visibility, `indirect` marks, `opaque`, `derives`, and field order when `Ordered` is derived. *Each invariant, in order.* *Potential.* |
-| Trait | *Interface:* parameters, required traits, associated types, and each member's interface. *Each member's contract and body.* *Each law.* |
-| `impl` | *Interface:* the trait, the type, `uses`, and associated types. *Each method,* as for a function. |
-| Constant | *Type.* *Value.* |
-| Test, theorem, law proof | *Signature.* *Body.* |
+| Definition | What checking others reads | What only its own check reads |
+|---|---|---|
+| Function or method | Its *signature*: generic parameters and bounds, the receiver, parameter names, types, and modes, which parameters have defaults, the result or `yields` or `lends` form, `uses`, and whether it has a `time` clause | Its body, each default, and its `requires`, `ensures`, `decreases`, and `cost` clauses |
+| Type | Its *shape*: generic parameters, fields and variants with their types, which fields have defaults, `indirect` marks, `opaque`, and `derives` | Its invariants, its potential, and its fields' defaults |
+| Trait | Its *interface*: parameters, required traits, associated types, and each member's signature | Its provided methods' bodies, and its laws |
+| `impl` | Its *interface*: generic parameters, the trait, the type, `uses`, and each method's signature | Each method's body |
+| Constant | Its type, and its value where the checker needs one | Its expression |
+| Test, theorem, law proof | Nothing | Its body |
 
-DESIGN.md says only that a signature and a body are separate results.
-Splitting the signature further is what lets each later stage depend on
-less:
-
-- **Type checking a caller depends only on the callee's interface.**
-  Changing an `ensures` re-checks no caller's types. It re-checks their
-  proofs, which depend on the contract.
-- **A default is its own part,** as DESIGN.md requires: callers depend only
-  on whether a parameter has one.
+- **Type checking a caller reads only the callee's signature.** Changing a
+  body, a default, or an `ensures` type-checks that definition again and no
+  caller. What the prover reads of a callee is PROVER.md's.
+- **A default is apart from the signature,** as DESIGN.md requires: callers
+  read only whether a parameter has one.
 - **A type's invariants are apart from its shape.** Strengthening an
-  invariant re-proves what relies on it, but type-checks nothing again.
+  invariant re-checks the type, and nothing that uses it.
 
 ## Types
 
@@ -1162,9 +1106,6 @@ capabilities, which is at the signatures of its code, never its bodies:
   dependency's type, for the capabilities its `impl`s use.
 - **Inside the dependency,** its own bodies are checked against its own
   signatures, so nothing it does can exceed what its signatures declare.
-- **Grants nest:** a dependency's manifest may grant its own dependencies
-  only what it was granted, which is a check on manifests. It is not built
-  yet, since `truss check` loads no dependencies' manifests.
 
 The error names the dependency's function and the capability that was not
 granted, as DESIGN.md asks. A dependency that offers both a client and a
@@ -1271,14 +1212,17 @@ follow the same rules.
 
 The checker works out a constant's value only where it needs the value: a
 `USize` in a type argument, as in `Array[UInt8, digest_size]`, and a constant
-used as a pattern, for exhaustiveness. It does so exactly, with Zarith for
-integers and the exact IEEE operations for floats, as IMPLEMENTATION.md
-describes. Overflow in a constant's arithmetic is an error. Constants that
-refer to each other in a cycle are an error. Every other constant is built
-by code generation, and the values of tagged templates and `Map` and `Set`
-tables by compiled code run while compiling, as CODEGEN.md describes. A
-result that used a constant's value reads that value, so changing the
-constant's expression in a way that keeps its value checks nothing again.
+used as a pattern, for exhaustiveness. It does so exactly, and needs no code
+to run: integers are Zarith's, and float operations are the exact IEEE ones,
+which OCaml computes bit for bit. A `Float32` is computed in 64 bits and
+rounded to 32, which gives the correctly rounded 32-bit result for `+`, `-`,
+`*`, `/`, and `sqrt`, because 53 bits is more than twice 24 plus 2. Overflow
+in a constant's arithmetic is an error. Constants that refer to each other
+in a cycle are an error. Every other constant is built by code generation,
+which runs compiled code for one whose value cannot be folded, such as a
+`Map` or a `Set`, as CODEGEN.md describes. A result that used a constant's
+value reads that value, so changing the constant's expression in a way that
+keeps its value checks nothing again.
 
 ## Tests
 
@@ -1325,7 +1269,6 @@ checker made, and the checked form records each with its position:
 |---|---|
 | Two indexes or ranges of one collection do not overlap | Loans of `items[i]` and `items[j]`, or two slices, that would otherwise conflict |
 | An `Integer` fits the built-in integer type expected | `items[i + 1]` in a specification |
-| A function value's costs imply the expected costs | Passing a function where its type's costs differ |
 | A guarded `match` is covered | `_ => unreachable` after guards |
 
 ## Dependencies
@@ -1363,13 +1306,13 @@ So the costs of everyday edits follow from what each result reads:
 |---|---|
 | A function's body | That body. Its interface is unchanged, so nothing else. |
 | A local's name | That body |
-| A function's `ensures` | Nothing's types. Callers' proofs, which depend on the contract. |
+| A function's `ensures` | That function's clauses, and no caller's types. Callers' proofs are PROVER.md's. |
 | A function's parameter type | That function, and every definition that read its interface |
 | A method added to `List` | Definitions that looked up a member of `List` with that name |
 | An `impl` added | Definitions that looked up `impl`s of that trait for that type in that package |
 | A definition added to a file | Definitions in that file that looked up that name, including bindings checked for hiding |
 | A field added to a type | Definitions that used its shape |
-| A definition moved to another module | Its users' names, which re-checks their types. Their proofs and test results are already done, because those are keyed by forms with names replaced, as DESIGN.md says. |
+| A definition moved to another module | Its users' names, which re-checks their types. Their test results are already done, because a test's key holds no names, as CODEGEN.md describes. |
 
 ## Diagnostics
 
@@ -1422,17 +1365,16 @@ gives an exact fix whenever it knows what was meant:
 - **The prover** reads checked forms, the interfaces and contracts of what
   they call, the functional bodies it reads as definitions, and the type
   checker's obligations, as [PROVER.md](PROVER.md) describes. It discharges
-  every `requires` and invariant,
-  every operation that could fail, every cost, termination, and every
-  obligation above.
+  every `requires` and invariant, every operation that could fail, every
+  cost, termination, and every obligation above.
 - **Code generation** reads checked forms, the shapes of types, and which
   methods can be pulled, as CODEGEN.md describes. Instantiation cycles have
   already been rejected.
 - **The build** uses checked forms to find what `main` can reach, to refuse
   programs that can reach a `todo` or an `echo`.
-- **The language server** shows the type of an expression and the
-  definition a name means from checked forms, and lists every hole with its
-  type, the names in scope, and what it blocks.
+- **Tools** show the type of an expression and the definition a name means
+  from checked forms, and list every hole with its type, the names in
+  scope, and what it blocks.
 
 ## The prelude
 
@@ -1472,47 +1414,29 @@ the compiler. The prelude holds:
 - the standard capabilities, and the types their methods take and return:
   `Instant`, `Duration`, `Path`, `Bytes`, and `FileError`
 
-## Testing
+## Not built
 
-The tests follow IMPLEMENTATION.md's rules for testing: each gives a small
-input and states one fact about the result, and there are no golden files.
-
-- **Focused tests.** A test gives a few small definitions and asserts either a
-  diagnostic, by its code, position, and the text after applying its fix, or
-  one fact about the checked form. For example: `count + 1` with a `UInt8`
-  gives the `1` the type `UInt8`; `found.unwrap_or(default: backup[..])`
-  followed by `mut backup.push(9)` and a use of the result is
-  `ownership.conflicting_loan`; a `lends` method with an `if` around its
-  `yield` is an error naming the path with none; adding a second `impl` of
-  `Multiply` for `Duration` leaves the `impl` chosen for `duration * 2`
-  unchanged.
-- **Fixes work.** Each test that expects a fix applies it, checks again, and
-  asserts that the diagnostic is gone with no new one in its place.
-- **Incremental work is tested as behavior.** A test checks a few
-  definitions, edits one, and asserts exactly which queries ran again: a
-  body edit re-checks only that body, and adding a method re-checks only the
-  definitions that looked up its name.
-- **Output is deterministic.** A test checks the same definitions twice and
-  asserts that the checked forms are byte-identical.
-- **Every test is audited.** When a test ends, each result the database
-  holds is computed again in a new engine with the same inputs, and
-  compared, as DATABASE.md describes. So every test also checks that each
-  query is a function of what it reads, and that the database kept every
-  result current.
-- **The cost of an edit follows the edit.** The same edit, to a body, a
-  local, a signature's layout, and a new definition, is made in a package of
-  four modules and in one of forty, and the database's counts of work must
-  be equal.
-- **The documents' examples type-check.** Every example in the documents
-  that parses as a file is checked through every stage, each as a test of
-  its own. One that uses a name defined elsewhere, shows a definition of the
-  standard library's, or redefines a prelude name is an excerpt and is
-  skipped; every other one must check with no diagnostic.
-
-## Open questions
-
-- **How `write_with` combines errors.** A writer's lambda may fail with its
-  own error type as well as a `FileError`. The standard library needs a
-  result type that holds either, and a name for it.
-- **Where `main` lives.** A package's program starts at a `main`, but no
-  document says which module holds it.
+- **A contract as a result of its own.** DESIGN.md has callers' proofs read a
+  function's contract, apart from its interface and its body. The contract
+  is type-checked with the body, and the prover reads it from the callee's
+  tree, so a change to a callee's body reaches its callers' proofs, which
+  then find each query's answer kept by the query's text.
+- **Recording that a function value's costs imply the ones expected.** The
+  checked form has a case for the obligation, where a function is given a
+  type whose costs differ from its own, and nothing records it. The prover
+  shows a function's or a lambda's costs where it is passed to a call, as
+  PROVER.md's "Lambdas and function values" describes.
+- **Checked forms stored in a specified encoding.** They are kept as OCaml's
+  marshaled values, as DATABASE.md describes.
+- **A shape that ignores the order of fields.** DESIGN.md says reordering a
+  type's fields rebuilds nothing. A shape keeps its fields in the order they
+  are written, so reordering them re-checks what reads the shape. Code
+  generation's layout already ignores the order.
+- **Checking that grants nest.** A dependency's manifest may grant its own
+  dependencies only what it was granted. Nothing loads a dependency's
+  manifest, since there is no package registry to find dependencies in.
+- **How `write_with` combines errors** is not decided. A writer's lambda may
+  fail with its own error type as well as a `FileError`. The standard
+  library needs a result type that holds either, and a name for it.
+- **Where `main` lives** is not decided. A package's program starts at a
+  `main`, but no document says which module holds it.

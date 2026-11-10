@@ -1,4 +1,4 @@
-let bug format = Printf.ksprintf (fun message -> invalid_arg ("Monomorphic: " ^ message)) format
+let bug format = Compiler_bug.bug ~stage:"Monomorphic" format
 
 type context = {
   type_interface : Path.t -> Types.type_interface option;

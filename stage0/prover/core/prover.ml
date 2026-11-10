@@ -1,4 +1,4 @@
-(* The prover's entry point. See PROVER.md, "What the prover does". *)
+(* The prover's entry point. *)
 
 open Syntax
 module Translate = Translate
@@ -332,8 +332,7 @@ let within database (key : Names.key) (span : span) =
    of them defined exactly, as the operation on its operands' bits of
    their type's width, which the solver decides by bit-blasting. A
    definition says what the operation is, so the second query means what
-   the first does, and its answer is as sound. See PROVER.md, "Types as
-   sorts". *)
+   the first does, and its answer is as sound. *)
 (* An obligation's answer: the solver's, or what running the code that
    decides it gave, or that it ran past its time limit. *)
 type answer = Solved of Solver.answer | Ran_false | Ran_too_long
@@ -411,8 +410,7 @@ let exactly (query : L.query) =
    bounds is asked with each choice of a pair for every bound in turn, the
    same choice for all of them, since a recursive call assumes the bound
    with the constants it is shown with; the first choice that proves them
-   all is taken, and if none does, the answers are the first choice's. See
-   PROVER.md, "Asymptotic bounds". *)
+   all is taken, and if none does, the answers are the first choice's. *)
 let answers ?(evaluate = fun _ -> None) solver (obligations : Translate.obligation list) =
   let solve (obligation : Translate.obligation) choice =
     let pins =

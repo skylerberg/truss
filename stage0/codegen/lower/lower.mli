@@ -29,8 +29,7 @@ type context = {
 val context : ?checks:bool -> Query.context -> Memory_layout.target -> context
 
 (* The LIR of an instance of a function, a method, an [impl]'s method, or a
-   test, before drop elaboration. Raises [Invalid_argument] for an instance
-   that is not code from source. *)
+   test, before drop elaboration. *)
 val instance : context -> Instance.key -> Lir.t
 
 (* A constant's static data: its value worked out exactly from its

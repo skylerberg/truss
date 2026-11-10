@@ -27,6 +27,10 @@ type frame = {
       (** In an inlined method, where its [return] goes and how many scopes that keeps *)
 }
 
+(* Where a function's result goes: through the pointer it is given, into a
+   local it returns, or nowhere. *)
+type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
+
 type state = {
   context : context;
   mutable frame : frame;
@@ -35,12 +39,31 @@ type state = {
   mutable loops : loop list;
   mutable temporaries : Lir.place list list;
       (** Of each statement being lowered, innermost first *)
-  return_ : Lir.place option;  (** Where a result too large to return is written *)
-  result_local : Lir.local option;
+  mutable result : result_slot;
   nested : Lir.function_ option list ref;  (** The instance's lambdas, in order *)
   mutable evidence : (Path.t * Lir.operand) list;  (** The evidence for each capability available *)
   pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
 }
+
+(* The code a function starts lowering: its own, with nothing bound yet. *)
+let frame_of code ~inlined =
+  { code; bindings = Hashtbl.create 16; self_place = None; on_yield = None; inlined; exit = None }
+
+(* The state to write one function in: a builder of its own and the
+   function's scope. A lambda shares [nested] with the function around it. *)
+let enter context ?(pulling = false) ?(nested = ref []) frame =
+  {
+    context;
+    frame;
+    b = Lir_builder.create ();
+    scopes = [ { owned = [] } ];
+    loops = [];
+    temporaries = [];
+    result = No_result;
+    nested;
+    evidence = [];
+    pulling;
+  }
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
 
@@ -92,12 +115,63 @@ let site st (span : S.span) : Lir.site =
     text;
   { definition = st.frame.code.anchor; line = !line; column = !column }
 
+(* A valid program stage0 cannot lower yet, at a place in the code being
+   lowered. *)
+let at_site ({ definition; line; column } : Lir.site) : Compiler_bug.site =
+  { definition; line; column }
+
+let unsupported st (span : S.span) format =
+  Compiler_bug.unsupported ~at:(at_site (site st span)) format
+
 let source st (span : S.span) =
   let text = st.frame.code.text in
   let start = min span.start (String.length text) in
   String.sub text start (min span.stop (String.length text) - start)
 
 let new_local st ?name ty = at (local st.b ?name (Value ty))
+
+(* A parameter of the function being written, as the calling convention
+   passes it, or as [how] does: the local it arrives in, unless it has no
+   size, and the place its value is read at. *)
+let parameter st ?how (mode : Ground.mode) ty =
+  let how = Option.value how ~default:(Convention.parameter st.context.env) in
+  match how mode ty with
+  | None -> (None, new_local st ty)
+  | Some (Lir.Pointer _ as pointer) ->
+      let arrives = local st.b pointer in
+      (Some arrives, { Lir.root = Local arrives; projections = [ Deref ] })
+  | Some passed ->
+      let arrives = local st.b passed in
+      (Some arrives, at arrives)
+
+(* A parameter for the evidence of each capability, which the code then
+   reaches by it. Gives the parameters, in order. *)
+let evidence_parameters st capabilities =
+  let arriving =
+    List.map
+      (fun capability -> (capability, local st.b ~name:"evidence" Convention.evidence))
+      capabilities
+  in
+  st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) arriving;
+  List.map snd arriving
+
+(* Makes the slot for the function's result, as the convention passes one. *)
+let result_slot st (convention : Convention.result) =
+  st.result <-
+    (match convention with
+    | Through_pointer pointer -> Through (local st.b ~name:"result" pointer)
+    | Returned ty -> Returned_in (local st.b ~name:"result" ty)
+    | Nothing -> No_result)
+
+(* Where the function's result is written, if it has one with a size. *)
+let result_place st : Lir.place option =
+  match st.result with
+  | Through pointer -> Some { root = Local pointer; projections = [ Deref ] }
+  | Returned_in local -> Some (at local)
+  | No_result -> None
+
+let return_result st : Lir.terminator =
+  Return (match st.result with Returned_in local -> Some (Move (at local)) | _ -> None)
 
 (* A temporary that holds an owned value for the rest of the statement. *)
 let temporary st ty =
@@ -157,6 +231,29 @@ let in_scope st f =
   let result = f () in
   close_scope st scope;
   result
+
+(* Ends the function being written: what its scope still owns is dropped
+   and its result returned. Its parameters are [first], which it is given
+   before anything else, the pointer its result is written through, if it
+   has one, and [rest]. *)
+let finish_function st ?(returns = true) ~first ~rest () : Lir.function_ =
+  (match st.scopes with [ scope ] -> drop_scope st scope | _ -> bug "a function ended in a scope");
+  finish st.b (if returns then return_result st else Unreachable);
+  let pointer = match st.result with Through pointer -> Some pointer | _ -> None in
+  let result =
+    match st.result with Returned_in local -> Some (local_type st.b local) | _ -> None
+  in
+  let built =
+    Lir_builder.build st.b ?written_result:pointer
+      ~parameters:(first @ Option.to_list pointer @ rest)
+      ~result
+  in
+  { built with returns }
+
+(* The lambdas the function made, in order. *)
+let nested_functions st =
+  Array.of_list
+    (List.map (function Some f -> f | None -> bug "a lambda left unfinished") !(st.nested))
 
 let unreachable_block st =
   finish st.b Unreachable;

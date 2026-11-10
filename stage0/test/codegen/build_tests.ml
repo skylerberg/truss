@@ -205,7 +205,9 @@ let () =
                    "test 5 incomplete\nmessage 40\nhole of type Int64\n  at suite.truss:12:3\n";
                    "test 6 panicked\nmessage 45\ncompiler bug: the test left 1 block allocated\n";
                  ])
-            (render_records (Compile.parse_report out)))
+            (match Compile.parse_report out with
+            | Ok records -> render_records records
+            | Error message -> message))
 
 let () =
   test "a program still running at its time limit is stopped" (fun () ->

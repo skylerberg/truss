@@ -8,45 +8,17 @@ open Targets
 open Lir_builder
 
 let generated_state context ~anchor ~substitution =
-  let code =
-    {
-      definition_key =
-        { Names.module_ = { package = ""; modules = [] }; path = anchor; ordinal = 0 };
-      anchor;
-      text = "";
-      checked = Checked.create 0;
-      parameters = [];
-      body = { statements = []; span = S.Span.make 0 0; id = 0 };
-      result = Returns T.unit;
-      parameter_types = [];
-      substitution;
-      uses = [];
-      real = [];
-      has_defaults = false;
-      requires = [];
-    }
-  in
-  {
-    context;
-    frame =
-      {
-        code;
-        bindings = Hashtbl.create 1;
-        self_place = None;
-        on_yield = None;
-        inlined = [];
-        exit = None;
-      };
-    b = Lir_builder.create ();
-    scopes = [ { owned = [] } ];
-    loops = [];
-    temporaries = [];
-    return_ = None;
-    result_local = None;
-    nested = ref [];
-    evidence = [];
-    pulling = false;
-  }
+  enter context
+    (frame_of ~inlined:[]
+       (unwritten
+          ~definition_key:
+            { Names.module_ = { package = ""; modules = [] }; path = anchor; ordinal = 0 }
+          ~anchor ~substitution ~result:(Returns T.unit)))
+
+(* Where a generated function's result goes when it is another function's,
+   passed on as it came: the slot, or a local for a result of no size. *)
+let passed_on st result_ty =
+  match result_place st with Some place -> place | None -> new_local st result_ty
 
 (* The capability an [impl] implements, and the capabilities its own
    methods use, in path order, which its evidence captures. *)
@@ -69,27 +41,18 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   in
   let interface, capability, captured = impl_capability context impl in
   let _, capability_signature = capability_method context capability name in
-  let entry_lir, result = entry_signature context capability_signature in
+  let _, result = entry_signature context capability_signature in
   let method_signature = signature_of context path in
   let substitution = bind method_signature.generics type_arguments in
   let st = generated_state context ~anchor:impl ~substitution in
   let b = st.b in
   let evidence = local b ~name:"evidence" Convention.evidence in
-  let result_pointer =
-    match result with Through_pointer pointer -> Some (local b ~name:"result" pointer) | _ -> None
-  in
-  let parameters =
+  result_slot st result;
+  let taken =
     List.map
       (fun (info : T.parameter_info) ->
         let ty = Monomorphic.ground context.monomorphic substitution info.type_ in
-        match Convention.parameter context.env (Monomorphic.mode info.mode) ty with
-        | Some (Pointer _ as pointer) ->
-            let l = local b pointer in
-            (Some l, ({ Lir.root = Local l; projections = [ Deref ] } : Lir.place), info.mode, ty)
-        | Some lir_ty ->
-            let l = local b lir_ty in
-            (Some l, at l, info.mode, ty)
-        | None -> (None, new_local st ty, info.mode, ty))
+        (parameter st (Monomorphic.mode info.mode) ty, info.mode, ty))
       capability_signature.parameters
   in
   start b (block b);
@@ -122,28 +85,19 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
     | _ -> bug "a capability method that yields"
   in
-  let destination =
-    match result_pointer with
-    | Some pointer -> { Lir.root = Local pointer; projections = [ Deref ] }
-    | None -> new_local st result_ty
-  in
   call_instance st method_key ~signature:method_signature ~substitution
     ~arguments:
       ((self_mode, self_ty, { Lir.root = Local implementation; projections = [ Deref ] })
-      :: List.map (fun (_, place, mode, ty) -> (mode, ty, place)) parameters)
-    ~mask:0 ~destination;
-  finish b (Return (match result with Returned _ -> Some (Lir.Move destination) | _ -> None));
-  let main =
-    Lir_builder.build b ?written_result:result_pointer
-      ~parameters:
-        ((evidence :: Option.to_list result_pointer)
-        @ List.filter_map (fun (l, _, _, _) -> l) parameters)
-      ~result:(match result with Returned ty -> Some ty | _ -> None)
-  in
-  ignore entry_lir;
+      :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) taken)
+    ~mask:0 ~destination:(passed_on st result_ty);
   {
     key;
-    main = { main with returns = capability_signature.output <> Returns Never };
+    main =
+      finish_function st
+        ~returns:(capability_signature.output <> Returns Never)
+        ~first:[ evidence ]
+        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken)
+        ();
     nested = [||];
   }
 
@@ -195,9 +149,8 @@ let real_evidence_of context ~user capabilities =
     (fun capability ->
       if Interface.Impls.impl_interface context.database (real_implementation capability) = None
       then
-        invalid_arg
-          (Printf.sprintf "%s uses %s, which stage0's runtime has no real implementation of yet"
-             user (Ground.path_name capability));
+        Compiler_bug.unsupported "%s uses %s, which has no real implementation" user
+          (Ground.path_name capability);
       (capability, Lir.Constant (Symbol_address (Real_evidence capability))))
     capabilities
 
@@ -331,45 +284,27 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
   let result_ty =
     match ty.result with Returns t -> t | _ -> bug "an adapter for a function that yields"
   in
-  let result = Convention.result context.env result_ty in
-  let result_pointer =
-    match result with Through_pointer pointer -> Some (local b ~name:"result" pointer) | _ -> None
-  in
-  let parameters =
+  result_slot st (Convention.result context.env result_ty);
+  let taken =
     List.map
       (fun ((mode : Ground.mode), ty) ->
         let types_mode : T.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
-        match Convention.parameter context.env mode ty with
-        | Some (Pointer _ as pointer) ->
-            let l = local b pointer in
-            (Some l, (types_mode, ty, ({ Lir.root = Local l; projections = [ Deref ] } : Lir.place)))
-        | Some lir_ty ->
-            let l = local b lir_ty in
-            (Some l, (types_mode, ty, at l))
-        | None -> (None, (types_mode, ty, new_local st ty)))
+        (parameter st mode ty, types_mode, ty))
       ty.parameters
   in
-  let evidence =
-    List.map (fun capability -> (capability, local b ~name:"evidence" Convention.evidence)) ty.uses
-  in
+  let evidence = evidence_parameters st ty.uses in
   start b (block b);
-  st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
-  let destination =
-    match result_pointer with
-    | Some p -> { Lir.root = Local p; projections = [ Deref ] }
-    | None -> new_local st result_ty
-  in
-  call_instance st function_ ~signature ~substitution ~arguments:(List.map snd parameters) ~mask:0
-    ~destination;
-  finish b (Return (match result with Returned _ -> Some (Lir.Move destination) | _ -> None));
-  let main =
-    Lir_builder.build b ?written_result:result_pointer
-      ~parameters:
-        ((environment :: Option.to_list result_pointer)
-        @ List.filter_map fst parameters @ List.map snd evidence)
-      ~result:(match result with Returned t -> Some t | _ -> None)
-  in
-  { key; main = { main with returns = result_ty <> Never }; nested = [||] }
+  call_instance st function_ ~signature ~substitution
+    ~arguments:(List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) taken)
+    ~mask:0 ~destination:(passed_on st result_ty);
+  {
+    key;
+    main =
+      finish_function st ~returns:(result_ty <> Never) ~first:[ environment ]
+        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken @ evidence)
+        ();
+    nested = [||];
+  }
 
 (* An entry in an [any] table: the value's pointer as [self], then the
    method's arguments. *)
@@ -393,30 +328,16 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   let st = generated_state context ~anchor:impl ~substitution in
   let b = st.b in
   let value = local b ~name:"value" (Raw (Pointer Opaque)) in
-  let result_pointer =
-    match result with Through_pointer pointer -> Some (local b ~name:"result" pointer) | _ -> None
-  in
-  let parameters =
+  result_slot st result;
+  let taken =
     List.map
       (fun (info : T.parameter_info) ->
         let ty = Monomorphic.ground context.monomorphic substitution info.type_ in
-        match Convention.parameter context.env (Monomorphic.mode info.mode) ty with
-        | Some (Pointer _ as pointer) ->
-            let l = local b pointer in
-            (Some l, (info.mode, ty, ({ Lir.root = Local l; projections = [ Deref ] } : Lir.place)))
-        | Some lir_ty ->
-            let l = local b lir_ty in
-            (Some l, (info.mode, ty, at l))
-        | None -> (None, (info.mode, ty, new_local st ty)))
+        (parameter st (Monomorphic.mode info.mode) ty, info.mode, ty))
       method_signature.parameters
   in
-  let evidence =
-    List.map
-      (fun capability -> (capability, local b ~name:"evidence" Convention.evidence))
-      (evidence_for [] trait_signature.uses)
-  in
+  let evidence = evidence_parameters st (evidence_for [] trait_signature.uses) in
   start b (block b);
-  st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
   let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
   let typed = local b (Pointer { target = Value self_ty; writable = true }) in
   if not (zero_size st self_ty) then emit b (Assign (at typed, Use (Copy (at value))));
@@ -426,25 +347,21 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
     | Returns t -> Monomorphic.ground context.monomorphic substitution t
     | _ -> bug "an any method that yields"
   in
-  let destination =
-    match result_pointer with
-    | Some p -> { Lir.root = Local p; projections = [ Deref ] }
-    | None -> new_local st result_ty
-  in
   call_instance st method_key ~signature:method_signature ~substitution
     ~arguments:
       ((self_mode, self_ty, { Lir.root = Local typed; projections = [ Deref ] })
-      :: List.map snd parameters)
-    ~mask:0 ~destination;
-  finish b (Return (match result with Returned _ -> Some (Lir.Move destination) | _ -> None));
-  let main =
-    Lir_builder.build b ?written_result:result_pointer
-      ~parameters:
-        ((value :: Option.to_list result_pointer)
-        @ List.filter_map fst parameters @ List.map snd evidence)
-      ~result:(match result with Returned t -> Some t | _ -> None)
-  in
-  { key; main = { main with returns = method_signature.output <> Returns Never }; nested = [||] }
+      :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) taken)
+    ~mask:0 ~destination:(passed_on st result_ty);
+  {
+    key;
+    main =
+      finish_function st
+        ~returns:(method_signature.output <> Returns Never)
+        ~first:[ value ]
+        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken @ evidence)
+        ();
+    nested = [||];
+  }
 
 (* An [any] table: the type's drop in slot 0, then an entry for each method
    that can be called through [any]. *)

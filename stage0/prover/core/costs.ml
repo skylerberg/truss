@@ -1,6 +1,6 @@
 (* Cost bounds: what a counter counts, how, and the constants an [O(...)]
-   bound is proven with. See PROVER.md, "Costs". The proof program that
-   increases the counters is [Translate]'s. *)
+   bound is proven with. The proof program that increases the counters is
+   [Translate]'s. *)
 
 module L = Logic
 
@@ -104,8 +104,8 @@ let larger a b =
 (* A callee's [O(g)], in units. *)
 let units g = plus (at_least_zero g) (L.int 1)
 
-(* [log] and [power], as DESIGN.md defines them: [log(n)] rounds
-   log2(n + 1) up, so [log(0)] is 0, and [power(b, e)] is [b] to the [e]. *)
+(* [log] and [power]: [log(n)] rounds log2(n + 1) up, so [log(0)] is 0,
+   and [power(b, e)] is [b] to the [e]. *)
 let log_symbol = "cost.log"
 let power_symbol = "cost.power"
 

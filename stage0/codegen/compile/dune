@@ -1,6 +1,8 @@
 (library
  (name compile)
  (libraries
+  compiler_bug
+  verify
   path
   query
   resolve

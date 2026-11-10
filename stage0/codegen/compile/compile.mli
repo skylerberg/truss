@@ -1,6 +1,12 @@
 (* Compiling a program or a test run from a database of checked
    definitions: lowering each instance a root reaches, elaborating its
-   drops, building it through the object cache, and running it. *)
+   drops, building it through the object cache, and running it.
+
+   A step that fails for a reason that is not the compiler's gives [Error]
+   with a message: the C compiler or the linker refused, a program run
+   while compiling ended badly, or the program is one stage0 cannot build
+   yet. A bug in the compiler is raised as [Compiler_bug.Bug], which
+   nothing here catches, for the command to report. *)
 
 type t
 
@@ -57,8 +63,9 @@ type record = {
 }
 
 (* A test program's whole report, as [Startup.tests_calling] describes it,
-   one record a test, in the order of the tests however they ended. *)
-val parse_report : string -> record list
+   one record a test, in the order of the tests however they ended, or why
+   it cannot be read. *)
+val parse_report : string -> (record list, string) result
 
 (* How a test run is getting on: lowering what the tests reach, compiling
    the C files that are not cached, out of how many, running the tests that
@@ -132,8 +139,7 @@ val run_program :
    holds. The prover asks it only of clauses that read the template's
    literals alone. With [results], each check's results are kept under the
    key of the code that ran, as test results are. A check that runs past
-   [time_limit], in milliseconds, is stopped. See CODEGEN.md, "Code run
-   while compiling". *)
+   [time_limit], in milliseconds, is stopped. *)
 type template_check = Ran of (int * bool) list | Ran_too_long
 
 val check_template :

@@ -247,7 +247,8 @@ and into st (e : S.expression) (destination : Lir.place) =
              fields = [ ("start", start); ("stop", stop); ("inclusive", Constant (Bool inclusive)) ];
            })
   | Provide { implementations; body } -> provide st e implementations body destination
-  | Range _ | Quantified _ -> bug "this expression is not lowered yet: %s" (source st e.span)
+  | Range _ -> unsupported st e.span "a range without both of its ends, as a value"
+  | Quantified _ -> unsupported st e.span "a quantifier in code that runs"
   | Self_type_value -> bug "Self as a value"
   | Expression_error -> bug "an expression that did not parse"
 

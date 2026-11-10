@@ -4,7 +4,7 @@
    An instance's code is lowered with its type arguments substituted, so
    every type in it must come out ground: no generic parameter, no
    projection, and nothing the checker left undecided. A type that is not
-   ground here is a compiler bug, and raises [Invalid_argument]. *)
+   ground here is a compiler bug. *)
 
 (* What the conversion reads about other definitions, each one of the type
    checker's queries. *)

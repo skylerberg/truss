@@ -9,7 +9,8 @@
   source_tests
   feature_tests
   program_tests
-  evaluate_tests)
+  evaluate_tests
+  failure_tests)
  (modules
   codegen_support
   layout_tests
@@ -21,9 +22,12 @@
   source_tests
   feature_tests
   program_tests
-  evaluate_tests)
+  evaluate_tests
+  failure_tests)
  (libraries
   harness
+  compiler_bug
+  verify
   zarith
   path
   ground

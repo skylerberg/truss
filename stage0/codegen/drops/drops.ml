@@ -1,4 +1,4 @@
-let bug format = Printf.ksprintf (fun message -> invalid_arg ("Drops: " ^ message)) format
+let bug format = Compiler_bug.bug ~stage:"Drops" format
 
 (* A move path: a local and the fields, variant fields, and dereferences
    after it. An element is never moved out, so paths have no indexes. *)
