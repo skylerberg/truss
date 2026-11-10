@@ -71,7 +71,8 @@ let enter context (written : signature) (lowered : T.signature option) =
     | Own -> Some Owned
     | Mut -> Some Mut_access
     | Read -> Some Viewing
-    | Static -> None)
+    | Static -> None);
+  context.self_type <- Option.bind lowered (fun lowered -> Option.map snd lowered.receiver)
 
 let check database (key : Resolve.Names.key) =
   match
@@ -105,6 +106,7 @@ let check database (key : Resolve.Names.key) =
           parameters = [];
           mutable_parameters = [];
           self_kind = None;
+          self_type = None;
           paths = Hashtbl.create 64;
           loops = Hashtbl.create 64;
           uses = Hashtbl.create 32;

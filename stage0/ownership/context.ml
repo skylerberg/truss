@@ -69,6 +69,7 @@ type context = {
   mutable parameters : id list;  (** The body's parameters, which a returned view may come from. *)
   mutable mutable_parameters : id list;
   mutable self_kind : kind option;
+  mutable self_type : T.ty option;
   paths : (int, (id * int) list) Hashtbl.t;
       (** For each position, the branches it is in: a branch's id and the arm. *)
   loops : (int, id list) Hashtbl.t;  (** For each position, the loops it is in. *)
@@ -181,6 +182,25 @@ let lender context (call : expression) =
 let kind_of context = function
   | Local id -> Option.value ~default:Owned (Hashtbl.find_opt context.kinds id)
   | Self_root -> Option.value ~default:Viewing context.self_kind
+
+(* Whether a place is gone once the function returns, so that nothing the
+   caller keeps may view it: a local, and a parameter or [self] that the
+   function owns. An owned view stands for what it views, which the caller
+   has. *)
+let ends_with_function context (place : place) =
+  let owned type_ =
+    kind_of context place.root = Owned
+    && match type_ with Some type_ -> not (is_view context type_) | None -> true
+  in
+  match place.root with
+  | Self_root -> owned context.self_type
+  | Local id -> (not (List.mem id context.parameters)) || owned context.checked.local_types.(id)
+
+(* Whether the caller keeps what a place is part of once the function
+   returns: a [mut] parameter, or [self] in a [mut self] method. *)
+let kept_by_caller context (place : place) =
+  kind_of context place.root = Mut_access
+  && match place.root with Self_root -> true | Local id -> List.mem id context.parameters
 
 (* Reachability, for liveness *)
 
