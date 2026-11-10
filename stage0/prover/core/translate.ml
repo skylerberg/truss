@@ -2818,6 +2818,24 @@ and body_over context frame bound body bind =
         | _ -> None
       with Unsupported _ | Foreign_unsupported _ -> None)
 
+(* A symbol for a term that holds a pure call, named by the term, and
+   equal to it. *)
+and named_term context ty term =
+  let rec holds_call = function
+    | L.Apply (name, arguments) ->
+        String.starts_with ~prefix:"function." name || List.exists holds_call arguments
+    | L.Forall (_, body) | L.Exists (_, body) -> holds_call body
+    | L.Symbol _ | L.Integer _ | L.Boolean _ | L.Bits _ -> false
+  in
+  if not (holds_call term) then term
+  else
+    let symbol = "argument." ^ Logic.hash (L.show_term term) in
+    let named = L.Symbol symbol in
+    once context ("named." ^ symbol) (fun () ->
+        declare context (L.Constant (symbol, sort_of context ty));
+        context.facts <- L.equal named term :: context.facts);
+    named
+
 (* A part's frame, for reading its clauses, with its parameters bound to
    the given terms by position. *)
 and part_frame frame (part : part) ~arguments ~substitution =
@@ -4336,6 +4354,21 @@ and check_built context frame (node : expression) ty term =
    must hold, its [ensures] holds after, and a recursive call decreases. *)
 and contract_call context frame (node : expression) (call_ : call) path contract
     (values : passed list) ~lent_final ~havoc_mut ~substitution_of ~instance =
+  (* A pure call's result is the function applied to its arguments, so a
+     nested call's argument holds every call inside it, which its clauses
+     and its definition then repeat at each use. Each argument that holds
+     another call is named once, by its term, and the name stands for it.
+     The same term gets the same name, so the same call is the same term
+     wherever it is made. *)
+  let values =
+    if contract.pure && contract.result_kind <> `Yields then
+      List.map
+        (fun (passed : passed) ->
+          if passed.mode = T.Mut || L.mentions frame.bound passed.term then passed
+          else { passed with term = named_term context passed.type_ passed.term })
+        values
+    else values
+  in
   let caller = frame.source in
   let span = at frame node in
   let argument_at index =

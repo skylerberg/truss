@@ -376,6 +376,13 @@ decides when a body is a definition. In the solver:
   arguments. Each use unfolds one level, as fuel does in Dafny, and a proof
   that needs more calls a theorem or asserts the steps between. A
   definition that is not recursive unfolds as deep as it goes.
+- **An argument that holds a call is named once.** A pure call is its
+  function applied to its arguments, so a nested call's argument holds
+  every call inside it, and its clauses and its definition repeat that at
+  each use of the parameter, so a query would grow by a factor with each
+  level of nesting. Such an argument is a symbol named by its term and
+  equal to it, the same symbol wherever the same term is, so a query grows
+  only with the calls in it.
 - **A query that runs out of steps is asked again with contracts alone.**
   Unfolding gives the solver every definition a query reaches, which can
   be too much for it where the callee's `ensures` already says what is

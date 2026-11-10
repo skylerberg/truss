@@ -2657,6 +2657,58 @@ let () =
 (* Deep definitions *)
 
 let () =
+  test "a nested call's arguments are written once, however deep it nests" (fun () ->
+      let most depth =
+        let nested =
+          List.fold_left
+            (fun inner _ -> "spread(" ^ inner ^ ")")
+            "value + 12345 - 12345" (List.init depth Fun.id)
+        in
+        let database =
+          Support.setup
+            [
+              ( "app::main",
+                "fn spread(value: Int64) -> Int64\n\
+                \  requires 0 <= value && value < 1000\n\
+                \  ensures result == value\n\
+                \  cost time O(1)\n\
+                 {\n\
+                \  (value + value + value + value) / 4\n\
+                 }\n\n\
+                 fn f(value: Int64) -> Int64\n\
+                \  requires 0 <= value && value < 100\n\
+                \  ensures result == value\n\
+                \  cost time O(1)\n\
+                 {\n\
+                \  " ^ nested ^ "\n}\n" );
+            ]
+        in
+        let key =
+          List.find
+            (fun (declaration : Resolve.Names.declaration) ->
+              Path.show declaration.path = "app::main::f")
+            (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
+        in
+        match Query.demand database Prover.proof (Resolve.Names.key_of key) with
+        | Obligations { obligations; _ } ->
+            List.fold_left
+              (fun most (obligation : Prover.Translate.obligation) ->
+                let text = Logic.text obligation.query in
+                let rec count from found =
+                  match String.index_from_opt text from '1' with
+                  | Some at when at + 5 <= String.length text && String.sub text at 5 = "12345" ->
+                      count (at + 5) (found + 1)
+                  | Some at -> count (at + 1) found
+                  | None -> found
+                in
+                max most (count 0 0))
+              0 obligations
+        | _ ->
+            fail "expected obligations";
+            0
+      in
+      let shallow = most 3 and deep = most 6 in
+      if deep > shallow then fail "written %d times nested 3 deep, %d times 6 deep" shallow deep);
   test "a query over an unfolded definition can be asked with the contract alone" (fun () ->
       let database =
         Support.setup
