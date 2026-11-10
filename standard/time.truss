@@ -1,4 +1,5 @@
 use standard::core
+use standard::intrinsic
 use standard::text
 
 public opaque type Duration(nanoseconds: Int64)
@@ -18,44 +19,50 @@ public fn Duration.nanoseconds(count: Int64) -> Duration
 
 public fn Duration.microseconds(count: Int64) -> Duration
   requires -9223372036854775 <= count && count <= 9223372036854775
+  ensures result.total_nanoseconds() == count * 1000
   cost time O(1)
 {
-  todo
+  Duration(nanoseconds: count * 1000)
 }
 
 public fn Duration.milliseconds(count: Int64) -> Duration
   requires -9223372036854 <= count && count <= 9223372036854
+  ensures result.total_nanoseconds() == count * 1000000
   cost time O(1)
 {
-  todo
+  Duration(nanoseconds: count * 1000000)
 }
 
 public fn Duration.seconds(count: Int64) -> Duration
   requires -9223372036 <= count && count <= 9223372036
+  ensures result.total_nanoseconds() == count * 1000000000
   cost time O(1)
 {
-  todo
+  Duration(nanoseconds: count * 1000000000)
 }
 
 public fn Duration.minutes(count: Int64) -> Duration
   requires -153722867 <= count && count <= 153722867
+  ensures result.total_nanoseconds() == count * 60000000000
   cost time O(1)
 {
-  todo
+  Duration(nanoseconds: count * 60000000000)
 }
 
 public fn Duration.hours(count: Int64) -> Duration
   requires -2562047 <= count && count <= 2562047
+  ensures result.total_nanoseconds() == count * 3600000000000
   cost time O(1)
 {
-  todo
+  Duration(nanoseconds: count * 3600000000000)
 }
 
 public fn Duration.days(count: Int64) -> Duration
   requires -106751 <= count && count <= 106751
+  ensures result.total_nanoseconds() == count * 86400000000000
   cost time O(1)
 {
-  todo
+  Duration(nanoseconds: count * 86400000000000)
 }
 
 public fn Duration.from_seconds(seconds: Float64) -> Option[Duration]
@@ -92,7 +99,7 @@ public fn Duration.subsecond_nanoseconds(self) -> Int32
   ensures -1000000000 < result && result < 1000000000
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self.nanoseconds % 1000000000)
 }
 
 public fn Duration.to_seconds(self) -> Float64
@@ -114,27 +121,43 @@ public fn Duration.is_negative(self) -> Bool
 }
 
 public fn Duration.absolute(self) -> Duration
+  ensures !result.is_negative()
   cost time O(1)
 {
-  todo
+  if self.nanoseconds == Int64.minimum {
+    Duration.maximum
+  } else if self.nanoseconds < 0 {
+    Duration(nanoseconds: -self.nanoseconds)
+  } else {
+    self
+  }
 }
 
 public fn Duration.checked_add(self, other: Duration) -> Option[Duration]
   cost time O(1)
 {
-  todo
+  match self.nanoseconds.checked_add(other.nanoseconds) {
+    Some(sum) => Some(Duration(nanoseconds: sum))
+    None => None
+  }
 }
 
 public fn Duration.checked_subtract(self, other: Duration) -> Option[Duration]
   cost time O(1)
 {
-  todo
+  match self.nanoseconds.checked_subtract(other.nanoseconds) {
+    Some(difference) => Some(Duration(nanoseconds: difference))
+    None => None
+  }
 }
 
 public fn Duration.checked_multiply(self, factor: Int64) -> Option[Duration]
   cost time O(1)
 {
-  todo
+  match self.nanoseconds.checked_multiply(factor) {
+    Some(product) => Some(Duration(nanoseconds: product))
+    None => None
+  }
 }
 
 impl Add[Duration] for Duration {
@@ -164,16 +187,22 @@ impl Multiply[Int64] for Duration {
 impl Divide[Int64] for Duration {
   type Output = Option[Duration]
 
-  fn divide(self, right: Int64) -> Option[Duration] {
-    todo
+  fn divide(self, right: Int64) -> Option[Duration]
+  {
+    match self.nanoseconds.checked_divide(right) {
+      Some(quotient) => Some(Duration(nanoseconds: quotient))
+      None => None
+    }
   }
 }
 
 impl Negate for Duration {
   type Output = Duration
 
-  fn negate(self) -> Duration {
-    todo
+  fn negate(self) -> Duration
+  {
+    let zero: Int64 = 0
+    Duration(nanoseconds: zero.saturating_subtract(self.nanoseconds))
   }
 }
 
@@ -254,13 +283,19 @@ public fn Instant.duration_since(self, earlier: Instant) -> Duration
 public fn Instant.checked_add(self, duration: Duration) -> Option[Instant]
   cost time O(1)
 {
-  todo
+  match self.nanoseconds.checked_add(duration.nanoseconds) {
+    Some(sum) => Some(Instant(nanoseconds: sum))
+    None => None
+  }
 }
 
 public fn Instant.checked_subtract(self, duration: Duration) -> Option[Instant]
   cost time O(1)
 {
-  todo
+  match self.nanoseconds.checked_subtract(duration.nanoseconds) {
+    Some(difference) => Some(Instant(nanoseconds: difference))
+    None => None
+  }
 }
 
 impl Add[Duration] for Instant {
@@ -308,8 +343,16 @@ public type ParseTimeError =
   derives Equal
 
 impl Display for ParseTimeError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Empty => mut output.write("the text is empty")
+      Malformed(offset) => {
+        mut output.write("the text is not a time at offset ")
+        offset.display(mut output)
+      }
+      OutOfRange => mut output.write("the time is outside the range the type holds")
+    }
   }
 }
 
@@ -332,26 +375,92 @@ public fn Month.number(self) -> UInt8
   ensures 1 <= result && result <= 12
   cost time O(1)
 {
-  todo
+  match self {
+    January => 1
+    February => 2
+    March => 3
+    April => 4
+    May => 5
+    June => 6
+    July => 7
+    August => 8
+    September => 9
+    October => 10
+    November => 11
+    December => 12
+  }
 }
 
 public fn Month.from_number(number: UInt8) -> Option[Month]
   ensures (result is Some(_)) == (1 <= number && number <= 12)
   cost time O(1)
 {
-  todo
+  if number == 1 {
+    Some(Month.January)
+  } else if number == 2 {
+    Some(Month.February)
+  } else if number == 3 {
+    Some(Month.March)
+  } else if number == 4 {
+    Some(Month.April)
+  } else if number == 5 {
+    Some(Month.May)
+  } else if number == 6 {
+    Some(Month.June)
+  } else if number == 7 {
+    Some(Month.July)
+  } else if number == 8 {
+    Some(Month.August)
+  } else if number == 9 {
+    Some(Month.September)
+  } else if number == 10 {
+    Some(Month.October)
+  } else if number == 11 {
+    Some(Month.November)
+  } else if number == 12 {
+    Some(Month.December)
+  } else {
+    None
+  }
 }
 
 public fn Month.days(self, leap_year: Bool) -> UInt8
   ensures 28 <= result && result <= 31
   cost time O(1)
 {
-  todo
+  match self {
+    January => 31
+    February => if leap_year { 29 } else { 28 }
+    March => 31
+    April => 30
+    May => 31
+    June => 30
+    July => 31
+    August => 31
+    September => 30
+    October => 31
+    November => 30
+    December => 31
+  }
 }
 
 impl Display for Month {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      January => mut output.write("January")
+      February => mut output.write("February")
+      March => mut output.write("March")
+      April => mut output.write("April")
+      May => mut output.write("May")
+      June => mut output.write("June")
+      July => mut output.write("July")
+      August => mut output.write("August")
+      September => mut output.write("September")
+      October => mut output.write("October")
+      November => mut output.write("November")
+      December => mut output.write("December")
+    }
   }
 }
 
@@ -362,7 +471,15 @@ public fn Weekday.number_from_monday(self) -> UInt8
   ensures 1 <= result && result <= 7
   cost time O(1)
 {
-  todo
+  match self {
+    Monday => 1
+    Tuesday => 2
+    Wednesday => 3
+    Thursday => 4
+    Friday => 5
+    Saturday => 6
+    Sunday => 7
+  }
 }
 
 public fn Weekday.is_weekend(self) -> Bool
@@ -372,24 +489,363 @@ public fn Weekday.is_weekend(self) -> Bool
 }
 
 impl Display for Weekday {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Monday => mut output.write("Monday")
+      Tuesday => mut output.write("Tuesday")
+      Wednesday => mut output.write("Wednesday")
+      Thursday => mut output.write("Thursday")
+      Friday => mut output.write("Friday")
+      Saturday => mut output.write("Saturday")
+      Sunday => mut output.write("Sunday")
+    }
   }
 }
 
 public opaque type Date(days_since_epoch: Int32)
   derives Plain, Equal, Hash, Ordered
 
+internal type Civil(year: Int64, month: Int64, day: Int64)
+
+internal fn is_leap(year: Int64) -> Bool
+  cost time O(1)
+{
+  (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+internal fn days_in_month(month: Int64, leap: Bool) -> Int64
+  requires 1 <= month && month <= 12
+  ensures 28 <= result && result <= 31
+  cost time O(1)
+{
+  if month == 2 {
+    if leap { 29 } else { 28 }
+  } else if month == 4 || month == 6 || month == 9 || month == 11 {
+    30
+  } else {
+    31
+  }
+}
+
+internal fn month_of(number: Int64) -> Month
+  requires 1 <= number && number <= 12
+  cost time O(1)
+{
+  if number == 1 {
+    Month.January
+  } else if number == 2 {
+    Month.February
+  } else if number == 3 {
+    Month.March
+  } else if number == 4 {
+    Month.April
+  } else if number == 5 {
+    Month.May
+  } else if number == 6 {
+    Month.June
+  } else if number == 7 {
+    Month.July
+  } else if number == 8 {
+    Month.August
+  } else if number == 9 {
+    Month.September
+  } else if number == 10 {
+    Month.October
+  } else if number == 11 {
+    Month.November
+  } else {
+    Month.December
+  }
+}
+
+internal fn weekday_of(number: Int64) -> Weekday
+  requires 1 <= number && number <= 7
+  cost time O(1)
+{
+  if number == 1 {
+    Weekday.Monday
+  } else if number == 2 {
+    Weekday.Tuesday
+  } else if number == 3 {
+    Weekday.Wednesday
+  } else if number == 4 {
+    Weekday.Thursday
+  } else if number == 5 {
+    Weekday.Friday
+  } else if number == 6 {
+    Weekday.Saturday
+  } else {
+    Weekday.Sunday
+  }
+}
+
+internal fn march_month(day_of_year: Int64) -> Int64
+  requires 0 <= day_of_year && day_of_year <= 365
+  ensures 0 <= result && result <= 11
+  cost time O(1)
+{
+  if day_of_year < 31 {
+    0
+  } else if day_of_year < 61 {
+    1
+  } else if day_of_year < 92 {
+    2
+  } else if day_of_year < 122 {
+    3
+  } else if day_of_year < 153 {
+    4
+  } else if day_of_year < 184 {
+    5
+  } else if day_of_year < 214 {
+    6
+  } else if day_of_year < 245 {
+    7
+  } else if day_of_year < 275 {
+    8
+  } else if day_of_year < 306 {
+    9
+  } else if day_of_year < 337 {
+    10
+  } else {
+    11
+  }
+}
+
+internal fn march_start(month: Int64) -> Int64
+  requires 0 <= month && month <= 11
+  ensures 0 <= result && result <= 337
+  cost time O(1)
+{
+  if month == 0 {
+    0
+  } else if month == 1 {
+    31
+  } else if month == 2 {
+    61
+  } else if month == 3 {
+    92
+  } else if month == 4 {
+    122
+  } else if month == 5 {
+    153
+  } else if month == 6 {
+    184
+  } else if month == 7 {
+    214
+  } else if month == 8 {
+    245
+  } else if month == 9 {
+    275
+  } else if month == 10 {
+    306
+  } else {
+    337
+  }
+}
+
+internal fn january_start(month: Int64) -> Int64
+  requires 1 <= month && month <= 12
+  ensures 0 <= result && result <= 334
+  cost time O(1)
+{
+  if month == 1 {
+    0
+  } else if month == 2 {
+    31
+  } else if month == 3 {
+    59
+  } else if month == 4 {
+    90
+  } else if month == 5 {
+    120
+  } else if month == 6 {
+    151
+  } else if month == 7 {
+    181
+  } else if month == 8 {
+    212
+  } else if month == 9 {
+    243
+  } else if month == 10 {
+    273
+  } else if month == 11 {
+    304
+  } else {
+    334
+  }
+}
+
+internal fn least(first: Int64, second: Int64) -> Int64
+  ensures result <= first && result <= second
+  ensures result == first || result == second
+  cost time O(1)
+{
+  if first < second { first } else { second }
+}
+
+internal fn civil_from_days(days: Int64) -> Civil
+  requires -2147483648 <= days && days <= 2147483647
+  ensures 1 <= result.month && result.month <= 12
+  ensures 1 <= result.day && result.day <= 31
+  ensures -5900000 < result.year && result.year < 5900000
+  cost time O(1)
+{
+  let shifted = days + 719468
+  let era = shifted.floor_divide(146097)
+  let day_of_era = shifted - era * 146097
+  let centuries = least(day_of_era / 36524, second: 3)
+  let in_century = day_of_era - centuries * 36524
+  let fours = least(in_century / 1461, second: 24)
+  let in_four = in_century - fours * 1461
+  let ones = least(in_four / 365, second: 3)
+  let day_of_year = in_four - ones * 365
+  let year_of_era = centuries * 100 + fours * 4 + ones
+  let from_march = march_month(day_of_year)
+  let day = day_of_year - march_start(from_march) + 1
+  let month = if from_march < 10 { from_march + 3 } else { from_march - 9 }
+  let year = year_of_era + era * 400 + (if month <= 2 { 1 } else { 0 })
+  Civil(year: year, month: month, day: day)
+}
+
+internal fn days_from_civil(year: Int64, month: Int64, day: Int64) -> Int64
+  requires -6000000 < year && year < 6000000
+  requires 1 <= month && month <= 12
+  requires 1 <= day && day <= 31
+  ensures -2200000000 < result && result < 2200000000
+  cost time O(1)
+{
+  let from_march = if month > 2 { month - 3 } else { month + 9 }
+  let shifted_year = if month > 2 { year } else { year - 1 }
+  let era = shifted_year.floor_divide(400)
+  let year_of_era = shifted_year - era * 400
+  let day_of_year = march_start(from_march) + day - 1
+  let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year
+  era * 146097 + day_of_era - 719468
+}
+
+internal fn date_of(year: Int64, month: Int64, day: Int64) -> Option[Date]
+  requires -6000000 < year && year < 6000000
+  requires 1 <= month && month <= 12
+  requires 1 <= day && day <= 31
+  cost time O(1)
+{
+  let days = days_from_civil(year, month: month, day: day)
+  if days < -2147483648 || days > 2147483647 {
+    None
+  } else {
+    Some(Date(days_since_epoch: intrinsic::convert(days)))
+  }
+}
+
+internal fn Date.civil(self) -> Civil
+  ensures 1 <= result.month && result.month <= 12
+  ensures 1 <= result.day && result.day <= 31
+  ensures -5900000 < result.year && result.year < 5900000
+  cost time O(1)
+{
+  civil_from_days(intrinsic::convert(self.days_since_epoch))
+}
+
+internal fn Date.weekday_number(self) -> Int64
+  ensures 1 <= result && result <= 7
+  cost time O(1)
+{
+  let days: Int64 = intrinsic::convert(self.days_since_epoch)
+  (days + 3).floor_modulo(7) + 1
+}
+
+internal fn ordinal_of(civil: Civil) -> Int64
+  requires 1 <= civil.month && civil.month <= 12
+  requires 1 <= civil.day && civil.day <= 31
+  ensures 1 <= result && result <= 366
+  cost time O(1)
+{
+  let leap_day: Int64 = if civil.month > 2 && is_leap(civil.year) { 1 } else { 0 }
+  january_start(civil.month) + leap_day + civil.day
+}
+
+internal fn Date.plus_months_wide(self, months: Int64) -> Option[Date]
+  requires -30000000000 < months && months < 30000000000
+  cost time O(1)
+{
+  let civil = self.civil()
+  let total = civil.year * 12 + civil.month - 1 + months
+  let year = total.floor_divide(12)
+  let month = total - year * 12 + 1
+  if year <= -5900000 || year >= 5900000 {
+    return None
+  }
+  date_of(year, month: month, day: least(civil.day, second: days_in_month(month, leap: is_leap(year))))
+}
+
+internal fn weeks_in_year(year: Int64) -> Int64
+  requires -6000000 < year && year < 6000000
+  ensures result == 52 || result == 53
+  cost time O(1)
+{
+  let previous = year - 1
+  let this_year = (year + year.floor_divide(4) - year.floor_divide(100) + year.floor_divide(400)).floor_modulo(7)
+  let last_year =
+    (previous + previous.floor_divide(4) - previous.floor_divide(100) + previous.floor_divide(400)).floor_modulo(7)
+  if this_year == 4 || last_year == 3 { 53 } else { 52 }
+}
+
+internal fn iso_week(ordinal: Int64, weekday: Int64, year: Int64) -> Int64
+  requires 1 <= ordinal && ordinal <= 366
+  requires 1 <= weekday && weekday <= 7
+  requires -5900000 < year && year < 5900000
+  ensures 1 <= result && result <= 53
+  cost time O(1)
+{
+  var week = (ordinal - weekday + 10) / 7
+  if week == 0 {
+    week = weeks_in_year(year - 1)
+  } else if week == 53 && weeks_in_year(year) == 52 {
+    week = 1
+  }
+  week
+}
+
+internal fn write_two_digits(output: mut TextBuilder, value: Int64)
+  requires 0 <= value && value <= 99
+{
+  if value < 10 {
+    mut output.write("0")
+  }
+  value.display(mut output)
+}
+
 public fn Date.new(year: Int32, month: UInt8, day: UInt8) -> Option[Date]
   cost time O(1)
 {
-  todo
+  if month < 1 || month > 12 || day < 1 {
+    return None
+  }
+  let wide_year: Int64 = intrinsic::convert(year)
+  let wide_month: Int64 = intrinsic::convert(month)
+  let wide_day: Int64 = intrinsic::convert(day)
+  if wide_year <= -5900000 || wide_year >= 5900000 || wide_day > days_in_month(wide_month, leap: is_leap(wide_year)) {
+    return None
+  }
+  date_of(wide_year, month: wide_month, day: wide_day)
 }
 
 public fn Date.from_day_of_year(year: Int32, day_of_year: UInt16) -> Option[Date]
   cost time O(1)
 {
-  todo
+  let wide_year: Int64 = intrinsic::convert(year)
+  let ordinal: Int64 = intrinsic::convert(day_of_year)
+  let length: Int64 = if is_leap(wide_year) { 366 } else { 365 }
+  if wide_year <= -5900000 || wide_year >= 5900000 || ordinal < 1 || ordinal > length {
+    return None
+  }
+  let days = days_from_civil(wide_year, month: 1, day: 1) + ordinal - 1
+  if days < -2147483648 || days > 2147483647 {
+    None
+  } else {
+    Some(Date(days_since_epoch: intrinsic::convert(days)))
+  }
 }
 
 public fn Date.is_leap_year(year: Int32) -> Bool
@@ -401,64 +857,71 @@ public fn Date.is_leap_year(year: Int32) -> Bool
 public fn Date.year(self) -> Int32
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self.civil().year)
 }
 
 public fn Date.month(self) -> Month
   cost time O(1)
 {
-  todo
+  month_of(self.civil().month)
 }
 
 public fn Date.day(self) -> UInt8
   ensures 1 <= result && result <= 31
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self.civil().day)
 }
 
 public fn Date.weekday(self) -> Weekday
   cost time O(1)
 {
-  todo
+  weekday_of(self.weekday_number())
 }
 
 public fn Date.day_of_year(self) -> UInt16
   ensures 1 <= result && result <= 366
   cost time O(1)
 {
-  todo
+  intrinsic::convert(ordinal_of(self.civil()))
 }
 
 public fn Date.week_of_year(self) -> UInt8
   ensures 1 <= result && result <= 53
   cost time O(1)
 {
-  todo
+  let civil = self.civil()
+  intrinsic::convert(iso_week(ordinal_of(civil), weekday: self.weekday_number(), year: civil.year))
 }
 
 public fn Date.plus_days(self, days: Int32) -> Option[Date]
   cost time O(1)
 {
-  todo
+  match self.days_since_epoch.checked_add(days) {
+    Some(sum) => Some(Date(days_since_epoch: sum))
+    None => None
+  }
 }
 
 public fn Date.plus_months(self, months: Int32) -> Option[Date]
   cost time O(1)
 {
-  todo
+  self.plus_months_wide(intrinsic::convert(months))
 }
 
 public fn Date.plus_years(self, years: Int32) -> Option[Date]
   cost time O(1)
 {
-  todo
+  let wide: Int64 = intrinsic::convert(years)
+  self.plus_months_wide(wide * 12)
 }
 
 public fn Date.days_until(self, other: Date) -> Int64
   cost time O(1)
 {
-  todo
+  let from: Int64 = intrinsic::convert(self.days_since_epoch)
+  let to: Int64 = intrinsic::convert(other.days_since_epoch)
+  to - from
 }
 
 public fn Date.at(self, time: TimeOfDay) -> DateTime
@@ -468,8 +931,14 @@ public fn Date.at(self, time: TimeOfDay) -> DateTime
 }
 
 impl Display for Date {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    let civil = self.civil()
+    mut output.write(civil.year.format(minimum_digits: 4))
+    mut output.write("-")
+    write_two_digits(mut output, value: civil.month)
+    mut output.write("-")
+    write_two_digits(mut output, value: civil.day)
   }
 }
 
@@ -497,19 +966,25 @@ impl core::Countable for Date {
   fn advanced(self, by: USize) -> Option[Date]
     cost time O(1)
   {
-    todo
+    match self.days_since_epoch.advanced(by: by) {
+      Some(days) => Some(Date(days_since_epoch: days))
+      None => None
+    }
   }
 
   fn retreated(self, by: USize) -> Option[Date]
     cost time O(1)
   {
-    todo
+    match self.days_since_epoch.retreated(by: by) {
+      Some(days) => Some(Date(days_since_epoch: days))
+      None => None
+    }
   }
 
   fn steps_to(self, other: Date) -> Option[USize]
     cost time O(1)
   {
-    todo
+    self.days_since_epoch.steps_to(other.days_since_epoch)
   }
 }
 
@@ -523,35 +998,42 @@ public let TimeOfDay.noon: TimeOfDay = TimeOfDay(nanoseconds_since_midnight: 432
 public fn TimeOfDay.new(hour: UInt8, minute: UInt8, second: UInt8 = 0, nanosecond: UInt32 = 0) -> Option[TimeOfDay]
   cost time O(1)
 {
-  todo
+  if hour >= 24 || minute >= 60 || second >= 60 || nanosecond >= 1000000000 {
+    return None
+  }
+  let hours: UInt64 = intrinsic::convert(hour)
+  let minutes: UInt64 = intrinsic::convert(minute)
+  let seconds: UInt64 = intrinsic::convert(second)
+  let nanoseconds: UInt64 = intrinsic::convert(nanosecond)
+  Some(TimeOfDay(nanoseconds_since_midnight: ((hours * 60 + minutes) * 60 + seconds) * 1000000000 + nanoseconds))
 }
 
 public fn TimeOfDay.hour(self) -> UInt8
   ensures result < 24
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self.nanoseconds_since_midnight / 3600000000000 % 24)
 }
 
 public fn TimeOfDay.minute(self) -> UInt8
   ensures result < 60
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self.nanoseconds_since_midnight / 60000000000 % 60)
 }
 
 public fn TimeOfDay.second(self) -> UInt8
   ensures result < 60
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self.nanoseconds_since_midnight / 1000000000 % 60)
 }
 
 public fn TimeOfDay.nanosecond(self) -> UInt32
   ensures result < 1000000000
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self.nanoseconds_since_midnight % 1000000000)
 }
 
 public fn TimeOfDay.since_midnight(self) -> Duration
