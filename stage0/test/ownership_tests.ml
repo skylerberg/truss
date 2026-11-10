@@ -750,6 +750,60 @@ let () =
         \  self.text.slice()\n\
          }\n")
 
+(* Views of a name that refers to a part of a parameter *)
+
+let () =
+  let url = "type Url(scheme: String, user: Option[String])\n\n" in
+  let accepted name body = test name (fun () -> fine (url ^ body)) in
+  accepted "a view of what a `match` on a parameter binds can be returned"
+    "fn Url.user(self) -> Option[StringSlice] {\n\
+    \  match self.user {\n\
+    \    Some(found) => Some(found.slice())\n\
+    \    None => None\n\
+    \  }\n\
+     }\n";
+  accepted "a view of what an `is` test on a parameter binds can be returned"
+    "fn Url.user(self) -> Option[StringSlice] {\n\
+    \  if self.user is Some(found) {\n\
+    \    Some(found.slice())\n\
+    \  } else {\n\
+    \    None\n\
+    \  }\n\
+     }\n";
+  accepted "a view of a name that a `let` binds to a part of a parameter can be returned"
+    "fn Url.scheme(self) -> StringSlice {\n  let scheme = self.scheme\n  scheme.slice()\n}\n";
+  accepted "a view of a loop's element of a parameter can be returned"
+    "fn first(names: List[String]) -> Option[StringSlice] {\n\
+    \  for name in names {\n\
+    \    return Some(name.slice())\n\
+    \  }\n\
+    \  None\n\
+     }\n";
+  test "a view of what a `match` on a local binds cannot be returned" (fun () ->
+      one_diagnostic
+        "fn f() -> Option[StringSlice] {\n\
+        \  let user: Option[String] = Some(\"a\".copy())\n\
+        \  match user {\n\
+        \    Some(found) => Some(found.slice())\n\
+        \    None => None\n\
+        \  }\n\
+         }\n"
+        "ownership.returns_local_view");
+  test "a place cannot change while a view of what a `match` on it binds is in use" (fun () ->
+      one_diagnostic
+        "fn f() -> USize {\n\
+        \  var user: Option[String] = Some(\"a\".copy())\n\
+        \  match user {\n\
+        \    Some(found) => {\n\
+        \      let name = found.slice()\n\
+        \      user = None\n\
+        \      name.length()\n\
+        \    }\n\
+        \    None => 0\n\
+        \  }\n\
+         }\n"
+        "ownership.changed_while_viewed")
+
 (* Constants *)
 
 let () =
