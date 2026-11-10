@@ -94,8 +94,9 @@ let prove database (key : Names.key) =
   | Some definition, Some source -> (
       try
         match definition.kind with
-        (* A trait's own method is proven where an [impl] takes it, as its
-           body is what the method means there. *)
+        (* A trait's provided body is not proven on its own: an [impl] that
+           replaces it shows its result is the body's, and one that keeps it
+           is not proven yet. *)
         | Function _ when Call_graph.in_trait database key -> Not_proven_here
         | Function { signature; body } ->
             let updating_helper =
