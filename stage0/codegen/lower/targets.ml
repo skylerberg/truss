@@ -461,6 +461,16 @@ let provided_evidence st ~(implementation : Lir.operand) provides =
       (capability, implementation_evidence st ~impl ~type_arguments ~implementation))
     provides
 
+(* The instance that a method's key is called as. The [next] of a cursor
+   over a yielding function is the function's state machine. *)
+let called (key : Instance.key) : Instance.key =
+  match key with
+  | Code { path = Method { owner; name = "next"; _ }; type_arguments } -> (
+      match Interface.Impls.cursor_of_impl owner with
+      | Some method_ -> Cursor_next { method_; type_arguments }
+      | None -> key)
+  | key -> key
+
 let call_instance st key ~(signature : T.signature) ~substitution
     ~(arguments : (T.mode * Ground.ty * Lir.place) list) ~mask ~destination =
   let lir_signature, result =
@@ -472,7 +482,7 @@ let call_instance st key ~(signature : T.signature) ~substitution
     (if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [])
     @ List.map (evidence_of st) (evidence_for substitution signature.uses)
   in
-  let target = Lir.Direct { function_ = Instance key; signature = lir_signature } in
+  let target = Lir.Direct { function_ = Instance (called key); signature = lir_signature } in
   emit st.b
     (Call { target; arguments = passed @ mask; result = Convention.destination result destination });
   if not lir_signature.returns then unreachable_block st
