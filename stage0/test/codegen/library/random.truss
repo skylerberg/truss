@@ -170,3 +170,12 @@ test "a UUID is read with its hyphens or without, in either case" {
   assert uuid::Uuid.parse("0011223344556677-899AABBCCDDEEFF") == Err(uuid::ParseError.InvalidCharacter(offset: 16))
   assert "${uuid::ParseError.InvalidCharacter(offset: 8)}" == "the text is not a UUID at offset 8"
 }
+
+test "a UUID made from a name is the same every time, and says it is version 5" {
+  assert uuid::Uuid.parse("6ba7b810-9dad-11d1-80b4-00c04fd430c8") is Ok(namespace)
+    && "${uuid::from_name(namespace, name: "example.com".bytes())}" == "cfbff0d1-9375-5685-968c-48ce8b15ae17"
+    && uuid::from_name(namespace, name: "example.com".bytes()).version() == 5
+  assert uuid::Uuid.parse("6ba7b811-9dad-11d1-80b4-00c04fd430c8") is Ok(namespace)
+    && "${uuid::from_name(namespace, name: "https://example.com/a".bytes())}" == "6639460f-3425-5329-8097-a58f06127860"
+  assert "${uuid::from_name(uuid::Uuid.nil, name: "".bytes())}" == "e129f27c-5103-5c5c-844b-cdf0a15e160d"
+}

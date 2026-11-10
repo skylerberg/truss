@@ -122,3 +122,25 @@ test "a list and a string are collected from a cursor, and a list is extended by
   let text: String = String.collect(Letters(left: 4))
   assert text == "h\u{e9}h\u{e9}"
 }
+
+test "the adapters and the trait's methods work on a yielding method's cursor" {
+  let items: List[Int64] = [1, 2, 3, 4, 5, 6, 7]
+  assert same_items(items.each().skip(2).to_list(), expected: [3, 4, 5, 6, 7])
+  assert same_items(items.each().take(3).to_list(), expected: [1, 2, 3])
+  assert same_items(items.each().step_by(3).to_list(), expected: [1, 4, 7])
+  assert same_items(items.each().skip(1).step_by(2).take(2).to_list(), expected: [2, 4])
+  assert items.each().count() == 7
+  assert items.each().last() == Some(7)
+  assert items.each().fold(0, combine: fn(total, item) { total + item }) == 28
+  let collected: List[Int64] = List.collect(items.each().skip(5))
+  assert same_items(collected, expected: [6, 7])
+  var cursor = items.each().peekable()
+  assert mut cursor.peek() == Some(1)
+  assert mut cursor.next() == Some(1)
+  assert mut cursor.find(fn(item) { item > 5 }) == Some(6)
+  let text = "h\u{e9}llo"
+  let start: String = String.collect(text.characters().take(2))
+  assert start == "h\u{e9}"
+  assert text.characters().count() == 5
+  assert text.characters().skip(4).last() == Some(Character"o")
+}

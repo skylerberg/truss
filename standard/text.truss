@@ -65,20 +65,32 @@ public fn String.is_empty(self) -> Bool
   self.length() == 0
 }
 
+internal fn push_bytes(storage: mut intrinsic::Storage[UInt8], text: StringSlice)
+  requires intrinsic::storage_length(storage) + text.length() <= intrinsic::storage_capacity(storage)
+  ensures identical(intrinsic::storage_model(storage), old(intrinsic::storage_model(storage)).concatenate(text.model()))
+  ensures intrinsic::storage_capacity(storage) == old(intrinsic::storage_capacity(storage))
+  cost time O(text.length())
+  cost allocations == 0
+{
+  for index in 0..text.length()
+    invariant intrinsic::storage_length(storage) == old(intrinsic::storage_length(storage)) + yielded.length()
+    invariant forall i in 0..old(intrinsic::storage_length(storage)) =>
+      identical(intrinsic::storage_model(storage)[i], old(intrinsic::storage_model(storage))[i])
+    invariant forall i in 0..yielded.length() =>
+      identical(intrinsic::storage_model(storage)[old(intrinsic::storage_length(storage)) + i], text.model()[i])
+    invariant intrinsic::storage_capacity(storage) == old(intrinsic::storage_capacity(storage))
+    cost allocations == 0
+  {
+    intrinsic::storage_push(mut storage, value: intrinsic::view_at(text.bytes, index: index))
+  }
+}
+
 public fn String.push(mut self, text: StringSlice)
   ensures identical(self.model(), old(self.model()).concatenate(text.model()))
+  cost amortized time O(text.length())
 {
   growth::reserve(mut self.storage, additional: text.length())
-  for index in 0..text.length()
-    invariant self.model().length() == old(self.model()).length() + yielded.length()
-    invariant forall i in 0..old(self.model()).length() =>
-      identical(self.model()[i], old(self.model())[i])
-    invariant forall i in 0..yielded.length() =>
-      identical(self.model()[old(self.model()).length() + i], text.model()[i])
-    invariant intrinsic::storage_capacity(self.storage) >= old(self.model()).length() + text.length()
-  {
-    intrinsic::storage_push(mut self.storage, value: intrinsic::view_at(text.bytes, index: index))
-  }
+  push_bytes(mut self.storage, text: text)
 }
 
 public fn String.slice(self) -> StringSlice
@@ -202,7 +214,9 @@ public fn TextBuilder.new() -> TextBuilder {
   TextBuilder(text: String(storage: intrinsic::storage_empty()))
 }
 
-public fn TextBuilder.write(mut self, text: StringSlice) {
+public fn TextBuilder.write(mut self, text: StringSlice)
+  cost amortized time O(text.length())
+{
   mut self.text.push(text)
 }
 
