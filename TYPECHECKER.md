@@ -1365,9 +1365,11 @@ associated type without a question coming back to itself.
 ### Method names
 
 A method is its name and how it takes `self`. A type's own method and a
-method of a trait the type implements cannot be the same one, and an `impl`
-outside the type's package cannot use a name the type's methods have at
-all, as DESIGN.md says. Neither can share a name with a constant of the
+method of a trait the type implements cannot be the same one. A trait's
+method may be another version of a type's own only when an `impl` in the
+type's package writes it: one left to the trait's provided body, or given
+by an `impl` in another package, cannot use a name the type's methods have
+at all, as DESIGN.md says. Neither can share a name with a constant of the
 type. The error is reported at the `impl`, wherever it is.
 
 ### `any`

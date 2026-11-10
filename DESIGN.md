@@ -856,16 +856,19 @@ choices below keep method calls predictable:
   there is still exactly one method for each name and each way of taking
   `self`. The cost is that the versions of one name can be in two places,
   a type's own methods and an `impl`.
-- **Versions merge only where one author wrote them as one method:** a
-  type's own methods with the `impl`s in the type's own package, and a trait
-  with the traits it requires. Picking by mode among everything visible
-  would let code added elsewhere take over a call without an error. On a
-  temporary the `own` version is chosen when there is one, so if a second
-  package could give a type's `label(self)` a `label(own self)` through a
-  trait of its own, `Counter(3).label()` would change which method it means
-  when that package was added. So an `impl` outside a type's package cannot
-  use a name the type's methods have, and two unrelated traits that share a
-  name are still told apart only by writing the call in full.
+- **Versions merge only where one author wrote them as one method.** Three
+  things are one author's: a type's own methods, the methods an `impl` in
+  the type's own package writes, and a trait with the traits it requires.
+  Picking by mode among everything visible would let code added elsewhere
+  take over a call without an error. On a temporary the `own` version is
+  chosen when there is one, so if a second package could give a type's
+  `label(self)` a `label(own self)` through a trait of its own,
+  `Counter(3).label()` would change which method it means when that package
+  was added. A method that an `impl` leaves to the body its trait provides
+  is no different: a later release of the trait can add one. So an `impl`
+  outside a type's package cannot use a name the type's methods have, an
+  `impl` inside it can only by writing the method, and two unrelated traits
+  that share a name are still told apart only by writing the call in full.
 - **Traits can take type parameters, which covers what overloading is mostly
   wanted for.** `Int64.from(count)` picks an `impl` of `From[Source]` by the
   type of `count`, and `instant + duration` picks an `impl` of

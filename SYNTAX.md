@@ -2485,9 +2485,10 @@ hand.
 - A type's own method and a method of a trait it implements cannot be the
   same method: the same name, taking `self` the same way. An `impl` that
   would give a type such a method is a compile error. An `impl` in the
-  type's own package can give it another version of a method it has. An
-  `impl` in any other package cannot use a name the type's methods have at
-  all.
+  type's own package can give it another version of a method it has, by
+  writing that method itself. A method the `impl` leaves to the body its
+  trait provides, and any method of an `impl` in another package, cannot use
+  a name the type's methods have at all.
 - An `impl` must be in the package of the trait, of the type, or of the
   outermost type of one of the trait's arguments. So `impl Multiply[Vector]
   for Float64`, which makes `2.0 * velocity` work, lives with `Vector`.

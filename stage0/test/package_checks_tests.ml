@@ -56,6 +56,37 @@ let () =
          }\n\n\
          fn Bag.each(mut self) yields mut Int64 { todo }\n\n\
          fn Bag.each(own self) yields own Int64 { todo }\n");
+  test "an impl that writes a method may make it another version of the type's own" (fun () ->
+      fine
+        "trait Labelled {\n\
+        \  fn label(self) -> Int64\n\
+        \    cost time O(1)\n\
+        \  {\n\
+        \    0\n\
+        \  }\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         fn Counter.label(own self) -> Int64 { todo }\n\n\
+         impl Labelled for Counter {\n\
+        \  fn label(self) -> Int64\n\
+        \    cost time O(1)\n\
+        \  {\n\
+        \    0\n\
+        \  }\n\
+         }\n");
+  test "a method an impl leaves to its trait cannot be a version of the type's own" (fun () ->
+      one_diagnostic
+        "trait Labelled {\n\
+        \  fn label(self) -> Int64\n\
+        \    cost time O(1)\n\
+        \  {\n\
+        \    0\n\
+        \  }\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         fn Counter.label(own self) -> Int64 { todo }\n\n\
+         impl Labelled for Counter {}\n"
+        "package.method_name_clash");
   test "a type's constant cannot share a name with a trait's method" (fun () ->
       one_diagnostic
         "trait Bounded {\n\
