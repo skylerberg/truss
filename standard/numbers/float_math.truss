@@ -135,37 +135,37 @@ public fn Float32.logarithm_one_plus(self) -> Float32
 public fn Float32.sine(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().sine().to_float32()
 }
 
 public fn Float32.cosine(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().cosine().to_float32()
 }
 
 public fn Float32.tangent(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().tangent().to_float32()
 }
 
 public fn Float32.arcsine(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().arcsine().to_float32()
 }
 
 public fn Float32.arccosine(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().arccosine().to_float32()
 }
 
 public fn Float32.arctangent(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().arctangent().to_float32()
 }
 
 public fn Float32.hyperbolic_sine(self) -> Float32
@@ -231,7 +231,7 @@ public fn Float32.logarithm_base(self, base: Float32) -> Float32
 public fn Float32.arctangent_2(self, x: Float32) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().arctangent_2(x.widened()).to_float32()
 }
 
 public fn Float32.copy_sign(self, sign: Float32) -> Float32
@@ -850,40 +850,203 @@ public fn Float64.logarithm_one_plus(self) -> Float64
   sum.logarithm() * (self / (sum - 1.0))
 }
 
+let four_over_pi: Array[UInt64, 20] = [
+  0x1, 0x45f306dc9c882a53, 0xf84eafa3ea69bb81, 0xb6c52b3278872083,
+  0xfca2c757bd778ac3, 0x6e48dc74849ba5c0, 0xc925dd413a32439, 0xfc3bd63962534e7d,
+  0xd1046bea5d768909, 0xd338e04d68befc82, 0x7323ac7306a673e9, 0x3908bf177bf25076,
+  0x3ff12fffbc0b301f, 0xde5e2316b414da3e, 0xda6cfd9e4f96136e, 0x9e8c7ecd3cbfd45a,
+  0xea4f758fd7cbe2f6, 0x7a0e73ef14a525d4, 0xd7f6bf623f1aba10, 0xac06608df8f6d757,
+]
+
+internal type Reduced(octant: UInt64, rest: Float64)
+
+internal fn pi_bits(digit: USize, shift: USize) -> UInt64
+  requires digit + 1 < 20
+  requires shift < 64
+  cost time O(1)
+{
+  if shift == 0 {
+    four_over_pi[digit]
+  } else {
+    (four_over_pi[digit] << shift) | (four_over_pi[digit + 1] >> (64 - shift))
+  }
+}
+
+internal fn Float64.reduced_exactly(self) -> Reduced
+  ensures result.octant < 8
+  cost time O(1)
+{
+  let bits = self.to_bits()
+  let field: Int64 = intrinsic::convert((bits >> 52) & 2047)
+  let place = field - 1014
+  if place < 0 || place >= 1088 {
+    return Reduced(octant: 0, rest: self)
+  }
+  let mantissa = (bits & 0x000f_ffff_ffff_ffff) | 0x0010_0000_0000_0000
+  let digit: USize = intrinsic::convert(place / 64)
+  let shift: USize = intrinsic::convert(place % 64)
+  let first = pi_bits(digit, shift: shift)
+  let second = pi_bits(digit + 1, shift: shift)
+  let third = pi_bits(digit + 2, shift: shift)
+  let second_low = second.wrapping_multiply(mantissa)
+  let low = second_low.wrapping_add(intrinsic::multiply_high(third, right: mantissa))
+  let carry: UInt64 = if low < second_low { 1 } else { 0 }
+  let high = first.wrapping_multiply(mantissa).wrapping_add(intrinsic::multiply_high(second, right: mantissa)).wrapping_add(carry)
+  let octant = high >> 61
+  let fraction = (high << 3) | (low >> 61)
+  let zeros = fraction.leading_zeros()
+  let part: Float64 = if zeros >= 64 {
+    0.0
+  } else {
+    let lift = zeros + 1
+    let kept: UInt64 = match fraction.checked_shift_left(lift) {
+      Some(moved) => moved
+      None => 0
+    }
+    let top = kept | (low >> (64 - lift))
+    let exponent: UInt64 = intrinsic::convert(1023 - lift)
+    Float64.from_bits((top >> 12) | (exponent << 52))
+  }
+  if octant % 2 == 1 {
+    Reduced(octant: (octant + 1) % 8, rest: (part - 1.0) * 0.7853981633974483)
+  } else {
+    Reduced(octant: octant, rest: part * 0.7853981633974483)
+  }
+}
+
+internal fn Float64.reduced(self) -> Reduced
+  ensures result.octant < 8
+  cost time O(1)
+{
+  if self >= 536870912.0 {
+    return self.reduced_exactly()
+  }
+  let count = self * 1.2732395447351628
+  let whole: UInt64 = if intrinsic::fits[Float64, UInt64](count) { intrinsic::convert(count) } else { 0 }
+  let even: UInt64 = if whole % 2 == 1 && whole < UInt64.maximum { whole + 1 } else { whole }
+  let steps = even.to_float64()
+  Reduced(octant: even % 8, rest: ((self - steps * 0.7853981256484985) - steps * 3.774894707930798e-08) - steps * 2.6951514290790595e-15)
+}
+
+internal fn sine_near_zero(rest: Float64) -> Float64
+  cost time O(1)
+{
+  let square = rest * rest
+  rest + rest * square * (((((1.5896230157654656e-10 * square + -2.5050747762857807e-08) * square + 2.7557313621385722e-06) * square + -0.0001984126982958954) * square + 0.008333333333322118) * square + -0.1666666666666663)
+}
+
+internal fn cosine_near_zero(rest: Float64) -> Float64
+  cost time O(1)
+{
+  let square = rest * rest
+  1.0 - 0.5 * square + square * square * (((((-1.1358536521387682e-11 * square + 2.087570084197473e-09) * square + -2.755731417929674e-07) * square + 2.4801587288851704e-05) * square + -0.0013888888888873056) * square + 0.041666666666666595)
+}
+
+internal fn arctangent_near_zero(value: Float64) -> Float64
+  cost time O(1)
+{
+  let square = value * value
+  let series = square * ((((-0.8750608600031904 * square + -16.157537187333652) * square + -75.00855792314705) * square + -122.88666844901361) * square + -64.85021904942025) / (((((square + 24.858464901423062) * square + 165.02700983169885) * square + 432.88106049129027) * square + 485.3903996359137) * square + 194.5506571482614)
+  value * series + value
+}
+
+internal fn arctangent_of_positive(value: Float64) -> Float64
+  cost time O(1)
+{
+  if value <= 0.66 {
+    arctangent_near_zero(value)
+  } else if value > 2.414213562373095 {
+    1.5707963267948966 - arctangent_near_zero(1.0 / value) + 6.123233995736766e-17
+  } else {
+    0.7853981633974483 + arctangent_near_zero((value - 1.0) / (value + 1.0)) + 3.061616997868383e-17
+  }
+}
+
 public fn Float64.sine(self) -> Float64
   cost time O(1)
 {
-  todo
+  if self == 0.0 || intrinsic::is_nan(self) {
+    return self
+  }
+  if self.is_infinite() {
+    return Float64.not_a_number
+  }
+  let reduced = self.absolute().reduced()
+  let flipped = reduced.octant > 3
+  let octant = if flipped { reduced.octant - 4 } else { reduced.octant }
+  let found = if octant == 1 || octant == 2 { cosine_near_zero(reduced.rest) } else { sine_near_zero(reduced.rest) }
+  if (self < 0.0) != flipped { -found } else { found }
 }
 
 public fn Float64.cosine(self) -> Float64
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) {
+    return self
+  }
+  if self.is_infinite() {
+    return Float64.not_a_number
+  }
+  let reduced = self.absolute().reduced()
+  let flipped = reduced.octant > 3
+  let octant = if flipped { reduced.octant - 4 } else { reduced.octant }
+  let found = if octant == 1 || octant == 2 { sine_near_zero(reduced.rest) } else { cosine_near_zero(reduced.rest) }
+  if flipped != (octant > 1) { -found } else { found }
 }
 
 public fn Float64.tangent(self) -> Float64
   cost time O(1)
 {
-  todo
+  if self == 0.0 || intrinsic::is_nan(self) {
+    return self
+  }
+  if self.is_infinite() {
+    return Float64.not_a_number
+  }
+  let reduced = self.absolute().reduced()
+  let rest = reduced.rest
+  let square = rest * rest
+  let near = if square > 1.0e-14 {
+    rest + rest * (square * ((-13093.693918138379 * square + 1153516.6483858742) * square + -17956525.197648488) / ((((square + 13681.296347069296) * square + -1320892.3444021097) * square + 25008380.18233579) * square + -53869575.592945464))
+  } else {
+    rest
+  }
+  let found = if reduced.octant % 4 >= 2 { -1.0 / near } else { near }
+  if self < 0.0 { -found } else { found }
 }
 
 public fn Float64.arcsine(self) -> Float64
   cost time O(1)
 {
-  todo
+  if self == 0.0 || intrinsic::is_nan(self) {
+    return self
+  }
+  let magnitude = self.absolute()
+  if magnitude > 1.0 {
+    return Float64.not_a_number
+  }
+  let other = intrinsic::square_root(1.0 - magnitude * magnitude)
+  let found = if magnitude > 0.7 {
+    1.5707963267948966 - arctangent_of_positive(other / magnitude)
+  } else {
+    arctangent_of_positive(magnitude / other)
+  }
+  found.copy_sign(self)
 }
 
 public fn Float64.arccosine(self) -> Float64
   cost time O(1)
 {
-  todo
+  1.5707963267948966 - self.arcsine()
 }
 
 public fn Float64.arctangent(self) -> Float64
   cost time O(1)
 {
-  todo
+  if self == 0.0 || intrinsic::is_nan(self) {
+    return self
+  }
+  arctangent_of_positive(self.absolute()).copy_sign(self)
 }
 
 public fn Float64.hyperbolic_sine(self) -> Float64
@@ -1084,7 +1247,32 @@ public fn Float64.logarithm_base(self, base: Float64) -> Float64
 public fn Float64.arctangent_2(self, x: Float64) -> Float64
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) || intrinsic::is_nan(x) {
+    return Float64.not_a_number
+  }
+  let zero: Float64 = 0.0
+  let straight: Float64 = 3.141592653589793
+  let right: Float64 = 1.5707963267948966
+  if self == 0.0 {
+    return if x.is_negative() { straight.copy_sign(self) } else { zero.copy_sign(self) }
+  }
+  if x == 0.0 {
+    return right.copy_sign(self)
+  }
+  if x.is_infinite() {
+    let diagonal: Float64 = if x > 0.0 { 0.7853981633974483 } else { 2.356194490192345 }
+    let level: Float64 = if x > 0.0 { 0.0 } else { 3.141592653589793 }
+    return if self.is_infinite() { diagonal.copy_sign(self) } else { level.copy_sign(self) }
+  }
+  if self.is_infinite() {
+    return right.copy_sign(self)
+  }
+  let angle = (self / x).arctangent()
+  if x < 0.0 {
+    if angle <= 0.0 { angle + 3.141592653589793 } else { angle - 3.141592653589793 }
+  } else {
+    angle
+  }
 }
 
 public fn Float64.copy_sign(self, sign: Float64) -> Float64
