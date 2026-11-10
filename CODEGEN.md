@@ -151,7 +151,8 @@ checks too, whether or not their proofs are done:
   mathematical `Integer`, a quantifier, a conversion to or from one, or a
   comparison of integers of two types.
 - Integer `+`, `-`, and `*` panic with "arithmetic overflow", through
-  `__builtin_*_overflow`. The `wrapping_` operations still wrap.
+  `__builtin_*_overflow`, and so does negating the least value of a signed
+  type. The `wrapping_` operations still wrap.
 - Integer division panics on a zero divisor, and on the least value over
   -1.
 

@@ -292,7 +292,13 @@ and operator st (e : S.expression) operands destination =
           | None -> bug "a built-in binary operator")
       | Prefix (Not, _), [ value ] -> assign (Unary (Not, value))
       | Prefix (Complement, _), [ value ] -> assign (Unary (Complement, value))
-      | Prefix (Negate, _), [ value ] -> assign (Unary (Negate, value))
+      | Prefix (Negate, _), [ value ] ->
+          (* Through the intrinsic, which a checked build has test for the
+             one value that has no negation. *)
+          ignore
+            (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types Negate
+               ~type_arguments:[ type_of st e.id ]
+               [ Value value ] ~destination:(Some destination) ~site:(site st e.span))
       | _ -> bug "a built-in operator")
   | Some _, Some (compare, left, right) when primitive (type_of st left.id) ->
       (* A comparison of built-in values is a primitive operation, with the

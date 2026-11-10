@@ -345,4 +345,21 @@ let () =
               (Lir.to_string instance)
       | _ -> fail "expected code")
 
+let () =
+  test "negating the least value of a signed type panics, where the checks are on" (fun () ->
+      expect_output
+        {|fn flip(value: Int8) -> Int8 {
+  -value
+}
+
+fn least() -> Int8 {
+  -128
+}
+
+test "negated" {
+  assert flip(least()) == 0
+}
+|}
+        "test 0 panicked\nmessage 47\narithmetic overflow\n  at example/main.truss:2:3\n")
+
 let () = Harness.finish ()
