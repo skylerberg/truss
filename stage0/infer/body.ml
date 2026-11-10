@@ -638,8 +638,8 @@ let check database (key : Names.key) =
         || contains state.tables.pattern_types
       in
       (* Whether a type is an error, or names a type whose declaration has
-         one. The error is reported at the declaration, and what uses the
-         type is checked without a report of its own. *)
+         an error. The error is reported at the declaration, and a use of
+         the type is checked without a second report. *)
       let broken =
         let shapes = Hashtbl.create 8 in
         fun (part : T.ty) ->

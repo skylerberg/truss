@@ -34,8 +34,7 @@ let rec call state env ?expected (value : expression) (callee : expression)
       | Some found -> call_named state env ?expected value callee found arguments
       | None -> function_value_call state env value callee arguments)
 
-(* A call whose callee is a name. The callee is whatever the name resolves
-   to. *)
+(* A call whose callee is a name. The callee is the name's referent. *)
 and call_named state env ?expected (value : expression) (callee : expression)
     ({ name; target; type_arguments } : Resolve.head) arguments =
   match target with

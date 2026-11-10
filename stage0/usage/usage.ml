@@ -19,7 +19,7 @@ let report context ?(fixes = []) code (span : span) message =
 
 (* Unused variables *)
 
-(* The names a definition reads, by the id of what binds them. *)
+(* The names that a definition reads, by the id of each name's binding. *)
 let references (resolved : Resolve.resolved) =
   let counts = Hashtbl.create 32 in
   Array.iter

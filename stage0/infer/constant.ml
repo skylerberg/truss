@@ -2,12 +2,12 @@
    compiler evaluates a constant expression, and every build gets the same
    value.
 
-   A constant expression is made of literals, operators on built-in numbers
+   A constant expression consists of literals, operators on built-in numbers
    and [Bool], other constants, and records, variants, and collections of
    these. It calls no function, so it uses no capability and always
    terminates, and it names only definitions. The check reads the checked
-   tables, which say what each call calls and what each name refers to, not
-   the spelling of the expression. *)
+   tables, which give the callee of each call and the referent of each name,
+   and not the spelling of the expression. *)
 
 open Syntax
 module T = Types
@@ -47,8 +47,8 @@ let rec offending state (value : expression) : expression option =
   | _ -> Some value
 
 (* Integer arithmetic that the checker can evaluate must not overflow its
-   type or divide by zero. What would stop the program at run time is an
-   error at compile time here. A negated literal is checked as a literal. *)
+   type or divide by zero. An operation that would panic at run time is a
+   compile-time error here. A negated literal is checked as a literal. *)
 let rec check_arithmetic state (value : expression) =
   let worked_out part =
     Interface.Constants.expression state.database ~visiting:[] state.resolved part

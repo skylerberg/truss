@@ -1,25 +1,25 @@
-(* The capability check: every call may only use capabilities that are
-   available where the call is.
+(* The capability check: a call can use only the capabilities that are
+   available at the call.
 
    The check runs on a definition's core form, because the core form has a
-   node for every call, including the calls that sugar hides (a [for] loop's
-   [each], an interpolated value's [display]).
+   node for every call, including the calls that desugaring introduces (the
+   [each] of a [for] loop, the [display] of an interpolated value).
 
-   What is available at a point in the code is its scope:
-   - in a function body: the function's [uses], plus the capabilities of
+   The capabilities that are available at a point of the code are its scope:
+   - in a function body: the function's [uses], and the capabilities of
      every enclosing [provide];
    - in a lambda body: the [uses] of the lambda's function type;
-   - in a specification, a proof, or a [parallel] branch: less than the
+   - in a specification, a proof, or a [parallel] branch: fewer than the
      function declares (see [scope_kind]).
 
-   The check cannot decide each call on its own, because capability sets
-   can contain capability variables. A capability variable stands for the
-   set that a capability parameter is instantiated with at one call, and it
-   is solved from constraints. So the check only collects constraints of
-   the form "the capabilities this call requires are a subset of the
-   capabilities available here". [solve] then solves all constraints of the
-   definition, including the ones type inference collected when it
-   converted function values to function types. *)
+   The check cannot decide each call independently, because a capability set
+   can contain capability variables. A capability variable is the set that a
+   capability parameter is instantiated with at one call, and it is solved
+   from constraints. So the check only collects constraints of the form "the
+   capabilities that this call requires are a subset of the capabilities
+   available here". [solve] then solves all constraints of the definition,
+   including those that type inference collected when it converted function
+   values to function types. *)
 
 open Syntax
 module T = Types
@@ -31,8 +31,8 @@ let panic : T.capability =
   Capability
     (Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Panic" })
 
-(* What [concurrent] code uses: what it does can depend on which task runs
-   first. *)
+(* The capability that [concurrent] code uses, because its behavior can
+   depend on task scheduling. *)
 let tasks : T.capability = Capability Core_walk.tasks_capability
 
 (* [spans] maps a syntax node id to its span. A core node is reported at the
@@ -62,8 +62,8 @@ type scope_kind =
   | Function_body  (** The body of a function or a test. *)
   | Lambda_body of Core.origin
       (** The body of the lambda with this origin. The available capabilities are the [uses] of the
-          lambda's type. If that type has a capability variable, solving adds whatever the body
-          requires to the variable. *)
+          lambda's type. If that type has a capability variable, solving adds the capabilities that
+          the body requires to the variable. *)
   | Restricted of string
       (** Code that may use less than the enclosing function declares: a [parallel] branch (only
           [Panic]), or a specification or proof (nothing). The string names the kind of code, for
@@ -138,8 +138,8 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
       | Bound | Dynamic -> ())
   | Capability_method _ | Intrinsic _ | Indirect _ -> ()
 
-(* Adds the constraint that [required] is a subset of what is available in
-   [scope]. [origin] is where a violation is reported. *)
+(* Adds the constraint that [required] is a subset of the capabilities
+   available in [scope]. [origin] is where a violation is reported. *)
 let require_available checking scope (origin : Core.origin) ?(for_implementation = false)
     ?(indirect_call = false) (required : T.capability list) =
   let state = checking.state in

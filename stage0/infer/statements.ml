@@ -1,5 +1,5 @@
-(* Checks blocks and statements: [let], assignment, loops and what they
-   iterate over, and the value of a block. *)
+(* Checks blocks and statements: [let], assignment, loops and their
+   iterations, and the value of a block. *)
 
 open Syntax
 module T = Types
@@ -368,8 +368,8 @@ and loop_clause state env (clause : loop_clause) =
       | Big_o value | At_most value | Exactly value -> ignore (expression state env value)
       | Finite -> ())
 
-(* What a [for] loop iterates over: a range of built-in integers, a call of
-   a yielding method, a cursor, or the [each] method that the loop's mode
+(* The iteration of a [for] loop: a range of built-in integers, a call of a
+   yielding method, a cursor, or the [each] method that the loop's mode
    selects. *)
 (* Checks the iterable of a [for] loop. Returns the type of the loop
    variable and its mode. *)
