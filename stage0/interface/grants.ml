@@ -54,22 +54,19 @@ let granted =
   Query.query ~name:"granted" ~phase:Interfaces ~saved:true
     ~show:(fun (package, dependency) -> Printf.sprintf "%s to %s" package dependency)
     (fun database (package, dependency) ->
-      Option.bind (Workspace.package database package) (fun (manifest : Workspace.package) ->
-          Option.map
-            (fun (entry : Workspace.dependency) ->
-              let found =
-                List.map (fun name -> (name, capability database ~package name)) entry.capabilities
-              in
-              {
-                capabilities = List.filter_map snd found;
-                unknown =
-                  List.filter_map
-                    (fun (name, path) -> if path = None then Some name else None)
-                    found;
-              })
-            (List.find_opt
-               (fun (entry : Workspace.dependency) -> entry.package = dependency)
-               manifest.dependencies)))
+      Option.map
+        (fun (entry : Workspace.dependency) ->
+          let found =
+            List.map (fun name -> (name, capability database ~package name)) entry.capabilities
+          in
+          {
+            capabilities = List.filter_map snd found;
+            unknown =
+              List.filter_map (fun (name, path) -> if path = None then Some name else None) found;
+          })
+        (List.find_opt
+           (fun (entry : Workspace.dependency) -> entry.package = dependency)
+           (Query.demand database Workspace.dependencies package)))
 
 (* The capabilities, of those some code of the package [of_] uses, that
    [package]'s manifest does not grant it. A package's own code and the

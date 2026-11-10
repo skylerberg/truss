@@ -1,39 +1,11 @@
 use standard::intrinsic
+use standard::system::handles
+use standard::system::lines
 
 public capability Console {
   fn print_line(text: StringSlice)
   fn print_error(text: StringSlice)
   fn read_line() -> Option[String]
-}
-
-internal type SystemConsole()
-
-impl Console for SystemConsole {
-  fn print_line(self, text: StringSlice) {
-    let _ = intrinsic::write_bytes(1, bytes: text.bytes)
-    let _ = intrinsic::write_bytes(1, bytes: "\n".slice().bytes)
-  }
-
-  fn print_error(self, text: StringSlice) {
-    let _ = intrinsic::write_bytes(2, bytes: text.bytes)
-    let _ = intrinsic::write_bytes(2, bytes: "\n".slice().bytes)
-  }
-
-  fn read_line(self) -> Option[String] {
-    var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
-    var ended = false
-    while !ended && intrinsic::read_bytes(0, buffer: mut bytes, count: 1) == 1 {
-      if intrinsic::view_at(intrinsic::storage_view(bytes), index: intrinsic::storage_length(bytes) - 1) == 10 {
-        let _ = intrinsic::storage_pop(mut bytes)
-        ended = true
-      }
-    }
-    if !ended && intrinsic::storage_length(bytes) == 0 {
-      None
-    } else {
-      Some(String.from_bytes(own bytes))
-    }
-  }
 }
 
 public capability FileRead {
@@ -83,79 +55,6 @@ public capability Panic {
   fn crash(message: StringSlice) -> Never
 }
 
-internal type SystemEnvironment()
-
-impl Environment for SystemEnvironment {
-  fn variable(self, name: StringSlice) -> Option[String] {
-    var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
-    if intrinsic::environment_variable(name.bytes, buffer: mut bytes) {
-      Some(String.from_bytes(own bytes))
-    } else {
-      None
-    }
-  }
-}
-
-internal type SystemProcesses()
-
-impl Processes for SystemProcesses {
-  fn run(self, program: Path, arguments: List[String]) -> Result[ExitCode, FileError] {
-    var packed: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
-    for argument in arguments {
-      let bytes = argument.slice().bytes
-      for index in 0..intrinsic::view_length(bytes) {
-        intrinsic::storage_push(mut packed, value: intrinsic::view_at(bytes, index: index))
-      }
-      intrinsic::storage_push(mut packed, value: 0)
-    }
-    var error: Int32 = 0
-    let status = intrinsic::run_process(
-      program.text.slice().bytes,
-      arguments: intrinsic::storage_view(packed),
-      error: mut error,
-    )
-    if error == 0 {
-      Ok(ExitCode(code: intrinsic::convert(status)))
-    } else if error == 2 {
-      Err(FileError.NotFound)
-    } else if error == 13 {
-      Err(FileError.PermissionDenied)
-    } else {
-      Err(FileError.Other(code: error))
-    }
-  }
-}
-
-internal type SystemTasks()
-
-impl Tasks for SystemTasks {
-  fn yield_now(self) {}
-}
-
-internal type SystemClock()
-
-impl Clock for SystemClock {
-  fn now(self) -> Instant {
-    Instant(nanoseconds: intrinsic::clock_now())
-  }
-}
-
-internal type SystemRandom()
-
-impl Random for SystemRandom {
-  fn next(self) -> UInt64 {
-    var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(8)
-    intrinsic::random_fill(mut bytes, count: 8)
-    var value: UInt64 = 0
-    let count: USize = 8
-    for index in 0..count {
-      let byte: UInt64 = intrinsic::convert(intrinsic::view_at(intrinsic::storage_view(bytes), index: index))
-      value = (value << 8) | byte
-    }
-    value
-  }
-}
-
 public type Instant(nanoseconds: Int64)
   derives Equal, Hash, Ordered
 
@@ -186,51 +85,19 @@ public fn Path.new(text: StringSlice) -> Path {
 
 public type Bytes(data: List[UInt8])
 
-public opaque type FileReader(
-  handle: intrinsic::Handle,
-  pending: intrinsic::Storage[UInt8],
-  start: USize,
-  ended: Bool,
-)
+public opaque type FileReader(handle: intrinsic::Handle, input: lines::LineInput)
 
 public fn FileReader.read_line(mut self) -> Result[String, FileError]
   uses FileRead
 {
-  var found = false
-  var end: USize = self.start
-  var failed = false
-  while !found && !failed {
-    if end < intrinsic::storage_length(self.pending) {
-      if intrinsic::view_at(intrinsic::storage_view(self.pending), index: end) == 10 {
-        found = true
-      } else {
-        end += 1
-      }
-    } else if self.ended {
-      found = true
-    } else {
-      let got = intrinsic::handle_read(mut self.handle, buffer: mut self.pending, count: 65536)
-      if got < 0 {
-        failed = true
-      } else if got == 0 {
-        self.ended = true
+  match mut self.input.next_line(intrinsic::handle_descriptor(self.handle)) {
+    Ok(line) => {
+      match own line {
+        Some(text) => Ok(own text)
+        None => Ok("")
       }
     }
-  }
-  if failed {
-    Err(FileError.Other(code: 5))
-  } else {
-    let pending = intrinsic::storage_view(self.pending)
-    var line: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(end - self.start)
-    for index in self.start..end {
-      intrinsic::storage_push(mut line, value: intrinsic::view_at(pending, index: index))
-    }
-    if end < intrinsic::storage_length(self.pending) {
-      self.start = end + 1
-    } else {
-      self.start = end
-    }
-    Ok(String.from_bytes(own line))
+    Err(number) => Err(handles::file_error(number))
   }
 }
 
@@ -239,97 +106,7 @@ public opaque type FileWriter(handle: intrinsic::Handle)
 public fn FileWriter.write(mut self, text: StringSlice) -> Result[Unit, FileError]
   uses FileWrite
 {
-  write_all(mut self.handle, bytes: text.bytes)
-}
-
-internal type SystemFileRead()
-
-impl FileRead for SystemFileRead {
-  fn read(self, file: Path) -> Result[Bytes, FileError] {
-    var handle = open_handle(file, flags: 0)?
-    let bytes = read_all(mut handle)?
-    Ok(Bytes(data: List.from_storage(own bytes)))
-  }
-
-  fn read_text(self, file: Path) -> Result[String, FileError] {
-    var handle = open_handle(file, flags: 0)?
-    let bytes = read_all(mut handle)?
-    Ok(String.from_bytes(own bytes))
-  }
-
-  fn open(self, file: Path) -> Result[FileReader, FileError] {
-    let handle = open_handle(file, flags: 0)?
-    Ok(FileReader(handle: own handle, pending: intrinsic::storage_empty(), start: 0, ended: false))
-  }
-}
-
-internal type SystemFileWrite()
-
-impl FileWrite for SystemFileWrite {
-  fn write(self, file: Path, contents: Bytes) -> Result[Unit, FileError] {
-    var handle = open_handle(file, flags: 1)?
-    write_all(mut handle, bytes: contents.data.elements())
-  }
-
-  fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, FileError] {
-    var handle = open_handle(file, flags: 1)?
-    write_all(mut handle, bytes: contents.bytes)
-  }
-
-  fn write_with(
-    self,
-    file: Path,
-    write: (fn(mut FileWriter) -> Result[Unit, FileError] uses FileWrite),
-  ) -> Result[Unit, FileError] {
-    let handle = open_handle(file, flags: 1)?
-    var writer = FileWriter(handle: own handle)
-    write(mut writer)
-  }
-}
-
-fn open_handle(file: Path, flags: Int32) -> Result[intrinsic::Handle, FileError] {
-  var error: Int32 = 0
-  let handle = intrinsic::open_file(file.text.slice().bytes, flags: flags, error: mut error)
-  if error == 0 {
-    Ok(own handle)
-  } else if error == 2 {
-    Err(FileError.NotFound)
-  } else if error == 13 {
-    Err(FileError.PermissionDenied)
-  } else {
-    Err(FileError.Other(code: error))
-  }
-}
-
-fn read_all(handle: mut intrinsic::Handle) -> Result[intrinsic::Storage[UInt8], FileError] {
-  var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
-  var reading = true
-  var failed = false
-  while reading {
-    let got = intrinsic::handle_read(mut handle, buffer: mut bytes, count: 65536)
-    if got < 0 {
-      failed = true
-      reading = false
-    } else if got == 0 {
-      reading = false
-    }
-  }
-  if failed { Err(FileError.Other(code: 5)) } else { Ok(own bytes) }
-}
-
-fn write_all(handle: mut intrinsic::Handle, bytes: intrinsic::View[UInt8]) -> Result[Unit, FileError] {
-  var at: USize = 0
-  var failed = false
-  while !failed && at < intrinsic::view_length(bytes) {
-    let wrote = intrinsic::handle_write(mut handle, bytes: intrinsic::view_slice(bytes, start: at, stop: intrinsic::view_length(bytes)))
-    if wrote <= 0 {
-      failed = true
-    } else {
-      let count: USize = intrinsic::convert(wrote)
-      at += count
-    }
-  }
-  if failed { Err(FileError.Other(code: 5)) } else { Ok(Unit) }
+  handles::write_all(mut self.handle, bytes: text.bytes)
 }
 
 public type FileError =

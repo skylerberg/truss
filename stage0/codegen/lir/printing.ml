@@ -116,28 +116,9 @@ let intrinsic_name = function
   | Round_even -> "round_even"
   | Float_bits -> "float_bits"
   | Float_from_bits -> "float_from_bits"
-  | Grow -> "grow"
-  | System_write -> "system_write"
-  | System_read -> "system_read"
-  | Float_text -> "float_text"
   | Evidence_fill -> "evidence_fill"
-  | System_environment -> "system_environment"
-  | System_open -> "system_open"
-  | System_close -> "system_close"
-  | System_run -> "system_run"
-  | Clock_now -> "clock_now"
-  | Random_fill -> "random_fill"
-  | Debug_begin -> "debug_begin"
-  | Debug_text -> "debug_text"
-  | Debug_signed -> "debug_signed"
-  | Debug_unsigned -> "debug_unsigned"
-  | Debug_float32 -> "debug_float32"
-  | Debug_float64 -> "debug_float64"
-  | Debug_bool -> "debug_bool"
-  | Debug_character -> "debug_character"
-  | Debug_string -> "debug_string"
-  | Debug_bytes -> "debug_bytes"
-  | Debug_length -> "debug_length"
+  | Environment -> "environment"
+  | Terminated_length -> "terminated_length"
   | Evidence_implementation -> "evidence_implementation"
   | Evidence_outer -> "evidence_outer"
   | Program_argument -> "program_argument"
@@ -163,8 +144,9 @@ let target_to_string = function
   | Direct { function_; _ } -> function_ref_to_string function_
   | Indirect { value; _ } -> "(" ^ operand_to_string value ^ ")"
   | Intrinsic intrinsic -> "intrinsic " ^ intrinsic_name intrinsic
-  | Evidence_call { evidence; slot; _ } ->
-      Printf.sprintf "(%s table %d)" (operand_to_string evidence) slot
+  | Foreign declaration -> "foreign " ^ declaration.symbol
+  | Evidence_call { evidence; capability; slot; _ } ->
+      Printf.sprintf "(%s %s %d)" (operand_to_string evidence) (Ground.path_name capability) slot
   | Table_call { table; value; slot; _ } ->
       Printf.sprintf "(%s[%d] %s)" (operand_to_string table) slot (operand_to_string value)
 

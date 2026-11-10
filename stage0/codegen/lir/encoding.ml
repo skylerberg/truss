@@ -2,7 +2,7 @@
 
 open Ir
 
-let version = 11
+let version = 14
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -143,31 +143,12 @@ let intrinsic_tag = function
   | Round_even -> 21
   | Float_bits -> 22
   | Float_from_bits -> 23
-  | Grow -> 24
-  | System_write -> 25
-  | System_read -> 26
-  | Clock_now -> 27
-  | Random_fill -> 28
-  | Debug_begin -> 29
-  | Debug_text -> 30
-  | Debug_signed -> 31
-  | Debug_unsigned -> 32
-  | Debug_float32 -> 33
-  | Debug_float64 -> 34
-  | Debug_bool -> 35
-  | Debug_character -> 36
-  | Debug_string -> 37
-  | Debug_bytes -> 38
-  | Debug_length -> 39
   | Evidence_implementation -> 40
   | Evidence_outer -> 41
   | Program_argument -> 42
-  | Float_text -> 43
   | Evidence_fill -> 44
-  | System_environment -> 45
-  | System_open -> 46
-  | System_close -> 47
-  | System_run -> 48
+  | Environment -> 49
+  | Terminated_length -> 50
 
 let encode_rvalue instance rvalue =
   let operand = encode_operand instance in
@@ -187,15 +168,30 @@ let encode_rvalue instance rvalue =
   | Function_value { code; environment } ->
       tagged 6 [ encode_function_ref instance code; option operand environment ]
 
+let encode_foreign (declaration : Libc.declaration) =
+  Cbor.Array
+    [
+      Text declaration.symbol;
+      Text declaration.returns;
+      list (fun c -> Cbor.Text c) declaration.takes;
+      option Cbor.int declaration.variadic_from;
+    ]
+
 let encode_target instance = function
   | Direct { function_; signature } ->
       tagged 0 [ encode_function_ref instance function_; encode_signature instance signature ]
   | Indirect { value; signature } ->
       tagged 1 [ encode_operand instance value; encode_signature instance signature ]
   | Intrinsic intrinsic -> tagged 2 [ Cbor.int (intrinsic_tag intrinsic) ]
-  | Evidence_call { evidence; slot; signature } ->
+  | Foreign declaration -> tagged 5 [ encode_foreign declaration ]
+  | Evidence_call { evidence; capability; slot; signature } ->
       tagged 3
-        [ encode_operand instance evidence; Cbor.int slot; encode_signature instance signature ]
+        [
+          encode_operand instance evidence;
+          instance.path capability;
+          Cbor.int slot;
+          encode_signature instance signature;
+        ]
   | Table_call { table; value; slot; signature } ->
       tagged 4
         [
@@ -316,15 +312,11 @@ let encode_table ?(path = Ground.encode_path) ?instance (table : table) =
   Cbor.Array
     [
       instance table.table_key;
+      option path table.capability;
       list
         (fun (key, s) -> Cbor.Array [ instance key; encode_signature encoders_default s ])
         table.entries;
     ]
-
-let encode_evidence ?(path = Ground.encode_path) ?instance (evidence : evidence) =
-  let instance = match instance with Some instance -> instance | None -> Instance.encode ~path in
-  Cbor.Array
-    [ instance evidence.evidence_key; instance evidence.table; list instance evidence.outer ]
 
 let hash t =
   Blake3.hash

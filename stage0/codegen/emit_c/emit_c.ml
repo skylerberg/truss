@@ -4,7 +4,7 @@
    - [C_types]: a file's context, and the C types of what it names
    - [C_values]: places, operands, constants, operators, and built values
    - [C_code]: intrinsics, calls, statements, terminators, and functions
-   - [C_data]: static data, tables, and evidence
+   - [C_data]: static data and tables
    - this module: a whole file *)
 
 open C_runtime
@@ -20,8 +20,7 @@ let anchor_struct = C_runtime.anchor_struct
 let runtime_declarations = C_runtime.runtime_declarations
 let anchor_symbol = C_runtime.anchor_symbol
 
-let file env build ?(data = []) ?(tables = []) ?(evidence = []) (instances : (Lir.t * linkage) list)
-    =
+let file env build ?(data = []) ?(tables = []) (instances : (Lir.t * linkage) list) =
   let context =
     {
       env;
@@ -71,11 +70,7 @@ let file env build ?(data = []) ?(tables = []) ?(evidence = []) (instances : (Li
         @ [ function_c context instance.key symbol ~linkage instance.main ])
       instances
   in
-  let data_definitions =
-    List.map (data_c context) data
-    @ List.map (table_c context) tables
-    @ List.map (evidence_c context) evidence
-  in
+  let data_definitions = List.map (data_c context) data @ List.map (table_c context) tables in
   (* Define every type the code names, and every type those definitions
      name, until nothing new is named. *)
   let definitions = ref Keys.empty in

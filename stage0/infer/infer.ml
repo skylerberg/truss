@@ -4,12 +4,22 @@ module Members = Members
 
 type result = Body.result = {
   checked : Checked.t;
+  core : Core.t option;
   diagnostics : Diagnostic.t list;
   evidence : string list;
 }
 
 let checked = Body.checked
+
+(* The core form of a method a derived [impl] gives, by the method's path. *)
+let derived = Derived.core
 let diagnostics = Body.diagnostics
+
+(* A definition's core form, when it has one: what the stages after
+   checking read. *)
+let core =
+  Query.query ~name:"core" ~phase:Bodies ~show:Resolve.Names.show_key (fun database key ->
+      Option.bind (Query.demand database checked key) (fun (result : result) -> result.core))
 
 (* A definition's checked form, when its header and body parsed whole and
    resolution and body checking found no error in it. The later stages,

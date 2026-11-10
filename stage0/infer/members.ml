@@ -5,42 +5,14 @@ module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
 
-(* The traits that declare a method with this name, among those a dot-call
-   may find: the standard library's, the calling package's, and those of
-   the packages its manifest lists. One query per package and name. *)
-let traits_declaring =
-  Query.query ~name:"traits_declaring" ~phase:Interfaces ~saved:true
-    ~show:(fun (package, name) -> package ^ " " ^ name)
-    (fun database (package, name) ->
-      match Workspace.package database package with
-      | None -> []
-      | Some package ->
-          List.concat_map
-            (fun module_ ->
-              List.filter_map
-                (fun (declaration : Names.declaration) ->
-                  if declaration.kind <> Trait || declaration.ordinal <> 0 then None
-                  else
-                    match Query.demand database Environment.trait_interface declaration.path with
-                    | Some trait
-                      when List.exists
-                             (fun (method_ : T.trait_method) -> method_.method_name = name)
-                             trait.methods ->
-                        Some declaration.path
-                    | _ -> None)
-                (Query.demand database Names.declarations module_))
-            package.modules)
-
+(* The packages whose traits a dot-call may find: the standard library, the
+   calling package, and those its manifest lists. *)
 let visible_packages database (package : string) =
-  let dependencies =
-    match Workspace.package database package with
-    | Some package ->
-        List.map
-          (fun (dependency : Workspace.dependency) -> dependency.package)
-          package.dependencies
-    | None -> []
-  in
-  List.sort_uniq compare ("standard" :: package :: dependencies)
+  List.sort_uniq compare
+    ("standard" :: package
+    :: List.map
+         (fun (dependency : Workspace.dependency) -> dependency.package)
+         (Query.demand database Workspace.dependencies package))
 
 (* A type's own methods with a name: one per receiver. *)
 let own_methods database owner name =
@@ -54,11 +26,17 @@ let own_constant database owner name =
     (fun (key : Names.key) -> match key.path with Member_constant _ -> Some key.path | _ -> None)
     (Query.demand database Names.members (owner, name))
 
+(* A trait's versions of a method: one for each way it takes [self]. *)
 let trait_methods database trait name =
   match Query.demand database Environment.trait_interface trait with
   | Some interface ->
       List.filter (fun (method_ : T.trait_method) -> method_.method_name = name) interface.methods
   | None -> []
+
+let trait_method database trait name receiver =
+  List.find_opt
+    (fun (method_ : T.trait_method) -> method_.method_receiver = receiver)
+    (trait_methods database trait name)
 
 (* The fields of a record type, with its type arguments substituted. *)
 let substitution_for database path arguments =

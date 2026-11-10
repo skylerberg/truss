@@ -25,6 +25,7 @@
   type_checker
   registry
   memory_layout
+  libc
   toolchain
   build
   instance

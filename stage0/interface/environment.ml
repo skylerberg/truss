@@ -177,6 +177,10 @@ type header = {
   self_trait : T.trait_reference option;
   self_associated : (string * T.ty) list;
   header_bounds : (T.parameter * T.trait_reference list) list;
+  header_generics : T.generic list;
+      (** An [impl]'s own generic parameters, which come before those of a method written inside it.
+          A trait's are given where its method is called, with [Self]. *)
+  header_uses : T.capability list;  (** An [impl]'s [uses], which are each of its methods' too. *)
 }
 
 let bounds_of (context : Lower.context) =
@@ -194,7 +198,12 @@ let header =
           | None -> (
               match lower_container (Lower.create database resolved) key.path definition with
               | Broken report, _ -> Some (Error report)
-              | _, context ->
+              | parts, context ->
+                  let header_generics, header_uses =
+                    match parts with
+                    | Impl_parts { impl_generics; impl_uses; _ } -> (impl_generics, impl_uses)
+                    | _ -> ([], [])
+                  in
                   Some
                     (Ok
                        {
@@ -202,6 +211,8 @@ let header =
                          self_trait = context.self_trait;
                          self_associated = context.self_associated;
                          header_bounds = bounds_of context;
+                         header_generics;
+                         header_uses;
                        })))
       | _ -> None)
 
@@ -275,7 +286,8 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
         match definition.kind with
         | Function { signature; _ } | Method_declaration signature ->
             let lowered =
-              Lower.signature context ~owner:path ~head:[] ~self_type:within.self_type signature
+              T.inside ~generics:within.header_generics ~uses:within.header_uses
+                (Lower.signature context ~owner:path ~head:[] ~self_type:within.self_type signature)
             in
             (* An [impl]'s method ends when its trait's does, since it keeps the
                trait's [time] clause. *)

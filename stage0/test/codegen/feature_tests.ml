@@ -626,4 +626,56 @@ test "once" {
 }
 |}
 
+let () =
+  passes "a list grows as it is pushed and keeps what it held"
+    {|test "grown" {
+  var numbers: List[Int64] = []
+  var next = 0
+  while next < 1000 {
+    mut numbers.push(next)
+    next += 1
+  }
+  var total = 0
+  for number in numbers {
+    total += number
+  }
+  assert numbers.length() == 1000
+  assert total == 499500
+}
+|};
+  passes "text that started as a literal is copied before it is added to"
+    {|test "added to" {
+  var first = "abc"
+  mut first.push("def")
+  let second = "abc"
+  assert first == "abcdef"
+  assert second == "abc"
+}
+|}
+
+let () =
+  test "values echo as Truss writes them" (fun () ->
+      expect_output
+        {|type Point(x: Float64, y: Float32)
+
+test "echoes" {
+  let _ = echo Some(true)
+  let _ = echo Some(1.5)
+  let _ = echo [1, 2, 3]
+  let _ = echo "hi\n \${x} \u{1}"
+  let _ = echo Point(x: 0.1, y: 2.0)
+  let _ = echo -7
+  let _ = echo Character"é"
+}
+|}
+        "test 0 passed\n\
+         echo 265\n\
+         example/main.truss:4:11: Some(true)\n\
+         example/main.truss:5:11: Some(1.5)\n\
+         example/main.truss:6:11: [1, 2, 3]\n\
+         example/main.truss:7:11: \"hi\\n \\${x} \\u{1}\"\n\
+         example/main.truss:8:11: Point(x: 0.1, y: 2.0)\n\
+         example/main.truss:9:11: -7\n\
+         example/main.truss:10:11: Character\"\195\169\"\n\n")
+
 let () = Harness.finish ()

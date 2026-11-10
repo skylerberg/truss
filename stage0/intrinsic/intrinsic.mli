@@ -38,6 +38,9 @@ val builtin_name : builtin -> string
 val builtin_path : builtin -> Path.t
 val builtin_of_path : Path.t -> builtin option
 
+val libc_builtin : Libc.scalar -> builtin
+(** The built-in type of a number the C library takes or gives. *)
+
 (** The operations of [standard::intrinsic], which the standard library is written on. The type
     checker gives each its signature, and code generation lowers each directly; both match on this
     type exhaustively, so a new operation cannot compile until both handle it. Arithmetic and
@@ -89,7 +92,14 @@ type operation =
   | Storage_with_capacity
   | Storage_length
   | Storage_capacity
-  | Storage_reserve
+  | Storage_set_capacity
+      (** [(storage, capacity)]: gives the storage a buffer of its own with room for exactly that
+          many elements, at least as many as it has. Nothing else makes room: [storage_push] and
+          [storage_insert] write into room the storage has, and how much to grow by is the standard
+          library's to say. *)
+  | Storage_lengthen
+      (** [(storage, by)]: the [by] elements after the last, which a function of the C library wrote
+          into room the storage had, are the storage's *)
   | Storage_push
   | Storage_pop
   | Storage_insert
@@ -101,26 +111,18 @@ type operation =
   | View_length
   | View_at
   | View_slice
+  | View_address
+      (** [(view) -> USize]: the address of a view's elements as a number, for the lists of
+          addresses that some functions of the C library take *)
   | Crash
-  | Write_bytes
-  | Read_bytes
-  | Write_float  (** [(buffer, value)]: appends the shortest decimal that reads back as the float *)
-  | Open_file
-      (** [(path, flags, error) -> Handle]: opens a file to read (flags 0), to write from empty (1),
-          or to append to (2), creating it to write; [error] gets 0, or the system's error number,
-          with a handle that is not open *)
-  | Handle_read
-      (** [(handle, buffer, count) -> ISize]: appends up to [count] bytes, as [read_bytes] *)
-  | Handle_write  (** [(handle, bytes) -> ISize]: writes, as [write_bytes] *)
-  | Environment_variable
-      (** [(name, buffer) -> Bool]: appends an environment variable's value; false when it is unset
-      *)
-  | Run_process
-      (** [(program, arguments, error) -> Int32]: runs a program found as a shell finds it, with the
-          arguments, each ending in a zero byte, and waits for it: its exit status, or [128 +] the
-          signal that ended it; [error] gets 0, or the system's error number *)
-  | Clock_now
-  | Random_fill
+  | Handle_from
+      (** [(descriptor) -> Handle]: owns a descriptor that is open, which dropping it closes *)
+  | Handle_descriptor  (** [(handle) -> Int32]: the descriptor a handle owns *)
+  | Libc of Libc.function_
+      (** A function of the system's C library, named [libc_] and its name: [libc_write] *)
+  | Libc_number of Libc.number
+      (** A number the C library's headers define, which differs between systems, as an operation
+          that takes nothing: [libc_o_creat()] *)
 
 val operations : operation list
 val operation_name : operation -> string

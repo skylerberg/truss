@@ -66,13 +66,10 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
       Printf.sprintf "%s(%s)"
         (helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
-  | Grow -> Printf.sprintf "t_runtime_storage_grow((void **)%s)" all
-  | System_write -> "t_runtime_write(" ^ all ^ ")"
-  | System_read -> "t_runtime_read(" ^ all ^ ")"
-  | System_environment -> "t_runtime_environment(" ^ all ^ ")"
-  | System_open -> "t_runtime_open(" ^ all ^ ")"
-  | System_close -> "t_runtime_close(" ^ all ^ ")"
-  | System_run -> "t_runtime_run(" ^ all ^ ")"
+  | Environment ->
+      declare_prototype context "environ" "extern char **environ;\n";
+      "((void *)environ)"
+  | Terminated_length -> Printf.sprintf "((t_usize)__builtin_strlen((const char *)%s))" (argument 0)
   | Evidence_fill ->
       let slot = argument 0 in
       let outer =
@@ -85,25 +82,9 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
         "(%s->evidence.implementation = (void *)%s, %s->evidence.table = (const void *const *)%s, \
          %s%s->evidence.outer = %s->outer)"
         slot (argument 1) slot (argument 2) (String.concat "" outer) slot slot
-  | Float_text ->
-      (if scalar 0 = Float32 then "t_runtime_float32_text(" else "t_runtime_float64_text(")
-      ^ all ^ ")"
-  | Clock_now -> "t_runtime_clock_now()"
-  | Random_fill -> "t_runtime_random_fill(" ^ all ^ ")"
-  | Debug_begin -> "t_runtime_debug_begin(" ^ all ^ ")"
-  | Debug_text -> "t_runtime_debug_text(" ^ all ^ ")"
-  | Debug_signed -> "t_runtime_debug_signed(" ^ all ^ ")"
-  | Debug_unsigned -> "t_runtime_debug_unsigned(" ^ all ^ ")"
-  | Debug_float32 -> "t_runtime_debug_float32(" ^ all ^ ")"
-  | Debug_float64 -> "t_runtime_debug_float64(" ^ all ^ ")"
-  | Debug_bool -> "t_runtime_debug_bool(" ^ all ^ ")"
-  | Debug_character -> "t_runtime_debug_character(" ^ all ^ ")"
-  | Debug_string -> "t_runtime_debug_string(" ^ all ^ ")"
-  | Debug_bytes -> "t_runtime_debug_bytes(" ^ all ^ ")"
-  | Debug_length -> "t_runtime_debug_length(" ^ all ^ ")"
   | Evidence_implementation ->
       Printf.sprintf "((const struct t_evidence *)%s)->implementation" (argument 0)
-  | Program_argument -> "t_runtime_program_argument(" ^ all ^ ")"
+  | Program_argument -> Printf.sprintf "((void *)((char **)%s)[%s])" (argument 0) (argument 1)
   | Evidence_outer ->
       Printf.sprintf "((void *)((const struct t_evidence *)%s)->outer[%s])" (argument 0)
         (argument 1)
@@ -127,6 +108,21 @@ let call_c context fc (target : Lir.target) arguments =
       Printf.sprintf "%s.f_code(%s)" value
         (String.concat ", " ((value ^ ".f_environment") :: List.map fst arguments))
   | Intrinsic intrinsic -> intrinsic_c context intrinsic arguments
+  | Foreign declaration ->
+      declare_prototype context declaration.symbol (Libc.prototype declaration);
+      let given =
+        try
+          List.map2
+            (fun c (text, _) -> Printf.sprintf "(%s)(%s)" c text)
+            declaration.takes arguments
+        with Invalid_argument _ ->
+          bug "a call of %s with an argument of zero size" declaration.symbol
+      in
+      let called = Printf.sprintf "%s(%s)" declaration.symbol (String.concat ", " given) in
+      (* An address comes back as C's own type for it, which the local it
+         goes to need not be. *)
+      if String.ends_with ~suffix:"*" declaration.returns then "((void *)" ^ called ^ ")"
+      else called
   | Table_call { table; value; slot; signature } ->
       let table =
         match operand_c context fc table with

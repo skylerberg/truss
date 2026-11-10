@@ -78,6 +78,15 @@ let builtin_of_path = function
       List.find_opt (fun builtin -> builtin_name builtin = name) builtins
   | _ -> None
 
+let libc_builtin : Libc.scalar -> builtin = function
+  | UInt8 -> UInt8
+  | Int32 -> Int32
+  | Int64 -> Int64
+  | UInt64 -> UInt64
+  | USize -> USize
+  | ISize -> ISize
+  | Float64 -> Float64
+
 type operation =
   | Add
   | Subtract
@@ -124,7 +133,8 @@ type operation =
   | Storage_with_capacity
   | Storage_length
   | Storage_capacity
-  | Storage_reserve
+  | Storage_set_capacity
+  | Storage_lengthen
   | Storage_push
   | Storage_pop
   | Storage_insert
@@ -136,17 +146,12 @@ type operation =
   | View_length
   | View_at
   | View_slice
+  | View_address
   | Crash
-  | Write_bytes
-  | Read_bytes
-  | Write_float
-  | Open_file
-  | Handle_read
-  | Handle_write
-  | Environment_variable
-  | Run_process
-  | Clock_now
-  | Random_fill
+  | Handle_from
+  | Handle_descriptor
+  | Libc of Libc.function_
+  | Libc_number of Libc.number
 
 let operations =
   [
@@ -195,7 +200,8 @@ let operations =
     Storage_with_capacity;
     Storage_length;
     Storage_capacity;
-    Storage_reserve;
+    Storage_set_capacity;
+    Storage_lengthen;
     Storage_push;
     Storage_pop;
     Storage_insert;
@@ -207,18 +213,13 @@ let operations =
     View_length;
     View_at;
     View_slice;
+    View_address;
     Crash;
-    Write_bytes;
-    Read_bytes;
-    Write_float;
-    Open_file;
-    Handle_read;
-    Handle_write;
-    Environment_variable;
-    Run_process;
-    Clock_now;
-    Random_fill;
+    Handle_from;
+    Handle_descriptor;
   ]
+  @ List.map (fun function_ -> Libc function_) Libc.functions
+  @ List.map (fun number -> Libc_number number) Libc.numbers
 
 let operation_name = function
   | Add -> "add"
@@ -266,7 +267,8 @@ let operation_name = function
   | Storage_with_capacity -> "storage_with_capacity"
   | Storage_length -> "storage_length"
   | Storage_capacity -> "storage_capacity"
-  | Storage_reserve -> "storage_reserve"
+  | Storage_set_capacity -> "storage_set_capacity"
+  | Storage_lengthen -> "storage_lengthen"
   | Storage_push -> "storage_push"
   | Storage_pop -> "storage_pop"
   | Storage_insert -> "storage_insert"
@@ -278,17 +280,12 @@ let operation_name = function
   | View_length -> "view_length"
   | View_at -> "view_at"
   | View_slice -> "view_slice"
+  | View_address -> "view_address"
   | Crash -> "crash"
-  | Write_bytes -> "write_bytes"
-  | Read_bytes -> "read_bytes"
-  | Write_float -> "write_float"
-  | Open_file -> "open_file"
-  | Handle_read -> "handle_read"
-  | Handle_write -> "handle_write"
-  | Environment_variable -> "environment_variable"
-  | Run_process -> "run_process"
-  | Clock_now -> "clock_now"
-  | Random_fill -> "random_fill"
+  | Handle_from -> "handle_from"
+  | Handle_descriptor -> "handle_descriptor"
+  | Libc function_ -> "libc_" ^ Libc.function_name function_
+  | Libc_number number -> "libc_" ^ String.lowercase_ascii (Libc.number_name number)
 
 let operation_path operation = Path.Top { module_; name = operation_name operation }
 

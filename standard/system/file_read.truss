@@ -1,0 +1,24 @@
+use standard::capabilities
+use standard::system::handles
+use standard::system::lines
+
+internal type SystemFileRead()
+
+impl FileRead for SystemFileRead {
+  fn read(self, file: Path) -> Result[Bytes, FileError] {
+    var handle = handles::open_to_read(file)?
+    let bytes = handles::read_all(mut handle)?
+    Ok(Bytes(data: List.from_storage(own bytes)))
+  }
+
+  fn read_text(self, file: Path) -> Result[String, FileError] {
+    var handle = handles::open_to_read(file)?
+    let bytes = handles::read_all(mut handle)?
+    Ok(String.from_bytes(own bytes))
+  }
+
+  fn open(self, file: Path) -> Result[capabilities::FileReader, FileError] {
+    let handle = handles::open_to_read(file)?
+    Ok(capabilities::FileReader(handle: own handle, input: lines::LineInput.new()))
+  }
+}

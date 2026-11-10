@@ -63,7 +63,6 @@ let constant = Constants.constant
 let evaluator = Constants.evaluator
 let table = Generated.table
 let any_table = Generated.any_table
-let real_evidence = Generated.real_evidence
 
 let trait_provides context ~trait ~name ~receiver =
   written context (Method { owner = trait; name; receiver }) <> None
@@ -107,9 +106,9 @@ let begin_body ?how st =
     if code.has_defaults then Some (local st.b ~name:"passed" (Raw (Integer UInt64))) else None
   in
   let evidence = evidence_parameters st (evidence_for code.substitution code.uses) in
-  st.evidence <-
-    st.evidence @ Generated.real_evidence_of st.context ~user:(Path.show code.anchor) code.real;
   start st.b (block st.b);
+  st.evidence <-
+    st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
   Option.iter (fill_defaults st) mask;
   check_requires st;
   ( bound,
@@ -175,16 +174,18 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
           | Named_parameter { name; _ } -> Hashtbl.replace st.frame.bindings name.id built
           | _ -> bug "a from_template without a named parameter")
       | _ -> bug "from_template takes one template");
-      Constants.begin_output st;
+      let output = Constants.begin_output st in
       List.iter
         (fun clause ->
           if executable st clause then begin
             let holds = temporary st context.bool in
             into st clause holds;
-            Glue.encode_call context.glue st.b context.bool holds
+            Glue.encode_call context.glue st.b
+              ~output:(Address { place = output; writable = true })
+              context.bool holds
           end)
         code.requires;
-      Constants.write_output st);
+      Constants.write_output st output);
   { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
 
 (* Code run while compiling, for a call whose arguments are known: the
@@ -219,9 +220,11 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
       call_instance st
         (Code { path = function_; type_arguments = [] })
         ~signature ~substitution:[] ~arguments:passed ~mask:0 ~destination:result;
-      Constants.begin_output st;
-      Glue.encode_call context.glue st.b result_ty result;
-      Constants.write_output st);
+      let output = Constants.begin_output st in
+      Glue.encode_call context.glue st.b
+        ~output:(Address { place = output; writable = true })
+        result_ty result;
+      Constants.write_output st output);
   { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
 
 let instance context (key : Instance.key) : Lir.t =

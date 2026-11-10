@@ -1220,6 +1220,23 @@ read-only one. On a temporary value, the `own` version is used if there is one,
 so `scores.filter(is_valid).enumerate()` moves the filtered elements instead of
 copying them. This is the only overloading Truss allows.
 
+A type's versions of one name need not all be its own methods. One can come
+from a trait the type implements in its own package:
+
+```truss
+impl Iterable for Grid {
+  type Element = Cell
+  fn each(self) yields Cell { todo }
+}
+
+fn Grid.each(mut self) yields mut Cell { todo }
+```
+
+`Grid` has the `each(self)` that generic code written against `Iterable`
+calls, and an `each(mut self)` of its own, which not every `Iterable` type
+could offer. A call picks among all of a name's versions by its keyword, as
+it does among a type's own.
+
 ### Lending and yielding methods
 
 A method can give its caller parts of `self` instead of returning a value,
@@ -1288,7 +1305,8 @@ A yielding method gives out parts one after another:
   [Contracts of lending and yielding methods](#contracts-of-lending-and-yielding-methods).
 - `for item in items` uses `items.each()`, and `for item in mut items` and
   `for item in own items` use the `mut self` and `own self` versions. A
-  user's type supports `for` by defining `each`.
+  user's type supports `for` by defining `each`, as methods of its own or by
+  implementing `Iterable`, whose one method is `each(self)`.
 - **Called anywhere but a `for` loop, a yielding method makes a cursor.** A
   method that yields read-only or owned values can be pulled one value at a
   time, through a cursor:
@@ -2286,8 +2304,10 @@ impl Loggable for Event {}
 - A bound includes what the trait requires, so with `[Element: Ordered]`,
   `==` works on `Element`.
 - Laws can use the methods of required traits.
-- A trait cannot redeclare a method of a trait it requires, and traits cannot
-  require each other in a cycle.
+- A trait cannot redeclare a method of a trait it requires. It can add a
+  version of one that takes `self` another way, as a
+  `trait Changeable: Iterable` can declare `each(mut self)`.
+- Traits cannot require each other in a cycle.
 - Each type implements a trait with its own `impl`. There are no impls that
   cover every type matching a bound.
 - A trait with no methods of its own, like `Loggable`, combines traits for
@@ -2432,7 +2452,7 @@ type Option[Value] =
 | `Equal` | Two values are equal when all their fields are equal. |
 | `Hash` | Combines the hashes of all fields. |
 | `Ordered` | Compares variants in the order they are declared, then fields in the order they are declared. |
-| `Default` | Uses each field's default. |
+| `Default` | Uses each field's default. Only a record can derive it. |
 | `Copyable`, `Plain` | Nothing: they state that an opaque type can be copied, explicitly or implicitly. See below. |
 
 - Every field must already have the trait, or deriving it is an error.
@@ -2465,11 +2485,16 @@ hand.
   package, or a package the calling package lists in its manifest. Traits
   from packages further away are not considered.
 - If two of those traits give a type methods with the same name, a call with
-  a dot is a compile error. Write the call in full instead:
-  `Ordered.compare(first, second)`.
-- A type's own methods cannot share a name with the methods of any trait it
-  implements. An `impl` that would give a type a second method with the same
-  name is a compile error, wherever the `impl` is.
+  a dot is a compile error, however each takes `self`. Write the call in full
+  instead: `Ordered.compare(first, second)`. A trait and a trait it requires
+  are the exception, since one can only add a version of the other's method.
+- A type's own method and a method of a trait it implements cannot be the
+  same method: the same name, taking `self` the same way. An `impl` that
+  would give a type such a method is a compile error. An `impl` in the
+  type's own package can give it another version of a method it has, by
+  writing that method itself. A method the `impl` leaves to the body its
+  trait provides, and any method of an `impl` in another package, cannot use
+  a name the type's methods have at all.
 - An `impl` must be in the package of the trait, of the type, or of the
   outermost type of one of the trait's arguments. So `impl Multiply[Vector]
   for Float64`, which makes `2.0 * velocity` work, lives with `Vector`.

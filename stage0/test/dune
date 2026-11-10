@@ -13,6 +13,7 @@
   standard_library_tests
   interface_tests
   infer_tests
+  core_tests
   patterns_tests
   usage_tests
   ownership_tests
@@ -37,6 +38,9 @@
   documents
   syntax
   syntax_print
+  core
+  core_print
+  core_walk
   parser
   reference
   cbor

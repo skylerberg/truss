@@ -73,13 +73,11 @@ let compiled_key : Lir.compiled -> Instance.key = function
   | Code t -> t.key
   | Data d -> d.data_key
   | Table t -> t.table_key
-  | Evidence e -> e.evidence_key
 
 let compiled_references env : Lir.compiled -> Instance.key list = function
   | Code t -> references env t
   | Data _ -> []
   | Table t -> List.map fst t.entries
-  | Evidence e -> e.table :: e.outer
 
 module Table = Hashtbl.Make (struct
   type t = Instance.key
@@ -88,14 +86,41 @@ module Table = Hashtbl.Make (struct
   let hash key = Hashtbl.hash_param 64 256 key
 end)
 
-let reached env ~lookup roots =
-  (* Breadth-first, so an instance's number depends only on the shape of
-     the walk up to it. Each key in the queue carries the way it was
-     reached, nearest first. *)
+let bug format = Compiler_bug.bug ~stage:"Reachable" format
+
+(* The methods of capabilities an instance calls: each capability, with the
+   method's place among its methods. *)
+let methods_called (instance : Lir.t) =
+  let in_function found (f : Lir.function_) =
+    Array.fold_left
+      (fun found (block : Lir.basic_block) ->
+        List.fold_left
+          (fun found (statement : Lir.statement) ->
+            match statement with
+            | Call { target = Evidence_call { capability; slot; _ }; _ } ->
+                (capability, slot) :: found
+            | _ -> found)
+          found block.statements)
+      found f.blocks
+  in
+  List.rev (Array.fold_left in_function (in_function [] instance.main) instance.nested)
+
+(* Breadth-first, so an instance's number depends only on the shape of the
+   walk up to it. Each key in the queue carries the way it was reached,
+   nearest first. With [by_call], an entry of a capability's table is
+   reached by a call of its method, with the caller's way, and only once
+   the table is reached too; without, a table reaches its every entry. *)
+let walk env ~lookup ~by_call roots =
   let seen = Table.create 256 in
   let queue = Queue.create () in
   List.iter (fun root -> Queue.add (root, []) queue) roots;
   let found = ref [] in
+  let tables = Hashtbl.create 16 and called = Hashtbl.create 16 in
+  let entry (table : Lir.table) (slot, way) =
+    match List.nth_opt table.entries slot with
+    | Some (key, _) -> Queue.add (key, way) queue
+    | None -> bug "a call of method %d of %s" slot (Instance.to_string table.table_key)
+  in
   while not (Queue.is_empty queue) do
     let key, way = Queue.pop queue in
     if not (Table.mem seen key) then begin
@@ -103,11 +128,31 @@ let reached env ~lookup roots =
       let compiled = lookup key in
       let way = key :: way in
       found := (compiled, List.rev way) :: !found;
-      List.iter (fun next -> Queue.add (next, way) queue) (compiled_references env compiled)
+      let all () =
+        List.iter (fun next -> Queue.add (next, way) queue) (compiled_references env compiled)
+      in
+      match compiled with
+      | Table ({ capability = Some capability; _ } as table) when by_call ->
+          Hashtbl.add tables capability table;
+          List.iter (entry table) (List.rev (Hashtbl.find_all called capability))
+      | Code instance when by_call ->
+          List.iter
+            (fun (capability, slot) ->
+              if not (List.mem_assoc slot (Hashtbl.find_all called capability)) then begin
+                Hashtbl.add called capability (slot, way);
+                List.iter
+                  (fun table -> entry table (slot, way))
+                  (List.rev (Hashtbl.find_all tables capability))
+              end)
+            (methods_called instance);
+          all ()
+      | _ -> all ()
     end
   done;
   List.rev !found
 
+let reached env ~lookup roots = walk env ~lookup ~by_call:false roots
+let running env ~lookup roots = walk env ~lookup ~by_call:true roots
 let reachable env ~lookup roots = List.map fst (reached env ~lookup roots)
 
 (* The hash of what an instance compiles to, by itself: its encoding with
@@ -143,7 +188,6 @@ let own_hash ~references compiled =
     | Lir.Code i -> Lir.encode ~path ~instance (Lir.canonical_instance i)
     | Data d -> Lir.encode_data ~path ~instance d
     | Table t -> Lir.encode_table ~path ~instance t
-    | Evidence e -> Lir.encode_evidence ~path ~instance e
   in
   Blake3.hash (Cbor.encode encoded)
 

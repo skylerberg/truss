@@ -11,6 +11,7 @@ let storage element =
   T.Named { path = Intrinsic.builtin_path Storage; arguments = [ T.Type element ] }
 
 let view element = T.Named { path = Intrinsic.builtin_path View; arguments = [ T.Type element ] }
+let libc_scalar scalar = T.builtin (Intrinsic.libc_builtin scalar)
 
 let signature (operation : Intrinsic.operation) : T.signature =
   let generic name = { T.generic = parameter operation name; kind = Type_generic [] } in
@@ -75,7 +76,8 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Storage_with_capacity ->
       make ~generics:[ "Element" ] ~output:(Returns (storage element)) [ input "capacity" usize ]
   | Storage_length | Storage_capacity -> with_storage ~output:(Returns usize) []
-  | Storage_reserve -> with_storage ~mode:Mut [ input "additional" usize ]
+  | Storage_set_capacity -> with_storage ~mode:Mut [ input "capacity" usize ]
+  | Storage_lengthen -> with_storage ~mode:Mut [ input "by" usize ]
   | Storage_push -> with_storage ~mode:Mut [ input ~mode:Own "value" element ]
   | Storage_pop -> with_storage ~mode:Mut ~output:(Returns element) []
   | Storage_insert ->
@@ -95,66 +97,36 @@ let signature (operation : Intrinsic.operation) : T.signature =
       make ~generics:[ "Element" ]
         ~output:(Returns (view element))
         [ input "view" (view element); input "start" usize; input "stop" usize ]
+  | View_address ->
+      make ~generics:[ "Element" ] ~output:(Returns usize) [ input "view" (view element) ]
   | Crash ->
       make ~output:(Returns T.Never)
         [ input "message" (T.Named { path = text "StringSlice"; arguments = [] }) ]
-  | Write_bytes ->
+  | Handle_from ->
+      make ~output:(Returns (T.builtin Handle)) [ input "descriptor" (T.builtin Int32) ]
+  | Handle_descriptor ->
+      make ~output:(Returns (T.builtin Int32)) [ input "handle" (T.builtin Handle) ]
+  | Libc function_ ->
+      let { Libc.parameters; result } = Libc.signature function_ in
+      let found = match result with Text -> [ input ~mode:Mut "found" bool ] | _ -> [] in
       make
-        ~output:(Returns (T.builtin ISize))
-        [ input "descriptor" (T.builtin Int32); input "bytes" (view (T.builtin UInt8)) ]
-  | Read_bytes ->
-      make
-        ~output:(Returns (T.builtin ISize))
-        [
-          input "descriptor" (T.builtin Int32);
-          input ~mode:Mut "buffer" (storage (T.builtin UInt8));
-          input "count" usize;
-        ]
-  | Write_float ->
-      make ~generics:[ "Value" ]
-        [ input ~mode:Mut "buffer" (storage (T.builtin UInt8)); input "value" value ]
-  | Open_file ->
-      make
-        ~output:(Returns (T.Named { path = Intrinsic.builtin_path Handle; arguments = [] }))
-        [
-          input "path" (view (T.builtin UInt8));
-          input "flags" (T.builtin Int32);
-          input ~mode:Mut "error" (T.builtin Int32);
-        ]
-  | Handle_read ->
-      make
-        ~output:(Returns (T.builtin ISize))
-        [
-          input ~mode:Mut "handle"
-            (T.Named { path = Intrinsic.builtin_path Handle; arguments = [] });
-          input ~mode:Mut "buffer" (storage (T.builtin UInt8));
-          input "count" usize;
-        ]
-  | Handle_write ->
-      make
-        ~output:(Returns (T.builtin ISize))
-        [
-          input ~mode:Mut "handle"
-            (T.Named { path = Intrinsic.builtin_path Handle; arguments = [] });
-          input "bytes" (view (T.builtin UInt8));
-        ]
-  | Environment_variable ->
-      make ~output:(Returns bool)
-        [
-          input "name" (view (T.builtin UInt8));
-          input ~mode:Mut "buffer" (storage (T.builtin UInt8));
-        ]
-  | Run_process ->
-      make
-        ~output:(Returns (T.builtin Int32))
-        [
-          input "program" (view (T.builtin UInt8));
-          input "arguments" (view (T.builtin UInt8));
-          input ~mode:Mut "error" (T.builtin Int32);
-        ]
-  | Clock_now -> make ~output:(Returns (T.builtin Int64)) []
-  | Random_fill ->
-      make [ input ~mode:Mut "buffer" (storage (T.builtin UInt8)); input "count" usize ]
+        ~output:
+          (Returns
+             (match result with
+             | Returns scalar | Points_at scalar -> libc_scalar scalar
+             | Text -> view (T.builtin UInt8)))
+        (List.concat_map
+           (fun (name, (passes : Libc.passes)) ->
+             match passes with
+             | Value scalar -> [ input name (libc_scalar scalar) ]
+             | Elements scalar -> [ input name (view (libc_scalar scalar)) ]
+             | Room scalar -> [ input ~mode:Mut name (storage (libc_scalar scalar)) ]
+             | Written (scalar, names) ->
+                 List.map (fun name -> input ~mode:Mut name (libc_scalar scalar)) names
+             | Always _ | Environment -> [])
+           parameters
+        @ found)
+  | Libc_number number -> make ~output:(Returns (libc_scalar (Libc.number_type number))) []
 
 type cost = { constant_time : bool; allocation_free : bool }
 
@@ -171,10 +143,10 @@ let cost (operation : Intrinsic.operation) =
   | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
   | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
   | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
-  | View_slice | Crash ->
+  | View_slice | View_address | Crash | Storage_lengthen | Storage_push | Handle_from
+  | Handle_descriptor | Libc_number _ ->
       { constant_time = true; allocation_free = true }
-  | Compare_bytes | Storage_remove -> { constant_time = false; allocation_free = true }
-  | Storage_with_capacity | Storage_reserve | Storage_push | Storage_insert | Write_bytes
-  | Read_bytes | Write_float | Open_file | Handle_read | Handle_write | Environment_variable
-  | Run_process | Clock_now | Random_fill ->
+  | Compare_bytes | Storage_remove | Storage_insert ->
+      { constant_time = false; allocation_free = true }
+  | Storage_with_capacity | Storage_set_capacity | Libc _ ->
       { constant_time = false; allocation_free = false }

@@ -15,7 +15,7 @@
 type argument = Place of Lir.place | Value of Lir.operand
 
 (* The ground types the lowering needs. *)
-type types = { usize : Ground.ty; isize : Ground.ty; string_slice : Ground.ty }
+type types = { usize : Ground.ty; string_slice : Ground.ty }
 
 (* Writes the operation, with its type arguments in the order the intrinsic
    module declares them, into the builder. The result, if any, goes to

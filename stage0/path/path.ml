@@ -25,6 +25,12 @@ let rec package = function
   | Method { owner; _ } | Member_constant { owner; _ } -> package owner
   | Derived { type_; _ } -> package type_
 
+let show_receiver = function
+  | Static -> "no `self`"
+  | Read -> "`self`"
+  | Mut -> "`mut self`"
+  | Own -> "`own self`"
+
 let rec show = function
   | Top { module_; name } -> show_module module_ ^ "::" ^ name
   | Method { owner; name; receiver } -> (

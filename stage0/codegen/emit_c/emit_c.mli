@@ -21,7 +21,6 @@ val file :
   build ->
   ?data:Lir.data list ->
   ?tables:Lir.table list ->
-  ?evidence:Lir.evidence list ->
   (Lir.t * linkage) list ->
   string
 

@@ -6,6 +6,7 @@
   ground
   instance
   memory_layout
+  libc
   zarith
   cbor
   blake3))

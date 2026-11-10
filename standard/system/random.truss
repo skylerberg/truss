@@ -1,0 +1,13 @@
+use standard::intrinsic
+
+internal type SystemRandom()
+
+impl Random for SystemRandom {
+  fn next(self) -> UInt64 {
+    var value: UInt64 = 0
+    if intrinsic::libc_getentropy(mut value) != 0 {
+      intrinsic::crash("the system gave no random bytes".slice())
+    }
+    value
+  }
+}

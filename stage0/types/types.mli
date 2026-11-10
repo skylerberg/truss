@@ -155,6 +155,17 @@ type signature = {
       (** The [own] function-typed parameters, which accept only functions that capture nothing. *)
 }
 
+val map_signature : (ty -> ty) -> signature -> signature
+(** A signature with each type of its receiver, parameters, and result rewritten. *)
+
+val substitute_signature : substitution -> signature -> signature
+(** A signature with a substitution made throughout: in its types, in the bounds of its generic
+    parameters, and in its [uses]. *)
+
+val inside : generics:generic list -> uses:capability list -> signature -> signature
+(** A method's signature inside an [impl] that has these generic parameters and [uses]: generic over
+    the [impl]'s parameters and then its own, and using what the [impl] uses as well. *)
+
 val function_type_of : signature -> function_type
 (** A signature as the type of a function value, with [self] as its first input. *)
 

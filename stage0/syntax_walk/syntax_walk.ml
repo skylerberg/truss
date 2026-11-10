@@ -246,6 +246,50 @@ let definition ?statement:visit f (definition : definition) =
       block body
   | Definition_error _ -> ()
 
+(* Where each expression, statement, pattern, arm, and update of a
+   definition is, by its id: what the stages that read the core form, which
+   holds no positions, show a node's source by. *)
+let spans (definition_ : definition) : span array =
+  let spans = Array.make (definition_.id + 1) definition_.span in
+  let rec pattern (written : pattern) =
+    spans.(written.id) <- written.span;
+    match written.kind with
+    | Wildcard | Binding_or_constant _ | Qualified_constant _ | Literal _ | Pattern_error -> ()
+    | Pattern_range { start; stop; _ } ->
+        spans.(start.id) <- start.span;
+        spans.(stop.id) <- stop.span
+    | Variant { fields; _ } -> Option.iter (List.iter pattern_field) fields
+    | Record fields -> List.iter pattern_field fields
+    | Alternatives alternatives -> List.iter pattern alternatives
+  and pattern_field (written : pattern_field) =
+    match written.kind with Named_field (_, inner) | Field inner -> pattern inner | Rest -> ()
+  in
+  let rec expression (value : expression) =
+    spans.(value.id) <- value.span;
+    (match value.kind with
+    | Is { pattern = matched; _ } -> pattern matched
+    | With (_, updates) ->
+        List.iter (fun (update : update) -> spans.(update.id) <- update.span) updates
+    | Quantified { binder = Binder_in (bound, _); _ } -> pattern bound
+    | Lambda { parameters; _ } -> List.iter pattern parameters
+    | Match { arms; _ } ->
+        List.iter
+          (fun (arm : arm) ->
+            spans.(arm.id) <- arm.span;
+            List.iter pattern arm.patterns)
+          arms
+    | _ -> ());
+    expression_parts ~expression ~statement value
+  and statement (written : statement) =
+    spans.(written.id) <- written.span;
+    (match written.kind with
+    | Let { pattern = bound; _ } | For { pattern = bound; _ } -> pattern bound
+    | _ -> ());
+    statement_parts ~expression ~statement written
+  in
+  definition ~statement expression definition_;
+  spans
+
 (* Visits every name in a definition, references and the names that bind,
    in expressions, patterns, types, clauses, and heads. *)
 let walk_names ~on_name:add (definition_ : definition) =

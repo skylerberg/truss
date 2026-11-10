@@ -211,27 +211,9 @@ and provide st (e : S.expression) implementations body destination =
                   | None -> bug "an unbound parameter of %s" (Path.show provided.impl))
                 interface.impl_generics
             in
-            let outer =
-              List.map
-                (fun capability ->
-                  match List.find_opt (fun (path, _) -> Path.equal path capability) around with
-                  | Some (_, operand) -> operand
-                  | None -> bug "no evidence for %s here" (Path.show capability))
-                (evidence_for [] interface.impl_uses)
-            in
-            let slot = local st.b (Evidence (List.length outer)) in
-            emit st.b
-              (Call
-                 {
-                   target = Intrinsic Evidence_fill;
-                   arguments =
-                     Address { place = at slot; writable = true }
-                     :: pointer
-                     :: Constant (Symbol_address (Table { impl = provided.impl; type_arguments }))
-                     :: outer;
-                   result = Discarded;
-                 });
-            (provided.capability, Lir.Address { place = at slot; writable = false }))
+            ( provided.capability,
+              implementation_evidence st ~impl:provided.impl ~type_arguments ~implementation:pointer
+            ))
           (provided_by implementation))
       implementations
   in
@@ -541,7 +523,8 @@ and is_built_in st (e : S.expression) =
   | _ -> false
 
 and echo st place ty span =
-  emit st.b (Call { target = Intrinsic Debug_begin; arguments = []; result = Discarded });
+  let output = temporary st Glue.output_ty in
+  emit st.b (Assign (output, Storage.empty Glue.output_ty));
   let arguments = if zero_size st ty then [] else [ Lir.Address { place; writable = false } ] in
   emit st.b
     (Call
@@ -552,15 +535,16 @@ and echo st place ty span =
                function_ = Instance (Debug ty);
                signature = Glue.debug_signature st.context.glue ty;
              };
-         arguments;
+         arguments = arguments @ [ Address { place = output; writable = true } ];
          result = Discarded;
        });
-  let bytes = local st.b (Raw (Pointer Opaque))
-  and length = local st.b (Value st.context.types.usize) in
-  emit st.b (Call { target = Intrinsic Debug_bytes; arguments = []; result = Returned (at bytes) });
   emit st.b
-    (Call { target = Intrinsic Debug_length; arguments = []; result = Returned (at length) });
-  emit st.b (Echo { text = Copy (at bytes); length = Copy (at length); site = site st span })
+    (Echo
+       {
+         text = Copy (Storage.buffer output);
+         length = Copy (Storage.length output);
+         site = site st span;
+       })
 
 (* A name that is not a place: a variant with no fields, or a constant. *)
 and name_value st (e : S.expression) destination =
