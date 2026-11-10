@@ -132,6 +132,9 @@ let visit_statement v = function
   | Region { region = Chunk { first; last }; _ } ->
       visit_place v { root = Local first; projections = [] };
       visit_place v { root = Local last; projections = [] }
+  | Region { region = Task { function_value; item }; _ } ->
+      visit_place v { root = Local function_value; projections = [] };
+      visit_place v { root = Local item; projections = [] }
   | Region { region = Branch; _ } | Regions_end _ -> ()
   | Fork { branches } -> List.iter (fun (_, environment) -> visit_operand v environment) branches
   | Fork_range { environment; first; last; _ } ->
@@ -232,13 +235,22 @@ let map_statement ~place ~block = function
   | Echo { text; length; site } ->
       Echo
         { text = map_operand ~place ~block text; length = map_operand ~place ~block length; site }
-  | Region { fork; region = Chunk { first; last } } ->
+  | Region { fork; region = (Chunk _ | Task _) as region } ->
       let local l =
         match place { root = Local l; projections = [] } with
         | { root = Local mapped; projections = [] } -> mapped
         | _ -> bug "a region's local mapped to a place that is not a local"
       in
-      Region { fork; region = Chunk { first = local first; last = local last } }
+      Region
+        {
+          fork;
+          region =
+            (match region with
+            | Chunk { first; last } -> Chunk { first = local first; last = local last }
+            | Task { function_value; item } ->
+                Task { function_value = local function_value; item = local item }
+            | Branch -> Branch);
+        }
   | (Region { region = Branch; _ } | Regions_end _) as mark -> mark
   | Fork { branches } ->
       Fork

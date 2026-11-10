@@ -439,7 +439,9 @@ let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lir.place) des
            arguments = [ Constant (Size_of inner_ty); Constant (Alignment_of inner_ty) ];
            result = Returned (at block);
          });
-    let typed = local st.b (Pointer { target = Value inner_ty; writable = true }) in
+    (* The pointer is [borrowed] so that drop elaboration does not track
+       the block's contents, which the [any] value owns. *)
+    let typed = local st.b ~borrowed:true (Pointer { target = Value inner_ty; writable = true }) in
     emit st.b (Assign (at typed, Use (Copy (at block))));
     emit st.b
       (Assign ({ root = Local typed; projections = [ Deref ] }, Use (owned st value inner_ty)))

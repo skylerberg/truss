@@ -2225,10 +2225,30 @@ fn serve(listener: network::Listener)
 }
 ```
 
-It works with every form of `for`. The body may read any place but may only
-change its own element and its own variables. `break` leaves the loop and
-cancels the iterations that are still running, and `continue` ends one
-iteration.
+The body may read any place but may only change its own element and its
+own variables. `break` leaves the loop and cancels the iterations that are
+still running, and `continue` ends one iteration.
+
+An iteration keeps running after the loop has gone on to the next value.
+So it cannot borrow a place that the iterated method lends only until the
+method resumes:
+
+- A loop over a range, over a cursor, or over a method that `yields own`
+  values works with any element type. Each task owns its value.
+- A loop over a method that yields read-only values works when the element
+  type is `Plain`. Each task gets a copy.
+- A loop over a method that lends its elements, read-only or `mut`, works
+  when the method's body is one `for` over a range whose body is one
+  `yield`, as the `each(mut self)` methods of `List`, `Slice`, and `Array`
+  are. Each task then runs one iteration of that loop and borrows its own
+  element.
+
+Any other `concurrent for` is rejected, because the method could change or
+free an element while a task still uses it.
+
+`yield` is not allowed in a `concurrent` block or a `concurrent for`. The
+caller's loop body would run as a task, and it is checked as sequential
+code.
 
 A time limit is a function. Each of its two branches returns from the
 function when it finishes, which cancels the other:

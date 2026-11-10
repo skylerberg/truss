@@ -59,6 +59,31 @@ test "left early" {
   assert boxed(Some(3)) is Some(_)
 }
 |};
+  passes "an any value drops what its value owns, also when it is made in a loop"
+    {|trait Named {
+  fn size(self) -> USize
+}
+
+type Dog(tag: String)
+
+impl Named for Dog {
+  fn size(self) -> USize {
+    self.tag.length()
+  }
+}
+
+test "made once and made in a loop" {
+  let count: USize = 1
+  let pet: any Named = any Dog(tag: "number ${count}")
+  assert pet.size() == 8
+  var total: USize = 0
+  for index in 0..3 {
+    let other: any Named = any Dog(tag: "number ${index}")
+    total += other.size()
+  }
+  assert total == 24
+}
+|};
   passes "a pulled loop left without taking its value drops the value"
     {|fn words() yields own String {
   yield "a${1}"

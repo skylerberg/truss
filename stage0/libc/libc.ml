@@ -20,7 +20,7 @@ let host =
   | Some os, Some architecture -> Some { os; architecture }
   | _ -> None
 
-type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | USize | ISize | Float64
+type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | USize | ISize | Float32 | Float64
 
 type number =
   | O_rdonly
@@ -186,6 +186,7 @@ type function_ =
   | Waitpid
   | Snprintf
   | Strtod
+  | Strtof
   | Fork
   | Pipe
   | Poll
@@ -245,6 +246,16 @@ type function_ =
   | Fcntl_getfl
   | Fcntl_setfl
   | Addresses_of_host
+  | Tasks_open
+  | Tasks_join
+  | Tasks_cancel
+  | Tasks_cancelled
+  | Tasks_watch
+  | Tasks_wait
+  | Tasks_wake
+  | Tasks_lock
+  | Tasks_unlock
+  | Tasks_yield
 
 let functions =
   [
@@ -260,6 +271,7 @@ let functions =
     Waitpid;
     Snprintf;
     Strtod;
+    Strtof;
     Fork;
     Pipe;
     Poll;
@@ -319,6 +331,16 @@ let functions =
     Fcntl_getfl;
     Fcntl_setfl;
     Addresses_of_host;
+    Tasks_open;
+    Tasks_join;
+    Tasks_cancel;
+    Tasks_cancelled;
+    Tasks_watch;
+    Tasks_wait;
+    Tasks_wake;
+    Tasks_lock;
+    Tasks_unlock;
+    Tasks_yield;
   ]
 
 let function_name = function
@@ -334,6 +356,7 @@ let function_name = function
   | Waitpid -> "waitpid"
   | Snprintf -> "snprintf"
   | Strtod -> "strtod"
+  | Strtof -> "strtof"
   | Fork -> "fork"
   | Pipe -> "pipe"
   | Poll -> "poll"
@@ -393,6 +416,16 @@ let function_name = function
   | Fcntl_getfl -> "fcntl_getfl"
   | Fcntl_setfl -> "fcntl_setfl"
   | Addresses_of_host -> "addresses_of_host"
+  | Tasks_open -> "tasks_open"
+  | Tasks_join -> "tasks_join"
+  | Tasks_cancel -> "tasks_cancel"
+  | Tasks_cancelled -> "tasks_cancelled"
+  | Tasks_watch -> "tasks_watch"
+  | Tasks_wait -> "tasks_wait"
+  | Tasks_wake -> "tasks_wake"
+  | Tasks_lock -> "tasks_lock"
+  | Tasks_unlock -> "tasks_unlock"
+  | Tasks_yield -> "tasks_yield"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -538,6 +571,13 @@ let describe function_ =
         ~headers:[ "stdio.h" ]
   | Strtod ->
       row (everywhere "double") (Returns Float64)
+        [
+          ("text", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("end", Always 0, everywhere "char **");
+        ]
+        ~headers:[ "stdlib.h" ]
+  | Strtof ->
+      row (everywhere "float") (Returns Float32)
         [
           ("text", Elements (UInt8, Through_zero), everywhere "const char *");
           ("end", Always 0, everywhere "char **");
@@ -1094,9 +1134,32 @@ let describe function_ =
           ("room", Value USize, size);
         ]
         ~headers:[]
+  | ( Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait
+    | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ) as task -> (
+      (* The runtime's task functions. A group, a key, a ticket, and a
+         mutex are each a [UInt64]. A function with no result to return
+         returns 0. *)
+      let handle name = (name, Value UInt64, everywhere "uint64_t") in
+      let symbol = everywhere ("t_runtime_" ^ function_name task) in
+      let returns_handle = row ~symbol (everywhere "uint64_t") (Returns UInt64) ~headers:[] in
+      let returns_flag = row ~symbol (everywhere "int32_t") (Returns Int32) ~headers:[] in
+      match task with
+      | Tasks_open -> returns_handle []
+      | Tasks_watch -> returns_handle [ handle "key" ]
+      | Tasks_join | Tasks_cancel -> returns_flag [ handle "group" ]
+      | Tasks_cancelled | Tasks_yield -> returns_flag []
+      | Tasks_wait -> returns_flag [ handle "key"; handle "ticket" ]
+      | Tasks_wake -> returns_flag [ handle "key" ]
+      | Tasks_lock | Tasks_unlock -> returns_flag [ handle "mutex" ]
+      | _ -> returns_flag [])
 
 let available system function_ = (describe function_).on system.os
-let of_the_runtime = function Addresses_of_host -> true | _ -> false
+
+let of_the_runtime = function
+  | Addresses_of_host | Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch
+  | Tasks_wait | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ->
+      true
+  | _ -> false
 
 let signature function_ =
   let row = describe function_ in
@@ -1709,7 +1772,7 @@ let value (system : system) number =
    width: code run while compiling for a narrower target has the target's. *)
 let bytes = function
   | UInt8 -> 1
-  | Int32 | UInt32 -> 4
+  | Int32 | UInt32 | Float32 -> 4
   | Int64 | UInt64 | Float64 -> 8
   | USize | ISize -> invalid_arg "a USize the C library reaches through an address"
 

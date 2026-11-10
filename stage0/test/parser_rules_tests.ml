@@ -265,6 +265,11 @@ let () =
   test "yield in a lambda" (fun () ->
       error "fn T.each(self) yields Int64 {\n  f(fn() { yield 1 })\n}" ~code:Misplaced_yield
         ~at:"yield 1");
+  test "yield in concurrent code" (fun () ->
+      error "fn T.each(self) yields Int64 {\n  concurrent {\n    yield 1\n  }\n}"
+        ~code:Misplaced_yield ~at:"yield 1";
+      error "fn T.each(self) yields Int64 {\n  concurrent for x in s {\n    yield x\n  }\n}"
+        ~code:Misplaced_yield ~at:"yield x");
   test "break outside a loop" (fun () -> body_error "break" ~code:Misplaced_loop_exit ~at:"break");
   test "continue across a lambda" (fun () ->
       body_error "for x in s {\n  f(fn() { continue })\n}" ~code:Misplaced_loop_exit ~at:"continue");
