@@ -623,10 +623,11 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
     | inherited, _ -> inherited
   in
   st.next_range <- Sequential;
-  (* How a spawned iteration receives a value that the loop owns. *)
+  (* How an iteration receives a value that the loop owns, such as one
+     that a cursor's [next] returned. *)
   let owned_each =
     match schedule with
-    | Spawned loop -> fun value -> spawn_with_owned_item st loop value ~each
+    | Spawned loop -> fun value -> spawn_with_item st loop value ~owned:true ~each
     | Sequential | Chunked -> each
   in
   (* What a range of a type counts in. A range of [Character] goes from
@@ -804,30 +805,25 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
           let after = block st.b in
           (* A method that yields by position has one range loop, and that
              loop takes this loop's schedule. Any other method runs
-             sequentially in the enclosing code. A task spawned at one of
-             its [yield]s outlives the [yield], so the task cannot borrow
-             the yielded place: the method may change or drop the place
-             when it resumes, which would be a use after free. The task
-             gets what a cursor's [next] returns: an owned value, or a
-             bitwise copy of a trivial one. *)
-          let each =
+             sequentially in the enclosing code, and a task is spawned at
+             each of its [yield]s with the yielded value. The task outlives
+             the [yield]. The ownership check has verified that a place
+             the task borrows stays valid and unchanged until the group is
+             joined, and it rejects a [yield] of a [mut] place. *)
+          let each_yielded =
             match schedule with
-            | Sequential -> each
             | (Chunked | Spawned _) when yields_by_position st path ->
                 st.next_range <- schedule;
-                each
-            | Chunked -> each
+                fun value ~owned:_ -> each value
+            | Sequential | Chunked -> fun value ~owned:_ -> each value
             | Spawned loop ->
-                if mode = Mut || (mode = Read && not (trivial st loop.element)) then
-                  Compiler_bug.unsupported
-                    ~at:(at_site (site_of st origin))
-                    "a `concurrent for` over `%s`, which yields borrowed places and whose body is \
-                     not a single `for` over a range"
+                if mode = Mut then
+                  bug "a `concurrent for` over %s, which yields `mut` places and not by position"
                     (Path.show path);
-                owned_each
+                fun value ~owned -> spawn_with_item st loop value ~owned ~each
           in
           inline st path type_arguments ~arguments ~call_site:(site_of st origin)
-            ~on_yield:(fun yielded ~resume ~stop ->
+            ~on_yield:(fun yielded ~owned ~resume ~stop ->
               let inner = st.frame in
               st.frame <- caller;
               let around = List.length st.scopes in
@@ -840,7 +836,7 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
                       break_depth = depth;
                     }
                     :: st.loops;
-                  each yielded;
+                  each_yielded yielded ~owned;
                   st.loops <- List.tl st.loops);
               finish st.b (Goto resume);
               ignore stop;
@@ -1370,18 +1366,24 @@ and spawn_iteration st (loop : spawn_loop) ~(not_spawned : unit -> unit) (f : un
   break_loop st;
   start st.b next
 
-(* Spawns one iteration of a [concurrent for] loop with a value that the
-   loop owns. The value is moved into a heap block, the block's address is
-   the task's argument, and the task moves the value out and frees the
-   block. A zero-sized value needs no block. *)
-and spawn_with_owned_item st (loop : spawn_loop) (value : Lir.place) ~(each : Lir.place -> unit) =
+(* Spawns one iteration of a [concurrent for] loop with the value at
+   [value]. The value's bytes go into a heap block, the block's address is
+   the task's argument, and the task takes the bytes out and frees the
+   block. A zero-sized value needs no block.
+
+   If the loop owns the value ([owned]), it is moved, and the task owns
+   and drops it. Otherwise the bytes are a bitwise copy of a borrowed
+   place, and the task never drops them: the place still owns what they
+   point at, and it outlives the task. *)
+and spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
+    ~(each : Lir.place -> unit) =
   let ty = loop.element in
   let item = at loop.item in
   let boxed = not (zero_size st ty) in
+  let taken place : Lir.operand = if is_owned then owned st place ty else Copy place in
   (* The block's address, read back from the item, and the value's place
      in the block. The pointer is [borrowed] so that drop elaboration does
-     not track the block's contents: ownership passes from the loop to the
-     task through the block. *)
+     not track the block's contents. *)
   let block_of () : Lir.local * Lir.place =
     let pointer = local st.b (Raw (Pointer Opaque)) in
     emit st.b (Assign (at pointer, Convert (Copy item, Pointer Opaque)));
@@ -1389,13 +1391,13 @@ and spawn_with_owned_item st (loop : spawn_loop) (value : Lir.place) ~(each : Li
     emit st.b (Assign (at typed, Use (Copy (at pointer))));
     (pointer, { root = Local typed; projections = [ Deref ] })
   in
-  (* Moves the value out of the block into a local of the enclosing scope
-     and frees the block. *)
+  (* Takes the value out of the block into a local and frees the block.
+     The enclosing scope drops the local only if the value is owned. *)
   let unbox () : Lir.place =
     if boxed then begin
-      let unboxed = binding st ty in
+      let unboxed = if is_owned then binding st ty else at (local st.b ~borrowed:true (Value ty)) in
       let pointer, inside = block_of () in
-      emit st.b (Assign (unboxed, Use (owned st inside ty)));
+      emit st.b (Assign (unboxed, Use (taken inside)));
       emit st.b
         (Call { target = Intrinsic Free; arguments = [ Copy (at pointer) ]; result = Discarded });
       unboxed
@@ -1412,7 +1414,7 @@ and spawn_with_owned_item st (loop : spawn_loop) (value : Lir.place) ~(each : Li
            result = Returned (at pointer);
          });
     emit st.b (Assign (item, Convert (Copy (at pointer), Integer UInt64)));
-    emit st.b (Assign (snd (block_of ()), Use (owned st value ty)))
+    emit st.b (Assign (snd (block_of ()), Use (taken value)))
   end
   else emit st.b (Assign (item, Use (constant_int UInt64 Z.zero)));
   spawn_iteration st loop
@@ -1596,8 +1598,11 @@ and statement st (node : Core.statement) =
                     slot
                 | None, _, _ -> operand_place st part
               in
+              let owned =
+                mode = Own || (lends = None && match part with Value _ -> true | Place _ -> false)
+              in
               let resume = block st.b and stop = block st.b in
-              on_yield place ~resume ~stop;
+              on_yield place ~owned ~resume ~stop;
               (* On the [stop] path the loop is leaving, so the method drops
                  what it owns and ends. *)
               start st.b stop;
@@ -1852,7 +1857,7 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
      after the method has gone on, whichever [yield] made it. *)
   let yield_into = if several then Some (temporary st ty) else None in
   inline ?yield_into st path type_arguments ~arguments ~call_site
-    ~on_yield:(fun place ~resume ~stop:_ ->
+    ~on_yield:(fun place ~owned:_ ~resume ~stop:_ ->
       (match through with
       | Some (pointer, writable) ->
           emit st.b (Assign (at pointer, Use (Address { place; writable })));

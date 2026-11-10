@@ -46,8 +46,10 @@ type frame = {
   synthetic : (int, Lir.place) Hashtbl.t;
       (** The places of the core form's synthetic locals, by number *)
   mutable self_place : Lir.place option;
-  on_yield : (Lir.place -> resume:Lir.block -> stop:Lir.block -> unit) option;
-      (** In an inlined lending or yielding method, what a [yield] of a place does *)
+  on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> stop:Lir.block -> unit) option;
+      (** In an inlined lending or yielding method, what a [yield] of a place does. [owned] is true
+          when the code that the [yield] runs may take the value: the method yields it [own], or
+          computed it for this [yield]. Otherwise the place is borrowed. *)
   yield_into : Lir.place option;
       (** In an inlined lending method with a [yield] on each of several paths, where a value the
           method makes to lend is put, so that one owner drops it whichever [yield] is reached *)
