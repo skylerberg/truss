@@ -28,6 +28,7 @@ public fn Set[Element: Hash + Ordered].length(self) -> USize
 
 public fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool
   ensures result == contains_equal(self.model(), value: element)
+  cost time finite
 {
   let position = self.elements.partition_point(fn(existing) { existing < element })
   proof {
@@ -44,6 +45,7 @@ public fn Set[Element: Hash + Ordered].insert(mut self, element: own Element)
   ensures forall other: Element =>
     self.model().contains(other) ==> old(self.model()).contains(other) || identical(other, element)
   ensures contains_equal(old(self.model()), value: element) ==> identical(self.model(), old(self.model()))
+  cost time finite
 {
   let position = self.elements.partition_point(fn(existing) { existing < element })
   if !(position < self.elements.length() && self.elements[position] == element) {
@@ -57,7 +59,11 @@ public fn Set[Element: Hash + Ordered].insert(mut self, element: own Element)
   }
 }
 
-internal fn Set[Element: Hash + Ordered].empty() -> Set[Element] {
+internal fn Set[Element: Hash + Ordered].empty() -> Set[Element]
+  ensures result.length() == 0
+  ensures forall value: Element => !result.model().contains(value)
+  cost time O(1)
+{
   Set(elements: [])
 }
 
