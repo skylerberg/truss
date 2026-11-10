@@ -2204,6 +2204,16 @@ package may want those names for its own types. They are `core::Pair`,
 - **`Type.parse(text)` parses text,** through the `Parse` trait. `From`
   and `TryFrom` convert between types. `Display` formats a value for
   people.
+- **A generic method's time counts its bounds' methods.** `contains` on a
+  slice promises `O(self.length() * time(Element.equal))`, and `sort`
+  promises `O(n * log(n) * time(Element.compare))`. A bound of
+  `O(self.length())` would be false for a list of strings, where one
+  comparison is not one step. The two other ways to make it true were
+  worse. A promise of `O(1)` on `Equal.equal` could not be kept by `String`.
+  A second trait for types that compare in constant time would give every
+  generic method two versions. With the term, a `List[Int64]` gets the
+  plain bound, because `Int64`'s comparison promises `O(1)`, and a
+  `List[String]` gets an honest one.
 - **A write reports at most the bytes it was given.** `Handles.write` and
   `streams::Writer.write` ensure it, so it is proven for every
   implementation: the operating system's, a fake's, and a package's own
