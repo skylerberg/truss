@@ -970,7 +970,11 @@ plus what happens before and after:
   pushing `count` times costs `O(count + items.length())`. A view, or a
   type whose model is the view it holds, such as a `Slice`, cannot grow,
   so it holds only the sum of its elements' potentials, and so does an
-  `Array`, whose model is its `count` elements.
+  `Array`, whose model is its `count` elements. A `List` or a `String` is read so only
+  where its fields are not seen; in its own package it is a record like
+  any other, holding what its storage holds, so a callee that changes
+  `self.storage` changes the list's potential by what it changes the
+  storage's.
 - **Potential is counted in a unit of its type's own,** one unknown constant
   for each type with a potential, the same for every method of the type, so
   that potential saved by one method pays for another's work. Since every
