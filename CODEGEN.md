@@ -14,8 +14,11 @@ reach and produces C, which a C compiler turns into object files, which a
 linker turns into a program. In the core form every call has a resolved
 callee and one argument per parameter, each argument is marked as a place
 or a value, every operator is resolved to an intrinsic operation or a call,
-and every type is fully inferred. Lowering from it needs no name resolution
-and no type inference. Every proof obligation has been discharged by then.
+and every type is fully inferred. A slice of a range, `items[1..3]`, is a
+call of the base type's `slice_range` with both bounds worked out, so
+lowering it is lowering that call. Lowering from the core form needs no
+name resolution and no type inference. Every proof obligation has been
+discharged by then.
 
 Lowering reads nothing else of a definition's body. A function's
 parameters, parameter defaults, `requires` checks, and body all come from
@@ -1584,8 +1587,6 @@ a command line can hold.
 - **A float's text without the C library.** DESIGN.md has it written in
   Truss so that it is the same on every system. The loop is Truss; the
   digits are `snprintf`'s and the check `strtod`'s.
-- **A slice of a range of elements,** `items[1..3]`. The type checker
-  accepts it, and lowering reports it as unsupported.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.
