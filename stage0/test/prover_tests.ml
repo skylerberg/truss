@@ -2635,6 +2635,50 @@ let () =
          }\n"
         "prover.requires")
 
+(* Deep definitions *)
+
+let () =
+  test "a query over an unfolded definition can be asked with the contract alone" (fun () ->
+      let database =
+        Support.setup
+          [
+            ( "app::main",
+              "fn halved(value: Int64) -> Int64\n\
+              \  requires value >= 0\n\
+              \  ensures result <= value\n\
+              \  cost time O(1)\n\
+               {\n\
+              \  value / 2\n\
+               }\n\n\
+               fn f(value: Int64) -> Int64\n\
+              \  requires value >= 0\n\
+              \  ensures result <= value\n\
+              \  cost time O(1)\n\
+               {\n\
+              \  halved(value)\n\
+               }\n" );
+          ]
+      in
+      let key =
+        List.find
+          (fun (declaration : Resolve.Names.declaration) ->
+            Path.show declaration.path = "app::main::f")
+          (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
+      in
+      match Query.demand database Prover.proof (Resolve.Names.key_of key) with
+      | Obligations { obligations; _ } -> (
+          match
+            List.find_opt
+              (fun (obligation : Prover.Translate.obligation) -> obligation.code = Ensures)
+              obligations
+          with
+          | Some { query; contracts_alone = Some alone; _ } ->
+              if List.length alone.facts >= List.length query.facts then
+                fail "the contract alone keeps every fact"
+          | Some _ -> fail "no query with the contract alone"
+          | None -> fail "no ensures obligation")
+      | _ -> fail "expected obligations")
+
 (* Triggers *)
 
 let triggered fact =
