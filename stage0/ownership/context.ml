@@ -16,7 +16,7 @@ type context = {
   kinds : (Core.local, kind) Hashtbl.t;
   types : (Core.local, T.ty) Hashtbl.t;
   mutable parameters : Core.local list;
-  mutable mut_parameters : Core.local list;
+  yields : bool;  (** The definition is a yielding method, which a loop may stop at a [yield]. *)
   mutable variables : Core.local list;  (** The locals declared with [var]. *)
   mutable diagnostics : Diagnostic.t list;
   mutable moves : Core.id list;  (** The [Use] nodes that move a place. *)
@@ -72,9 +72,7 @@ let collect context (definition : Core.definition) =
           Hashtbl.replace context.names parameter.local parameter.name;
           Hashtbl.replace context.kinds parameter.local (kind_of_mode parameter.mode);
           Hashtbl.replace context.types parameter.local parameter.type_;
-          context.parameters <- parameter.local :: context.parameters;
-          if parameter.mode = Mut && parameter.local <> Self then
-            context.mut_parameters <- parameter.local :: context.mut_parameters)
+          context.parameters <- parameter.local :: context.parameters)
         parameters
   | Type _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> ());
   Core_walk.definition

@@ -1129,8 +1129,24 @@ matching an owned value, by `own base with (...)`, and by returning it. A
 - **Only owned places can be moved.** Moving out of a read-only parameter, a
   view, a constant, or an element, as in `own items[i]`, is an error, as in
   Rust. The fixes offer `copy()`, and a method such as `remove` for an
-  element. A `mut` parameter or `mut self` may have a field moved out only
-  if the field is assigned again on every path before the function returns.
+  element.
+- **A place lent `mut` can be moved out of if it is put back.** A `mut`
+  parameter, `mut self`, the variable of a `mut` loop, a `mut` binding of a
+  `match`, and a lambda's `mut` parameter belong to someone else, who gets
+  them back. Such a place, or a field of it, may be given up with `own` if
+  it is assigned again on every path before it goes back: before the
+  function returns, before the loop's iteration, the `match` arm, or the
+  lambda ends, and, in a yielding method, before each `yield`, because a
+  loop may stop the method there. A lending method always continues after
+  its `yield`, so it may yield in between. Until the place is assigned,
+  using it is an error, as for any moved place. So `Option.take` is
+  `let taken = own self`, then `self = None`, then `taken`. This is sound
+  because a panic ends the program: nothing can see the place while it is
+  empty. Rust unwinds, so it forbids the move and offers `mem::replace`
+  instead.
+- **A name that a value is moved into owns it.** After `let taken = own
+  items`, `taken` views nothing, and `items` can be assigned again while
+  `taken` is in use.
 - **A returned place that is not owned is an error,** with a fix that
   copies it. This holds for the function's last expression, and for the
   value of a block, an `if`, or a `match` arm that is the last expression.

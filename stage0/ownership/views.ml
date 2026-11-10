@@ -86,8 +86,8 @@ let transfer context (point : point) (before : holdings) : holdings =
       match resolve context before views with
       | [] -> before
       | viewed -> hold before place.root viewed)
-  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Assign _ | Exit | Return_view _
-  | Views_temporary _ | Keeps_lent_part _ | Write_through _ | Arguments _ ->
+  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Assign _ | Ends _ | Suspend | Exit
+  | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Write_through _ | Arguments _ ->
       before
 
 (* What each holder may view before each point. *)
@@ -400,7 +400,7 @@ let check context (graph : Graph.t) =
                         through `%s`."
                        (show context slice) (show context viewed) (show context slice))
               | None -> ()))
-      | Enter | Take_lent _ | Bind _ | Exit | Hold _ -> ())
+      | Enter | Take_lent _ | Bind _ | Ends _ | Suspend | Exit | Hold _ -> ())
     graph.points;
   (* What a stretch of code changes and uses, for [parallel]. *)
   let effects (range : range) =
