@@ -151,16 +151,22 @@ internal fn exit_status_from(status: Int32) -> processes::ExitStatus {
   let ending_signal = status & 127
   if ending_signal == 0 {
     processes::ExitStatus.Exited(code: intrinsic::convert((status >> 8) & 255))
-  } else if ending_signal == intrinsic::libc_sigusr1() {
-    processes::ExitStatus.Signaled(signal: processes::Signal.User1)
-  } else if ending_signal == intrinsic::libc_sigusr2() {
-    processes::ExitStatus.Signaled(signal: processes::Signal.User2)
   } else {
-    processes::ExitStatus.Signaled(signal: processes::Signal.from_number(ending_signal))
+    processes::ExitStatus.Signaled(signal: signal_from(ending_signal))
   }
 }
 
-fn signal_number(signal: processes::Signal) -> Int32 {
+internal fn signal_from(number: Int32) -> processes::Signal {
+  if number == intrinsic::libc_sigusr1() {
+    processes::Signal.User1
+  } else if number == intrinsic::libc_sigusr2() {
+    processes::Signal.User2
+  } else {
+    processes::Signal.from_number(number)
+  }
+}
+
+internal fn signal_number(signal: processes::Signal) -> Int32 {
   match signal {
     HangUp => 1
     Interrupt => 2

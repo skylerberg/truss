@@ -122,6 +122,8 @@ type number =
   | Istrip
   | Opost
   | Cs8
+  | Sigset_size  (** How many bytes a [sigset_t] takes *)
+  | Sig_block
 
 (** How many elements a function reads or writes through an address it is given. The prover holds
     every call to it: a view has that many elements, and storage has room for that many. *)
@@ -235,6 +237,10 @@ type function_ =
   | Ioctl_tiocgwinsz  (** [ioctl] with the request [TIOCGWINSZ] *)
   | Tcgetattr
   | Tcsetattr  (** With [TCSAFLUSH] *)
+  | Sigemptyset
+  | Sigaddset
+  | Sigprocmask_block  (** [sigprocmask] with [SIG_BLOCK] *)
+  | Sigwait
 
 val functions : function_ list
 
