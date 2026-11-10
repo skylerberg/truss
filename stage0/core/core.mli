@@ -45,6 +45,9 @@ type callee =
           [Method { owner = impl; name; receiver }], whose signature and whose body, written there
           or left to the trait, the interface answers for. *)
   | Capability_method of { capability : Path.t; name : string }
+  | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
+      (** An operation of [standard::intrinsic], called by name: exact when it returns, with nothing
+          for the prover to show first. *)
   | Value of expression  (** A function value, called by position. *)
 
 and call = {
@@ -73,9 +76,9 @@ and operand =
 (** Where a value is. *)
 and place =
   | Local of local
-  | Field of { base : place; field : string; type_ : Types.ty }
-      (** A field of a record, or of the variant a pattern or an [is] showed the base to be; [type_]
-          is the field's. *)
+  | Field of { base : place; variant : string option; field : string; type_ : Types.ty }
+      (** A field of a record, or of the [variant] a pattern or an [is] showed the base to be;
+          [type_] is the field's. *)
   | Lent of expression
       (** The part a call of a lending method lends, for the rest of the statement: [items[index]],
           which is [at], and [grid.cell(position)]. The expression is the [Call]. *)
@@ -123,14 +126,10 @@ and kind =
       (** [items[start..stop]]: a view of part of a list, a slice, or an array. *)
   (* Calls and operations *)
   | Call of call
-  | Primitive of {
-      operation : Intrinsic.operation;
-      type_arguments : Types.argument list;
-      arguments : expression list;
-    }
-      (** A built-in operation on built-in types: arithmetic, bitwise operators, and shifts, however
-          they were written, as [left + right] or as [left.add(right)]; and a call of
-          [standard::intrinsic]. *)
+  | Operator of { operation : Intrinsic.operation; arguments : expression list }
+      (** Arithmetic, a bitwise operator, or a shift on built-in types, however it was written, as
+          [left + right] or as [left.add(right)]. The prover shows it defined: that it does not
+          overflow, divide by zero, or shift too far. *)
   | Compare of { comparison : comparison; left : expression; right : expression }
       (** A comparison of two values of one built-in type, or in a specification of two integers by
           value. On any other type a comparison is a [Call] of [equal], or of [compare] under a
@@ -169,7 +168,12 @@ and kind =
   | Quantified of { quantifier : Syntax.quantifier; binder : binder; body : expression }
   | Yielded  (** The parts handed out so far, in order. *)
   | Finished
+  | Identical of expression * expression  (** [identical(first, second)] *)
+  | Measure of { function_ : measure; arguments : expression list }
+      (** [log(count)], [power(base, exponent)], [time(visit)], or [calls(visit)], in a [cost]
+          bound. *)
 
+and measure = Log | Power | Time | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
 
 and piece =
@@ -227,8 +231,9 @@ and statement_kind =
   | Parallel of statement list
   | Proof of block
   | Assert of expression
-  | Yield of operand
-      (** The part a lending or yielding method gives: a place, or a value it made. *)
+  | Yield of { mode : Types.mode; part : operand }
+      (** The part a lending or yielding method gives, a place or a value it made, lent as the
+          method's signature says. *)
 
 (** What a [for] loop goes over. *)
 and drive =
@@ -271,7 +276,12 @@ type parameter = {
   mode : Types.mode;
   type_ : Types.ty;
   default : expression option;
+  accepts : accepts option;
 }
+
+and accepts = { inputs : (local * string) list; requires : expression list }
+(** What a parameter of a function type requires of each call through it, when the type names its
+    inputs: [transform: (fn(element: Element) -> Output requires ...)]. *)
 
 type contract = {
   requires : expression list;
