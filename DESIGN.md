@@ -847,6 +847,28 @@ choices below keep method calls predictable:
   loops, where Rust needs three names (`iter`, `iter_mut`, `into_iter`).
   Overloading by parameter types is not allowed, because it makes calls harder
   to predict.
+- **A method is its name and how it takes `self`.** The versions of one name
+  need not be written in one place. A `List` gets `each(self)` from
+  `Iterable`, which generic code is written against, and has an
+  `each(mut self)` and an `each(own self)` of its own, which a set or a
+  range could not offer. A trait that requires another can add a version in
+  the same way. A call picks its version among all of them by its mark, so
+  there is still exactly one method for each name and each way of taking
+  `self`. The cost is that the versions of one name can be in two places,
+  a type's own methods and an `impl`.
+- **Versions merge only where one author wrote them as one method.** Three
+  things are one author's: a type's own methods, the methods an `impl` in
+  the type's own package writes, and a trait with the traits it requires.
+  Picking by mode among everything visible would let code added elsewhere
+  take over a call without an error. On a temporary the `own` version is
+  chosen when there is one, so if a second package could give a type's
+  `label(self)` a `label(own self)` through a trait of its own,
+  `Counter(3).label()` would change which method it means when that package
+  was added. A method that an `impl` leaves to the body its trait provides
+  is no different: a later release of the trait can add one. So an `impl`
+  outside a type's package cannot use a name the type's methods have, an
+  `impl` inside it can only by writing the method, and two unrelated traits
+  that share a name are still told apart only by writing the call in full.
 - **Traits can take type parameters, which covers what overloading is mostly
   wanted for.** `Int64.from(count)` picks an `impl` of `From[Source]` by the
   type of `count`, and `instant + duration` picks an `impl` of
@@ -898,9 +920,11 @@ choices below keep method calls predictable:
 - **A clash between names is always an error, never a silent choice.** Rust,
   Kotlin, and C# let a type's own method win over a trait's or extension's
   method with the same name, so adding a method can silently change what an
-  existing call does. In Truss, a type's own method and a trait method with
-  the same name is an error at the `impl`, and two traits with the same
-  method name is an error at the call. Upgrading a dependency can therefore
+  existing call does. In Truss, a type's own method and a trait's method
+  that are the same one, by name and by how they take `self`, are an error
+  at the `impl`, as is any shared name when the `impl` is outside the type's
+  package, and two unrelated traits with the same method name are an error
+  at the call. Upgrading a dependency can therefore
   break a call only with an error that names both sides, never by changing
   what it does. Adding a public method to a type can so break another
   package's `impl`, with an error whose fix is a rename. A release that only

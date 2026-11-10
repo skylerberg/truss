@@ -323,10 +323,8 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
                        "`%s` has no `each` that takes %s, so a `for` loop cannot go over it this \
                         way."
                        (T.show type_)
-                       (match mode with
-                       | T.Read -> "`self`"
-                       | Mut -> "`mut self`"
-                       | Own -> "`own self`")))))
+                       (Path.show_receiver
+                          (match mode with T.Read -> Read | Mut -> Mut | Own -> Own))))))
 
 (* An assignment's left side must be a place that may change. *)
 and check_assignable state env (written : expression) =

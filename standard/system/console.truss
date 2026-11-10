@@ -1,31 +1,27 @@
-use standard::intrinsic
+use standard::system::calls
+use standard::system::lines
 
-internal type SystemConsole()
+internal type SystemConsole(input: lines::LineInput)
+
+internal fn SystemConsole.new() -> SystemConsole {
+  SystemConsole(input: lines::LineInput.new())
+}
 
 impl Console for SystemConsole {
   fn print_line(self, text: StringSlice) {
-    let _ = intrinsic::write_bytes(1, bytes: text.bytes)
-    let _ = intrinsic::write_bytes(1, bytes: "\n".slice().bytes)
+    let _ = calls::write_fully(1, bytes: text.bytes)
+    let _ = calls::write_fully(1, bytes: "\n".slice().bytes)
   }
 
   fn print_error(self, text: StringSlice) {
-    let _ = intrinsic::write_bytes(2, bytes: text.bytes)
-    let _ = intrinsic::write_bytes(2, bytes: "\n".slice().bytes)
+    let _ = calls::write_fully(2, bytes: text.bytes)
+    let _ = calls::write_fully(2, bytes: "\n".slice().bytes)
   }
 
-  fn read_line(self) -> Option[String] {
-    var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
-    var ended = false
-    while !ended && intrinsic::read_bytes(0, buffer: mut bytes, count: 1) == 1 {
-      if intrinsic::view_at(intrinsic::storage_view(bytes), index: intrinsic::storage_length(bytes) - 1) == 10 {
-        let _ = intrinsic::storage_pop(mut bytes)
-        ended = true
-      }
-    }
-    if !ended && intrinsic::storage_length(bytes) == 0 {
-      None
-    } else {
-      Some(String.from_bytes(own bytes))
+  fn read_line(mut self) -> Option[String] {
+    match mut self.input.next_line(0) {
+      Ok(line) => line
+      Err(_) => None
     }
   }
 }

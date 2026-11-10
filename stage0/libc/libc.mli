@@ -11,7 +11,7 @@ val host : os option
     [None] where that is a system it knows no C library of. *)
 
 (** A number that Truss and C both have. *)
-type scalar = UInt8 | Int32 | Int64 | USize | ISize
+type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize
 
 (** How an argument reaches the function. There is no pointer type in Truss, so memory is passed as
     a view or as storage, and the function is given an address into it. *)
@@ -21,13 +21,23 @@ type passes =
   | Room of scalar
       (** Storage: the address after its last element, for a function that fills room the storage
           has beyond its length *)
+  | Written of scalar * string list
+      (** A structure of numbers of one type that the function writes: the address of one, whose
+          numbers then go to [mut] arguments of these names, one each *)
+  | Always of int
+      (** A number that is no argument of the Truss call: the function always gets it *)
+  | Environment
+      (** The environment the process was started with, which is no argument of the Truss call *)
 
 type result =
   | Returns of scalar
   | Points_at of scalar  (** The number at the address returned, which is how [errno] is reached *)
+  | Text
+      (** The bytes at the address returned, up to a zero byte, as a view, with a last [mut Bool]
+          argument, [found], that says whether the function returned an address at all *)
 
 type signature = { parameters : (string * passes) list; result : result }
-(** A function as Truss calls it. *)
+(** A function as Truss calls it: how each parameter of the C function is given. *)
 
 type declaration = {
   symbol : string;
@@ -39,7 +49,17 @@ type declaration = {
 }
 (** A function as one system's headers declare it. *)
 
-type function_ = Write | Read | Open | Close | Errno | Clock_gettime | Getentropy
+type function_ =
+  | Write
+  | Read
+  | Open
+  | Close
+  | Errno
+  | Clock_gettime
+  | Getentropy
+  | Getenv
+  | Posix_spawnp
+  | Waitpid
 
 val functions : function_ list
 
@@ -57,11 +77,12 @@ type number =
   | O_wronly
   | O_creat
   | O_trunc
-  | O_append
   | O_cloexec
   | Eintr
   | Enoent
   | Eacces
+  | Eio
+  | Einval
   | Clock_realtime
 
 val numbers : number list

@@ -116,8 +116,13 @@ let overlap (first : T.impl_interface) (second : T.impl_interface) =
 
 (* Method names *)
 
-(* A type's own method and a method of a trait it implements cannot share
-   a name, wherever the [impl] is. *)
+(* A method is its name and how it takes [self]. An [impl] in a type's own
+   package may write another version of a method the type has: one name,
+   taking [self] another way. Nothing else may use a name the type's methods
+   have: not an [impl] in another package, and not a method an [impl] leaves
+   to its trait's body, since either can arrive in an upgrade that the
+   type's author never saw, and would then change which method a call
+   means. Neither may a method share a constant's name. *)
 let check_method_names database (declaration : Names.declaration) (definition : definition)
     (impl : T.impl_interface) =
   match
@@ -126,13 +131,44 @@ let check_method_names database (declaration : Names.declaration) (definition : 
   | T.Named { path; _ }, Some trait when not trait.is_capability ->
       List.filter_map
         (fun (method_ : T.trait_method) ->
-          match Query.demand database Names.members (path, method_.method_name) with
-          | [] -> None
-          | _ ->
-              at database (Names.key_of declaration) Method_name_clash (header_span definition)
-                (Printf.sprintf
-                   "`%s` has a method `%s` of its own, so it cannot also get one from `%s`."
-                   (T.show impl.for_type) method_.method_name (T.show_trait impl.implements)))
+          let own = Query.demand database Names.members (path, method_.method_name) in
+          let same_version (key : Names.key) =
+            match key.path with
+            | Method { receiver; _ } -> receiver = method_.method_receiver
+            | _ -> true
+          in
+          let written =
+            List.exists
+              (fun (name, receiver, (_ : T.signature)) ->
+                name = method_.method_name && receiver = method_.method_receiver)
+              impl.impl_methods
+          in
+          let clash message =
+            at database (Names.key_of declaration) Method_name_clash (header_span definition)
+              message
+          in
+          if own = [] then None
+          else if List.exists same_version own then
+            clash
+              (Printf.sprintf
+                 "`%s` has a `%s` of its own that takes %s, so it cannot also get one from `%s`."
+                 (T.show impl.for_type) method_.method_name
+                 (Path.show_receiver method_.method_receiver)
+                 (T.show_trait impl.implements))
+          else if declaration.module_.package <> Path.package path then
+            clash
+              (Printf.sprintf
+                 "`%s` has a `%s` of its own, so only an `impl` in its own package can give it \
+                  another."
+                 (T.show impl.for_type) method_.method_name)
+          else if not written then
+            clash
+              (Printf.sprintf
+                 "`%s` has a `%s` of its own, so this `impl` can give it another only by writing \
+                  it, and `%s` is left to the body `%s` provides."
+                 (T.show impl.for_type) method_.method_name method_.method_name
+                 (T.show_trait impl.implements))
+          else None)
         trait.methods
   | _ -> []
 

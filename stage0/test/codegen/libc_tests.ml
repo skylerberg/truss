@@ -5,7 +5,6 @@ open Codegen_support
 
 let view_ty = named "View" ~arguments:[ Type uint8 ]
 let bytes_ty = Storage.of_elements uint8
-let times_ty = Storage.of_elements int64
 let isize = named "ISize"
 
 let extra =
@@ -14,7 +13,7 @@ let extra =
     (Ground.to_string isize, Memory_layout.Scalar (Integer ISize));
   ]
 
-let intrinsic_types : Intrinsics.types = { usize; isize; string_slice = named "StringSlice" }
+let intrinsic_types : Intrinsics.types = { usize; string_slice = named "StringSlice" }
 
 let operate b ?destination ?(type_arguments = []) operation arguments =
   ignore
@@ -172,37 +171,47 @@ let () =
           ]
       in
       expect_int ~expected:(Char.code 'h' + 5) status);
-  test "the clock's time arrives as the two numbers of a timespec" (fun () ->
+  test "a structure the C library writes arrives in the arguments named for its numbers" (fun () ->
       let open Lir_builder in
       expect_status ~extra 1
         [
           built_entry (fun b ->
-              let time = local b (value times_ty) in
-              operate b ~destination:(at time) ~type_arguments:[ int64 ] Storage_with_capacity
-                [ Value (usize 2) ];
+              let seconds = local b (value int64) and nanoseconds = local b (value int64) in
               let clock = flags b [ Clock_realtime ] in
               let failed = local b (value int32) in
               operate b ~destination:(at failed) (Libc Clock_gettime)
-                [ Value (Copy (at clock)); Place (at time) ];
+                [ Value (Copy (at clock)); Place (at seconds); Place (at nanoseconds) ];
               (* Later than 2023, and less than a second of nanoseconds. *)
               let recent = local b (Raw Bool) and whole = local b (Raw Bool) in
               emit b
                 (Assign
-                   ( at recent,
-                     Binary
-                       (Greater, Copy (Storage.at (at time) (usize 0)), constant_int64 1_700_000_000)
-                   ));
+                   (at recent, Binary (Greater, Copy (at seconds), constant_int64 1_700_000_000)));
               emit b
                 (Assign
-                   ( at whole,
-                     Binary
-                       (Less, Copy (Storage.at (at time) (usize 1)), constant_int64 1_000_000_000)
-                   ));
+                   (at whole, Binary (Less, Copy (at nanoseconds), constant_int64 1_000_000_000)));
               emit b (Assign (at recent, Binary (Bit_and, Copy (at recent), Copy (at whole))));
               let status = local b (value int32) in
               emit b (Assign (at status, Convert (Copy (at recent), Integer Int32)));
               emit b (Assign (at status, Binary (Subtract, Copy (at status), Copy (at failed))));
-              free b (at time);
+              status);
+        ]);
+  test "an argument a row fixes is no argument of the Truss call" (fun () ->
+      let open Lir_builder in
+      let uint64 = named "UInt64" in
+      expect_status ~extra 1
+        [
+          built_entry (fun b ->
+              (* Two draws of eight random bytes differ. *)
+              let draw () =
+                let value = local b (value uint64) and failed = local b (value int32) in
+                operate b ~destination:(at failed) (Libc Getentropy) [ Place (at value) ];
+                value
+              in
+              let first = draw () in
+              let second = draw () in
+              let differ = local b (Raw Bool) and status = local b (value int32) in
+              emit b (Assign (at differ, Binary (Not_equal, Copy (at first), Copy (at second))));
+              emit b (Assign (at status, Convert (Copy (at differ), Integer Int32)));
               status);
         ])
 
@@ -222,11 +231,7 @@ let () =
       let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
       let handle_ty = Monomorphic.builtin Handle in
       let types : Intrinsics.types =
-        {
-          usize = Monomorphic.builtin USize;
-          isize = Monomorphic.builtin ISize;
-          string_slice = standard "text" "StringSlice" ();
-        }
+        { usize = Monomorphic.builtin USize; string_slice = standard "text" "StringSlice" () }
       in
       let entry =
         let b = Lir_builder.create () in

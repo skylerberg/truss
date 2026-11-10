@@ -2,7 +2,7 @@
 
 open Ir
 
-let version = 12
+let version = 13
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -144,10 +144,6 @@ let intrinsic_tag = function
   | Float_bits -> 22
   | Float_from_bits -> 23
   | Grow -> 24
-  | System_write -> 25
-  | System_read -> 26
-  | Clock_now -> 27
-  | Random_fill -> 28
   | Debug_begin -> 29
   | Debug_text -> 30
   | Debug_signed -> 31
@@ -164,9 +160,8 @@ let intrinsic_tag = function
   | Program_argument -> 42
   | Float_text -> 43
   | Evidence_fill -> 44
-  | System_environment -> 45
-  | System_open -> 46
-  | System_run -> 48
+  | Environment -> 49
+  | Terminated_length -> 50
 
 let encode_rvalue instance rvalue =
   let operand = encode_operand instance in
@@ -329,11 +324,6 @@ let encode_table ?(path = Ground.encode_path) ?instance (table : table) =
         (fun (key, s) -> Cbor.Array [ instance key; encode_signature encoders_default s ])
         table.entries;
     ]
-
-let encode_evidence ?(path = Ground.encode_path) ?instance (evidence : evidence) =
-  let instance = match instance with Some instance -> instance | None -> Instance.encode ~path in
-  Cbor.Array
-    [ instance evidence.evidence_key; instance evidence.table; list instance evidence.outer ]
 
 let hash t =
   Blake3.hash

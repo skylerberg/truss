@@ -951,10 +951,15 @@ behind most capabilities.
 ### `main` and the real implementations
 
 The standard library implements each standard capability for real with an
-ordinary type, such as a system clock and the real file system. The
-generated startup code builds the evidence for exactly the capabilities in
-`main`'s `uses` clause and passes it in. An external test gets its declared
-capabilities the same way.
+ordinary type, such as a system clock and the real file system: the
+capability's `System` type, as `SystemConsole` is `Console`'s. The
+generated startup code makes a value of the type for exactly the
+capabilities in `main`'s `uses` clause, with evidence on the stack
+pointing at each, as a `provide mut` would. A type that holds something is
+made by its `new`: `SystemConsole` holds the input it has read and not yet
+given out. The values are `main`'s caller's, and are dropped when `main`
+returns. An external test gets its declared capabilities the same way, as
+values of its own.
 
 ### Tasks
 
@@ -983,7 +988,7 @@ until both handle it.
 | Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits`, `from_bits` |
 | Storage | empty, with a capacity, length, capacity, reserve, push, pop, insert, remove, swap, lend an element, view |
 | Views | length, lend an element, slice |
-| Operating system | write and read bytes, the clock, random bytes, crash; more come with the standard library's real implementations |
+| Operating system | the C library's functions and numbers, a handle from a descriptor and its descriptor, the address of a view, crash |
 
 `Intrinsics` writes every operation into the caller's LIR, never as a call:
 numbers as primitive operations, and storage and views as a few statements
@@ -1022,12 +1027,27 @@ reaches it:
 | A number | Its value, converted to the parameter's C type |
 | A `View` | The address of its elements, which the function only reads |
 | A `mut Storage` | The address after its last element, for a function that fills room the storage has beyond its length |
+| Several `mut` numbers of one type | The address of a structure of them, which the function writes; each number then goes to its argument |
 
-Truss has no pointer type, so memory crosses to C only as a view or as
-storage, and a structure a function fills is storage of the numbers it is
-made of: `clock_gettime` fills a `Storage[Int64]` with the two numbers of a
-`timespec`. A function's result is a number, or the number at the address
-it returns, which is how `errno` is reached.
+Truss has no pointer type, so memory crosses to C only as a view, as
+storage, or as numbers to write. A small structure a function fills is the
+numbers it is made of: `libc_clock_gettime(clock, seconds: mut seconds,
+nanoseconds: mut nanoseconds)` gives a `timespec`'s two, with nothing on
+the heap. `storage_lengthen` then makes what a function wrote into
+storage's room the storage's own. A row can also fix an argument, which
+the Truss call then does not have: `libc_getentropy(mut value)` always
+asks for the eight bytes of the `UInt64` it fills, and
+`libc_posix_spawnp` always gives the program it starts the environment
+this process was started with. A list of addresses, such as the arguments
+of a program to run, is a `View[USize]` that Truss fills with
+`view_address`, which gives the address of a view's elements as a number;
+nothing turns a number back into an address.
+
+A function's result is a number; the number at the address it returns,
+which is how `errno` is reached; or text, the bytes at the address it
+returns up to a zero byte, as a view, with a `mut Bool` that says whether
+it returned an address at all, which is how `getenv` says a variable is
+unset.
 
 A call is written into the caller's LIR as a call of the C function
 itself, given each argument converted to its parameter's C type, and the C
@@ -1051,14 +1071,25 @@ therefore a failing test, not a program that misbehaves.
 ### Handles
 
 The intrinsic module also provides one handle type: `Handle`, a file
-descriptor in an `Int32`, which is neither `Copyable` nor `Plain`, with
-`open_file`, `handle_read`, and `handle_write`. Its drop function calls the
-operating system to release it, with `close`. The standard
-library's `SystemFileRead` and `SystemFileWrite`, and its `FileReader` and
-`FileWriter`, are written on them, as `SystemEnvironment` is on
-`environment_variable`, `SystemProcesses` on `run_process`, which spawns
-a program found on the `PATH` and waits for it, `SystemClock` on
-`clock_now`, and `SystemRandom` on `random_fill`. `SystemTasks.yield_now`
+descriptor in an `Int32`, which is neither `Copyable` nor `Plain`.
+`handle_from` makes one of a descriptor that is open, and
+`handle_descriptor` reads it. Its drop function calls the operating system
+to release it, with `close`.
+
+The standard library's real implementations are Truss on the C library's
+functions: opening a file, with its path given a zero byte at its end and
+refused if it holds one; reading into storage; writing every byte; going
+on after a signal interrupts a call; and turning an error number into a
+`FileError`. `SystemFileRead`, `SystemFileWrite`, `FileReader`, and
+`FileWriter` are written on those, `SystemConsole` writes with them,
+`SystemClock` reads `clock_gettime`, and `SystemRandom` reads
+`getentropy`. `SystemConsole` and `FileReader` each hold a reader of
+lines, which reads a block at a time and keeps what it has not given out.
+`SystemEnvironment` reads `getenv`. `SystemProcesses` runs a program found
+on the `PATH` with `posix_spawnp` and waits for it with `waitpid`: it lays
+the program's name and its arguments end to end, each with its zero byte,
+refusing one that holds a zero byte, and reads the exit status, or 128 and
+the signal that ended the program, out of the status. `SystemTasks.yield_now`
 does nothing, since tasks run one after another. `NetworkClient` and
 `NetworkServer` have no real implementation, and a `main` that uses one is
 refused with a message saying so. A handle's is the only drop that does more
@@ -1074,13 +1105,10 @@ The C `main` of a program is generated:
    code has no unsafe operations, so a segmentation fault means the stack
    ran out.
 2. Turn `argc` and `argv` into `List[String]`, the program's path first, as
-   in C. Each `String`'s storage points at the argument itself, with
-   capacity 0, so it is never copied, unless it holds bad UTF-8, which a
-   copy replaces with U+FFFD.
-3. Build the evidence for `main`'s `uses` clause: static evidence for the
-   standard library's real implementation of each capability, its
-   `System` type, such as `SystemConsole`, whose table of entries is static
-   data too.
+   in C. Each `String` is made of an argument's bytes by the standard
+   library, which replaces bad UTF-8 with U+FFFD.
+3. Make the standard library's real implementation of each capability in
+   `main`'s `uses` clause, and evidence for each on the stack.
 4. Call Truss's `main` and return its `ExitCode` as the process's status.
 
 Failures end the process without running anything else:
@@ -1313,7 +1341,7 @@ Everything a build links is checked together before any C is emitted:
 - each call names its callee with the signature the callee has, as does
   each entry of a table and each named function used as a value
 - a drop reaches a drop function
-- each address of static evidence, of a table, or of a constant reaches one
+- each address of a table or of a constant reaches one
 - what an instance compiles to is the instance that was asked for
 
 ## Building
@@ -1426,14 +1454,10 @@ a command line can hold.
 - **Checkers shipped compiled.** The standard library's are to ship already
   compiled with the toolchain, for each host and both widths of `USize`, and
   a dependency's to be compiled once per version.
-- **The standard library written on the C library.** Its real
-  implementations still reach the system through the runtime's functions
-  for writing, reading, opening a file, the clock, random bytes, the
-  environment, and running a program; of the C library's functions in the
-  table, only `close` is called, by a handle's drop. The logic of those
-  runtime functions is to be Truss in the standard library over the table,
-  with storage's growth, debug output, and the test runner, leaving the
-  runtime only startup, failing, and allocation.
+- **The rest of the runtime in Truss.** A float's text, storage's growth,
+  debug output, and the test runner are functions of the C runtime. Each is to be Truss in the standard library
+  on the C library's functions, leaving the runtime only startup, failing,
+  and allocation.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.

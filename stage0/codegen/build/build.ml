@@ -131,8 +131,7 @@ let program ?progress ?(tests = false) ?(copied = fun _ -> []) toolchain cache e
         in
         let data = List.filter_map (function Lir.Data d -> Some d | _ -> None) units in
         let tables = List.filter_map (function Lir.Table t -> Some t | _ -> None) units in
-        let evidence = List.filter_map (function Lir.Evidence e -> Some e | _ -> None) units in
-        (Printf.sprintf "file %d" i, Emit_c.file env settings.build ~data ~tables ~evidence code))
+        (Printf.sprintf "file %d" i, Emit_c.file env settings.build ~data ~tables code))
       files
   in
 

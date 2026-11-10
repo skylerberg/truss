@@ -52,7 +52,7 @@ let context ?(checks = false) database target =
       Glue.create env ~kind_of:(Monomorphic.kind monomorphic) ~usize
         ~debug_form:Monomorphic.debug_form ();
     monomorphic;
-    types = { usize; isize = Monomorphic.builtin ISize; string_slice = standard_text "StringSlice" };
+    types = { usize; string_slice = standard_text "StringSlice" };
     bool = Monomorphic.builtin Bool;
     cursor_fields;
     checks;

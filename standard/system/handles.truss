@@ -1,46 +1,46 @@
 use standard::intrinsic
+use standard::system::calls
 
-internal fn open_handle(file: Path, flags: Int32) -> Result[intrinsic::Handle, FileError] {
-  var error: Int32 = 0
-  let handle = intrinsic::open_file(file.text.slice().bytes, flags: flags, error: mut error)
-  if error == 0 {
-    Ok(own handle)
-  } else if error == 2 {
-    Err(FileError.NotFound)
-  } else if error == 13 {
-    Err(FileError.PermissionDenied)
+internal fn file_error(number: Int32) -> FileError {
+  if number == intrinsic::libc_enoent() {
+    FileError.NotFound
+  } else if number == intrinsic::libc_eacces() {
+    FileError.PermissionDenied
   } else {
-    Err(FileError.Other(code: error))
+    FileError.Other(code: number)
   }
+}
+
+internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[Value, FileError] {
+  match own outcome {
+    Ok(value) => Ok(own value)
+    Err(number) => Err(file_error(number))
+  }
+}
+
+internal fn open_to_read(file: Path) -> Result[intrinsic::Handle, FileError] {
+  with_file_error(calls::open_file(file.text.slice().bytes, flags: intrinsic::libc_o_rdonly()))
+}
+
+internal fn open_to_write_from_empty(file: Path) -> Result[intrinsic::Handle, FileError] {
+  let flags = intrinsic::libc_o_wronly() | intrinsic::libc_o_creat() | intrinsic::libc_o_trunc()
+  with_file_error(calls::open_file(file.text.slice().bytes, flags: flags))
 }
 
 internal fn read_all(handle: mut intrinsic::Handle) -> Result[intrinsic::Storage[UInt8], FileError] {
   var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
   var reading = true
-  var failed = false
   while reading {
-    let got = intrinsic::handle_read(mut handle, buffer: mut bytes, count: 65536)
-    if got < 0 {
-      failed = true
-      reading = false
-    } else if got == 0 {
+    let read = with_file_error(
+      calls::read_onto_end(intrinsic::handle_descriptor(handle), buffer: mut bytes, count: 65536),
+    )?
+    if read == 0 {
       reading = false
     }
   }
-  if failed { Err(FileError.Other(code: 5)) } else { Ok(own bytes) }
+  Ok(own bytes)
 }
 
 internal fn write_all(handle: mut intrinsic::Handle, bytes: intrinsic::View[UInt8]) -> Result[Unit, FileError] {
-  var at: USize = 0
-  var failed = false
-  while !failed && at < intrinsic::view_length(bytes) {
-    let wrote = intrinsic::handle_write(mut handle, bytes: intrinsic::view_slice(bytes, start: at, stop: intrinsic::view_length(bytes)))
-    if wrote <= 0 {
-      failed = true
-    } else {
-      let count: USize = intrinsic::convert(wrote)
-      at += count
-    }
-  }
-  if failed { Err(FileError.Other(code: 5)) } else { Ok(Unit) }
+  with_file_error(calls::write_fully(intrinsic::handle_descriptor(handle), bytes: bytes))
 }

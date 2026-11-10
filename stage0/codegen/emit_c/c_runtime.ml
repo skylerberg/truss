@@ -63,7 +63,6 @@ let runtime_declarations (target : Memory_layout.target) =
       "void t_runtime_echo(const uint8_t *text, t_usize length, const struct t_anchor *anchor, \
        uint32_t line, uint32_t column);\n";
       "_Noreturn void t_runtime_compiler_bug(void);\n";
-      "uint8_t *t_runtime_program_argument(void *arguments, int32_t index, t_usize *length);\n";
       "struct t_evidence {\n\
       \  void *implementation;\n\
       \  const void *const *table;\n\
@@ -74,16 +73,8 @@ let runtime_declarations (target : Memory_layout.target) =
       "void t_runtime_free(void *pointer);\n";
       "void t_runtime_storage_grow(void **buffer, t_usize length, t_usize *capacity, t_usize size, \
        t_usize alignment, t_usize minimum);\n";
-      "t_isize t_runtime_write(int32_t descriptor, const uint8_t *bytes, t_usize count);\n";
-      "t_isize t_runtime_read(int32_t descriptor, uint8_t *bytes, t_usize count);\n";
       "t_usize t_runtime_float32_text(float value, uint8_t *bytes);\n";
-      "int32_t t_runtime_open(const uint8_t *path, t_usize length, int32_t flags, int32_t *error);\n";
-      "int32_t t_runtime_run(const uint8_t *program, t_usize length, const uint8_t *arguments, \
-       t_usize arguments_length, int32_t *error);\n";
-      "uint8_t *t_runtime_environment(const uint8_t *name, t_usize length, t_usize *value_length);\n";
       "t_usize t_runtime_float64_text(double value, uint8_t *bytes);\n";
-      "int64_t t_runtime_clock_now(void);\n";
-      "void t_runtime_random_fill(uint8_t *bytes, t_usize count);\n";
       "void t_runtime_debug_begin(void);\n";
       "void t_runtime_debug_text(const void *bytes, t_usize count);\n";
       "void t_runtime_debug_signed(int64_t value);\n";

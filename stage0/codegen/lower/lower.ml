@@ -63,7 +63,6 @@ let constant = Constants.constant
 let evaluator = Constants.evaluator
 let table = Generated.table
 let any_table = Generated.any_table
-let real_evidence = Generated.real_evidence
 
 let trait_provides context ~trait ~name ~receiver =
   written context (Method { owner = trait; name; receiver }) <> None
@@ -107,9 +106,9 @@ let begin_body ?how st =
     if code.has_defaults then Some (local st.b ~name:"passed" (Raw (Integer UInt64))) else None
   in
   let evidence = evidence_parameters st (evidence_for code.substitution code.uses) in
-  st.evidence <-
-    st.evidence @ Generated.real_evidence_of st.context ~user:(Path.show code.anchor) code.real;
   start st.b (block st.b);
+  st.evidence <-
+    st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
   Option.iter (fill_defaults st) mask;
   check_requires st;
   ( bound,

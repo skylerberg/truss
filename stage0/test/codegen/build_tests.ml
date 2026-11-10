@@ -76,8 +76,7 @@ let () =
               (function
                 | Lir.Code i -> Instance.to_string i.key
                 | Data d -> Instance.to_string d.data_key
-                | Table t -> Instance.to_string t.table_key
-                | Evidence e -> Instance.to_string e.evidence_key)
+                | Table t -> Instance.to_string t.table_key)
               reached)));
   test "a drop reaches the type's drop function" (fun () ->
       let f =
