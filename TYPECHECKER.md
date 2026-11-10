@@ -1207,7 +1207,6 @@ checker made, and the checked form records each with its position:
 |---|---|
 | Two indexes or ranges of one collection do not overlap | Loans of `items[i]` and `items[j]`, or two slices, that would otherwise conflict |
 | An `Integer` fits the built-in integer type expected | `items[i + 1]` in a specification |
-| A function value's costs imply the expected costs | Passing a function where its type's costs differ |
 | A guarded `match` is covered | `_ => unreachable` after guards |
 
 ## Dependencies
@@ -1360,6 +1359,11 @@ the compiler. The prelude holds:
   is type-checked with the body, and the prover reads it from the callee's
   tree, so a change to a callee's body reaches its callers' proofs, which
   then find each query's answer kept by the query's text.
+- **Recording that a function value's costs imply the ones expected.** The
+  checked form has a case for the obligation, where a function is given a
+  type whose costs differ from its own, and nothing records it. The prover
+  shows a function's or a lambda's costs where it is passed to a call, as
+  PROVER.md's "Lambdas and function values" describes.
 - **Checked forms stored in a specified encoding.** They are kept as OCaml's
   marshaled values, as DATABASE.md describes.
 - **A shape that ignores the order of fields.** DESIGN.md says reordering a
