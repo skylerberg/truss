@@ -95,7 +95,8 @@ or name resolution gives them their meaning where they appear:
 | Words | Where they mean something special |
 |---|---|
 | `amortized`, `time`, `allocations`, `allocated_bytes`, `calls`, `O`, `finite`, `potential` | In the fixed positions of a `cost` clause: `cost [amortized] resource bound` and `cost potential expression` |
-| `time(...)`, `calls(...)`, `log(...)`, `power(...)` | Called inside a `cost` bound, where they are the cost functions |
+| `time(...)`, `calls(...)` | Called inside a `cost` bound, where they are the cost functions |
+| `log(...)`, `power(...)` | Called inside a `cost` bound or any other specification, where they are the functions on exact integers |
 | `result` | Inside `ensures` and `cost`, where it names the return value |
 | `old` | Inside specifications: `requires`, `ensures`, invariants, laws, `decreases`, `cost`, and proofs |
 | `identical` | Inside specifications: `identical(a, b)`, whether two values of one type are the same value |
@@ -924,6 +925,8 @@ A bound is an expression that can use:
 - `power(base, exponent)`, for bounds such as `O(power(2, items.length()))`
 - `time(visit)`, a bound on the time of any one call to the function
   parameter `visit`, and `calls(...)` as above
+- `time(Element.equal)`, a bound on the time of any one call to a method of
+  a trait that bounds a type parameter
 
 `time(visit)` cannot depend on what `visit` is called with, because a
 function type's parameters have no names. If `visit` has the type
@@ -931,6 +934,47 @@ function type's parameters have no names. If `visit` has the type
 `cost time finite`, `time(visit)` is a fixed bound that is not known. A
 callback whose time grows with its argument is better described by a trait
 whose method has a cost clause.
+
+A generic function counts the methods of its bounds the same way:
+
+```truss
+fn Slice[Element: Equal].contains(self, item: Element) -> Bool
+  cost time O(self.length() * time(Element.equal))
+```
+
+- **The term names a method of a bound.** In `time(Element.equal)`,
+  `Element` is a type parameter of the definition, or `Self` in a trait,
+  and `equal` is a method of a trait that bounds it. If the name has
+  several versions, the term means the read-only one.
+- **An operator counts as the method it calls.** `==` and `!=` spend
+  `time(Element.equal)`, and `<`, `<=`, `>`, and `>=` spend
+  `time(Element.compare)`.
+- **At a call, the term has the value the type gives it.** For
+  `List[Int64]`, `time(Int64.equal)` is a constant, because
+  `impl Equal for Int64` promises `cost time O(1)`, so `contains` is
+  `O(self.length())`. For `List[String]`, comparing two strings promises
+  only `cost time finite`, so the term is a fixed bound that is not known,
+  as it is for a function value.
+- **A trait's provided method states its cost the same way,** as in
+  `cost time O(time(Self.equal))`, and an `impl` that writes the method
+  itself must keep that bound.
+
+`log` and `power` are also specification functions. Outside a `cost` bound
+they can be used in `requires`, `ensures`, invariants, `decreases`, and
+proofs, with the same meaning:
+
+```truss
+fn digit_count(value: UInt64, base: UInt64) -> USize
+  requires base >= 2
+  ensures result <= log(value) + 1
+```
+
+A bound such as "at most 64 digits" cannot be proven step by step, and
+`log(value) + 1` can. The prover knows `log` of a number exactly, and
+knows that `log` of a value of an integer type is at most the type's
+width. Outside a `cost` bound, a local or a definition of the file named
+`log` or `power` takes precedence. Neither function can be called in code
+that runs.
 
 `time` counts abstract steps: each primitive operation and each call counts
 as one. It never measures time on a machine.
@@ -1283,6 +1327,40 @@ mut grid.cell(position).visit()
 - **A lending method yields exactly once on every path.** A path with no
   `yield`, or with two, is a compile error.
 - A lending method cannot drive a `for` loop or be pulled.
+
+A method can also lend a value that it builds around its parts. This is how
+a lookup that can miss lends an `Option` without copying the element:
+
+```truss
+fn Slice[Element].get(self, index: USize) lends Option[Element] {
+  if index < self.length() {
+    yield Some(self[index])
+  } else {
+    yield None
+  }
+}
+```
+
+- **The operand of `yield` may be a constructor application.** An argument
+  that is a place is lent to the value that is built. It needs no `own` and
+  no copy. The place can be any place the method could yield by itself.
+- **Constructors nest,** as in
+  `yield Some(SplitFirst(first: self[0], rest: self[1..]))`.
+- **Only the constructor written directly after `yield` counts.** A `let`,
+  an `if` expression, or a call around it does not, so the `if` above
+  chooses between two `yield` statements.
+- **The other fields have nothing to drop.** Beside a lent place, a field
+  is a place, a nested constructor, or a value that is `Plain`, such as an
+  index or a `Slice`. An owned value there is an error. Bind it to a name
+  first, and the name is then a place.
+- **A `mut` lend marks each place it lends `mut`:**
+  `yield Indexed(index: index, value: mut self[index])`. The caller's
+  changes to a marked field reach the place when the lend ends. A field
+  without the mark is a value, and a change to it ends with the lend. Two
+  places lent `mut` by one `yield` must be different places.
+- **The value owns none of what it was lent.** It holds each lent place's
+  value for as long as it is lent, and `self` is lent whole for that time,
+  as it is when one part is lent.
 
 A yielding method gives out parts one after another:
 
@@ -2495,8 +2573,10 @@ type Option[Value] =
 fields, except for an opaque type, which has them only when it declares them,
 as in `public opaque type Token(bytes: Array[UInt8, 16]) derives Plain`. The
 compiler checks a declaration against the fields, and other packages rely only
-on what is declared. Generic code that copies says so with a bound, as in
-`[Element: Copyable]`.
+on what is declared. A generic opaque type that declares one has it under the
+conditions its fields give: `Slice[Element]` is `Plain` for every `Element`,
+because the view it holds is. Generic code that copies says so with a bound,
+as in `[Element: Copyable]`.
 
 Every type also has debug output, which tools such as the test runner use to
 show values, as in a failed `assert`. Nothing needs to be derived for it. To

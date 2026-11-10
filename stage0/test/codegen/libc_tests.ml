@@ -158,7 +158,7 @@ let () =
                         fail "%s: `%s` is counted by %s, which is no USize" name parameter
                           (Libc.number_name number)
                   | Through_zero -> ())
-              | Value _ | Written _ | Always _ | Fixed _ | Environment -> ())
+              | Value _ | Written _ | Always _ | Fixed _ -> ())
             parameters)
         Libc.functions;
       let { Libc.parameters; at_most; _ } = Libc.signature Read in

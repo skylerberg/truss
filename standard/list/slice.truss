@@ -220,10 +220,31 @@ public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option
 }
 
 public fn Slice[Element].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> USize
+  requires forall i in 0..self.length() => forall j in i..self.length() =>
+    before(self.model()[j]) ==> before(self.model()[i])
   ensures result <= self.length()
+  ensures forall i in 0..result => before(self.model()[i])
+  ensures forall i in result..self.length() => !before(self.model()[i])
   cost time O(log(self.length()) * time(before))
 {
-  todo
+  var low: USize = 0
+  var high = self.length()
+  while low < high
+    invariant low <= high
+    invariant high <= self.length()
+    invariant forall i in 0..low => before(self.model()[i])
+    invariant forall i in high..self.length() => !before(self.model()[i])
+    decreases high - low
+    cost time O((log(self.length()) - log(high - low)) * time(before))
+  {
+    let middle = low + (high - low) / 2
+    if before(self[middle]) {
+      low = middle + 1
+    } else {
+      high = middle
+    }
+  }
+  low
 }
 
 public fn Slice[Element: Ordered].minimum(self) lends Option[Element]
@@ -239,17 +260,37 @@ public fn Slice[Element: Ordered].maximum(self) lends Option[Element]
 }
 
 public fn Slice[Element: Copyable].to_list(self) -> List[Element]
-  ensures result.length() == self.length()
-  cost time O(self.length())
+  ensures identical(result.model(), self.model())
+  cost time O(self.length() * time(Element.copy))
 {
-  todo
+  var copy: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(self.length())
+  for index in 0..self.length()
+    invariant intrinsic::storage_length(copy) == yielded.length()
+    invariant intrinsic::storage_capacity(copy) == self.length()
+    invariant forall i in 0..yielded.length() =>
+      identical(intrinsic::storage_model(copy)[i], self.model()[i])
+  {
+    intrinsic::storage_push(mut copy, value: self[index].copy())
+  }
+  List(storage: own copy)
 }
 
 public fn Slice[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
   ensures result.length() <= self.length()
-  cost time O(self.length() * time(keep))
+  ensures forall i in 0..result.length() => keep(result.model()[i])
+  cost time O(self.length() * (time(keep) + time(Element.copy)))
 {
-  todo
+  var kept: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(self.length())
+  for index in 0..self.length()
+    invariant intrinsic::storage_length(kept) <= yielded.length()
+    invariant intrinsic::storage_capacity(kept) == self.length()
+    invariant forall i in 0..intrinsic::storage_length(kept) => keep(intrinsic::storage_model(kept)[i])
+  {
+    if keep(self[index]) {
+      intrinsic::storage_push(mut kept, value: self[index].copy())
+    }
+  }
+  List(storage: own kept)
 }
 
 public fn Slice[Element: Ordered + Copyable].sorted(self) -> List[Element]
@@ -512,8 +553,25 @@ public fn Slice[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -
 }
 
 impl Equal for Slice[Element: Equal] {
-  fn equal(self, other: Slice[Element]) -> Bool {
-    todo
+  fn equal(self, other: Slice[Element]) -> Bool
+    ensures result == (self.length() == other.length()
+      && forall i in 0..self.length() => self.model()[i] == other.model()[i])
+  {
+    if self.length() != other.length() {
+      return false
+    }
+    var index: USize = 0
+    while index < self.length()
+      invariant index <= self.length()
+      invariant forall i in 0..index => self.model()[i] == other.model()[i]
+      decreases self.length() - index
+    {
+      if self[index] != other[index] {
+        return false
+      }
+      index += 1
+    }
+    true
   }
 }
 
@@ -524,13 +582,25 @@ impl Ordered for Slice[Element: Ordered] {
 }
 
 impl Hash for Slice[Element: Hash] {
-  fn hash(self, hasher: mut Hasher) {
-    todo
+  fn hash(self, hasher: mut Hasher)
+  {
+    mut hasher.write(intrinsic::convert(self.length()))
+    for index in 0..self.length() {
+      self[index].hash(mut hasher)
+    }
   }
 }
 
 impl Display for Slice[Element: Display] {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write("[")
+    for index in 0..self.length() {
+      if index > 0 {
+        mut output.write(", ")
+      }
+      self[index].display(mut output)
+    }
+    mut output.write("]")
   }
 }

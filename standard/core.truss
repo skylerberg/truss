@@ -100,18 +100,24 @@ public trait Hash: Equal {
 public opaque type Hasher(state: UInt64)
   derives Plain
 
-public fn Hasher.new() -> Hasher {
+public fn Hasher.new() -> Hasher
+  cost time O(1)
+{
   Hasher(state: 14695981039346656037)
 }
 
-public fn Hasher.write(mut self, value: UInt64) {
+public fn Hasher.write(mut self, value: UInt64)
+  cost time O(1)
+{
   self.state = intrinsic::wrapping_multiply(intrinsic::bit_xor(self.state, right: value), right: 1099511628211)
 }
 
 public fn Hasher.write_bytes(mut self, bytes: Slice[UInt8])
   cost time O(bytes.length())
 {
-  todo
+  for index in 0..bytes.length() {
+    mut self.write(intrinsic::convert(bytes[index]))
+  }
 }
 
 public fn Hasher.finish(self) -> UInt64 {
@@ -137,6 +143,8 @@ public trait TryFrom[Source] {
 
 public trait Copyable {
   fn copy(self) -> Self
+    ensures identical(result, self)
+    cost time finite
 }
 
 public trait Plain: Copyable {}

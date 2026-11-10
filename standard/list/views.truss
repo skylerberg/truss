@@ -142,15 +142,16 @@ public fn List[Element: Ordered].maximum(self) lends Option[Element]
 }
 
 public fn List[Element: Copyable].to_list(self) -> List[Element]
-  ensures result.length() == self.length()
-  cost time O(self.length())
+  ensures identical(result.model(), self.model())
+  cost time O(self.length() * time(Element.copy))
 {
   self.slice().to_list()
 }
 
 public fn List[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
   ensures result.length() <= self.length()
-  cost time O(self.length() * time(keep))
+  ensures forall i in 0..result.length() => keep(result.model()[i])
+  cost time O(self.length() * (time(keep) + time(Element.copy)))
 {
   self.slice().filter(keep)
 }
