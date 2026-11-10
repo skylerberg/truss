@@ -213,7 +213,11 @@ public trait Iterable {
   ) -> Total
     cost time finite
   {
-    todo
+    var total = own initial
+    for item in self {
+      total = combine(own total, item)
+    }
+    total
   }
 
   fn map[Output](self, transform: (fn(Self.Element) -> Output cost time finite)) -> List[Output]
@@ -232,7 +236,14 @@ public trait Iterable {
   ) -> List[Output]
     cost time finite
   {
-    todo
+    var results: List[Output] = []
+    for item in self {
+      match transform(item) {
+        Some(output) => mut results.push(own output)
+        None => {}
+      }
+    }
+    results
   }
 
   fn flat_map[Output](
@@ -241,13 +252,26 @@ public trait Iterable {
   ) -> List[Output]
     cost time finite
   {
-    todo
+    var results: List[Output] = []
+    for item in self {
+      var outputs = transform(item)
+      for output in own outputs {
+        mut results.push(own output)
+      }
+    }
+    results
   }
 
   fn count(self, matching: (fn(Self.Element) -> Bool cost time finite)) -> USize
     cost time finite
   {
-    todo
+    var count: USize = 0
+    for item in self {
+      if matching(item) {
+        count = count.saturating_add(1)
+      }
+    }
+    count
   }
 
   fn find(self, matching: (fn(Self.Element) -> Bool cost time finite)) lends Option[Self.Element]
@@ -406,8 +430,9 @@ public type ConversionError()
   derives Equal
 
 impl Display for ConversionError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write("the value does not fit the type")
   }
 }
 
@@ -418,8 +443,17 @@ public type ParseIntegerError =
   derives Equal
 
 impl Display for ParseIntegerError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Empty => mut output.write("the text has no digits")
+      InvalidDigit(offset) => {
+        mut output.write("the byte at offset ")
+        offset.display(mut output)
+        mut output.write(" is not a digit")
+      }
+      OutOfRange => mut output.write("the number does not fit the type")
+    }
   }
 }
 
@@ -429,8 +463,16 @@ public type ParseFloatError =
   derives Equal
 
 impl Display for ParseFloatError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Empty => mut output.write("the text is empty")
+      Invalid(offset) => {
+        mut output.write("the byte at offset ")
+        offset.display(mut output)
+        mut output.write(" is not part of a number")
+      }
+    }
   }
 }
 
