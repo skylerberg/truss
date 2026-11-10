@@ -357,6 +357,57 @@ let () =
     \  add\n\
      }\n"
     "ownership.returns_local_view";
+  rejected "the value of an `if` views what its branches' values view"
+    "fn f(items: mut List[Int64], first: Bool) -> USize {\n\
+    \  let part = if first { items[..1] } else { items[1..] }\n\
+    \  mut items.push(1)\n\
+    \  part.length()\n\
+     }\n"
+    "ownership.changed_while_viewed";
+  rejected "the value of a `match` views what its arms' values view"
+    "fn f(items: mut List[Int64], pick: Option[USize]) -> USize {\n\
+    \  let part = match pick {\n\
+    \    Some(count) => items[..count]\n\
+    \    None => items[..]\n\
+    \  }\n\
+    \  mut items.push(1)\n\
+    \  part.length()\n\
+     }\n"
+    "ownership.changed_while_viewed";
+  rejected "the value of a block views what its last expression views"
+    "fn f(items: mut List[Int64]) -> USize {\n\
+    \  let part = {\n\
+    \    let all = items[..]\n\
+    \    all\n\
+    \  }\n\
+    \  mut items.push(1)\n\
+    \  part.length()\n\
+     }\n"
+    "ownership.changed_while_viewed";
+  rejected "a view of a local cannot be returned through an `if` and a name"
+    "fn f(first: Bool) -> Slice[Int64] {\n\
+    \  let items: List[Int64] = [1, 2, 3]\n\
+    \  let part = if first { items[..1] } else { items[1..] }\n\
+    \  part\n\
+     }\n"
+    "ownership.returns_local_view";
+  rejected "a copy of a view views what the view does"
+    "fn f(items: mut List[Int64]) -> USize {\n\
+    \  let all = items[..]\n\
+    \  let part = all.copy()\n\
+    \  mut items.push(1)\n\
+    \  part.length()\n\
+     }\n"
+    "ownership.changed_while_viewed";
+  rejected "a record made by `with` views what the new fields view"
+    "type Sized(view: Slice[Int64], count: USize)\n\n\
+     fn f(items: mut List[Int64], other: List[Int64]) -> USize {\n\
+    \  let sized = Sized(view: other[..], count: 0)\n\
+    \  let changed = sized with (view: items[..])\n\
+    \  mut items.push(1)\n\
+    \  changed.view.length()\n\
+     }\n"
+    "ownership.changed_while_viewed";
   rejected "a view copied out of a loop variable views what the loop goes over"
     "fn f(data: mut List[Int64], other: List[Int64]) -> USize {\n\
     \  var parts: List[Slice[Int64]] = []\n\

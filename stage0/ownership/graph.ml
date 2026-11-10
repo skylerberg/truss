@@ -157,6 +157,16 @@ let operand_type : Core.operand -> T.ty = function
 let lends_to_call builder (mode : T.mode) type_ =
   (mode <> Own && not (builder.plain type_)) || builder.is_view type_
 
+(* The values that an [if], a [match], or a block may end with: the last
+   expression of each of its blocks. Its value is one of them. *)
+let ending_values (value : Core.expression) : Core.expression list =
+  let of_block (body : Core.block) = Option.to_list body.value in
+  match value.kind with
+  | If { then_; else_; _ } -> of_block then_ @ Option.fold ~none:[] ~some:of_block else_
+  | Match { arms; _ } -> List.concat_map (fun (arm : Core.arm) -> of_block arm.body) arms
+  | Block body | Provide { body; _ } -> of_block body
+  | _ -> []
+
 (* The places that a value may view, before the analysis adds what the
    roots of those places are known to view. A value read out of a place is
    a copy or a moved value: it views what the place's root views. A slice
@@ -165,7 +175,8 @@ let lends_to_call builder (mode : T.mode) type_ =
    a call views the arguments that the call may keep a view of. *)
 let rec viewed builder (value : Core.expression) : view list =
   match value.kind with
-  | Use found -> taken_from builder found
+  | Use found | Copy (Place found) | Cursor_next found -> taken_from builder found
+  | Copy (Value copied) -> viewed builder copied
   | Slice { base; _ } -> (
       match Place.of_slice value with
       | Some place -> [ { place; taken = Place.is_slice_type (Core_walk.place_type base) } ]
@@ -178,6 +189,7 @@ let rec viewed builder (value : Core.expression) : view list =
              { place = { root = Local capture.local; steps = [] }; taken = false })
            captures
   | Call call -> List.concat_map (viewed_operand builder) (lent_arguments builder call)
+  | Template { call; _ } -> viewed builder call
   | Construct { fields; _ } ->
       List.concat_map
         (fun (_, (field : Core.operand option)) ->
@@ -186,13 +198,24 @@ let rec viewed builder (value : Core.expression) : view list =
           | Some (Place found) -> viewed_place builder found
           | _ -> [])
         fields
-  | Collection_literal { elements; _ } ->
-      List.concat_map
-        (fun (element : Core.expression) ->
-          if builder.is_view element.type_ then viewed builder element else [])
-        elements
+  | Collection_literal { elements; _ } -> List.concat_map (held builder) elements
+  | Record_update { base; updates } ->
+      viewed builder base @ List.concat_map (fun (_, update) -> held builder update) updates
   | Echo inner | To_any { value = inner; _ } | Convert { value = inner; _ } -> viewed builder inner
-  | _ -> []
+  (* The value of an [if], a [match], or a block is the value that one of
+     its blocks ends with. *)
+  | If _ | Match _ | Block _ | Provide _ -> List.concat_map (viewed builder) (ending_values value)
+  (* These make a value that holds no view, or make no value. Every kind is
+     listed, so that a new kind is decided here. *)
+  | Integer _ | Float _ | Boolean _ | String _ | Interpolated _ | Function_value _
+  | Value_parameter _ | Map_literal _ | Operator _ | Compare _ | Not _ | And _ | Or _ | Implies _
+  | Matches _ | Return _ | Break | Continue | Todo | Unreachable | Result | Old _ | Current_target
+  | Quantified _ | Yielded | Finished | Identical _ | Specification_function _ | Method_time _ ->
+      []
+
+(* What a part of a value views, if the part's type can hold a view. *)
+and held builder (part : Core.expression) : view list =
+  if builder.is_view part.type_ then viewed builder part else []
 
 (* What a value that is copied or moved out of a place views. *)
 and taken_from builder (found : Core.place) : view list =
@@ -227,6 +250,8 @@ let rec viewed_temporaries builder (value : Core.expression) : Core.expression l
   match value.kind with
   | Echo inner | To_any { value = inner; _ } | Convert { value = inner; _ } ->
       viewed_temporaries builder inner
+  | If _ | Match _ | Block _ | Provide _ ->
+      List.concat_map (viewed_temporaries builder) (ending_values value)
   | Slice { base; _ } -> owned_temporary_place builder base
   | Call call ->
       List.concat_map
