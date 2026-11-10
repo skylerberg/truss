@@ -5966,14 +5966,17 @@ and potential context frame ?(seen = []) (ty : T.ty) term =
       fact context frame
         L.(validity context frame ~assuming:true ty term ==> Apply ("<=", [ int 0; held ]));
       match (potential_clause context ty, constructors context ty) with
-      | None, _ when Option.is_some (buffer_elements context ty) -> (
+      (* A type whose fields are seen holds what they hold; one whose fields
+         are not, as a [List] outside its package, is read as the buffer its
+         model says it is. *)
+      | None, None when Option.is_some (buffer_elements context ty) -> (
           (* A buffer's potential is what it saved for growing, as a
              doubling array saves it: twice its length less its capacity,
              and never below zero, so at most two units for each element;
              and its elements' potentials. A view cannot grow, so it saves
              nothing of its own. *)
           match buffer_elements context ty with
-          | Some (element, model) -> (
+          | Some (element, model) ->
               let sequence = model term in
               let slack = buffer_slack context ty term in
               let length = sequence_length context element sequence in
@@ -6001,16 +6004,7 @@ and potential context frame ?(seen = []) (ty : T.ty) term =
                   sequence_sum context element sequence (potential_measure context element)
                 else Costs.zero
               in
-              fact context frame (L.equal held (Costs.plus slack elements));
-              (* A type that holds its buffer in a field it shows saves what
-                 the buffer saves. *)
-              match constructors context ty with
-              | Some [ (None, [ (field, (field_type : T.ty)) ]) ]
-                when Option.is_some (buffer_elements context field_type) ->
-                  fact context frame
-                    (L.equal slack
-                       (buffer_slack context field_type (selected context ty None field term)))
-              | _ -> ())
+              fact context frame (L.equal held (Costs.plus slack elements))
           | None -> ())
       | clause, Some shape -> (
           try
