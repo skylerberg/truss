@@ -35,6 +35,8 @@ type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; b
 type frame = {
   code : code;
   bindings : (S.id, Lir.place) Hashtbl.t;
+  made : (int, Lir.place) Hashtbl.t;
+      (** The locals the type checker made, which no name in the source binds *)
   mutable self_place : Lir.place option;
   on_yield : (Lir.place -> resume:Lir.block -> stop:Lir.block -> unit) option;
       (** In an inlined lending or yielding method, what a [yield] of a place does *)
@@ -61,7 +63,15 @@ type state = {
 
 (* The code a function starts lowering: its own, with nothing bound yet. *)
 let frame_of code ~inlined =
-  { code; bindings = Hashtbl.create 16; self_place = None; on_yield = None; inlined; exit = None }
+  {
+    code;
+    bindings = Hashtbl.create 16;
+    made = Hashtbl.create 4;
+    self_place = None;
+    on_yield = None;
+    inlined;
+    exit = None;
+  }
 
 (* The state to write one function in: a builder of its own and the
    function's scope. A lambda shares [nested] with the function around it. *)

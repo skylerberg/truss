@@ -328,6 +328,7 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
       {
         st.frame with
         bindings = Hashtbl.copy st.frame.bindings;
+        made = Hashtbl.copy st.frame.made;
         on_yield = None;
         exit = None;
         (* What the lambda returns, which a [?] in it returns early. *)

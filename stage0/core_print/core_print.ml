@@ -40,11 +40,13 @@ let rec expression names (node : expression) =
           (function
             | Text text -> Printf.sprintf "%S" text
             | Displayed { value; display } ->
-                Printf.sprintf "%s through %s" (expression value) (callee names display))
+                Printf.sprintf "%s through %s" (operand value) (callee names display))
           pieces
       ^ ")"
-  | Template { from_template; template } ->
-      Printf.sprintf "%s(%s)" (callee names from_template) (expression template)
+  | Template { literals; made } ->
+      Printf.sprintf "template(%s) made by %s"
+        (list (Printf.sprintf "%S") literals)
+        (expression made)
   | Use found -> place found
   | Copy given -> "copy(" ^ operand given ^ ")"
   | Function_value { path; type_arguments = arguments } ->
@@ -91,7 +93,6 @@ let rec expression names (node : expression) =
   | Convert { conversion; value } ->
       Printf.sprintf "%s(%s)"
         (match conversion with
-        | View view -> "view through " ^ callee names view
         | Widen -> "widen"
         | To_integer -> "to_integer"
         | From_integer -> "from_integer")
@@ -151,11 +152,7 @@ let rec expression names (node : expression) =
         (match function_ with Log -> "log" | Power -> "power" | Time -> "time" | Calls -> "calls")
         (list expression arguments)
 
-and collection = function
-  | Array -> "array"
-  | From_storage _ -> "list"
-  | Inserted _ -> "inserted"
-  | Modelled -> "modelled"
+and collection = function Array -> "array" | Inserted _ -> "inserted" | Modelled -> "modelled"
 
 and callee names = function
   | Function { path; type_arguments = arguments } -> Path.show path ^ type_arguments arguments
@@ -164,7 +161,7 @@ and callee names = function
         (evidence found)
   | Capability_method { capability; name } -> Path.show capability ^ "." ^ name
   | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.operation_name operation
-  | Value function_ -> "(" ^ expression names function_ ^ ")"
+  | Through function_ -> "(" ^ operand names function_ ^ ")"
 
 and call names (made : call) =
   Printf.sprintf "%s(%s)%s" (callee names made.callee)
@@ -217,7 +214,7 @@ and statement names (node : statement) =
               (expression names stop)
         | Each each -> "each " ^ expression names each
         | Pull { cursor; next } ->
-            Printf.sprintf "pull %s%s" (expression names cursor)
+            Printf.sprintf "pull %s%s" (place names cursor)
               (match next with Some next -> " by " ^ callee names next | None -> ""))
         (loop_clauses names clauses) (block names body)
   | While { condition; clauses; body } ->

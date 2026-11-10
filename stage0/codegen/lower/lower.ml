@@ -227,6 +227,44 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
       Constants.write_output st output);
   { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
 
+(* The code of a function or a test that is written in source, with what
+   stopped its body from being lowered from its core form, if anything did:
+   it is lowered from the form where the form holds only what [Core_form]
+   knows, and otherwise from the syntax tree. *)
+let written_code context key ~path ~type_arguments : Lir.t * string option =
+  let code = code_of context path type_arguments in
+  (* The function with its body written by [body], or why [body] cannot. *)
+  let lowered body : (Lir.t, string) result =
+    let st = enter context (frame_of code ~inlined:[ path ]) in
+    let convention, returns = result_of context code.substitution code.result in
+    result_slot st convention;
+    let _, _, parameters = begin_body st in
+    Result.map
+      (fun () : Lir.t ->
+        {
+          key;
+          main = finish_function st ~returns ~first:[] ~rest:parameters ();
+          nested = nested_functions st;
+        })
+      (body st)
+  in
+  let from_core =
+    match demand context Infer.core_at path with
+    | Some (form, _) -> lowered (fun st -> Core_form.body st form)
+    | None -> Error "a definition with no core form"
+  in
+  match from_core with
+  | Ok instance -> (instance, None)
+  | Error stopped -> (
+      match lowered (fun st -> Ok (block_into st code.body (result_place st))) with
+      | Ok instance -> (instance, Some stopped)
+      | Error _ -> bug "a body that was not lowered")
+
+let not_from_core context (key : Instance.key) =
+  match key with
+  | Code { path; type_arguments } -> snd (written_code context key ~path ~type_arguments)
+  | _ -> Some "an instance that no source writes"
+
 let instance context (key : Instance.key) : Lir.t =
   match key with
   | Entry method_key -> entry context key method_key
@@ -240,16 +278,5 @@ let instance context (key : Instance.key) : Lir.t =
       }
     when not (trait_provides context ~trait ~name ~receiver) ->
       derived context ~key ~type_path ~trait ~name ~type_arguments
-  | Code { path; type_arguments } ->
-      let code = code_of context path type_arguments in
-      let st = enter context (frame_of code ~inlined:[ path ]) in
-      let convention, returns = result_of context code.substitution code.result in
-      result_slot st convention;
-      let _, _, parameters = begin_body st in
-      block_into st code.body (result_place st);
-      {
-        key;
-        main = finish_function st ~returns ~first:[] ~rest:parameters ();
-        nested = nested_functions st;
-      }
+  | Code { path; type_arguments } -> fst (written_code context key ~path ~type_arguments)
   | _ -> bug "%s is not code from source" (Instance.to_string key)

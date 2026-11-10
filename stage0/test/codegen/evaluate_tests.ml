@@ -48,7 +48,8 @@ impl FromTemplate for Shout {
 let () =
   test "a template check that holds is proven by running it" (fun () ->
       match
-        proven_with_running (shout ^ "\nfn f(name: String) -> Shout {\n  Shout\"hey ${name}!\"\n}\n")
+        proven_with_running
+          (shout ^ "\nfn f(name: String) -> Shout {\n  Shout\"hey ${name.copy()}!\"\n}\n")
       with
       | [] -> ()
       | found ->
