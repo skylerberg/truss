@@ -165,9 +165,9 @@ public fn Slice[Element: Ordered + Copyable].sorted(self) -> List[Element]
   todo
 }
 
-public fn Slice[Element: Copyable].repeated(self, count: USize) -> List[Element]
-  ensures result.length() == self.length() * count
-  cost time O(self.length() * count)
+public fn Slice[Element: Copyable].repeated(self, times: USize) -> List[Element]
+  ensures result.length() == self.length() * times
+  cost time O(self.length() * times)
 {
   todo
 }

@@ -149,11 +149,11 @@ public fn List[Element: Ordered + Copyable].sorted(self) -> List[Element]
   self.slice().sorted()
 }
 
-public fn List[Element: Copyable].repeated(self, count: USize) -> List[Element]
-  ensures result.length() == self.length() * count
-  cost time O(self.length() * count)
+public fn List[Element: Copyable].repeated(self, times: USize) -> List[Element]
+  ensures result.length() == self.length() * times
+  cost time O(self.length() * times)
 {
-  self.slice().repeated(count)
+  self.slice().repeated(times)
 }
 
 public fn List[Element: Display].join(self, separator: StringSlice) -> String

@@ -1,0 +1,200 @@
+use standard::core
+
+public let Character.replacement: Character = Character"\u{FFFD}"
+
+public let Character.maximum: Character = Character"\u{10FFFF}"
+
+public fn Character.utf8_length(self) -> USize
+  ensures 1 <= result && result <= 4
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.utf16_length(self) -> USize
+  ensures 1 <= result && result <= 2
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_ascii(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_alphabetic(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_numeric(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_alphanumeric(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_whitespace(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_uppercase(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_lowercase(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_control(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_ascii_digit(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_ascii_alphabetic(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_ascii_alphanumeric(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_ascii_punctuation(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.is_ascii_hexadecimal_digit(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.to_uppercase(self) -> Character
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.to_lowercase(self) -> Character
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.to_ascii_uppercase(self) -> Character
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.to_ascii_lowercase(self) -> Character
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.digit_value(self, radix: UInt32 = 10) -> Option[UInt32]
+  requires 2 <= radix && radix <= 36
+  ensures match result {
+    Some(value) => value < radix
+    None => true
+  }
+  cost time O(1)
+{
+  todo
+}
+
+public fn Character.from_digit(value: UInt32, radix: UInt32 = 10) -> Option[Character]
+  requires 2 <= radix && radix <= 36
+  ensures (result is Some(_)) == (value < radix)
+  cost time O(1)
+{
+  todo
+}
+
+impl From[Character] for UInt32 {
+  fn from(value: own Character) -> UInt32 {
+    todo
+  }
+}
+
+impl From[UInt8] for Character {
+  fn from(value: own UInt8) -> Character {
+    todo
+  }
+}
+
+impl TryFrom[UInt32] for Character {
+  type Error = core::ConversionError
+
+  fn try_from(value: own UInt32) -> Result[Character, core::ConversionError] {
+    todo
+  }
+}
+
+impl TryFrom[Character] for UInt8 {
+  type Error = core::ConversionError
+
+  fn try_from(value: own Character) -> Result[UInt8, core::ConversionError] {
+    todo
+  }
+}
+
+impl core::Countable for Character {
+  fn successor(self) -> Option[Character]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn predecessor(self) -> Option[Character]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn advanced(self, by: USize) -> Option[Character]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn retreated(self, by: USize) -> Option[Character]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn steps_to(self, other: Character) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+}
