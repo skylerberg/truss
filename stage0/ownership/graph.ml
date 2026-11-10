@@ -68,9 +68,10 @@ type action =
           another branch exits the block early, the code after the block does not run. So by this
           point the branch must have reinitialized every place that it moved out of a [mut] borrow.
       *)
-  | Yield_point of view list
+  | Yield_point of { mode : T.mode; lent : Place.t option list; views : view list }
       (** A [yield]. The caller's loop may [break] here, in which case the method never resumes.
-          [views] are the views of the yielded value, if it has a view type. *)
+          [lent] is the places that the yield lends, where [None] is a place that the check does not
+          track. [views] is the views of the yielded value, if it has a view type. *)
   | Exit  (** The function returns. *)
   | Bind_views of { locals : Core.local list; views : view list }
       (** A pattern binds [locals] to a value that has these views. *)
@@ -979,11 +980,12 @@ and statement_actions builder frontier (node : Core.statement) =
 and statement_and_yield_point builder frontier (node : Core.statement) =
   let frontier = statement_actions builder frontier node in
   match node.kind with
-  | Yield { part; _ } ->
+  | Yield { mode; part } ->
       let views =
         if builder.is_view (operand_type part) then views_of_operand builder part else []
       in
-      emit builder frontier (Yield_point views) node.origin
+      let lent = List.map Place.of_core (Core_walk.lent_places part) in
+      emit builder frontier (Yield_point { mode; lent; views }) node.origin
   | _ -> frontier
 
 (* A [let]: evaluates the value, then records the views of the locals that

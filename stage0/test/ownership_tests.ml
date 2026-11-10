@@ -909,8 +909,8 @@ let () =
     \  Ok(first + second)\n\
      }\n"
     "ownership.not_reinitialized";
-  (* A [concurrent for] over a yielding method. [Pair.each] does not yield
-     by position: its body is not a single loop over a range. *)
+  (* A [concurrent for] over a yielding method that does not yield by
+     position: its body is not a single loop over a range. *)
   let pair =
     "type Pair(first: List[Int64], second: List[Int64], text: String)\n\n\
      fn look[Value](value: Value) {}\n\n"
@@ -928,16 +928,53 @@ let () =
     \  yield mut self.second\n\
      }\n"
     "  concurrent for list in mut pair.each() {\n    look(list)\n  }\n";
-  rejected_loop "a `concurrent for` cannot iterate over borrowed elements that are not Plain"
-    ~says:"borrowed elements of type `List[Int64]`"
-    "fn Pair.each(self) yields List[Int64] {\n  yield self.first\n  yield self.second\n}\n"
+  rejected_loop "a task cannot borrow a place inside a `mut` parameter of the yielding method"
+    ~says:"`self.first`"
+    "fn Pair.each(mut self) yields List[Int64] {\n\
+    \  yield self.first\n\
+    \  mut self.first.clear()\n\
+    \  yield self.second\n\
+     }\n"
+    "  concurrent for list in mut pair.each() {\n    look(list)\n  }\n";
+  rejected_loop "a task cannot borrow a local of the yielding method" ~says:"`local`"
+    "fn Pair.each(self) yields List[Int64] {\n\
+    \  let local: List[Int64] = [1]\n\
+    \  yield local\n\
+    \  yield self.second\n\
+     }\n"
     "  concurrent for list in pair.each() {\n    look(list)\n  }\n";
-  rejected_loop "a `concurrent for` cannot iterate over owned views" ~says:"`StringSlice` is a view"
+  rejected_loop "a task cannot keep a view of a place inside a `mut` parameter" ~says:"`self.text`"
     "fn Pair.words(mut self) yields own StringSlice {\n\
     \  yield self.text.slice()\n\
     \  mut self.text.clear()\n\
      }\n"
     "  concurrent for word in mut pair.words() {\n    look(word)\n  }\n";
+  test "a task can borrow and view places inside a read-only parameter" (fun () ->
+      fine
+        (pair
+       ^ "fn Pair.each(self) yields List[Int64] {\n\
+         \  yield self.first\n\
+         \  yield self.second\n\
+          }\n\n\
+          fn Pair.words(self) yields own StringSlice {\n\
+         \  yield self.text.slice()\n\
+          }\n\n\
+          fn f(pair: Pair, names: List[String], parts: List[Slice[Int64]])\n\
+         \  uses Tasks\n\
+          {\n\
+         \  concurrent for list in pair.each() {\n\
+         \    look(list)\n\
+         \  }\n\
+         \  concurrent for word in pair.words() {\n\
+         \    look(word)\n\
+         \  }\n\
+         \  concurrent for name in names {\n\
+         \    look(name)\n\
+         \  }\n\
+         \  concurrent for part in parts {\n\
+         \    look(part)\n\
+         \  }\n\
+          }\n"));
   test "a `concurrent for` cannot iterate over a cursor of views" (fun () ->
       one_diagnostic ~says:"`Slice[Int64]` is a view"
         (pair

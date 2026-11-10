@@ -226,21 +226,25 @@ let yield_mode context (callee : Core.callee) : T.mode option =
 
 (* Use after free in a [concurrent for]. Each iteration runs as a task, and
    the task outlives the [yield] that started it: the yielding method
-   resumes while the task still runs. So the task cannot borrow what the
-   method yields, because the method could mutate or drop it after it
-   resumes. The task needs an owned element that is not a view, or a
-   [Plain] copy of a read-only one.
+   resumes while the task still runs. So the task can keep a borrow or a
+   view only of a place that the method cannot mutate or drop, which is a
+   place inside a read-only parameter of the method. [Views.task_hazard] is
+   that fact about a method's body, and [task_hazard] reads it for a
+   callee.
 
-   A method that yields by position is exempt. Its body is a single loop
-   over a range, the tasks run as that loop's iterations, and the method
-   does nothing after the loop. *)
-let check_concurrent_loops context (definition : Core.definition) =
-  let by_position : Core.callee -> bool = function
-    | Function { path; _ } -> (
-        match body_of context.database path with
-        | Some body -> Core_walk.yields_by_position body
-        | None -> false)
-    | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
+   - A method that yields by position is exempt. Its body is a single loop
+     over a range, the tasks run as that loop's iterations, and the method
+     does nothing after the loop.
+   - A [Plain] element that is not a view is copied to the task, so it is
+     accepted whatever it was borrowed from.
+   - For a callee without a known body, such as a trait method called
+     through a bound, and for a cursor, the task needs an owned element that
+     is not a view, or a [Plain] copy of a read-only one. *)
+let check_concurrent_loops context ~(task_hazard : Path.t -> Views.task_hazard option option)
+    (definition : Core.definition) =
+  let body : Core.callee -> (Path.t * Core.block) option = function
+    | Function { path; _ } -> Option.map (fun body -> (path, body)) (body_of context.database path)
+    | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> None
   in
   Core_walk.definition
     {
@@ -250,13 +254,19 @@ let check_concurrent_loops context (definition : Core.definition) =
           match node.kind with
           | For { mode = Concurrent_loop; pattern; iteration; _ } -> (
               let element = pattern.type_ in
+              let copied = plain context element && not (is_view context element) in
               let reject (at : Core.origin) problem =
                 report context Task_outlives_yield (span context at)
                   (Printf.sprintf
                      "Each iteration of a `concurrent for` runs as a task that outlives the \
                       `yield` that started it. %s Use a `for` loop, or iterate over a method that \
-                      yields owned values that are not views."
+                      yields owned values or borrows of its read-only parameters."
                      problem)
+              in
+              let yields_mut at =
+                reject at
+                  "This method yields `mut` borrows, which it could invalidate when it resumes, so \
+                   the task would have a dangling borrow."
               in
               let view at =
                 if is_view context element then
@@ -269,20 +279,29 @@ let check_concurrent_loops context (definition : Core.definition) =
               match iteration with
               | Integer_range _ -> ()
               | Yielding_call { kind = Call { callee; _ }; origin; _ } -> (
-                  if not (by_position callee) then
-                    match yield_mode context callee with
-                    | Some Mut ->
-                        reject origin
-                          "This method yields `mut` borrows, which it could invalidate when it \
-                           resumes, so the task would have a dangling borrow."
-                    | Some Read when not (plain context element) ->
-                        reject origin
-                          (Printf.sprintf
-                             "This method yields borrowed elements of type `%s`, which it could \
-                              mutate or drop when it resumes, so the task would have a dangling \
-                              borrow."
-                             (T.show element))
-                    | _ -> view origin)
+                  match body callee with
+                  | Some (_, body) when Core_walk.yields_by_position body -> ()
+                  | Some (path, _) -> (
+                      match Option.join (task_hazard path) with
+                      | Some Yields_mut -> yields_mut origin
+                      | Some (Borrows place) when not copied ->
+                          reject origin
+                            (Printf.sprintf
+                               "This method yields a borrow or a view of its `%s`, which it could \
+                                mutate or drop when it resumes, so the task would have a dangling \
+                                borrow."
+                               place)
+                      | Some (Borrows _) | None -> ())
+                  | None -> (
+                      match yield_mode context callee with
+                      | Some Mut -> yields_mut origin
+                      | Some Read when not (plain context element) ->
+                          reject origin
+                            (Printf.sprintf
+                               "This method yields borrowed elements of type `%s`, and its body is \
+                                not known here, so it could mutate or drop them when it resumes."
+                               (T.show element))
+                      | _ -> view origin))
               | Yielding_call _ -> ()
               | Cursor { cursor; _ } -> view (Core_walk.place_origin cursor))
           | _ -> ());
