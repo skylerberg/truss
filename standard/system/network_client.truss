@@ -5,7 +5,7 @@ internal type SystemNetworkClient()
 
 impl NetworkClient for SystemNetworkClient {
   fn resolve(self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
-    todo
+    sockets::addresses_of(host)
   }
 
   fn connect(

@@ -244,6 +244,7 @@ type function_ =
   | Recvfrom
   | Fcntl_getfl
   | Fcntl_setfl
+  | Addresses_of_host
 
 let functions =
   [
@@ -317,6 +318,7 @@ let functions =
     Recvfrom;
     Fcntl_getfl;
     Fcntl_setfl;
+    Addresses_of_host;
   ]
 
 let function_name = function
@@ -390,6 +392,7 @@ let function_name = function
   | Recvfrom -> "recvfrom"
   | Fcntl_getfl -> "fcntl_getfl"
   | Fcntl_setfl -> "fcntl_setfl"
+  | Addresses_of_host -> "addresses_of_host"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -1074,8 +1077,26 @@ let describe function_ =
           ("flags", Value Int32, everywhere "int");
         ]
         ~headers:[ "fcntl.h" ]
+  | Addresses_of_host ->
+      (* The runtime's, and no function of the C library: [getaddrinfo]
+         gives a host's addresses as a chain of structures that hold
+         addresses of one another, which no row can describe. The runtime
+         follows the chain and writes each address into the room it is
+         given, as a byte that is 4 or 6 and then the address's 4 or 16
+         bytes. It returns how many bytes it wrote, -1 where the system
+         knows no such host, and -2 where it could not find out. *)
+      row ~at_most:"room"
+        ~symbol:(everywhere "t_runtime_addresses_of_host")
+        (everywhere "long") (Returns ISize)
+        [
+          ("host", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("addresses", Room (UInt8, counted "room"), everywhere "void *");
+          ("room", Value USize, size);
+        ]
+        ~headers:[]
 
 let available system function_ = (describe function_).on system.os
+let of_the_runtime = function Addresses_of_host -> true | _ -> false
 
 let signature function_ =
   let row = describe function_ in
