@@ -166,80 +166,47 @@ and constant_state context path =
   in
   let code =
     {
-      definition_key = key;
-      anchor = path;
+      (unwritten ~definition_key:key ~anchor:path ~substitution:[] ~result:(Returns T.unit)) with
       text = text_of context key;
       checked = checked_of context key;
-      parameters = [];
-      body = { statements = []; span = S.Span.make 0 0; id = 0 };
-      result = Returns T.unit;
-      parameter_types = [];
-      substitution = [];
-      uses = [];
-      real = [];
-      has_defaults = false;
-      requires = [];
     }
   in
-  let st =
-    {
-      context;
-      frame =
-        {
-          code;
-          bindings = Hashtbl.create 1;
-          self_place = None;
-          on_yield = None;
-          inlined = [];
-          exit = None;
-        };
-      b = Lir_builder.create ();
-      scopes = [ { owned = [] } ];
-      loops = [];
-      temporaries = [];
-      return_ = None;
-      result_local = None;
-      nested = ref [];
-      evidence = [];
-      pulling = false;
-    }
-  in
+  let st = enter context (frame_of code ~inlined:[]) in
   (st, value, ty)
 
 let constant context path = constant_data context path
+
+(* Code run while compiling leaves what it works out in the debug buffer, in
+   its binary form, and writes the buffer to standard output as it ends. *)
+let begin_output st =
+  emit st.b (Call { target = Intrinsic Debug_begin; arguments = []; result = Discarded })
+
+let write_output st =
+  let b = st.b in
+  let call intrinsic arguments result =
+    emit b (Call { target = Intrinsic intrinsic; arguments; result = Returned result })
+  in
+  let bytes = local b (Raw (Pointer Opaque)) and length = new_local st st.context.types.usize in
+  call Debug_bytes [] (at bytes);
+  call Debug_length [] length;
+  call System_write
+    [ Constant (Integer (Int32, Z.one)); Copy (at bytes); Copy length ]
+    (new_local st st.context.types.isize)
 
 (* Code run while compiling: works out a constant's value and writes its
    binary form to standard output. *)
 let evaluator context path : Lir.t =
   let st, value, ty = constant_state context path in
-  let b = st.b in
-  start b (block b);
-  let call ?result intrinsic arguments =
-    emit b
-      (Call
-         {
-           target = Intrinsic intrinsic;
-           arguments;
-           result = (match result with Some r -> Lir.Returned r | None -> Discarded);
-         })
-  in
+  start st.b (block st.b);
   in_scope st (fun () ->
       let place = new_local st ty in
       into st value place;
       if not (trivial st ty) then own_in_scope st place;
-      call Debug_begin [];
-      Glue.encode_call context.glue b ty place;
-      let bytes = local b (Raw (Pointer Opaque)) and length = new_local st context.types.usize in
-      call ~result:(at bytes) Debug_bytes [];
-      call ~result:length Debug_length [];
-      let written = new_local st context.types.isize in
-      call ~result:written System_write
-        [ Constant (Integer (Int32, Z.one)); Copy (at bytes); Copy length ]);
-  finish b (Return None);
+      begin_output st;
+      Glue.encode_call context.glue st.b ty place;
+      write_output st);
   {
     key = Evaluator path;
-    main = Lir_builder.build b ~parameters:[] ~result:None;
-    nested =
-      Array.of_list
-        (List.map (function Some f -> f | None -> bug "a lambda left unfinished") !(st.nested));
+    main = finish_function st ~first:[] ~rest:[] ();
+    nested = nested_functions st;
   }

@@ -122,9 +122,8 @@ let own_hash ~references compiled =
     else
       let rec find i = function
         | [] ->
-            invalid_arg
-              ("Reachable.own_hash: a reference that was not collected, to "
-             ^ Instance.to_string key)
+            Compiler_bug.bug ~stage:"Reachable" "a reference that was not collected, to %s"
+              (Instance.to_string key)
         | other :: rest -> if Instance.equal other key then i else find (i + 1) rest
       in
       Cbor.Array [ Text "instance"; Cbor.int (find 0 references) ]

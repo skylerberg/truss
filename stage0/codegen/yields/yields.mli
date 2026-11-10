@@ -14,10 +14,10 @@
    it calls the body and always goes on. *)
 val loop_form : Memory_layout.env -> body:Ground.function_type -> Lir.function_ -> Lir.function_
 
-(* The fields of a cursor over the method: [state], a [UInt32], then each
-   parameter and each local live where a [yield] resumes or stops, named
-   [local] and its number. This is the shape of the method's [Cursor]
-   type. *)
+(* The fields of a cursor over the method: its state, a [UInt32], then each
+   parameter, named as [Convention.cursor_parameter] names it, and each
+   local live where a [yield] resumes or stops, named [local] and its
+   number. This is the shape of the method's [Cursor] type. *)
 val cursor_fields : Memory_layout.env -> Lir.function_ -> (string * Memory_layout.member) list
 
 (* [next]: takes a writable pointer to the cursor, of type [cursor], and

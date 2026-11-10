@@ -142,7 +142,8 @@ and evaluate_arguments st ~(expressions : S.expression list) ~(arguments : C.arg
    the method writes it. *)
 and inline st path type_arguments ~arguments ~call_site ~on_yield =
   if List.exists (Path.equal path) st.frame.inlined then
-    bug "%s yields through recursion, which stage0 does not lower yet" (Path.show path);
+    Compiler_bug.unsupported ~at:(at_site call_site) "%s, which lends through a call to itself"
+      (Path.show path);
   let code = code_of st.context path type_arguments in
   let exit = block st.b in
   let caller = st.frame in
@@ -187,20 +188,78 @@ and inline st path type_arguments ~arguments ~call_site ~on_yield =
   start st.b exit;
   st.frame <- caller
 
-(* The place a lending method lends, by inlining it. Its [yield] must be
-   its last statement, so nothing it does after lending can run before the
-   caller uses the place. *)
+(* The place a lending method lends, by inlining it. The method's body runs
+   to its end before the caller uses the place, so stage0 lowers only a
+   method that has nothing left to do then: each [yield] is the last thing
+   its path does, and what it lends is none of the method's own values,
+   which are dropped as its body ends. *)
 and lend st call_ ~expressions ~arguments ~span =
   match resolve_callee st call_ with
   | Some (path, type_arguments) -> (
       let call_site = site st span in
       let arguments = evaluate_arguments st ~expressions ~arguments in
+      if not (yields_last (code_of st.context path type_arguments).body) then
+        unsupported st span "%s, a lending method that does more after its yield" (Path.show path);
+      let own_from = local_count st.b in
       let lent = ref None in
       inline st path type_arguments ~arguments ~call_site ~on_yield:(fun place ~resume ~stop:_ ->
+          (match place.root with
+          | Local local when local >= own_from -> (
+              match local_type st.b local with
+              | Value ty when not (trivial st ty) ->
+                  Compiler_bug.unsupported ~at:(at_site call_site)
+                    "%s, a lending method that lends a value it made" (Path.show path)
+              | _ -> ())
+          | _ -> ());
           lent := Some place;
           finish st.b (Goto resume));
       match !lent with Some place -> place | None -> bug "a lending method that lends nothing")
   | None -> bug "a lending call that is not to a method"
+
+(* Whether each [yield] in a body is the last thing its path does. *)
+and yields_last (body : S.block) =
+  let rec statement_yields (s : S.statement) =
+    match s.kind with
+    | Yield _ -> true
+    | _ ->
+        let found = ref false in
+        Syntax_walk.statement_parts
+          ~expression:(fun e -> if expression_yields e then found := true)
+          ~statement:(fun s -> if statement_yields s then found := true)
+          s;
+        !found
+  and expression_yields (e : S.expression) =
+    let found = ref false in
+    Syntax_walk.expression_parts
+      ~expression:(fun e -> if expression_yields e then found := true)
+      ~statement:(fun s -> if statement_yields s then found := true)
+      e;
+    !found
+  in
+  let rec last_of_block (block : S.block) =
+    match List.rev block.statements with
+    | [] -> true
+    | last :: before -> (not (List.exists statement_yields before)) && last_statement last
+  and last_statement (s : S.statement) =
+    match s.kind with
+    | Yield _ -> true
+    | Expression e -> last_expression e
+    | _ -> not (statement_yields s)
+  and last_expression (e : S.expression) =
+    match e.kind with
+    | Parenthesized inner -> last_expression inner
+    | Block block -> last_of_block block
+    | If { then_; else_; _ } -> (
+        last_of_block then_
+        &&
+        match else_ with
+        | None -> true
+        | Some (Else block) -> last_of_block block
+        | Some (Else_if e) -> last_expression e)
+    | Match { arms; _ } -> List.for_all (fun (arm : S.arm) -> last_statement arm.body) arms
+    | _ -> not (expression_yields e)
+  in
+  last_of_block body
 
 and call st (e : S.expression) ~callee ~arguments destination =
   match st.frame.code.checked.calls.(e.id) with
@@ -269,7 +328,7 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
            defaults' mask, then the evidence. *)
         let fields =
           List.mapi
-            (fun i operand -> (Printf.sprintf "local%d" i, operand))
+            (fun i operand -> (Convention.cursor_parameter i, operand))
             (passed @ mask @ evidence)
         in
         let cursor = Ground.Cursor { method_ = path; type_arguments } in
@@ -280,7 +339,7 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
                  {
                    ty = cursor;
                    variant = None;
-                   fields = ("state", Constant (Integer (UInt32, Z.zero))) :: fields;
+                   fields = (Convention.cursor_state, Constant (Integer (UInt32, Z.zero))) :: fields;
                  } ))
     | Trait_method { trait; name; self_type; _ }
       when primitive (ground st self_type)
@@ -699,16 +758,17 @@ and fill_defaults st mask =
       (match Hashtbl.find_opt st.frame.bindings name.id with
       | Some ({ projections = [ Deref ]; root = Local pointer } : Lir.place) ->
           if st.pulling then
-            bug "%s's %s has a default and is held as a pointer, which a cursor cannot point at"
-              (Path.show code.anchor) name.text;
+            unsupported st (default : S.expression).span
+              "a default for %s, which is passed by address, in a yielding method that is pulled"
+              name.text;
           let value = new_local st ty in
           into st default value;
           if not (trivial st ty) then own_in_scope st value;
           emit b (Assign (at pointer, Use (Address { place = value; writable = true })))
       | Some place when mode <> T.Own && not (trivial st ty) ->
           if st.pulling then
-            bug "%s's %s has a default and is a view, which a cursor would not drop"
-              (Path.show code.anchor) name.text;
+            unsupported st (default : S.expression).span
+              "a default for %s, which is a view, in a yielding method that is pulled" name.text;
           (* The parameter is a view: of the caller's value, or of the
              default, which the function owns, and drops only where it made
              one. *)

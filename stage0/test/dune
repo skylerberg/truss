@@ -5,6 +5,7 @@
   parser_rules_tests
   parser_documents_tests
   hashing_tests
+  compiler_bug_tests
   query_tests
   store_tests
   database_tests
@@ -23,6 +24,7 @@
   scale_tests)
  (libraries
   harness
+  compiler_bug
   source
   diagnostic
   token

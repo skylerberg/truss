@@ -5,7 +5,7 @@
 type build = Development | Release
 type linkage = External | Internal
 
-let bug format = Printf.ksprintf (fun message -> invalid_arg ("Emit_c: " ^ message)) format
+let bug format = Compiler_bug.bug ~stage:"Emit_c" format
 let anchor_symbol definition = "t_Anchor_" ^ Instance.path_symbol definition
 
 let anchor_struct =

@@ -1,3 +1,12 @@
 (library
  (name monomorphic)
- (libraries path intrinsic types ground memory_layout convention glue zarith))
+ (libraries
+  compiler_bug
+  path
+  intrinsic
+  types
+  ground
+  memory_layout
+  convention
+  glue
+  zarith))

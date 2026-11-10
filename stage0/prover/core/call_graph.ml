@@ -1,5 +1,4 @@
-(* Each package's call graph, for termination. See PROVER.md,
-   "Termination".
+(* Each package's call graph, for termination.
 
    A node is a function, a method, or an [impl]'s method. Its edges are
    every way it can reach another: a call, naming a function as a value,

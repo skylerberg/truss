@@ -27,6 +27,25 @@ test "cursors" {
   assert mut third.next() == None
 }
 |};
+  passes "a cursor over a method whose receiver has no size keeps its arguments"
+    {|type Quiet()
+
+fn Quiet.count(self, limit: Int64) yields Int64 {
+  var i = 1
+  while i <= limit {
+    yield i
+    i += 1
+  }
+}
+
+test "counted" {
+  let quiet = Quiet()
+  var each = quiet.count(2)
+  assert mut each.next() == Some(1)
+  assert mut each.next() == Some(2)
+  assert mut each.next() == None
+}
+|};
   passes "a cursor dropped before it ends drops what it holds"
     {|fn words(prefix: own String) yields String {
   yield "${prefix} one"
