@@ -375,4 +375,47 @@ test "keeps" {
 }
 |}
 
+let () =
+  lowers "defaults of a plain, a read-only, and an own parameter, and a requires clause" ~tests:true
+    [ ("step", []); ("length", []); ("keep", []) ]
+    {|fn step(start: Int64, by: Int64 = 2 * 3) -> Int64
+  requires by > 0
+{
+  start + by
+}
+
+fn length(prefix: String = "item") -> USize {
+  prefix.length()
+}
+
+fn keep(text: own String = "kept") -> String {
+  text
+}
+
+test "defaults" {
+  assert step(1) == 7
+  assert step(1, by: 1) == 2
+  assert length() == 4
+  assert length("ab") == 2
+  assert keep() == "kept"
+  assert keep("mine") == "mine"
+}
+|};
+  test "a requires clause lowered from the core form panics when it does not hold" (fun () ->
+      expect_output
+        {|fn step(start: Int64, by: Int64 = 1) -> Int64
+  requires by > 0
+{
+  start + by
+}
+
+test "breaks" {
+  let _ = step(1, by: 0)
+}
+|}
+        "test 0 panicked\n\
+         message 65\n\
+         requirement not met: requires by > 0\n\
+        \  at example/main.truss:2:12\n")
+
 let () = Harness.finish ()

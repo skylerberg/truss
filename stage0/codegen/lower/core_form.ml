@@ -779,13 +779,47 @@ and match_ st ~(scrutinees : Core.operand list) ~(arms : Core.arm list) destinat
   finish st.b Unreachable;
   start st.b after
 
-(* Lowers the body of the current function into its result slot. Returns an
-   error that describes the node kind where the body has one that is not
-   handled yet; the caller then discards what was emitted. *)
-let body st (form : Core.t) : (unit, string) result =
+(* The defaults of a function's parameters, in parameter order. *)
+let defaults st (form : Core.t) : default list =
   match form.definition with
-  | Function { body = Some inner; _ } | Test inner -> (
-      match block_into st inner (result_place st) with
-      | () -> Ok ()
-      | exception Unhandled_node what -> Error what)
-  | _ -> Error "a definition that has no body"
+  | Function { parameters; _ } ->
+      List.filter_map
+        (fun (parameter : Core.parameter) ->
+          match (parameter.default, parameter.local) with
+          | Some value, Named binding ->
+              Some
+                {
+                  mode = parameter.mode;
+                  ty = ground st parameter.type_;
+                  binding;
+                  name = parameter.name;
+                  evaluate = (fun place -> into st value place);
+                  span = (spans st).(value.origin);
+                }
+          | Some _, (Self | Synthetic _) -> bug "a default for a parameter with no name"
+          | None, _ -> None)
+        parameters
+  | _ -> []
+
+(* A function's [requires] clauses that can run. *)
+let requirements st (form : Core.t) : requirement list =
+  match form.definition with
+  | Function { contract; _ } ->
+      List.filter_map
+        (fun (clause : Core.condition) ->
+          if clause.executable then
+            Some
+              {
+                test = (fun ~yes ~no -> branch st clause.value ~yes ~no);
+                text = source st (spans st).(clause.value.origin);
+                site = site_of st clause.value.origin;
+              }
+          else None)
+        contract.requires
+  | _ -> []
+
+(* Lowers the body of the current function into its result slot. *)
+let body st (form : Core.t) =
+  match form.definition with
+  | Function { body = Some inner; _ } | Test inner -> block_into st inner (result_place st)
+  | _ -> unhandled "a definition that has no body"

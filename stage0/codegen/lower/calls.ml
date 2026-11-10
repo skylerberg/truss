@@ -185,7 +185,7 @@ and inline st path type_arguments ~arguments ~call_site ~on_yield =
           | Named_parameter { name; _ } -> Hashtbl.replace frame.bindings name.id place
           | Parameter_error -> ())
         code.parameter_types;
-      check_requires st ~call_site;
+      check_requires st ~call_site (syntax_requirements st);
       block_into st code.body None);
   finish st.b (Goto exit);
   start st.b exit;
@@ -716,54 +716,78 @@ and executable st (e : S.expression) =
   visit e;
   !runs
 
-(* In a checked build, tests each [requires] clause that can run on entry
-   to the code, its parameters bound, and panics with the clause when one
-   does not hold, at [call_site] for inlined code and at the clause
-   otherwise. Stage0's builds keep these whether or not the proofs are
-   done, so a test catches a call that breaks a contract as it runs. *)
-and check_requires ?call_site st =
+(* The [requires] clauses of the current code that can run, read from the
+   syntax tree. *)
+and syntax_requirements st : requirement list =
+  List.filter_map
+    (fun (clause : S.expression) ->
+      if executable st clause then
+        Some
+          {
+            test = (fun ~yes ~no -> branch st clause ~yes ~no);
+            text = source st clause.span;
+            site = site st clause.span;
+          }
+      else None)
+    st.frame.code.requires
+
+(* The defaults of the current code's parameters, in parameter order, read
+   from the syntax tree. *)
+and syntax_defaults st : default list =
+  List.filter_map
+    (fun (mode, ty, (parameter : S.parameter)) ->
+      match parameter.kind with
+      | Named_parameter { name; default = Some default; _ } ->
+          Some
+            {
+              mode;
+              ty = ground st ty;
+              binding = name.id;
+              name = name.text;
+              evaluate = (fun place -> into st default place);
+              span = default.span;
+            }
+      | _ -> None)
+    st.frame.code.parameter_types
+
+(* In a checked build, tests each [requires] clause on entry to the code,
+   with its parameters bound, and panics with the clause's text when one
+   does not hold: at [call_site] for inlined code and at the clause
+   otherwise. Stage0's builds keep these checks whether or not the proofs
+   are done, so a test catches a call that breaks a contract as it runs. *)
+and check_requires ?call_site st (requirements : requirement list) =
   if st.context.checks then
     List.iter
-      (fun (clause : S.expression) ->
-        if executable st clause then begin
-          let holds = block st.b and broken = block st.b in
-          let scope = open_scope st Bindings in
-          branch st clause ~yes:holds ~no:broken;
-          start st.b broken;
-          let message = "requirement not met: requires " ^ source st clause.span in
-          finish st.b
-            (Fail
-               {
-                 failure = Panic;
-                 message = Constant (Bytes message);
-                 length = usize (String.length message);
-                 site = (match call_site with Some s -> s | None -> site st clause.span);
-               });
-          start st.b holds;
-          close_scope st scope
-        end)
-      st.frame.code.requires
+      (fun (requirement : requirement) ->
+        let holds = block st.b and broken = block st.b in
+        let scope = open_scope st Bindings in
+        requirement.test ~yes:holds ~no:broken;
+        start st.b broken;
+        let message = "requirement not met: requires " ^ requirement.text in
+        finish st.b
+          (Fail
+             {
+               failure = Panic;
+               message = Constant (Bytes message);
+               length = usize (String.length message);
+               site = Option.value call_site ~default:requirement.site;
+             });
+        start st.b holds;
+        close_scope st scope)
+      requirements
 
-(* Fills in each parameter whose default the caller left out, as the bits
-   of [mask] say, from the default's expression, so that changing a default
-   compiles only the function again. An [own] parameter with a default may
-   arrive holding nothing, so the function does not own it as it arrives:
-   its name is bound to a local the function owns, which takes the argument
-   or the default. A parameter that is a view is pointed at the default's
-   value, or given its bits, and the function owns that value. *)
-and fill_defaults st mask =
+(* Fills in each parameter whose argument the caller omitted, as the bits
+   of [mask] say, by evaluating the default inside the function, so that
+   changing a default compiles only the function again. [defaults] are in
+   parameter order. An [own] parameter with a default may arrive holding
+   nothing, so the function does not own it as it arrives: its name is bound
+   to a local the function owns, which takes the argument or the default. A
+   parameter that is a view is pointed at the default's value, or given its
+   bits, and the function owns that value. *)
+and fill_defaults st mask (defaults : default list) =
   let b = st.b in
-  let defaulted =
-    List.filter_map
-      (fun (mode, ty, (parameter : S.parameter)) ->
-        match parameter.kind with
-        | Named_parameter { name; default = Some default; _ } -> Some (mode, ty, name, default)
-        | _ -> None)
-      st.frame.code.parameter_types
-  in
   List.iteri
-    (fun bit (mode, ty, (name : S.name), (default : S.expression)) ->
-      let ty = ground st ty in
+    (fun bit ({ mode; ty; binding = key; name; evaluate; span } : default) ->
       let passed = local b (Raw (Integer UInt64)) and given = local b (Raw Bool) in
       emit b
         (Assign
@@ -771,9 +795,9 @@ and fill_defaults st mask =
              Binary (Bit_and, Copy (at mask), constant_int UInt64 (Z.shift_left Z.one bit)) ));
       emit b (Assign (at given, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
       let arrived =
-        match Hashtbl.find_opt st.frame.bindings name.id with
+        match Hashtbl.find_opt st.frame.bindings key with
         | Some place -> place
-        | None -> bug "%s has a default and no place" name.text
+        | None -> bug "%s has a default and no place" name
       in
       let fill = block b and after = block b in
       let unless_given other =
@@ -782,19 +806,18 @@ and fill_defaults st mask =
       in
       let pulled what =
         if st.pulling then
-          unsupported st default.span "a default for %s, %s, in a yielding method that is pulled"
-            name.text what
+          unsupported st span "a default for %s, %s, in a yielding method that is pulled" name what
       in
       if mode = T.Own && not (trivial st ty) then begin
-        let held = binding st ~name:name.text ty in
-        Hashtbl.replace st.frame.bindings name.id held;
+        let held = binding st ~name ty in
+        Hashtbl.replace st.frame.bindings key held;
         let taken = block b in
         unless_given taken;
         start b taken;
         emit b (Assign (held, Use (Move arrived)));
         finish b (Goto after);
         start b fill;
-        in_statement st (fun () -> into st default held)
+        in_statement st (fun () -> evaluate held)
       end
       else begin
         unless_given after;
@@ -804,15 +827,15 @@ and fill_defaults st mask =
             | { projections = [ Deref ]; root = Local pointer } ->
                 pulled "which is passed by address";
                 let value = binding st ty in
-                into st default value;
+                evaluate value;
                 emit b (Assign (at pointer, Use (Address { place = value; writable = true })))
             | place when not (trivial st ty) ->
                 pulled "which is a view";
                 let value = binding st ty in
-                into st default value;
+                evaluate value;
                 emit b (Assign (place, Use (Copy value)))
-            | place -> into st default place)
+            | place -> evaluate place)
       end;
       finish b (Goto after);
       start b after)
-    defaulted
+    defaults
