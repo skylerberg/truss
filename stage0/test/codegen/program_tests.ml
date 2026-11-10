@@ -219,6 +219,68 @@ let () =
       expect_string ~expected:"exited 7\nmissing\n" output)
 
 let () =
+  test "a program run with an argument that holds a zero byte is not started" (fun () ->
+      let status, output, _ =
+        run_main
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes
+{
+  if Processes.run(Path.new("sh".slice()), arguments: ["-c", "exit 3\0; exit 4"]) is Err(_) {
+    Console.print_line("refused".slice())
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"refused\n" output);
+  test "a program that a signal ends is told by 128 and the signal" (fun () ->
+      let status, output, _ =
+        run_main
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes
+{
+  if Processes.run(Path.new("sh".slice()), arguments: ["-c", "kill -9 $$"]) is Ok(code) {
+    Console.print_line("ended ${code.code}".slice())
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"ended 137\n" output);
+  test "a program is given its arguments, with bytes that are not UTF-8 replaced" (fun () ->
+      let _, output, _ =
+        run_main ~arguments:[ "caf\xff"; "" ]
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  Console.print_line("${arguments.length()} [${arguments[1]}] [${arguments[2]}]".slice())
+  ExitCode(0)
+}
+|}
+      in
+      expect_string ~expected:"3 [caf\xef\xbf\xbd] []\n" output);
+  test "a variable that is set to nothing is told from one that is not set" (fun () ->
+      Unix.putenv "TRUSS_TEST_EMPTY" "";
+      let _, output, _ =
+        run_main
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console, Environment
+{
+  if Environment.variable("TRUSS_TEST_EMPTY".slice()) is Some(value) {
+    Console.print_line("set to [${value}]".slice())
+  }
+  if Environment.variable("TRUSS\0_TEST_EMPTY".slice()) is None {
+    Console.print_line("no such name".slice())
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_string ~expected:"set to []\nno such name\n" output)
+
+let () =
   test "a program reads environment variables" (fun () ->
       Unix.putenv "TRUSS_TEST_VARIABLE" "caf\xc3\xa9";
       let status, output, _ =
@@ -276,6 +338,53 @@ let () =
       in
       expect_int ~expected:3 status;
       expect_string ~expected:"0: first\n1: second \xef\xbf\xbd line\n2: last\n" output)
+
+let () =
+  test "a line longer than a block is read whole, and what follows it is kept" (fun () ->
+      let long = String.make 150_000 'x' in
+      let status, output, _ =
+        run_main
+          ~input:(long ^ "\nshort\n" ^ long)
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  while Console.read_line() is Some(line) {
+    Console.print_line("${line.length()}")
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"150000\n5\n150000\n" output);
+  test "the console a program is given is a value its start owns and drops" (fun () ->
+      let _, compile =
+        load {|fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  ExitCode(0)
+}
+|}
+      in
+      match Compile.compiled compile (Program_main (Top { module_ = example; name = "main" })) with
+      | Code instance ->
+          let console local =
+            match instance.main.locals.(local).ty with
+            | Value (Named { path = Top { name = "SystemConsole"; _ }; _ }) -> true
+            | _ -> false
+          in
+          let dropped =
+            Array.exists
+              (fun (block : Lir.basic_block) ->
+                List.exists
+                  (function
+                    | Lir.Drop { root = Local local; projections = [] } -> console local
+                    | _ -> false)
+                  block.statements)
+              instance.main.blocks
+          in
+          if not dropped then fail "no drop of the console:\n%s" (Lir.to_string instance)
+      | _ -> fail "expected code")
 
 (* The documents' examples: in every block that checks cleanly, each
    function that is not generic, and not only for specifications, lowers, and each test passes or reaches a

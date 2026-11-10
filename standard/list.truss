@@ -1,3 +1,4 @@
+use standard::growth
 use standard::intrinsic
 
 public opaque type List[Element](storage: intrinsic::Storage[Element])
@@ -57,6 +58,9 @@ public fn List[Element].push(mut self, item: own Element)
   ensures identical(self.model(), old(self.model()).append(item))
   cost amortized time O(1)
 {
+  if intrinsic::storage_length(self.storage) >= intrinsic::storage_capacity(self.storage) {
+    growth::reserve(mut self.storage, additional: 1)
+  }
   intrinsic::storage_push(mut self.storage, value: own item)
 }
 
@@ -68,6 +72,7 @@ public fn List[Element].insert_at(mut self, position: USize, item: own Element)
   requires position <= self.length()
   cost time O(self.length())
 {
+  growth::reserve(mut self.storage, additional: 1)
   intrinsic::storage_insert(mut self.storage, index: position, value: own item)
 }
 

@@ -1,0 +1,3 @@
+(library
+ (name core_print)
+ (libraries core core_walk path intrinsic types syntax zarith))

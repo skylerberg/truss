@@ -13,7 +13,7 @@ let extra =
     (Ground.to_string isize, Memory_layout.Scalar (Integer ISize));
   ]
 
-let intrinsic_types : Intrinsics.types = { usize; isize; string_slice = named "StringSlice" }
+let intrinsic_types : Intrinsics.types = { usize; string_slice = named "StringSlice" }
 
 let operate b ?destination ?(type_arguments = []) operation arguments =
   ignore
@@ -231,11 +231,7 @@ let () =
       let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
       let handle_ty = Monomorphic.builtin Handle in
       let types : Intrinsics.types =
-        {
-          usize = Monomorphic.builtin USize;
-          isize = Monomorphic.builtin ISize;
-          string_slice = standard "text" "StringSlice" ();
-        }
+        { usize = Monomorphic.builtin USize; string_slice = standard "text" "StringSlice" () }
       in
       let entry =
         let b = Lir_builder.create () in

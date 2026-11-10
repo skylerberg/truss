@@ -26,10 +26,15 @@ type passes =
           numbers then go to [mut] arguments of these names, one each *)
   | Always of int
       (** A number that is no argument of the Truss call: the function always gets it *)
+  | Environment
+      (** The environment the process was started with, which is no argument of the Truss call *)
 
 type result =
   | Returns of scalar
   | Points_at of scalar  (** The number at the address returned, which is how [errno] is reached *)
+  | Text
+      (** The bytes at the address returned, up to a zero byte, as a view, with a last [mut Bool]
+          argument, [found], that says whether the function returned an address at all *)
 
 type signature = { parameters : (string * passes) list; result : result }
 (** A function as Truss calls it: how each parameter of the C function is given. *)
@@ -44,7 +49,17 @@ type declaration = {
 }
 (** A function as one system's headers declare it. *)
 
-type function_ = Write | Read | Open | Close | Errno | Clock_gettime | Getentropy
+type function_ =
+  | Write
+  | Read
+  | Open
+  | Close
+  | Errno
+  | Clock_gettime
+  | Getentropy
+  | Getenv
+  | Posix_spawnp
+  | Waitpid
 
 val functions : function_ list
 

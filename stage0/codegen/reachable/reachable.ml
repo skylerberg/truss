@@ -73,13 +73,11 @@ let compiled_key : Lir.compiled -> Instance.key = function
   | Code t -> t.key
   | Data d -> d.data_key
   | Table t -> t.table_key
-  | Evidence e -> e.evidence_key
 
 let compiled_references env : Lir.compiled -> Instance.key list = function
   | Code t -> references env t
   | Data _ -> []
   | Table t -> List.map fst t.entries
-  | Evidence e -> e.table :: e.outer
 
 module Table = Hashtbl.Make (struct
   type t = Instance.key
@@ -143,7 +141,6 @@ let own_hash ~references compiled =
     | Lir.Code i -> Lir.encode ~path ~instance (Lir.canonical_instance i)
     | Data d -> Lir.encode_data ~path ~instance d
     | Table t -> Lir.encode_table ~path ~instance t
-    | Evidence e -> Lir.encode_evidence ~path ~instance e
   in
   Blake3.hash (Cbor.encode encoded)
 

@@ -1,3 +1,4 @@
+use standard::growth
 use standard::intrinsic
 
 internal fn interrupted_by_signal() -> Bool {
@@ -31,7 +32,7 @@ internal fn read_onto_end(
   buffer: mut intrinsic::Storage[UInt8],
   count: USize,
 ) -> Result[USize, Int32] {
-  intrinsic::storage_reserve(mut buffer, additional: count)
+  growth::reserve(mut buffer, additional: count)
   var got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)
   while got < 0 && interrupted_by_signal() {
     got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)
@@ -71,4 +72,17 @@ internal fn open_file(path: intrinsic::View[UInt8], flags: Int32) -> Result[intr
   } else {
     Ok(intrinsic::handle_from(descriptor))
   }
+}
+
+internal fn copy_of(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
+  let length = intrinsic::view_length(bytes)
+  var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
+  for index in 0..length {
+    intrinsic::storage_push(mut copy, value: intrinsic::view_at(bytes, index: index))
+  }
+  copy
+}
+
+internal fn text_copied_from(bytes: intrinsic::View[UInt8]) -> String {
+  String.from_bytes(copy_of(bytes))
 }

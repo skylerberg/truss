@@ -3,7 +3,7 @@ open Lir_builder
 let bug format = Compiler_bug.bug ~stage:"Intrinsics" format
 
 type argument = Place of Lir.place | Value of Lir.operand
-type types = { usize : Ground.ty; isize : Ground.ty; string_slice : Ground.ty }
+type types = { usize : Ground.ty; string_slice : Ground.ty }
 
 let operand = function Place place -> Lir.Copy place | Value operand -> operand
 let place = function Place place -> place | Value _ -> bug "an operation on storage given a value"
@@ -41,40 +41,65 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
   in
   let into intrinsic = call ?result:destination intrinsic (List.map operand arguments) in
   let usize_local name = local b ~name (Value types.usize) in
-  (* The storage's element: the type argument, or bytes for the system's
-     operations, which take none. *)
-  let element () =
-    match operation with
-    | Intrinsic.Read_bytes | Write_float | Environment_variable ->
-        Ground.Named { path = Intrinsic.builtin_path UInt8; arguments = [] }
-    | _ -> type_argument 0
-  in
+  let element () = type_argument 0 in
   let element_layout () = Memory_layout.of_type env (element ()) in
   let length storage = Lir.Copy (Storage.length storage) in
   let view_length view = Lir.Copy (Storage.view_length view) in
   let element_at = Storage.at in
-  (* Gives the storage room for at least [minimum] elements. *)
-  let grow storage minimum =
-    let layout = element_layout () in
-    call Grow
-      [
-        Address { place = Storage.buffer storage; writable = true };
-        length storage;
-        Address { place = Storage.capacity storage; writable = true };
-        usize layout.size;
-        usize layout.alignment;
-        minimum;
-      ]
+  (* Ends the run with a panic where [failed] holds. *)
+  let panic_when failed message =
+    let fail = block b and go_on = block b in
+    finish b (Switch { value = failed; cases = [ (Z.one, fail) ]; default = Some go_on });
+    start b fail;
+    finish b
+      (Fail
+         {
+           failure = Panic;
+           message = Constant (Bytes message);
+           length = usize (String.length message);
+           site;
+         });
+    start b go_on
   in
-  (* Grows the storage when [condition], a comparison of the length against
-     the capacity, holds. *)
-  let grow_when op storage minimum =
-    let needed = local b (Raw Bool) in
-    emit b (Assign (at needed, Binary (op, minimum, Copy (Storage.capacity storage))));
-    when_ b (Copy (at needed)) (fun () -> grow storage minimum)
+  (* Gives the storage a buffer of its own with room for exactly [capacity]
+     elements, which is at least as many as it has. A buffer it owns is
+     made larger; elements it does not own, as static ones are, are copied
+     to a new one and never freed. *)
+  let set_capacity storage capacity =
+    let layout = element_layout () in
+    let bytes = usize_local "bytes" and too_many = local b (Raw Bool) in
+    call ~result:(at too_many) Multiply_overflow
+      [ capacity; usize layout.size; Address { place = at bytes; writable = true } ];
+    panic_when (Copy (at too_many)) "out of memory";
+    let buffer = local b (Raw (Pointer Opaque)) in
+    let owns = local b (Raw Bool) and borrows = local b (Raw Bool) in
+    emit b (Assign (at owns, Binary (Not_equal, Copy (Storage.capacity storage), usize 0)));
+    emit b (Assign (at borrows, Unary (Not, Copy (at owns))));
+    when_ b
+      (Copy (at owns))
+      (fun () ->
+        let held = usize_local "held" in
+        emit b
+          (Assign (at held, Binary (Multiply, Copy (Storage.capacity storage), usize layout.size)));
+        call ~result:(at buffer) Reallocate
+          [ Copy (Storage.buffer storage); Copy (at held); Copy (at bytes); usize layout.alignment ]);
+    when_ b
+      (Copy (at borrows))
+      (fun () ->
+        call ~result:(at buffer) Allocate [ Copy (at bytes); usize layout.alignment ];
+        let used = usize_local "used" in
+        emit b (Assign (at used, Binary (Multiply, length storage, usize layout.size)));
+        call Copy_bytes [ Copy (at buffer); Copy (Storage.buffer storage); Copy (at used) ]);
+    emit b (Assign (Storage.buffer storage, Use (Copy (at buffer))));
+    emit b (Assign (Storage.capacity storage, Use capacity))
   in
   (* Static storage gets a buffer of its own before it is written. *)
-  let own storage = grow_when Greater (place storage) (length (place storage)) in
+  let own storage =
+    let storage = place storage in
+    let borrowed = local b (Raw Bool) in
+    emit b (Assign (at borrowed, Binary (Greater, length storage, Copy (Storage.capacity storage))));
+    when_ b (Copy (at borrowed)) (fun () -> set_capacity storage (length storage))
+  in
   let add_to_length storage amount =
     emit b (Assign (Storage.length storage, Binary (Add, length storage, amount)))
   in
@@ -90,21 +115,6 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
         match (Memory_layout.of_type env (type_argument 0)).form with
         | Scalar (Integer integer) -> Some integer
         | _ -> None
-      in
-      (* In a checked build, ends the run with a panic where [failed] holds. *)
-      let panic_when failed message =
-        let fail = block b and go_on = block b in
-        finish b (Switch { value = failed; cases = [ (Z.one, fail) ]; default = Some go_on });
-        start b fail;
-        finish b
-          (Fail
-             {
-               failure = Panic;
-               message = Constant (Bytes message);
-               length = usize (String.length message);
-               site;
-             });
-        start b go_on
       in
       (* Integer arithmetic that panics on overflow in a checked build; it wraps
      otherwise, which the prover shows never happens. *)
@@ -271,21 +281,16 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           let ty = Storage.of_elements (element ()) in
           let result = local b (Value ty) in
           emit b (Assign (at result, Storage.empty ty));
-          grow_when Greater (at result) (value 0);
+          let any = local b (Raw Bool) in
+          emit b (Assign (at any, Binary (Greater, value 0, usize 0)));
+          when_ b (Copy (at any)) (fun () -> set_capacity (at result) (value 0));
           set (Use (Move (at result)))
       | Storage_length -> set (Use (length (place (argument 0))))
       | Storage_capacity -> set (Use (Copy (Storage.capacity (place (argument 0)))))
-      | Storage_reserve ->
-          let storage = place (argument 0) in
-          let wanted = usize_local "wanted" in
-          emit b (Assign (at wanted, Binary (Add, length storage, value 1)));
-          grow_when Greater storage (Copy (at wanted))
+      | Storage_set_capacity -> set_capacity (place (argument 0)) (value 1)
       | Storage_lengthen -> add_to_length (place (argument 0)) (value 1)
       | Storage_push ->
           let storage = place (argument 0) in
-          let wanted = usize_local "wanted" in
-          emit b (Assign (at wanted, Binary (Add, length storage, usize 1)));
-          grow_when Greater storage (Copy (at wanted));
           emit b (Assign (element_at storage (length storage), Use (value 1)));
           add_to_length storage (usize 1)
       | Storage_pop ->
@@ -295,9 +300,6 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
       | Storage_insert ->
           let storage = place (argument 0) in
           let index = value 1 in
-          let wanted = usize_local "wanted" in
-          emit b (Assign (at wanted, Binary (Add, length storage, usize 1)));
-          grow_when Greater storage (Copy (at wanted));
           let after = usize_local "after" in
           let bytes = usize_local "bytes" in
           emit b (Assign (at after, Binary (Add, index, usize 1)));
@@ -345,6 +347,8 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                ~elements:(Copy (Storage.buffer storage))
                ~length:(length storage))
       | View_length -> set (Use (view_length (place (argument 0))))
+      | View_address ->
+          set (Convert (Copy (Storage.view_elements (place (argument 0))), Integer USize))
       | View_slice ->
           let view = place (argument 0) in
           let count = usize_local "count" in
@@ -372,35 +376,8 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                  site;
                });
           start b (block b)
-      | Read_bytes ->
-          let storage = place (argument 1) in
-          let count = value 2 in
-          let wanted = usize_local "wanted" in
-          emit b (Assign (at wanted, Binary (Add, length storage, count)));
-          grow_when Greater storage (Copy (at wanted));
-          let got = local b ~name:"got" (Value types.isize) in
-          call ~result:(at got) System_read
-            [
-              value 0;
-              Address { place = element_at storage (length storage); writable = true };
-              count;
-            ];
-          let read_some = local b (Raw Bool) in
-          emit b
-            (Assign
-               (at read_some, Binary (Greater, Copy (at got), Constant (Integer (ISize, Z.zero)))));
-          when_ b
-            (Copy (at read_some))
-            (fun () ->
-              let count = usize_local "count" in
-              emit b (Assign (at count, Convert (Copy (at got), Integer USize)));
-              add_to_length storage (Copy (at count)));
-          set (Use (Copy (at got)))
       | Write_float ->
           let storage = place (argument 0) in
-          let wanted = usize_local "wanted" in
-          emit b (Assign (at wanted, Binary (Add, length storage, usize Lir.float_text_limit)));
-          grow_when Greater storage (Copy (at wanted));
           let count = usize_local "count" in
           call ~result:(at count) Float_text
             [ value 1; Address { place = element_at storage (length storage); writable = true } ];
@@ -414,43 +391,6 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                  fields = [ ("descriptor", value 0) ];
                })
       | Handle_descriptor -> set (Use (Copy (read (argument 0) / Field "descriptor")))
-      | Run_process ->
-          let program = place (argument 0) and packed = place (argument 1) in
-          call ?result:destination System_run
-            [
-              Copy (Storage.view_elements program);
-              Copy (Storage.view_length program);
-              Copy (Storage.view_elements packed);
-              Copy (Storage.view_length packed);
-              Address { place = place (argument 2); writable = true };
-            ]
-      | Environment_variable ->
-          let name = place (argument 0) in
-          let storage = place (argument 1) in
-          let found = local b ~name:"found" (Raw (Nullable_pointer Opaque)) in
-          let count = usize_local "count" in
-          call ~result:(at found) System_environment
-            [
-              Copy (Storage.view_elements name);
-              Copy (Storage.view_length name);
-              Address { place = at count; writable = true };
-            ];
-          let present = local b ~name:"present" (Raw Bool) in
-          emit b (Assign (at present, Binary (Not_equal, Copy (at found), Constant Null)));
-          when_ b
-            (Copy (at present))
-            (fun () ->
-              let wanted = usize_local "wanted" in
-              emit b (Assign (at wanted, Binary (Add, length storage, Copy (at count))));
-              grow_when Greater storage (Copy (at wanted));
-              call Copy_bytes
-                [
-                  Address { place = element_at storage (length storage); writable = true };
-                  Copy (at found);
-                  Copy (at count);
-                ];
-              add_to_length storage (Copy (at count)));
-          set (Use (Copy (at present)))
       | Libc function_ -> (
           let ground scalar =
             Ground.Named
@@ -496,7 +436,17 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                           :: !after)
                       names;
                     Address { place = at structure; writable = true }
-                | Always number -> usize number)
+                | Always number -> usize number
+                | Environment ->
+                    let environment = local b (Raw (Pointer Opaque)) in
+                    emit b
+                      (Call
+                         {
+                           target = Intrinsic Environment;
+                           arguments = [];
+                           result = Returned (at environment);
+                         });
+                    Copy (at environment))
               parameters
           in
           let target = Lir.Foreign (Libc.declaration (Memory_layout.target env).os function_) in
@@ -510,7 +460,32 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           | Points_at scalar ->
               let address = local b (Raw (Pointer (Data (ground scalar)))) in
               call (Returned (at address));
-              set (Use (Copy (at address / Deref))))
+              set (Use (Copy (at address / Deref)))
+          | Text ->
+              let bytes = ground UInt8 in
+              let address = local b (Raw (Nullable_pointer (Data bytes))) in
+              call (Returned (at address));
+              let found = place (argument (taken ())) in
+              emit b (Assign (found, Binary (Not_equal, Copy (at address), Constant Null)));
+              (* A view's address is never null, so text that is not there
+                 is an empty view of static bytes. *)
+              let elements = local b (Raw (Pointer (Data bytes))) in
+              let count = usize_local "length" in
+              emit b (Assign (at elements, Use (Constant (Bytes ""))));
+              emit b (Assign (at count, Use (usize 0)));
+              when_ b (Copy found) (fun () ->
+                  emit b (Assign (at elements, Use (Copy (at address))));
+                  emit b
+                    (Call
+                       {
+                         target = Intrinsic Terminated_length;
+                         arguments = [ Copy (at address) ];
+                         result = Returned (at count);
+                       }));
+              set
+                (Storage.view (Storage.view_of_elements bytes)
+                   ~elements:(Copy (at elements))
+                   ~length:(Copy (at count))))
       | Libc_number number ->
           let integer =
             match

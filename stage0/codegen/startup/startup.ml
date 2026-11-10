@@ -13,7 +13,6 @@ let headers =
 #include <string.h>
 #include <signal.h>
 #include <errno.h>
-#include <spawn.h>
 #include <poll.h>
 #include <time.h>
 #include <unistd.h>
@@ -171,46 +170,6 @@ static void t_stack_overflow(int signal) {
   t_end(t_panicked, "", 101);
 }
 
-/* A program argument as UTF-8: the argument itself when it is valid, and
-   otherwise a copy with each bad sequence replaced by U+FFFD. Either way it
-   lives as long as the program, so the [String] that holds it has capacity
-   0 and never frees it. */
-static t_usize t_utf8_sequence(const uint8_t *bytes, t_usize left) {
-  uint8_t first = bytes[0];
-  t_usize length = first < 0x80 ? 1 : (first & 0xe0) == 0xc0 ? 2 : (first & 0xf0) == 0xe0 ? 3 : (first & 0xf8) == 0xf0 ? 4 : 0;
-  if (length == 0 || length > left) return 0;
-  for (t_usize k = 1; k < length; k++) if ((bytes[k] & 0xc0) != 0x80) return 0;
-  uint32_t code = length == 1 ? first : (uint32_t)(first & (0x7f >> length));
-  for (t_usize k = 1; k < length; k++) code = (code << 6) | (bytes[k] & 0x3f);
-  if ((length == 2 && code < 0x80) || (length == 3 && code < 0x800) || (length == 4 && code < 0x10000)) return 0;
-  if (code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return 0;
-  return length;
-}
-
-uint8_t *t_runtime_program_argument(void *arguments, int32_t index, t_usize *length) {
-  uint8_t *bytes = (uint8_t *)((char **)arguments)[index];
-  t_usize count = strlen((const char *)bytes);
-  t_usize at = 0, fixed = 0;
-  int valid = 1;
-  while (at < count) {
-    t_usize step = t_utf8_sequence(bytes + at, count - at);
-    if (step == 0) { valid = 0; step = 1; fixed += 3; } else fixed += step;
-    at += step;
-  }
-  if (valid) { *length = count; return bytes; }
-  uint8_t *copy = t_runtime_allocate(fixed, 1);
-  t_usize out = 0;
-  at = 0;
-  while (at < count) {
-    t_usize step = t_utf8_sequence(bytes + at, count - at);
-    if (step == 0) { copy[out++] = 0xef; copy[out++] = 0xbf; copy[out++] = 0xbd; step = 1; }
-    else { memcpy(copy + out, bytes + at, step); out += step; }
-    at += step;
-  }
-  *length = out;
-  return copy;
-}
-
 void t_runtime_install(void) {
   stack_t stack;
   memset(&stack, 0, sizeof stack);
@@ -271,111 +230,6 @@ void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usiz
   memcpy(moved, pointer, old_size < size ? old_size : size);
   t_runtime_free(pointer);
   return moved;
-}
-
-/* Gives storage room for at least [minimum] elements, at least doubling it
-   so that pushing is amortized O(1). Storage with capacity 0 owns no
-   buffer: its elements, if any, are static, so they are copied, and the
-   old buffer is never freed. */
-void t_runtime_storage_grow(void **buffer, t_usize length, t_usize *capacity, t_usize size, t_usize alignment,
-                            t_usize minimum) {
-  t_usize wanted = *capacity * 2;
-  if (wanted < minimum) wanted = minimum;
-  if (wanted < 4) wanted = 4;
-  if (size != 0 && wanted > (t_usize)-1 / size) t_out_of_memory();
-  if (*capacity == 0) {
-    void *fresh = t_runtime_allocate(wanted * size, alignment);
-    if (length > 0) memcpy(fresh, *buffer, length * size);
-    *buffer = fresh;
-  } else {
-    *buffer = t_runtime_reallocate(*buffer, *capacity * size, wanted * size, alignment);
-  }
-  *capacity = wanted;
-}
-
-/* Runs a program, found on the PATH as a shell finds it, with the
-   arguments, each ending in a zero byte, and waits for it. It returns the
-   exit status, or 128 and the signal that ended it; on failure to start it,
-   -1 with the error number written. */
-int32_t t_runtime_run(const uint8_t *program, t_usize length, const uint8_t *arguments, t_usize arguments_length,
-                      int32_t *error) {
-  t_usize count = 0;
-  for (t_usize i = 0; i < arguments_length; i++)
-    if (arguments[i] == 0) count += 1;
-  char **argv = malloc((count + 2) * sizeof(char *));
-  char *name = malloc(length + 1);
-  char *copied = malloc(arguments_length + 1);
-  if (argv == NULL || name == NULL || copied == NULL) t_out_of_memory();
-  memcpy(name, program, length);
-  name[length] = 0;
-  if (arguments_length > 0) memcpy(copied, arguments, arguments_length);
-  argv[0] = name;
-  t_usize at = 0;
-  for (t_usize k = 0; k < count; k++) {
-    argv[k + 1] = copied + at;
-    while (copied[at] != 0) at += 1;
-    at += 1;
-  }
-  argv[count + 1] = NULL;
-  pid_t pid;
-  extern char **environ;
-  int failed = posix_spawnp(&pid, name, NULL, NULL, argv, environ);
-  int status = 0;
-  if (failed == 0) {
-    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
-  }
-  free(argv);
-  free(name);
-  free(copied);
-  if (failed != 0) {
-    *error = failed;
-    return -1;
-  }
-  *error = 0;
-  return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
-}
-
-/* An environment variable's value and its length, or null when it is
-   unset. */
-uint8_t *t_runtime_environment(const uint8_t *name, t_usize length, t_usize *value_length) {
-  char *terminated = malloc(length + 1);
-  if (terminated == NULL) t_out_of_memory();
-  memcpy(terminated, name, length);
-  terminated[length] = 0;
-  char *value = getenv(terminated);
-  free(terminated);
-  if (value == NULL) return NULL;
-  *value_length = strlen(value);
-  return (uint8_t *)value;
-}
-
-/* Standard input is read a block at a time and handed out from this
-   buffer, so that reading a line a byte at a time costs one system call a
-   block. */
-static uint8_t t_input[4096];
-static t_usize t_input_start = 0, t_input_end = 0;
-
-t_isize t_runtime_read(int32_t descriptor, uint8_t *bytes, t_usize count) {
-  if (descriptor == 0) {
-    if (t_input_start == t_input_end) {
-      ssize_t got;
-      do got = read(0, t_input, sizeof t_input);
-      while (got < 0 && errno == EINTR);
-      if (got <= 0) return got;
-      t_input_start = 0;
-      t_input_end = (t_usize)got;
-    }
-    t_usize available = t_input_end - t_input_start;
-    t_usize given = count < available ? count : available;
-    memcpy(bytes, t_input + t_input_start, given);
-    t_input_start += given;
-    return (t_isize)given;
-  }
-  for (;;) {
-    ssize_t got = read(descriptor, bytes, count);
-    if (got < 0 && errno == EINTR) continue;
-    return got;
-  }
 }
 
 /* Debug output: generated debug functions append a value's text here, and

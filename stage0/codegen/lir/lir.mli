@@ -60,9 +60,6 @@ val encode : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> t
 val encode_data : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> data -> Cbor.t
 val encode_table : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> table -> Cbor.t
 
-val encode_evidence :
-  ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> evidence -> Cbor.t
-
 (* Whether two signatures are the same, by their canonical encoding. *)
 val equal_signature : signature -> signature -> bool
 

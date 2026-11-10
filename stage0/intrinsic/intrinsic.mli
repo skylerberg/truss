@@ -92,7 +92,11 @@ type operation =
   | Storage_with_capacity
   | Storage_length
   | Storage_capacity
-  | Storage_reserve
+  | Storage_set_capacity
+      (** [(storage, capacity)]: gives the storage a buffer of its own with room for exactly that
+          many elements, at least as many as it has. Nothing else makes room: [storage_push] and
+          [storage_insert] write into room the storage has, and how much to grow by is the standard
+          library's to say. *)
   | Storage_lengthen
       (** [(storage, by)]: the [by] elements after the last, which a function of the C library wrote
           into room the storage had, are the storage's *)
@@ -107,19 +111,14 @@ type operation =
   | View_length
   | View_at
   | View_slice
+  | View_address
+      (** [(view) -> USize]: the address of a view's elements as a number, for the lists of
+          addresses that some functions of the C library take *)
   | Crash
-  | Read_bytes
   | Write_float  (** [(buffer, value)]: appends the shortest decimal that reads back as the float *)
   | Handle_from
       (** [(descriptor) -> Handle]: owns a descriptor that is open, which dropping it closes *)
   | Handle_descriptor  (** [(handle) -> Int32]: the descriptor a handle owns *)
-  | Environment_variable
-      (** [(name, buffer) -> Bool]: appends an environment variable's value; false when it is unset
-      *)
-  | Run_process
-      (** [(program, arguments, error) -> Int32]: runs a program found as a shell finds it, with the
-          arguments, each ending in a zero byte, and waits for it: its exit status, or [128 +] the
-          signal that ended it; [error] gets 0, or the system's error number *)
   | Libc of Libc.function_
       (** A function of the system's C library, named [libc_] and its name: [libc_write] *)
   | Libc_number of Libc.number

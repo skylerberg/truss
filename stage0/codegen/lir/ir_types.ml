@@ -47,7 +47,7 @@ and constant =
   | Character of int
   | Bytes of string  (** The address of static bytes, such as a string literal's *)
   | Null
-  | Symbol_address of Instance.key  (** The address of static evidence or a table *)
+  | Symbol_address of Instance.key  (** The address of a table *)
   | Size_of of Ground.ty  (** A [USize]: how many bytes a value of the type takes *)
   | Alignment_of of Ground.ty  (** A [USize]: the alignment of a value of the type *)
 
@@ -110,16 +110,8 @@ type intrinsic =
   | Round_even
   | Float_bits  (** A float's bits, with every NaN replaced by one canonical NaN *)
   | Float_from_bits
-  | Grow
-      (** [(buffer pointer's address, length, capacity's address, element size, alignment, minimum)]:
-          gives storage room for at least [minimum] elements. Storage with capacity 0 and a nonzero
-          length is static, and is copied to the heap, never freed. *)
-  | System_read  (** [(descriptor, bytes, count) -> ISize], -1 on error *)
-  | System_environment
-      (** [(name, name length, value length's address) -> bytes]: an environment variable's value,
-          null when it is unset *)
-  | System_run
-      (** [(program, length, arguments, length, error's address) -> Int32]: as [run_process] *)
+  | Environment  (** [() -> pointer] to the environment the process was started with *)
+  | Terminated_length  (** [(bytes) -> USize]: how many bytes come before the first zero byte *)
   | Float_text
       (** [(value, bytes) -> USize]: writes the shortest decimal that reads back as the float, at
           most [float_text_limit] bytes, as [Display] shows it *)
@@ -137,8 +129,7 @@ type intrinsic =
   | Evidence_implementation  (** [(evidence) -> pointer] to the value that implements it *)
   | Evidence_outer  (** [(evidence, index) -> evidence] the implementation captured *)
   | Program_argument
-      (** [(arguments, index, length pointer) -> bytes]: a program argument as UTF-8, with bad
-          sequences replaced by U+FFFD *)
+      (** [(arguments, index) -> bytes]: a program argument, ending in a zero byte *)
   | Evidence_fill
       (** [(evidence's address, implementation, table, captured evidence...)]: fills evidence a
           [provide] builds *)
@@ -255,10 +246,5 @@ type data = { data_key : Instance.key; ty : Ground.ty; value : static_value }
    capability's methods. *)
 type table = { table_key : Instance.key; entries : (Instance.key * signature) list }
 
-(* Static evidence: its implementation, a value of zero size here, its
-   table, and the evidence the implementation captured. *)
-type evidence = { evidence_key : Instance.key; table : Instance.key; outer : Instance.key list }
-
-(* What an instance compiles to: code, static data, a table of entries, or
-   static evidence. *)
-type compiled = Code of t | Data of data | Table of table | Evidence of evidence
+(* What an instance compiles to: code, static data, or a table of entries. *)
+type compiled = Code of t | Data of data | Table of table

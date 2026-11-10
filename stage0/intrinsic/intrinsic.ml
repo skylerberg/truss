@@ -132,7 +132,7 @@ type operation =
   | Storage_with_capacity
   | Storage_length
   | Storage_capacity
-  | Storage_reserve
+  | Storage_set_capacity
   | Storage_lengthen
   | Storage_push
   | Storage_pop
@@ -145,13 +145,11 @@ type operation =
   | View_length
   | View_at
   | View_slice
+  | View_address
   | Crash
-  | Read_bytes
   | Write_float
   | Handle_from
   | Handle_descriptor
-  | Environment_variable
-  | Run_process
   | Libc of Libc.function_
   | Libc_number of Libc.number
 
@@ -202,7 +200,7 @@ let operations =
     Storage_with_capacity;
     Storage_length;
     Storage_capacity;
-    Storage_reserve;
+    Storage_set_capacity;
     Storage_lengthen;
     Storage_push;
     Storage_pop;
@@ -215,13 +213,11 @@ let operations =
     View_length;
     View_at;
     View_slice;
+    View_address;
     Crash;
-    Read_bytes;
     Write_float;
     Handle_from;
     Handle_descriptor;
-    Environment_variable;
-    Run_process;
   ]
   @ List.map (fun function_ -> Libc function_) Libc.functions
   @ List.map (fun number -> Libc_number number) Libc.numbers
@@ -272,7 +268,7 @@ let operation_name = function
   | Storage_with_capacity -> "storage_with_capacity"
   | Storage_length -> "storage_length"
   | Storage_capacity -> "storage_capacity"
-  | Storage_reserve -> "storage_reserve"
+  | Storage_set_capacity -> "storage_set_capacity"
   | Storage_lengthen -> "storage_lengthen"
   | Storage_push -> "storage_push"
   | Storage_pop -> "storage_pop"
@@ -285,13 +281,11 @@ let operation_name = function
   | View_length -> "view_length"
   | View_at -> "view_at"
   | View_slice -> "view_slice"
+  | View_address -> "view_address"
   | Crash -> "crash"
-  | Read_bytes -> "read_bytes"
   | Write_float -> "write_float"
   | Handle_from -> "handle_from"
   | Handle_descriptor -> "handle_descriptor"
-  | Environment_variable -> "environment_variable"
-  | Run_process -> "run_process"
   | Libc function_ -> "libc_" ^ Libc.function_name function_
   | Libc_number number -> "libc_" ^ String.lowercase_ascii (Libc.number_name number)
 

@@ -626,4 +626,31 @@ test "once" {
 }
 |}
 
+let () =
+  passes "a list grows as it is pushed and keeps what it held"
+    {|test "grown" {
+  var numbers: List[Int64] = []
+  var next = 0
+  while next < 1000 {
+    mut numbers.push(next)
+    next += 1
+  }
+  var total = 0
+  for number in numbers {
+    total += number
+  }
+  assert numbers.length() == 1000
+  assert total == 499500
+}
+|};
+  passes "text that started as a literal is copied before it is added to"
+    {|test "added to" {
+  var first = "abc"
+  mut first.push("def")
+  let second = "abc"
+  assert first == "abcdef"
+  assert second == "abc"
+}
+|}
+
 let () = Harness.finish ()

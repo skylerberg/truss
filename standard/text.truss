@@ -1,3 +1,4 @@
+use standard::growth
 use standard::intrinsic
 
 public opaque type String(storage: intrinsic::Storage[UInt8])
@@ -65,7 +66,7 @@ public fn String.is_empty(self) -> Bool
 public fn String.push(mut self, text: StringSlice)
   ensures identical(self.model(), old(self.model()).concatenate(text.model()))
 {
-  intrinsic::storage_reserve(mut self.storage, additional: text.length())
+  growth::reserve(mut self.storage, additional: text.length())
   for index in 0..text.length() {
     intrinsic::storage_push(mut self.storage, value: intrinsic::view_at(text.bytes, index: index))
   }
@@ -119,13 +120,13 @@ fn replaced(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
   while at < intrinsic::view_length(bytes) {
     let step = utf8_sequence(bytes, at)
     if step == 0 {
-      intrinsic::storage_push(mut fixed, value: 239)
-      intrinsic::storage_push(mut fixed, value: 191)
-      intrinsic::storage_push(mut fixed, value: 189)
+      growth::push(mut fixed, value: 239)
+      growth::push(mut fixed, value: 191)
+      growth::push(mut fixed, value: 189)
       at += 1
     } else {
       for index in at..at + step {
-        intrinsic::storage_push(mut fixed, value: intrinsic::view_at(bytes, index: index))
+        growth::push(mut fixed, value: intrinsic::view_at(bytes, index: index))
       }
       at += step
     }
@@ -203,10 +204,14 @@ public fn TextBuilder.finish(own self) -> String {
 }
 
 internal fn TextBuilder.write_byte(mut self, byte: UInt8) {
+  if intrinsic::storage_length(self.text.storage) >= intrinsic::storage_capacity(self.text.storage) {
+    growth::reserve(mut self.text.storage, additional: 1)
+  }
   intrinsic::storage_push(mut self.text.storage, value: byte)
 }
 
 internal fn TextBuilder.write_float[Value](mut self, value: Value) {
+  growth::reserve(mut self.text.storage, additional: 32)
   intrinsic::write_float(mut self.text.storage, value: value)
 }
 
