@@ -4,8 +4,6 @@
 open Definitions
 open Lowering
 open Targets
-open Matching
-open Expressions
 open Lir_builder
 
 (* Constants *)
@@ -41,10 +39,11 @@ let integer_kind st ty =
 
 let truth value = Some (Lir.Static_scalar (Bool value))
 
-(* An operator on two folded values, where both are numbers or both [Bool]
-   and the result is exactly what running the operator gives. Anything else,
-   such as a sum that does not fit its type, is left to be run. *)
-let binary st ty (operator : S.binary) (left : Lir.static_value) (right : Lir.static_value) =
+(* An arithmetic or bitwise operation on two folded numbers, where the
+   result is exactly what running the operation gives. Anything else, such
+   as a sum that does not fit its type, is left to be run. *)
+let arithmetic st ty (operation : Intrinsic.operation) (left : Lir.static_value)
+    (right : Lir.static_value) =
   match (left, right) with
   | Static_scalar (Integer (kind, x)), Static_scalar (Integer (_, y)) -> (
       let bits = 8 * Memory_layout.integer_size (Memory_layout.target st.context.env) kind in
@@ -55,7 +54,7 @@ let binary st ty (operator : S.binary) (left : Lir.static_value) (right : Lir.st
       let shift by =
         if Z.sign y >= 0 && Z.lt y (Z.of_int bits) then number (by x (Z.to_int y)) else None
       in
-      match operator with
+      match operation with
       | Add -> number (Z.add x y)
       | Subtract -> number (Z.sub x y)
       | Multiply -> number (Z.mul x y)
@@ -66,17 +65,11 @@ let binary st ty (operator : S.binary) (left : Lir.static_value) (right : Lir.st
       | Bit_xor -> number (Z.logxor x y)
       | Shift_left -> shift Z.shift_left
       | Shift_right -> shift Z.shift_right
-      | Equal -> truth (Z.equal x y)
-      | Not_equal -> truth (not (Z.equal x y))
-      | Less -> truth (Z.lt x y)
-      | Less_equal -> truth (Z.leq x y)
-      | Greater -> truth (Z.gt x y)
-      | Greater_equal -> truth (Z.geq x y)
-      | And | Or | Implies -> None)
+      | _ -> None)
   | Static_scalar (Float64 x), Static_scalar (Float64 y) -> (
       let number value = Some (Lir.Static_scalar (Float64 (Int64.bits_of_float value))) in
       let x = Int64.float_of_bits x and y = Int64.float_of_bits y in
-      match operator with
+      match operation with
       | Add -> number (x +. y)
       | Subtract -> number (x -. y)
       | Multiply -> number (x *. y)
@@ -85,49 +78,75 @@ let binary st ty (operator : S.binary) (left : Lir.static_value) (right : Lir.st
   | Static_scalar (Float32 x), Static_scalar (Float32 y) -> (
       let number value = Some (Lir.Static_scalar (Float32 (Int32.bits_of_float value))) in
       let x = Int32.float_of_bits x and y = Int32.float_of_bits y in
-      match operator with
+      match operation with
       | Add -> number (x +. y)
       | Subtract -> number (x -. y)
       | Multiply -> number (x *. y)
       | Divide -> number (x /. y)
       | _ -> None)
-  | Static_scalar (Bool x), Static_scalar (Bool y) -> (
-      match operator with
-      | And -> truth (x && y)
-      | Or -> truth (x || y)
-      | Equal -> truth (x = y)
-      | Not_equal -> truth (x <> y)
-      | _ -> None)
   | _ -> None
 
-(* A constant expression's value, where it can be worked out here exactly
-   as running it would: literals, operators on numbers and on [Bool],
-   other constants that fold, and records, variants, strings, lists, and
-   arrays built from parts that fold. For anything else there is none, and
-   the value is worked out by running the constant's evaluator. Running is
-   what a constant's value means; folding only saves the run. *)
-let rec fold st (e : S.expression) : Lir.static_value option =
-  let ty = type_of st e.id in
-  let checked = st.frame.code.checked in
-  let number value =
-    match constant_of st ty value with Constant c -> Some (Lir.Static_scalar c) | _ -> None
+let negated st (value : Lir.static_value) =
+  match value with
+  | Static_scalar (Integer (kind, x)) -> integer st kind (Z.neg x)
+  | Static_scalar (Float64 x) ->
+      Some (Lir.Static_scalar (Float64 (Int64.bits_of_float (Float.neg (Int64.float_of_bits x)))))
+  | Static_scalar (Float32 x) ->
+      Some (Lir.Static_scalar (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits x)))))
+  | _ -> None
+
+(* A comparison of two folded integers or two folded [Bool]s. *)
+let compared (comparison : Core.comparison) (left : Lir.static_value) (right : Lir.static_value) =
+  match (left, right) with
+  | Static_scalar (Integer (_, x)), Static_scalar (Integer (_, y)) ->
+      truth
+        (match comparison with
+        | Equal -> Z.equal x y
+        | Not_equal -> not (Z.equal x y)
+        | Less -> Z.lt x y
+        | Less_equal -> Z.leq x y
+        | Greater -> Z.gt x y
+        | Greater_equal -> Z.geq x y)
+  | Static_scalar (Bool x), Static_scalar (Bool y) -> (
+      match comparison with
+      | Equal -> truth (x = y)
+      | Not_equal -> truth (x <> y)
+      | Less | Less_equal | Greater | Greater_equal -> None)
+  | _ -> None
+
+(* How deep folding follows calls. A call that is deeper is left to be
+   run. *)
+let call_depth = 8
+
+(* A constant expression's value, where it can be worked out here exactly as
+   running it would. For anything else there is none, and the value is
+   worked out by running the constant's evaluator. Running is what a
+   constant's value means; folding only saves the run.
+
+   What folds: literals, operators on numbers and on [Bool], other constants
+   that fold, records, variants, and arrays built from parts that fold, and
+   a list literal. A list literal is a block that makes a storage, pushes
+   each element, and calls [List.from_storage], so folding follows a block's
+   [let]s and pushes, and a call of a function whose body is one expression
+   and which has no [requires] clause. [locals] holds the values of the
+   locals bound so far. *)
+let rec fold ?(depth = call_depth) st (locals : (Core.local, Lir.static_value ref) Hashtbl.t)
+    (value : Core.expression) : Lir.static_value option =
+  let ty = ground st value.type_ in
+  let fold_here = fold ~depth st locals in
+  let number literal =
+    match constant_of st ty literal with Constant c -> Some (Lir.Static_scalar c) | _ -> None
   in
-  match e.kind with
-  | Parenthesized inner -> fold st inner
-  | Integer _ | Float _ -> number (literal st e.id)
-  | Prefix (Negate, ({ kind = Integer _; _ } as inner)) when checked.calls.(e.id) = None -> (
-      match literal st inner.id with
-      | Integer_value v -> number (Integer_value (Z.neg v))
-      | Float_value v -> number (Float_value (Float.neg v)))
-  | True -> truth true
-  | False -> truth false
-  | String _ when checked.literals.(e.id) <> None -> number (literal st e.id)
-  | String literal when literal.rest = [] && literal.tag = None -> (
+  match value.kind with
+  | Integer integer -> number (Integer_value integer)
+  | Float float -> number (Float_value float)
+  | Boolean boolean -> truth boolean
+  | String text -> (
       match Monomorphic.shape st.context.monomorphic ty with
       | Record [ (field, Typed _) ] ->
           let bytes =
-            List.init (String.length literal.first.value) (fun i ->
-                Lir.Static_scalar (Integer (UInt8, Z.of_int (Char.code literal.first.value.[i]))))
+            List.init (String.length text) (fun i ->
+                Lir.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[i]))))
           in
           Some
             (Lir.Static_record
@@ -137,65 +156,132 @@ let rec fold st (e : S.expression) : Lir.static_value option =
                      { element = Monomorphic.builtin UInt8; elements = bytes; owned = false } );
                ])
       | _ -> None)
-  | List elements -> (
-      let* values = all (List.map (fold st) elements) in
-      match Monomorphic.shape st.context.monomorphic ty with
-      | Array _ -> Some (Lir.Static_array values)
-      | Record [ (field, Typed storage) ] -> (
-          match Monomorphic.kind st.context.monomorphic storage with
-          | Storage element ->
-              Some
-                (Lir.Static_record
-                   [ (field, Static_storage { element; elements = values; owned = true }) ])
-          | _ -> None)
+  | Use place -> fold_place st locals place
+  | Construct { variant; fields } ->
+      let* fields =
+        all
+          (List.map
+             (fun (name, field) ->
+               let* field = field in
+               let* field = fold_here field in
+               Some (name, field))
+             fields)
+      in
+      Some
+        (match variant with
+        | Some variant -> Lir.Static_variant (variant, fields)
+        | None -> Static_record fields)
+  | Collection_literal { elements; construction = Array } ->
+      let* elements = all (List.map fold_here elements) in
+      Some (Lir.Static_array elements)
+  | Operator { operation = Negate; arguments = [ inner ] } ->
+      let* inner = fold_here inner in
+      negated st inner
+  | Operator { operation; arguments = [ left; right ] } ->
+      let* left = fold_here left in
+      let* right = fold_here right in
+      arithmetic st ty operation left right
+  | Compare { comparison; left; right } ->
+      let* left = fold_here left in
+      let* right = fold_here right in
+      compared comparison left right
+  | Not inner -> (
+      let* inner = fold_here inner in
+      match inner with Static_scalar (Bool x) -> truth (not x) | _ -> None)
+  | And (left, right) | Or (left, right) -> (
+      let* left = fold_here left in
+      let* right = fold_here right in
+      match (value.kind, left, right) with
+      | And _, Static_scalar (Bool x), Static_scalar (Bool y) -> truth (x && y)
+      | Or _, Static_scalar (Bool x), Static_scalar (Bool y) -> truth (x || y)
       | _ -> None)
-  | Name _ | Member _ -> (
-      match checked.meanings.(e.id) with
-      | Some (Global { path; _ }) -> !(st.context.constant) path
-      | Some (Variant_value { variant; _ }) -> Some (Lir.Static_variant (variant, []))
-      | _ -> None)
-  | Call (_, arguments) -> (
-      match checked.calls.(e.id) with
-      | Some { callee = Constructor { variant; _ }; arguments = passed; defaults_left_out = []; _ }
-        ->
-          let names = constructor_fields st ty variant in
-          let* fields =
+  | Block { statements; value = Some result; _ } ->
+      let* _ = all (List.map (fold_statement ~depth st locals) statements) in
+      fold_here result
+  | Call
+      {
+        callee = Intrinsic { operation = Storage_with_capacity; type_arguments = [ Type element ] };
+        _;
+      } ->
+      Some (Lir.Static_storage { element = ground st element; elements = []; owned = true })
+  | Call { callee = Function { path; type_arguments }; arguments; _ } when depth > 0 -> (
+      match demand st.context Infer.core_of_path path with
+      | Some
+          ( {
+              definition =
+                Function
+                  {
+                    parameters;
+                    contract = { requires = []; _ };
+                    body = Some { statements = []; value = Some result; _ };
+                  };
+              _;
+            },
+            _ ) ->
+          let* arguments =
             all
               (List.map
-                 (fun (argument : C.argument) ->
-                   let* written =
-                     List.find_opt
-                       (fun (a : S.argument) -> a.value.id = argument.expression)
-                       arguments
-                   in
-                   let* value = fold st written.value in
-                   let* name = List.nth_opt names argument.parameter in
-                   Some (name, value))
-                 passed)
+                 (fun (argument : Core.argument) ->
+                   match argument with
+                   | Passed { value = Value value; _ } -> fold_here value
+                   | Passed { value = Place place; _ } -> fold_place st locals place
+                   | Default -> None)
+                 arguments)
           in
-          Some
-            (match variant with
-            | Some v -> Lir.Static_variant (v, fields)
-            | None -> Static_record fields)
+          let type_arguments =
+            List.map
+              (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
+              type_arguments
+          in
+          let callee =
+            enter st.context (frame_of (code_of st.context path type_arguments) ~inlined:[])
+          in
+          let bound = Hashtbl.create 4 in
+          List.iter2
+            (fun (parameter : Core.parameter) argument ->
+              Hashtbl.replace bound parameter.local (ref argument))
+            parameters arguments;
+          fold ~depth:(depth - 1) callee bound result
       | _ -> None)
-  | Binary { operator; left; right; _ } ->
-      let* left = fold st left in
-      let* right = fold st right in
-      binary st ty operator left right
-  | Prefix (Negate, inner) -> (
-      let* value = fold st inner in
-      match value with
-      | Static_scalar (Integer (kind, x)) -> integer st kind (Z.neg x)
-      | Static_scalar (Float64 x) ->
-          Some
-            (Lir.Static_scalar (Float64 (Int64.bits_of_float (Float.neg (Int64.float_of_bits x)))))
-      | Static_scalar (Float32 x) ->
-          Some
-            (Lir.Static_scalar (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits x)))))
+  | _ -> None
+
+(* The folded value at a place: another constant's, or a local's. *)
+and fold_place st locals (place : Core.place) =
+  match place with
+  | Constant { path; _ } -> !(st.context.constant) path
+  | Local { local; _ } -> Option.map ( ! ) (Hashtbl.find_opt locals local)
+  | Field _ | Lent _ | Temporary _ -> None
+
+(* Folds a statement of a block: a [let] of one name, or a push onto a
+   storage that a [let] bound. *)
+and fold_statement ~depth st locals (statement : Core.statement) : unit option =
+  match statement.kind with
+  | Let { pattern = { kind = Bind { local; _ }; _ }; value = Value value; else_ = None } ->
+      let* value = fold ~depth st locals value in
+      Hashtbl.replace locals local (ref value);
+      Some ()
+  | Evaluate
+      {
+        kind =
+          Call
+            {
+              callee = Intrinsic { operation = Storage_push; _ };
+              arguments =
+                [
+                  Passed { value = Place (Local { local; _ }); _ };
+                  Passed { value = Value element; _ };
+                ];
+              _;
+            };
+        _;
+      } -> (
+      let* storage = Hashtbl.find_opt locals local in
+      let* element = fold ~depth st locals element in
+      match !storage with
+      | Static_storage contents ->
+          storage := Static_storage { contents with elements = contents.elements @ [ element ] };
+          Some ()
       | _ -> None)
-  | Prefix (Not, inner) -> (
-      let* value = fold st inner in
-      match value with Static_scalar (Bool x) -> truth (not x) | _ -> None)
   | _ -> None
 
 (* The state to lower a constant's expression in, the expression, and its
@@ -203,8 +289,8 @@ let rec fold st (e : S.expression) : Lir.static_value option =
 let constant_state context path =
   let key = key_of context path in
   let value =
-    match demand context Names.definition key with
-    | Some { kind = Constant { value; _ }; _ } -> value
+    match demand context Infer.core_of_path path with
+    | Some ({ definition = Constant value; _ }, _) -> value
     | _ -> bug "%s is not a constant" (Path.show path)
   in
   let ty =
@@ -228,7 +314,7 @@ type constant = Folded of Lir.data | Run of Ground.ty
 
 let constant context path =
   let st, value, ty = constant_state context path in
-  match fold st value with
+  match fold st (Hashtbl.create 4) value with
   | Some value -> Folded { data_key = Constant path; ty; value }
   | None -> Run ty
 
@@ -274,7 +360,7 @@ let evaluator context path : Lir.t =
   start st.b (block st.b);
   in_scope st (fun () ->
       let place = temporary st ty in
-      into st value place;
+      Core_form.into st value place;
       let output = begin_output st in
       Glue.encode_call context.glue st.b
         ~output:(Address { place = output; writable = true })

@@ -8,14 +8,8 @@ open Lir_builder
 
 (* Patterns *)
 
-(* A constant's static data, as a place. *)
-let rec static_constant st path : Lir.place =
-  match demand st.context Environment.constant_type path with
-  | Some ty -> { root = Static { key = Constant path; ty = ground st ty }; projections = [] }
-  | None -> bug "no type for the constant %s" (Path.show path)
-
 (* A [String] or [StringSlice] of a literal's text, in a new local. *)
-and string_place st ty text =
+let rec string_place st ty text =
   let place = temporary st ty in
   string_literal st ty text ~destination:place;
   place

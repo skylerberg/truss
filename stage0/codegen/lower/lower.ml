@@ -171,36 +171,45 @@ let code_state context path =
   let code = code_of context path [] in
   (enter context (frame_of code ~inlined:[ path ]), code)
 
+(* A tag's [from_template]: its one parameter and its [requires] clauses,
+   from its core form. *)
+let from_template_contract context from_template : Core.parameter * Core.condition list =
+  match demand context Infer.core_of_path from_template with
+  | Some ({ definition = Function { parameters = [ parameter ]; contract; _ }; _ }, _) ->
+      (parameter, contract.requires)
+  | _ -> bug "%s does not take one template" (Path.show from_template)
+
 (* The positions, among a tag's [from_template]'s clauses, of those a
    template check works out. *)
 let template_checked context from_template =
-  let st, code = code_state context from_template in
+  let _, requires = from_template_contract context from_template in
   List.concat
-    (List.mapi (fun index clause -> if executable st clause then [ index ] else []) code.requires)
+    (List.mapi
+       (fun index (clause : Core.condition) -> if clause.executable then [ index ] else [])
+       requires)
 
 let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
-  let st, code = code_state context from_template in
+  let st, _ = code_state context from_template in
+  let parameter, requires = from_template_contract context from_template in
   start st.b (block st.b);
   in_scope st (fun () ->
-      (match code.parameter_types with
-      | [ (_, ty, (parameter : S.parameter)) ] -> (
-          let ty = ground st ty in
-          let built = Values.template_value st ty texts ~span:code.body.span ~parts:[] in
-          match parameter.kind with
-          | Named_parameter { name; _ } -> Hashtbl.replace st.frame.bindings name.id built
-          | _ -> bug "a from_template without a named parameter")
-      | _ -> bug "from_template takes one template");
+      let template =
+        template_value st (ground st parameter.type_) texts
+          ~site:{ definition = st.frame.code.anchor; line = 1; column = 1 }
+          ~parts:[]
+      in
+      Core_form.bind_local st parameter.local template;
       let output = Constants.begin_output st in
       List.iter
-        (fun clause ->
-          if executable st clause then begin
+        (fun (clause : Core.condition) ->
+          if clause.executable then begin
             let holds = temporary st context.bool in
-            into st clause holds;
+            Core_form.into st clause.value holds;
             Glue.encode_call context.glue st.b
               ~output:(Address { place = output; writable = true })
               context.bool holds
           end)
-        code.requires;
+        requires;
       Constants.write_output st output);
   { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
 
