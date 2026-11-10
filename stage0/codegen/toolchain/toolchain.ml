@@ -189,7 +189,7 @@ let link t ?(extra = []) ~objects ~output () =
       List.iter (fun path -> output_string channel (response_word path ^ "\n")) objects);
   (* [fma] can be a call into libm where the processor has no instruction
      for it, as on baseline x86-64. macOS accepts [-lm] as part of its libc. *)
-  let result = run t.compiler (extra @ [ "@" ^ response; "-o"; output; "-lm" ]) in
+  let result = run t.compiler (extra @ [ "@" ^ response; "-o"; output; "-lm"; "-pthread" ]) in
   (try Sys.remove response with Sys_error _ -> ());
   match result with 0, _, _ -> Ok () | _, out, err -> Error (out ^ err)
 

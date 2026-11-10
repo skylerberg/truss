@@ -1,6 +1,7 @@
-(* The runtime is C, kept here as text. It has three parts: writing and
-   failing, which every program uses; allocation; and what a test program
-   gives the runner, which is Truss in the standard library. *)
+(* The runtime is C, kept here as text. Its parts: writing and failing,
+   which every program uses; allocation; the threads that run branches at
+   once; and what a test program gives the runner, which is Truss in the
+   standard library. *)
 
 let headers =
   (* Strict C11 hides POSIX functions such as [posix_memalign] and
@@ -13,6 +14,10 @@ let headers =
 #include <signal.h>
 #include <errno.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <sched.h>
+#include <stdatomic.h>
+#include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -47,9 +52,12 @@ void t_runtime_report_tests_to(int32_t descriptor) { t_report = descriptor; }
 enum { t_passed, t_failed, t_panicked, t_incomplete, t_echoed };
 
 /* Text is built in a fixed buffer, so that failing never allocates, even
-   when it fails because memory ran out. Longer text is cut short. */
+   when it fails because memory ran out. Longer text is cut short. One
+   thread at a time builds text, and a thread that is ending the run never
+   gives the buffer up, so one failure is reported. */
 static char t_text[65536];
 static size_t t_text_length;
+static pthread_mutex_t t_text_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void t_text_add(const void *bytes, size_t length) {
   size_t room = sizeof t_text - t_text_length;
@@ -111,6 +119,7 @@ static _Noreturn void t_end(uint8_t kind, const char *heading, int status) {
 
 static void t_describe(const uint8_t *message, t_usize length, const struct t_anchor *anchor, uint32_t line,
                        uint32_t column) {
+  pthread_mutex_lock(&t_text_lock);
   t_text_length = 0;
   t_text_add(message, length);
   t_text_string("\n  at ");
@@ -137,6 +146,7 @@ _Noreturn void t_runtime_todo(const uint8_t *message, t_usize length, const stru
 
 void t_runtime_echo(const uint8_t *text, t_usize length, const struct t_anchor *anchor, uint32_t line,
                     uint32_t column) {
+  pthread_mutex_lock(&t_text_lock);
   t_text_length = 0;
   t_text_position(anchor, line, column);
   t_text_string(": ");
@@ -148,15 +158,18 @@ void t_runtime_echo(const uint8_t *text, t_usize length, const struct t_anchor *
     t_write_all(2, t_text, t_text_length);
     t_write_all(2, "\n", 1);
   }
+  pthread_mutex_unlock(&t_text_lock);
 }
 
 _Noreturn void t_runtime_compiler_bug(void) {
+  pthread_mutex_lock(&t_text_lock);
   t_text_length = 0;
   t_text_string("reached code the prover showed unreachable");
   t_end(t_panicked, "compiler bug: ", 101);
 }
 
 static _Noreturn void t_out_of_memory(void) {
+  pthread_mutex_lock(&t_text_lock);
   t_text_length = 0;
   t_text_string("out of memory");
   if (t_report >= 0) t_end(t_panicked, "", 101);
@@ -168,6 +181,8 @@ static char t_signal_stack[65536];
 
 static void t_stack_overflow(int signal) {
   (void)signal;
+  /* The thread may hold the lock already, so it is taken only if free. */
+  (void)pthread_mutex_trylock(&t_text_lock);
   t_text_length = 0;
   t_text_string("stack overflow");
   t_end(t_panicked, "", 101);
@@ -243,6 +258,349 @@ void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usiz
 
 |}
 
+let threads =
+  {|
+struct t_branch {
+  void (*run)(void *environment);
+  void *environment;
+};
+
+#ifdef T_IN_ORDER
+
+/* A test program, and code run while compiling, run a fork's branches in
+   order, which gives what running them at once gives. A test already has
+   one core of the machine, and in order a check that fails is the same
+   check on every run. */
+void t_runtime_parallel(const struct t_branch *branches, t_usize count) {
+  for (t_usize index = 0; index < count; index++) branches[index].run(branches[index].environment);
+}
+
+void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t last),
+                              void *environment, uint64_t first, uint64_t last) {
+  body(environment, first, last);
+}
+
+#else
+
+/* Running branches at once.
+
+   A fork gives a thread several branches. It runs the first itself and
+   offers the rest as jobs on its own queue, where a thread with nothing to
+   do takes one from the far end. When its first branch returns, the thread
+   takes back each job that is still there and runs it, and for a job that
+   was taken it waits, running other threads' jobs meanwhile. A job lives in
+   the frame of the fork that offered it, which does not return until every
+   one of its jobs is done.
+
+   The queue is Chase and Lev's, with the memory orderings of Le, Pop,
+   Cohen, and Zappa Nardelli ("Correct and Efficient Work-Stealing for Weak
+   Memory Models"), and a fixed size: a thread whose queue is full runs the
+   branch itself, which is always right. */
+
+struct t_job {
+  void (*run)(void *environment);
+  void *environment;
+  atomic_int done;
+  int offered;
+};
+
+#define T_QUEUE 256
+#define T_WORKERS 256
+#define T_FORK 32
+
+struct t_worker {
+  _Alignas(64) _Atomic(int64_t) top;
+  _Alignas(64) _Atomic(int64_t) bottom;
+  uint64_t random;
+  _Alignas(64) _Atomic(struct t_job *) jobs[T_QUEUE];
+};
+
+static struct t_worker t_workers[T_WORKERS];
+static size_t t_worker_count;
+static _Thread_local struct t_worker *t_self;
+static pthread_once_t t_pool_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t t_pool_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t t_pool_wake = PTHREAD_COND_INITIALIZER;
+static atomic_size_t t_sleepers;
+
+static int t_offer(struct t_worker *worker, struct t_job *job) {
+  int64_t bottom = atomic_load_explicit(&worker->bottom, memory_order_relaxed);
+  int64_t top = atomic_load_explicit(&worker->top, memory_order_acquire);
+  if (bottom - top >= T_QUEUE) return 0;
+  atomic_store_explicit(&worker->jobs[bottom % T_QUEUE], job, memory_order_relaxed);
+  /* Sequentially consistent, so that of this store and a thread that is
+     about to sleep, one sees the other. */
+  atomic_store(&worker->bottom, bottom + 1);
+  return 1;
+}
+
+static struct t_job *t_take_back(struct t_worker *worker) {
+  int64_t bottom = atomic_load_explicit(&worker->bottom, memory_order_relaxed) - 1;
+  atomic_store_explicit(&worker->bottom, bottom, memory_order_relaxed);
+  atomic_thread_fence(memory_order_seq_cst);
+  int64_t top = atomic_load_explicit(&worker->top, memory_order_relaxed);
+  struct t_job *job = NULL;
+  if (top <= bottom) {
+    job = atomic_load_explicit(&worker->jobs[bottom % T_QUEUE], memory_order_relaxed);
+    if (top == bottom) {
+      /* The last job, which a thief may be taking. */
+      if (!atomic_compare_exchange_strong_explicit(&worker->top, &top, top + 1, memory_order_seq_cst,
+                                                   memory_order_relaxed))
+        job = NULL;
+      atomic_store_explicit(&worker->bottom, bottom + 1, memory_order_relaxed);
+    }
+  } else {
+    atomic_store_explicit(&worker->bottom, bottom + 1, memory_order_relaxed);
+  }
+  return job;
+}
+
+static struct t_job *t_steal(struct t_worker *victim) {
+  int64_t top = atomic_load_explicit(&victim->top, memory_order_acquire);
+  atomic_thread_fence(memory_order_seq_cst);
+  int64_t bottom = atomic_load_explicit(&victim->bottom, memory_order_acquire);
+  if (top >= bottom) return NULL;
+  struct t_job *job = atomic_load_explicit(&victim->jobs[top % T_QUEUE], memory_order_relaxed);
+  if (!atomic_compare_exchange_strong_explicit(&victim->top, &top, top + 1, memory_order_seq_cst,
+                                               memory_order_relaxed))
+    return NULL;
+  return job;
+}
+
+/* A job of another thread's, or none. */
+static struct t_job *t_find(struct t_worker *self) {
+  size_t count = t_worker_count;
+  self->random = self->random * 6364136223846793005ULL + 1442695040888963407ULL;
+  size_t start = (size_t)(self->random >> 33) % count;
+  for (size_t offset = 0; offset < count; offset++) {
+    struct t_worker *victim = &t_workers[(start + offset) % count];
+    if (victim == self) continue;
+    struct t_job *job = t_steal(victim);
+    if (job != NULL) return job;
+  }
+  return NULL;
+}
+
+static int t_any_job(void) {
+  for (size_t index = 0; index < t_worker_count; index++)
+    if (atomic_load(&t_workers[index].top) < atomic_load(&t_workers[index].bottom)) return 1;
+  return 0;
+}
+
+static void t_wake(int everyone) {
+  if (atomic_load(&t_sleepers) == 0) return;
+  pthread_mutex_lock(&t_pool_lock);
+  if (everyone) pthread_cond_broadcast(&t_pool_wake);
+  else pthread_cond_signal(&t_pool_wake);
+  pthread_mutex_unlock(&t_pool_lock);
+}
+
+/* Runs a job that was taken from another thread. Its frame may be gone as
+   soon as it is marked done. */
+static void t_run_taken(struct t_job *job) {
+  job->run(job->environment);
+  atomic_store(&job->done, 1);
+  t_wake(1);
+}
+
+static void t_rest(unsigned idle) {
+  if (idle < 32) {
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_ia32_pause();
+#elif defined(__aarch64__)
+    __asm__ __volatile__("yield");
+#endif
+  } else {
+    sched_yield();
+  }
+}
+
+/* Sleeps until a job is offered or a taken one is done, unless [job] is
+   done or some thread has a job already. */
+static void t_sleep(struct t_job *job) {
+  pthread_mutex_lock(&t_pool_lock);
+  atomic_fetch_add(&t_sleepers, 1);
+  if (!(job != NULL && atomic_load(&job->done)) && !t_any_job())
+    pthread_cond_wait(&t_pool_wake, &t_pool_lock);
+  atomic_fetch_sub(&t_sleepers, 1);
+  pthread_mutex_unlock(&t_pool_lock);
+}
+
+static void t_wait_for(struct t_worker *self, struct t_job *job) {
+  unsigned idle = 0;
+  while (!atomic_load_explicit(&job->done, memory_order_acquire)) {
+    struct t_job *other = t_find(self);
+    if (other != NULL) {
+      t_run_taken(other);
+      idle = 0;
+    } else if (++idle < 40) {
+      t_rest(idle);
+    } else {
+      t_sleep(job);
+      idle = 0;
+    }
+  }
+}
+
+static void t_thread_stack(void);
+
+static void *t_worker_main(void *argument) {
+  struct t_worker *self = argument;
+  t_self = self;
+  /* Signals sent to the process go to the thread that started it, as they
+     do in a program with one thread. */
+  sigset_t all;
+  sigfillset(&all);
+  sigdelset(&all, SIGSEGV);
+  sigdelset(&all, SIGBUS);
+  sigdelset(&all, SIGFPE);
+  sigdelset(&all, SIGILL);
+  pthread_sigmask(SIG_SETMASK, &all, NULL);
+  t_thread_stack();
+  unsigned idle = 0;
+  for (;;) {
+    struct t_job *job = t_find(self);
+    if (job != NULL) {
+      t_run_taken(job);
+      idle = 0;
+    } else if (++idle < 40) {
+      t_rest(idle);
+    } else {
+      t_sleep(NULL);
+      idle = 0;
+    }
+  }
+  return NULL;
+}
+
+/* Starts the pool: a thread for each core but one, since the thread that
+   forks first is the pool's too. [TRUSS_WORKERS] gives another number of
+   threads, which changes how long a program takes and nothing it does. */
+static void t_pool_start(void) {
+  long count = sysconf(_SC_NPROCESSORS_ONLN);
+  const char *asked = getenv("TRUSS_WORKERS");
+  if (asked != NULL && asked[0] != 0) count = strtol(asked, NULL, 10);
+  if (count < 1) count = 1;
+  if (count > T_WORKERS) count = T_WORKERS;
+  for (long index = 0; index < count; index++) t_workers[index].random = (uint64_t)index + 1;
+  t_worker_count = (size_t)count;
+  if (count == 1) return;
+  t_self = &t_workers[0];
+  /* A branch may recurse as deeply on any thread as on the first. */
+  struct rlimit limit;
+  size_t stack = (size_t)8 << 20;
+  if (getrlimit(RLIMIT_STACK, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY &&
+      limit.rlim_cur >= ((rlim_t)1 << 16) && limit.rlim_cur <= ((rlim_t)1 << 30))
+    stack = (size_t)limit.rlim_cur;
+  pthread_attr_t attributes;
+  pthread_attr_init(&attributes);
+  pthread_attr_setstacksize(&attributes, stack);
+  pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+  for (long index = 1; index < count; index++) {
+    pthread_t thread;
+    if (pthread_create(&thread, &attributes, t_worker_main, &t_workers[index]) != 0) {
+      /* Fewer threads than cores is slower and still right. */
+      t_worker_count = (size_t)index;
+      break;
+    }
+  }
+  pthread_attr_destroy(&attributes);
+  if (t_worker_count == 1) t_self = NULL;
+}
+
+/* Runs up to [T_FORK] + 1 branches at once. */
+static void t_fork(struct t_worker *self, const struct t_branch *branches, size_t count) {
+  struct t_job jobs[T_FORK];
+  int offered = 0;
+  /* The last branch is offered first, so that thieves take the last ones
+     and this thread takes the others back in order. */
+  for (size_t index = count - 1; index >= 1; index--) {
+    struct t_job *job = &jobs[index - 1];
+    job->run = branches[index].run;
+    job->environment = branches[index].environment;
+    atomic_init(&job->done, 0);
+    job->offered = t_offer(self, job);
+    offered |= job->offered;
+  }
+  if (offered) t_wake(0);
+  branches[0].run(branches[0].environment);
+  for (size_t index = 1; index < count; index++) {
+    struct t_job *job = &jobs[index - 1];
+    if (!job->offered) {
+      job->run(job->environment);
+      continue;
+    }
+    /* What the branches before this one offered, they took back or waited
+       for, so the newest job on the queue is this one, unless a thief has
+       it, and then a thief has every job offered before it too. */
+    struct t_job *back = t_take_back(self);
+    if (back == job) job->run(job->environment);
+    else if (back == NULL) t_wait_for(self, job);
+    else t_runtime_compiler_bug();
+  }
+}
+
+void t_runtime_parallel(const struct t_branch *branches, t_usize count) {
+  pthread_once(&t_pool_once, t_pool_start);
+  struct t_worker *self = t_self;
+  if (self == NULL) {
+    /* One core, or a thread that is not the pool's: in order. */
+    for (t_usize index = 0; index < count; index++) branches[index].run(branches[index].environment);
+    return;
+  }
+  while (count > 0) {
+    size_t some = count > T_FORK + 1 ? T_FORK + 1 : (size_t)count;
+    t_fork(self, branches, some);
+    branches += some;
+    count -= some;
+  }
+}
+
+struct t_range {
+  void (*body)(void *environment, uint64_t first, uint64_t last);
+  void *environment;
+  uint64_t first;
+  uint64_t last;
+  uint64_t size;
+};
+
+/* Runs a range by halves, down to parts of at most [size] indexes. */
+static void t_range_run(void *argument) {
+  const struct t_range *range = argument;
+  if (range->last - range->first < range->size) {
+    range->body(range->environment, range->first, range->last);
+    return;
+  }
+  uint64_t middle = range->first + (range->last - range->first) / 2;
+  struct t_range low = *range;
+  struct t_range high = *range;
+  low.last = middle;
+  high.first = middle + 1;
+  const struct t_branch halves[2] = {{t_range_run, &low}, {t_range_run, &high}};
+  t_runtime_parallel(halves, 2);
+}
+
+/* The size of a part depends on the range alone, never on the machine. */
+void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t last),
+                              void *environment, uint64_t first, uint64_t last) {
+  struct t_range whole = {body, environment, first, last, ((last - first) >> 8) + 1};
+  t_range_run(&whole);
+}
+
+/* A thread's own stack for the handler of a stack overflow, as the first
+   thread has. */
+static void t_thread_stack(void) {
+  stack_t stack;
+  memset(&stack, 0, sizeof stack);
+  stack.ss_sp = malloc(65536);
+  if (stack.ss_sp == NULL) return;
+  stack.ss_size = 65536;
+  sigaltstack(&stack, NULL);
+}
+
+#endif
+|}
+
 let resolving =
   {|
 /* A host's addresses, for the standard library, which cannot follow the
@@ -290,16 +648,18 @@ const t_test *t_runtime_tests;
 void t_runtime_run_test(uint32_t index) { t_runtime_tests[index](); }
 |}
 
-let runtime (target : Memory_layout.target) ~tests =
+let runtime (target : Memory_layout.target) ~tests ~in_order =
   String.concat ""
     [
       (if tests then "#define T_TESTS 1\n" else "");
+      (if in_order then "#define T_IN_ORDER 1\n" else "");
       headers;
       (if target.usize_bytes = 8 then "typedef uint64_t t_usize;\ntypedef int64_t t_isize;\n"
        else "typedef uint32_t t_usize;\ntypedef int32_t t_isize;\n");
       Emit_c.anchor_struct;
       failing;
       allocation;
+      threads;
       resolving;
       (if tests then tests_table else "");
     ]

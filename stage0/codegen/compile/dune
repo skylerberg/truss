@@ -16,6 +16,7 @@
   lir
   glue
   drops
+  outline
   yields
   lower
   reachable

@@ -216,6 +216,33 @@ let statement_c context fc buffer (statement : Lir.statement) =
       | Some (text, Value sum) ->
           line "t_runtime_free(%s);" (block_pointer context text sum variant)
       | _ -> bug "a block of a place that is not a sum type")
+  | Region _ | Regions_end _ -> bug "a region that outlining left in place"
+  | Fork { branches } ->
+      let operand o =
+        match operand_c context fc o with
+        | Some (text, _) -> text
+        | None -> bug "an environment of zero size"
+      in
+      line "{";
+      line "  const struct t_branch branches[%d] = { %s };" (List.length branches)
+        (String.concat ", "
+           (List.map
+              (fun (nested, environment) ->
+                Printf.sprintf "{ &%s, (void *)%s }"
+                  (function_ref_symbol fc (Nested nested))
+                  (operand environment))
+              branches));
+      line "  t_runtime_parallel(branches, %d);" (List.length branches);
+      line "}"
+  | Fork_range { body; environment; first; last } ->
+      let operand o =
+        match operand_c context fc o with
+        | Some (text, _) -> text
+        | None -> bug "an operand of zero size"
+      in
+      line "t_runtime_parallel_range(&%s, (void *)%s, %s, %s);"
+        (function_ref_symbol fc (Nested body))
+        (operand environment) (operand first) (operand last)
 
 let unreachable_c context =
   match context.build with

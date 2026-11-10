@@ -191,6 +191,14 @@ jobs:
           ASAN_OPTIONS: detect_leaks=0
         run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune test --force stage0/test/codegen
 
+      # The programs that run branches on several threads, again under
+      # ThreadSanitizer, which the other sanitizers cannot run beside.
+      - name: Test parallel programs under ThreadSanitizer
+        env:
+          TRUSS_SANITIZE: thread
+        working-directory: _build/default/stage0/test/codegen
+        run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" ./parallel_tests.exe
+
       - if: github.event_name == 'push'
         run: mkdir -p ~/.cache/truss-objects && find ~/.cache/truss-objects -type f -mtime +14 -delete
 

@@ -54,7 +54,12 @@ let references env (instance : Lir.t) =
                   | Some (Value ty) -> add (Drop ty) keys
                   | _ -> keys)
               | Free_block { place; _ } -> place_keys place keys
-              | Echo { text; length; _ } -> operand_keys length (operand_keys text keys))
+              | Echo { text; length; _ } -> operand_keys length (operand_keys text keys)
+              | Region _ | Regions_end _ -> keys
+              | Fork { branches } ->
+                  List.fold_left (fun keys (_, o) -> operand_keys o keys) keys branches
+              | Fork_range { environment; first; last; _ } ->
+                  operand_keys last (operand_keys first (operand_keys environment keys)))
             keys block.statements
         in
         match block.terminator with

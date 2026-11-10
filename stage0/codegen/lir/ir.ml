@@ -129,6 +129,15 @@ let visit_statement v = function
   | Echo { text; length; _ } ->
       visit_operand v text;
       visit_operand v length
+  | Region { region = Chunk { first; last }; _ } ->
+      visit_place v { root = Local first; projections = [] };
+      visit_place v { root = Local last; projections = [] }
+  | Region { region = Branch; _ } | Regions_end _ -> ()
+  | Fork { branches } -> List.iter (fun (_, environment) -> visit_operand v environment) branches
+  | Fork_range { environment; first; last; _ } ->
+      visit_operand v environment;
+      visit_operand v first;
+      visit_operand v last
 
 let visit_terminator v = function
   | Switch { value; _ } | Yield { value; _ } -> visit_operand v value
@@ -223,6 +232,30 @@ let map_statement ~place ~block = function
   | Echo { text; length; site } ->
       Echo
         { text = map_operand ~place ~block text; length = map_operand ~place ~block length; site }
+  | Region { fork; region = Chunk { first; last } } ->
+      let local l =
+        match place { root = Local l; projections = [] } with
+        | { root = Local mapped; projections = [] } -> mapped
+        | _ -> bug "a region's local mapped to a place that is not a local"
+      in
+      Region { fork; region = Chunk { first = local first; last = local last } }
+  | (Region { region = Branch; _ } | Regions_end _) as mark -> mark
+  | Fork { branches } ->
+      Fork
+        {
+          branches =
+            List.map
+              (fun (nested, environment) -> (nested, map_operand ~place ~block environment))
+              branches;
+        }
+  | Fork_range { body; environment; first; last } ->
+      Fork_range
+        {
+          body;
+          environment = map_operand ~place ~block environment;
+          first = map_operand ~place ~block first;
+          last = map_operand ~place ~block last;
+        }
 
 let map_terminator ~place ~block terminator =
   let operand = map_operand ~place ~block in

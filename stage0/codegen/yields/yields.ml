@@ -92,6 +92,8 @@ let statement_uses_defines (statement : Lir.statement) =
       (target_reads @ List.concat_map operand_reads arguments @ reads, defined)
   | Drop place | Free_block { place; _ } -> (place_reads place, None)
   | Echo { text; length; _ } -> (operand_reads text @ operand_reads length, None)
+  | Region _ | Regions_end _ | Fork _ | Fork_range _ ->
+      bug "a parallel statement in a method that is pulled, which runs its branches in order"
 
 let terminator_reads (terminator : Lir.terminator) =
   match terminator with
