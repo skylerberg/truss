@@ -8,3 +8,111 @@ test "a string's bytes are its UTF-8 encoding" {
   assert bytes[5] == 111
   assert "".bytes().length() == 0
 }
+
+fn same(found: StringSlice, expected: StringSlice) -> Bool {
+  found == expected
+}
+
+test "is_ascii is true only when every byte is ASCII" {
+  assert "hello".is_ascii()
+  assert "".is_ascii()
+  assert !"h\u{e9}llo".is_ascii()
+}
+
+test "characters decodes each UTF-8 sequence" {
+  var seen: List[Character] = []
+  for character in "a\u{e9}\u{20ac}\u{1F600}z".characters() {
+    mut seen.push(character)
+  }
+  assert seen.length() == 5
+  assert seen[0] == Character"a"
+  assert seen[1] == Character"\u{e9}"
+  assert seen[2] == Character"\u{20ac}"
+  assert seen[3] == Character"\u{1F600}"
+  assert seen[4] == Character"z"
+  assert "a\u{e9}\u{20ac}\u{1F600}z".character_count() == 5
+  assert "".character_count() == 0
+}
+
+test "characters_with_offsets gives the byte offset of each character" {
+  var offsets: List[USize] = []
+  for entry in "a\u{e9}\u{20ac}z".characters_with_offsets() {
+    mut offsets.push(entry.index)
+  }
+  assert offsets.length() == 4
+  assert offsets[0] == 0
+  assert offsets[1] == 1
+  assert offsets[2] == 3
+  assert offsets[3] == 6
+}
+
+test "the first and last characters are whole characters" {
+  assert "".first_character() is None
+  assert "".last_character() is None
+  assert "x".first_character() == Some(Character"x")
+  assert "x".last_character() == Some(Character"x")
+  assert "\u{20ac}uro".first_character() == Some(Character"\u{20ac}")
+  assert "caf\u{e9}".last_character() == Some(Character"\u{e9}")
+  assert "smile \u{1F600}".last_character() == Some(Character"\u{1F600}")
+}
+
+test "a substring is taken at character boundaries" {
+  let text = "caf\u{e9} au lait"
+  assert same(text.substring(0, to: 3), expected: "caf")
+  assert same(text.substring(3, to: 5), expected: "\u{e9}")
+  assert same(text.substring(5, to: 5), expected: "")
+  assert text.get_substring(0, to: 5) == Some("caf\u{e9}".slice())
+  assert text.get_substring(0, to: 4) is None
+  assert text.get_substring(4, to: 5) is None
+  assert text.get_substring(6, to: 2) is None
+  assert text.get_substring(0, to: 99) is None
+  let halves = text.split_at(5)
+  assert same(halves.first, expected: "caf\u{e9}")
+  assert same(halves.second, expected: " au lait")
+}
+
+test "prefixes and suffixes are tested and stripped" {
+  let text = "prefix-body-suffix"
+  assert text.starts_with("prefix")
+  assert text.starts_with("")
+  assert !text.starts_with("refix")
+  assert !text.starts_with("prefix-body-suffix-and-more")
+  assert text.ends_with("suffix")
+  assert text.ends_with("")
+  assert !text.ends_with("suffi")
+  assert text.strip_prefix("prefix-") == Some("body-suffix".slice())
+  assert text.strip_prefix("body") is None
+  assert text.strip_suffix("-suffix") == Some("prefix-body".slice())
+  assert text.strip_suffix("prefix") is None
+  assert text.strip_prefix(text) == Some("".slice())
+}
+
+test "trimming removes Unicode white space from the ends only" {
+  assert same("  hello world \n".trim(), expected: "hello world")
+  assert same("  hello ".trim_start(), expected: "hello ")
+  assert same("  hello ".trim_end(), expected: "  hello")
+  assert same("\u{a0}\u{2003}wide\u{3000}".trim(), expected: "wide")
+  assert same("".trim(), expected: "")
+  assert same("   ".trim(), expected: "")
+  assert same("none".trim(), expected: "none")
+  assert same("\u{e9}t\u{e9}".trim(), expected: "\u{e9}t\u{e9}")
+}
+
+test "to_bytes copies a string's bytes" {
+  let bytes = "h\u{e9}".to_bytes()
+  assert bytes.length() == 3
+  assert bytes[0] == 104
+  assert bytes[1] == 195
+  assert bytes[2] == 169
+}
+
+test "strings compare without regard to ASCII case, and order by bytes" {
+  assert "Hello".equal_ignoring_ascii_case("hELLO")
+  assert !"Hello".equal_ignoring_ascii_case("Hell")
+  assert !"Hello".equal_ignoring_ascii_case("Hallo")
+  assert !"\u{c9}".equal_ignoring_ascii_case("\u{e9}")
+  assert "apple".slice() < "banana".slice()
+  assert "apple".slice() < "apples".slice()
+  assert "b".slice() > "apple".slice()
+  assert "same".slice() == "same".slice()
+}

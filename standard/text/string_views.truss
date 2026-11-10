@@ -22,14 +22,18 @@ public fn String.is_boundary(self, offset: USize) -> Bool
 public fn String.characters(self) yields Character
   cost time O(self.length())
 {
-  todo
+  for character in self.slice().characters() {
+    yield character
+  }
 }
 
 public fn String.characters_with_offsets(self) yields core::Indexed[Character]
   ensures result.index < self.length()
   cost time O(self.length())
 {
-  todo
+  for entry in self.slice().characters_with_offsets() {
+    yield entry
+  }
 }
 
 public fn String.character_count(self) -> USize
