@@ -185,6 +185,7 @@ module Code : sig
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent
+    | Task_outlives_yield
 
   type capabilities =
     | Not_available

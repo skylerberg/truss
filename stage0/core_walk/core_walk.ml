@@ -292,3 +292,25 @@ let can_use_tasks ?(solved = fun (_ : int) : Types.capability list -> []) (body 
        })
     body;
   !found
+
+(* Whether a yielding method yields by position: its body is one [for] loop
+   over a range of integers, and the loop body is one [yield]. The
+   iterations share no state, so a [parallel for] or a [concurrent for] over
+   the method can run the range loop's iterations at the same time. *)
+let yields_by_position (body : block) : bool =
+  match (body.statements, body.value) with
+  | ( [
+        {
+          kind =
+            For
+              {
+                iteration = Integer_range _;
+                body = { statements = [ { kind = Yield _; _ } ]; value = None; _ };
+                _;
+              };
+          _;
+        };
+      ],
+      None ) ->
+      true
+  | _ -> false

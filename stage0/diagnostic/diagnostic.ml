@@ -177,6 +177,7 @@ module Code = struct
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent
+    | Task_outlives_yield
 
   type capabilities =
     | Not_available
@@ -413,6 +414,7 @@ module Code = struct
     | Keeps_lent_part -> "keeps_lent_part"
     | Read_only_view -> "read_only_view"
     | Owned_beside_lent -> "owned_beside_lent"
+    | Task_outlives_yield -> "task_outlives_yield"
 
   let capabilities_name code =
     match code with
