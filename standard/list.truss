@@ -188,6 +188,9 @@ public fn List[Element].reverse(mut self)
   ensures self.length() == old(self.length())
   ensures forall i in 0..self.length() =>
     identical(self.model()[i], old(self.model())[self.length() - 1 - i])
+  ensures forall measure: (fn(Element) -> Integer cost time finite) =>
+    self.model().sum(measure) == old(self.model()).sum(measure)
+  ensures self.capacity() == old(self.capacity())
   cost time O(self.length())
 {
   var low: USize = 0
@@ -200,10 +203,13 @@ public fn List[Element].reverse(mut self)
     invariant forall i in high..self.length() =>
       identical(self.model()[i], old(self.model())[self.length() - 1 - i])
     invariant forall i in low..high => identical(self.model()[i], old(self.model())[i])
+    invariant forall measure: (fn(Element) -> Integer cost time finite) =>
+      self.model().sum(measure) == old(self.model()).sum(measure)
+    invariant intrinsic::storage_capacity(self.storage) == old(intrinsic::storage_capacity(self.storage))
     decreases high - low
   {
     high -= 1
-    mut self.swap(low, second: high)
+    intrinsic::storage_swap(mut self.storage, first: low, second: high)
     low += 1
   }
 }
@@ -539,7 +545,24 @@ public fn List[Element].append(mut self, other: own List[Element])
   ensures identical(self.model(), old(self.model()).concatenate(other.model()))
   cost amortized time O(other.length())
 {
-  todo
+  var rest = own other
+  mut rest.reverse()
+  let count = rest.length()
+  growth::reserve(mut self.storage, additional: count)
+  let capacity = intrinsic::storage_capacity(self.storage)
+  for _ in 0..count
+    invariant rest.length() == count - yielded.length()
+    invariant forall i in 0..rest.length() => identical(rest.model()[i], other.model()[count - 1 - i])
+    invariant self.model().length() == old(self.model()).length() + yielded.length()
+    invariant forall i in 0..old(self.model()).length() =>
+      identical(self.model()[i], old(self.model())[i])
+    invariant forall i in 0..yielded.length() =>
+      identical(self.model()[old(self.model()).length() + i], other.model()[i])
+    invariant intrinsic::storage_capacity(self.storage) == capacity
+    invariant capacity >= old(self.model()).length() + count
+  {
+    intrinsic::storage_push(mut self.storage, value: intrinsic::storage_pop(mut rest.storage))
+  }
 }
 
 public fn List[Element: Copyable].append_slice(mut self, items: Slice[Element])

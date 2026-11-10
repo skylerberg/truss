@@ -29,3 +29,17 @@ test "a captured console gives its lines in order and keeps what is printed" {
   assert same(captured.output(), expected: "ab\n")
   assert same(captured.errors(), expected: "oops\n")
 }
+
+test "a style wraps text in the codes that set it and the code that resets it" {
+  assert console::Style().apply("plain") == "plain"
+  assert console::Style(bold: true).apply("x") == "\u{1b}[0;1mx\u{1b}[0m"
+  assert console::Style(dim: true, italic: true).apply("x") == "\u{1b}[0;2;3mx\u{1b}[0m"
+  assert console::Style(foreground: Some(console::Color.Red), background: Some(console::Color.BrightBlue), underline: true)
+    .apply("hi") == "\u{1b}[0;4;31;104mhi\u{1b}[0m"
+  assert console::Style(foreground: Some(console::Color.Palette(index: 200))).apply("p") == "\u{1b}[0;38;5;200mp\u{1b}[0m"
+  assert console::Style(background: Some(console::Color.TrueColor(red: 1, green: 20, blue: 255))).apply("t")
+    == "\u{1b}[0;48;2;1;20;255mt\u{1b}[0m"
+  assert console::Style(foreground: Some(console::Color.BrightWhite)).apply("") == "\u{1b}[0;97m\u{1b}[0m"
+  let styled = console::Style(bold: true, foreground: Some(console::Color.Green)).apply("h\u{e9}llo")
+  assert console::strip_styles(styled) == "h\u{e9}llo"
+}

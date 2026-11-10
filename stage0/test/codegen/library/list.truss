@@ -479,3 +479,21 @@ test "a slice is repeated, and split where an element is" {
   }
   assert parts == 1
 }
+
+test "append moves another list's elements onto the end, in order" {
+  var items: List[Int64] = [1, 2]
+  mut items.append([3, 4, 5])
+  assert same_items(items, expected: [1, 2, 3, 4, 5])
+  mut items.append([])
+  assert same_items(items, expected: [1, 2, 3, 4, 5])
+  var empty: List[Int64] = []
+  mut empty.append([9])
+  assert same_items(empty, expected: [9])
+  var words: List[String] = ["a${1}"]
+  let more: List[String] = ["b${2}", "c${3}"]
+  mut words.append(own more)
+  assert words.length() == 3
+  assert words[0] == "a1"
+  assert words[1] == "b2"
+  assert words[2] == "c3"
+}

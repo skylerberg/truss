@@ -1,3 +1,4 @@
+use standard::cryptography
 use standard::hex
 use standard::intrinsic
 use standard::text
@@ -46,7 +47,18 @@ public fn time_ordered() -> Uuid
 public fn from_name(namespace: Uuid, name: Slice[UInt8]) -> Uuid
   cost time O(name.length())
 {
-  todo
+  let prefix = namespace.bytes()
+  var hasher = cryptography::Sha1.new()
+  mut hasher.update(prefix.slice())
+  mut hasher.update(name)
+  let digest = own hasher.finish()
+  let high = UInt64.from_big_endian_bytes(
+    [digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6], digest[7]],
+  )
+  let low = UInt64.from_big_endian_bytes(
+    [digest[8], digest[9], digest[10], digest[11], digest[12], digest[13], digest[14], digest[15]],
+  )
+  Uuid(high: (high & 0xffff_ffff_ffff_0fff) | 0x5000, low: (low & 0x3fff_ffff_ffff_ffff) | 0x8000_0000_0000_0000)
 }
 
 public fn Uuid.from_bytes(bytes: Array[UInt8, 16]) -> Uuid

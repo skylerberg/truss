@@ -106,10 +106,96 @@ public type Style(
   underline: Bool = false,
 )
 
+internal fn Color.named_offset(self) -> UInt8
+  ensures result <= 67
+  cost time O(1)
+{
+  match self {
+    Black => 0
+    Red => 1
+    Green => 2
+    Yellow => 3
+    Blue => 4
+    Magenta => 5
+    Cyan => 6
+    White => 7
+    BrightBlack => 60
+    BrightRed => 61
+    BrightGreen => 62
+    BrightYellow => 63
+    BrightBlue => 64
+    BrightMagenta => 65
+    BrightCyan => 66
+    BrightWhite => 67
+    Palette(_) => 0
+    TrueColor(..) => 0
+  }
+}
+
+internal fn Color.write_code(self, output: mut String, background: Bool)
+  cost amortized time O(1)
+{
+  let base: UInt8 = if background { 40 } else { 30 }
+  match self {
+    Palette(index) => {
+      if background {
+        mut output.push(";48;5;")
+      } else {
+        mut output.push(";38;5;")
+      }
+      mut output.push(index.format())
+    }
+    TrueColor(red, green, blue) => {
+      if background {
+        mut output.push(";48;2;")
+      } else {
+        mut output.push(";38;2;")
+      }
+      mut output.push(red.format())
+      mut output.push(";")
+      mut output.push(green.format())
+      mut output.push(";")
+      mut output.push(blue.format())
+    }
+    _ => {
+      mut output.push(";")
+      mut output.push((base + self.named_offset()).format())
+    }
+  }
+}
+
 public fn Style.apply(self, text: StringSlice) -> String
   cost time O(text.length())
 {
-  todo
+  if self.foreground is None && self.background is None && !self.bold && !self.dim && !self.italic && !self.underline {
+    return text.to_string()
+  }
+  var output: String = ""
+  mut output.push("\u{1b}[0")
+  if self.bold {
+    mut output.push(";1")
+  }
+  if self.dim {
+    mut output.push(";2")
+  }
+  if self.italic {
+    mut output.push(";3")
+  }
+  if self.underline {
+    mut output.push(";4")
+  }
+  match self.foreground {
+    Some(color) => color.write_code(mut output, background: false)
+    None => {}
+  }
+  match self.background {
+    Some(color) => color.write_code(mut output, background: true)
+    None => {}
+  }
+  mut output.push("m")
+  mut output.push(text)
+  mut output.push("\u{1b}[0m")
+  output
 }
 
 internal fn sequence_end(text: StringSlice, from: USize) -> USize
