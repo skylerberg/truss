@@ -1,0 +1,24 @@
+use standard::capabilities
+use standard::intrinsic
+use standard::system::handles
+
+internal type SystemFileRead()
+
+impl FileRead for SystemFileRead {
+  fn read(self, file: Path) -> Result[Bytes, FileError] {
+    var handle = handles::open_handle(file, flags: 0)?
+    let bytes = handles::read_all(mut handle)?
+    Ok(Bytes(data: List.from_storage(own bytes)))
+  }
+
+  fn read_text(self, file: Path) -> Result[String, FileError] {
+    var handle = handles::open_handle(file, flags: 0)?
+    let bytes = handles::read_all(mut handle)?
+    Ok(String.from_bytes(own bytes))
+  }
+
+  fn open(self, file: Path) -> Result[capabilities::FileReader, FileError] {
+    let handle = handles::open_handle(file, flags: 0)?
+    Ok(capabilities::FileReader(handle: own handle, pending: intrinsic::storage_empty(), start: 0, ended: false))
+  }
+}

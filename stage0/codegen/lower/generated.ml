@@ -133,12 +133,22 @@ let table context (key : Instance.key) : Lir.table =
   | _ -> bug "not a table: %s" (Instance.to_string key)
 
 (* The [impl] of a standard capability by its real implementation: the
-   standard library's [System] type for it, such as [SystemConsole]. *)
+   standard library's [System] type for it, such as [SystemConsole], in the
+   module of [standard::system] named for the capability, as [FileRead]'s is
+   in [standard::system::file_read]. *)
 let real_implementation (capability : Path.t) : Path.t =
   let name = Ground.path_name capability in
+  let module_name =
+    String.concat ""
+      (List.mapi
+         (fun index letter ->
+           let lower = String.make 1 (Char.lowercase_ascii letter) in
+           if index > 0 && Char.uppercase_ascii letter = letter then "_" ^ lower else lower)
+         (List.of_seq (String.to_seq name)))
+  in
   Impl
     {
-      module_ = { package = "standard"; modules = [ "capabilities" ] };
+      module_ = { package = "standard"; modules = [ "system"; module_name ] };
       name = Printf.sprintf "%s for System%s" name name;
     }
 
