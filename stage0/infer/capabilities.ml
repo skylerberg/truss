@@ -402,11 +402,11 @@ let solve (state : state) =
     (List.rev state.capability_constraints)
 
 (* Whether a value of a type can call code that uses a capability: the type
-   is a function type with a [uses] clause, or an [any] type or a bounded
-   type parameter whose trait has a method with one, or it holds such a
-   type at any depth. *)
-let rec calls_with_capabilities (state : state) ~bounds ?(seen = []) (type_ : T.ty) =
-  let inside = calls_with_capabilities state ~bounds ~seen in
+   is a function type with a [uses] clause, an [any] type or a bounded type
+   parameter whose trait has a method with one, or a type that contains one
+   of these at any depth. *)
+let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T.ty) =
+  let inside = can_call_capability_code state ~bounds ~seen in
   let trait_uses (trait : T.trait_reference) =
     List.exists
       (fun (bound : T.trait_reference) ->
@@ -435,7 +435,7 @@ let rec calls_with_capabilities (state : state) ~bounds ?(seen = []) (type_ : T.
       arguments given
       || (not (List.exists (Path.equal path) seen))
          &&
-         let inside = calls_with_capabilities state ~bounds ~seen:(path :: seen) in
+         let inside = can_call_capability_code state ~bounds ~seen:(path :: seen) in
          let fields = List.exists (fun (field : T.field) -> inside field.field_type) in
          (match Members.fields state.database path given with
            | Some found -> fields found
@@ -449,13 +449,18 @@ let rec calls_with_capabilities (state : state) ~bounds ?(seen = []) (type_ : T.
          | None -> false)
   | T.Projection _ | T.Never | T.Integer | T.Literal _ | T.Variable _ | T.Hole | T.Error _ -> false
 
-(* Where the code inside a [provide] can use [Tasks], the calls of an
-   implementation that is provided [mut] take turns: each runs from start
-   to end before the next begins. A method that is given a function that
-   uses a capability could call an implementation provided further in, and
-   two tasks could then wait for each other's turn. So such a capability
-   has no method that takes one. *)
-let check_turns checking ~solved (implementations, body) =
+(* Deadlock prevention. Where the body of a [provide] can use [Tasks], an
+   implementation that is provided [mut] is a monitor: each call of its
+   methods runs to completion before the next call starts.
+
+   An implementation calls only capabilities that are provided outside its
+   own [provide], so tasks acquire monitors from the innermost outward,
+   which cannot deadlock. A callback parameter breaks that order: a callback
+   that uses a capability could enter the monitor of a nested [provide]
+   while the outer monitor is held. So a capability that a monitor
+   implements has no method with a parameter that can call code with a
+   [uses] clause. *)
+let check_monitor_callbacks checking ~solved (implementations, body) =
   let state = checking.state in
   if Core_walk.can_use_tasks ~solved body then
     List.iter
@@ -479,18 +484,19 @@ let check_turns checking ~solved (implementations, body) =
                       match
                         List.find_opt
                           (fun (parameter : T.parameter_info) ->
-                            calls_with_capabilities state ~bounds parameter.type_)
+                            can_call_capability_code state ~bounds parameter.type_)
                           signature.parameters
                       with
                       | Some parameter ->
-                          report checking Function_in_turn implementation.origin
+                          report checking Callback_may_deadlock implementation.origin
                             (Printf.sprintf
-                               "The code inside this `provide` can use `Tasks`, so the calls of \
-                                this implementation take turns. `%s.%s` is given `%s`, which can \
-                                call code that uses a capability. That code could call an \
-                                implementation that is provided further in, and two tasks could \
-                                then wait for each other's turn. Give the method the values it \
-                                needs instead."
+                               "The body of this `provide` can use `Tasks`, so this implementation \
+                                is a monitor: each call of its methods runs to completion before \
+                                the next call starts. `%s.%s` takes `%s`, which can call code that \
+                                uses a capability. Called while the monitor is held, that code \
+                                could enter the monitor of a nested `provide`, and two tasks could \
+                                deadlock. Pass the method the values that it needs instead of a \
+                                callback."
                                (show_capability (T.Capability found.capability))
                                method_.method_name parameter.name)
                       | None -> ())
@@ -562,4 +568,4 @@ let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
     | Some solution -> Option.value ~default:[] (Hashtbl.find_opt solution variable)
     | None -> []
   in
-  List.iter (check_turns checking ~solved) (List.rev checking.provides)
+  List.iter (check_monitor_callbacks checking ~solved) (List.rev checking.provides)

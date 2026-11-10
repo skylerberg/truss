@@ -192,7 +192,7 @@ module Code : sig
     | Not_granted
     | Provide_mark
     | Not_an_implementation
-    | Function_in_turn
+    | Callback_may_deadlock
 
   type prover =
     | Overflow
