@@ -48,6 +48,14 @@ val packages : session -> (string * string) list
 val time_limit : session -> int
 (** The time each test of the project may take, in seconds. *)
 
+val registry_packages : session -> (string * Registry.Version.t * string) list
+(** The registry packages of the project's build, in order of name: each one's name, its version,
+    and the hash of its files. *)
+
+val lock_fix : session -> string option
+(** The lock file the project's manifests give, when the one that is written is another, which is a
+    problem whose fix is to write this one. *)
+
 val package_modules : session -> string -> Path.module_ list
 
 val module_file : session -> Path.module_ -> string
@@ -171,6 +179,23 @@ val load_standard : Engine.t -> unit
 
 val standard_base : unit -> Engine.t
 (** The standard library, checked whole and frozen as a fixed base for engines to be made over. *)
+
+type lock_plan = {
+  text : string;  (** The lock file as it would be written *)
+  before : Registry.Lock.t;
+  after : Registry.Lock.t;
+}
+
+val plan_lock :
+  session -> set:(string * Registry.Version.t option) list -> all:bool -> (lock_plan, string) result
+(** The lock file a project would have with other versions: each package of [set] at the version
+    given, or at the registry's newest, and with [all], every registry package of the build at its
+    newest. The rest follow as a build's versions do. It fetches what it needs and writes no file.
+    An error says, in sentences, why there is no such lock file. *)
+
+val trial_with_lock : session -> string -> session
+(** A session that starts from another's state, with a lock file in place of its own, for seeing
+    what other versions would change before the file is written. *)
 
 val trial : session -> Engine.t
 (** An engine that starts from a session's state and changes on its own, for trying a change, such

@@ -350,3 +350,24 @@ let without_dependency text name =
       String.split_on_char '\n' text
       |> List.filteri (fun index _ -> index + 1 < entry.line || index + 1 > entry.last_line)
       |> String.concat "\n"
+
+let with_dependency text name =
+  let entry =
+    Printf.sprintf "%s = []" (if String.contains name ':' then Printf.sprintf "%S" name else name)
+  in
+  match List.find_opt (fun (table : table) -> table.name = "dependencies") (tables text) with
+  | Some table when List.exists (fun (entry : entry) -> entry.key = name) table.entries -> text
+  | Some table ->
+      let lines = String.split_on_char '\n' text in
+      let after =
+        match List.rev table.entries with last :: _ -> last.last_line | [] -> table.line
+      in
+      let after = min after (List.length lines) in
+      String.concat "\n"
+        (List.concat
+           (List.mapi
+              (fun index line -> if index + 1 = after then [ line; entry ] else [ line ])
+              lines))
+  | None ->
+      let text = if text = "" || text.[String.length text - 1] = '\n' then text else text ^ "\n" in
+      text ^ "\n[dependencies]\n" ^ entry ^ "\n"

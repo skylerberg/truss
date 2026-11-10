@@ -33,13 +33,22 @@ let standard_base () =
 type layout = {
   packages : (string * string) list;
       (** Each package's directory, relative to the root, and name *)
-  files : string list;  (** Each manifest and module file under the root, relative to it *)
+  files : string list;
+      (** Each manifest, lock file, and module file under the root, relative to it *)
   modules : (string * Path.module_) list;  (** Each module's file *)
   time_limit : int;  (** Each test's, in seconds *)
+  registry : (string * Registry.Version.t * string) list;
+      (** Each registry package of the build: its name, its version, and the hash of its files *)
 }
 
 let no_layout =
-  { packages = []; files = []; modules = []; time_limit = Type_checker.Manifest.default_time_limit }
+  {
+    packages = [];
+    files = [];
+    modules = [];
+    time_limit = Type_checker.Manifest.default_time_limit;
+    registry = [];
+  }
 
 let layout : (unit, layout) Query.input =
   Query.input ~name:"worktree_layout" ~show:(fun () -> "") ()
@@ -52,6 +61,10 @@ let stamps : (string, Worktree.stamp) Query.input =
 let manifest_texts : (string, string) Query.input =
   Query.input ~name:"worktree_manifest" ~show:Fun.id ()
 
+(* The project's lock file's text, for the same reason. *)
+let lock_text : (unit, string) Query.input =
+  Query.input ~name:"worktree_lock" ~show:(fun () -> "") ()
+
 (* Sessions *)
 
 type source = Directory of string | Commit of { repository : string; commit : string }
@@ -61,6 +74,8 @@ type session = {
   mutable engine : Engine.t;
   pointer : Store.pointer option;  (** Where a worktree's current state is named *)
   mutable problems : string list;  (** Manifests that could not be read, and duplicate names *)
+  mutable lock_fix : string option;
+      (** The lock file the manifests give, when the one written is another *)
   mutable used : float;
   texts : (string, string) Hashtbl.t;
       (** Each manifest and module file's fingerprint, by its path from the root *)
@@ -152,6 +167,66 @@ let text_fingerprint text = Blake3.hash text
 type file_contents = Text of string | Unchanged
 
 let manifest_file directory = if directory = "" then "truss.toml" else directory ^ "/truss.toml"
+
+(* Registry packages *)
+
+type published = {
+  manifest : Type_checker.Manifest.package;
+  record : Registry.Lock.t;
+  sources : (string list * string) list;  (** Each module's names under its package, and its text *)
+}
+
+(* A published package never changes, so what was read of one is kept by its
+   hash for as long as the process lives. *)
+let published : (string, published) Hashtbl.t = Hashtbl.create 16
+
+(* A published package's files, from the store, fetched into it from the
+   registry when they are not there yet. *)
+let load_published ~packages name version ~hash =
+  match Hashtbl.find_opt published hash with
+  | Some found -> Ok found
+  | None -> (
+      let fetched =
+        let directory = Filename.concat packages hash in
+        if Sys.file_exists directory then Ok directory
+        else
+          match Registry.Index.current () with
+          | Some registry -> Registry.Index.fetch registry ~into:packages name version ~hash
+          | None ->
+              Error
+                (Printf.sprintf "no registry is set: `%s` names its directory"
+                   Registry.Index.variable)
+      in
+      match fetched with
+      | Error reason -> Error reason
+      | Ok directory -> (
+          let files = Registry.Content.files ~all:true directory in
+          let text file = List.assoc_opt file files in
+          match
+            ( Option.map Type_checker.Manifest.parse (text "truss.toml"),
+              Registry.Lock.parse (Option.value ~default:"" (text "truss.lock")) )
+          with
+          | exception Type_checker.Manifest.Malformed (line, message) ->
+              Error (Printf.sprintf "its manifest cannot be read: line %d: %s" line message)
+          | exception Registry.Lock.Malformed (line, message) ->
+              Error (Printf.sprintf "its lock file cannot be read: line %d: %s" line message)
+          | Some { package = Some manifest; _ }, record when manifest.name = name ->
+              let found =
+                {
+                  manifest;
+                  record;
+                  sources =
+                    List.filter_map
+                      (fun (path, text) ->
+                        if Filename.check_suffix path ".truss" then
+                          Some (Worktree.segments (Filename.chop_suffix path ".truss"), text)
+                        else None)
+                      files;
+                }
+              in
+              Hashtbl.replace published hash found;
+              Ok found
+          | _ -> Error (Printf.sprintf "its manifest does not name the package `%s`" name)))
 
 (* A package that is in a cycle of the project's packages that depend on
    each other, with the cycle. *)
@@ -272,6 +347,86 @@ let apply session (files : (string * file_contents) list) =
       parsed
   in
   let named name = List.find_opt (fun (_, (p : Manifest.package)) -> p.name = name) packages in
+  let lock_problem format =
+    Printf.ksprintf (fun message -> problems := ("truss.lock: " ^ message) :: !problems) format
+  in
+  let written_text =
+    match List.assoc_opt "truss.lock" files with
+    | Some (Text text) ->
+        Engine.set engine lock_text () text;
+        Some text
+    | Some Unchanged -> read (Engine.context engine) lock_text ()
+    | None ->
+        Engine.remove engine lock_text ();
+        None
+  in
+  let written =
+    match Registry.Lock.parse (Option.value ~default:"" written_text) with
+    | entries -> Some entries
+    | exception Registry.Lock.Malformed (line, message) ->
+        problems := Printf.sprintf "truss.lock:%d: %s" line message :: !problems;
+        None
+  in
+  (* The registry packages of the build: what the project's packages depend
+     on that is no package of the project, at the versions the lock file and
+     their own records give. *)
+  let store_packages = Store.files (current ()).store "packages" in
+  let selected, selection_problems =
+    Registry.Selection.choose
+      ~lock:(Option.value ~default:[] written)
+      ~roots:
+        (List.concat_map
+           (fun (_, (package : Manifest.package)) ->
+             List.filter_map
+               (fun (dependency : Workspace.dependency) ->
+                 match Path.package_parts dependency.package with
+                 | [ _; _ ] -> Some (package.name, dependency.package)
+                 | _ -> None)
+               package.dependencies)
+           packages)
+      ~local:(fun name -> named name <> None)
+      ~load:(fun name version ~hash ->
+        Result.map
+          (fun found -> (found.manifest, found.record))
+          (load_published ~packages:store_packages name version ~hash))
+  in
+  List.iter (fun found -> lock_problem "%s" (Registry.Selection.sentence found)) selection_problems;
+  let selected_named name =
+    List.find_opt (fun (found : Registry.Selection.package) -> found.name = name) selected
+  in
+  List.iter
+    (fun (found : Registry.Selection.package) ->
+      match found.manifest.truss with
+      | Some version when not (Manifest.toolchain_builds version) ->
+          lock_problem "`%s` %s is written for Truss %s, and this toolchain is Truss %s." found.name
+            (Registry.Version.show found.version)
+            version Manifest.truss_version
+      | _ -> ())
+    selected;
+  (* The lock file is written one way: what the manifests and the versions
+     in it give. Another is a problem whose fix is to write that one. *)
+  session.lock_fix <- None;
+  (match written with
+  | Some written when selection_problems = [] ->
+      let current =
+        Registry.Selection.lock
+          ~project:
+            (List.concat_map
+               (fun (_, (package : Manifest.package)) -> package.dependencies)
+               packages)
+          selected
+      in
+      let text = Registry.Lock.print current in
+      if current = [] && written_text = None then ()
+      else if written_text <> Some text then begin
+        session.lock_fix <- Some text;
+        lock_problem "This is not the lock file the manifests give. %sRun `truss check --fix`."
+          (String.concat ""
+             (List.map
+                (fun difference -> difference ^ " ")
+                (Registry.Selection.differences ~written ~current)))
+      end
+  | _ -> ());
   List.iter
     (fun (directory, (package : Manifest.package)) ->
       (match package.truss with
@@ -308,16 +463,26 @@ let apply session (files : (string * file_contents) list) =
           if dependency.package = package.name then
             problem directory "`%s` cannot depend on itself." package.name
           else
-            match named dependency.package with
-            | None -> problem directory "`%s` is not a package of this project." dependency.package
-            | Some (_, other) ->
+            let found =
+              match (named dependency.package, selected_named dependency.package) with
+              | Some (_, other), _ -> Some other
+              | None, Some other -> Some other.manifest
+              | None, None ->
+                  (* A dependency the registry would have, with no version
+                     known, is reported with the lock file. *)
+                  if List.length (Path.package_parts dependency.package) = 1 then
+                    problem directory "`%s` is not a package of this project." dependency.package;
+                  None
+            in
+            match found with
+            | Some other when package.usize_bits = 32 && other.usize_bits = 64 ->
                 (* A package that claims to run on every target cannot rely
                    on one that runs only on 64-bit targets. *)
-                if package.usize_bits = 32 && other.usize_bits = 64 then
-                  problem directory
-                    "`%s` runs only on 64-bit targets, so `%s` must say `usize_bits = 64` to \
-                     depend on it."
-                    other.name package.name)
+                problem directory
+                  "`%s` runs only on 64-bit targets, so `%s` must say `usize_bits = 64` to depend \
+                   on it."
+                  other.name package.name
+            | _ -> ())
         package.dependencies)
     packages;
   (match dependency_cycle packages with
@@ -398,12 +563,56 @@ let apply session (files : (string * file_contents) list) =
           usize_bits = package.usize_bits;
         })
     packages;
+  (* A registry package's files never change, so its inputs are set when it
+     enters the build, or its version changes, and taken away when it
+     leaves. *)
+  let registry =
+    List.map
+      (fun (found : Registry.Selection.package) -> (found.name, found.version, found.hash))
+      selected
+  in
+  List.iter
+    (fun ((name, _, _) as was) ->
+      if not (List.mem was registry) then begin
+        (match read (Engine.context engine) Workspace.packages name with
+        | Some package when named name = None ->
+            List.iter
+              (fun module_ -> Engine.remove engine Workspace.file_text module_)
+              package.modules
+        | _ -> ());
+        if named name = None && selected_named name = None then
+          Engine.remove engine Workspace.packages name
+      end)
+    old.registry;
+  List.iter
+    (fun (found : Registry.Selection.package) ->
+      if not (List.mem (found.name, found.version, found.hash) old.registry) then
+        match Hashtbl.find_opt published found.hash with
+        | Some { sources; _ } ->
+            let sources =
+              List.map
+                (fun (modules, text) -> (({ package = found.name; modules } : Path.module_), text))
+                sources
+            in
+            List.iter
+              (fun (module_, text) -> Engine.set engine Workspace.file_text module_ text)
+              sources;
+            Engine.set engine Workspace.packages found.name
+              {
+                Workspace.name = found.name;
+                dependencies = found.manifest.dependencies;
+                modules = List.map fst sources;
+                usize_bits = found.manifest.usize_bits;
+              }
+        | None -> ())
+    selected;
   Engine.set engine layout ()
     {
       packages = List.map (fun (d, (p : Manifest.package)) -> (d, p.name)) packages;
       files = List.map fst files;
       modules = List.map (fun (path, module_, _) -> (path, module_)) modules;
       time_limit;
+      registry;
     };
   session.problems <- List.rev !problems
 
@@ -580,6 +789,7 @@ let open_directory state root =
             engine;
             pointer = Some pointer;
             problems = [];
+            lock_fix = None;
             used = Unix.time ();
             texts;
             pointed = own <> None;
@@ -609,6 +819,7 @@ let open_commit state ~repository commit =
               engine;
               pointer = None;
               problems = [];
+              lock_fix = None;
               used = Unix.time ();
               texts = Hashtbl.create 16;
               pointed = true;
@@ -705,6 +916,8 @@ let module_file session (module_ : Path.module_) =
   | None -> Workspace.file_path module_
 
 let time_limit session = (current_layout session.engine).time_limit
+let registry_packages session = (current_layout session.engine).registry
+let lock_fix session = session.lock_fix
 
 let diagnostics session module_ =
   try Engine.get session.engine Type_checker.file_diagnostics module_ with Not_found -> []
@@ -1040,6 +1253,131 @@ let trial_engine state session =
 
 let trial session = trial_engine (current ()) session
 
+(* Choosing versions *)
+
+type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
+
+let project_manifests session =
+  List.filter_map
+    (fun (_, name) -> read (Engine.context session.engine) Workspace.packages name)
+    (current_layout session.engine).packages
+
+(* The lock file a project would have with some packages at other versions:
+   each of [set] at the version given, or at its newest, and with [all],
+   every registry package of the build at its newest. The other versions
+   follow as a build's do. *)
+let plan_lock session ~set ~all =
+  match Registry.Index.current () with
+  | None ->
+      Error (Printf.sprintf "No registry is set: `%s` names its directory." Registry.Index.variable)
+  | Some registry -> (
+      let before =
+        try
+          Registry.Lock.parse
+            (Option.value ~default:"" (read (Engine.context session.engine) lock_text ()))
+        with Registry.Lock.Malformed _ -> []
+      in
+      let set =
+        set
+        @
+        if all then
+          List.filter_map
+            (fun (name, _, _) -> if List.mem_assoc name set then None else Some (name, None))
+            (current_layout session.engine).registry
+        else []
+      in
+      let wanted =
+        List.map
+          (fun (name, version) ->
+            match version with
+            | None -> (
+                match Registry.Index.newest registry name with
+                | Some (version, hash) -> Ok (name, version, hash)
+                | None -> Error (Printf.sprintf "The registry has no package `%s`." name))
+            | Some version -> (
+                match Registry.Index.hash_of registry name version with
+                | Some hash -> Ok (name, version, hash)
+                | None ->
+                    Error
+                      (Printf.sprintf "The registry has no `%s` %s." name
+                         (Registry.Version.show version))))
+          set
+      in
+      match List.find_map (function Error message -> Some message | Ok _ -> None) wanted with
+      | Some message -> Error message
+      | None ->
+          let wanted = List.filter_map Result.to_option wanted in
+          let lock =
+            List.map
+              (fun (name, version, hash) -> { Registry.Lock.name; version; hash; holds = [] })
+              wanted
+            @ List.filter
+                (fun (entry : Registry.Lock.entry) ->
+                  not (List.exists (fun (name, _, _) -> name = entry.name) wanted))
+                before
+          in
+          let manifests = project_manifests session in
+          let local name =
+            List.exists (fun (package : Workspace.package) -> package.name = name) manifests
+          in
+          let packages = Store.files (current ()).store "packages" in
+          let selected, problems =
+            Registry.Selection.choose ~lock
+              ~roots:
+                (List.concat_map
+                   (fun (package : Workspace.package) ->
+                     List.filter_map
+                       (fun (dependency : Workspace.dependency) ->
+                         match Path.package_parts dependency.package with
+                         | [ _; _ ] -> Some (package.name, dependency.package)
+                         | _ -> None)
+                       package.dependencies)
+                   manifests)
+              ~local
+              ~load:(fun name version ~hash ->
+                Result.map
+                  (fun found -> (found.manifest, found.record))
+                  (load_published ~packages name version ~hash))
+          in
+          if problems <> [] then
+            Error (String.concat " " (List.map Registry.Selection.sentence problems))
+          else
+            let after =
+              Registry.Selection.lock
+                ~project:
+                  (List.concat_map
+                     (fun (package : Workspace.package) -> package.dependencies)
+                     manifests)
+                selected
+            in
+            Ok { text = Registry.Lock.print after; before; after })
+
+(* A session that starts from another's state, with a lock file in place of
+   its own, for seeing what other versions would change before the file is
+   written. It is never saved. *)
+let trial_with_lock session text =
+  let state = current () in
+  let trial =
+    {
+      source = session.source;
+      engine = trial_engine state session;
+      pointer = None;
+      problems = [];
+      lock_fix = None;
+      used = Unix.time ();
+      texts = Hashtbl.create 16;
+      pointed = true;
+    }
+  in
+  let files = (current_layout session.engine).files in
+  apply trial
+    (("truss.lock", Text text)
+    :: List.filter_map
+         (fun path -> if path = "truss.lock" then None else Some (path, Unchanged))
+         files);
+  ignore (Engine.stabilize trial.engine);
+  trial
+
 (* The diagnostics of a merge of two commits that neither has. *)
 let merge_preview session other =
   let state = current () in
@@ -1061,6 +1399,7 @@ let merge_preview session other =
               engine = trial_engine state session;
               pointer = None;
               problems = [];
+              lock_fix = None;
               used = Unix.time ();
               texts = Hashtbl.create 16;
               pointed = true;

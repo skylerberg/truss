@@ -3015,9 +3015,11 @@ truss::json 1.9.4 a3b1c5d7e9f20416283a4c6e8f0b2d4f6a8c0e2f4b6d8a0c2e4f6b8d0a2c4e
   The lines are in order of name.
 - A version is three numbers. The first is the number after `_v` at the end
   of the package's name, or 1 for a name without one.
-- The hash is the BLAKE3 hash of the package's files as the registry holds
-  them: for each file, in order of its path, the path, the BLAKE3 hash of
-  its bytes, and a line feed. It is written as 64 hexadecimal digits.
+- The hash is of the package's files as the registry holds them. It is the
+  BLAKE3 hash of a line for each file, in the order of the bytes of their
+  paths: the path, a space, the BLAKE3 hash of the file's bytes as 64
+  hexadecimal digits, and a line feed. It is written as 64 hexadecimal
+  digits too.
 - A lock file that does not match the project's manifests is a compile
   error: a dependency with no line, a line no package uses, or a `holds`
   that the manifests' grants do not give. `truss check --fix` removes a

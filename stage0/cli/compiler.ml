@@ -38,7 +38,9 @@ let create ?(sanitize = false) (project : Project.t) build =
     | Development, Some file -> Project.shown file
     | _ -> Workspace.file_path module_
   in
-  Compile.create ~file_name ~want:(Database.want project.session) project.context
-    Memory_layout.target_64 toolchain
+  let own = List.map snd (Database.packages project.session) in
+  Compile.create ~file_name ~want:(Database.want project.session)
+    ~worked_on:(fun package -> List.mem package own)
+    project.context Memory_layout.target_64 toolchain
     (Build.cache (Database.objects_directory ()))
     settings

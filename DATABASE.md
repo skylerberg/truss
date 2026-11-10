@@ -309,13 +309,15 @@ A session's inputs are:
 |---|---|---|
 | A package | Its name | Its manifest: dependencies, grants, and `usize_bits`, and its modules |
 | A module's text | Its module path | The file's text |
-| The layout | The session | Each package's directory and name, every manifest and module file, each module's file, and the project's test time limit |
+| The layout | The session | Each package's directory and name, every manifest, lock file, and module file, each module's file, the project's test time limit, and each registry package of the build with its version and hash |
 | A file's stamp | Its path in the worktree | Its size, modification time, and inode |
 | A manifest's text | Its package's directory | The file's text |
+| The lock file's text | The session | The text of `truss.lock` at the project's root |
 | The wanted keys | How instances are lowered | The tests and programs whose keys have been asked for |
 
-The layout, the stamps, and the manifests' texts are the database's own, so
-that a restart reads only the files whose stamps changed. The wanted keys
+The layout, the stamps, and the manifests' and the lock file's texts are the
+database's own, so that a restart reads only the files whose stamps
+changed. The wanted keys
 are code generation's, which says which tests' keys a driver is about to ask
 for (see CODEGEN.md's "Test results"). A module's text
 is set from the file system, or from git for a commit (see
@@ -529,6 +531,7 @@ the machine. It holds:
 | Results of expensive steps | The hash of their kind and of exactly the input that made them (see [Exact keys](#exact-keys)) | `segments/` |
 | A package's artifact | The key of its sources | `segments/` |
 | Object files | Their key, as CODEGEN.md describes | `objects/`, one file each, since a linker reads them by path |
+| A registry package's files | The hash of the files, as SYNTAX.md's "The lock file" defines it | `packages/`, one directory each |
 | A solver's answers | Their key, as PROVER.md describes | `proofs/`, one file each |
 | Pointers | A worktree's session | `pointers/` |
 | The compiler's identity, the list of worktrees, and the background process's lock and log | | the top, and `servers/` |
@@ -669,6 +672,37 @@ in one repository may each have a package called `tools`.
   the same project by being at the same place under worktrees of one
   repository.
 
+### Registry packages
+
+A session's build is its project's packages and the registry packages they
+use, at the versions SYNTAX.md's "The lock file" and DESIGN.md's "Choosing
+versions" give. The database works those out each time it reads the
+project's files, from the lock file and the records of the packages it
+names, and never chooses a version itself.
+
+- **A registry package's files are in the store,** in `packages/`, a
+  directory named by the hash of the files, as [The store](#the-store)
+  lists. One that is not there is fetched from the registry, and kept only
+  if it has that hash. What is read of a package is kept by its hash for as
+  long as the process lives, since it never changes, so a scan that finds
+  the build unchanged reads no file of one.
+- **A registry package is a package like any other to the stages:** the
+  package input, with the dependencies and grants of its manifest, and the
+  text of each of its modules. They are set when the package enters the
+  build or its version changes, and taken away when it leaves. Its results
+  are computed when something reads them, so a project pays for what it
+  uses of a package.
+- **A project's package of the same name takes its place,** as DESIGN.md's
+  "Projects" decides: the name is then the project's package, and no line
+  of the lock file is for it.
+- **What is wrong is a problem of the session:** a lock file that cannot be
+  read, a dependency no lock file or record gives a version, files that
+  cannot be had, and a lock file that is not the one the manifests give,
+  with that one, which `truss check --fix` writes.
+- **Other versions are tried in a trial** (see [Trials](#trials)): a
+  session that starts from the project's and has another lock file, which
+  `truss upgrade` compares with the project's before it writes the file.
+
 ### The background process
 
 One background process per user and compiler serves every session on the
@@ -750,8 +784,8 @@ that has no worktree, and checks a merge.
 `Database.trial` gives an engine that starts from a session's state and
 changes on its own: the session's state is written, and opened again. The
 trial holds what it changes and shares the rest with the session. A rename
-checks its plan in a trial before it writes a file, and a merge is checked
-in one.
+checks its plan in a trial before it writes a file, a merge is checked in
+one, and an upgrade is tried in one, as a session with another lock file.
 
 ## Questions
 
@@ -935,7 +969,11 @@ with the same inputs.
 - **Registry packages as artifacts,** each keyed by the hash of the
   package's content and the keys of the packages it depends on, and each a
   fixed base under every state that uses it, as the standard library is.
-  Stage0 fetches no package, so the standard library's is the only one.
+  A registry package's files are inputs of each session that uses it. A
+  second project that uses one finds as facts what the first computed of
+  it, and still holds its own nodes for them.
+- **Collecting registry packages.** A package's files stay in the store
+  when no lock file names them any more.
 - **Artifacts read in part.** A whole state is one value, read whole to open
   the state, so the first command of a new process costs the state's size:
   every node is made before one is asked for. In the background process that

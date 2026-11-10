@@ -64,7 +64,8 @@ let files ~directory commit =
                 in
                 if
                   (not skipped)
-                  && (base = "truss.toml" || Filename.check_suffix base ".truss")
+                  && (base = "truss.toml" || base = "truss.lock"
+                     || Filename.check_suffix base ".truss")
                   && match meta with [ _; "blob"; _ ] -> true | _ -> false
                 then Some (path, List.nth meta 2)
                 else None)

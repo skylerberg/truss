@@ -202,6 +202,12 @@ let expect_problem files part =
   if not (List.exists (fun problem -> contains problem part) found) then
     fail "problems: [%s]" (String.concat "; " found)
 
+(* The same, of a directory that is there already. *)
+let expect_problem_in root part =
+  let found = (Report.gather (Project.load root)).problems in
+  if not (List.exists (fun problem -> contains problem part) found) then
+    fail "problems: [%s]" (String.concat "; " found)
+
 let () =
   test "a package that does not say which Truss it is written for has a problem" (fun () ->
       expect_problem
@@ -890,6 +896,262 @@ let () =
                 change = place "four" "body";
                 reads = place "double" "signature";
               })))
+
+(* Registry packages *)
+
+(* A registry in a directory of its own, which commands then use. *)
+let registry () =
+  let registry = Registry.Index.at (directory []) in
+  Registry.Index.configure (Some (Registry.Index.root registry));
+  registry
+
+(* Adds a version of a package to a registry: its modules, the packages it
+   depends on, each with what it grants, and the versions it was published
+   with, which the registry must hold already. *)
+let publish registry name version ?(dependencies = []) ?(record = []) modules =
+  let manifest =
+    manifest_of name
+    ^
+    if dependencies = [] then ""
+    else
+      "[dependencies]\n"
+      ^ String.concat ""
+          (List.map
+             (fun (dependency, capabilities) ->
+               Printf.sprintf "%S = [%s]\n" dependency
+                 (String.concat ", " (List.map (Printf.sprintf "%S") capabilities)))
+             dependencies)
+  in
+  let lock =
+    Registry.Lock.print
+      (List.map
+         (fun (dependency, version) ->
+           match Registry.Index.hash_of registry dependency version with
+           | Some hash -> { Registry.Lock.name = dependency; version; hash; holds = [] }
+           | None -> failwith (dependency ^ " is not in the registry"))
+         record)
+  in
+  Registry.Index.add registry name version
+    ((("truss.toml", manifest) :: (if record = [] then [] else [ ("truss.lock", lock) ])) @ modules)
+
+let units text =
+  [ ("lengths.truss", Printf.sprintf "public fn meter() -> Int64 {\n  %s\n}\n" text) ]
+
+let geometry =
+  [
+    ( "vector.truss",
+      "use acme::units::lengths\n\npublic fn length() -> Int64 {\n  lengths::meter()\n}\n" );
+  ]
+
+(* A registry with [acme::units] at 1.0.0 and 1.1.0, and [acme::geometry]
+   1.0.0, published with the first. *)
+let stocked () =
+  let registry = registry () in
+  publish registry "acme::units" (1, 0, 0) (units "1");
+  publish registry "acme::units" (1, 1, 0) (units "100");
+  publish registry "acme::geometry" (1, 0, 0)
+    ~dependencies:[ ("acme::units", []) ]
+    ~record:[ ("acme::units", (1, 0, 0)) ]
+    geometry;
+  registry
+
+let uses_geometry =
+  ("main.truss", "use acme::geometry::vector\n\nfn length() -> Int64 {\n  vector::length()\n}\n")
+
+let add root names = quietly (fun () -> Add_command.run ~directory:root ~names ~json:false)
+let lock_lines root = String.split_on_char '\n' (String.trim (read root "truss.lock"))
+
+let versions root =
+  List.map
+    (fun (entry : Registry.Lock.entry) -> (entry.name, Registry.Version.show entry.version))
+    (Registry.Lock.parse (read root "truss.lock"))
+
+let expect_versions root expected =
+  let found = versions root in
+  if found <> expected then
+    fail "the lock file has [%s]"
+      (String.concat "; " (List.map (fun (name, version) -> name ^ " " ^ version) found))
+
+let clean root = Report.clean (Report.gather (Project.load root))
+
+let () =
+  test "adding a package writes its entry, and a line for it and for each package it brings"
+    (fun () ->
+      let _ = stocked () in
+      let root = package [ uses_geometry ] in
+      if add root [ "acme::geometry" ] <> 0 then fail "not added";
+      if not (contains (read root "truss.toml") "\"acme::geometry\" = []") then
+        fail "the manifest is %s" (read root "truss.toml");
+      expect_versions root [ ("acme::geometry", "1.0.0"); ("acme::units", "1.0.0") ];
+      if not (clean root) then fail "has diagnostics");
+  test "a package is added at the version it was published with, and nothing newer" (fun () ->
+      let registry = stocked () in
+      let root = package [ uses_geometry ] in
+      ignore (add root [ "acme::geometry" ]);
+      (* A package published with a newer version of what the build has
+         brings that version with it. *)
+      publish registry "acme::shapes" (1, 0, 0)
+        ~dependencies:[ ("acme::units", []) ]
+        ~record:[ ("acme::units", (1, 1, 0)) ]
+        [ ("square.truss", "public fn sides() -> Int64 {\n  4\n}\n") ];
+      rewrite root "main.truss"
+        (snd uses_geometry ^ "\nfn sides() -> Int64 {\n  acme::shapes::square::sides()\n}\n");
+      if add root [ "acme::shapes" ] <> 0 then fail "not added";
+      expect_versions root
+        [ ("acme::geometry", "1.0.0"); ("acme::shapes", "1.0.0"); ("acme::units", "1.1.0") ];
+      if not (clean root) then fail "has diagnostics");
+  test "a package is added at the version written after @" (fun () ->
+      let _ = stocked () in
+      let root =
+        package [ ("main.truss", "fn meter() -> Int64 {\n  acme::units::lengths::meter()\n}\n") ]
+      in
+      if add root [ "acme::units@1.0.0" ] <> 0 then fail "not added";
+      expect_versions root [ ("acme::units", "1.0.0") ]);
+  test "a package the registry does not hold is not added, and the manifest is left as it was"
+    (fun () ->
+      let _ = stocked () in
+      let root = package [ ("main.truss", "") ] in
+      let before = read root "truss.toml" in
+      (match add root [ "acme::nothing" ] with
+      | exception Project.Cannot_run _ -> ()
+      | _ -> fail "added");
+      expect_string ~expected:before (read root "truss.toml");
+      if Sys.file_exists (Filename.concat root "truss.lock") then fail "wrote a lock file");
+  test "a dependency with no line in the lock file is a problem that says to add it" (fun () ->
+      let _ = stocked () in
+      let root =
+        directory [ ("truss.toml", manifest_of "demo" ^ "[dependencies]\n\"acme::units\" = []\n") ]
+      in
+      expect_problem_in root "Run `truss add acme::units`");
+  test "a lock file that is not the one the manifests give is a problem, which check --fix fixes"
+    (fun () ->
+      let _ = stocked () in
+      let root = package [ uses_geometry ] in
+      ignore (add root [ "acme::geometry" ]);
+      (* Granting a package a capability changes what it holds. *)
+      rewrite root "truss.toml"
+        (manifest_of "demo" ^ "[dependencies]\n\"acme::geometry\" = [\"Clock\"]\n");
+      expect_problem_in root
+        "`acme::geometry` is said to hold nothing, and the manifests grant it Clock";
+      if quietly (fun () -> Check_command.run ~directory:root ~fix:true ~json:false) <> 0 then
+        fail "still has errors";
+      if
+        not
+          (List.exists
+             (fun line -> contains line "acme::geometry 1.0.0" && contains line " holds Clock")
+             (lock_lines root))
+      then fail "the lock file is %s" (read root "truss.lock"));
+  test "a line that no package uses is a problem, which check --fix fixes by deleting it" (fun () ->
+      let _ = stocked () in
+      let root = package [ uses_geometry ] in
+      ignore (add root [ "acme::geometry" ]);
+      rewrite root "main.truss" "";
+      rewrite root "truss.toml" (manifest_of "demo");
+      expect_problem_in root "Nothing in the build uses `acme::geometry`";
+      if quietly (fun () -> Check_command.run ~directory:root ~fix:true ~json:false) <> 0 then
+        fail "still has errors";
+      expect_versions root []);
+  test "files in the registry that do not have the lock file's hash are not used" (fun () ->
+      let registry = stocked () in
+      publish registry "acme::angles" (1, 0, 0) [ ("degrees.truss", "") ];
+      let root = package [ ("main.truss", "") ] in
+      let hash = Option.get (Registry.Index.hash_of registry "acme::angles" (1, 0, 0)) in
+      rewrite root "truss.toml" (manifest_of "demo" ^ "[dependencies]\n\"acme::angles\" = []\n");
+      rewrite root "truss.lock" (Printf.sprintf "format 1\nacme::angles 1.0.0 %s\n" hash);
+      Out_channel.with_open_bin
+        (Filename.concat
+           (Registry.Index.version_directory registry "acme::angles" (1, 0, 0))
+           "degrees.truss")
+        (fun channel -> output_string channel "fn stolen() {}\n");
+      expect_problem_in root "do not have the hash the lock file names");
+  test "a package that is not in the store cannot be had without a registry" (fun () ->
+      let registry = stocked () in
+      publish registry "acme::tides" (1, 0, 0) [ ("moon.truss", "") ];
+      let root = package [ ("main.truss", "") ] in
+      let hash = Option.get (Registry.Index.hash_of registry "acme::tides" (1, 0, 0)) in
+      rewrite root "truss.toml" (manifest_of "demo" ^ "[dependencies]\n\"acme::tides\" = []\n");
+      rewrite root "truss.lock" (Printf.sprintf "format 1\nacme::tides 1.0.0 %s\n" hash);
+      Registry.Index.configure (Some "");
+      expect_problem_in root "no registry is set");
+  test "a project's package takes the place of the registry's package of its name" (fun () ->
+      let _ = stocked () in
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n");
+            ("app/truss.toml", manifest_of "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
+            ("app/main.truss", snd uses_geometry);
+            ("units/truss.toml", manifest_of "acme::units");
+            ("units/lengths.truss", "public fn meter() -> Int64 {\n  7\n}\n");
+          ]
+      in
+      let app = Filename.concat root "app" in
+      if add app [ "acme::geometry" ] <> 0 then fail "not added";
+      expect_versions root [ ("acme::geometry", "1.0.0") ];
+      if not (clean root) then fail "has diagnostics";
+      let project = Project.load root in
+      if
+        not
+          (List.mem "units/lengths.truss"
+             (List.map (Database.module_file project.session) (Project.modules project)))
+      then fail "the project's package is not the one in the build")
+
+(* Upgrading *)
+
+let upgrade root names = captured (fun () -> Upgrade_command.run ~directory:root ~names ~json:false)
+
+let () =
+  test "upgrading moves a package to its newest version and says so" (fun () ->
+      let _ = stocked () in
+      let root = package [ uses_geometry ] in
+      ignore (add root [ "acme::geometry" ]);
+      let status, output = upgrade root [] in
+      if status <> 0 then fail "status %d: %s" status output;
+      if not (contains output "`acme::units` goes from 1.0.0 to 1.1.0") then fail "said %s" output;
+      expect_versions root [ ("acme::geometry", "1.0.0"); ("acme::units", "1.1.0") ]);
+  test "upgrading a package that is at its newest version changes nothing" (fun () ->
+      let _ = stocked () in
+      let root = package [ uses_geometry ] in
+      ignore (add root [ "acme::geometry" ]);
+      let before = read root "truss.lock" in
+      let status, output = upgrade root [ "acme::geometry" ] in
+      if status <> 0 || not (contains output "Every package is at the version asked for") then
+        fail "status %d: %s" status output;
+      expect_string ~expected:before (read root "truss.lock"));
+  test "an upgrade says which signatures the project reads change, and what breaks" (fun () ->
+      let registry = stocked () in
+      let root =
+        package [ ("main.truss", "fn meter() -> Int64 {\n  acme::units::lengths::meter()\n}\n") ]
+      in
+      ignore (add root [ "acme::units" ]);
+      publish registry "acme::units" (1, 2, 0)
+        [ ("lengths.truss", "public fn meter(scale: Int64) -> Int64 {\n  scale\n}\n") ];
+      let status, output = upgrade root [ "acme::units" ] in
+      if status <> 1 then fail "status %d: %s" status output;
+      List.iter
+        (fun part -> if not (contains output part) then fail "%s is not in: %s" part output)
+        [
+          "`acme::units` goes from 1.1.0 to 1.2.0";
+          "acme::units::lengths::meter";
+          "was: public fn meter() -> Int64";
+          "now: public fn meter(scale: Int64) -> Int64";
+          "read by: demo::main::meter";
+          "errors it does not have now";
+        ]);
+  test "an upgrade says which packages would hold a capability they did not" (fun () ->
+      let registry = stocked () in
+      let root = package [ uses_geometry ] in
+      ignore (add root [ "acme::geometry" ]);
+      rewrite root "truss.toml"
+        (manifest_of "demo" ^ "[dependencies]\n\"acme::geometry\" = [\"Clock\"]\n");
+      ignore (quietly (fun () -> Check_command.run ~directory:root ~fix:true ~json:false));
+      publish registry "acme::geometry" (1, 1, 0)
+        ~dependencies:[ ("acme::units", [ "Clock" ]) ]
+        ~record:[ ("acme::units", (1, 0, 0)) ]
+        geometry;
+      let _, output = upgrade root [ "acme::geometry" ] in
+      if not (contains output "`acme::units` would hold Clock, which it did not") then
+        fail "said %s" output)
 
 (* The command line as a whole *)
 

@@ -260,6 +260,34 @@ let rename =
           exit_with (fun () -> Rename_command.run ~directory ~from_ ~to_ ~json))
       $ directory $ from_ $ to_ $ json)
 
+let packages_argument ~doc = Arg.(value & pos_all string [] & info [] ~docv:"PACKAGE" ~doc)
+
+let add =
+  command "add"
+    ~doc:
+      "Make registry packages dependencies of the package, each granted nothing, at the version \
+       written after $(b,@), or at its newest."
+    Term.(
+      const (fun directory names json ->
+          exit_with (fun () -> Add_command.run ~directory ~names ~json))
+      $ directory
+      $ packages_argument
+          ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."
+      $ json)
+
+let upgrade =
+  command "upgrade"
+    ~doc:
+      "Move the project's registry packages to their newest versions, or the packages named to \
+       theirs or to the version written after $(b,@), and say what that changes."
+    Term.(
+      const (fun directory names json ->
+          exit_with (fun () -> Upgrade_command.run ~directory ~names ~json))
+      $ directory
+      $ packages_argument
+          ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."
+      $ json)
+
 let new_ =
   let name = Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME") in
   command "new" ~doc:"Make a new package in a directory named $(i,NAME)."
@@ -329,6 +357,8 @@ let truss =
       explain;
       overlap;
       rename;
+      add;
+      upgrade;
       new_;
       sync;
       status;
@@ -361,6 +391,7 @@ let evaluate arguments =
 type request = {
   arguments : string list;
   directory : string;  (** The client's current directory *)
+  registry : string option;  (** The registry the client's environment names *)
   terminal : bool;
   columns : int option;
 }
@@ -378,6 +409,7 @@ let handle ~progress request =
       ~finally:(fun () -> try Sys.chdir previous with Sys_error _ -> ())
       (fun () ->
         Sys.chdir request.directory;
+        Registry.Index.configure request.registry;
         Output.with_
           {
             out = Buffer.add_string buffer;
@@ -420,6 +452,7 @@ let request arguments =
   {
     arguments;
     directory = Sys.getcwd ();
+    registry = Sys.getenv_opt Registry.Index.variable;
     terminal = Output.terminal ();
     columns = Output.columns ();
   }
