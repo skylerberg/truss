@@ -76,7 +76,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Storage_with_capacity ->
       make ~generics:[ "Element" ] ~output:(Returns (storage element)) [ input "capacity" usize ]
   | Storage_length | Storage_capacity -> with_storage ~output:(Returns usize) []
-  | Storage_reserve -> with_storage ~mode:Mut [ input "additional" usize ]
+  | Storage_set_capacity -> with_storage ~mode:Mut [ input "capacity" usize ]
   | Storage_lengthen -> with_storage ~mode:Mut [ input "by" usize ]
   | Storage_push -> with_storage ~mode:Mut [ input ~mode:Own "value" element ]
   | Storage_pop -> with_storage ~mode:Mut ~output:(Returns element) []
@@ -146,10 +146,10 @@ let cost (operation : Intrinsic.operation) =
   | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
   | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
   | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
-  | View_slice | View_address | Crash | Storage_lengthen | Handle_from | Handle_descriptor
-  | Libc_number _ ->
+  | View_slice | View_address | Crash | Storage_lengthen | Storage_push | Handle_from
+  | Handle_descriptor | Libc_number _ ->
       { constant_time = true; allocation_free = true }
-  | Compare_bytes | Storage_remove -> { constant_time = false; allocation_free = true }
-  | Storage_with_capacity | Storage_reserve | Storage_push | Storage_insert | Write_float | Libc _
-    ->
+  | Compare_bytes | Storage_remove | Storage_insert | Write_float ->
+      { constant_time = false; allocation_free = true }
+  | Storage_with_capacity | Storage_set_capacity | Libc _ ->
       { constant_time = false; allocation_free = false }

@@ -1,3 +1,4 @@
+use standard::growth
 use standard::intrinsic
 use standard::system::calls
 use standard::system::handles
@@ -50,7 +51,8 @@ fn add_ended_with_zero_byte(
   texts: mut intrinsic::Storage[UInt8],
   starts: mut intrinsic::Storage[USize],
 ) -> Result[Unit, Int32] {
-  intrinsic::storage_push(mut starts, value: intrinsic::storage_length(texts))
+  growth::push(mut starts, value: intrinsic::storage_length(texts))
+  growth::reserve(mut texts, additional: intrinsic::view_length(bytes) + 1)
   for index in 0..intrinsic::view_length(bytes) {
     let byte = intrinsic::view_at(bytes, index: index)
     if byte == 0 {

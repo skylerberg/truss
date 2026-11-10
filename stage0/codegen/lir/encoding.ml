@@ -143,7 +143,6 @@ let intrinsic_tag = function
   | Round_even -> 21
   | Float_bits -> 22
   | Float_from_bits -> 23
-  | Grow -> 24
   | Debug_begin -> 29
   | Debug_text -> 30
   | Debug_signed -> 31
