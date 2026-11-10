@@ -1576,6 +1576,25 @@ expression, statement, or pattern is, and builds the form once the
 definition has checked: only then is every type final, and every choice a
 statement settles at its end, such as the `impl` an operator means.
 
+A method a derived `impl` gives is written nowhere, so its form is made
+from the type's shape, as the body the method would have if it were
+written:
+
+- **`equal`** tests that the other value is the same variant, and then
+  that each field equals the other's, in order, with `&&`, so the first
+  difference ends it.
+- **`hash`** writes the variant's number, counted from 0 in the order the
+  variants are declared, and then hashes each field.
+- **`compare`** orders by variant, in the order they are declared, and
+  between two values of one variant by each field in turn: the first
+  field that is not equal decides.
+- **`default`** builds the record of each field's default.
+
+Each field's method is a call of the trait's method on the field's type,
+with the `impl` the type has, or a bound where the type is a parameter. A
+method the trait itself gives a body, such as `not_equal`, has the trait's
+form, as in any `impl` that leaves it to the trait.
+
 ### Obligations the type checker creates
 
 Most proof obligations come from the program itself: every index, every
@@ -1755,8 +1774,7 @@ the compiler. The prelude holds:
 
 - **Reading the core form.** Ownership, the prover, and code generation
   read the checked form's tables and the syntax tree, and work out again
-  what the core form holds. The methods of a derived `impl` have no core
-  form.
+  what the core form holds.
 - **A contract as a result of its own.** DESIGN.md has callers' proofs read a
   function's contract, apart from its interface and its body. The contract
   is type-checked with the body, and the prover reads it from the callee's
