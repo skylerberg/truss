@@ -1113,6 +1113,16 @@ each: the descriptor, and what to wait for in the low half of the next
 with what was found in the high half. The table's check holds the
 structure to that, byte order included.
 
+A larger structure whose layout differs between systems is filled as
+bytes. `fstat`, `stat`, and `lstat` write a `struct stat` into the room of
+a `Storage[UInt8]`, and the table has numbers for the structure's size and
+for the offset of each field the standard library reads:
+`libc_stat_size()`, `libc_stat_mode_offset()`, and so on. The standard
+library reads each number out of the bytes at its offset. The check
+compares each of those numbers with `sizeof` or `offsetof` on the real
+structure. A field that a system's structure does not have, as Linux's has
+no time of creation, has offset 0.
+
 A call is written into the caller's LIR as a call of the C function
 itself, given each argument converted to its parameter's C type, and the C
 declares the function with the prototype the system's headers give it. A
@@ -1124,7 +1134,10 @@ same table with their value on each system, and are operations that take
 nothing: `libc_o_creat()`. Lowering writes the value. So the type checker
 and the prover see the same signatures on every system, and only code
 generation's results depend on the system, which is part of the target.
-Stage0 builds for the system it runs on.
+A system is an operating system and an architecture: Linux or macOS, on
+x86-64 or ARM64. The architecture matters where a structure's layout or a
+function's symbol depends on it, as `struct stat` does on Linux and the
+symbol of `stat` does on macOS. Stage0 builds for the system it runs on.
 
 A test compiles the table against the system's own headers: every number
 must have the value the table gives, every prototype must be the one the
@@ -1154,7 +1167,9 @@ lines, which reads a block at a time and keeps what it has not given out.
 `SystemHandles` reads onto the end of a list and writes a slice with
 `read` and `write`, does the same at an offset with `pread` and `pwrite`,
 and moves, shortens, flushes, and closes a file with `lseek`, `ftruncate`,
-`fsync`, and `close`. `SystemFileWrite.open` opens a file in each write
+`fsync`, and `close`. A file's metadata comes from `fstat` for an open file
+and from `stat` or `lstat` for a path: its kind, length, permissions, and
+times are read out of the structure's bytes. `SystemFileWrite.open` opens a file in each write
 mode: to replace it, to append to it, to create it only if it is missing,
 or to update it in place.
 `SystemEnvironment` reads `getenv`. `SystemProcesses` runs a program found

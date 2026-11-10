@@ -13,10 +13,10 @@
    a target whose [USize] is narrower than the host's pointers: such code
    runs on the host, with the target's [USize], so that it computes what the
    target would. *)
-type target = { pointer_bytes : int; usize_bytes : int; os : Libc.os }
+type target = { pointer_bytes : int; usize_bytes : int; system : Libc.system }
 
-val target_64 : Libc.os -> target
-val target_32 : Libc.os -> target
+val target_64 : Libc.system -> target
+val target_32 : Libc.system -> target
 
 type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
 

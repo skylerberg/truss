@@ -492,7 +492,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                     Copy (at environment))
               parameters
           in
-          let target = Lir.Foreign (Libc.declaration (Memory_layout.target env).os function_) in
+          let target = Lir.Foreign (Libc.declaration (Memory_layout.target env).system function_) in
           let call result =
             emit b (Call { target; arguments = given; result });
             List.iter (fun write -> write ()) (List.rev !after)
@@ -547,6 +547,6 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
             | Integer integer -> integer
             | _ -> bug "a number of the C library that is not an integer"
           in
-          let os = (Memory_layout.target env).os in
-          set (Use (Constant (Integer (integer, Z.of_int (Libc.value os number))))));
+          let system = (Memory_layout.target env).system in
+          set (Use (Constant (Integer (integer, Z.of_int (Libc.value system number))))));
       None

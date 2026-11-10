@@ -1,12 +1,22 @@
 type os = Linux | Macos
+type architecture = X86_64 | Arm64
+type system = { os : os; architecture : architecture }
 
 let os_name = function Linux -> "Linux" | Macos -> "macOS"
+let architecture_name = function X86_64 -> "x86-64" | Arm64 -> "ARM64"
+let system_name system = os_name system.os ^ " on " ^ architecture_name system.architecture
 
 let host =
-  let system = Built_for.system in
-  if system = "macosx" then Some Macos
-  else if String.starts_with ~prefix:"linux" system then Some Linux
-  else None
+  let os =
+    if Built_for.system = "macosx" then Some Macos
+    else if String.starts_with ~prefix:"linux" Built_for.system then Some Linux
+    else None
+  and architecture =
+    match Built_for.architecture with "amd64" -> Some X86_64 | "arm64" -> Some Arm64 | _ -> None
+  in
+  match (os, architecture) with
+  | Some os, Some architecture -> Some { os; architecture }
+  | _ -> None
 
 type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize | Float64
 
@@ -53,6 +63,9 @@ type function_ =
   | Lseek
   | Ftruncate
   | Fsync
+  | Fstat
+  | Stat
+  | Lstat
 
 let functions =
   [
@@ -79,6 +92,9 @@ let functions =
     Lseek;
     Ftruncate;
     Fsync;
+    Fstat;
+    Stat;
+    Lstat;
   ]
 
 let function_name = function
@@ -105,6 +121,9 @@ let function_name = function
   | Lseek -> "lseek"
   | Ftruncate -> "ftruncate"
   | Fsync -> "fsync"
+  | Fstat -> "fstat"
+  | Stat -> "stat"
+  | Lstat -> "lstat"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -113,21 +132,28 @@ let function_name = function
    parameter the type the headers call it by, where that is a name only the
    headers have and the C that is emitted says [void]. *)
 type row = {
-  symbol : os -> string;
-  returns : os -> string;
+  symbol : system -> string;
+  returns : system -> string;
   result : result;
-  parameters : (string * passes * (os -> string)) list;
+  parameters : (string * passes * (system -> string)) list;
   variadic_from : int option;
   headers : string list;
   layout : string list;
   named : (string * string) list;
 }
 
-let everywhere c (_ : os) = c
+let everywhere c (_ : system) = c
+let by_os choose (system : system) = choose system.os
 let size = everywhere "__SIZE_TYPE__"
 
+(* The symbol of a function that fills a [struct stat]. On macOS for
+   x86-64 the plain symbol is an old function that fills a smaller
+   structure, and the one the headers call has this suffix. *)
+let status_symbol name (system : system) =
+  match system with { os = Macos; architecture = X86_64 } -> name ^ "$INODE64" | _ -> name
+
 (* [off_t], a position in a file. *)
-let offset = function Linux -> "long" | Macos -> "long long"
+let offset = by_os (function Linux -> "long" | Macos -> "long long")
 
 let describe function_ =
   let row ?(symbol = everywhere (function_name function_)) ?variadic_from ?(layout = [])
@@ -165,14 +191,14 @@ let describe function_ =
         ~headers:[ "unistd.h" ]
   | Errno ->
       row (everywhere "int *") (Points_at Int32) []
-        ~symbol:(function Linux -> "__errno_location" | Macos -> "__error")
+        ~symbol:(by_os (function Linux -> "__errno_location" | Macos -> "__error"))
         ~headers:[ "errno.h" ]
   | Clock_gettime ->
       row (everywhere "int") (Returns Int32)
         [
           (* macOS makes [clockid_t] an enumeration with no negative member,
              which C gives the representation of this type. *)
-          ("clock", Value Int32, function Linux -> "int" | Macos -> "unsigned int");
+          ("clock", Value Int32, by_os (function Linux -> "int" | Macos -> "unsigned int"));
           ("time", Written (Int64, [ "seconds"; "nanoseconds" ]), everywhere "struct timespec *");
         ]
         ~headers:[ "time.h" ]
@@ -252,7 +278,9 @@ let describe function_ =
       row (everywhere "int") (Returns Int32)
         [
           ("waited_for", Elements_to_change Int32, everywhere "struct pollfd *");
-          ("count", Value USize, function Linux -> "unsigned long" | Macos -> "unsigned int");
+          ( "count",
+            Value USize,
+            by_os (function Linux -> "unsigned long" | Macos -> "unsigned int") );
           ("timeout", Value Int32, everywhere "int");
         ]
         ~headers:[ "poll.h" ]
@@ -313,6 +341,42 @@ let describe function_ =
       row (everywhere "int") (Returns Int32)
         [ ("descriptor", Value Int32, everywhere "int") ]
         ~headers:[ "unistd.h" ]
+  | Fstat ->
+      (* The structure is filled as bytes, which the standard library reads
+         at the offsets the table's numbers give. *)
+      row (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int"); ("status", Room UInt8, everywhere "void *");
+        ]
+        ~symbol:(status_symbol "fstat")
+        ~named:[ ("status", "struct stat *") ]
+        ~headers:[ "sys/stat.h" ]
+        ~layout:
+          [
+            "sizeof(((struct stat *)0)->st_size) == 8";
+            "sizeof(struct timespec) == 16";
+            "__builtin_offsetof(struct timespec, tv_sec) == 0";
+            "__builtin_offsetof(struct timespec, tv_nsec) == 8";
+            "__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__";
+          ]
+  | Stat ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("path", Elements UInt8, everywhere "const char *");
+          ("status", Room UInt8, everywhere "void *");
+        ]
+        ~symbol:(status_symbol "stat")
+        ~named:[ ("status", "struct stat *") ]
+        ~headers:[ "sys/stat.h" ]
+  | Lstat ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("path", Elements UInt8, everywhere "const char *");
+          ("status", Room UInt8, everywhere "void *");
+        ]
+        ~symbol:(status_symbol "lstat")
+        ~named:[ ("status", "struct stat *") ]
+        ~headers:[ "sys/stat.h" ]
 
 let signature function_ =
   let row = describe function_ in
@@ -321,12 +385,12 @@ let signature function_ =
     result = row.result;
   }
 
-let declaration os function_ : declaration =
+let declaration system function_ : declaration =
   let row = describe function_ in
   {
-    symbol = row.symbol os;
-    returns = row.returns os;
-    takes = List.map (fun (_, _, c) -> c os) row.parameters;
+    symbol = row.symbol system;
+    returns = row.returns system;
+    takes = List.map (fun (_, _, c) -> c system) row.parameters;
     variadic_from = row.variadic_from;
   }
 
@@ -414,6 +478,17 @@ type number =
   | Etimedout
   | Econnrefused
   | Ehostunreach
+  | Stat_size
+  | Stat_mode_offset
+  | Stat_mode_size
+  | Stat_length_offset
+  | Stat_accessed_offset
+  | Stat_modified_offset
+  | Stat_created_offset
+  | S_ifmt
+  | S_ifreg
+  | S_ifdir
+  | S_iflnk
 
 let numbers =
   [
@@ -460,6 +535,17 @@ let numbers =
     Etimedout;
     Econnrefused;
     Ehostunreach;
+    Stat_size;
+    Stat_mode_offset;
+    Stat_mode_size;
+    Stat_length_offset;
+    Stat_accessed_offset;
+    Stat_modified_offset;
+    Stat_created_offset;
+    S_ifmt;
+    S_ifreg;
+    S_ifdir;
+    S_iflnk;
   ]
 
 let number_name = function
@@ -506,8 +592,26 @@ let number_name = function
   | Etimedout -> "ETIMEDOUT"
   | Econnrefused -> "ECONNREFUSED"
   | Ehostunreach -> "EHOSTUNREACH"
+  | Stat_size -> "STAT_SIZE"
+  | Stat_mode_offset -> "STAT_MODE_OFFSET"
+  | Stat_mode_size -> "STAT_MODE_SIZE"
+  | Stat_length_offset -> "STAT_LENGTH_OFFSET"
+  | Stat_accessed_offset -> "STAT_ACCESSED_OFFSET"
+  | Stat_modified_offset -> "STAT_MODIFIED_OFFSET"
+  | Stat_created_offset -> "STAT_CREATED_OFFSET"
+  | S_ifmt -> "S_IFMT"
+  | S_ifreg -> "S_IFREG"
+  | S_ifdir -> "S_IFDIR"
+  | S_iflnk -> "S_IFLNK"
 
-let number_type (_ : number) = Int32
+(* A size or an offset in a structure is a [USize], and the bits of a
+   file's mode are compared with a number read out of the structure. *)
+let number_type = function
+  | Stat_size | Stat_mode_offset | Stat_mode_size | Stat_length_offset | Stat_accessed_offset
+  | Stat_modified_offset | Stat_created_offset ->
+      USize
+  | S_ifmt | S_ifreg | S_ifdir | S_iflnk -> UInt64
+  | _ -> Int32
 
 let number_headers = function
   | O_rdonly | O_wronly | O_creat | O_trunc | O_cloexec | O_rdwr | O_append | O_excl ->
@@ -521,9 +625,31 @@ let number_headers = function
   | Sc_nprocessors_onln -> [ "unistd.h" ]
   | Pollin | Pollhup -> [ "poll.h" ]
   | Sigkill -> [ "signal.h" ]
+  | Stat_size | Stat_mode_offset | Stat_mode_size | Stat_length_offset | Stat_accessed_offset
+  | Stat_modified_offset | Stat_created_offset | S_ifmt | S_ifreg | S_ifdir | S_iflnk ->
+      [ "sys/stat.h" ]
 
-let value os number =
-  match (number, os) with
+(* The C expression that a number is the value of, which the check compares
+   with the table's value. Most numbers are constants that the headers
+   name. A size or an offset in [struct stat] is an expression over the
+   structure. [None] where this system's structure has no such field. *)
+let number_expression (system : system) number =
+  let offset_of field = Some (Printf.sprintf "__builtin_offsetof(struct stat, %s)" field) in
+  match (number, system.os) with
+  | Stat_size, _ -> Some "sizeof(struct stat)"
+  | Stat_mode_offset, _ -> offset_of "st_mode"
+  | Stat_mode_size, _ -> Some "sizeof(((struct stat *)0)->st_mode)"
+  | Stat_length_offset, _ -> offset_of "st_size"
+  | Stat_accessed_offset, Linux -> offset_of "st_atim"
+  | Stat_accessed_offset, Macos -> offset_of "st_atimespec"
+  | Stat_modified_offset, Linux -> offset_of "st_mtim"
+  | Stat_modified_offset, Macos -> offset_of "st_mtimespec"
+  | Stat_created_offset, Linux -> None
+  | Stat_created_offset, Macos -> offset_of "st_birthtimespec"
+  | number, _ -> Some (number_name number)
+
+let value (system : system) number =
+  match (number, system.os) with
   | O_rdonly, (Linux | Macos) -> 0
   | O_wronly, (Linux | Macos) -> 1
   | O_creat, Linux -> 0x40
@@ -586,6 +712,26 @@ let value os number =
   | Econnrefused, Macos -> 61
   | Ehostunreach, Linux -> 113
   | Ehostunreach, Macos -> 65
+  | Stat_size, Linux -> ( match system.architecture with X86_64 -> 144 | Arm64 -> 128)
+  | Stat_size, Macos -> 144
+  | Stat_mode_offset, Linux -> ( match system.architecture with X86_64 -> 24 | Arm64 -> 16)
+  | Stat_mode_offset, Macos -> 4
+  | Stat_mode_size, Linux -> 4
+  | Stat_mode_size, Macos -> 2
+  | Stat_length_offset, Linux -> 48
+  | Stat_length_offset, Macos -> 96
+  | Stat_accessed_offset, Linux -> 72
+  | Stat_accessed_offset, Macos -> 32
+  | Stat_modified_offset, Linux -> 88
+  | Stat_modified_offset, Macos -> 48
+  (* Linux's structure has no time of creation, which 0 says: no time is at
+     the start of the structure. *)
+  | Stat_created_offset, Linux -> 0
+  | Stat_created_offset, Macos -> 80
+  | S_ifmt, (Linux | Macos) -> 0o170000
+  | S_ifreg, (Linux | Macos) -> 0o100000
+  | S_ifdir, (Linux | Macos) -> 0o040000
+  | S_iflnk, (Linux | Macos) -> 0o120000
 
 (* How many bytes a number the function reaches through an address takes,
    which the C type it is declared with must take too. [USize] has no one
@@ -596,7 +742,7 @@ let bytes = function
   | Int64 | UInt64 | Float64 -> 8
   | USize | ISize -> invalid_arg "a USize the C library reaches through an address"
 
-let check os =
+let check system =
   let headers =
     List.fold_left
       (fun seen header -> if List.mem header seen then seen else seen @ [ header ])
@@ -623,21 +769,26 @@ let check os =
        "#undef _FORTIFY_SOURCE\n#define _FORTIFY_SOURCE 0\n#define _DEFAULT_SOURCE\n";
      ]
     @ List.map (fun header -> Printf.sprintf "#include <%s>\n" header) headers
-    @ List.map
+    @ List.filter_map
         (fun number ->
-          holds (number_name number)
-            (Printf.sprintf "%s == %d" (number_name number) (value os number)))
+          Option.map
+            (fun expression ->
+              holds (number_name number)
+                (Printf.sprintf "%s == %d" expression (value system number)))
+            (number_expression system number))
         numbers
     @ List.concat_map
         (fun function_ ->
-          let row = describe function_ and declaration = declaration os function_ in
+          let row = describe function_ and declaration = declaration system function_ in
           let as_the_headers_name_it =
             {
               declaration with
               takes =
                 List.map
                   (fun (name, _, c) ->
-                    match List.assoc_opt name row.named with Some named -> named | None -> c os)
+                    match List.assoc_opt name row.named with
+                    | Some named -> named
+                    | None -> c system)
                   row.parameters;
             }
           in
@@ -648,8 +799,8 @@ let check os =
           @ List.filter_map
               (fun (_, passes, c) ->
                 match passes with
-                | Written (scalar, names) when not (is_void (c os)) ->
-                    Some (reached declaration.symbol (c os) (List.length names) scalar)
+                | Written (scalar, names) when not (is_void (c system)) ->
+                    Some (reached declaration.symbol (c system) (List.length names) scalar)
                 | Written _ | Value _ | Elements _ | Room _ | Elements_to_change _ | Always _
                 | Environment ->
                     None)
