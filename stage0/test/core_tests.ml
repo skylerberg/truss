@@ -460,7 +460,7 @@ let () =
      cost time O(multiply(to_integer(standard::list::List.length[Int64](place items)), time(visit)))\n\
      {  }"
 
-(* Every form of the standard library holds together. *)
+(* Every form of the standard library holds to what a form promises. *)
 
 let () =
   let database = setup [] in
@@ -469,88 +469,7 @@ let () =
     (fun ((module_ : Path.module_), _) ->
       test
         (Printf.sprintf "%s's core forms hold together" (Path.show_module module_))
-        (fun () ->
-          List.iter
-            (fun (declaration : Resolve.Names.declaration) ->
-              let key = Resolve.Names.key_of declaration in
-              match Query.demand database Infer.core key with
-              | None -> ()
-              | Some form ->
-                  incr forms;
-                  let seen = Hashtbl.create 64 in
-                  let wrong format =
-                    Printf.ksprintf
-                      (fun message -> fail "%s: %s" (Resolve.Names.show_key key) message)
-                      format
-                  in
-                  let once id =
-                    if id < 0 || id >= form.nodes then wrong "the id %d is out of range" id;
-                    if Hashtbl.mem seen id then wrong "the id %d is used twice" id;
-                    Hashtbl.replace seen id ()
-                  in
-                  let known what capabilities =
-                    if Types.unknown_capabilities capabilities then
-                      wrong "%s holds an unknown set of capabilities" what;
-                    capabilities
-                  in
-                  let decided what (type_ : Types.ty) =
-                    if Types.contains_unsolved type_ then
-                      wrong "%s has the type `%s`" what (Types.show type_);
-                    ignore (Types.map_capabilities (known what) type_)
-                  in
-                  let called (callee : Core.callee) =
-                    match callee with
-                    | Function { type_arguments; _ } | Trait_method { type_arguments; _ } ->
-                        List.iter
-                          (fun argument ->
-                            ignore
-                              (Types.map_argument_capabilities (known "a type argument") argument))
-                          type_arguments
-                    | Capability_method _ | Intrinsic _ | Value _ -> ()
-                  in
-                  let rec place (found : Core.place) =
-                    match found with
-                    | Lent { kind = Call { lends = Some _; _ }; _ } | Local _ | Temporary _ -> ()
-                    | Lent _ -> wrong "a lent part is not a call that lends"
-                    | Field { base; _ } -> place base
-                  in
-                  Core_walk.parts
-                    {
-                      expression =
-                        (fun (node : Core.expression) ->
-                          once node.id;
-                          decided "an expression" node.type_;
-                          match node.kind with
-                          | Use found | Next found -> place found
-                          | Call { callee; arguments; uses; _ } ->
-                              called callee;
-                              ignore (known "what a call needs" uses);
-                              List.iter
-                                (function
-                                  | Core.Passed { mode = Mut; value = Value { kind = Slice _; _ } }
-                                    ->
-                                      ()
-                                  | Core.Passed { mode = Mut; value = Value _ } ->
-                                      wrong "a value is passed where a place is changed"
-                                  | Passed { mode = Own; value = Place _ } ->
-                                      wrong "a place is passed where a value is taken"
-                                  | _ -> ())
-                                arguments
-                          | _ -> ());
-                      statement =
-                        (fun (node : Core.statement) ->
-                          once node.id;
-                          match node.kind with
-                          | Assign { target; _ } | Update { target; _ } -> place target
-                          | _ -> ());
-                      pattern =
-                        (fun (node : Core.pattern) ->
-                          once node.id;
-                          decided "a pattern" node.type_);
-                      callee = ignore;
-                    }
-                    form.parts)
-            (Query.demand database Resolve.Names.declarations module_)))
+        (fun () -> forms := !forms + forms_hold database module_))
     Standard_library.modules;
   test "the standard library has core forms" (fun () ->
       if !forms < 500 then fail "only %d of its definitions have one" !forms)

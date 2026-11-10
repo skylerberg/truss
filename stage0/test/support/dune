@@ -9,4 +9,10 @@
   workspace
   diagnostic
   source
+  types
+  resolve
+  interface
+  infer
+  core
+  core_walk
   type_checker))
