@@ -1375,7 +1375,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       extensional context frame (type_of context frame first) first_value second_value;
       Some (frame, L.equal first_value second_value)
   | Cost_function { function_; arguments } -> cost_function context frame node function_ arguments
-  | Method_time _ -> unsupported (at frame node) "the time of a method of a type parameter"
+  | Method_time callee -> Some (frame, method_time context frame callee)
 
 (* The right side of [&&], [||], or [==>], which runs only where [runs]
    holds. One that changes a local, as a call with a [mut] argument does,
@@ -4328,7 +4328,15 @@ and contract_call context frame (node : expression) (call_ : call) path contract
             (* A call of a capability's method is one of its calls. *)
             step_amount context after call_ values counter
         | _ ->
-            callee_amount context after ~path ~parts:contract.parts
+            (* A trait's method that promises only that it ends takes at most
+               [time(T.method)] for the type it is called on. *)
+            let ends_in =
+              match call_.callee with
+              | Trait_method _ when signature_terminates context path ->
+                  Some (method_time context frame call_.callee)
+              | _ -> None
+            in
+            callee_amount ?ends_in context after ~path ~parts:contract.parts
               ~bound_frame:(fun part ->
                 { (entry_frame part) with result = Some result; condition = after.condition })
               ~uses:call_.uses ~values ~change:(Some change) counter)
@@ -4504,8 +4512,8 @@ and promised_amount context frame (counter : Costs.counter) (bound : bound) ~eva
    [O(...)] bound with the definition's own constants; every function of a
    cycle is then proven with the first pair, so that each assumes of the
    others what they show. *)
-and callee_amount context after ~path ~(parts : part list) ~(bound_frame : part -> frame) ~uses
-    ~(values : passed list) ~change (counter : Costs.counter) =
+and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_frame : part -> frame)
+    ~uses ~(values : passed list) ~change (counter : Costs.counter) =
   let assumed =
     if
       counter.counting = Units
@@ -4564,8 +4572,9 @@ and callee_amount context after ~path ~(parts : part list) ~(bound_frame : part 
           List.fold_left (fun total clause -> Costs.plus total (amount clause)) Costs.zero found
       | _ -> unknown_amount context after counter)
   | _ -> (
-      match first_clauses () with
-      | Some (clause :: _) -> amount clause
+      match (first_clauses (), counter.resource, counter.counting, ends_in) with
+      | Some (clause :: _), _, _, _ -> amount clause
+      | _, Time, Units, Some time -> Costs.plus time (L.int 1)
       | _ -> unknown_amount context after counter)
 
 (* Whether a call can reach a [calls] clause's target: a function value
@@ -5051,7 +5060,21 @@ and indirect context (ty : T.ty) variant =
 and cost_function context frame (node : expression) (measure : cost_function) arguments =
   let values = List.map (fun argument -> snd (value context frame argument)) arguments in
   match (measure, values, arguments) with
-  | Log, [ n ], _ -> Some (frame, log_of context frame n)
+  | Log, [ n ], [ argument ] ->
+      let log = log_of context frame n in
+      (* [log] of a value of a bounded type is at most [log] of the type's
+         largest value: its width, for an unsigned type. *)
+      let rec unconverted (node : expression) =
+        match node.kind with
+        | Convert { conversion = To_integer; value = inner } -> unconverted inner
+        | _ -> node
+      in
+      (match bounds (type_of context frame (unconverted argument)) with
+      | Some (_, high) when not (L.mentions frame.bound n) ->
+          fact context frame
+            L.(Apply ("<=", [ n; Integer high ]) ==> Apply ("<=", [ log; int (Z.numbits high) ]))
+      | _ -> ());
+      Some (frame, log)
   | Power, [ base; exponent ], _ -> Some (frame, power_of context frame base exponent)
   | Time, [ f ], [ function_value ] ->
       Some (frame, time_of context frame (type_of context frame function_value) f)
@@ -5072,6 +5095,15 @@ and log_of context frame n =
         Option.iter (fun half -> add half ~halving:false) half
   in
   if not (L.mentions frame.bound n) then add n ~halving:true;
+  (* Of a number, it is the number's bit length: the smallest integer at
+     least log2(n + 1). *)
+  (match n with
+  | L.Integer k ->
+      fact context frame
+        (L.equal
+           (L.Apply (Costs.log_symbol, [ n ]))
+           (L.int (if Z.sign k <= 0 then 0 else Z.numbits k)))
+  | _ -> ());
   L.Apply (Costs.log_symbol, [ n ])
 
 and power_of context frame base exponent =
@@ -5095,7 +5127,33 @@ and power_of context frame base exponent =
          fact context frame step;
          ignore (add previous)
      | None -> ());
+  (* Of two numbers, it is their power. *)
+  (match (base, exponent) with
+  | L.Integer b, L.Integer e when Z.sign e >= 0 && Z.leq e (Z.of_int 256) ->
+      fact context frame
+        (L.equal
+           (L.Apply (Costs.power_symbol, [ base; exponent ]))
+           (L.Integer (Z.pow b (Z.to_int e))))
+  | _ -> ());
   L.Apply (Costs.power_symbol, [ base; exponent ])
+
+(* [time(T.method)]: the longest any one call of a trait's method on a type
+   takes in this run, a constant of the run, at least one step. It is one
+   symbol for each method and type, so a callee's bound and its caller's
+   are about the same term. *)
+and method_time context frame (callee : callee) =
+  match callee with
+  | Trait_method { trait; name; receiver; self_type; _ } ->
+      let self_type = substituted context frame self_type in
+      let symbol =
+        Printf.sprintf "time.method.%s"
+          (Path.show (Path.Method { owner = trait.trait; name; receiver }))
+        ^ "[" ^ type_key self_type ^ "]"
+      in
+      declare context (L.Constant (symbol, L.Int));
+      fact context frame (L.Apply ("<=", [ L.int 1; L.Symbol symbol ]));
+      L.Symbol symbol
+  | _ -> raise (Foreign_unsupported "the time of what is not a trait's method")
 
 (* Loops' costs. A loop with a [cost] clause about a counter is bounded by
    it: what the loop has spent so far is within the clause at its head, on
