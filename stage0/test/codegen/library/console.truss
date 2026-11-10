@@ -1,0 +1,31 @@
+use standard::console
+
+fn same(found: StringSlice, expected: StringSlice) -> Bool {
+  found == expected
+}
+
+test "styles are stripped from text" {
+  assert console::strip_styles("\u{1b}[1;31mred\u{1b}[0m plain") == "red plain"
+  assert console::strip_styles("no styles") == "no styles"
+  assert console::strip_styles("") == ""
+  assert console::strip_styles("\u{1b}[") == ""
+  assert console::strip_styles("a\u{1b}[2Kb") == "ab"
+  assert console::strip_styles("\u{1b}[38;2;1;2;3mx") == "x"
+  assert console::strip_styles("h\u{e9}\u{1b}[4m\u{20ac}") == "h\u{e9}\u{20ac}"
+  assert console::strip_styles("\u{1b}x").length() == 2
+}
+
+test "a captured console gives its lines in order and keeps what is printed" {
+  var captured = console::CapturedConsole.new(["first", "second"])
+  provide mut captured {
+    assert Console.read_line() == Some("first")
+    Console.print("a")
+    Console.print_line("b")
+    Console.print_error("oops")
+    assert Console.read_line() == Some("second")
+    assert Console.read_line() is None
+    assert Console.read_line() is None
+  }
+  assert same(captured.output(), expected: "ab\n")
+  assert same(captured.errors(), expected: "oops\n")
+}

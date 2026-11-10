@@ -131,6 +131,9 @@ let solve solver ?(values = []) query =
   let stored =
     match file with
     | Some file when Sys.file_exists file -> (
+        (* An answer read is one still asked, so its file's age is how long
+           ago a run last asked it, which is what pruning old answers reads. *)
+        (try Unix.utimes file 0. 0. with Unix.Unix_error _ -> ());
         match String.split_on_char '\n' (In_channel.with_open_bin file In_channel.input_all) with
         | "proven" :: _ -> Some Proven
         | "out_of_steps" :: _ -> Some Out_of_steps

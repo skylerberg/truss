@@ -1,0 +1,28 @@
+use standard::log
+
+test "a level is displayed in lower case" {
+  assert "${log::Level.Debug}" == "debug"
+  assert "${log::Level.Information}" == "information"
+  assert "${log::Level.Warning}" == "warning"
+  assert "${log::Level.Error}" == "error"
+}
+
+test "a logger that adds fields puts them before the record's own" {
+  var captured = log::CapturedLog()
+  provide mut captured {
+    provide log::WithFields(fields: [log::Field.string("request", value: "r1")]) {
+      log::information("started", fields: [log::Field.integer("count", value: 2)])
+      log::debug("detail")
+    }
+    log::warning("outside")
+  }
+  assert captured.records.length() == 3
+  assert captured.records[0].level == log::Level.Information
+  assert captured.records[0].message == "started"
+  assert captured.records[0].fields.length() == 2
+  assert captured.records[0].fields[0].name == "request"
+  assert captured.records[0].fields[1].name == "count"
+  assert captured.records[1].fields.length() == 1
+  assert captured.records[1].fields[0].name == "request"
+  assert captured.records[2].fields.length() == 0
+}

@@ -1,3 +1,4 @@
+use standard::intrinsic
 use standard::streams
 
 public opaque type Input(handle: streams::Handle)
@@ -111,10 +112,45 @@ public fn Style.apply(self, text: StringSlice) -> String
   todo
 }
 
+internal fn sequence_end(text: StringSlice, from: USize) -> USize
+  requires from <= text.length()
+  ensures from <= result
+  ensures result <= text.length()
+  cost time O(result - from)
+{
+  var index = from
+  while index < text.length() && text.byte(index) >= 32 && text.byte(index) <= 63
+    invariant from <= index
+    invariant index <= text.length()
+    decreases text.length() - index
+    cost time O(index - from)
+  {
+    index += 1
+  }
+  if index < text.length() && text.byte(index) >= 64 && text.byte(index) <= 126 { index + 1 } else { index }
+}
+
 public fn strip_styles(text: StringSlice) -> String
+  ensures result.length() <= text.length()
   cost time O(text.length())
 {
-  todo
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(text.length())
+  var index: USize = 0
+  while index < text.length()
+    invariant index <= text.length()
+    invariant intrinsic::storage_length(output) <= index
+    invariant intrinsic::storage_capacity(output) == text.length()
+    decreases text.length() - index
+    cost time O(index)
+  {
+    if text.byte(index) == 27 && index + 1 < text.length() && text.byte(index + 1) == 91 {
+      index = sequence_end(text, from: index + 2)
+    } else {
+      intrinsic::storage_push(mut output, value: text.byte(index))
+      index += 1
+    }
+  }
+  String(storage: own output)
 }
 
 public fn display_width(text: StringSlice) -> USize
@@ -156,23 +192,34 @@ impl Console for CapturedConsole {
     mut self.errors.push("\n")
   }
 
-  fn read_line(mut self) -> Option[String] {
-    todo
+  fn read_line(mut self) -> Option[String]
+  {
+    if self.next_line < self.input.length() {
+      let line = self.input[self.next_line].copy()
+      self.next_line += 1
+      Some(own line)
+    } else {
+      None
+    }
   }
 
-  fn input(mut self) -> Input {
-    todo
+  fn input(mut self) -> Input
+  {
+    Input(handle: streams::Handle.simulated(0))
   }
 
-  fn output(mut self) -> Output {
-    todo
+  fn output(mut self) -> Output
+  {
+    Output(handle: streams::Handle.simulated(1))
   }
 
-  fn error_output(mut self) -> Output {
-    todo
+  fn error_output(mut self) -> Output
+  {
+    Output(handle: streams::Handle.simulated(2))
   }
 
-  fn terminal(mut self) -> Terminal {
-    todo
+  fn terminal(mut self) -> Terminal
+  {
+    Terminal(handle: streams::Handle.simulated(1))
   }
 }

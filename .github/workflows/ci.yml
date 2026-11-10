@@ -92,9 +92,14 @@ jobs:
           key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
 
   # The standard library's proofs: the longest test, and the one that grows
-  # with the library, so it has a runner of its own, beside the check.
+  # with the library, so it runs beside the check, dealt out to several
+  # runners. Each proves its share of the modules. A new share is one more
+  # entry in the list.
   proofs:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        share: [0, 1]
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -115,21 +120,26 @@ jobs:
 
       # The solver's answers, each kept by the text of its query, the
       # solver's version, and its limit. A run starts from main's and solves
-      # only the queries main did not.
+      # only the queries main did not. Each share keeps its own answers, and
+      # one with none yet starts from any share's, which is how a new share
+      # begins with the answers of the ones it was split from.
       - uses: actions/cache/restore@v6.1.0
         with:
           path: ~/.cache/truss-solver
-          key: solver-${{ github.sha }}
-          restore-keys: solver-
+          key: solver-share-${{ matrix.share }}-${{ github.sha }}
+          restore-keys: |
+            solver-share-${{ matrix.share }}-
+            solver-
 
-      - name: Prove the standard library
+      - name: Prove a share of the standard library
         run: |
           opam exec -- dune build ./stage0/test/standard_library_tests.exe
           cd _build/default/stage0/test
-          TRUSS_SOLVER_CACHE="$HOME/.cache/truss-solver" ./standard_library_tests.exe
+          TRUSS_PROOF_SHARE="${{ matrix.share }}/${{ strategy.job-total }}" TRUSS_SOLVER_CACHE="$HOME/.cache/truss-solver" ./standard_library_tests.exe
 
-      # An answer no run has written for two weeks is dropped, so the cache
-      # holds the queries that are still asked and not every one that was.
+      # An answer no run has asked for in two weeks is dropped, so the cache
+      # holds the queries that are still asked and not every one that was. A
+      # run gives each answer it finds the present time.
       - if: github.event_name == 'push'
         run: mkdir -p ~/.cache/truss-solver && find ~/.cache/truss-solver -type f -mtime +14 -delete
 
@@ -137,7 +147,7 @@ jobs:
         uses: actions/cache/save@v6.1.0
         with:
           path: ~/.cache/truss-solver
-          key: solver-${{ github.sha }}
+          key: solver-share-${{ matrix.share }}-${{ github.sha }}
 
   # Every codegen test again, with its C built under AddressSanitizer and
   # UndefinedBehaviorSanitizer: a report is a compiler bug. Leaks are left to

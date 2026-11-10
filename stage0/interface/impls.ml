@@ -96,6 +96,56 @@ let impls_in =
         (fun (indexed_trait, impl) -> if Path.equal indexed_trait trait then Some impl else None)
         (impls_for database type_ package))
 
+let cursor_trait : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Cursor" }
+
+(* The cursor of a yielding function or method implements [Cursor], and no
+   [impl] is written for it. Its [impl] is a derived one, named by the
+   function. *)
+let cursor_impl (method_ : Path.t) : Path.t = Derived { type_ = method_; trait = cursor_trait }
+
+(* The yielding function or method whose cursor an [impl] is for, if the
+   [impl] is a cursor's. No type derives [Cursor], so a derived [impl] of it
+   is a cursor's. *)
+let cursor_of_impl : Path.t -> Path.t option = function
+  | Derived { type_ = method_; trait } when Path.equal trait cursor_trait -> Some method_
+  | _ -> None
+
+(* The interface of a cursor's [impl]. Its generic parameters are the
+   yielding method's, its [Element] is what the method yields, and its
+   methods are the trait's with [Self] replaced. The trait gives every
+   method but [next] a body. [next] is the method's own code, run to its
+   next [yield]. *)
+let cursor_interface database ~method_ =
+  match
+    ( Query.demand database Environment.signature method_,
+      Query.demand database Environment.trait_interface cursor_trait )
+  with
+  | Some ({ output = Yields (_, element); _ } as signature), Some trait_interface ->
+      let impl_generics = signature.generics in
+      let for_type =
+        T.Cursor { method_; arguments = Environment.generic_arguments signature.generics }
+      in
+      let self : T.substitution = [ ({ owner = cursor_trait; name = "Self" }, T.Type for_type) ] in
+      Some
+        {
+          T.impl_generics;
+          implements =
+            { trait = cursor_trait; trait_arguments = []; associated = [ ("Element", element) ] };
+          for_type;
+          impl_uses = [];
+          impl_methods =
+            List.map
+              (fun (method_ : T.trait_method) ->
+                ( method_.method_name,
+                  method_.method_receiver,
+                  T.method_in_impl ~impl_generics ~impl_uses:[]
+                    (T.substitute_signature self method_.method_signature) ))
+              trait_interface.methods;
+          impl_broken = false;
+        }
+  | _ -> None
+
 (* The interface of a derived [impl]: the type's generic parameters, each
    bound by the trait, as [impl Equal for Option[Value: Equal]], and the
    trait's methods with [Self] replaced. *)
@@ -104,6 +154,8 @@ let derived_interface database ~type_ ~trait =
     ( Query.demand database Environment.type_interface type_,
       Query.demand database Environment.trait_interface trait )
   with
+  | _ when Option.is_some (cursor_of_impl (Derived { type_; trait })) ->
+      cursor_interface database ~method_:type_
   | Some type_interface, Some trait_interface ->
       let trait_reference : T.trait_reference = { trait; trait_arguments = []; associated = [] } in
       let impl_generics =
@@ -230,9 +282,6 @@ type evidence =
           worked out yet. A trait whose definition did not parse is accepted of every type, as the
           [Error] of its report. *)
 
-let cursor_trait : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Cursor" }
-
 (* What a pulled yielding method's cursor gives: what the method yields,
    with the method's type arguments. *)
 let cursor_element database (method_ : Path.t) arguments =
@@ -317,7 +366,13 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
   else
     match type_ with
     | T.Error _ | T.Hole | T.Variable _ -> Some (Accepted type_)
-    | T.Cursor _ -> if Path.equal wanted.trait cursor_trait then Some Built_in else None
+    | T.Cursor { method_; arguments } ->
+        if Path.equal wanted.trait cursor_trait then
+          Option.bind (Query.demand database Environment.signature method_) (fun signature ->
+              Option.map
+                (fun substitution -> From_impl { impl = cursor_impl method_; substitution })
+                (T.substitution_of signature.generics arguments))
+        else None
     | T.Never | T.Integer | T.Literal _ | T.Function _ -> None
     | T.Parameter _ | T.Projection _ ->
         if
@@ -416,11 +471,8 @@ and associated_type database ~bounds type_ (trait : T.trait_reference) name =
                 (fun (bound : T.trait_reference) -> List.assoc_opt name bound.associated)
                 (any :: Properties.bound_closure database ~self:type_ any)
           | _ -> None)
-      | Some Built_in -> (
-          match type_ with
-          | T.Cursor { method_; arguments } when name = "Element" ->
-              cursor_element database method_ arguments
-          | _ -> None)
+      (* [Copyable] and [Plain] have no associated types. *)
+      | Some Built_in -> None
       (* An associated type of an [Error] or a [Hole] is one too; of a type
          not worked out yet, it is not known. *)
       | Some (Accepted (T.Variable _)) -> None
