@@ -7,8 +7,9 @@ let int64 = Monomorphic.builtin Int64
 
 (* Checks that the module's test passes and that each named function, with
    the given type arguments, is lowered from its core form. With [tests],
-   the tests' bodies must be lowered from their core forms too. *)
-let lowers what ?(tests = false) functions source =
+   the tests' bodies must be lowered from their core forms too. [pulled]
+   names yielding functions whose pulled versions must be as well. *)
+let lowers what ?(tests = false) ?(pulled = []) functions source =
   test what (fun () ->
       let database, _ = load source in
       let context = Lower.context ~checks:true database target_64 in
@@ -23,6 +24,10 @@ let lowers what ?(tests = false) functions source =
           from_core (Code { path = Top { module_ = example; name }; type_arguments }))
         functions;
       if tests then List.iter (fun path -> from_core (Lower.test_key path)) (tests_of database);
+      List.iter
+        (fun name ->
+          from_core (Cursor_next { method_ = Top { module_ = example; name }; type_arguments = [] }))
+        pulled;
       expect_output source "test 0 passed\n")
 
 let () =
@@ -699,5 +704,82 @@ test "reads" {
 }
 |}
         "test 0 panicked\nmessage 35\nno cell\n  at example/main.truss:6:3\n")
+
+let () =
+  lowers "a loop over a recursive yielding function pulls a cursor over it" ~tests:true
+    ~pulled:[ "descend" ]
+    [ ("total", []) ]
+    {|fn descend(from: Int64) yields Int64 {
+  if from > 0 {
+    yield from
+    for below in descend(from - 1) {
+      yield below
+    }
+  }
+}
+
+fn total(from: Int64) -> Int64 {
+  var sum = 0
+  for value in descend(from) {
+    sum += value
+  }
+  sum
+}
+
+test "descends" {
+  assert total(4) == 10
+  assert total(0) == 0
+}
+|};
+  lowers "a pulled yielding function copies the places it yields" ~pulled:[ "labels" ]
+    [ ("longest", []) ]
+    {|fn labels(names: List[String], depth: Int64) yields String {
+  for name in names {
+    yield name
+  }
+  if depth > 0 {
+    for inner in labels(names, depth: depth - 1) {
+      yield inner
+    }
+  }
+}
+
+fn longest(names: List[String]) -> USize {
+  var most: USize = 0
+  for label in labels(names, depth: 2) {
+    if label.length() > most && label != "" {
+      most = label.length()
+    }
+  }
+  most
+}
+
+test "labels" {
+  assert longest(["a", "abc", "ab"]) == 3
+}
+|};
+  lowers "a named function as a value, at its own type and at a wider one" ~tests:true
+    [ ("doubled", []); ("named", []) ]
+    {|fn double(value: Int64) -> Int64 {
+  value * 2
+}
+
+fn apply(transform: fn(Int64) -> Int64, value: Int64) -> Int64 {
+  transform(value)
+}
+
+fn doubled(value: Int64) -> Int64 {
+  apply(double, value: value)
+}
+
+fn named() -> fn(Int64) -> Int64 {
+  double
+}
+
+test "function values" {
+  assert doubled(4) == 8
+  assert apply(named(), value: 5) == 10
+}
+|}
 
 let () = Harness.finish ()

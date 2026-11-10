@@ -400,31 +400,9 @@ and call_with ?evaluated st (call_ : C.call) ~(expressions : S.expression list)
         let path, type_arguments = Option.get (resolve_callee st call_) in
         let signature = signature_of st.context path in
         let substitution = bind signature.generics type_arguments in
-        let arguments = with_placeholders st signature substitution in_order in
-        let passed = List.filter_map (fun (mode, ty, place) -> hold st mode ty place) arguments in
-        let mask =
-          if has_defaults signature then
-            [ constant_int UInt64 (Z.of_int (default_mask signature call_)) ]
-          else []
-        in
-        let evidence = List.map (evidence_of st) (evidence_for substitution signature.uses) in
-        (* In the order of the pulled method's parameters: its own, the
-           defaults' mask, then the evidence. *)
-        let fields =
-          List.mapi
-            (fun i operand -> (Convention.cursor_parameter i, operand))
-            (passed @ mask @ evidence)
-        in
-        let cursor = Ground.Cursor { method_ = path; type_arguments } in
-        emit st.b
-          (Assign
-             ( destination,
-               Build
-                 {
-                   ty = cursor;
-                   variant = None;
-                   fields = (Convention.cursor_state, Constant (Integer (UInt32, Z.zero))) :: fields;
-                 } ))
+        cursor_into st ~path ~type_arguments ~signature ~substitution
+          ~arguments:(with_placeholders st signature substitution in_order)
+          ~mask:(default_mask signature call_) destination
     | Trait_method { trait; name; self_type; _ }
       when primitive (ground st self_type)
            && List.mem_assoc name primitive_methods
@@ -615,21 +593,6 @@ and yields_cursor st (call_ : C.call) =
   | Some (path, _) -> (
       match (signature_of st.context path).output with Yields _ -> true | _ -> false)
   | None -> false
-
-(* [next()] on a cursor: the pulled method's state machine. *)
-and call_next st (yielding : Ground.yielding) cursor destination =
-  let option = cursor_result st.context yielding in
-  let cursor_pointer = Lir.Pointer { target = Value (Cursor yielding); writable = true } in
-  let target signature = Lir.Direct { function_ = Instance (Cursor_next yielding); signature } in
-  let self = Lir.Address { place = cursor; writable = true } in
-  let convention = Convention.result st.context.env option in
-  emit st.b
-    (Call
-       {
-         target = target (Convention.signature [ cursor_pointer ] convention);
-         arguments = [ self ];
-         result = Convention.destination convention destination;
-       })
 
 and default_mask (signature : T.signature) (call_ : C.call) =
   let defaulted = List.filter (fun (p : T.parameter_info) -> p.has_default) signature.parameters in

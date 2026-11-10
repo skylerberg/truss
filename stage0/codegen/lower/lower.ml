@@ -121,13 +121,11 @@ let begin_body ?how ~(source : function_source) st =
    each [own] argument's local, and for a parameter with a default, the
    mask's local and the parameter's bit in it, since the argument is there
    only when the bit is set. *)
-let pulled context (yielding : Ground.yielding) :
+let pulled_from context (yielding : Ground.yielding) (source : function_source) :
     Lir.function_ * (Lir.local * (Lir.local * int) option) list =
   let code = code_of context yielding.method_ yielding.type_arguments in
   let st = enter context ~pulling:true (frame_of code ~inlined:[ yielding.method_ ]) in
-  let bound, mask, parameters =
-    begin_body st ~how:(Convention.held context.env) ~source:syntax_tree
-  in
+  let bound, mask, parameters = begin_body st ~how:(Convention.held context.env) ~source in
   let owned =
     List.filter_map
       (fun (arrives, mode, ty, bit) ->
@@ -145,8 +143,24 @@ let pulled context (yielding : Ground.yielding) :
         else None)
       bound
   in
-  block_into st code.body None;
+  source.body st None;
   (finish_function st ~first:[] ~rest:parameters (), owned)
+
+(* Lowers the code at a path with [lowered]: from its core form where
+   [Core_form] handles every node in it, and from the syntax tree otherwise.
+   Also returns the reason for the fallback to the syntax tree, if there was
+   one. *)
+let core_form_first context path (lowered : function_source -> 'lowered) : 'lowered * string option
+    =
+  match demand context Infer.core_of_path path with
+  | None -> (lowered syntax_tree, Some "a definition with no core form")
+  | Some (form, _) -> (
+      match lowered (Core_form.core_form form) with
+      | result -> (result, None)
+      | exception Core_form.Unhandled_node reason -> (lowered syntax_tree, Some reason))
+
+let pulled context (yielding : Ground.yielding) =
+  fst (core_form_first context yielding.method_ (pulled_from context yielding))
 
 (* Code run while compiling, for a tagged template's check: a template of
    the literal texts and no parts, given to the tag's [from_template]'s
@@ -229,34 +243,27 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
       Constants.write_output st output);
   { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
 
-(* Lowers a function or a test that has a body in source. The body is
-   lowered from its core form where [Core_form] handles every node in it,
-   and from the syntax tree otherwise. Also returns the reason for the
-   fallback to the syntax tree, if there was one. *)
+(* Lowers a function or a test that has a body in source. Also returns the
+   reason for a fallback to the syntax tree, if there was one. *)
 let source_code context key ~path ~type_arguments : Lir.t * string option =
   let code = code_of context path type_arguments in
-  let lowered (source : function_source) : Lir.t =
-    let st = enter context (frame_of code ~inlined:[ path ]) in
-    let convention, returns = result_of context code.substitution code.result in
-    result_slot st convention;
-    let _, _, parameters = begin_body st ~source in
-    source.body st (result_place st);
-    {
-      key;
-      main = finish_function st ~returns ~first:[] ~rest:parameters ();
-      nested = nested_functions st;
-    }
-  in
-  match demand context Infer.core_of_path path with
-  | None -> (lowered syntax_tree, Some "a definition with no core form")
-  | Some (form, _) -> (
-      match lowered (Core_form.core_form form) with
-      | instance -> (instance, None)
-      | exception Core_form.Unhandled_node reason -> (lowered syntax_tree, Some reason))
+  core_form_first context path (fun (source : function_source) : Lir.t ->
+      let st = enter context (frame_of code ~inlined:[ path ]) in
+      let convention, returns = result_of context code.substitution code.result in
+      result_slot st convention;
+      let _, _, parameters = begin_body st ~source in
+      source.body st (result_place st);
+      {
+        key;
+        main = finish_function st ~returns ~first:[] ~rest:parameters ();
+        nested = nested_functions st;
+      })
 
 let core_fallback_reason context (key : Instance.key) =
   match key with
   | Code { path; type_arguments } -> snd (source_code context key ~path ~type_arguments)
+  | Cursor_next yielding ->
+      snd (core_form_first context yielding.method_ (pulled_from context yielding))
   | _ -> Some "an instance with no body in source"
 
 let instance context (key : Instance.key) : Lir.t =

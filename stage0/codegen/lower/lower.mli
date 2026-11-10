@@ -32,10 +32,11 @@ val context : ?checks:bool -> Query.context -> Memory_layout.target -> context
    test, before drop elaboration. *)
 val instance : context -> Instance.key -> Lir.t
 
-(* Why the body of a function or a test was lowered from the syntax tree
-   instead of its core form: a description of a node kind in the body that
-   lowering from the core form does not handle yet. [None] where the body
-   was lowered from its core form. *)
+(* Why the body of a function, a test, or the pulled version of a yielding
+   method ([Cursor_next]) was lowered from the syntax tree instead of its
+   core form: a description of a node kind in the body that lowering from
+   the core form does not handle yet. [None] where the body was lowered
+   from its core form. *)
 val core_fallback_reason : context -> Instance.key -> string option
 
 (* A constant's static data, where its value folds: literals, operators on
