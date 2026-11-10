@@ -302,7 +302,6 @@ let constant_state context path =
     {
       (unwritten ~definition_key:key ~anchor:path ~substitution:[] ~result:(Returns T.unit)) with
       text = text_of context key;
-      checked = checked_of context key;
     }
   in
   let st = enter context (frame_of code ~inlined:[]) in

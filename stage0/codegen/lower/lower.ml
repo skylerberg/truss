@@ -1,4 +1,4 @@
-(* Lowering: the checked form of one instance to its LIR. The library's
+(* Lowering: the core form of one instance to its LIR. The library's
    modules, in the order each builds on the ones before it:
 
    - [Definitions]: lowering's context, and finding an instance's code and
@@ -6,14 +6,10 @@
    - [Lowering]: the state of lowering one function, its scopes, locals,
      and positions
    - [Targets]: what a call reaches, how arguments are passed, evidence,
-     and literals
-   - [Forward]: references that let the parts below call one another
-   - [Matching]: testing and binding patterns
-   - [Calls]: arguments, inlining, calls, defaults, and [requires] checks
-   - [Values]: literals, templates, collections, [provide], [?], lambdas,
-     [with], interpolation, and [any]
-   - [Expressions]: places and values of expressions
-   - [Statements]: blocks, statements, loops, conditions, and [match]
+     literals, cursors, and nested functions
+   - [Method_yields]: where a lending or yielding method's [yield]s are
+   - [Core_form]: expressions, statements, patterns, calls, inlining,
+     defaults, and [requires] checks
    - [Constants], [Derived], [Generated]: constants and their evaluators,
      derived implementations, and the instances lowering makes, such as
      capability tables and the program's [main]
@@ -23,23 +19,8 @@ open Lir_builder
 open Definitions
 open Lowering
 open Targets
-open Calls
 open Derived
 open Generated
-
-(* The knot: each forward reference, which the earlier parts of lowering
-   call through, set to the part that defines it. *)
-let () =
-  Forward.expression := Expressions.expression;
-  Forward.into := Expressions.into;
-  Forward.operand := Expressions.operand;
-  Forward.operator := Expressions.operator;
-  Forward.place_expression := Expressions.place_expression;
-  Forward.block_into := Statements.block_into;
-  Forward.branch := Statements.branch;
-  Forward.if_ := Statements.if_;
-  Forward.match_ := Statements.match_;
-  Forward.statement := Statements.statement
 
 type context = Definitions.context = {
   database : Query.context;
@@ -72,36 +53,35 @@ let trait_provides context ~trait ~name ~receiver =
    may arrive holding nothing: [fill_defaults] gives that one an owner.
    Gives each one's local, if it has one, with its mode, its type, and for
    one with a default, its bit in the mask of defaults passed. *)
-let bind_parameters ?how st =
+let bind_parameters ?how st (parameters : Core.parameter list) =
   let defaults = ref 0 in
   List.map
-    (fun (mode, ty, (written : S.parameter)) ->
-      let ty = ground st ty in
+    (fun (parameter : Core.parameter) ->
+      let ty = ground st parameter.type_ in
       let bit =
-        match written.kind with
-        | Named_parameter { default = Some _; _ } ->
+        Option.map
+          (fun _ ->
             incr defaults;
-            Some (!defaults - 1)
-        | _ -> None
+            !defaults - 1)
+          parameter.default
       in
       let arrives, place =
-        parameter st ?how ~owned:(mode = T.Own && bit = None) (Monomorphic.mode mode) ty
+        Lowering.parameter st ?how
+          ~owned:(parameter.mode = Own && bit = None)
+          (Monomorphic.mode parameter.mode) ty
       in
-      (match written.kind with
-      | Self_parameter _ -> st.frame.self_place <- Some place
-      | Named_parameter { name; _ } -> Hashtbl.replace st.frame.bindings name.id place
-      | Parameter_error -> ());
-      (arrives, mode, ty, bit))
-    st.frame.code.parameter_types
+      Core_form.bind_local st parameter.local place;
+      (arrives, parameter.mode, ty, bit))
+    parameters
 
 (* The start every function from source shares, after its result's slot:
    its parameters, the mask of defaults passed, and the evidence it is
    given, with its defaults filled in and its [requires] clauses checked.
-   The defaults and the clauses are read from [source]. Returns the
-   parameters bound, the mask, and every parameter's local in order. *)
-let begin_body ?how ~(source : function_source) st =
+   Returns the parameters bound, the mask, and every parameter's local in
+   order. *)
+let begin_body ?how st ~(parameters : Core.parameter list) ~(requires : Core.condition list) =
   let code = st.frame.code in
-  let bound = bind_parameters ?how st in
+  let bound = bind_parameters ?how st parameters in
   let mask =
     if code.has_defaults then Some (local st.b ~name:"passed" (Raw (Integer UInt64))) else None
   in
@@ -109,8 +89,8 @@ let begin_body ?how ~(source : function_source) st =
   start st.b (block st.b);
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
-  Option.iter (fun mask -> fill_defaults st mask (source.defaults st)) mask;
-  check_requires st (source.requirements st);
+  Option.iter (fun mask -> Core_form.fill_defaults st mask parameters) mask;
+  Core_form.check_requires st requires;
   ( bound,
     mask,
     List.filter_map (fun (arrives, _, _, _) -> arrives) bound @ Option.to_list mask @ evidence )
@@ -121,11 +101,14 @@ let begin_body ?how ~(source : function_source) st =
    each [own] argument's local, and for a parameter with a default, the
    mask's local and the parameter's bit in it, since the argument is there
    only when the bit is set. *)
-let pulled_from context (yielding : Ground.yielding) (source : function_source) :
+let pulled context (yielding : Ground.yielding) :
     Lir.function_ * (Lir.local * (Lir.local * int) option) list =
   let code = code_of context yielding.method_ yielding.type_arguments in
+  let parameters, requires, body = Core_form.body_of context yielding.method_ in
   let st = enter context ~pulling:true (frame_of code ~inlined:[ yielding.method_ ]) in
-  let bound, mask, parameters = begin_body st ~how:(Convention.held context.env) ~source in
+  let bound, mask, parameter_locals =
+    begin_body st ~how:(Convention.held context.env) ~parameters ~requires
+  in
   let owned =
     List.filter_map
       (fun (arrives, mode, ty, bit) ->
@@ -143,24 +126,8 @@ let pulled_from context (yielding : Ground.yielding) (source : function_source) 
         else None)
       bound
   in
-  source.body st None;
-  (finish_function st ~first:[] ~rest:parameters (), owned)
-
-(* Lowers the code at a path with [lowered]: from its core form where
-   [Core_form] handles every node in it, and from the syntax tree otherwise.
-   Also returns the reason for the fallback to the syntax tree, if there was
-   one. *)
-let core_form_first context path (lowered : function_source -> 'lowered) : 'lowered * string option
-    =
-  match demand context Infer.core_of_path path with
-  | None -> (lowered syntax_tree, Some "a definition with no core form")
-  | Some (form, _) -> (
-      match lowered (Core_form.core_form form) with
-      | result -> (result, None)
-      | exception Core_form.Unhandled_node reason -> (lowered syntax_tree, Some reason))
-
-let pulled context (yielding : Ground.yielding) =
-  fst (core_form_first context yielding.method_ (pulled_from context yielding))
+  Core_form.block_into st body None;
+  (finish_function st ~first:[] ~rest:parameter_locals (), owned)
 
 (* Code run while compiling, for a tagged template's check: a template of
    the literal texts and no parts, given to the tag's [from_template]'s
@@ -252,28 +219,20 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
       Constants.write_output st output);
   { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
 
-(* Lowers a function or a test that has a body in source. Also returns the
-   reason for a fallback to the syntax tree, if there was one. *)
-let source_code context key ~path ~type_arguments : Lir.t * string option =
+(* Lowers a function or a test that has a body in source. *)
+let source_code context key ~path ~type_arguments : Lir.t =
   let code = code_of context path type_arguments in
-  core_form_first context path (fun (source : function_source) : Lir.t ->
-      let st = enter context (frame_of code ~inlined:[ path ]) in
-      let convention, returns = result_of context code.substitution code.result in
-      result_slot st convention;
-      let _, _, parameters = begin_body st ~source in
-      source.body st (result_place st);
-      {
-        key;
-        main = finish_function st ~returns ~first:[] ~rest:parameters ();
-        nested = nested_functions st;
-      })
-
-let core_fallback_reason context (key : Instance.key) =
-  match key with
-  | Code { path; type_arguments } -> snd (source_code context key ~path ~type_arguments)
-  | Cursor_next yielding ->
-      snd (core_form_first context yielding.method_ (pulled_from context yielding))
-  | _ -> Some "an instance with no body in source"
+  let parameters, requires, body = Core_form.body_of context path in
+  let st = enter context (frame_of code ~inlined:[ path ]) in
+  let convention, returns = result_of context code.substitution code.result in
+  result_slot st convention;
+  let _, _, parameter_locals = begin_body st ~parameters ~requires in
+  Core_form.block_into st body (result_place st);
+  {
+    key;
+    main = finish_function st ~returns ~first:[] ~rest:parameter_locals ();
+    nested = nested_functions st;
+  }
 
 let instance context (key : Instance.key) : Lir.t =
   match key with
@@ -288,5 +247,5 @@ let instance context (key : Instance.key) : Lir.t =
       }
     when not (trait_provides context ~trait ~name ~receiver) ->
       derived context ~key ~type_path ~trait ~name ~type_arguments
-  | Code { path; type_arguments } -> fst (source_code context key ~path ~type_arguments)
+  | Code { path; type_arguments } -> source_code context key ~path ~type_arguments
   | _ -> bug "%s is not code from source" (Instance.to_string key)
