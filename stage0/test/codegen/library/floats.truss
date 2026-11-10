@@ -403,3 +403,135 @@ test "a single goes through the same functions" {
   assert eight.cube_root() == 2.0
   assert two.power(10.0) == 1024.0
 }
+
+fn sine(value: Float64) -> Float64 {
+  value.sine()
+}
+
+fn cosine(value: Float64) -> Float64 {
+  value.cosine()
+}
+
+fn tangent(value: Float64) -> Float64 {
+  value.tangent()
+}
+
+test "the sine, the cosine, and the tangent of ordinary angles" {
+  assert close(sine(0.5), expected: 0.479425538604203)
+  assert close(sine(1.0), expected: 0.8414709848078965)
+  assert close(sine(-2.0), expected: -0.9092974268256817)
+  assert close(sine(3.0), expected: 0.1411200080598672)
+  assert close(sine(10.0), expected: -0.5440211108893698)
+  assert close(sine(100.0), expected: -0.5063656411097588)
+  assert close(sine(0.001), expected: 0.0009999998333333417)
+  assert sine(1.5707963267948966) == 1.0
+  assert close(sine(0.5235987755982988), expected: 0.49999999999999994)
+  assert close(cosine(0.5), expected: 0.8775825618903728)
+  assert close(cosine(1.0), expected: 0.5403023058681398)
+  assert close(cosine(-2.0), expected: -0.4161468365471424)
+  assert close(cosine(3.0), expected: -0.9899924966004454)
+  assert close(cosine(10.0), expected: -0.8390715290764524)
+  assert close(cosine(100.0), expected: 0.8623188722876839)
+  assert cosine(3.141592653589793) == -1.0
+  assert cosine(0.0) == 1.0
+  assert close(tangent(0.5), expected: 0.5463024898437905)
+  assert close(tangent(1.0), expected: 1.557407724654902)
+  assert close(tangent(-2.0), expected: 2.185039863261519)
+  assert close(tangent(3.0), expected: -0.1425465430742778)
+  assert close(tangent(10.0), expected: 0.6483608274590867)
+  assert close(tangent(0.001), expected: 0.0010000003333334668)
+}
+
+test "an angle of any size is reduced exactly" {
+  assert close(sine(1000000.0), expected: -0.34999350217129294)
+  assert close(cosine(1000000.0), expected: 0.9367521275331447)
+  assert close(tangent(1000000.0), expected: -0.373624453987599)
+  assert close(sine(536870912.5), expected: -0.1665503842914579)
+  assert close(cosine(536870912.5), expected: -0.9860329454396378)
+  assert close(sine(1.0e15), expected: 0.8582727931702359)
+  assert close(cosine(1.0e15), expected: -0.5131937377869702)
+  assert close(tangent(1.0e15), expected: -1.672414782127583)
+  assert close(sine(1.0e22), expected: -0.8522008497671888)
+  assert close(cosine(1.0e22), expected: 0.523214785395139)
+  assert close(tangent(1.0e22), expected: -1.6287782256068988)
+  assert close(sine(1.0e300), expected: -0.8178819121159085)
+  assert close(cosine(1.0e300), expected: -0.5753861119575491)
+  assert close(sine(-1.0e22), expected: 0.8522008497671888)
+  assert (sine(3.141592653589793) - 1.2246467991473532e-16).absolute() < 1.0e-30
+  assert (cosine(1.5707963267948966) - 6.123233995736766e-17).absolute() < 1.0e-30
+}
+
+test "the trigonometric functions at zero, infinity, and a float that is not a number" {
+  let negative_zero: Float64 = -0.0
+  assert sine(0.0) == 0.0
+  assert sine(negative_zero).is_negative()
+  assert tangent(negative_zero).is_negative()
+  assert sine(Float64.infinity).is_nan()
+  assert cosine(Float64.negative_infinity).is_nan()
+  assert tangent(Float64.infinity).is_nan()
+  assert sine(Float64.not_a_number).is_nan()
+  assert cosine(Float64.not_a_number).is_nan()
+}
+
+fn arctangent(value: Float64) -> Float64 {
+  value.arctangent()
+}
+
+test "the inverse trigonometric functions" {
+  assert close(arctangent(0.5), expected: 0.46364760900080615)
+  assert close(arctangent(1.0), expected: 0.7853981633974483)
+  assert close(arctangent(-2.0), expected: -1.1071487177940906)
+  assert close(arctangent(0.66), expected: 0.583373006993856)
+  assert close(arctangent(3.0), expected: 1.2490457723982544)
+  assert close(arctangent(1.0e10), expected: 1.5707963266948965)
+  assert close(arctangent(0.001), expected: 0.0009999996666668668)
+  assert arctangent(Float64.infinity) == 1.5707963267948966
+  assert arctangent(Float64.negative_infinity) == -1.5707963267948966
+  let half: Float64 = 0.5
+  let one: Float64 = 1.0
+  let small: Float64 = -0.3
+  let nearly: Float64 = 0.9
+  let two: Float64 = 2.0
+  assert close(half.arcsine(), expected: 0.5235987755982988)
+  assert one.arcsine() == 1.5707963267948966
+  assert close(small.arcsine(), expected: -0.30469265401539747)
+  assert close(nearly.arcsine(), expected: 1.1197695149986342)
+  assert two.arcsine().is_nan()
+  assert close(half.arccosine(), expected: 1.0471975511965976)
+  assert one.arccosine() == 0.0
+  assert close(small.arccosine(), expected: 1.8754889808102941)
+  assert close(nearly.arccosine(), expected: 0.45102681179626236)
+  let minus_one: Float64 = -1.0
+  assert minus_one.arccosine() == 3.141592653589793
+}
+
+fn angle_of(y: Float64, x: Float64) -> Float64 {
+  y.arctangent_2(x)
+}
+
+test "the angle of a point is in the quadrant the point is in" {
+  assert close(angle_of(1.0, x: 1.0), expected: 0.7853981633974483)
+  assert close(angle_of(1.0, x: -1.0), expected: 2.356194490192345)
+  assert close(angle_of(-1.0, x: -1.0), expected: -2.356194490192345)
+  assert close(angle_of(-1.0, x: 1.0), expected: -0.7853981633974483)
+  assert close(angle_of(3.0, x: 4.0), expected: 0.6435011087932844)
+  assert angle_of(0.0, x: -1.0) == 3.141592653589793
+  assert angle_of(-0.0, x: -1.0) == -3.141592653589793
+  assert angle_of(0.0, x: 1.0) == 0.0
+  assert angle_of(2.0, x: 0.0) == 1.5707963267948966
+  assert angle_of(-2.0, x: 0.0) == -1.5707963267948966
+  assert angle_of(Float64.infinity, x: Float64.infinity) == 0.7853981633974483
+  assert angle_of(Float64.infinity, x: Float64.negative_infinity) == 2.356194490192345
+  assert angle_of(1.0, x: Float64.infinity) == 0.0
+  assert angle_of(1.0, x: Float64.negative_infinity) == 3.141592653589793
+  assert angle_of(Float64.negative_infinity, x: 1.0) == -1.5707963267948966
+  assert angle_of(Float64.not_a_number, x: 1.0).is_nan()
+}
+
+test "a single goes through the trigonometric functions too" {
+  let one: Float32 = 1.0
+  assert (one.sine() - 0.84147096).absolute() < 0.0000001
+  assert (one.cosine() - 0.5403023).absolute() < 0.0000001
+  assert (one.arctangent() - 0.7853982).absolute() < 0.0000001
+  assert (one.arctangent_2(1.0) - 0.7853982).absolute() < 0.0000001
+}
