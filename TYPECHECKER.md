@@ -1058,13 +1058,17 @@ copied.
 
 `Patterns` uses Maranget's usefulness algorithm ("Warnings for pattern
 matching", 2007), the one OCaml and Rust use, over the matched values as a
-vector, so a `match` over several values is checked as one:
+vector, so a `match` over several values is checked as one. It reads the
+[core form](#the-core-form), so it checks the patterns that the prover and
+code generation read, the ones that `?` expands to among them:
 
 - **Constructors** are the variants of a sum type, `true` and `false`, the
   intervals of an integer or `Character` type, which ranges and literals
   split, and constants, which are expanded into the patterns of their
   values. Strings have infinitely many values, so a `match` on a string
-  needs a pattern that matches everything.
+  needs a pattern that matches everything. A value that is not worked out,
+  such as a constant built by a call or a generic parameter that is a
+  value, covers nothing but itself.
 - **An arm with a guard never covers its pattern.** When the guards cover
   everything, the `match` ends with `_ => unreachable`, which the prover
   checks.

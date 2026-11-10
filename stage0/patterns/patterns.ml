@@ -2,15 +2,16 @@
    ("Warnings for pattern matching", 2007), over the matched values as a
    vector, so a [match] over several values is checked as one.
 
+   The check reads the core form, so it checks the patterns that the prover
+   and code generation read.
+
    Constructors are the variants of a sum type, a record's one shape,
    [true] and [false], and for integers and [Character] the intervals that
    the patterns' literals and ranges split the type into. Strings have
    infinitely many values, so only a pattern that matches everything
    covers them. An arm with a guard never covers its pattern. *)
 
-open Syntax
 module T = Types
-module C = Checked
 module Members = Infer.Members
 
 (* The space of patterns *)
@@ -21,19 +22,24 @@ type constructor =
   | Boolean of bool
   | Interval of Z.t * Z.t  (** Inclusive. *)
   | Text of string  (** A string literal, one of infinitely many. *)
-  | Opaque_constant of Path.t
-      (** A constant whose value is not worked out, which covers nothing else. *)
+  | Opaque of string
+      (** A value that is not worked out, which covers nothing else. The text names it in a message.
+      *)
 
 type space = Wild | Constructed of constructor * space list | Alternatives of space list
 
 type context = {
   database : Query.context;
-  package : string;
-  checked : C.t;
+  spans : Syntax.span array;
+  text : string;  (** The definition's source text, in which the spans are offsets. *)
   mutable diagnostics : Diagnostic.t list;
 }
 
-let report context ?(fixes = []) code (span : span) message =
+let span context (origin : Core.origin) : Syntax.span =
+  if origin >= 0 && origin < Array.length context.spans then context.spans.(origin)
+  else Syntax.Span.make 0 0
+
+let report context ?(fixes = []) code (span : Syntax.span) message =
   context.diagnostics <-
     Diagnostic.make ~fixes ~code:(Patterns code) (Source.span span.start span.stop) message
     :: context.diagnostics
@@ -80,206 +86,109 @@ let field_types context type_ constructor =
 
 let arity context type_ constructor = List.length (fields_of context type_ constructor)
 
-(* A written pattern as a space, its fields put in declared order, with
-   fields it does not name as wildcards. *)
-(* [replace] stands one or-pattern, by its id, for only some of its
-   alternatives, to ask what those alone cover. *)
-let rec space ?replace context type_ (written : pattern) : space =
+(* A pattern as a space, its fields put in declared order, with fields it
+   does not name as wildcards. [replace] stands one or-pattern, by its id,
+   for only some of its alternatives, to ask what those alone cover. *)
+let rec space ?replace context (written : Core.pattern) : space =
   match written.kind with
-  | Wildcard | Pattern_error -> Wild
-  | Binding_or_constant _ | Qualified_constant _ -> (
-      match context.checked.patterns.(written.id) with
-      | Some (Constant_pattern path) -> constant context type_ path
-      | _ -> Wild)
-  | Literal literal -> literal_space context written.id literal
-  | Pattern_range { start; stop; inclusive } -> (
+  | Wildcard | Bind _ -> Wild
+  | Literal value | Equal_to { value; _ } -> compared context value
+  | Range { start; stop; inclusive } -> (
       match (range_end context start, range_end context stop) with
-      | Ok (Some low), Ok (Some high) ->
+      | Ok low, Ok high ->
           let high = if inclusive then high else Z.pred high in
           if Z.gt low high then Alternatives [] else Constructed (Interval (low, high), [])
       (* An end whose value is not worked out here covers nothing else. *)
-      | Error path, _ | _, Error path -> Constructed (Opaque_constant path, [])
-      | _ -> Wild)
-  | Variant { name; fields } ->
-      fielded ?replace context type_ (Variant name.last.text) (Option.value ~default:[] fields)
-  | Record fields -> fielded ?replace context type_ Record fields
+      | Error shown, _ | _, Error shown -> Constructed (Opaque shown, []))
+  | Variant { variant; fields } -> fielded ?replace context written.type_ (Variant variant) fields
+  | Record fields -> fielded ?replace context written.type_ Record fields
   | Alternatives alternatives ->
       let alternatives =
         match replace with Some (id, only) when id = written.id -> only | _ -> alternatives
       in
-      Alternatives (List.map (space ?replace context type_) alternatives)
+      Alternatives (List.map (space ?replace context) alternatives)
 
-(* A literal's value as body checking recorded it, so a character or byte
-   is the integer it stands for. *)
-and literal_space context id = function
-  | Literal_true -> Constructed (Boolean true, [])
-  | Literal_false -> Constructed (Boolean false, [])
-  | literal -> (
-      match (context.checked.literals.(id), literal) with
-      | Some (Integer_value value), _ -> Constructed (Interval (value, value), [])
-      | _, Literal_string literal -> Constructed (Text literal.first.value, [])
-      | _ -> Wild)
+(* The value that a pattern compares the scrutinee with, as the pattern of
+   that value. A value that is not worked out here covers nothing else. *)
+and compared context (value : Core.expression) : space =
+  match value.kind with
+  | Use (Constant { path; _ }) -> constant context path
+  | Value_parameter parameter -> Constructed (Opaque parameter.name, [])
+  | _ -> Option.value ~default:(Constructed (Opaque "this value", [])) (literal value)
+
+and literal (value : Core.expression) : space option =
+  match value.kind with
+  | Boolean found -> Some (Constructed (Boolean found, []))
+  | Integer found -> Some (Constructed (Interval (found, found), []))
+  | String text -> Some (Constructed (Text text, []))
+  | _ -> None
 
 (* A constant as the pattern of its value, so it covers exactly what that
    value does. A value that is not worked out here, such as one built by a
    function call, covers nothing else. *)
-and constant ?(seen = []) context type_ path =
-  let opaque = Constructed (Opaque_constant path, []) in
+and constant ?(seen = []) context path =
+  let opaque = Constructed (Opaque (Path.show path), []) in
   if List.exists (Path.equal path) seen then opaque
   else
     match Query.demand context.database Interface.Constants.value_of path with
     | Some value -> Constructed (Interval (value, value), [])
     | None -> (
-        match Interface.Summary.definition context.database path with
-        | Some (key, { kind = Constant { value; _ }; _ }) -> (
-            match Query.demand context.database Resolve.resolved key with
-            | Some resolved -> (
-                match constant_value context resolved type_ (path :: seen) value with
-                | Some space -> space
-                | None -> opaque)
-            | None -> opaque)
+        match
+          Option.bind
+            (Query.demand context.database Interface.Summary.key path)
+            (Query.demand context.database Infer.core)
+        with
+        | Some { definition = Constant value; _ } ->
+            Option.value ~default:opaque (constant_value context (path :: seen) value)
         | _ -> opaque)
 
-(* A constant's value expression as a space, or [None] if any part of it is
-   not a literal, a variant, a record, or another constant. *)
-and constant_value context (resolved : Resolve.resolved) type_ seen (value : expression) =
-  let recurse = constant_value context resolved in
-  let variant_named owner name =
-    match type_ with
-    | T.Named { path; arguments } when Path.equal path owner -> (
-        match Members.variants context.database path arguments with
-        | Some variants ->
-            List.exists (fun (variant : T.variant) -> variant.variant_name = name) variants
-        | None -> false)
-    | _ -> false
-  in
-  (* The constructor a name or member before [(] builds, if any. *)
-  let constructor_of (callee : expression) =
-    match callee.kind with
-    | Name path -> (
-        match resolved.names.(path.last.id) with
-        | Some (Variant (_, name)) -> Some (Variant name)
-        | Some (Definition (_, definition)) -> (
-            match type_ with
-            | T.Named { path; _ } when Path.equal path definition -> Some Record
-            | _ -> None)
-        | _ -> None)
-    | Member ({ kind = Name owner; _ }, member) -> (
-        match resolved.names.(owner.last.id) with
-        | Some (Definition (_, owner)) when variant_named owner member.text ->
-            Some (Variant member.text)
-        | _ -> None)
-    | _ -> None
-  in
-  let built constructor (arguments : argument list) =
-    let fields = fields_of context type_ constructor in
-    let assigned =
-      List.mapi
-        (fun index (argument : argument) ->
-          match (argument.label, argument.value.kind) with
-          | Some label, _ -> Some label.text
-          | None, Name { modules = []; last }
-            when List.exists (fun (field : T.field) -> field.field_name = last.text) fields ->
-              Some last.text
-          | None, _ ->
-              Option.map (fun (field : T.field) -> field.field_name) (List.nth_opt fields index))
-        arguments
-    in
-    (* Every field must be given and worked out; a field left to its
-       default is not worked out here. *)
-    let parts =
-      List.map
-        (fun (field : T.field) ->
-          match
-            List.find_map
-              (fun (name, (argument : argument)) ->
-                if name = Some field.field_name then Some argument else None)
-              (List.combine assigned arguments)
-          with
-          | Some argument -> recurse field.field_type seen argument.value
-          | None -> None)
-        fields
-    in
-    if List.for_all Option.is_some parts then
-      Some (Constructed (constructor, List.map Option.get parts))
-    else None
-  in
+(* A constant's value as a space, or [None] if any part of it is not a
+   literal, a variant, a record, or another constant. *)
+and constant_value context seen (value : Core.expression) : space option =
   match value.kind with
-  | Parenthesized inner -> recurse type_ seen inner
-  | True -> Some (Constructed (Boolean true, []))
-  | False -> Some (Constructed (Boolean false, []))
-  | String { tag = None; rest = []; first; _ } -> Some (Constructed (Text first.value, []))
-  | Integer _ | Prefix (Negate, _) | Binary _ -> (
-      match Interface.Constants.expression context.database ~visiting:[] resolved value with
-      | Some number -> Some (Constructed (Interval (number, number), []))
-      | None -> None)
-  | Name path -> (
-      match resolved.names.(path.last.id) with
-      | Some (Variant (_, name)) -> built (Variant name) []
-      | Some (Definition (_, definition)) -> (
-          match constant ~seen context type_ definition with
-          | Constructed (Opaque_constant _, _) -> None
-          | space -> Some space)
-      | _ -> None)
-  | Member ({ kind = Name owner; _ }, member) -> (
-      match resolved.names.(owner.last.id) with
-      | Some (Definition (_, owner)) -> (
-          if variant_named owner member.text then built (Variant member.text) []
-          else
-            match constant ~seen context type_ (Member_constant { owner; name = member.text }) with
-            | Constructed (Opaque_constant _, _) -> None
-            | space -> Some space)
-      | _ -> None)
-  | Call (callee, arguments) -> (
-      match constructor_of callee with
-      | Some constructor -> built constructor arguments
-      | None -> None)
-  | _ -> None
+  | Use (Constant { path; _ }) -> (
+      match constant ~seen context path with
+      | Constructed (Opaque _, _) -> None
+      | space -> Some space)
+  | Construct { variant; fields } ->
+      (* Every field must be given and worked out. A field left to its
+         default is not worked out here. *)
+      let parts =
+        List.map
+          (fun (_, (field : Core.operand option)) ->
+            match field with
+            | Some (Value field) -> constant_value context seen field
+            | Some (Place _) | None -> None)
+          fields
+      in
+      if List.for_all Option.is_some parts then
+        Some
+          (Constructed
+             ( (match variant with Some name -> Variant name | None -> Record),
+               List.map Option.get parts ))
+      else None
+  | _ -> literal value
 
-(* A range's end: [Ok] its value, or [Ok None] for an end that failed to
-   type, whose error is reported; [Error] a constant whose value is not
-   worked out here. *)
-and range_end context (written : range_end) =
-  match written.kind with
-  | End_literal _ -> (
-      match context.checked.literals.(written.id) with
-      | Some (Integer_value value) -> Ok (Some value)
-      | _ -> Ok None)
-  | End_name _ | End_constant _ -> (
-      match context.checked.patterns.(written.id) with
-      | Some (Constant_pattern path) -> (
-          match Query.demand context.database Interface.Constants.value_of path with
-          | Some value -> Ok (Some value)
-          | None -> Error path)
-      | _ -> Ok None)
+(* A range's end: [Ok] its value, or [Error] the name of a constant whose
+   value is not worked out here. *)
+and range_end context (value : Core.expression) =
+  match value.kind with
+  | Integer found -> Ok found
+  | Use (Constant { path; _ }) -> (
+      match Query.demand context.database Interface.Constants.value_of path with
+      | Some value -> Ok value
+      | None -> Error (Path.show path))
+  | _ -> Error "this bound"
 
-and fielded ?replace context type_ constructor (written : pattern_field list) =
-  let fields = fields_of context type_ constructor in
-  let bare (inner : pattern) =
-    match inner.kind with Binding_or_constant name -> Some name.text | _ -> None
-  in
-  let assigned =
-    List.filter_map
-      (fun (field : pattern_field) ->
-        match field.kind with
-        | Named_field (name, inner) -> Some (name.text, inner)
-        | Field inner -> (
-            match bare inner with
-            | Some name
-              when List.exists (fun (declared : T.field) -> declared.field_name = name) fields ->
-                Some (name, inner)
-            | _ -> ( match fields with [ only ] -> Some (only.field_name, inner) | _ -> None))
-        | Rest -> None)
-      written
-  in
+and fielded ?replace context type_ constructor (written : (string * Core.pattern) list) =
   Constructed
     ( constructor,
       List.map
         (fun (declared : T.field) ->
-          match List.assoc_opt declared.field_name assigned with
-          | Some inner -> space ?replace context declared.field_type inner
+          match List.assoc_opt declared.field_name written with
+          | Some inner -> space ?replace context inner
           | None -> Wild)
-        fields )
+        (fields_of context type_ constructor) )
 
 (* Matrices *)
 
@@ -481,7 +390,7 @@ let rec show context type_ (pattern : space) =
       if Z.equal low high then Z.to_string low
       else Printf.sprintf "%s..=%s" (Z.to_string low) (Z.to_string high)
   | Constructed (Text text, _) -> Printf.sprintf "%S" text
-  | Constructed (Opaque_constant path, _) -> Path.show path
+  | Constructed (Opaque shown, _) -> shown
   | Constructed (constructor, arguments) -> (
       let fields = fields_of context type_ constructor in
       let shown =
@@ -511,7 +420,9 @@ let show_row context types row = String.concat ", " (List.map2 (show context) ty
 
 (* Checking *)
 
-let type_of context (value : expression) = Checked.type_of context.checked value
+let operand_type : Core.operand -> T.ty = function
+  | Place found -> Core_walk.place_type found
+  | Value value -> value.type_
 
 (* Whether a type, or a type it is built from, failed to check or parse:
    matching on it is accepted silently, since its error is reported where it
@@ -555,42 +466,40 @@ let indentation text (position : int) =
   String.sub text line_start (spaces line_start - line_start)
 
 (* The or-patterns in a pattern, at any depth, each with its alternatives. *)
-let rec or_patterns (written : pattern) =
+let rec or_patterns (written : Core.pattern) =
   match written.kind with
   | Alternatives alternatives -> (written, alternatives) :: List.concat_map or_patterns alternatives
-  | Variant { fields = Some fields; _ } | Record fields ->
-      List.concat_map
-        (fun (field : pattern_field) ->
-          match field.kind with
-          | Named_field (_, inner) | Field inner -> or_patterns inner
-          | Rest -> [])
-        fields
-  | _ -> []
+  | Variant { fields; _ } | Record fields ->
+      List.concat_map (fun (_, inner) -> or_patterns inner) fields
+  | Wildcard | Bind _ | Literal _ | Range _ | Equal_to _ -> []
 
 (* How many missing cases a [match]'s fix adds arms for. *)
 let witness_limit = 8
 
-let check_match context ~text (value : expression) scrutinees (arms : arm list) =
-  let types = List.map (fun scrutinee -> type_of context scrutinee) scrutinees in
+let check_match context (node : Core.expression) scrutinees (arms : Core.arm list) =
+  let types = List.map operand_type scrutinees in
   if not (List.exists (has_error context) types) then begin
     let rows = ref [] in
     List.iter
-      (fun (arm : arm) ->
+      (fun (arm : Core.arm) ->
         if List.length arm.patterns = List.length types then begin
-          let row = List.map2 (space context) types arm.patterns in
+          let row = List.map (space context) arm.patterns in
+          let arm_span = span context arm.origin in
           (* An or-pattern's alternative the ones before it cover is
              unreachable, as is an arm earlier arms cover. *)
           let reachable = useful context types !rows row in
           if not reachable then
-            report context Unreachable_arm arm.span
+            report context Unreachable_arm arm_span
               ~fixes:
                 [
                   Diagnostic.fix "Delete the arm."
                     [
                       Diagnostic.delete
                         (Source.span
-                           (arm.span.start - String.length (indentation text arm.span.start) - 1)
-                           arm.span.stop);
+                           (arm_span.start
+                           - String.length (indentation context.text arm_span.start)
+                           - 1)
+                           arm_span.stop);
                     ];
                 ]
               "Earlier arms already match everything this arm matches, so it is never reached."
@@ -598,24 +507,26 @@ let check_match context ~text (value : expression) scrutinees (arms : arm list) 
             (* Each alternative, at any depth, against the arms before and
                the alternatives before it. *)
             List.iter
-              (fun ((group : pattern), alternatives) ->
+              (fun ((group : Core.pattern), alternatives) ->
                 List.iteri
-                  (fun index (alternative : pattern) ->
+                  (fun index (alternative : Core.pattern) ->
                     let row_with only =
-                      List.map2 (space ~replace:(group.id, only) context) types arm.patterns
+                      List.map (space ~replace:(group.id, only) context) arm.patterns
                     in
                     let before = List.filteri (fun other _ -> other < index) alternatives in
                     let prior = if before = [] then !rows else !rows @ [ row_with before ] in
                     if not (useful context types prior (row_with [ alternative ])) then
+                      let at (pattern : Core.pattern) = span context pattern.origin in
+                      let found = at alternative in
                       let deleted =
                         match if index > 0 then List.nth_opt alternatives (index - 1) else None with
-                        | Some previous -> Source.span previous.span.stop alternative.span.stop
+                        | Some previous -> Source.span (at previous).stop found.stop
                         | None -> (
                             match List.nth_opt alternatives 1 with
-                            | Some next -> Source.span alternative.span.start next.span.start
-                            | None -> Source.span alternative.span.start alternative.span.stop)
+                            | Some next -> Source.span found.start (at next).start
+                            | None -> Source.span found.start found.stop)
                       in
-                      report context Unreachable_alternative alternative.span
+                      report context Unreachable_alternative found
                         ~fixes:
                           [ Diagnostic.fix "Delete the alternative." [ Diagnostic.delete deleted ] ]
                         (if before = [] then
@@ -642,11 +553,12 @@ let check_match context ~text (value : expression) scrutinees (arms : arm list) 
         let fixes =
           match List.rev arms with
           | last :: _ ->
-              let indent = indentation text last.span.start in
+              let last = span context last.origin in
+              let indent = indentation context.text last.start in
               [
                 Diagnostic.fix "Add an arm for each missing case."
                   [
-                    Diagnostic.insert last.span.stop
+                    Diagnostic.insert last.stop
                       (String.concat ""
                          (List.map
                             (fun witness ->
@@ -656,7 +568,7 @@ let check_match context ~text (value : expression) scrutinees (arms : arm list) 
               ]
           | [] -> []
         in
-        report context Not_covered value.span ~fixes
+        report context Not_covered (span context node.origin) ~fixes
           (Printf.sprintf "This `match` does not cover every case: `%s` is not covered%s."
              (show_row context types first)
              (match List.length all with
@@ -667,44 +579,48 @@ let check_match context ~text (value : expression) scrutinees (arms : arm list) 
 
 (* A pattern in a [let], a [for], or a lambda's parameters must cover its
    type alone. *)
-let check_irrefutable context (written : pattern) =
-  let type_ = Checked.pattern_type context.checked written in
-  if not (has_error context type_) then
-    match missing context [ type_ ] [ [ space context type_ written ] ] with
+let check_irrefutable context (written : Core.pattern) =
+  if not (has_error context written.type_) then
+    match missing context [ written.type_ ] [ [ space context written ] ] with
     | Some witness ->
-        report context Refutable written.span
+        report context Refutable (span context written.origin)
           (Printf.sprintf
              "This pattern can fail: it does not match `%s`. Use `match`, an `is` test, or `let \
               ... else`."
-             (show context type_ (List.hd witness)))
+             (show context written.type_ (List.hd witness)))
     | None -> ()
 
-let check_definition context ~text (definition : definition) =
-  let rec expression (value : expression) =
-    (match value.kind with
-    | Match { scrutinees; arms } -> check_match context ~text value scrutinees arms
-    | Lambda { parameters; _ } -> List.iter (check_irrefutable context) parameters
-    | _ -> ());
-    Syntax_walk.expression_parts ~expression ~statement value
-  and statement (written : statement) =
-    (match written.kind with
-    | Let { pattern; else_ = None; _ } | For { pattern; _ } -> check_irrefutable context pattern
-    | _ -> ());
-    Syntax_walk.statement_parts ~expression ~statement written
-  in
-  Syntax_walk.definition ~statement expression definition
+let check_definition context (definition : Core.definition) =
+  Core_walk.definition
+    {
+      Core_walk.ignore_all with
+      expression =
+        (fun (node : Core.expression) ->
+          match node.kind with
+          | Match { scrutinees; arms; _ } -> check_match context node scrutinees arms
+          | Lambda { parameters; _ } -> List.iter (check_irrefutable context) parameters
+          | _ -> ());
+      statement =
+        (fun (node : Core.statement) ->
+          match node.kind with
+          | Let { pattern; else_ = None; _ } | For { pattern; _ } ->
+              check_irrefutable context pattern
+          | _ -> ());
+    }
+    definition
 
 let definition_diagnostics =
   Query.query ~name:"pattern_diagnostics" ~phase:Bodies ~saved:true ~show:Resolve.Names.show_key
     (fun database key ->
       match
-        ( Query.demand database Resolve.Names.definition key,
-          Infer.clean database key,
+        ( Infer.is_clean database key,
+          Query.demand database Infer.core key,
+          Query.demand database Resolve.Names.spans key,
           Query.demand database Resolve.Names.text key )
       with
-      | Some definition, Some checked, Some text ->
-          let context = { database; package = key.module_.package; checked; diagnostics = [] } in
-          check_definition context ~text definition;
+      | true, Some form, Some spans, Some text ->
+          let context = { database; spans; text; diagnostics = [] } in
+          check_definition context form.definition;
           List.sort
             (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span right.span)
             context.diagnostics
