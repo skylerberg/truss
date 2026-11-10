@@ -72,6 +72,8 @@ public fn List[Element].insert_at(mut self, position: USize, item: own Element)
   ensures forall i: Integer =>
     position <= i && i < old(self.model()).length() ==>
       identical(self.model()[i + 1], old(self.model())[i])
+  ensures forall i: Integer =>
+    position < i && i < self.model().length() ==> identical(self.model()[i], old(self.model())[i - 1])
   cost time O(self.length())
 {
   intrinsic::storage_insert(mut self.storage, index: position, value: own item)

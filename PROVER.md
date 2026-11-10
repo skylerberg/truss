@@ -992,9 +992,10 @@ sanitized runs, test the trusted base against real executions.
 
 ## Not built
 
-- **The rest of the standard library proven.** The standard library's
-  test lists what does not prove yet, `Map` and `Set`, whose contracts are
-  stated up to their elements' `==`. Until it all proves, `truss build`
+- **The rest of the standard library proven.** What `Map.insert` keeps of
+  the other keys does not prove yet: each step needs the solver to find
+  which index holds a key, through the key function of the map's model,
+  which waits on choosing triggers, below. Until it proves, `truss build`
   keeps the run-time checks.
 - **A trait's provided methods proven on their own.** A provided body is
   proven only where an `impl` replaces it, which shows its result is the

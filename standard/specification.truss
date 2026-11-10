@@ -63,6 +63,23 @@ public fn Sequence[Element].elements(self) -> FiniteSet[Element]
   todo
 }
 
+public fn Sequence[Element].to_map[Key, Value](
+  self,
+  key: (fn(Element) -> Key cost time finite),
+  value: (fn(Element) -> Value cost time finite),
+) -> FiniteMap[Key, Value]
+  ensures forall each: Key =>
+    result.contains_key(each) == (exists i in 0..self.length() => identical(key(self[i]), each))
+  ensures forall i in 0..self.length() => result.contains_key(key(self[i]))
+  ensures (forall i in 0..self.length() => forall j in 0..self.length() =>
+    i == j || !identical(key(self[i]), key(self[j]))) ==>
+      result.size() == self.length()
+      && forall i in 0..self.length() => identical(result.get(key(self[i])), value(self[i]))
+  cost time finite
+{
+  todo
+}
+
 public fn Sequence[Element].sum(self, measure: (fn(Element) -> Integer cost time finite)) -> Integer
   ensures self.length() == 0 ==> result == 0
   ensures (forall i in 0..self.length() => measure(self[i]) >= 0) ==> result >= 0

@@ -789,8 +789,10 @@ and functional_statement (written : statement) =
 
 and functional_expression (written : expression) =
   match written.kind with
-  | Mode _ | Lambda _ | Return _ | Break | Continue | Todo | Echo _ | Provide _ | Unreachable ->
-      false
+  | Mode _ | Return _ | Break | Continue | Todo | Echo _ | Provide _ | Unreachable -> false
+  | Lambda { body; _ } ->
+      (* A lambda with a functional body is a value of the logic, its body. *)
+      functional_block body
   | _ ->
       let fine = ref true in
       Syntax_walk.expression_parts
@@ -2322,11 +2324,22 @@ and lambda_definition context frame (function_type : T.function_type) parameters
     match defined with
     | Some defined ->
         let defined = canonical_binders defined in
+        (* The same body is the same function wherever it is written, so its
+           parameters are named by position alone in what names it. *)
+        let named_by_position =
+          List.fold_left
+            (fun term (index, (name, _)) ->
+              L.replace ~from:(L.Symbol name)
+                ~into:(L.Symbol (Printf.sprintf "parameter.%d" index))
+                term)
+            defined
+            (List.mapi (fun index parameter -> (index, parameter)) bound)
+        in
         let symbol =
           "lambda."
           ^ Logic.hash
               (String.concat " " (List.map (fun (_, sort) -> sort_label sort) bound)
-              ^ " " ^ L.show_term defined)
+              ^ " " ^ L.show_term named_by_position)
         in
         declare context (L.Constant (symbol, sort_of context (T.Function function_type)));
         let term = L.Symbol symbol in
@@ -4909,6 +4922,12 @@ and buffer_operation context frame (operation : Intrinsic.operation) element ope
       assume context frame
         (all k index (length before)
            (L.equal (at after (L.Apply ("+", [ L.Symbol k; L.int 1 ]))) (at before (L.Symbol k))));
+      let k = bound () in
+      assume context frame
+        (all k
+           (L.Apply ("+", [ index; L.int 1 ]))
+           (length after)
+           (L.equal (at after (L.Symbol k)) (at before (L.Apply ("-", [ L.Symbol k; L.int 1 ])))));
       assume context frame
         (each_sum (fun sum measure ->
              L.equal (sum after) (L.Apply ("+", [ sum before; measure value ]))));
