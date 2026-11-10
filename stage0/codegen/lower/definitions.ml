@@ -203,8 +203,7 @@ let code_of context (path : Path.t) type_arguments : code =
    the result pointer when the result is too large, each parameter, the
    mask of defaults passed when there are defaults, and then the evidence
    for each capability it uses. *)
-let panic_path : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Panic" }
+let panic_path = Monomorphic.panic_capability
 
 (* The capabilities a function takes evidence for, in path order: those it
    uses, with capability parameters replaced by what they stand for, but

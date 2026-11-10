@@ -10,6 +10,9 @@ type context = {
 let mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
 let builtin builtin = Ground.Named { path = Intrinsic.builtin_path builtin; arguments = [] }
 
+let panic_capability : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Panic" }
+
 let rec ground context substitution (ty : Types.ty) : Ground.ty =
   match context.normalize (Types.substitute substitution ty) with
   | Named { path; arguments } ->
@@ -61,12 +64,14 @@ and ground_function context substitution (f : Types.function_type) : Ground.func
     result = ground_result f.output;
     uses =
       List.sort_uniq Path.compare
-        (List.concat_map
-           (function
-             | Types.Capability path -> [ path ]
-             | Capability_parameter p -> context.capabilities p
-             | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
-           f.uses);
+        (List.filter
+           (fun path -> not (Path.equal path panic_capability))
+           (List.concat_map
+              (function
+                | Types.Capability path -> [ path ]
+                | Capability_parameter p -> context.capabilities p
+                | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
+              f.uses));
   }
 
 let usize = builtin USize
