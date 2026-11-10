@@ -13,7 +13,7 @@ let pullable = Yield_rules.pullable
 type result = {
   diagnostics : Diagnostic.t list;
   moves : Core.id list;
-  obligations : Checked.obligation list;
+  disjoint : (Core.origin * Core.origin) list;
 }
 
 (* The inputs of the check of one definition: a new context, the core form,
@@ -148,13 +148,11 @@ let check database (key : Resolve.Names.key) : result option =
           moves = List.sort_uniq compare analyzed.moved;
           (* Two rules can report the same pair, in either order, so the
              pairs are normalized and deduplicated. *)
-          obligations =
-            List.map
-              (fun (first, second) -> Checked.Disjoint { first; second })
-              (List.sort_uniq compare
-                 (List.map
-                    (fun (first, second) -> (min first second, max first second))
-                    analyzed.must_be_disjoint));
+          disjoint =
+            List.sort_uniq compare
+              (List.map
+                 (fun (first, second) -> (min first second, max first second))
+                 analyzed.must_be_disjoint);
         }
   | _ -> None
 

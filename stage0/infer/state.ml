@@ -6,7 +6,7 @@
 
 open Syntax
 module T = Types
-module C = Checked
+module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
@@ -123,7 +123,6 @@ type state = {
   text : string;  (** The definition's source text, for fixes. *)
   mutable tables : C.t;
   form : form;
-  mutable obligations : C.obligation list;
   mutable diagnostics : Diagnostic.t list;
   unifier : Unify.t;
   locals : (id, local) Hashtbl.t;
@@ -962,8 +961,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
       if not (Unify.unify_arguments state.unifier wanted_named.arguments given_named.arguments) then
         mismatch state span ~expected ~found;
       Some Owned_to_view
-  | T.Integer, _, Some expression when argument && env.specification && T.is_integer_type wanted ->
-      state.obligations <- Integer_fits { expression; type_ = wanted } :: state.obligations;
+  | T.Integer, _, Some _ when argument && env.specification && T.is_integer_type wanted ->
       Some From_integer
   (* In a specification, a built-in integer converts to [Integer]. *)
   | _, T.Integer, _ when env.specification && T.is_integer_type given -> Some To_integer
@@ -999,13 +997,6 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
                   mismatch state span ~expected:(final state expected) ~found:(final state found));
             }
             :: state.capability_constraints;
-        Option.iter
-          (fun expression ->
-            if not (proven || argument) then
-              state.obligations <-
-                Costs_imply { expression; given = given_function; expected = wanted_function }
-                :: state.obligations)
-          expression;
         Some Function_widening
       end
       else refused ()

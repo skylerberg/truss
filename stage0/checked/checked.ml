@@ -48,104 +48,12 @@ type meaning =
   | Generic_value of Types.parameter
   | Specification_value
 
-type literal = Integer_value of Z.t | Float_value of float
-
-type loop =
-  | Integer_range of { element : Types.ty; inclusive : bool }
-  | Yielding of { call : call; mode : Types.mode }
-  | Pulled of { cursor : Types.ty }
-
-type pattern =
-  | Variant_pattern of { type_ : Types.ty; variant : string }
-  | Record_pattern of { type_ : Types.ty }
-  | Constant_pattern of Path.t
-  | Literal_pattern of literal
-  | Other_pattern
-
-type template = {
-  from_template : call option;
-  part_conversions : call option list;
-  interpolated : bool;
-}
-
-type obligation =
-  | Disjoint of { first : Syntax.id; second : Syntax.id }
-  | Integer_fits of { expression : Syntax.id; type_ : Types.ty }
-  | Costs_imply of {
-      expression : Syntax.id;
-      given : Types.function_type;
-      expected : Types.function_type;
-    }
-  | Guards_cover of { match_ : Syntax.id }
-
-type provided = { capability : Path.t; impl : Path.t; arguments : Types.substitution }
-type provide = { implementations : (Syntax.id * provided list) list }
-
 type t = {
   types : Types.ty option array;
   local_types : Types.ty option array;
   meanings : meaning option array;
   calls : call option array;
-  literals : literal option array;
-  patterns : pattern option array;
-  pattern_types : Types.ty option array;
-  loops : loop option array;
-  templates : template option array;
-  captures : local list option array;
-  own_operator : bool array;
-  provides : provide option array;
-  lends : Types.mode option array;
-  obligations : obligation list;
 }
-
-let create size =
-  {
-    types = Array.make size None;
-    local_types = Array.make size None;
-    meanings = Array.make size None;
-    calls = Array.make size None;
-    literals = Array.make size None;
-    patterns = Array.make size None;
-    pattern_types = Array.make size None;
-    loops = Array.make size None;
-    templates = Array.make size None;
-    captures = Array.make size None;
-    own_operator = Array.make size false;
-    provides = Array.make size None;
-    lends = Array.make size None;
-    obligations = [];
-  }
-
-let copy tables =
-  {
-    types = Array.copy tables.types;
-    local_types = Array.copy tables.local_types;
-    meanings = Array.copy tables.meanings;
-    calls = Array.copy tables.calls;
-    literals = Array.copy tables.literals;
-    patterns = Array.copy tables.patterns;
-    pattern_types = Array.copy tables.pattern_types;
-    loops = Array.copy tables.loops;
-    templates = Array.copy tables.templates;
-    captures = Array.copy tables.captures;
-    own_operator = Array.copy tables.own_operator;
-    provides = Array.copy tables.provides;
-    lends = Array.copy tables.lends;
-    obligations = tables.obligations;
-  }
-
-let undecided what (span : Syntax.span) =
-  Compiler_bug.bug ~stage:"Checked" "the %s at %d..%d has no type" what span.start span.stop
-
-let type_of checked (value : Syntax.expression) =
-  match checked.types.(value.id) with
-  | Some type_ -> type_
-  | None -> undecided "expression" value.span
-
-let pattern_type checked (written : Syntax.pattern) =
-  match checked.pattern_types.(written.id) with
-  | Some type_ -> type_
-  | None -> undecided "pattern" written.span
 
 let show_meaning = function
   | Local_value local -> Printf.sprintf "local %d" local

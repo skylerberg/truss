@@ -108,7 +108,7 @@ Every node the parser builds has an *id*: a small integer, unique within its
 definition, given in the order the parser builds the definition's nodes.
 Later stages never rebuild or copy a tree. Each records what it decided in
 tables keyed by node id: resolution's table says what each name means, and
-the checked form's tables give each expression's type, each call's argument
+the checker's tables give each expression's type, each call's argument
 binding, each pattern's variants, and so on.
 
 - **Spans cannot be the key.** They are not unique: a node the lexer or
@@ -803,8 +803,8 @@ known:
 
 **A character or byte is a tagged string,** `Character"a"` or `UInt8"\n"`,
 of type `Character` or `UInt8`. It must hold exactly one Unicode scalar
-value, or one ASCII character, with no `${...}`, and the checked form records
-the value it stands for, as for an integer literal. In a pattern it matches
+value, or one ASCII character, with no `${...}`, and the checker records its
+value, as for an integer literal. In a pattern it matches
 that value, and a range of them, `Character"a"..=Character"z"`, matches the
 values between. A range pattern's type must be an integer type or
 `Character`.
@@ -1894,31 +1894,33 @@ name in one package are an error.
 
 ## The checked form
 
-The checked form of a definition is a set of tables keyed by the tree's
-node ids (see [Node identity](#node-identity)). The tools read it, because
-they answer questions about the source as it is written, broken code
-included: the type at a position, what a name means, the holes. The usage
-check reads it for which statements never finish. Every other check, the
-prover, and code generation read [the core form](#the-core-form) instead.
-The tables record:
+The checked form of a definition is four tables keyed by the tree's node ids
+(see [Node identity](#node-identity)). Tools read it, because they answer
+questions about the source as it is written, including code with errors: the
+type at a position, the meaning of a name, the holes. The usage check reads it
+to find the statements that diverge. Every other check, the prover, and code
+generation read [the core form](#the-core-form) instead. The tables record:
 
-- **the type of every expression,** with no inference variables
-- **what each name means:** the definition and its type arguments, the field
-  or variant, the method's version by receiver mode, the `impl` chosen for a
-  trait method, and each normalized associated type
-- **each call's arguments:** the parameter each goes to, its mode, the
-  defaults left out, and every conversion from the
-  [No subtyping](#no-subtyping) table
-- **each literal's type and value,** with floats already rounded
-- **each pattern's variants and fields,** and the order of arms
-- **each call of a lending method,** with how the part it gives is lent
-- **the capability set** at each call, with each capability parameter of
-  what is called solved among the call's type arguments, and the evidence
-  each `provide` builds, for each capability its implementations implement
-- **obligations** that the type checker created, as described next
+- **the type of every expression and of every binding,** with no inference
+  variables
+- **the meaning of each name:** the definition and its type arguments, the
+  field or variant, and each normalized associated type
+- **each call:** the callee, with the method's version by receiver mode and the
+  `impl` chosen for a trait method; the parameter that each argument goes to,
+  and its mode; the defaults left out; every conversion from the [No
+  subtyping](#no-subtyping) table; and the capability set, with each capability
+  parameter of the callee solved among the call's type arguments
 
-It is canonical, so that two checks of the same definition give equal
-results, and the database saves it with the graph, as DATABASE.md
+While it checks a body, the checker fills six more tables: the value of each
+literal, the variant or record of each pattern and the type of its scrutinee,
+the iteration of each `for` loop, the conversions of each template, and the
+mode of each lending call. They are private to the checker (`Tables` in
+`stage0/infer`), which builds the core form from all ten. What a `provide`
+provides, and the obligations that the type checker creates, are in the core
+form only.
+
+The checked form is canonical, so that two checks of the same definition give
+equal results, and the database saves it with the graph, as DATABASE.md
 describes.
 
 ### The core form
