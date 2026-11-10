@@ -12,6 +12,8 @@
      without returns none
    - a call gives its target as many arguments as the target's signature
      takes
+   - a value that has a size is built as a record or a variant its type
+     has, with fields the type has
    - a call of a nested function, or a function value made of one, names it
      with the signature it has *)
 val instance : Memory_layout.env -> Lir.t -> unit

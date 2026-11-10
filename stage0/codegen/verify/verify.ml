@@ -60,12 +60,38 @@ let function_ env (instance : Lir.t) what (f : Lir.function_) =
         if n < 0 || n >= Array.length instance.nested then bug "a value of nested function %d" n
     | _ -> ()
   in
+  (* The emitter leaves out a field that has no size, which it knows by
+     finding no such field in the layout, so a field the type does not have
+     would be left out too. *)
+  let built : Lir.statement -> unit = function
+    | Assign (_, Build { ty; variant; fields }) when (Memory_layout.of_type env ty).size > 0 -> (
+        let has =
+          match (Memory_layout.shape env ty, variant) with
+          | Record members, None -> Some (List.map fst members)
+          | Sum variants, Some name ->
+              Option.map
+                (fun (v : Memory_layout.variant_shape) -> List.map fst v.fields)
+                (List.find_opt (fun (v : Memory_layout.variant_shape) -> v.name = name) variants)
+          | _ -> None
+        in
+        match has with
+        | None -> bug "a value of %s built as what it is not" (Ground.to_string ty)
+        | Some names ->
+            List.iter
+              (fun (name, _) ->
+                if not (List.mem name names) then
+                  bug "a value of %s built with a field %s, which it does not have"
+                    (Ground.to_string ty) name)
+              fields)
+    | _ -> ()
+  in
   Array.iter
     (fun (block : Lir.basic_block) ->
       List.iter
         (fun (statement : Lir.statement) ->
           Lir.visit_statement visitor statement;
           nested_value statement;
+          built statement;
           match statement with
           | Call { target; arguments; result } ->
               Option.iter

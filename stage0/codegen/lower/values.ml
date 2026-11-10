@@ -279,13 +279,9 @@ and try_ st (inner : S.expression) destination =
   in
   let built = new_local st result_ty in
   emit st.b (Assign (built, Build { ty = result_ty; variant = Some failure; fields = returned }));
-  (match (st.return_, st.result_local) with
-  | Some pointer, _ -> emit st.b (Assign (pointer, Use (Move built)))
-  | None, Some local -> emit st.b (Assign (at local, Use (Move built)))
-  | None, None -> ());
+  Option.iter (fun result -> emit st.b (Assign (result, Use (Move built)))) (result_place st);
   leave_to st 0;
-  finish st.b
-    (Return (match st.result_local with Some local -> Some (Move (at local)) | None -> None));
+  finish st.b (return_result st);
   start st.b stay;
   match fields success with
   | [ (name, Typed field_ty) ] ->
@@ -341,63 +337,30 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
              code = Nested index;
              environment = Some (Address { place = environment_local; writable = false });
            } ));
-  (* The lambda itself. *)
-  let b = Lir_builder.create () in
+  (* The lambda itself: it is given its environment, then what its type
+     takes, then the evidence for what its type uses, passed by whoever
+     calls it, which is the only evidence its code can reach. *)
+  let inner =
+    enter st.context ~pulling:st.pulling ~nested:st.nested
+      {
+        st.frame with
+        bindings = Hashtbl.copy st.frame.bindings;
+        on_yield = None;
+        exit = None;
+        (* What the lambda returns, which a [?] in it returns early. *)
+        code =
+          (match raw_type_of st e.id with
+          | Some (T.Function f) -> { st.frame.code with result = f.output }
+          | _ -> st.frame.code);
+      }
+  in
+  let b = inner.b in
   let environment_parameter = local b ~name:"environment" (Raw (Nullable_pointer Opaque)) in
   let result_ty = match f.result with Returns ty -> ty | _ -> bug "a lambda that yields" in
-  let result = Convention.result st.context.env result_ty in
-  let return_pointer =
-    match result with Through_pointer pointer -> Some (local b ~name:"result" pointer) | _ -> None
-  in
-  let parameter_places =
-    List.map
-      (fun ((mode : Ground.mode), ty) ->
-        match Convention.parameter st.context.env mode ty with
-        | Some (Pointer _ as pointer) ->
-            let l = local b pointer in
-            (Some l, { Lir.root = Local l; projections = [ Deref ] }, mode, ty)
-        | Some lir_ty ->
-            let l = local b lir_ty in
-            (Some l, at l, mode, ty)
-        | None -> (None, at (local b (Value ty)), mode, ty))
-      f.parameters
-  in
-  let result_local =
-    match result with Returned ty -> Some (local b ~name:"result" ty) | _ -> None
-  in
-  (* The evidence for what the lambda's type uses, passed by whoever calls
-     it, after its own parameters: the only evidence its code can reach. *)
-  let evidence =
-    List.map (fun capability -> (capability, local b ~name:"evidence" Convention.evidence)) f.uses
-  in
+  result_slot inner (Convention.result st.context.env result_ty);
+  let taken = List.map (fun (mode, ty) -> (parameter inner mode ty, mode, ty)) f.parameters in
+  let evidence = evidence_parameters inner f.uses in
   let environment_pointer = local b (Pointer { target = Environment index; writable = false }) in
-  let inner =
-    {
-      st with
-      evidence = List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
-      frame =
-        {
-          st.frame with
-          bindings = Hashtbl.copy st.frame.bindings;
-          on_yield = None;
-          exit = None;
-          (* What the lambda returns, which a [?] in it returns early. *)
-          code =
-            (match raw_type_of st e.id with
-            | Some (T.Function f) -> { st.frame.code with result = f.output }
-            | _ -> st.frame.code);
-        };
-      b;
-      scopes = [ { owned = [] } ];
-      loops = [];
-      temporaries = [];
-      return_ =
-        Option.map
-          (fun pointer -> { Lir.root = Local pointer; projections = [ Deref ] })
-          return_pointer;
-      result_local;
-    }
-  in
   start b (block b);
   emit b (Assign (at environment_pointer, Use (Copy (at environment_parameter))));
   List.iter
@@ -406,25 +369,14 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
         { Lir.root = Local environment_pointer; projections = [ Deref; Field name; Deref ] })
     captured;
   List.iter2
-    (fun (pattern : S.pattern) (_, place, (mode : Ground.mode), ty) ->
+    (fun (pattern : S.pattern) ((_, place), (mode : Ground.mode), ty) ->
       bind_pattern inner pattern place ty ~owned:(mode = Own))
-    parameters parameter_places;
-  let destination =
-    match (inner.return_, result_local) with
-    | Some pointer, _ -> Some pointer
-    | None, Some local -> Some (at local)
-    | None, None -> None
-  in
-  block_into inner body destination;
-  drop_scope inner (List.hd inner.scopes);
-  finish b (Return (Option.map (fun local -> Lir.Move (at local)) result_local));
+    parameters taken;
+  block_into inner body (result_place inner);
   let function_ =
-    Lir_builder.build b ?written_result:return_pointer
-      ~parameters:
-        ((environment_parameter :: Option.to_list return_pointer)
-        @ List.filter_map (fun (l, _, _, _) -> l) parameter_places
-        @ List.map snd evidence)
-      ~result:(match result with Returned ty -> Some ty | _ -> None)
+    finish_function inner ~first:[ environment_parameter ]
+      ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken @ evidence)
+      ()
   in
   st.nested :=
     List.mapi (fun i f -> if i = index then Some { function_ with environment } else f) !(st.nested)
@@ -650,12 +602,10 @@ and return_ st value =
       finish st.b (Goto exit);
       start st.b (block st.b)
   | None ->
-      (match (value, st.return_, st.result_local) with
-      | Some e, Some pointer, _ -> into st e pointer
-      | Some e, None, Some local -> into st e (at local)
-      | Some e, None, None -> ignore (expression st e)
-      | None, _, _ -> ());
+      (match (value, result_place st) with
+      | Some e, Some result -> into st e result
+      | Some e, None -> ignore (expression st e)
+      | None, _ -> ());
       leave_to st 0;
-      finish st.b
-        (Return (match st.result_local with Some local -> Some (Move (at local)) | None -> None));
+      finish st.b (return_result st);
       start st.b (block st.b)

@@ -89,7 +89,7 @@ let () =
   let cursor = Ground.Cursor yielding in
   test "a cursor keeps the parameters and the locals live across a yield" (fun () ->
       let fields = List.map fst (Yields.cursor_fields (shape_env ()) count_to) in
-      expect_string ~expected:"state local0 local1" (String.concat " " fields));
+      expect_string ~expected:"state parameter0 local1" (String.concat " " fields));
   test "a pulled method yields each value and then None" (fun () ->
       let cursor_shape =
         ("cursor of count_to", Record (Yields.cursor_fields (shape_env ()) count_to))
@@ -152,7 +152,7 @@ let () =
                           fields =
                             [
                               ("state", Constant (Integer (UInt32, Z.zero)));
-                              ("local0", constant_int32 3);
+                              ("parameter0", constant_int32 3);
                             ];
                         } );
                   Assign (at 2, Use (constant_int32 0));
