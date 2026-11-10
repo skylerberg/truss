@@ -220,6 +220,27 @@ let () =
             | Error message -> message))
 
 let () =
+  test "an object that a build finds again is as new as that build" (fun () ->
+      let directory = Filename.concat (Lazy.force scratch) "aged-objects" in
+      let cache = Build.cache directory in
+      let objects () =
+        match
+          Build.objects (Lazy.force compiler) cache settings
+            [ ("one", "int one(void) { return 1; }\n") ]
+        with
+        | Ok [ path ] -> path
+        | Ok _ -> failwith "one source made several objects"
+        | Error message -> failwith message
+      in
+      let path = objects () in
+      let long_ago = Unix.time () -. (30. *. 86400.) in
+      Unix.utimes path long_ago long_ago;
+      let found = objects () in
+      expect_string ~expected:path found;
+      if (Unix.stat found).st_mtime < Unix.time () -. 3600. then
+        fail "an object that was found kept the time it was compiled at")
+
+let () =
   test "a program still running at its time limit is stopped" (fun () ->
       let started = Unix.gettimeofday () in
       let status, _, _ = Toolchain.run ~time_limit:100 "/bin/sleep" [ "5" ] in

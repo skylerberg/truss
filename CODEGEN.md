@@ -1039,7 +1039,7 @@ until both handle it.
 | Storage | empty, with a capacity, from an array, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view, view to change the elements through, take a view back |
 | Views | length, lend an element, lend an element to change, swap, slice, take a view back |
 | Arrays | a view of the elements, lend an element to change, take a view back |
-| Operating system | the C library's functions and numbers, a handle from a descriptor and its descriptor, the address of a view, crash |
+| Operating system | the C library's functions and numbers, which system the program is built for, an entry of the environment, a handle from a descriptor and its descriptor, the address of a view, crash |
 | A test program | run a test by its number, have failures reported to a descriptor, how many blocks are allocated and not freed |
 
 `Intrinsics` writes every operation into the caller's LIR, never as a call:
@@ -1124,10 +1124,15 @@ nanoseconds: mut nanoseconds)` gives a `timespec`'s two, with nothing on
 the heap. `storage_lengthen` then makes what a function wrote into
 storage's room the storage's own. A row can also fix an argument, which
 the Truss call then does not have: `libc_getentropy(mut value)` always
-asks for the eight bytes of the `UInt64` it fills, and
-`libc_posix_spawnp` always gives the program it starts the environment
-this process was started with. A list of addresses, such as the arguments
-of a program to run, is a `View[USize]` that Truss fills with
+asks for the eight bytes of the `UInt64` it fills. A function that reads
+its arguments by a
+request, as `fcntl` and `ioctl` do, has a row for each request the
+standard library makes, and the row fixes the request:
+`libc_fcntl_dupfd_cloexec(descriptor, least: 3)`. Another request would
+read the next argument as an address, so the request is not Truss's to
+choose. A list of addresses, such as the arguments
+of a program to run or the variables it is given, is a `View[USize]` that
+Truss fills with
 `view_address`, which gives the address of a view's elements as a number;
 nothing turns a number back into an address.
 
@@ -1181,6 +1186,14 @@ x86-64 or ARM64. The architecture matters where a structure's layout or a
 function's symbol depends on it, as `struct stat` does on Linux and the
 symbol of `stat` does on macOS. Stage0 builds for the system it runs on.
 
+A function that only some systems have says so in its row, as
+`proc_pidpath` is macOS's. The standard library asks which system the
+program is built for with `system_is_linux()`, `system_is_macos()`,
+`system_is_x86_64()`, and `system_is_arm64()`, which lowering writes as
+constants, and calls such a function only where it exists. A call of it
+on a system that lacks it is lowered to a failure, so the program never
+names a symbol its C library does not have.
+
 A test compiles the table against the system's own headers: every number
 must have the value the table gives, every prototype must be the one the
 headers declare, and every structure must be laid out as the storage
@@ -1206,6 +1219,14 @@ on after a signal interrupts a call; and turning an error number into a
 `SystemClock` reads `clock_gettime`, and `SystemRandom` reads
 `getentropy`. `SystemConsole` and `FileReader` each hold a reader of
 lines, which reads a block at a time and keeps what it has not given out.
+The console's input and its two outputs as streams are each a new
+descriptor for the same open file, made with `fcntl`, so that a stream
+owns the descriptor it closes and the process keeps its first three. The
+console's terminal is `/dev/tty`, the terminal the process is controlled
+from, whatever its input and output were redirected to. `SystemLog`
+writes each record to standard error as one line and with one `write`,
+`level=warning message="..."` and then each field as `name=value`, with
+text in quotes.
 `SystemHandles` reads onto the end of a list and writes a slice with
 `read` and `write`, does the same at an offset with `pread` and `pwrite`,
 and moves, shortens, flushes, and closes a file with `lseek`, `ftruncate`,
@@ -1222,11 +1243,36 @@ where a symbolic link points with `readlink` and resolves a path with
 `SystemClock.sleep` calls `nanosleep`, and sleeps again for the time left
 when a signal interrupts it; the monotonic clock is `clock_gettime` with
 `CLOCK_MONOTONIC`.
-`SystemEnvironment` reads `getenv`. `SystemProcesses` runs a program found
-on the `PATH` with `posix_spawnp` and waits for it with `waitpid`: it lays
-the program's name and its arguments end to end, each with its zero byte,
-refusing one that holds a zero byte, and reads the exit status, or 128 and
-the signal that ended the program, out of the status. `SystemTasks.yield_now`
+`SystemEnvironment` reads one variable with `getenv` and all of them with
+`environment_entry`, an intrinsic that gives the entry at an index of the
+environment the process was started with and counts from the first entry
+each time, so that it never reads past the last. The current directory is
+`getcwd`'s, and the platform is the system the program was built for with
+`sysconf`'s count of processors, `gethostname`, and `getpid`. The
+program's own path is the link `/proc/self/exe` on Linux and
+`proc_pidpath` on macOS. The other locations come from `HOME`, `TMPDIR`,
+and on Linux the `XDG` variables. The local time zone is `TZ`, or where
+`/etc/localtime` links to, and a zone's rules are its file under
+`/usr/share/zoneinfo`, for a name that stays inside that directory.
+`SystemProcesses` starts a program found on the `PATH` with
+`posix_spawnp`. It lays the program's name and its arguments end to end,
+each with its zero byte, refusing one that holds a zero byte, and does the
+same for the variables: those this process was started with, unless the
+command leaves them out, and then the command's own, a later one of a
+name replacing an earlier. What the program does to its first three
+descriptors before it runs is a `posix_spawn_file_actions_t`, which is
+storage of as many bytes as the structure takes: a stream that is
+discarded is opened on `/dev/null`, a stream that is piped or captured is
+one end of a `pipe` whose other end this process keeps, and the directory
+the program starts in is `posix_spawn_file_actions_addchdir_np`'s. Both
+ends of each pipe are closed in programs that are run, so a child never
+holds the end that its parent writes to it with. `run` reads what it
+captures from both pipes as `poll` finds it, so that neither fills while
+the other is read, and then waits with `waitpid`. A spawned child is a
+handle whose number is the process's and whose descriptor is none;
+`Handles.wait` reads the exit status, or the signal that ended the
+program, out of `waitpid`'s status, and `Handles.signal` is `kill`, which
+is refused for a handle that is not one process. `SystemTasks.yield_now`
 does nothing, since tasks run one after another. `NetworkClient` and
 `NetworkServer` have no real implementation, and a `main` that uses one is
 refused with a message saying so. A handle's is the only drop that does more
@@ -1544,7 +1590,9 @@ so upgrading clang recompiles objects but invalidates no test result.
 - **Object files are cached by their key,** each written under a temporary
   name and renamed into place, so a build that stops partway leaves no
   broken object. Files that need compiling are compiled in parallel, across
-  the machine's cores.
+  the machine's cores. An object that a build finds is given the present
+  time, so a cache that drops objects by age drops those no build has used
+  for that long, and never one that is still in use.
 - **Every build compiles one C file per instance.** The C compiler runs
   once for each instance whose C changed, in parallel across cores, and
   each instance is an external function of its own file.

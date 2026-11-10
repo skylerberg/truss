@@ -219,7 +219,13 @@ and `reads` clauses):
   are the same. A C function is given only an address into a storage, so
   every storage it is lent keeps its length and its capacity; one passed
   as its room keeps its elements too, and one passed as its elements, to
-  change, has elements nothing more is known of. An operation that stops
+  change, has elements nothing more is known of. Each function's row of
+  the C library's table says how many elements it reads or writes through
+  each address, and that many must be there: room after a storage's
+  elements, elements of a view or of a storage it changes, or, for a view
+  it reads up to a zero, a last element that is zero. A result that is not
+  negative is at most the parameter the row names, and each number of the
+  system, such as `PATH_MAX`, is one constant. An operation that stops
   the program on a bad index says what holds when it returns. A part
   `storage_at_mut` lends changes nothing until the lend ends, where the
   storage takes back what the caller left in it, and so for `view_at_mut`
@@ -234,7 +240,12 @@ and `reads` clauses):
   postconditions are about.
 - **Bitwise operations get a second encoding.** On integers, `&`, `|`, `^`,
   `~`, and shifts are functions the solver knows only by a few facts, such
-  as `0 <= a & b <= a` for unsigned values. That proves the bounds most bit
+  as `0 <= a & b <= a` for unsigned values. An unsigned shift multiplies
+  or divides by a power of two: `x << k` is `x * power(2, k)` where that
+  fits, and `x >> k` is `x / power(2, k)`. `leading_zeros`,
+  `trailing_zeros`, and `count_ones` are at most the width, and a nonzero
+  unsigned `x` lies from `power(2, width - 1 - leading_zeros(x))` to before
+  `power(2, width - leading_zeros(x))`. That proves the bounds most bit
   twiddling needs. When a query that mentions a bitwise operation is not
   proven that way, the prover tries it once more with each such operation
   defined exactly: as the operation on its operands' bits, of their type's
@@ -811,7 +822,12 @@ removes them in two steps:
 1. **Count in units.** Each callee's `O(g)` is counted as `g + 1` with its
    arguments, or 1 where `g` is below zero, each step as 1, and each call
    through a function value `visit` as `time(visit)`, which is at least 1,
-   and 1 when its type has an `O(...)` bound. Every callee's real cost is at
+   and 1 when its type has an `O(...)` bound. A call of a trait's method
+   that promises only that it ends, as `Equal.equal` does, is counted as
+   `time(T.method)` for the type `T` it is called on: the longest any one
+   call of it takes in the run, a constant of the run, which a bound states
+   as `time(Element.equal)`. It is one term for each method and type, so a
+   callee's bound and its caller's are about the same term. Every callee's real cost is at
    most `C` times what is counted, where `C` is the largest of the callees'
    constants and 1. That `C` is a fixed number, though unknown, so a bound
    `counted <= c' * f + d'` proves the real cost is at most
@@ -836,7 +852,10 @@ pair that proves all of them is taken. So binary search's
 `1 + c' * log(n / 2) + d' <= c' * log(n) + d'` holds because
 `log(n / 2) == log(n) - 1` for every `n` at least 1, one of the facts the
 prover gives the solver about `log`. That fact is exact because DESIGN.md
-rounds `log(n)` as it does. A tree's `O(size)` walk needs `c' > d'`, and
+rounds `log(n)` as it does. `log` of a number is its bit length, `power`
+of two numbers is their power, and `log` of a value of a bounded integer
+type is at most the bit length of the type's largest value, so a bound of
+`O(64)` can pay for `log` of any `UInt64`. A tree's `O(size)` walk needs `c' > d'`, and
 merge sort's `O(n * log(n))` needs `c'` large enough to pay for the merge,
 which the first pair gives both.
 

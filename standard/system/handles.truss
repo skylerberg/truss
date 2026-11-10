@@ -127,6 +127,62 @@ internal fn open_with(file: Path, flags: Int32) -> Result[streams::Handle, Syste
   Ok(streams::Handle(descriptor: own descriptor, number: 0))
 }
 
+internal fn of_descriptor(descriptor: Int32) -> streams::Handle {
+  streams::Handle(descriptor: intrinsic::handle_from(descriptor), number: 0)
+}
+
+internal fn of_process(process: Int32) -> streams::Handle {
+  streams::Handle(
+    descriptor: intrinsic::handle_from(-1),
+    number: if process > 0 { intrinsic::convert(process) } else { 0 },
+  )
+}
+
+fn process_of(handle: streams::Handle) -> Result[Int32, SystemError] {
+  if handle.number == 0 || handle.number > 2147483647 {
+    Err(SystemError.InvalidInput)
+  } else {
+    Ok(intrinsic::convert(handle.number))
+  }
+}
+
+internal fn exit_status_from(status: Int32) -> processes::ExitStatus {
+  let ending_signal = status & 127
+  if ending_signal == 0 {
+    processes::ExitStatus.Exited(code: intrinsic::convert((status >> 8) & 255))
+  } else if ending_signal == intrinsic::libc_sigusr1() {
+    processes::ExitStatus.Signaled(signal: processes::Signal.User1)
+  } else if ending_signal == intrinsic::libc_sigusr2() {
+    processes::ExitStatus.Signaled(signal: processes::Signal.User2)
+  } else {
+    processes::ExitStatus.Signaled(signal: processes::Signal.from_number(ending_signal))
+  }
+}
+
+fn signal_number(signal: processes::Signal) -> Int32 {
+  match signal {
+    HangUp => 1
+    Interrupt => 2
+    Quit => 3
+    Kill => 9
+    Terminate => 15
+    User1 => intrinsic::libc_sigusr1()
+    User2 => intrinsic::libc_sigusr2()
+    Other(number) => number
+  }
+}
+
+internal fn duplicate(descriptor: Int32) -> streams::Handle {
+  of_descriptor(intrinsic::libc_fcntl_dupfd_cloexec(descriptor, least: 3))
+}
+
+internal fn controlling_terminal() -> streams::Handle {
+  match calls::open_file("/dev/tty".slice().bytes, flags: intrinsic::libc_o_rdwr()) {
+    Ok(descriptor) => streams::Handle(descriptor: own descriptor, number: 0)
+    Err(_) => streams::Handle(descriptor: intrinsic::handle_from(-1), number: 0)
+  }
+}
+
 internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[Value, SystemError]
   ensures !(result is Ok(kept) && outcome is Ok(given) && !identical(kept, given))
   ensures (result is Ok(_)) == (outcome is Ok(_))
@@ -263,11 +319,16 @@ impl Handles for SystemHandles {
   }
 
   fn wait(self, process: streams::Handle) -> Result[processes::ExitStatus, SystemError] {
-    todo
+    let status = with_file_error(calls::wait_for(process_of(process)?))?
+    Ok(exit_status_from(status))
   }
 
   fn signal(self, process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
-    todo
+    let number = signal_number(signal)
+    if number <= 0 {
+      return Err(SystemError.InvalidInput)
+    }
+    with_file_error(calls::done(intrinsic::libc_kill(process_of(process)?, signal: number)))
   }
 
   fn terminal_size(self, terminal: streams::Handle) -> Result[console::Size, SystemError] {

@@ -69,6 +69,163 @@ let () =
          \  items.length()\n\
           }\n"))
 
+(* The operands of one operation *)
+
+let () =
+  let functions =
+    "fn take(items: mut List[Int64], view: Slice[Int64]) {}\n\n\
+     fn give(view: Slice[Int64], items: mut List[Int64]) {}\n\n\
+     fn measure(items: mut List[Int64], count: USize) {}\n\n\
+     fn show(item: Int64, count: USize) {}\n\n\
+     fn change(item: mut Int64, count: USize) {}\n\n\
+     fn count_of(view: Slice[Int64], count: USize) {}\n\n\
+     fn grow(items: mut List[Int64]) -> USize {\n\
+    \  mut items.push(1)\n\
+    \  items.length()\n\
+     }\n\n"
+  in
+  let rejected name body code =
+    test name (fun () ->
+        one_diagnostic (functions ^ "fn f(items: mut List[Int64]) {\n" ^ body ^ "}\n") code)
+  in
+  rejected "a view cannot be passed after a `mut` borrow of what it views"
+    "  var part = items.slice()\n  take(mut items, view: part)\n" "ownership.conflicting_loan";
+  rejected "a view cannot be passed before a `mut` borrow of what it views"
+    "  var part = items.slice()\n  give(part, items: mut items)\n" "ownership.conflicting_loan";
+  rejected "a slice of a place cannot be passed with a `mut` borrow of the place"
+    "  take(mut items, view: items[..1])\n" "ownership.conflicting_loan";
+  test "a view of another place, and a value read from the place, can be passed with it" (fun () ->
+      fine
+        (functions
+       ^ "fn f(items: mut List[Int64], others: List[Int64]) {\n\
+         \  var part = others.slice()\n\
+         \  take(mut items, view: part)\n\
+         \  measure(mut items, count: items.length())\n\
+          }\n"));
+  rejected "a later argument cannot change a place that an earlier argument borrows"
+    "  show(items[0], count: grow(mut items))\n" "ownership.changed_while_viewed";
+  rejected "a later argument cannot change a place that an earlier argument borrows `mut`"
+    "  change(mut items[0], count: grow(mut items))\n" "ownership.changed_while_viewed";
+  rejected "a later argument cannot change what an earlier argument views"
+    "  count_of(items[..1], count: grow(mut items))\n" "ownership.changed_while_viewed";
+  rejected "a later argument cannot change what a view passed earlier views"
+    "  var part = items.slice()\n  count_of(part, count: grow(mut items))\n"
+    "ownership.changed_while_viewed";
+  rejected "an index key cannot change the collection that is indexed"
+    "  let _ = items[grow(mut items)]\n" "ownership.changed_while_viewed";
+  rejected "a bound of a slice cannot change the collection that is sliced"
+    "  let _ = items[..grow(mut items)]\n" "ownership.changed_while_viewed";
+  test "a later field cannot change what an earlier field views" (fun () ->
+      one_diagnostic
+        (functions
+       ^ "type Counted(view: Slice[Int64], count: USize)\n\n\
+          fn f(items: mut List[Int64]) {\n\
+         \  let _ = Counted(view: items[..1], count: grow(mut items))\n\
+          }\n")
+        "ownership.changed_while_viewed");
+  test "an operand that is a copy does not lend its place" (fun () ->
+      fine
+        (functions
+       ^ "fn sum(first: own USize, second: USize) {}\n\n\
+          fn bump(count: mut USize) -> USize {\n\
+         \  count = 1\n\
+         \  count\n\
+          }\n\n\
+          fn f(count: mut USize) {\n\
+         \  sum(count, second: bump(mut count))\n\
+          }\n"))
+
+(* A yielded constructor that lends places *)
+
+let () =
+  let shelf =
+    "type Shelf(books: List[String])\n\n\
+     type First(title: String, rest: Slice[String])\n\n\
+     type Numbered(index: USize, title: String)\n\n\
+     type Tagged(tag: String, book: String)\n\n\
+     type Both(first: List[String], second: List[String])\n\n"
+  in
+  let lends name signature body = shelf ^ "fn Shelf." ^ name ^ signature ^ " {\n" ^ body ^ "}\n" in
+  test "a yielded constructor lends a place without a mark" (fun () ->
+      fine
+        (lends "get" "(self, index: USize) lends Option[String]"
+           "  if index < self.books.length() {\n\
+           \    yield Some(self.books[index])\n\
+           \  } else {\n\
+           \    yield None\n\
+           \  }\n"
+        ^ "\n\
+           fn title_length(shelf: Shelf) -> USize {\n\
+          \  match shelf.get(0) {\n\
+          \    Some(title) => title.length()\n\
+          \    None => 0\n\
+          \  }\n\
+           }\n"));
+  test "a constructor nested in a yielded constructor lends places too" (fun () ->
+      fine
+        (lends "first" "(self) lends Option[First]"
+           "  yield Some(First(title: self.books[0], rest: self.books[1..]))\n"));
+  test "a yielded constructor that lends no place owns its fields" (fun () ->
+      fine
+        (lends "copied" "(self) lends Tagged"
+           "  yield Tagged(tag: \"new\".copy(), book: self.books[0].copy())\n"));
+  test "a `Plain` place in a yielded constructor is copied, so it lends nothing" (fun () ->
+      fine
+        (lends "numbered" "(self, index: USize) lends Numbered"
+           "  yield Numbered(index: index, title: self.books[index].copy())\n"));
+  test "a local is a place that a yielded constructor lends" (fun () ->
+      fine
+        (lends "tagged" "(self) lends Tagged"
+           "  let tag = \"new\".copy()\n  yield Tagged(tag: tag, book: self.books[0])\n"));
+  test "a yielded constructor that lends a place takes no owned value" (fun () ->
+      one_diagnostic
+        (lends "tagged" "(self) lends Tagged"
+           "  yield Tagged(tag: \"new\".copy(), book: self.books[0])\n")
+        "ownership.owned_beside_lent");
+  test "a constructor yielded `mut` lends the places marked `mut`" (fun () ->
+      fine
+        (lends "numbered" "(mut self) yields mut Numbered"
+           "  var index: USize = 0\n\
+           \  while index < self.books.length() {\n\
+           \    yield Numbered(index: index, title: mut self.books[index])\n\
+           \    index = index + 1\n\
+           \  }\n"
+        ^ "\n\
+           fn clear(shelf: mut Shelf) {\n\
+          \  for numbered in mut shelf.numbered() {\n\
+          \    numbered.title = \"\".copy()\n\
+          \  }\n\
+           }\n"));
+  test "a place in a constructor yielded `mut` needs the `mut` mark" (fun () ->
+      one_diagnostic
+        (lends "numbered" "(mut self) lends mut Numbered"
+           "  yield Numbered(index: 0, title: self.books[0])\n")
+        "types.missing_mark");
+  test "a place in a constructor yielded read-only takes no `mut` mark" (fun () ->
+      one_diagnostic
+        (lends "numbered" "(self) lends Numbered"
+           "  yield Numbered(index: 0, title: mut self.books[0])\n")
+        "types.redundant_mark");
+  test "a yielded constructor is not lent one place `mut` twice" (fun () ->
+      one_diagnostic
+        (lends "both" "(mut self) lends mut Both"
+           "  yield Both(first: mut self.books, second: mut self.books)\n")
+        "ownership.conflicting_loan");
+  test "a method that yields a constructor that lends places is not pulled" (fun () ->
+      one_diagnostic
+        (lends "numbered" "(self) yields Numbered"
+           "  var index: USize = 0\n\
+           \  while index < self.books.length() {\n\
+           \    yield Numbered(index: index, title: self.books[index])\n\
+           \    index = index + 1\n\
+           \  }\n"
+        ^ "\n\
+           fn f(shelf: Shelf) {\n\
+          \  var cursor = shelf.numbered()\n\
+          \  let _ = mut cursor.next()\n\
+           }\n")
+        "ownership.not_pullable")
+
 (* Constants *)
 
 let () =
@@ -442,7 +599,7 @@ let () =
          fn f(items: own List[Int64]) {\n\
         \  both(items, second: own items)\n\
          }\n"
-        "ownership.conflicting_loan");
+        "ownership.changed_while_viewed");
   test "a Plain place passed own is copied, so the call may use it twice" (fun () ->
       fine
         "fn both(first: Int64, second: own Int64) {}\n\n\
@@ -813,7 +970,7 @@ let () =
           fn f(grid: mut Grid) {\n\
          \  both(grid, cell: mut grid.cell(0))\n\
           }\n")
-        "ownership.conflicting_loan");
+        "ownership.changed_while_viewed");
   test "a place lent read-only is not changed in the same statement" (fun () ->
       one_diagnostic
         (tally ^ "fn f(tally: mut Tally) {\n  tally[0] = tally[1]\n}\n")

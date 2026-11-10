@@ -87,6 +87,31 @@ let () =
           fail "the check takes the table of %s on %s" (Libc.system_name other)
             (Libc.system_name host)
       | Error _ -> ());
+  test "a function that only macOS has is held to its headers, and to no other system's" (fun () ->
+      let checked system = contains (Libc.check system) "proc_pidpath" in
+      if not (checked { os = Macos; architecture = Arm64 }) then
+        fail "the check for macOS leaves out proc_pidpath";
+      if checked linux then fail "the check for Linux looks for proc_pidpath");
+  test "a call of a function the system lacks stops the program, and calls nothing" (fun () ->
+      let open Lir_builder in
+      let b = create () in
+      start b (block b);
+      let length = local b (value int32) in
+      let path = local b (value bytes_ty) in
+      ignore
+        (Intrinsics.lower
+           (Memory_layout.create (Memory_layout.target_64 linux) ~shape_of:(shapes extra))
+           b intrinsic_types (Libc Proc_pidpath) ~type_arguments:[]
+           [ Value (constant_int32 1); Place (at path); Value (usize 64) ]
+           ~destination:(Some (at length))
+           ~site:{ definition = definition "entry"; line = 0; column = 1 });
+      finish b (Return (Some (Copy (at length))));
+      let lowered =
+        Lir.to_string (instance "entry" (build b ~parameters:[] ~result:(Some (value int32))))
+      in
+      if not (contains lowered "this system's C library has no proc_pidpath") then
+        fail "the call does not stop the program:\n%s" lowered;
+      if contains lowered "foreign" then fail "the function is called:\n%s" lowered);
   test "a function that takes a structure is declared with no header" (fun () ->
       expect_string ~expected:"struct timespec;\nint clock_gettime(int, struct timespec *);\n"
         (Libc.prototype (Libc.declaration linux Clock_gettime)));
@@ -133,7 +158,7 @@ let () =
                         fail "%s: `%s` is counted by %s, which is no USize" name parameter
                           (Libc.number_name number)
                   | Through_zero -> ())
-              | Value _ | Written _ | Always _ | Environment -> ())
+              | Value _ | Written _ | Always _ | Fixed _ -> ())
             parameters)
         Libc.functions;
       let { Libc.parameters; at_most; _ } = Libc.signature Read in
@@ -160,6 +185,32 @@ let () =
       in
       expect_int ~expected:8 status;
       expect_string ~expected:"written\n" output);
+  test "a request that a row fixes is passed, and is no argument of the Truss call" (fun () ->
+      let open Lir_builder in
+      let names =
+        List.map
+          (fun (parameter : Types.parameter_info) -> parameter.name)
+          (Intrinsic_signatures.signature (Libc Fcntl_dupfd_cloexec)).parameters
+      in
+      if names <> [ "descriptor"; "least" ] then
+        fail "fcntl_dupfd_cloexec takes %s" (String.concat ", " names);
+      let status, output, _ =
+        run_program ~extra
+          [
+            built_entry (fun b ->
+                let copy = local b (value int32) in
+                operate b ~destination:(at copy) (Libc Fcntl_dupfd_cloexec)
+                  [ Value (constant_int32 1); Value (constant_int32 10) ];
+                let view = view_of b "through the copy\n" in
+                let wrote = local b (value isize) in
+                operate b ~destination:(at wrote) (Libc Write)
+                  [ Value (Copy (at copy)); Place (at view); Value (usize 17) ];
+                copy);
+          ]
+      in
+      if status < 10 then
+        fail "the new descriptor is %d, which is less than the least asked for" status;
+      expect_string ~expected:"through the copy\n" output);
   test "open is given its mode as C passes an argument through ..." (fun () ->
       let open Lir_builder in
       let path = Filename.concat (Lazy.force scratch) "opened" in

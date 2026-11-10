@@ -1417,7 +1417,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       extensional context frame (type_of context frame first) first_value second_value;
       Some (frame, L.equal first_value second_value)
   | Cost_function { function_; arguments } -> cost_function context frame node function_ arguments
-  | Method_time _ -> unsupported (at frame node) "the time of a method of a type parameter"
+  | Method_time callee -> Some (frame, method_time context frame callee)
 
 (* The right side of [&&], [||], or [==>], which runs only where [runs]
    holds. One that changes a local, as a call with a [mut] argument does,
@@ -1559,7 +1559,21 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
               L.(Apply ("<", [ right; int bits ]))
         | None -> unsupported span "a shift of `%s`" (T.show ty));
         let name = match operation with Shift_left -> "shift_left" | _ -> "shift_right" in
-        (frame, opaque_operation context frame ty name [ left; right ])
+        let shifted = opaque_operation context frame ty name [ left; right ] in
+        (* An unsigned shift multiplies or divides by a power of two: to the
+           left exactly, where the product fits. *)
+        (match bounds ty with
+        | Some (low, high) when Z.equal low Z.zero && not (L.mentions frame.bound right) ->
+            let scale = power_of context frame (L.int 2) right in
+            assume context frame
+              (match operation with
+              | Shift_left ->
+                  L.(
+                    Apply ("<=", [ Apply ("*", [ left; scale ]); Integer high ])
+                    ==> equal shifted (Apply ("*", [ left; scale ])))
+              | _ -> L.equal shifted (L.truncated_divide left scale))
+        | _ -> ());
+        (frame, shifted)
     | (Bit_and | Bit_or | Bit_xor), [ left; right ] ->
         let name = match operation with Bit_and -> "and" | Bit_or -> "or" | _ -> "xor" in
         let term = opaque_operation context frame ty name [ left; right ] in
@@ -2202,6 +2216,7 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
   | Compare_bytes, _ ->
       buffer_operation context frame ~node operation (T.builtin UInt8) operands ~changed known
   | Libc function_, _ -> libc_call context frame ~node function_ operands ~changed known
+  | Libc_number number, _ -> libc_number context frame number
   | Convert, [ _; target ] when T.is_builtin Character target -> (
       (* A [Character] is made from an integer only when the integer is a
          Unicode scalar value, which the conversion does not check. *)
@@ -2215,78 +2230,113 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
       | _ -> known)
   | _ -> integer_intrinsic context frame operation types operands known
 
-(* A function of the C library is never given a storage, only an address
-   into its buffer, so each storage it is lent keeps its length and its
-   capacity, whatever the function does. One passed as the room after its
-   elements keeps its elements too; one passed as its elements, for the
-   function to change, has elements nothing more is known of. What is left
-   to each function is the room it needs and what it returns. *)
+(* A function of the C library, by its row of the C library's table. It
+   is given only an address into a storage, so each storage it is lent
+   keeps its length and its capacity, whatever the function does. Each
+   argument it reads or writes through an address names how many elements:
+   room after a storage's elements must be there, elements of a view or of
+   a storage it changes must be there, and a view it reads up to a zero
+   must end with one. A storage passed as room keeps its elements; one
+   passed as its elements to change has elements nothing more is known of.
+   A result that is not negative is at most the parameter the row names. *)
 and libc_call context frame ~(node : expression) (function_ : Libc.function_) operands ~changed
     known =
-  let { Libc.parameters; _ } = Libc.signature function_ in
-  let passed =
+  let { Libc.parameters; at_most; _ } = Libc.signature function_ in
+  let arguments =
     List.concat_map
-      (fun (_, (passes : Libc.passes)) ->
+      (fun (name, (passes : Libc.passes)) ->
         match passes with
-        | Value _ | Elements _ | Room _ | Elements_to_change _ -> [ Some passes ]
-        | Written (_, names) -> List.map (fun _ -> None) names
-        | Always _ | Environment -> [])
+        | Value _ | Elements _ | Room _ | Elements_to_change _ -> [ (name, Some passes) ]
+        | Written (_, names) -> List.map (fun name -> (name, None)) names
+        | Always _ | Fixed _ -> [])
       parameters
   in
-  let storage_of scalar = T.builtin (Intrinsic.libc_builtin scalar) in
-  let length element term =
-    sequence_length context element (buffer_model context Storage element term)
+  let value_of name =
+    List.find_map
+      (fun (position, (named, _)) -> if named = name then List.nth_opt operands position else None)
+      (List.mapi (fun position argument -> (position, argument)) arguments)
   in
+  let count (extent : Libc.extent) =
+    match extent with
+    | Counted { by; each } ->
+        Option.map
+          (fun value -> if each = 1 then value else L.Apply ("*", [ L.int each; value ]))
+          (value_of by)
+    | Exactly elements -> Some (L.int elements)
+    | Number number -> Some (libc_number context frame number)
+    | Through_zero -> None
+  in
+  let needs what condition =
+    oblige context frame Requires (at frame node)
+      (Printf.sprintf "`%s` may not %s." (quote frame.source node.origin) what)
+      condition
+  in
+  let element_of scalar = T.builtin (Intrinsic.libc_builtin scalar) in
+  let length element sequence = sequence_length context element sequence in
   List.iteri
-    (fun position passes ->
+    (fun position (_, passes) ->
       match (passes, List.nth_opt operands position, List.nth_opt changed position) with
-      | ( Some ((Libc.Room (scalar, _) | Elements_to_change (scalar, _)) as passes),
+      | ( Some ((Libc.Room (scalar, extent) | Elements_to_change (scalar, extent)) as passes),
           Some before,
           Some after ) -> (
-          let element = storage_of scalar in
+          let element = element_of scalar in
           let model term = buffer_model context Storage element term in
+          let capacity term = buffer_capacity context element term in
           assume context frame
             L.(
-              equal (length element after) (length element before)
-              &&& equal
-                    (buffer_capacity context element after)
-                    (buffer_capacity context element before));
-          match passes with
-          | Room _ -> assume context frame (L.equal (model after) (model before))
-          | _ -> ())
+              equal (length element (model after)) (length element (model before))
+              &&& equal (capacity after) (capacity before));
+          match (passes, count extent) with
+          | Room _, counted ->
+              assume context frame (L.equal (model after) (model before));
+              Option.iter
+                (fun counted ->
+                  needs "have the room it writes into"
+                    (L.Apply
+                       ( "<=",
+                         [
+                           L.Apply ("+", [ length element (model before); counted ]);
+                           capacity before;
+                         ] )))
+                counted
+          | _, Some counted ->
+              needs "have the elements it changes"
+                (L.Apply ("<=", [ counted; length element (model before) ]))
+          | _, None -> ())
+      | Some (Libc.Elements (scalar, extent)), Some view, _ -> (
+          let element = element_of scalar in
+          let elements = buffer_model context View element view in
+          match count extent with
+          | Some counted ->
+              needs "have the elements it reads"
+                (L.Apply ("<=", [ counted; length element elements ]))
+          | None ->
+              let last = L.Apply ("-", [ length element elements; L.int 1 ]) in
+              needs "end with a zero, which it reads up to"
+                L.(
+                  Apply (">=", [ length element elements; int 1 ])
+                  &&&
+                  match sequence_at context element elements last with
+                  | Some found -> equal found (int 0)
+                  | None -> Boolean false))
       | _ -> ())
-    passed;
-  let byte = T.builtin UInt8 in
-  let needs room =
-    oblige context frame Requires (at frame node)
-      (Printf.sprintf "`%s` may not have the room it writes into." (quote frame.source node.origin))
-      room
-  in
-  let room_for buffer count =
-    L.Apply
-      ("<=", [ L.Apply ("+", [ length byte buffer; count ]); buffer_capacity context byte buffer ])
-  in
-  (match (function_, operands) with
-  | (Write | Pwrite), _ :: bytes :: count :: _ ->
-      (* It reads at most [count] of the view's bytes, and writes at most
-         as many. *)
-      needs
-        (L.Apply
-           ("<=", [ count; sequence_length context byte (buffer_model context View byte bytes) ]));
-      assume context frame (L.Apply ("<=", [ known; count ]))
-  | (Read | Pread), _ :: buffer :: count :: _ ->
-      (* It fills at most [count] bytes of the room after the storage's
-         elements, which are the storage's only once [storage_lengthen]
-         says so. *)
-      needs (room_for buffer count);
-      assume context frame (L.Apply ("<=", [ known; count ]))
-  | Snprintf, buffer :: size :: _ ->
-      (* It fills at most [size] bytes of the room after the storage's
-         elements. It returns how many it would have written, which may be
-         more. *)
-      needs (room_for buffer size)
-  | _ -> ());
+    arguments;
+  (match Option.bind at_most value_of with
+  | Some bound ->
+      assume context frame L.(Apply (">=", [ known; int 0 ]) ==> Apply ("<=", [ known; bound ]))
+  | None -> ());
   known
+
+(* A number of the system that the C library's headers define, such as
+   [PATH_MAX]: one constant, whatever call gives it, so the room a caller
+   makes for it and the room a function needs are the same term. *)
+and libc_number context frame (number : Libc.number) =
+  let symbol = "libc.number." ^ Libc.number_name number in
+  declare context (L.Constant (symbol, L.Int));
+  let term = L.Symbol symbol in
+  assume context frame
+    (in_range (T.builtin (Intrinsic.libc_builtin (Libc.number_type number))) term);
+  term
 
 and integer_intrinsic context frame (operation : Intrinsic.operation) types operands known =
   let integer = match types with ty :: _ -> bounds ty | [] -> None in
@@ -2330,6 +2380,23 @@ and integer_intrinsic context frame (operation : Intrinsic.operation) types oper
   | Convert, Some _, [ _; target ], [ value ] when bounds target <> None ->
       assume context frame L.(in_range target value ==> equal known value);
       known
+  | (Leading_zeros | Trailing_zeros | Count_ones), Some (low, _), ty :: _, [ value ] -> (
+      (* A count of bits is at most the width; and a nonzero unsigned value
+         lies between the powers of two that its leading zeros give. *)
+      match width ty with
+      | Some bits ->
+          assume context frame
+            L.(Apply ("<=", [ int 0; known ]) &&& Apply ("<=", [ known; int bits ]));
+          (if operation = Leading_zeros && Z.equal low Z.zero && not (L.mentions frame.bound value)
+           then
+             let power exponent = power_of context frame (L.int 2) exponent in
+             assume context frame
+               L.(
+                 not_ (equal value (int 0))
+                 ==> (Apply ("<=", [ power (Apply ("-", [ int (bits - 1); known ])); value ])
+                     &&& Apply ("<", [ value; power (Apply ("-", [ int bits; known ])) ]))));
+          known
+      | None -> known)
   | _ -> known
 
 (* Lambdas and callbacks *)
@@ -3741,8 +3808,7 @@ and constant_value context frame path =
 
 (* Building a record or a variant: its constructor, with each field given
    or defaulted. *)
-and construct context frame (node : expression) variant (fields : (string * expression option) list)
-    =
+and construct context frame (node : expression) variant (fields : (string * operand option) list) =
   let ty = type_of context frame node in
   if T.equal ty T.unit then begin
     (* The one value of [Unit]. *)
@@ -3755,7 +3821,7 @@ and construct context frame (node : expression) variant (fields : (string * expr
         (fun (frame, given) (field, written) ->
           match written with
           | Some written ->
-              let frame, term = value context frame written in
+              let frame, term = operand_value context frame written in
               (frame, given @ [ (field, term) ])
           | None -> (frame, given @ [ (field, field_default context frame node ty variant field) ]))
         (frame, []) fields
@@ -4378,7 +4444,15 @@ and contract_call context frame (node : expression) (call_ : call) path contract
             (* A call of a capability's method is one of its calls. *)
             step_amount context after call_ values counter
         | _ ->
-            callee_amount context after ~path ~parts:contract.parts
+            (* A trait's method that promises only that it ends takes at most
+               [time(T.method)] for the type it is called on. *)
+            let ends_in =
+              match call_.callee with
+              | Trait_method _ when signature_terminates context path ->
+                  Some (method_time context frame call_.callee)
+              | _ -> None
+            in
+            callee_amount ?ends_in context after ~path ~parts:contract.parts
               ~bound_frame:(fun part ->
                 { (entry_frame part) with result = Some result; condition = after.condition })
               ~uses:call_.uses ~values ~change:(Some change) counter)
@@ -4554,8 +4628,8 @@ and promised_amount context frame (counter : Costs.counter) (bound : bound) ~eva
    [O(...)] bound with the definition's own constants; every function of a
    cycle is then proven with the first pair, so that each assumes of the
    others what they show. *)
-and callee_amount context after ~path ~(parts : part list) ~(bound_frame : part -> frame) ~uses
-    ~(values : passed list) ~change (counter : Costs.counter) =
+and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_frame : part -> frame)
+    ~uses ~(values : passed list) ~change (counter : Costs.counter) =
   let assumed =
     if
       counter.counting = Units
@@ -4614,8 +4688,9 @@ and callee_amount context after ~path ~(parts : part list) ~(bound_frame : part 
           List.fold_left (fun total clause -> Costs.plus total (amount clause)) Costs.zero found
       | _ -> unknown_amount context after counter)
   | _ -> (
-      match first_clauses () with
-      | Some (clause :: _) -> amount clause
+      match (first_clauses (), counter.resource, counter.counting, ends_in) with
+      | Some (clause :: _), _, _, _ -> amount clause
+      | _, Time, Units, Some time -> Costs.plus time (L.int 1)
       | _ -> unknown_amount context after counter)
 
 (* Whether a call can reach a [calls] clause's target: a function value
@@ -5101,7 +5176,21 @@ and indirect context (ty : T.ty) variant =
 and cost_function context frame (node : expression) (measure : cost_function) arguments =
   let values = List.map (fun argument -> snd (value context frame argument)) arguments in
   match (measure, values, arguments) with
-  | Log, [ n ], _ -> Some (frame, log_of context frame n)
+  | Log, [ n ], [ argument ] ->
+      let log = log_of context frame n in
+      (* [log] of a value of a bounded type is at most [log] of the type's
+         largest value: its width, for an unsigned type. *)
+      let rec unconverted (node : expression) =
+        match node.kind with
+        | Convert { conversion = To_integer; value = inner } -> unconverted inner
+        | _ -> node
+      in
+      (match bounds (type_of context frame (unconverted argument)) with
+      | Some (_, high) when not (L.mentions frame.bound n) ->
+          fact context frame
+            L.(Apply ("<=", [ n; Integer high ]) ==> Apply ("<=", [ log; int (Z.numbits high) ]))
+      | _ -> ());
+      Some (frame, log)
   | Power, [ base; exponent ], _ -> Some (frame, power_of context frame base exponent)
   | Time, [ f ], [ function_value ] ->
       Some (frame, time_of context frame (type_of context frame function_value) f)
@@ -5122,6 +5211,15 @@ and log_of context frame n =
         Option.iter (fun half -> add half ~halving:false) half
   in
   if not (L.mentions frame.bound n) then add n ~halving:true;
+  (* Of a number, it is the number's bit length: the smallest integer at
+     least log2(n + 1). *)
+  (match n with
+  | L.Integer k ->
+      fact context frame
+        (L.equal
+           (L.Apply (Costs.log_symbol, [ n ]))
+           (L.int (if Z.sign k <= 0 then 0 else Z.numbits k)))
+  | _ -> ());
   L.Apply (Costs.log_symbol, [ n ])
 
 and power_of context frame base exponent =
@@ -5145,7 +5243,33 @@ and power_of context frame base exponent =
          fact context frame step;
          ignore (add previous)
      | None -> ());
+  (* Of two numbers, it is their power. *)
+  (match (base, exponent) with
+  | L.Integer b, L.Integer e when Z.sign e >= 0 && Z.leq e (Z.of_int 256) ->
+      fact context frame
+        (L.equal
+           (L.Apply (Costs.power_symbol, [ base; exponent ]))
+           (L.Integer (Z.pow b (Z.to_int e))))
+  | _ -> ());
   L.Apply (Costs.power_symbol, [ base; exponent ])
+
+(* [time(T.method)]: the longest any one call of a trait's method on a type
+   takes in this run, a constant of the run, at least one step. It is one
+   symbol for each method and type, so a callee's bound and its caller's
+   are about the same term. *)
+and method_time context frame (callee : callee) =
+  match callee with
+  | Trait_method { trait; name; receiver; self_type; _ } ->
+      let self_type = substituted context frame self_type in
+      let symbol =
+        Printf.sprintf "time.method.%s"
+          (Path.show (Path.Method { owner = trait.trait; name; receiver }))
+        ^ "[" ^ type_key self_type ^ "]"
+      in
+      declare context (L.Constant (symbol, L.Int));
+      fact context frame (L.Apply ("<=", [ L.int 1; L.Symbol symbol ]));
+      L.Symbol symbol
+  | _ -> raise (Foreign_unsupported "the time of what is not a trait's method")
 
 (* Loops' costs. A loop with a [cost] clause about a counter is bounded by
    it: what the loop has spent so far is within the clause at its head, on
@@ -5766,6 +5890,8 @@ and handing_out context frame (node : statement) (mode : T.mode) (part : operand
         | T.Mut, Place place ->
             let part_after = arrive context frame "lent" part_type in
             (store context frame place part_after, part_after)
+        | T.Mut, Value { kind = Construct _; _ } when Core_walk.lent_places part <> [] ->
+            unsupported span "a `yield` of a constructor that lends places `mut`"
         | _ -> (frame, handed)
       in
       let after = appended context frame part_type before part_after in

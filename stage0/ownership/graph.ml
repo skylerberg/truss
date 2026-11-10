@@ -3,8 +3,9 @@
    evaluation. The ownership check runs its analyses on this graph.
 
    The order of evaluation: a call evaluates an indirect callee and then
-   its arguments in order. An assignment evaluates its value, then the
-   index keys of its target, and then assigns. The right operand of [&&],
+   its arguments in order, and then borrows the places that it is given
+   [mut]. An assignment evaluates its value, then the index keys of its
+   target, and then assigns. The right operand of [&&],
    [||], and [==>] may not run. An arm of a [match] binds its names, then
    evaluates its guard, then runs its body.
 
@@ -15,15 +16,14 @@
 module T = Types
 
 (* A place that is lent for a stretch of code: to a loop, for the loop's
-   body, or by a lending call, for the rest of the statement. While a place
-   is lent read-only, the code may not change it. While it is lent [mut],
-   the code may not use it at all. *)
-type lender = To_loop | To_statement
+   body; by a lending call, for the rest of the statement; or to an operand
+   that has been evaluated, until the operation that the operand belongs to
+   runs. While a place is lent read-only, the code may not change it. While
+   it is lent [mut], the code may not use it at all. *)
+type lender = To_loop | To_statement | To_operand
 type loan = { lent : Place.t; mode : T.mode; lender : lender }
 
-(* A place passed to a call, with the mode it is passed with. A place that
-   is not [Plain] and is passed [own] is moved. A [Plain] place passed
-   [own] is copied, which counts as [Read]. *)
+(* A place that a call borrows, with the mode it is borrowed with. *)
 type passed = { place : Place.t; mode : T.mode; at : Core.origin; position : int }
 
 type action =
@@ -55,9 +55,14 @@ type action =
   | Write_through of Place.t
       (** A mutation writes through a slice that is held in this place. The mutation changes
           everything that the slice views. *)
-  | Arguments of { places : passed list; lent : (int * Place.t * T.mode * Core.origin) list }
-      (** The places passed to one call, in argument order. [lent] lists the arguments that are
-          parts lent by a call: the argument's position, the place that lends the part, and how. *)
+  | Arguments of {
+      places : passed list;
+      views : (int * Place.t list * Core.origin) list;
+      yielded : bool;
+    }
+      (** The places that one call borrows, in argument order. [views] lists the arguments of a view
+          type: the argument's position and the places it views. If [yielded], the places are
+          instead the ones that a yielded construct lends, and there are no views. *)
 
 (* The points with an index from [first] up to, but not including, [limit].
    Points are numbered in the order they are created, so the points of a
@@ -153,9 +158,10 @@ let rec viewed builder (value : Core.expression) : Place.t list =
   | Call call -> List.concat_map (viewed_operand builder) (lent_arguments builder call)
   | Construct { fields; _ } ->
       List.concat_map
-        (fun (_, (field : Core.expression option)) ->
+        (fun (_, (field : Core.operand option)) ->
           match field with
-          | Some field when builder.is_view field.type_ -> viewed builder field
+          | Some (Value field) when builder.is_view field.type_ -> viewed builder field
+          | Some (Place found) -> viewed_place builder found
           | _ -> [])
         fields
   | Echo inner -> viewed builder inner
@@ -196,9 +202,9 @@ let rec viewed_temporaries builder (value : Core.expression) : Core.expression l
         call.arguments
   | Construct { fields; _ } ->
       List.concat_map
-        (fun (_, (field : Core.expression option)) ->
+        (fun (_, (field : Core.operand option)) ->
           match field with
-          | Some field when builder.is_view field.type_ -> viewed_temporaries builder field
+          | Some (Value field) when builder.is_view field.type_ -> viewed_temporaries builder field
           | _ -> [])
         fields
   | _ -> []
@@ -223,10 +229,49 @@ and owned_temporary_place builder (found : Core.place) : Core.expression list =
       else [ value ]
   | None, _ -> []
 
+(* What an evaluated operand refers to until the operation that it belongs
+   to runs: a place that is borrowed, and what a view-typed value views. *)
+let pending builder (found : Core.operand) : Place.t list =
+  match found with
+  | Place found -> Option.to_list (Place.of_core found)
+  | Value value when builder.is_view value.type_ -> viewed builder value
+  | Value _ -> []
+
 (* The graph *)
 
+(* Lends places read-only to an evaluated operand. *)
+let reserve builder (places : Place.t list) : loan list =
+  let added = List.map (fun lent -> { lent; mode = T.Read; lender = To_operand }) places in
+  builder.loans <- added @ builder.loans;
+  added
+
+let release builder (added : loan list) =
+  builder.loans <- List.filter (fun loan -> not (List.memq loan added)) builder.loans
+
+(* Evaluates the operands of one operation in order. An operand that has
+   been evaluated must stay as it is until the operation runs, so what it
+   refers to is lent while the operands after it are evaluated. *)
+let in_order builder frontier operands ~evaluate ~pending =
+  let frontier, added =
+    List.fold_left
+      (fun (frontier, added) operand ->
+        let frontier = evaluate frontier operand in
+        (frontier, reserve builder (pending operand) @ added))
+      (frontier, []) operands
+  in
+  release builder added;
+  frontier
+
 let rec expression builder frontier (node : Core.expression) : int list =
-  let all frontier nodes = List.fold_left (expression builder) frontier nodes in
+  let all frontier nodes =
+    in_order builder frontier nodes ~evaluate:(expression builder) ~pending:(fun node ->
+        pending builder (Value node))
+  in
+  let scrutinized frontier scrutinees =
+    in_order builder frontier scrutinees
+      ~evaluate:(fun frontier scrutinee -> operand builder frontier Read scrutinee)
+      ~pending:(pending builder)
+  in
   match node.kind with
   | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Result
   | Current_target | Yielded | Finished | Todo | Quantified _ | Method_time _ ->
@@ -272,11 +317,11 @@ let rec expression builder frontier (node : Core.expression) : int list =
       builder.loans <- loans;
       builder.captured <- captured;
       frontier
-  | Construct { fields; _ } -> all frontier (List.filter_map snd fields)
+  | Construct { fields; _ } -> construct builder frontier Read fields
   | Collection_literal { elements; _ } -> all frontier elements
   | Map_literal { entries } ->
       all frontier (List.concat_map (fun (key, value) -> [ key; value ]) entries)
-  | Record_update { base; updates } -> all (expression builder frontier base) (List.map snd updates)
+  | Record_update { base; updates } -> all frontier (base :: List.map snd updates)
   | Slice { call = { kind = Call call; _ }; _ } -> arguments builder frontier call.arguments
   | Slice { call; _ } -> expression builder frontier call
   | Call call -> call_ builder frontier node call
@@ -298,30 +343,15 @@ let rec expression builder frontier (node : Core.expression) : int list =
       let else_end = match else_ with Some else_ -> block builder after else_ | None -> after in
       then_end @ else_end
   | Match { scrutinees; arms; _ } ->
-      let after =
-        List.fold_left
-          (fun frontier scrutinee -> operand builder frontier Read scrutinee)
-          frontier scrutinees
-      in
-      List.concat_map
-        (fun (arm : Core.arm) ->
-          let frontier =
-            emit builder after (Bind (List.concat_map pattern_locals arm.patterns)) arm.origin
-          in
-          let frontier =
-            match arm.guard with
-            | Some guard -> expression builder frontier guard
-            | None -> frontier
-          in
-          block builder frontier arm.body)
-        arms
+      arms_ builder (scrutinized frontier scrutinees) arms ~body:(block builder)
   | Block body -> block builder frontier body
   | Provide { implementations; body } ->
       let frontier =
-        List.fold_left
-          (fun frontier (implementation : Core.implementation) ->
+        in_order builder frontier implementations
+          ~evaluate:(fun frontier (implementation : Core.implementation) ->
             operand builder frontier implementation.mode implementation.value)
-          frontier implementations
+          ~pending:(fun (implementation : Core.implementation) ->
+            pending builder implementation.value)
       in
       block builder frontier body
   | Return value ->
@@ -330,6 +360,33 @@ let rec expression builder frontier (node : Core.expression) : int list =
       in
       ignore (emit builder frontier Exit node.origin);
       []
+
+(* The fields of a construct, evaluated in order. A field that is a place
+   is lent to the constructed value with the mode of the [yield] that
+   yields it. A [mut] lend begins at the [yield], after every field is
+   evaluated, as a [mut] borrow for an argument begins at the call. *)
+and construct builder frontier (mode : T.mode) fields =
+  in_order builder frontier (List.filter_map snd fields)
+    ~evaluate:(fun frontier (field : Core.operand) ->
+      match field with
+      | Value { kind = Construct { fields; _ }; _ } -> construct builder frontier mode fields
+      | _ -> evaluated builder frontier mode field)
+    ~pending:(fun field ->
+      pending builder field @ List.filter_map Place.of_core (Core_walk.lent_places field))
+
+(* The arms of a [match], after its scrutinees. [body] builds the body of
+   an arm. *)
+and arms_ builder frontier (arms : Core.arm list) ~body =
+  List.concat_map
+    (fun (arm : Core.arm) ->
+      let frontier =
+        emit builder frontier (Bind (List.concat_map pattern_locals arm.patterns)) arm.origin
+      in
+      let frontier =
+        match arm.guard with Some guard -> expression builder frontier guard | None -> frontier
+      in
+      body frontier arm.body)
+    arms
 
 (* A call: its arguments in order, then what the call means for the places
    it is given. *)
@@ -340,41 +397,50 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
     | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> frontier
   in
   let frontier = arguments builder frontier call.arguments in
-  (* The places passed to the call must not overlap if one of them is
-     borrowed [mut] or moved. *)
-  let passed position (argument : Core.argument) =
-    match argument with
-    | Passed { mode; value = Place found } -> (
-        match Place.of_core found with
-        | Some place -> `Place { place; mode; at = Core_walk.place_origin found; position }
-        | None -> (
-            match Place.lender found with
-            | Some (lent, lent_mode) ->
-                `Lent (position, lent, lent_mode, Core_walk.place_origin found)
-            | None -> `Neither))
-    | Passed { mode = Own; value = Value ({ kind = Use found; _ } as value) } -> (
-        match Place.of_core found with
-        | Some place ->
-            `Place
-              {
-                place;
-                mode = (if builder.plain value.type_ then Read else Own);
-                at = value.origin;
-                position;
-              }
-        | None -> `Neither)
-    | Passed { mode = Mut; value = Value ({ kind = Slice _; _ } as slice) } -> (
-        match Place.of_slice slice with
-        | Some place -> `Place { place; mode = Mut; at = slice.origin; position }
-        | None -> `Neither)
-    | Passed _ | Default -> `Neither
+  (* The places that the call borrows must not overlap if one of them is
+     borrowed [mut]. *)
+  let places =
+    List.concat
+      (List.mapi
+         (fun position (argument : Core.argument) ->
+           let place, at =
+             match argument with
+             | Passed { value = Place found; _ } ->
+                 (Place.of_core found, Core_walk.place_origin found)
+             | Passed { mode = Mut; value = Value ({ kind = Slice _; _ } as slice) } ->
+                 (Place.of_slice slice, slice.origin)
+             | Passed { value = Value value; _ } -> (None, value.origin)
+             | Default -> (None, node.origin)
+           in
+           match (place, argument) with
+           | Some place, Passed { mode; _ } -> [ { place; mode; at; position } ]
+           | _ -> [])
+         call.arguments)
   in
-  let given = List.mapi passed call.arguments in
-  let places = List.filter_map (function `Place place -> Some place | _ -> None) given in
-  let lent = List.filter_map (function `Lent lent -> Some lent | _ -> None) given in
+  (* A view passed to the call must not view a place that the call borrows
+     [mut]. The operations that give a view back to its owner are the
+     exception: they take the owner [mut] and the view. *)
+  let views =
+    match call.callee with
+    | Intrinsic { operation = Storage_take_view | View_take_view | Array_take_view; _ } -> []
+    | _ ->
+        List.concat
+          (List.mapi
+             (fun position (argument : Core.argument) ->
+               match argument with
+               | Passed { value; _ } when builder.is_view (operand_type value) ->
+                   let origin =
+                     match value with
+                     | Place found -> Core_walk.place_origin found
+                     | Value value -> value.origin
+                   in
+                   [ (position, viewed_operand builder value, origin) ]
+               | Passed _ | Default -> [])
+             call.arguments)
+  in
   let frontier =
-    if List.length places + List.length lent > 1 then
-      emit builder frontier (Arguments { places; lent }) node.origin
+    if List.length places > 1 || (places <> [] && views <> []) then
+      emit builder frontier (Arguments { places; views; yielded = false }) node.origin
     else frontier
   in
   (* A place passed [mut] that can hold views may keep a view of what the
@@ -424,34 +490,55 @@ and keeps_views builder frontier (place : Place.t) origin ~views ~temporaries =
   in
   emit builder frontier (Store { place; views }) origin
 
+(* The arguments of a call. A [mut] borrow for an argument takes effect at
+   the call, after every argument is evaluated, so the place is mutated
+   after the arguments that follow it are read. *)
 and arguments builder frontier (given : Core.argument list) =
+  let passed =
+    List.filter_map
+      (function Core.Passed { mode; value } -> Some (mode, value) | Default -> None)
+      given
+  in
+  let frontier =
+    in_order builder frontier passed
+      ~evaluate:(fun frontier (mode, value) -> evaluated builder frontier mode value)
+      ~pending:(fun (_, value) -> pending builder value)
+  in
   List.fold_left
-    (fun frontier (argument : Core.argument) ->
-      match argument with
-      | Passed { mode; value } -> operand builder frontier mode value
-      | Default -> frontier)
-    frontier given
+    (fun frontier (mode, value) ->
+      if mode = T.Mut then mutated builder frontier value else frontier)
+    frontier passed
 
 (* An operand: a place that is borrowed with the given mode, or a value. *)
 and operand builder frontier (mode : T.mode) (found : Core.operand) =
+  let frontier = evaluated builder frontier mode found in
+  if mode = Mut then mutated builder frontier found else frontier
+
+(* What runs when an operand is evaluated. A [mut] borrow of the operand
+   comes after it. *)
+and evaluated builder frontier (mode : T.mode) (found : Core.operand) =
   match found with
   | Place found -> (
       let frontier = place_parts builder frontier found in
-      let frontier =
-        if mode = Mut then writes_through builder frontier found ~whole:true else frontier
-      in
       match Place.of_core found with
-      | Some place ->
-          emit builder frontier
-            (if mode = Mut then Mutate place else Read place)
-            (Core_walk.place_origin found)
+      | Some place when mode <> Mut ->
+          emit builder frontier (Read place) (Core_walk.place_origin found)
+      | _ -> frontier)
+  | Value value -> expression builder frontier value
+
+(* The [mut] borrow of an operand. *)
+and mutated builder frontier (found : Core.operand) =
+  match found with
+  | Place found -> (
+      let frontier = writes_through builder frontier found ~whole:true in
+      match Place.of_core found with
+      | Some place -> emit builder frontier (Mutate place) (Core_walk.place_origin found)
       | None -> frontier)
-  | Value ({ kind = Slice _; _ } as slice) when mode = Mut -> (
-      let frontier = expression builder frontier slice in
+  | Value ({ kind = Slice _; _ } as slice) -> (
       match Place.of_slice slice with
       | Some place -> emit builder frontier (Mutate place) slice.origin
       | None -> frontier)
-  | Value value -> expression builder frontier value
+  | Value _ -> frontier
 
 (* A mutation of a place may write through a slice on the way to it. *)
 and writes_through builder frontier (found : Core.place) ~whole =
@@ -472,7 +559,11 @@ and place_parts builder frontier (found : Core.place) =
   | Lent index -> (
       match (Place.storage_index index, index.kind) with
       | Some collection, Call { arguments = _ :: keys; _ } ->
-          arguments builder (place_parts builder frontier collection) keys
+          let frontier = place_parts builder frontier collection in
+          let added = reserve builder (viewed_place builder collection) in
+          let frontier = arguments builder frontier keys in
+          release builder added;
+          frontier
       | _ -> expression builder frontier index)
   | Temporary value -> expression builder frontier value
 
@@ -506,22 +597,11 @@ and returned builder frontier (value : Core.expression) =
       returned_block builder after then_ @ returned_block builder after else_
   | Match { scrutinees; arms; _ } ->
       let after =
-        List.fold_left
-          (fun frontier scrutinee -> operand builder frontier Read scrutinee)
-          frontier scrutinees
+        in_order builder frontier scrutinees
+          ~evaluate:(fun frontier scrutinee -> operand builder frontier Read scrutinee)
+          ~pending:(pending builder)
       in
-      List.concat_map
-        (fun (arm : Core.arm) ->
-          let frontier =
-            emit builder after (Bind (List.concat_map pattern_locals arm.patterns)) arm.origin
-          in
-          let frontier =
-            match arm.guard with
-            | Some guard -> expression builder frontier guard
-            | None -> frontier
-          in
-          returned_block builder frontier arm.body)
-        arms
+      arms_ builder after arms ~body:(returned_block builder)
   | _ ->
       let frontier =
         match value.kind with
@@ -553,7 +633,9 @@ and statement_parts builder frontier (node : Core.statement) =
   | Evaluate value -> expression builder frontier value
   | Assign { target; value } -> (
       let frontier = expression builder frontier value in
+      let added = reserve builder (pending builder (Value value)) in
       let frontier = place_parts builder frontier target in
+      release builder added;
       let frontier = writes_through builder frontier target ~whole:false in
       match Place.of_core target with
       | Some place ->
@@ -610,6 +692,29 @@ and statement_parts builder frontier (node : Core.statement) =
       frontier
   | Proof _ -> frontier
   | Assert { value; _ } -> expression builder frontier value
+  | Yield { mode; part = Value { kind = Construct { fields; _ }; _ } as part } ->
+      let frontier = construct builder frontier mode fields in
+      let lent = Core_walk.lent_places part in
+      if mode = Mut then
+        let frontier =
+          List.fold_left
+            (fun frontier found -> mutated builder frontier (Place found))
+            frontier lent
+        in
+        (* The places that the yielded value is lent [mut] must not overlap. *)
+        let places =
+          List.concat
+            (List.mapi
+               (fun position (found : Core.place) ->
+                 match Place.of_core found with
+                 | Some place -> [ { place; mode; at = Core_walk.place_origin found; position } ]
+                 | None -> [])
+               lent)
+        in
+        if List.length places > 1 then
+          emit builder frontier (Arguments { places; views = []; yielded = true }) node.origin
+        else frontier
+      else frontier
   | Yield { mode; part } -> operand builder frontier mode part
 
 (* A [let]: its value, then what its names come to view. *)

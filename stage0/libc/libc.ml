@@ -2,6 +2,8 @@ type os = Linux | Macos
 type architecture = X86_64 | Arm64
 type system = { os : os; architecture : architecture }
 
+let oses = [ Linux; Macos ]
+let architectures = [ X86_64; Arm64 ]
 let os_name = function Linux -> "Linux" | Macos -> "macOS"
 let architecture_name = function X86_64 -> "x86-64" | Arm64 -> "ARM64"
 let system_name system = os_name system.os ^ " on " ^ architecture_name system.architecture
@@ -78,6 +80,12 @@ type number =
   | At_fdcwd
   | Utime_omit
   | Path_max
+  | F_dupfd_cloexec
+  | F_setfd
+  | Fd_cloexec
+  | Spawn_file_actions_size
+  | Sigusr1
+  | Sigusr2
 
 type extent =
   | Counted of { by : string; each : int }
@@ -92,7 +100,7 @@ type passes =
   | Elements_to_change of scalar * extent
   | Written of scalar * string list
   | Always of int
-  | Environment
+  | Fixed of number
 
 type result = Returns of scalar | Points_at of scalar | Text | Never
 type signature = { parameters : (string * passes) list; result : result; at_most : string option }
@@ -141,6 +149,17 @@ type function_ =
   | Readlink
   | Realpath
   | Nanosleep
+  | Getcwd
+  | Gethostname
+  | Getpid
+  | Proc_pidpath
+  | Fcntl_dupfd_cloexec
+  | Fcntl_setfd_cloexec
+  | Posix_spawn_file_actions_init
+  | Posix_spawn_file_actions_destroy
+  | Posix_spawn_file_actions_adddup2
+  | Posix_spawn_file_actions_addopen
+  | Posix_spawn_file_actions_addchdir
 
 let functions =
   [
@@ -180,6 +199,17 @@ let functions =
     Readlink;
     Realpath;
     Nanosleep;
+    Getcwd;
+    Gethostname;
+    Getpid;
+    Proc_pidpath;
+    Fcntl_dupfd_cloexec;
+    Fcntl_setfd_cloexec;
+    Posix_spawn_file_actions_init;
+    Posix_spawn_file_actions_destroy;
+    Posix_spawn_file_actions_adddup2;
+    Posix_spawn_file_actions_addopen;
+    Posix_spawn_file_actions_addchdir;
   ]
 
 let function_name = function
@@ -219,6 +249,17 @@ let function_name = function
   | Readlink -> "readlink"
   | Realpath -> "realpath"
   | Nanosleep -> "nanosleep"
+  | Getcwd -> "getcwd"
+  | Gethostname -> "gethostname"
+  | Getpid -> "getpid"
+  | Proc_pidpath -> "proc_pidpath"
+  | Fcntl_dupfd_cloexec -> "fcntl_dupfd_cloexec"
+  | Fcntl_setfd_cloexec -> "fcntl_setfd_cloexec"
+  | Posix_spawn_file_actions_init -> "posix_spawn_file_actions_init"
+  | Posix_spawn_file_actions_destroy -> "posix_spawn_file_actions_destroy"
+  | Posix_spawn_file_actions_adddup2 -> "posix_spawn_file_actions_adddup2"
+  | Posix_spawn_file_actions_addopen -> "posix_spawn_file_actions_addopen"
+  | Posix_spawn_file_actions_addchdir -> "posix_spawn_file_actions_addchdir"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -231,6 +272,7 @@ type row = {
   returns : system -> string;
   result : result;
   at_most : string option;
+  on : os -> bool;
   parameters : (string * passes * (system -> string)) list;
   variadic_from : int option;
   headers : string list;
@@ -256,8 +298,8 @@ let offset = by_os (function Linux -> "long" | Macos -> "long long")
 
 let describe function_ =
   let row ?(symbol = everywhere (function_name function_)) ?variadic_from ?(layout = [])
-      ?(named = []) ?at_most returns result parameters ~headers =
-    { symbol; returns; result; at_most; parameters; variadic_from; headers; layout; named }
+      ?(named = []) ?at_most ?(on = fun _ -> true) returns result parameters ~headers =
+    { symbol; returns; result; at_most; on; parameters; variadic_from; headers; layout; named }
   in
   let counted by = Counted { by; each = 1 } in
   match function_ with
@@ -327,10 +369,12 @@ let describe function_ =
         [
           ("process", Written (Int32, [ "process" ]), everywhere "int *");
           ("program", Elements (UInt8, Through_zero), everywhere "const char *");
-          ("file_actions", Always 0, everywhere "const void *");
+          ( "file_actions",
+            Elements (UInt8, Number Spawn_file_actions_size),
+            everywhere "const void *" );
           ("attributes", Always 0, everywhere "const void *");
           ("arguments", Elements (USize, Through_zero), everywhere "char *const *");
-          ("environment", Environment, everywhere "char *const *");
+          ("environment", Elements (USize, Through_zero), everywhere "char *const *");
         ]
         ~named:
           [
@@ -556,6 +600,115 @@ let describe function_ =
             everywhere "struct timespec *" );
         ]
         ~headers:[ "time.h" ]
+  | Getcwd ->
+      (* The path is written into the room given, and the address returned
+         is that room's. *)
+      row (everywhere "char *") Text
+        [
+          ("buffer", Room (UInt8, counted "size"), everywhere "char *"); ("size", Value USize, size);
+        ]
+        ~headers:[ "unistd.h" ]
+  | Gethostname ->
+      (* The name ends with a zero byte unless it fills the bytes given. *)
+      row (everywhere "int") (Returns Int32)
+        [
+          ("name", Elements_to_change (UInt8, counted "size"), everywhere "char *");
+          ("size", Value USize, size);
+        ]
+        ~headers:[ "unistd.h" ]
+  | Getpid -> row (everywhere "int") (Returns Int32) [] ~headers:[ "unistd.h" ]
+  | Proc_pidpath ->
+      (* The path of a process's executable, which Linux gives as a link
+         in its [/proc]. *)
+      row ~at_most:"size"
+        ~on:(fun os -> os = Macos)
+        (everywhere "int") (Returns Int32)
+        [
+          ("process", Value Int32, everywhere "int");
+          ("buffer", Room (UInt8, counted "size"), everywhere "void *");
+          ("size", Value USize, everywhere "unsigned int");
+        ]
+        ~headers:[ "libproc.h" ]
+  | Fcntl_dupfd_cloexec ->
+      (* A new descriptor for the same open file, the lowest free one that
+         is not less than [least], closed in programs the process runs.
+         The request is the row's, since another request reads its third
+         argument as an address. *)
+      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("request", Fixed F_dupfd_cloexec, everywhere "int");
+          ("least", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "fcntl.h" ]
+  | Fcntl_setfd_cloexec ->
+      (* Has the descriptor closed in programs the process runs. *)
+      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("request", Fixed F_setfd, everywhere "int");
+          ("flags", Fixed Fd_cloexec, everywhere "int");
+        ]
+        ~headers:[ "fcntl.h" ]
+  | Posix_spawn_file_actions_init ->
+      (* What a program that is started does to its descriptors before it
+         runs. The structure is storage of as many bytes as it takes, which
+         only these functions read. *)
+      row (everywhere "int") (Returns Int32)
+        [
+          ( "actions",
+            Elements_to_change (UInt8, Number Spawn_file_actions_size),
+            everywhere "void *" );
+        ]
+        ~named:[ ("actions", "posix_spawn_file_actions_t *") ]
+        ~headers:[ "spawn.h" ]
+  | Posix_spawn_file_actions_destroy ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ( "actions",
+            Elements_to_change (UInt8, Number Spawn_file_actions_size),
+            everywhere "void *" );
+        ]
+        ~named:[ ("actions", "posix_spawn_file_actions_t *") ]
+        ~headers:[ "spawn.h" ]
+  | Posix_spawn_file_actions_adddup2 ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ( "actions",
+            Elements_to_change (UInt8, Number Spawn_file_actions_size),
+            everywhere "void *" );
+          ("descriptor", Value Int32, everywhere "int");
+          ("onto", Value Int32, everywhere "int");
+        ]
+        ~named:[ ("actions", "posix_spawn_file_actions_t *") ]
+        ~headers:[ "spawn.h" ]
+  | Posix_spawn_file_actions_addopen ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ( "actions",
+            Elements_to_change (UInt8, Number Spawn_file_actions_size),
+            everywhere "void *" );
+          ("descriptor", Value Int32, everywhere "int");
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("flags", Value Int32, everywhere "int");
+          ("mode", Value Int32, mode);
+        ]
+        ~named:[ ("actions", "posix_spawn_file_actions_t *") ]
+        ~headers:[ "spawn.h" ]
+  | Posix_spawn_file_actions_addchdir ->
+      (* The directory the program starts in. *)
+      row (everywhere "int") (Returns Int32)
+        ~symbol:(everywhere "posix_spawn_file_actions_addchdir_np")
+        [
+          ( "actions",
+            Elements_to_change (UInt8, Number Spawn_file_actions_size),
+            everywhere "void *" );
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+        ]
+        ~named:[ ("actions", "posix_spawn_file_actions_t *") ]
+        ~headers:[ "spawn.h" ]
+
+let available system function_ = (describe function_).on system.os
 
 let signature function_ =
   let row = describe function_ in
@@ -673,6 +826,12 @@ let numbers =
     At_fdcwd;
     Utime_omit;
     Path_max;
+    F_dupfd_cloexec;
+    F_setfd;
+    Fd_cloexec;
+    Spawn_file_actions_size;
+    Sigusr1;
+    Sigusr2;
   ]
 
 let number_name = function
@@ -733,6 +892,12 @@ let number_name = function
   | At_fdcwd -> "AT_FDCWD"
   | Utime_omit -> "UTIME_OMIT"
   | Path_max -> "PATH_MAX"
+  | F_dupfd_cloexec -> "F_DUPFD_CLOEXEC"
+  | F_setfd -> "F_SETFD"
+  | Fd_cloexec -> "FD_CLOEXEC"
+  | Spawn_file_actions_size -> "SPAWN_FILE_ACTIONS_SIZE"
+  | Sigusr1 -> "SIGUSR1"
+  | Sigusr2 -> "SIGUSR2"
 
 (* A size or an offset in a structure is a [USize], and the bits of a
    file's mode are compared with a number read out of the structure. *)
@@ -742,7 +907,7 @@ let number_type = function
       USize
   | S_ifmt | S_ifreg | S_ifdir | S_iflnk -> UInt64
   | Utime_omit -> Int64
-  | Path_max -> USize
+  | Path_max | Spawn_file_actions_size -> USize
   | _ -> Int32
 
 let number_headers = function
@@ -756,12 +921,13 @@ let number_headers = function
   | Clock_realtime | Clock_monotonic -> [ "time.h" ]
   | Sc_nprocessors_onln -> [ "unistd.h" ]
   | Pollin | Pollhup -> [ "poll.h" ]
-  | Sigkill -> [ "signal.h" ]
+  | Sigkill | Sigusr1 | Sigusr2 -> [ "signal.h" ]
+  | Spawn_file_actions_size -> [ "spawn.h" ]
   | Stat_size | Stat_mode_offset | Stat_mode_size | Stat_length_offset | Stat_accessed_offset
   | Stat_modified_offset | Stat_created_offset | S_ifmt | S_ifreg | S_ifdir | S_iflnk | Utime_omit
     ->
       [ "sys/stat.h" ]
-  | At_fdcwd -> [ "fcntl.h" ]
+  | At_fdcwd | F_dupfd_cloexec | F_setfd | Fd_cloexec -> [ "fcntl.h" ]
   | Path_max -> [ "limits.h" ]
 
 (* The C expression that a number is the value of, which the check compares
@@ -772,6 +938,7 @@ let number_expression (system : system) number =
   let offset_of field = Some (Printf.sprintf "__builtin_offsetof(struct stat, %s)" field) in
   match (number, system.os) with
   | Stat_size, _ -> Some "sizeof(struct stat)"
+  | Spawn_file_actions_size, _ -> Some "sizeof(posix_spawn_file_actions_t)"
   | Stat_mode_offset, _ -> offset_of "st_mode"
   | Stat_mode_size, _ -> Some "sizeof(((struct stat *)0)->st_mode)"
   | Stat_length_offset, _ -> offset_of "st_size"
@@ -873,6 +1040,16 @@ let value (system : system) number =
   | Utime_omit, Macos -> -2
   | Path_max, Linux -> 4096
   | Path_max, Macos -> 1024
+  | F_dupfd_cloexec, Linux -> 1030
+  | F_dupfd_cloexec, Macos -> 67
+  | F_setfd, (Linux | Macos) -> 2
+  | Fd_cloexec, (Linux | Macos) -> 1
+  | Spawn_file_actions_size, Linux -> 80
+  | Spawn_file_actions_size, Macos -> 8
+  | Sigusr1, Linux -> 10
+  | Sigusr1, Macos -> 30
+  | Sigusr2, Linux -> 12
+  | Sigusr2, Macos -> 31
 
 (* How many bytes a number the function reaches through an address takes,
    which the C type it is declared with must take too. [USize] has no one
@@ -884,6 +1061,7 @@ let bytes = function
   | USize | ISize -> invalid_arg "a USize the C library reaches through an address"
 
 let check system =
+  let functions = List.filter (available system) functions in
   let headers =
     List.fold_left
       (fun seen header -> if List.mem header seen then seen else seen @ [ header ])
@@ -907,7 +1085,7 @@ let check system =
     ([
        (* The headers are to declare each function plainly, not as a macro
           that checks its arguments. *)
-       "#undef _FORTIFY_SOURCE\n#define _FORTIFY_SOURCE 0\n#define _DEFAULT_SOURCE\n";
+       "#undef _FORTIFY_SOURCE\n#define _FORTIFY_SOURCE 0\n#define _GNU_SOURCE\n";
      ]
     @ List.map (fun header -> Printf.sprintf "#include <%s>\n" header) headers
     @ List.filter_map
@@ -943,7 +1121,7 @@ let check system =
                 | Written (scalar, names) when not (is_void (c system)) ->
                     Some (reached declaration.symbol (c system) (List.length names) scalar)
                 | Written _ | Value _ | Elements _ | Room _ | Elements_to_change _ | Always _
-                | Environment ->
+                | Fixed _ ->
                     None)
               row.parameters)
         functions)

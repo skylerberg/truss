@@ -412,6 +412,230 @@ fn main(arguments: List[String]) -> ExitCode
         output)
 
 let () =
+  test "a program reads its variables, directory, platform, locations, and time zone" (fun () ->
+      let home = Lazy.force scratch in
+      Unix.putenv "TRUSS_TEST_MARK" "first=second";
+      Unix.putenv "HOME" home;
+      Unix.putenv "TMPDIR" "";
+      Unix.putenv "XDG_CACHE_HOME" "/caches";
+      Unix.putenv "TZ" ":Europe/Paris";
+      let status, output, _ =
+        run_main
+          {|use standard::environment
+
+fn say(text: String) uses Console {
+  Console.print_line(text.slice())
+}
+
+fn shown(path: Option[Path]) -> String {
+  if path is Some(found) && found.text() is Some(text) { "${text}" } else { "none".copy() }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Environment, FileRead
+{
+  var marked = 0
+  for variable in Environment.variables() {
+    if variable.name == "TRUSS_TEST_MARK" {
+      say("${variable.name} is ${variable.value}")
+      marked += 1
+    }
+  }
+  say("marked ${marked}")
+  if Environment.variable("TRUSS_TEST_MARK".slice()) is Some(value) {
+    say("read ${value}")
+  }
+  if Environment.current_directory() is Ok(directory) {
+    say("in ${shown(Some(directory.copy()))}")
+  }
+  let platform = Environment.platform()
+  let known = platform.operating_system == environment::OperatingSystem.Linux
+    || platform.operating_system == environment::OperatingSystem.MacOs
+  say("system known ${known}, processors ${platform.processor_count > 0}")
+  say("host named ${!platform.host_name.is_empty()}, process ${platform.process_identifier > 1}")
+  say("home ${shown(Environment.location(environment::Location.Home))}")
+  say("temporary ${shown(Environment.location(environment::Location.Temporary))}")
+  if Environment.location(environment::Location.Executable) is Some(program)
+    && FileRead.metadata(program) is Ok(metadata)
+  {
+    say("executable is a file ${metadata.is_file()}")
+  }
+  if platform.operating_system == environment::OperatingSystem.Linux {
+    say("cache ${shown(Environment.location(environment::Location.Cache))}")
+  } else {
+    say("cache /caches")
+  }
+  say("data set ${Environment.location(environment::Location.Data) is Some(_)}")
+  if Environment.local_zone() is Some(zone) {
+    say("zone ${zone}")
+  }
+  if Environment.zone_rules("UTC".slice()) is Some(rules) && rules.length() > 4 {
+    say("rules start ${rules[0]} ${rules[1]} ${rules[2]} ${rules[3]}")
+  }
+  say("outside ${Environment.zone_rules("../../../etc/hosts".slice()) is Some(_)}")
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               "TRUSS_TEST_MARK is first=second";
+               "marked 1";
+               "read first=second";
+               "in " ^ Sys.getcwd ();
+               "system known true, processors true";
+               "host named true, process true";
+               "home " ^ home;
+               "temporary /tmp";
+               "executable is a file true";
+               "cache /caches";
+               "data set true";
+               "zone Europe/Paris";
+               "rules start 84 90 105 102";
+               "outside false";
+               "";
+             ])
+        output)
+
+let () =
+  test "a program's log records go to standard error, one line each" (fun () ->
+      let status, output, errors =
+        run_main
+          {|use standard::log
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Log
+{
+  log::debug("left out")
+  log::information(
+    "started",
+    fields: [
+      log::Field.integer("port", value: 8080),
+      log::Field.string("host", value: "a \"quoted\" name\n"),
+      log::Field.bool("ready", value: true),
+      log::Field.float("load", value: 0.5),
+      log::Field.duration("took", value: Duration.nanoseconds(1500)),
+    ],
+  )
+  log::error("stopped")
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"" output;
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               {|level=information message="started" port=8080 host="a \"quoted\" name\n" ready=true load=0.5 took=1500ns|};
+               {|level=error message="stopped"|};
+               "";
+             ])
+        errors)
+
+let () =
+  test "a program runs others: their status, output, variables, directory, and a signal" (fun () ->
+      let status, output, _ =
+        run_main
+          {|use standard::processes
+
+fn say(text: String) uses Console {
+  Console.print_line(text.slice())
+}
+
+fn shown(status: processes::ExitStatus) -> String {
+  match status {
+    Exited(code) => "exited ${code}"
+    Signaled(signal) => if signal == processes::Signal.Terminate {
+      "ended by terminate".copy()
+    } else {
+      "ended by another signal".copy()
+    }
+  }
+}
+
+fn show(label: String, bytes: List[UInt8])
+  uses Console, Handles
+{
+  Console.print(label.slice())
+  var out = Console.output()
+  let _ = mut out.write(bytes.slice())
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes, Handles
+{
+  let quiet = processes::Command.new("sh").argument("-c").argument("exit 3")
+  if Processes.run(quiet) is Ok(output) {
+    say("run ${shown(output.status)}, output ${output.output.length()}")
+  }
+  let loud = processes::Command.new("sh")
+    .argument("-c")
+    .argument("echo out; echo err >&2; echo $TRUSS_SPAWNED; pwd")
+    .variable("TRUSS_SPAWNED", value: "first")
+    .variable("TRUSS_SPAWNED", value: "second")
+    .directory(Path.new("/"))
+    .output(processes::Redirect.Capture)
+    .error_output(processes::Redirect.Capture)
+  if Processes.run(loud) is Ok(output) {
+    show("captured ", bytes: output.output)
+    show("and ", bytes: output.error_output)
+  }
+  let bare = processes::Command.new("sh")
+    .argument("-c")
+    .argument("echo home=$HOME.")
+    .without_inherited_variables()
+    .variable("PATH", value: "/usr/bin:/bin")
+    .output(processes::Redirect.Capture)
+  if Processes.run(bare) is Ok(output) {
+    show("without variables ", bytes: output.output)
+  }
+  if Processes.run(processes::Command.new("no-such-program-anywhere")) is Err(NotFound) {
+    say("not found")
+  }
+  if Processes.spawn(processes::Command.new("sleep").argument("30")) is Ok(started) {
+    var sleeper = own started
+    say("sleeping ${sleeper.identifier() > 1}")
+    if mut sleeper.signal(processes::Signal.Terminate) is Ok(_) && mut sleeper.wait() is Ok(status) {
+      say("sleep ${shown(status)}")
+    }
+  }
+  let discarded = processes::Command.new("sh")
+    .argument("-c")
+    .argument("echo unseen; cat")
+    .input(processes::Redirect.Discard)
+    .output(processes::Redirect.Discard)
+  if Processes.run(discarded) is Ok(output) {
+    say("discarded ${shown(output.status)}")
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               "run exited 3, output 0";
+               "captured out";
+               "second";
+               "/";
+               "and err";
+               "without variables home=.";
+               "not found";
+               "sleeping true";
+               "sleep ended by terminate";
+               "discarded exited 0";
+               "";
+             ])
+        output)
+
+let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"
     (fun () ->
       let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in

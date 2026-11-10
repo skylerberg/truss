@@ -163,10 +163,18 @@ and kind =
       body : block;
       result : Types.ty;
     }
-  | Construct of { variant : string option; fields : (string * expression option) list }
+  | Construct of { variant : string option; fields : (string * operand option) list }
       (** Constructs a record, or a variant of a sum type; the node's type says which type. [fields]
           lists every field in declaration order. A field with [None] takes its default value, which
-          is in the type's core form. A range expression such as [1..5] is desugared to this. *)
+          is in the type's core form. A range expression such as [1..5] is desugared to this.
+
+          A field that is a [Value] is moved into the constructed value. A field that is a [Place]
+          is lent to it: the constructed value holds the place's value and does not own it. Only a
+          construct that a {!Yield} yields has such a field, or a construct that is a field of one,
+          to any depth. The place is lent with the [Yield]'s mode: when a [mut] lend ends, the place
+          has the value of the field as the caller left it. A yielded construct that lends a place
+          at any depth owns nothing, because each of its other fields is a place, a nested
+          construct, or a value of a [Plain] type. *)
   | Collection_literal of { elements : expression list; construction : construction }
       (** An array literal, or a specification-only sequence or set. The node's type says which.
           List and set literals are not this node: they are desugared to calls. *)

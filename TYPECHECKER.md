@@ -504,11 +504,22 @@ is `Plain` exactly when `Value` is.
   everything, including handles.
 - **An opaque type has them only when declared** with `derives Copyable` or
   `derives Plain`. The checker verifies that the fields allow it. Other
-  packages rely only on the declaration, so changing an opaque type's fields
-  never changes what other packages may do, which is the freedom `opaque`
-  promises. Every other type has them by inference, and declaring them on a
-  type that is not opaque is an error with a fix that removes the
-  declaration, since its fields already say it.
+  packages rely on the declaration, so adding a field that cannot be copied
+  is an error at the type and never a surprise elsewhere. Every other type
+  has them by inference, and declaring them on a type that is not opaque is
+  an error with a fix that removes the declaration, since its fields already
+  say it.
+- **A generic opaque type has them under the conditions its fields give,**
+  as any other generic type does. `Slice[Element]` holds a view of its
+  elements, so it is `Plain` whatever `Element` is. `List[Element]` holds
+  its elements, so it is `Copyable` when `Element` is. A type parameter that
+  no field holds, as in `opaque type Id[Entity](value: UInt64)`, is no
+  condition. Swift checks a declared `BitwiseCopyable` against the fields
+  the same way. Rust's `derive` instead requires the property of every type
+  parameter, which is why a `Copy` type with an unused parameter needs a
+  hand-written `impl` there. The cost is that changing a generic opaque
+  type's fields can change which of its type arguments must have the
+  property.
 - **`copy()` is always the compiler's.** It is the method of `Copyable`, and
   no type can give copying a cost or an effect of its own, as no type can
   define a destructor.
@@ -1141,6 +1152,7 @@ A *loan* is a period during which a place is lent. Each is shared or `mut`:
 | What a lending call is called on | shared, or `mut` when the method takes `mut self` | the rest of the statement |
 | A `for` loop's variable | shared or `mut` | the iteration |
 | A `provide` of a place | shared or `mut` | the `provide` block |
+| An operand that has been evaluated | shared | until its operation runs |
 
 A loan is live while any value that holds it may still be used, which a
 liveness analysis decides, as in Rust's non-lexical lifetimes. While a shared
@@ -1148,7 +1160,25 @@ loan of a place is live, nothing may change, move, or lend `mut` an
 overlapping place. While a `mut` loan is live, nothing else may use an
 overlapping place at all. So `swap(mut first, second: mut first)` is an
 error, and `mut items.push(9)` is allowed once `middle` is no longer used, as
-in SYNTAX.md's example.
+in SYNTAX.md's example. A loan of a view is also a loan of what the view
+views.
+
+The operands of one operation are evaluated in order, and an operand stays
+as it was evaluated until the operation runs. The operands are the arguments
+of a call, the fields of a constructor, the elements of a literal, the
+scrutinees of a `match`, the collection and then the keys of an index, and
+the value of an assignment and then the keys of its target.
+
+- **An evaluated operand is lent until its operation runs.** An operand
+  that is a place lends the place, and an operand of a view type lends what
+  it views. A later operand may read what is lent, but may not change it,
+  move it, or lend it `mut`. So `show(items[0], count: grow(mut items))` is
+  an error, as in Rust: the call would be given an element of a list that
+  `grow` has since changed. An operand that is a copy lends nothing.
+- **A `mut` borrow for an argument begins at the call,** after every
+  argument is evaluated. So `mut items.push(items.length())` is allowed, as
+  Rust's two-phase borrows allow it. At the call, two places that the call
+  borrows may not overlap if one of them is borrowed `mut`.
 
 ### Views
 
@@ -1196,6 +1226,12 @@ all read from one account of what a value views:
   another view type, such as a cursor, can be passed `mut` over a read-only
   source.
 
+- **A view cannot be passed with a `mut` borrow of what it views.** A call
+  that is given a view and that borrows `mut`, as another argument, a place
+  that the view views is an error in either order: the callee would hold
+  the view and change what it views. The intrinsic operations that give a
+  view back to its owner are the exception.
+
 - **Nothing kept may view a temporary.** A temporary lives until the end
   of its statement, so a `let` or `var` whose view, or whose cursor, views
   an owned temporary passed read-only to the call that made it is an error
@@ -1240,6 +1276,9 @@ unless it is `Plain`. Otherwise the error offers both fixes.
 - **A tagged string takes its parts,** because each part goes into the
   template that its tag receives. A plain string only reads the values it
   interpolates.
+- **A yielded constructor lends its places instead.** In
+  `yield Some(self[index])` the field is lent, not taken, so it needs no
+  mark (see [Yielding and lending](#yielding-and-lending)).
 
 ### Yielding and lending
 
@@ -1257,6 +1296,32 @@ unless it is `Plain`. Otherwise the error offers both fixes.
   a collection other than a `List`, a `Slice`, or an `Array` is such a call,
   so two indexes of a user's collection are never lent `mut` in one
   statement, and `grid[a] = grid[b]` needs the right side in a `let` first.
+- **A yielded constructor lends the places among its fields.** A lookup that
+  can miss lends an `Option`, as in `yield Some(self[index])`, and the
+  element stays in the collection. So in the constructor written directly
+  after `yield`, and in a constructor that is a field of it, a field that is
+  a place is lent to the value that is built, and needs no `own` and no
+  copy. The place is anything the method could yield by itself: a part of
+  `self`, a parameter, or a local.
+  - A method that yields or lends read-only lends every place read-only. A
+    `Plain` place is copied instead, as in any constructor.
+  - A method that yields or lends `mut` lends the places that are marked
+    `mut`, as in `yield Indexed(index: index, value: mut self[index])`.
+    When the lend ends, such a place has the value of its field as the
+    caller left it. A field without the mark takes a value, as in any
+    constructor, so `index` is a copy, and a place there that is not
+    `Plain` is an error whose fix is the mark. Two places lent `mut` to
+    one value may not overlap: the same place twice is an error, and two
+    indexes are an obligation for the prover, as for two `mut` arguments.
+  - A yielded value that lends a place owns nothing. Each of its other
+    fields is a constructor or a `Plain` value, such as an index or a
+    slice. An owned value there is an error
+    (`ownership.owned_beside_lent`) that says to bind it to a name first:
+    the name is a place, and is lent like the rest. A yielded constructor
+    that lends no place is an ordinary owned value.
+  - A slice is a value, so `rest: self[1..]` is taken, not lent.
+  - A method that yields such a value yields places, so it can be pulled
+    only where the element is `Plain`.
 - **A part that is lent goes back.** Returning it, storing it, or giving it
   to an `own` parameter is an error unless it is `Plain`, and so is binding
   it with `let`, since the name would outlast the statement. Matching one
@@ -1525,6 +1590,12 @@ checks them like code, with these differences:
   range or a collection is an expression in code as well; one over a type,
   and `==>`, are errors in a body that is compiled, which the parser leaves
   to this stage since only the signature's types say whether a body is.
+- **`log` and `power` are specification functions.** A call of `log(n)` or
+  `power(base, exponent)` by bare name is the function on `Integer` that a
+  `cost` bound uses. In a `cost` bound the names always mean these
+  functions. In any other specification, a local or a definition of the
+  file with the same name takes precedence. `time` and `calls` are cost
+  functions only.
 - **Theorems** are called only from proofs, and a call makes their `ensures`
   available. `assert` is only in tests, theorems, and proofs.
 
@@ -1630,11 +1701,19 @@ The core form records these decisions:
   expression is a lending call of `Index.at`. Every place carries its type.
 - **An operand is a borrowed place or a value.** The operands are: an
   argument, the scrutinee of a `match`, a `let`, or an `is`, the operand of
-  a `yield`, an implementation in a `provide`, an indirect callee, an
-  interpolated value, and the cursor of a loop. Reading a value out of a
-  place is a node of its own. It copies the value if the type is `Plain`
-  and moves it otherwise. Code that only borrows a place never has that
-  node.
+  a `yield`, a field of a constructor, an implementation in a `provide`, an
+  indirect callee, an interpolated value, and the cursor of a loop. Reading
+  a value out of a place is a node of its own. It copies the value if the
+  type is `Plain` and moves it otherwise. Code that only borrows a place
+  never has that node.
+- **A field of a constructor is a place only in a yielded constructor.** A
+  field that is a value is moved into the constructed value. A field that
+  is a place is lent to it, with the mode of the `yield`: the constructed
+  value holds the place's value and does not own it. Only the constructor
+  that is the operand of a `yield`, and a constructor that is a field of
+  one, has such a field. If it has one at any depth, each of its other
+  fields is a place, a constructor, or a value of a `Plain` type, so the
+  yielded value owns nothing and nothing drops it.
 - **Operators are resolved.** An arithmetic, bitwise, or shift operator on
   built-in types is one node that holds the operation, whether it was
   written `left + right` or `left.add(right)`. A comparison of built-in

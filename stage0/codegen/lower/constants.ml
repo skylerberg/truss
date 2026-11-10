@@ -163,7 +163,9 @@ let rec fold ?(depth = call_depth) st (locals : (Core.local, Lir.static_value re
           (List.map
              (fun (name, field) ->
                let* field = field in
-               let* field = fold_here field in
+               let* field =
+                 match field with Core.Value field -> fold_here field | Place _ -> None
+               in
                Some (name, field))
              fields)
       in

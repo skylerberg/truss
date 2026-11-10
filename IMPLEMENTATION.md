@@ -131,6 +131,12 @@ Every stage of stage0 is tested the same way:
   test must not load the library's sources into a new engine: that parses
   and checks the whole library again, so every such test gets slower each
   time the library grows.
+- **A test run reuses what the last one worked out.** Two results are
+  kept by what they were worked out from, so they can be kept between
+  runs: the solver's answer to a query, and the object compiled from a
+  file of generated C. `TRUSS_SOLVER_CACHE` and `TRUSS_OBJECT_CACHE` name
+  the directories. CI restores both from `main`'s last run, so a run
+  solves and compiles only what changed.
 - **The standard library's own tests are written in Truss.** Each file of
   `stage0/test/codegen/library/` is a module of tests for one module of the
   library, named after it. `library_tests` builds every file's tests into

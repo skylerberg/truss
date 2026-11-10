@@ -174,9 +174,11 @@ and into st (value : Core.expression) (destination : Lir.place) =
   | Construct { variant; fields } ->
       let fields =
         List.map
-          (fun (name, (field : Core.expression option)) ->
+          (fun (name, (field : Core.operand option)) ->
             match field with
-            | Some field -> (name, owned st (value_place st field) (ground st field.type_))
+            | Some (Value field) -> (name, owned st (value_place st field) (ground st field.type_))
+            | Some (Place _) ->
+                Compiler_bug.unsupported "a yielded value with a field that is a lent place"
             | None ->
                 (* The default is written in the type's definition, so it is
                    lowered in that definition's frame. *)

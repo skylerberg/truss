@@ -50,6 +50,13 @@ let core_of_path =
                         (written (Method { owner = impl.implements.trait; name; receiver })))))
       | None, _ -> None)
 
+(* The packages whose [impl]s met a bound in a definition. *)
+let evidence =
+  Query.query ~name:"evidence" ~phase:Bodies ~show:Resolve.Names.show_key (fun database key ->
+      match Query.demand database checked key with
+      | Some (result : result) -> result.evidence
+      | None -> [])
+
 (* The checked tables of a definition, or [None] if the definition has a
    parse error, a resolution error, or a type error. The pattern, use, and
    ownership checks run only on a definition that has none, so that one
@@ -70,3 +77,7 @@ let clean database key =
          | _ -> true ->
       Some checked
   | _ -> None
+
+(* Whether a definition has no parse error, resolution error, or type
+   error. *)
+let is_clean database key = Option.is_some (clean database key)

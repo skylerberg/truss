@@ -165,7 +165,16 @@ let strict =
   [ "-Wall"; "-Wextra"; "-Werror"; "-Wno-unused-parameter"; "-Wno-unused-but-set-variable" ]
 
 let counter = ref 0
-let cache = lazy (Build.cache (Filename.concat (Lazy.force scratch) "objects"))
+
+(* An object is kept by the text of its C, the compiler, and its flags, so
+   with a directory to keep them in, a run compiles only the C that the
+   last run did not. *)
+let cache =
+  lazy
+    (Build.cache
+       (match Sys.getenv_opt "TRUSS_OBJECT_CACHE" with
+       | Some directory when directory <> "" -> directory
+       | _ -> Filename.concat (Lazy.force scratch) "objects"))
 
 (* [TRUSS_SANITIZE=1] builds every test's C with AddressSanitizer and
    UndefinedBehaviorSanitizer, as [truss --sanitize] does; a report is a

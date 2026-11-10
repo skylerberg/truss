@@ -60,8 +60,17 @@ jobs:
           key: solver-${{ github.sha }}
           restore-keys: solver-
 
+      # The objects of the C that the tests generate, each kept by the text
+      # of its C, the compiler, and its flags. A run starts from main's and
+      # compiles only the C that main did not.
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/truss-objects
+          key: objects-${{ github.sha }}
+          restore-keys: objects-
+
       - name: Build, check formatting and truss.opam, and test
-        run: TRUSS_SOLVER_CACHE="$HOME/.cache/truss-solver" opam exec -- dune build @default @install @fmt @runtest
+        run: TRUSS_SOLVER_CACHE="$HOME/.cache/truss-solver" TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune build @default @install @fmt @runtest
 
       - name: Check that truss.opam matches dune-project
         run: git diff --exit-code truss.opam
@@ -76,6 +85,18 @@ jobs:
         with:
           path: ~/.cache/truss-solver
           key: solver-${{ github.sha }}
+
+      # An object compiled more than two weeks ago is dropped, and compiled
+      # again by the next run that needs it, so the cache holds the objects
+      # that are still built and not every one that was.
+      - if: github.event_name == 'push'
+        run: mkdir -p ~/.cache/truss-objects && find ~/.cache/truss-objects -type f -mtime +14 -delete
+
+      - if: github.event_name == 'push'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.cache/truss-objects
+          key: objects-${{ github.sha }}
 
       # Each save starts from the last one, so the cache is trimmed to keep it
       # quick to restore.
@@ -113,8 +134,25 @@ jobs:
       # The codegen tests include running the prover on templates.
       - uses: ./.github/actions/z3
 
+      # The sanitizers' flags are part of an object's key, so these objects
+      # are this job's own.
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/truss-objects
+          key: objects-sanitized-${{ github.sha }}
+          restore-keys: objects-sanitized-
+
       - name: Test generated code under sanitizers
         env:
           TRUSS_SANITIZE: "1"
           ASAN_OPTIONS: detect_leaks=0
-        run: opam exec -- dune test --force stage0/test/codegen
+        run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune test --force stage0/test/codegen
+
+      - if: github.event_name == 'push'
+        run: mkdir -p ~/.cache/truss-objects && find ~/.cache/truss-objects -type f -mtime +14 -delete
+
+      - if: github.event_name == 'push'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.cache/truss-objects
+          key: objects-sanitized-${{ github.sha }}

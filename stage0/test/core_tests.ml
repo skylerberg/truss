@@ -356,6 +356,49 @@ let () =
         <> "{ yield mut place lent Index.at for List[Cell] by standard::list::impl Index for \
             List[Element](mut place self.cells, place index) lends mut }"
       then fail "found:\n%s" found);
+  test "a yielded constructor lends the places among its fields" (fun () ->
+      let found =
+        printed_body
+          "type Shelf(books: List[String])\n\n\
+           type First(title: String, rest: Slice[String])\n\n\
+           fn Shelf.first(self) lends Option[First] {\n\
+          \  if self.books.is_empty() {\n\
+          \    yield None\n\
+          \  } else {\n\
+          \    yield Some(First(title: self.books[0], rest: self.books[1..]))\n\
+          \  }\n\
+           }\n"
+          "Shelf.first"
+      in
+      if
+        found
+        <> "{ if standard::list::List.is_empty[String](place self.books) { yield \
+            Option[First].None() } else { yield Option[First].Some(value: First(title: place lent \
+            Index.at for List[String] by standard::list::impl Index for List[Element](place \
+            self.books, 0) lends, rest: slice standard::list::List.slice_range[String](place \
+            self.books, 1, standard::list::List.length[String](place self.books)))) } }"
+      then fail "found:\n%s" found);
+  test "a constructor yielded `mut` lends the places that are marked `mut`" (fun () ->
+      let found =
+        printed_body
+          "type Shelf(books: List[String])\n\n\
+           type Numbered(index: USize, title: String)\n\n\
+           fn Shelf.numbered(mut self) yields mut Numbered {\n\
+          \  var index: USize = 0\n\
+          \  while index < self.books.length() {\n\
+          \    yield Numbered(index: index, title: mut self.books[index])\n\
+          \    index = index + 1\n\
+          \  }\n\
+           }\n"
+          "Shelf.numbered(mut self)"
+      in
+      if
+        found
+        <> "{ let var own index = 0; while (index < standard::list::List.length[String](place \
+            self.books)) { yield mut Numbered(index: index, title: place lent Index.at for \
+            List[String] by standard::list::impl Index for List[Element](mut place self.books, \
+            place index) lends mut); index = add(index, 1) } }"
+      then fail "found:\n%s" found);
   expect_body "patterns of constants, ranges, and strings"
     "let limit: Int64 = 10\n\n\
      fn g(count: Int64, name: String) -> Int64 {\n\
@@ -596,6 +639,29 @@ let () =
      {  }"
 
 let () =
+  expect_definition "`log` and `power` are specification functions outside a cost bound too"
+    "fn g(value: UInt64) -> USize\n\
+    \  ensures result <= log(value) + 1\n\
+    \  ensures power(2, result) >= 1\n\
+     {\n\
+    \  todo\n\
+     }\n"
+    "fn(value: UInt64)\n\
+     ensures (to_integer(result) <= add(log(value), 1))\n\
+     ensures (power(2, result) >= 1)\n\
+     { todo }";
+  expect_definition "a function of the file named `power` is called in a specification"
+    "fn power(base: Int64, exponent: Int64) -> Int64\n\
+    \  cost time finite\n\
+     {\n\
+    \  base\n\
+     }\n\n\
+     fn g(value: Int64) -> Int64\n\
+    \  ensures result == power(value, exponent: 1)\n\
+     {\n\
+    \  value\n\
+     }\n"
+    "fn(value: Int64)\nensures (result == app::main::power(place value, 1))\n{ value }";
   expect_definition "the time of a method of a type parameter's bound names the trait method"
     "fn g[Element: Equal](items: List[Element], item: Element) -> Bool\n\
     \  cost time O(items.length() * time(Element.equal))\n\

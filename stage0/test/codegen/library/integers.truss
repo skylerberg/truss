@@ -225,3 +225,52 @@ test "an integer is parsed in any radix from 2 to 36, in either case" {
   assert ISize.parse_radix("-80", radix: 16) == Ok(-128)
   assert USize.parse_radix("777", radix: 8) == Ok(511)
 }
+
+test "the integer square root of a 64-bit number is exact at the top of its range" {
+  let top: UInt64 = 18446744073709551615
+  assert top.integer_square_root() == 4294967295
+  let square: UInt64 = 18446744065119617025
+  assert square.integer_square_root() == 4294967295
+  let below: UInt64 = 18446744065119617024
+  assert below.integer_square_root() == 4294967294
+  let small: USize = 17
+  assert small.integer_square_root() == 4
+  let nothing: USize = 0
+  assert nothing.integer_square_root() == 0
+}
+
+test "an integer is formatted in a radix, with a sign and leading zeros" {
+  let answer: Int32 = 42
+  assert answer.format() == "42"
+  assert answer.format(radix: 2) == "101010"
+  assert answer.format(radix: 16) == "2a"
+  assert answer.format(radix: 16, uppercase: true) == "2A"
+  assert answer.format(minimum_digits: 5) == "00042"
+  assert answer.format(radix: 36) == "16"
+  let negative: Int32 = -42
+  assert negative.format() == "-42"
+  assert negative.format(radix: 16, minimum_digits: 4) == "-002a"
+  let zero: Int32 = 0
+  assert zero.format() == "0"
+  assert zero.format(minimum_digits: 3) == "000"
+  assert zero.format(minimum_digits: 0) == "0"
+}
+
+test "formatting reaches both ends of each type" {
+  assert Int8.minimum.format() == "-128"
+  assert Int8.maximum.format(radix: 2) == "1111111"
+  assert Int64.minimum.format() == "-9223372036854775808"
+  assert Int64.maximum.format(radix: 16) == "7fffffffffffffff"
+  assert UInt64.maximum.format() == "18446744073709551615"
+  assert UInt64.maximum.format(radix: 2).length() == 64
+  assert UInt64.maximum.format(radix: 36, uppercase: true) == "3W5E11264SGSF"
+  let byte: UInt8 = 255
+  assert byte.format(radix: 16, minimum_digits: 4, uppercase: true) == "00FF"
+}
+
+test "a formatted integer parses back to itself" {
+  assert Int64.parse(Int64.minimum.format()) == Ok(Int64.minimum)
+  assert UInt64.parse_radix(UInt64.maximum.format(radix: 7), radix: 7) == Ok(UInt64.maximum)
+  let value: Int16 = -12345
+  assert Int16.parse_radix(value.format(radix: 36), radix: 36) == Ok(value)
+}

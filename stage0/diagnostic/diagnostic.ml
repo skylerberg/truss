@@ -175,6 +175,7 @@ module Code = struct
     | Parallel_conflict
     | Keeps_lent_part
     | Read_only_view
+    | Owned_beside_lent
 
   type capabilities =
     | Not_available
@@ -408,6 +409,7 @@ module Code = struct
     | Parallel_conflict -> "parallel_conflict"
     | Keeps_lent_part -> "keeps_lent_part"
     | Read_only_view -> "read_only_view"
+    | Owned_beside_lent -> "owned_beside_lent"
 
   let capabilities_name code =
     match code with

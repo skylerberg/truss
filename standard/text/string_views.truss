@@ -97,26 +97,23 @@ public fn String.split_at(self, offset: USize) -> core::Pair[StringSlice, String
 }
 
 public fn String.contains(self, pattern: StringSlice) -> Bool
+  ensures result == (self.find(pattern) is Some(_))
   cost time O(self.length() + pattern.length())
 {
   self.slice().contains(pattern)
 }
 
 public fn String.find(self, pattern: StringSlice) -> Option[USize]
-  ensures match result {
-    Some(offset) => offset + pattern.length() <= self.length() && self.is_boundary(offset)
-    None => !self.contains(pattern)
-  }
+  ensures !(result is Some(offset)
+    && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
   cost time O(self.length() + pattern.length())
 {
   self.slice().find(pattern)
 }
 
 public fn String.find_last(self, pattern: StringSlice) -> Option[USize]
-  ensures match result {
-    Some(offset) => offset + pattern.length() <= self.length() && self.is_boundary(offset)
-    None => !self.contains(pattern)
-  }
+  ensures !(result is Some(offset)
+    && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
   cost time O(self.length() + pattern.length())
 {
   self.slice().find_last(pattern)
@@ -193,16 +190,19 @@ public fn String.split(self, separator: StringSlice) yields StringSlice
   requires separator.length() > 0
   cost time O(self.length() + separator.length())
 {
-  todo
+  for part in self.slice().split(separator) {
+    yield part
+  }
 }
 
 public fn String.split_at_most(self, separator: StringSlice, parts: USize) yields StringSlice
   requires separator.length() > 0
   requires parts > 0
-  ensures yielded.length() < parts
   cost time O(self.length() + separator.length())
 {
-  todo
+  for part in self.slice().split_at_most(separator, parts: parts) {
+    yield part
+  }
 }
 
 public fn String.split_matching(self, matching: (fn(Character) -> Bool cost time finite)) yields StringSlice
@@ -227,7 +227,7 @@ public fn String.split_once(self, separator: StringSlice) -> Option[core::Pair[S
 
 public fn String.split_once_last(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
   requires separator.length() > 0
-  ensures (result is Some(_)) == self.contains(separator)
+  ensures (result is Some(_)) == (self.find_last(separator) is Some(_))
   cost time O(self.length() + separator.length())
 {
   self.slice().split_once_last(separator)

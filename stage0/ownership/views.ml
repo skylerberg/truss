@@ -160,120 +160,166 @@ let used_after (graph : Graph.t) : Core.local list array =
   done;
   after
 
-let lent_mut_message context (loan : loan) =
-  let place = show context loan.lent in
+let overlaps left right = Place.overlap left right <> Apart
+
+(* Why a place cannot be used: a loan that is [mut] covers it. [viewed] is
+   true if the loan covers the place only because what is lent views it. *)
+let lent_mut_message context (loan : loan) ~viewed (place : Place.t) =
+  let lent = Printf.sprintf "`%s`" (show context loan.lent) in
+  let lent, used =
+    if viewed then
+      let place = Printf.sprintf "`%s`" (show context place) in
+      (Printf.sprintf "%s, which views %s," lent place, place)
+    else (lent, "it")
+  in
   match loan.lender with
-  | To_loop -> Printf.sprintf "`%s` is lent `mut` to the loop, so its body cannot use it." place
+  | To_loop -> Printf.sprintf "%s is lent `mut` to the loop, so its body cannot use %s." lent used
   | To_statement ->
       Printf.sprintf
-        "`%s` is lent `mut` for the rest of this statement, so the statement cannot use it again."
-        place
+        "%s is lent `mut` for the rest of this statement, so the statement cannot use %s again."
+        lent used
+  | To_operand ->
+      Printf.sprintf "%s is lent `mut` to this expression, so the expression cannot use %s yet."
+        lent used
 
-let overlaps left right = Place.overlap left right <> Apart
+(* Why a place cannot be changed: a read-only loan covers it. *)
+let lent_message context (loan : loan) ~viewed (place : Place.t) ~what =
+  let place = show context place and lent = Printf.sprintf "`%s`" (show context loan.lent) in
+  match loan.lender with
+  | To_loop ->
+      Printf.sprintf "`%s` cannot %s while the loop goes over %s." place what
+        (if viewed then lent ^ ", which views it" else "it")
+  | To_statement ->
+      Printf.sprintf "`%s` cannot %s while a part of %s is lent, which lasts this statement." place
+        what
+        (if viewed then lent ^ ", which views it," else "it")
+  | To_operand ->
+      Printf.sprintf
+        "`%s` cannot %s here, because %s was evaluated earlier in this expression and is used \
+         later in it."
+        place what
+        (if viewed then lent ^ ", which views it," else lent)
 
 let check context (graph : Graph.t) =
   let before = holdings_before context graph in
   let after = used_after graph in
+  (* Whether a loan covers a place: the loan lends the place, or it lends a
+     view of the place. [Some viewed] if it does, where [viewed] is true in
+     the second case. *)
+  let covers index (loan : loan) (place : Place.t) =
+    if overlaps loan.lent place then Some false
+    else if
+      List.exists
+        (fun viewed -> overlaps viewed place)
+        (resolve context before.(index) [ loan.lent ])
+    then Some true
+    else None
+  in
+  (* The loans that cover a place, oldest first, each with [viewed]. *)
+  let covering index (point : point) (place : Place.t) =
+    List.rev
+      (List.filter_map
+         (fun loan -> Option.map (fun viewed -> (loan, viewed)) (covers index loan place))
+         point.loans)
+  in
+  let is_mut ((loan : loan), _) = loan.mode = Mut in
   (* A use of a place that is lent [mut]. *)
-  let used (point : point) (place : Place.t) =
-    List.iter
-      (fun (loan : loan) ->
-        if loan.mode = Mut && overlaps loan.lent place then
-          report context Conflicting_loan (span context point.origin)
-            (lent_mut_message context loan))
-      point.loans
+  let used index (point : point) (place : Place.t) =
+    match List.find_opt is_mut (covering index point place) with
+    | Some (loan, viewed) ->
+        report context Conflicting_loan (span context point.origin)
+          (lent_mut_message context loan ~viewed place)
+    | None -> ()
   in
   (* A change to a place that is lent, or that a holder still in use
-     views. *)
+     views. One change gets one report. *)
   let changed index (point : point) (place : Place.t) ~what =
     let at = span context point.origin in
-    List.iter
-      (fun (loan : loan) ->
-        if overlaps loan.lent place then
-          if loan.mode = Mut then report context Conflicting_loan at (lent_mut_message context loan)
-          else
-            report context Changed_while_viewed at
-              (Printf.sprintf
-                 (match loan.lender with
-                 | To_loop -> format_of_string "`%s` cannot %s while the loop goes over it."
-                 | To_statement ->
-                     "`%s` cannot %s while a part of it is lent, which lasts this statement.")
-                 (show context place) what))
-      point.loans;
-    List.iter
-      (fun ((holder : Place.root), viewed) ->
-        let in_use =
-          match holder with
-          | Local local when not (kept_by_caller context { root = holder; steps = [] }) ->
-              List.mem local after.(index)
-          | Local _ | Constant _ -> true
-        in
-        if in_use && List.exists (fun viewed -> overlaps viewed place) viewed then
-          report context Changed_while_viewed at
-            (Printf.sprintf "`%s` cannot %s while `%s`, which views it, is still in use."
-               (show context place) what (show_root context holder)))
-      before.(index)
+    let covering = covering index point place in
+    match (List.find_opt is_mut covering, covering) with
+    | Some (loan, viewed), _ ->
+        report context Conflicting_loan at (lent_mut_message context loan ~viewed place)
+    | None, (loan, viewed) :: _ ->
+        report context Changed_while_viewed at (lent_message context loan ~viewed place ~what)
+    | None, [] ->
+        List.iter
+          (fun ((holder : Place.root), viewed) ->
+            let in_use =
+              match holder with
+              | Local local when not (kept_by_caller context { root = holder; steps = [] }) ->
+                  List.mem local after.(index)
+              | Local _ | Constant _ -> true
+            in
+            if in_use && List.exists (fun viewed -> overlaps viewed place) viewed then
+              report context Changed_while_viewed at
+                (Printf.sprintf "`%s` cannot %s while `%s`, which views it, is still in use."
+                   (show context place) what (show_root context holder)))
+          before.(index)
   in
   Array.iteri
     (fun index (point : point) ->
       let at = span context point.origin in
       match point.action with
-      | Read place -> used point place
+      | Read place -> used index point place
       | Mutate place ->
-          used point place;
+          used index point place;
           changed index point place ~what:"be lent `mut`"
       | Assign place -> changed index point place ~what:"change"
       | Move { place; type_; returned; captured; _ } -> (
-          used point place;
+          used index point place;
           match verdict context place ~type_ ~returned ~captured with
           | Moves -> changed index point place ~what:"be moved"
           | Reads | Refused _ -> ())
-      | Arguments { places; lent } ->
-          (* Two places passed to one call may not overlap if one of them
-             is borrowed [mut] or moved. *)
-          let given : T.mode -> string = function Mut -> "lent `mut`" | _ -> "moved" in
+      | Arguments { places; views; yielded } ->
+          (* Two places that one call borrows may not overlap if one of
+             them is borrowed [mut]. *)
           List.iteri
             (fun first_index (first : passed) ->
               List.iteri
                 (fun second_index (second : passed) ->
-                  if second_index > first_index && (first.mode <> Read || second.mode <> Read) then
+                  if second_index > first_index && (first.mode = Mut || second.mode = Mut) then
                     let exclusive, also =
-                      if first.mode <> Read then (first, second) else (second, first)
+                      if first.mode = Mut then (first, second) else (second, first)
                     in
                     match Place.overlap first.place second.place with
                     | Overlap ->
                         report context Conflicting_loan
                           (with_mark context (span context second.at))
                           (Printf.sprintf
-                             "`%s` is %s to this call, so the call cannot use `%s` too."
-                             (show context exclusive.place) (given exclusive.mode)
-                             (show context also.place))
+                             (if yielded then
+                                format_of_string
+                                  "`%s` is lent `mut` to the value that is yielded, so the value \
+                                   cannot be lent `%s` too."
+                              else
+                                "`%s` is lent `mut` to this call, so the call cannot use `%s` too.")
+                             (show context exclusive.place) (show context also.place))
                     | Maybe_apart (first_element, second_element) ->
                         context.disjoint <- (first_element, second_element) :: context.disjoint
                     | Apart -> ())
                 places)
             places;
-          (* A part that a call lends lends its whole place, so an
-             argument before the part may not overlap that place if either
-             is [mut]. *)
+          (* A view passed to the call may not view a place that the call
+             borrows [mut]: the callee would hold the view and change what
+             it views. *)
           List.iter
-            (fun (position, lender, lent_mode, lent_at) ->
+            (fun (position, viewed, view_at) ->
+              let viewed = resolve context before.(index) viewed in
               List.iter
                 (fun (passed : passed) ->
                   if
-                    passed.position < position
-                    && (passed.mode <> Read || lent_mode <> T.Read)
-                    && overlaps passed.place lender
+                    passed.position <> position && passed.mode = Mut
+                    && List.exists
+                         (fun viewed -> Place.overlap viewed passed.place = Overlap)
+                         viewed
                   then
                     report context Conflicting_loan
-                      (with_mark context (span context lent_at))
+                      (with_mark context (span context view_at))
                       (Printf.sprintf
-                         "This call is given `%s`, and a part that `%s` lends, and one of them is \
-                          `mut`. A place is lent whole, for the rest of the statement, when a part \
-                          of it is lent."
-                         (show context passed.place) (show context lender)))
+                         "`%s` is lent `mut` to this call, so the call cannot be given a view of \
+                          it too."
+                         (show context passed.place)))
                 places)
-            lent
+            views
       | Views_temporary holder ->
           report context Views_temporary at
             (match holder with

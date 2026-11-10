@@ -166,6 +166,9 @@ type operation =
   | Run_test
   | Report_tests_to
   | Live_blocks
+  | Environment_entry
+  | System_is_os of Libc.os
+  | System_is_architecture of Libc.architecture
   | Libc of Libc.function_
   | Libc_number of Libc.number
 
@@ -249,7 +252,10 @@ let operations =
     Run_test;
     Report_tests_to;
     Live_blocks;
+    Environment_entry;
   ]
+  @ List.map (fun os -> System_is_os os) Libc.oses
+  @ List.map (fun architecture -> System_is_architecture architecture) Libc.architectures
   @ List.map (fun function_ -> Libc function_) Libc.functions
   @ List.map (fun number -> Libc_number number) Libc.numbers
 
@@ -332,6 +338,11 @@ let operation_name = function
   | Run_test -> "run_test"
   | Report_tests_to -> "report_tests_to"
   | Live_blocks -> "live_blocks"
+  | Environment_entry -> "environment_entry"
+  | System_is_os Linux -> "system_is_linux"
+  | System_is_os Macos -> "system_is_macos"
+  | System_is_architecture X86_64 -> "system_is_x86_64"
+  | System_is_architecture Arm64 -> "system_is_arm64"
   | Libc function_ -> "libc_" ^ Libc.function_name function_
   | Libc_number number ->
       (* A name does not start with an underscore, as some of C's do. *)

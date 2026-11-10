@@ -106,6 +106,10 @@ type state = {
   mutable frames : frame list;
   mutable references : id list;  (** Locals read, newest first, for lambdas' captures. *)
   mutable receiver_modes : (id * T.mode) list;  (** Method calls whose receiver a mark covers. *)
+  yielded : (id, T.mode) Hashtbl.t;
+      (** The operand of each [yield], and each field of a constructor that is in this table, with
+          the mode of the [yield]. A field in this table that is a place is lent to the yielded
+          value instead of moved into it. *)
   binding_spans : (id, span) Hashtbl.t;
       (** Where each name of the definition is, for lambdas' captures. *)
   mutable lambdas : span list;  (** The lambdas being checked, innermost first. *)
@@ -1367,6 +1371,20 @@ let argument_form state (value : expression) =
       | Some mode -> Lent mode
       | None -> if is_place state value then Place else Temporary)
 
+(* The mode with which a field of a yielded constructor lends a place to
+   the value that is built, or [None] if the field takes its value, as a
+   field of any other constructor does. [type_] is the type of [value]. A
+   method that yields read-only lends every place read-only, except a
+   [Plain] place, which is copied. A method that yields [mut] lends the
+   places that are marked [mut]. A slice is a value, so it is taken. *)
+let lent_field state (value : expression) type_ : T.mode option =
+  match (Hashtbl.find_opt state.yielded value.id, argument_form state value) with
+  | _ when is_slice value -> None
+  | Some Read, Marked (Mut, _) -> Some Read
+  | Some Read, (Place | Lent _) when not (plain state type_) -> Some Read
+  | Some Mut, Marked (Mut, _) -> Some Mut
+  | _ -> None
+
 let mark_span (value : expression) (inner : expression) =
   Span.make value.span.start inner.span.start
 
@@ -1422,6 +1440,19 @@ let check_mode state env (value : expression) (parameter : T.parameter_info) typ
             ]
           (Printf.sprintf "`%s` copies implicitly, so it needs no `own`." (show state type_))
   | Own, Temporary -> ()
+  | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
+      if not (plain state type_) then
+        report state Missing_mark value.span
+          ~fixes:
+            (fix "Lend it `mut`." [ insert value.span.start "mut " ]
+            ::
+            (if copyable state type_ then
+               [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
+             else []))
+          (Printf.sprintf
+             "`%s` is a field of a value that is lent `mut`. Mark the place `mut` to lend it too, \
+              or pass a copy."
+             name)
   | Own, Place when is_part_of_constant state value ->
       if not (plain state type_) then
         report state Missing_mark value.span
@@ -1449,6 +1480,52 @@ let check_mode state env (value : expression) (parameter : T.parameter_info) typ
         (Printf.sprintf "`%s` takes ownership of its argument, so it is marked `own`, not `mut`."
            name)
   | (Mut | Own), Marked (Read, _) -> ()
+
+(* A yielded constructor that lends a place owns nothing, so nothing drops
+   it when the lend ends. Each of its other fields must then have nothing
+   to drop: the field is a constructor too, or its type is [Plain].
+   [operand] is the operand of the [yield]. *)
+let check_lent_value state env (operand : expression) =
+  let lends = ref false and taken = ref [] in
+  let rec fields (value : expression) =
+    match (value.kind, state.tables.calls.(value.id)) with
+    | Call (_, arguments), Some { callee = Constructor _; arguments = checked; _ } ->
+        List.iter
+          (fun (argument : argument) ->
+            match
+              List.find_opt
+                (fun (found : C.argument) -> found.expression = argument.value.id)
+                checked
+            with
+            | Some { mode = Read | Mut; _ } -> lends := true
+            | _ -> fields argument.value)
+          arguments
+    | _ -> taken := value :: !taken
+  in
+  fields operand;
+  if !lends && runs env then
+    List.iter
+      (fun (value : expression) ->
+        defer state (fun () ->
+            match Option.map (normalize state) state.tables.types.(value.id) with
+            | None -> true
+            | Some type_ when T.contains_unsolved type_ -> false
+            | Some type_ ->
+                let fieldless_variant =
+                  match (state.tables.meanings.(value.id), type_) with
+                  | Some (Variant_value _), T.Function _ -> false
+                  | Some (Variant_value _), _ -> true
+                  | _ -> false
+                in
+                if not (plain state type_ || fieldless_variant) then
+                  state.diagnostics <-
+                    Diagnostic.make ~code:(Ownership Owned_beside_lent)
+                      (Source.span value.span.start value.span.stop)
+                      "This value is owned, but the value that is yielded lends a place, so it \
+                       owns nothing. Bind this value to a name first, and pass the name."
+                    :: state.diagnostics;
+                true))
+      !taken
 
 (* Checks a value where an owned value is required and no parameter
    receives it: the initializer of a [var], the value of an assignment, an
