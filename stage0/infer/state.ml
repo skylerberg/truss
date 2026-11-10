@@ -575,15 +575,68 @@ let function_signature state (path : Path.t) =
   | Some signature -> Some (Ok signature)
   | None -> Environment.signature_or_report state.database path
 
+(* Lending *)
+
+(* A call of a lending method is the part the method gives, lent for the
+   rest of the caller's statement. It is not a temporary: it is never moved,
+   and what may be done with it follows how it is lent. *)
+let note_lending state (value : expression) (output : T.result) =
+  match output with
+  | Lends (mode, _) -> state.tables.lends.(value.id) <- Some mode
+  | Returns _ | Yields _ -> ()
+
+(* How an expression is lent, when it is what a lending call gives or a
+   part of that, a field or an element. A mark before it is the mark of the
+   place it is lent from. *)
+let rec lent state (value : expression) : T.mode option =
+  match value.kind with
+  | Call _ -> state.tables.lends.(value.id)
+  | Member (base, _) | Parenthesized base -> lent state base
+  | Bracket (base, _) when state.resolved.brackets.(value.id) <> Some Type_arguments ->
+      lent state base
+  | Mode (_, inner) when Option.is_some (marked_call state inner) -> lent state inner
+  | _ -> None
+
+(* Whether a value is borrowed where it is: a place, or a part that is
+   lent. What binds it views it, and what matches it binds views of its
+   parts. *)
+let borrowed state (value : expression) = is_place state value || Option.is_some (lent state value)
+
+(* A place that is assigned or lent [mut]: each index on its way is the
+   [mut] version of [at], which lends its element [mut]. *)
+let rec mutable_place state (value : expression) =
+  match value.kind with
+  | Member (base, _) | Parenthesized base | Mode (_, base) -> mutable_place state base
+  | Bracket (base, _) ->
+      (match state.tables.calls.(value.id) with
+      | Some ({ callee = Trait_method ({ name = "at"; _ } as method_); arguments; _ } as call) ->
+          state.tables.calls.(value.id) <-
+            Some
+              {
+                call with
+                callee = Trait_method { method_ with receiver = Mut };
+                arguments =
+                  List.map
+                    (fun (argument : C.argument) ->
+                      if argument.parameter = 0 then { argument with mode = T.Mut } else argument)
+                    arguments;
+              }
+      | _ -> ());
+      mutable_place state base
+  | _ -> ()
+
 (* Arguments and modes *)
 
-type argument_form = Marked of T.mode * expression | Place | Temporary
+type argument_form = Marked of T.mode * expression | Place | Lent of T.mode | Temporary
 
 let argument_form state (value : expression) =
   match value.kind with
   | Mode (mode, inner) when Option.is_none (marked_call state inner) ->
       Marked ((match mode with Mut -> Mut | Own -> Own), inner)
-  | _ -> if is_place state value then Place else Temporary
+  | _ -> (
+      match lent state value with
+      | Some mode -> Lent mode
+      | None -> if is_place state value then Place else Temporary)
 
 let mark_span (value : expression) (inner : expression) =
   Span.make value.span.start inner.span.start
@@ -591,7 +644,7 @@ let mark_span (value : expression) (inner : expression) =
 let check_mode state (value : expression) (parameter : T.parameter_info) type_ =
   let name = parameter.name in
   match (parameter.mode, argument_form state value) with
-  | Read, (Place | Temporary) -> ()
+  | Read, (Place | Temporary | Lent _) -> ()
   | Read, Marked (_, inner) ->
       report state Redundant_mark value.span
         ~fixes:
@@ -600,11 +653,29 @@ let check_mode state (value : expression) (parameter : T.parameter_info) type_ =
               [ Diagnostic.delete (Source.span value.span.start inner.span.start) ];
           ]
         (Printf.sprintf "`%s` only reads its argument, so it takes no mark." name)
-  | Mut, Marked (Mut, _) -> ()
+  | Mut, Marked (Mut, inner) -> mutable_place state inner
   | Mut, Place ->
       report state Missing_mark value.span
         ~fixes:[ fix "Mark it `mut`." [ insert value.span.start "mut " ] ]
         (Printf.sprintf "`%s` may change its argument, so the call marks it `mut`." name)
+  | Mut, Lent Mut -> mutable_place state value
+  | Mut, Lent (Read | Own) ->
+      report state Wrong_mark value.span
+        (Printf.sprintf
+           "`%s` may change its argument, and this part is lent read-only. Mark the place it is \
+            lent from `mut`, so that it is lent `mut`."
+           name)
+  | Own, Lent _ ->
+      if not (plain state type_) then
+        report state Missing_mark value.span
+          ~fixes:
+            (if copyable state type_ then
+               [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
+             else [])
+          (Printf.sprintf
+             "`%s` takes ownership of its argument, and a part that is lent cannot be given up. \
+              Pass a copy."
+             name)
   | Mut, (Temporary | Marked (Own, _)) ->
       report state Wrong_mark value.span
         (Printf.sprintf "`%s` changes its argument in place, so it must be a place marked `mut`."

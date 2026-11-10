@@ -264,6 +264,7 @@ and finish_call state (value : expression) callee (instance : instance) argument
         capability_arguments = [];
         result;
       };
+  note_lending state value instance.signature.output;
   (* A call to a [yields] method outside a [for] loop makes a cursor. *)
   match instance.signature.output with
   | Yields _ -> cursor_type state callee instance

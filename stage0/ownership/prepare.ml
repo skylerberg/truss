@@ -16,10 +16,12 @@ let prepare context =
      a method call's receiver, as in [mut file.read_line()], leaves the
      call's result, which is owned. *)
   let matched (value : expression) =
-    match value.kind with
-    | Mode (Mut, inner) when place_of context inner <> None -> Mut_access
-    | Mode (_, _) -> Owned
-    | _ -> if place_of context value <> None then Viewing else Owned
+    match (lending context value, value.kind) with
+    | Some (_, T.Mut), _ -> Mut_access
+    | Some _, _ -> Viewing
+    | None, Mode (Mut, inner) when place_of context inner <> None -> Mut_access
+    | None, Mode (_, _) -> Owned
+    | None, _ -> if place_of context value <> None then Viewing else Owned
   in
   let rec expression ~path ~loop_ids (value : expression) =
     Hashtbl.replace paths value.span.start path;

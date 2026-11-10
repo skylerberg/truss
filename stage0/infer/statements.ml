@@ -97,7 +97,7 @@ and statement state env (written : statement) ~last : unit =
                 "The `else` of a `let` must leave the block, with `return`, `break`, `continue`, \
                  or `unreachable`.")
       | None -> ());
-      let mode = if mutable_ then T.Own else if is_place state value then T.Read else T.Own in
+      let mode = if mutable_ then T.Own else if borrowed state value then T.Read else T.Own in
       binding_pattern state env written_pattern type_ ~mutable_ ~mode
   | Assignment { target = written_target; operator; value } -> (
       let target_type = expression state env written_target in
@@ -330,6 +330,13 @@ and check_assignable state env (written : expression) =
     | Member (base, _) -> root base
     | Bracket (base, _) -> root base
     | Parenthesized inner -> root inner
+    | Mode (Mut, inner) when Option.is_some (marked_call state inner) -> root inner
+    | Call _ -> (
+        (* A part that is lent [mut] may change; one lent read-only may not. *)
+        match lent state value with
+        | Some T.Mut -> `Ok
+        | Some _ -> `Lent
+        | None -> `Not_a_place)
     | _ -> `Not_a_place
   in
   match root written with
@@ -346,6 +353,11 @@ and check_assignable state env (written : expression) =
            "`%s` cannot change here: only a `var`, a `mut` parameter, or `mut self`, and their \
             parts, can be assigned."
            name)
+  | `Lent ->
+      report state Not_assignable written.span
+        ~fixes:[ fix "Mark it `mut`." [ insert written.span.start "mut " ] ]
+        "This part is lent read-only, so it cannot change. Mark the place it is lent from `mut`, \
+         so that it is lent `mut`."
   | `Not_a_place ->
       report state Not_assignable written.span
         "Only a place, such as a variable, a field, or an element, can be assigned."

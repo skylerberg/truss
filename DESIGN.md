@@ -611,9 +611,9 @@ views are *second-class*, as in Hylo:
 - **`mut` access is never stored.** It is named only by a `mut` parameter, a
   `mut` loop's variable, or a lambda's `mut` parameter, and lasts only for
   that call, iteration, or `provide mut` block, so there is no mutable
-  reference to track across statements. Disjoint parts of one collection
-  can still be passed `mut` side by side, because the prover shows the
-  ranges do not overlap.
+  reference to track across statements. Disjoint parts of one `List`,
+  `Slice`, or `Array` can still be passed `mut` side by side, because the
+  prover shows the ranges do not overlap.
 - **The compiler checks each function on its own.** The rules involve only
   one function body plus the signatures it calls, which keeps checking fast
   and incremental.
@@ -664,7 +664,31 @@ Hylo also keep accessors apart from sequences, and Python's
 - **User collections are not second-class.** `[]` and `for` work through the
   `Index` trait and `each`, so a user's `Grid` supports
   `mut grid[position].visit()` and `for cell in mut grid` exactly as a `List`
-  does, with the same proof rules.
+  does, with the same proof rules. The one difference is two parts lent side
+  by side, below.
+- **What a lending method lends need not be stored in `self`.** It may be a
+  value the method made, which the method takes back after the caller's
+  statement, as Swift's and Hylo's accessors may. So a collection that packs
+  its elements, such as a set of bits, can still be indexed: its `at` makes
+  the `Bool`, lends it, and writes it back. Rust's `Index` returns a
+  reference, so there such a collection cannot be indexed at all.
+- **A lending call lends the whole of what it is called on,** for the rest
+  of the caller's statement: read-only when the method takes `self`, and
+  `mut` when it takes `mut self`. The method is waiting to go on, and it was
+  proven as if nothing else touches `self` until it does. So the statement
+  makes no other use of a place it is lent from `mut`, and does not change
+  one that is lent read-only. `mut grid[a].swap(mut grid[b])` is an error
+  for a user's `Grid`, as it is for every collection in Swift, Hylo, and
+  Rust, which offer `swapAt` and `split_at_mut` for it.
+- **`List`, `Slice`, and `Array` lend two parts side by side.** Their
+  elements are places the compiler knows, and their `at` has nothing left to
+  do after its `yield`, so two indexes or two slices of one of them can be
+  lent together, `mut` or not, when the prover shows they are apart.
+- **A part that is lent is not the caller's to keep.** It cannot be given
+  up, and a name cannot hold it past the statement, though a `Plain` part
+  is copied as any `Plain` value is. A part lent `mut` is changed with no
+  mark of its own, since the mark is already on the place it is lent from:
+  `mut grid.cell(position).visit()`.
 - **A lending method yields exactly once on every path, and always
   continues afterward,** even if the caller's statement leaves early, so a
   type can update what depends on the part, such as a cached total. The

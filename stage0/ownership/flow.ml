@@ -22,9 +22,11 @@ let join (left : flow) (right : flow) : flow =
 type views = (id * place list) list
 type loop_frame = { mutable breaks : flow; mutable continues : flow }
 
-(* A place lent for a stretch of code, by a loop over it: read-only, so the
-   code may not change it, or [mut], so the code may not use it at all. *)
-type loan = { lent : place; lent_mode : T.mode }
+(* A place lent for a stretch of code: by a loop over it, for the loop, or by
+   a lending call, for the rest of its statement. Read-only, so the code may
+   not change it, or [mut], so the code may not use it at all. *)
+type lender = To_loop | To_statement
+type loan = { lent : place; lent_mode : T.mode; lent_to : lender }
 
 (* What a stretch of code changes and reads, gathered for [parallel]. *)
 type effects = { mutable changes : (place * span) list; mutable reads : place list }
@@ -43,9 +45,14 @@ type state = {
 let new_state context =
   { context; views = []; loop_frames = []; loans = []; parallel_bodies = []; effects = None }
 
-let lent_mut_message context place =
-  Printf.sprintf "`%s` is lent `mut` to the loop, so its body cannot use it."
-    (show_place context.names place)
+let lent_mut_message context (loan : loan) =
+  let place = show_place context.names loan.lent in
+  match loan.lent_to with
+  | To_loop -> Printf.sprintf "`%s` is lent `mut` to the loop, so its body cannot use it." place
+  | To_statement ->
+      Printf.sprintf
+        "`%s` is lent `mut` for the rest of this statement, so the statement cannot use it again."
+        place
 
 (* The edits that copy where a place was moved: [.copy()] after it, and
    its [own] mark removed. *)
@@ -63,7 +70,7 @@ let used state (flow : flow) (place : place) (span : span) =
   List.iter
     (fun loan ->
       if loan.lent_mode = T.Mut && overlap loan.lent place <> No_overlap then
-        report state.context Conflicting_loan span (lent_mut_message state.context loan.lent))
+        report state.context Conflicting_loan span (lent_mut_message state.context loan))
     state.loans;
   match flow with
   | None -> ()
@@ -97,10 +104,14 @@ let changed state (place : place) (span : span) ~what =
     (fun loan ->
       if overlap loan.lent place <> No_overlap then
         if loan.lent_mode = T.Mut then
-          report context Conflicting_loan span (lent_mut_message context loan.lent)
+          report context Conflicting_loan span (lent_mut_message context loan)
         else
           report context Changed_while_viewed span
-            (Printf.sprintf "`%s` cannot %s while the loop goes over it."
+            (Printf.sprintf
+               (match loan.lent_to with
+               | To_loop -> format_of_string "`%s` cannot %s while the loop goes over it."
+               | To_statement ->
+                   "`%s` cannot %s while a part of it is lent, which lasts this statement.")
                (show_place context.names place) what))
     state.loans;
   (* Each iteration of a [parallel for] runs at once with the others, so it

@@ -98,6 +98,21 @@ let plain context type_ = Properties.plain context.database ~bounds:context.boun
 let copyable context type_ = Properties.copyable context.database ~bounds:context.bounds type_
 let is_view context type_ = Properties.is_view context.database ~bounds:context.bounds type_
 
+(* The collections whose elements are places the compiler knows: an index
+   or a slice of one is a part of it, so two of them can be shown to be
+   apart. An index of any other collection is a call of its [at], which
+   lends, and may go on after what it lends is used. *)
+let storage (type_ : T.ty) =
+  match type_ with
+  | T.Named
+      {
+        path =
+          Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" | "Slice" };
+        _;
+      } ->
+      true
+  | _ -> T.is_builtin Array type_
+
 (* The place an expression names, from a definition's resolved and checked
    forms alone. *)
 let rec place_in (resolved : Resolve.resolved) (checked : C.t) (value : expression) : place option =
@@ -116,11 +131,12 @@ let rec place_in (resolved : Resolve.resolved) (checked : C.t) (value : expressi
             (place_of () base)
       | _ -> None)
   | Bracket (base, [ Item key ])
-    when resolved.brackets.(value.id) = Some Index
+    when (resolved.brackets.(value.id) = Some Index
          ||
          match checked.calls.(value.id) with
          | Some { callee = Trait_method { name = "at"; _ }; _ } -> true
-         | _ -> false ->
+         | _ -> false)
+         && match checked.types.(base.id) with Some type_ -> storage type_ | None -> false ->
       (* A slice, as [items[a..b]], is some elements, as an index is one. *)
       Option.map
         (fun place -> { place with steps = place.steps @ [ Element key.id ] })
@@ -129,6 +145,39 @@ let rec place_in (resolved : Resolve.resolved) (checked : C.t) (value : expressi
   | _ -> None
 
 let place_of context value = place_in context.resolved context.checked value
+
+(* What lends an expression, when it is a part that is lent: the lending
+   call, and how the part is lent. A call of a lending method gives a part,
+   and so does an index of a collection that is not storage. A field or an
+   element of a lent part is lent with it. *)
+let rec lending context (value : expression) : (expression * T.mode) option =
+  match value.kind with
+  | Call _ -> Option.map (fun mode -> (value, mode)) context.checked.lends.(value.id)
+  | Bracket (base, _) when context.resolved.brackets.(value.id) <> Some Type_arguments -> (
+      match (place_of context value, context.checked.calls.(value.id)) with
+      | Some _, _ -> None
+      | None, Some { callee = Trait_method { name = "at"; receiver; _ }; _ }
+        when not (storage (type_of context base)) ->
+          Some (value, if receiver = Mut then T.Mut else T.Read)
+      | None, _ -> lending context base)
+  | Member (base, _) | Parenthesized base | Mode (_, base) -> lending context base
+  | _ -> None
+
+(* The place a lending call lends from, and how: its receiver, when that is
+   a place. *)
+let lender context (call : expression) =
+  match context.checked.calls.(call.id) with
+  | Some { arguments; _ } ->
+      Option.bind
+        (List.find_opt (fun (argument : C.argument) -> argument.parameter = 0) arguments)
+        (fun (argument : C.argument) ->
+          Option.bind (Hashtbl.find_opt context.nodes argument.expression)
+            (fun (receiver : expression) ->
+              let receiver = match receiver.kind with Mode (_, inner) -> inner | _ -> receiver in
+              Option.map
+                (fun place -> (place, if argument.mode = T.Mut then T.Mut else T.Read))
+                (place_of context receiver)))
+  | None -> None
 
 let kind_of context = function
   | Local id -> Option.value ~default:Owned (Hashtbl.find_opt context.kinds id)
