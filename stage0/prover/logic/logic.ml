@@ -1,5 +1,4 @@
-(* The solver's logic, and the canonical text of a query. See PROVER.md,
-   "The canonical form". *)
+(* The solver's logic, and the canonical text of a query. *)
 
 type sort = Int | Bool | Float of int * int | Uninterpreted of string
 

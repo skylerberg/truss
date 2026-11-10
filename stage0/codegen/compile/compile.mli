@@ -132,8 +132,7 @@ val run_program :
    holds. The prover asks it only of clauses that read the template's
    literals alone. With [results], each check's results are kept under the
    key of the code that ran, as test results are. A check that runs past
-   [time_limit], in milliseconds, is stopped. See CODEGEN.md, "Code run
-   while compiling". *)
+   [time_limit], in milliseconds, is stopped. *)
 type template_check = Ran of (int * bool) list | Ran_too_long
 
 val check_template :
