@@ -234,7 +234,12 @@ and `reads` clauses):
   postconditions are about.
 - **Bitwise operations get a second encoding.** On integers, `&`, `|`, `^`,
   `~`, and shifts are functions the solver knows only by a few facts, such
-  as `0 <= a & b <= a` for unsigned values. That proves the bounds most bit
+  as `0 <= a & b <= a` for unsigned values. An unsigned shift multiplies
+  or divides by a power of two: `x << k` is `x * power(2, k)` where that
+  fits, and `x >> k` is `x / power(2, k)`. `leading_zeros`,
+  `trailing_zeros`, and `count_ones` are at most the width, and a nonzero
+  unsigned `x` lies from `power(2, width - 1 - leading_zeros(x))` to before
+  `power(2, width - leading_zeros(x))`. That proves the bounds most bit
   twiddling needs. When a query that mentions a bitwise operation is not
   proven that way, the prover tries it once more with each such operation
   defined exactly: as the operation on its operands' bits, of their type's
