@@ -342,7 +342,10 @@ reach a `todo` or an `echo`, in code or in a proof, and lists each one, a
 ```text
 render.truss:12:14: `todo` can be reached from `main`, so the program cannot be built.
     weather::main::main -> weather::render::render
-``` The program is written to `--output`, or else
+``` Since every proof the program reaches is done, the program has none
+of the run-time checks of a test build, as CODEGEN.md's "Test builds check
+instead of waiting for proofs" says; `run --release` keeps them, since it
+does not wait for proofs. The program is written to `--output`, or else
 to a file named after the package in the current directory, as `go build`
 does. Truss keeps every intermediate file in its cache, so there is no build
 directory in the package, and nothing to add to `.gitignore` but the
@@ -806,7 +809,3 @@ It is left out of each command's help.
 - **Renaming a field or a variant** with `truss rename`.
 - **Listing the proofs to check again** in `truss impact`, as it lists the
   tests whose code changed.
-- **`--check-proofs`,** a flag for working on the compiler, on `test`,
-  `run`, and `build`. It is to emit a run-time check for every proven
-  obligation. Stage0's builds keep every run-time check whether or not its
-  proofs are done, so they all check what the prover proves.

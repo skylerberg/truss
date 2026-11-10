@@ -1663,16 +1663,12 @@ iterations cost different amounts, as when each one handles a row of its own
 length:
 
 ```truss
-fn total_cells(rows: Sequence[List[Int64]]) -> Integer {
-  todo
-}
-
 fn sum_all(rows: List[List[Int64]]) -> Int64
-  cost time O(rows.length() + total_cells(rows.model()))
+  cost time O(rows.length() + rows.model().sum(fn(cells) { cells.length() }))
 {
   var total = 0
   for row in rows
-    cost time O(yielded.length() + total_cells(yielded))
+    cost time O(yielded.length() + yielded.sum(fn(cells) { cells.length() }))
   {
     for cell in row {
       total = total.saturating_add(cell)
@@ -1686,6 +1682,9 @@ fn sum_all(rows: List[List[Int64]]) -> Int64
   repeat, but is never `amortized` or `finite`.
 - Its bound can use the variables in scope at the loop and, in a `for`
   loop, `yielded`.
+- `sum` adds up a measure of each element of a `Sequence`, here each row's
+  length. The measure is a lambda or a named function that ends and uses no
+  capabilities, and two lambdas with the same body are the same measure.
 
 ### Operators
 
@@ -2243,7 +2242,9 @@ so `text.graphemes()` gives those as `StringSlice`s.
 ```truss
 trait Monoid: Equal {
   fn empty() -> Self
+    cost time finite
   fn combine(self, other: Self) -> Self
+    cost time finite
 
   law left_identity(value: Self) { Self.empty().combine(value) == value }
   law associative(first: Self, second: Self, third: Self) {
@@ -2259,6 +2260,11 @@ impl Monoid for Int64 {
 
 A `law` is a property every implementation must satisfy. A trait bound on a
 generic parameter is written `[Element: Ordered]`.
+
+A law is about what methods return, so the prover can use it only where
+those methods end and give the same result for the same arguments: methods
+with a `time` clause and no capabilities, as `cost time finite` gives here.
+An `impl`'s method keeps its trait's `time` clause.
 
 A law can have `requires` clauses, as a theorem can. They are its premises:
 the law must hold for every set of values that meets them.
@@ -2397,13 +2403,18 @@ A trait can leave a type for each implementation to choose:
 trait Index {
   type Key
   type Output
+  fn contains_key(self, key: Self.Key) -> Bool
+    cost time finite
   fn at(self, key: Self.Key) lends Self.Output
+    requires self.contains_key(key)
   fn at(mut self, key: Self.Key) lends mut Self.Output
+    requires self.contains_key(key)
 }
 
 impl Index for Grid {
   type Key = Position
   type Output = Cell
+  fn contains_key(self, key: Position) -> Bool { todo }
   fn at(self, key: Position) lends Cell { todo }
   fn at(mut self, key: Position) lends mut Cell { todo }
 }
@@ -2419,6 +2430,10 @@ fn first[Items: Iterable](items: Items) -> Option[Items.Element]
 - A trait's own type parameters are the types an implementation can be
   chosen by, as in `From[Source]`. Its associated types are the types each
   implementation decides, as in `Index`'s `Output`.
+- A trait states its methods' preconditions through its own methods, as
+  `Index` does with `contains_key`, so generic code can show them, and an
+  implementation says what they mean for its type: a `List`'s keys are the
+  indexes below its length.
 
 ### Deriving
 

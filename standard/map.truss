@@ -1,4 +1,6 @@
 public opaque type Map[Key: Hash + Ordered, Value](entries: List[Entry[Key, Value]])
+  invariant forall i in 0..entries.length() => forall j in 0..entries.length() =>
+    i < j ==> entries.model()[i].key < entries.model()[j].key
   derives Copyable
 
 public type Entry[Key, Value](key: Key, value: Value)
@@ -9,8 +11,14 @@ impl Model for Map[Key: Hash + Ordered, Value] {
   fn model(self) -> FiniteMap[Key, Value]
     cost time finite
   {
-    todo
+    self.entries.model().to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value })
   }
+}
+
+public fn contains_equal_key[Key: Equal, Value](map: FiniteMap[Key, Value], key: Key) -> Bool
+  cost time finite
+{
+  exists other: Key => map.contains_key(other) && other == key
 }
 
 public fn Map[Key: Hash + Ordered, Value].length(self) -> USize
@@ -21,19 +29,94 @@ public fn Map[Key: Hash + Ordered, Value].length(self) -> USize
 }
 
 public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
-  ensures result == self.model().contains_key(key)
+  ensures result == contains_equal_key(self.model(), key: key)
 {
   let position = self.entries.partition_point(fn(entry) { entry.key < key })
   position < self.entries.length() && self.entries[position].key == key
 }
 
 public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: own Value)
-  ensures identical(self.model(), old(self.model()).insert(key, value))
+  ensures exists other: Key =>
+    self.model().contains_key(other) && other == key && identical(self.model().get(other), value)
+  ensures forall other: Key =>
+    !(other == key) ==> self.model().contains_key(other) == old(self.model()).contains_key(other)
+  ensures forall other: Key =>
+    !(other == key) && old(self.model()).contains_key(other) ==>
+      identical(self.model().get(other), old(self.model()).get(other))
 {
   let position = self.entries.partition_point(fn(entry) { entry.key < key })
+  proof {
+    assert identical(
+      self.model(),
+      self.entries.model().to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value }),
+    )
+  }
   if position < self.entries.length() && self.entries[position].key == key {
     self.entries[position].value = own value
+    proof {
+      assert identical(
+        self.model(),
+        self.entries.model().to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value }),
+      )
+      assert forall i in 0..self.entries.length() =>
+        identical(self.entries.model()[i].key, old(self.entries.model())[i].key)
+      assert forall i in 0..self.entries.length() =>
+        i == position || identical(self.entries.model()[i], old(self.entries.model())[i])
+      assert forall i in 0..old(self.entries.model()).length() =>
+        self.entries.model().to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value })
+          .contains_key(old(self.entries.model())[i].key)
+      assert forall j in 0..self.entries.model().length() =>
+        old(self.entries.model()).to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value })
+          .contains_key(self.entries.model()[j].key)
+      assert forall i in 0..self.entries.model().length() =>
+        forall j in 0..self.entries.model().length() =>
+          i == j || !identical(self.entries.model()[i].key, self.entries.model()[j].key)
+      assert forall i in 0..old(self.entries.model()).length() =>
+        forall j in 0..old(self.entries.model()).length() =>
+          i == j || !identical(old(self.entries.model())[i].key, old(self.entries.model())[j].key)
+      assert forall other: Key =>
+        self.entries.model().to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value })
+          .contains_key(other)
+          == old(self.entries.model()).to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value })
+            .contains_key(other)
+      assert forall other: Key =>
+        !(other == key) && old(self.model()).contains_key(other) ==>
+          identical(self.model().get(other), old(self.model()).get(other))
+    }
   } else {
+    proof {
+      assert forall k in position..self.entries.length() => key < self.entries.model()[k].key
+    }
     mut self.entries.insert_at(position, item: Entry(key: own key, value: own value))
+    proof {
+      assert identical(
+        self.model(),
+        self.entries.model().to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value }),
+      )
+      assert forall j: Integer =>
+        position < j && j < self.entries.model().length() ==>
+          identical(self.entries.model()[j], old(self.entries.model())[j - 1])
+      assert forall i in 0..old(self.entries.model()).length() =>
+        self.entries.model().to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value })
+          .contains_key(old(self.entries.model())[i].key)
+      assert forall i in 0..old(self.entries.model()).length() =>
+        old(self.entries.model()).to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value })
+          .contains_key(old(self.entries.model())[i].key)
+      assert forall j in 0..self.entries.model().length() =>
+        j == position
+          || old(self.entries.model()).to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value })
+            .contains_key(self.entries.model()[j].key)
+      assert forall i in 0..self.entries.model().length() =>
+        forall j in 0..self.entries.model().length() =>
+          i == j || !identical(self.entries.model()[i].key, self.entries.model()[j].key)
+      assert forall i in 0..old(self.entries.model()).length() =>
+        forall j in 0..old(self.entries.model()).length() =>
+          i == j || !identical(old(self.entries.model())[i].key, old(self.entries.model())[j].key)
+      assert forall other: Key =>
+        !(other == key) ==> self.model().contains_key(other) == old(self.model()).contains_key(other)
+      assert forall other: Key =>
+        !(other == key) && old(self.model()).contains_key(other) ==>
+          identical(self.model().get(other), old(self.model()).get(other))
+    }
   }
 }

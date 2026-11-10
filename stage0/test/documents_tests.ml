@@ -1,11 +1,19 @@
-(* The documents' examples, type-checked. Every ```truss block that parses as
-   a file is checked through every stage. Most blocks are excerpts: they use
-   names defined elsewhere, show a definition of the standard library's, or
-   redefine a prelude name to show how it is written. Those diagnostics say
-   the block is an excerpt, and such a block is skipped. Every other block is
-   a whole program and must check cleanly. *)
+(* The documents' examples, type-checked and proven. Every ```truss block
+   that parses as a file is checked through every stage. Most blocks are
+   excerpts: they use names defined elsewhere, show a definition of the
+   standard library's, or redefine a prelude name to show how it is written.
+   Those diagnostics say the block is an excerpt, and such a block is
+   skipped. Every other block is a whole program and must check cleanly and
+   prove. *)
 
 open Harness
+
+let solver =
+  match Solver.find () with
+  | Ok solver -> solver
+  | Error message ->
+      prerr_endline message;
+      exit 1
 
 let markdown_files =
   Sys.readdir "../.." |> Array.to_list
@@ -32,7 +40,8 @@ let () =
           let file = Query.demand database Workspace.file module_ in
           if file.diagnostics = [] then
             test
-              (Printf.sprintf "%s block %d type-checks unless it is an excerpt" name (index + 1))
+              (Printf.sprintf "%s block %d checks and proves unless it is an excerpt" name
+                 (index + 1))
               (fun () ->
                 let diagnostics = Type_checker.diagnostics database module_ in
                 if
@@ -42,7 +51,12 @@ let () =
                        (Support.codes diagnostics))
                 then
                   match diagnostics with
-                  | [] -> ()
+                  | [] -> (
+                      match Prover.diagnostics database solver module_ with
+                      | [] -> ()
+                      | unproven ->
+                          fail "%s"
+                            (String.concat "" (List.map (Diagnostic.render file.source) unproven)))
                   | diagnostics ->
                       fail "%s"
                         (String.concat "" (List.map (Diagnostic.render file.source) diagnostics))))

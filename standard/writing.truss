@@ -10,8 +10,12 @@ internal fn byte(output: mut intrinsic::Storage[UInt8], value: UInt8) {
 
 internal fn append(output: mut intrinsic::Storage[UInt8], bytes: intrinsic::View[UInt8]) {
   let count = intrinsic::view_length(bytes)
+  let start = intrinsic::storage_length(output)
   growth::reserve(mut output, additional: count)
-  for index in 0..count {
+  for index in 0..count
+    invariant intrinsic::storage_length(output) == start + yielded.length()
+    invariant intrinsic::storage_capacity(output) >= start + count
+  {
     intrinsic::storage_push(mut output, value: intrinsic::view_at(bytes, index: index))
   }
 }
@@ -83,7 +87,9 @@ fn shortest_that_reads_back(output: mut intrinsic::Storage[UInt8], value: Float6
   } else {
     var digits: Int32 = 1
     var text = with_digits(value, digits: digits)
-    while digits < 17 && !reads_back(intrinsic::storage_view(text), value: value, as_float32: as_float32) {
+    while digits < 17 && !reads_back(intrinsic::storage_view(text), value: value, as_float32: as_float32)
+      invariant intrinsic::storage_length(text) >= 1
+    {
       digits += 1
       text = with_digits(value, digits: digits)
     }
@@ -102,7 +108,9 @@ fn shortest_that_reads_back(output: mut intrinsic::Storage[UInt8], value: Float6
   }
 }
 
-fn with_digits(value: Float64, digits: Int32) -> intrinsic::Storage[UInt8] {
+fn with_digits(value: Float64, digits: Int32) -> intrinsic::Storage[UInt8]
+  ensures intrinsic::storage_length(result) >= 1
+{
   var text: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(40)
   let length = intrinsic::libc_snprintf(
     mut text,
@@ -111,7 +119,7 @@ fn with_digits(value: Float64, digits: Int32) -> intrinsic::Storage[UInt8] {
     precision: digits,
     value: value,
   )
-  let written: USize = intrinsic::convert(length)
+  let written: USize = if length < 0 { 0 } else if length > 39 { 39 } else { intrinsic::convert(length) }
   intrinsic::storage_lengthen(mut text, by: written + 1)
   text
 }

@@ -729,7 +729,8 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
   | T.Integer, _, Some expression when argument && env.specification && T.is_integer_type wanted ->
       state.obligations <- Integer_fits { expression; type_ = wanted } :: state.obligations;
       Some From_integer
-  | _, T.Integer, _ when argument && env.specification && T.is_integer_type given -> Some To_integer
+  (* A built-in integer is an [Integer] wherever a specification gives one. *)
+  | _, T.Integer, _ when env.specification && T.is_integer_type given -> Some To_integer
   | T.Function given_function, T.Function wanted_function, _
     when not (T.same_clauses given_function wanted_function) ->
       let unlisted =

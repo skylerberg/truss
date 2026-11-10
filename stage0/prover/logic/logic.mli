@@ -70,9 +70,12 @@ val replace : from:term -> into:term -> term -> term
 
 val prune : query -> query
 (** The query with only the facts its goal can depend on: starting from the goal's declared symbols,
-    each fact that mentions one of them is kept, with its symbols, until no more are added. Dropping
-    a fact is always sound, and a fact about symbols the goal never reaches cannot help to prove it,
-    so a change to such a fact leaves the query's text, and its cached result, as they were. *)
+    each fact that mentions one of them is kept, with its symbols, until no more are added. A
+    quantified fact is kept only once every symbol of one of its triggers is, an application of a
+    declared function that names every bound variable, since only a term of such a shape can use it.
+    Dropping a fact is always sound, and a fact about symbols the goal never reaches cannot help to
+    prove it, so a change to such a fact leaves the query's text, and its cached result, as they
+    were. *)
 
 (** {1 Canonical text} *)
 

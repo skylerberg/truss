@@ -71,3 +71,8 @@ val template_check : context -> Instance.key -> from_template:Path.t -> texts:st
 (* The positions, among a tag's [from_template]'s clauses, of those a
    template check works out, in order. *)
 val template_checked : context -> Path.t -> int list
+
+(* Code run while compiling, for a call whose arguments are known: the
+   function, which is not generic, called with each argument a constant, an
+   integer or a [Bool] as 0 or 1, and its result written out. *)
+val call_evaluation : context -> Instance.key -> function_:Path.t -> arguments:Z.t list -> Lir.t

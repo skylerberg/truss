@@ -358,6 +358,7 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                (Storage.view_of_elements (element ()))
                ~elements:(Address { place = Storage.view_at view (value 1); writable = false })
                ~length:(Copy (at count)))
+      | Storage_model | View_model -> bug "a model, which exists only in specifications"
       | Crash ->
           (* The message is a [StringSlice], a record of one field: its view of
          bytes. *)
