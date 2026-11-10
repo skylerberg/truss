@@ -374,3 +374,112 @@ test "from_utf8 takes valid bytes and says where invalid ones start" {
   let too_large: List[UInt8] = [244, 144, 128, 128]
   assert String.from_utf8(own too_large) is Err(error) && error.valid_up_to == 0
 }
+
+test "replace swaps every occurrence that does not overlap the one before" {
+  assert "a-b-c".replace("-", replacement: "+") == "a+b+c"
+  assert "a-b-c".replace("-", replacement: "") == "abc"
+  assert "a-b-c".replace("-", replacement: " and ") == "a and b and c"
+  assert "aaaa".replace("aa", replacement: "b") == "bb"
+  assert "aaa".replace("aa", replacement: "b") == "ba"
+  assert "abc".replace("x", replacement: "y") == "abc"
+  assert "abc".replace("abcd", replacement: "y") == "abc"
+  assert "".replace("x", replacement: "y") == ""
+  assert "abc".replace("abc", replacement: "") == ""
+  assert "h\u{e9}llo h\u{e9}llo".replace("\u{e9}", replacement: "e") == "hello hello"
+  assert "xyxyx".replace("xyx", replacement: "-") == "-yx"
+}
+
+test "replace_first swaps only the first occurrence" {
+  assert "a-b-c".replace_first("-", replacement: "+") == "a+b-c"
+  assert "abc".replace_first("x", replacement: "y") == "abc"
+  assert "abc".replace_first("c", replacement: "") == "ab"
+  assert "abc".replace_first("a", replacement: "xyz") == "xyzbc"
+  assert "ab".replace_first("abc", replacement: "y") == "ab"
+}
+
+test "padding fills up to a width counted in characters" {
+  assert "7".pad_start(3, fill: Character"0") == "007"
+  assert "7".pad_end(3) == "7  "
+  assert "abc".pad_start(3) == "abc"
+  assert "abcd".pad_start(3) == "abcd"
+  assert "".pad_end(2, fill: Character"-") == "--"
+  assert "h\u{e9}".pad_start(4, fill: Character"\u{2022}") == "\u{2022}\u{2022}h\u{e9}"
+  assert "x".pad_end(3, fill: Character"\u{1f600}").length() == 9
+}
+
+test "pop_character takes the last character whatever its length" {
+  var text: String = "a\u{e9}\u{20ac}\u{1f600}"
+  assert mut text.pop_character() == Some(Character"\u{1f600}")
+  assert mut text.pop_character() == Some(Character"\u{20ac}")
+  assert mut text.pop_character() == Some(Character"\u{e9}")
+  assert text == "a"
+  assert mut text.pop_character() == Some(Character"a")
+  assert mut text.pop_character() is None
+  assert text.is_empty()
+}
+
+test "insert and remove_range change the middle of a string" {
+  var text: String = "hello world"
+  mut text.insert(5, text: ",")
+  assert text == "hello, world"
+  mut text.insert(0, text: ">> ")
+  assert text == ">> hello, world"
+  mut text.insert(text.length(), text: "!")
+  assert text == ">> hello, world!"
+  mut text.insert(3, text: "")
+  assert text == ">> hello, world!"
+  mut text.remove_range(0, to: 3)
+  assert text == "hello, world!"
+  mut text.remove_range(5, to: 6)
+  assert text == "hello world!"
+  mut text.remove_range(4, to: 4)
+  assert text == "hello world!"
+  mut text.remove_range(5, to: text.length())
+  assert text == "hello"
+  var accented: String = "caf\u{e9}"
+  mut accented.insert(3, text: "f")
+  assert accented == "caff\u{e9}"
+  mut accented.remove_range(4, to: 6)
+  assert accented == "caff"
+}
+
+test "bytes that are not text become the replacement character, once for each broken sequence" {
+  let valid: List[UInt8] = [104, 195, 169]
+  assert String.from_utf8_lossy(valid) == "h\u{e9}"
+  let none: List[UInt8] = []
+  assert String.from_utf8_lossy(none) == ""
+  let stray: List[UInt8] = [97, 128, 98]
+  assert String.from_utf8_lossy(stray) == "a\u{fffd}b"
+  let cut_short: List[UInt8] = [104, 226, 130]
+  assert String.from_utf8_lossy(cut_short) == "h\u{fffd}"
+  let cut_in_middle: List[UInt8] = [226, 130, 97]
+  assert String.from_utf8_lossy(cut_in_middle) == "\u{fffd}a"
+  let overlong: List[UInt8] = [192, 128]
+  assert String.from_utf8_lossy(overlong) == "\u{fffd}\u{fffd}"
+  let surrogate: List[UInt8] = [237, 160, 128]
+  assert String.from_utf8_lossy(surrogate) == "\u{fffd}\u{fffd}\u{fffd}"
+  let four: List[UInt8] = [240, 159, 152, 97]
+  assert String.from_utf8_lossy(four) == "\u{fffd}a"
+  let whole: List[UInt8] = [240, 159, 152, 128, 255]
+  assert String.from_utf8_lossy(whole) == "\u{1f600}\u{fffd}"
+}
+
+test "UTF-16 units become a string, and a lone surrogate says where it is" {
+  let plain: List[UInt16] = [104, 233, 8364]
+  assert String.from_utf16(plain) is Ok(text) && text == "h\u{e9}\u{20ac}"
+  let pair: List[UInt16] = [55357, 56832, 33]
+  assert String.from_utf16(pair) is Ok(text) && text == "\u{1f600}!"
+  let none: List[UInt16] = []
+  assert String.from_utf16(none) is Ok(text) && text.is_empty()
+  let lone_high: List[UInt16] = [97, 55357]
+  assert String.from_utf16(lone_high) is Err(error) && error.valid_up_to == 1
+  let lone_low: List[UInt16] = [56832, 97]
+  assert String.from_utf16(lone_low) is Err(error) && error.valid_up_to == 0
+  let wrong_order: List[UInt16] = [97, 98, 56832, 55357]
+  assert String.from_utf16(wrong_order) is Err(error) && error.valid_up_to == 2
+  assert String.from_utf16(wrong_order) is Err(error) && "${error}" == "the units are not UTF-16 at index 2"
+  let round_trip = "a\u{1f600}\u{e9}"
+  assert String.from_utf16(round_trip.to_utf16()) is Ok(text) && text == round_trip
+  let stray: List[UInt8] = [97, 128, 98]
+  assert String.from_utf8(own stray) is Err(error) && "${error}" == "the bytes are not UTF-8 at offset 1"
+}
