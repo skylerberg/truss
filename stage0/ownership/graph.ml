@@ -23,6 +23,14 @@ module T = Types
 type lender = To_loop | To_statement | To_operand
 type loan = { lent : Place.t; mode : T.mode; lender : lender }
 
+(* A place that a value views, and how. *)
+type view = {
+  place : Place.t;
+  taken : bool;
+      (** The value was copied or moved out of the place, so it views what the place's root views
+          and not the place. If false, the value refers to the place itself. *)
+}
+
 (* A place that a call borrows, with the mode it is borrowed with. *)
 type passed = { place : Place.t; mode : T.mode; at : Core.origin; position : int }
 
@@ -45,18 +53,18 @@ type action =
           the arm, and a lambda's parameters at the end of its body. *)
   | Suspend  (** A [yield]. A loop may stop a yielding method here. *)
   | Exit  (** The function returns. *)
-  | Hold of { holders : Core.local list; views : Place.t list }
+  | Hold of { holders : Core.local list; views : view list }
       (** A [let] binds names to a value that views these places, and whatever the roots of these
           places view. *)
-  | Store of { place : Place.t; views : Place.t list }
+  | Store of { place : Place.t; views : view list }
       (** A value that views these places is put in the place: by an assignment, or by a call that
           takes the place [mut] and may keep a view in it. *)
-  | Return_view of Place.t list  (** The function returns a value that views these places. *)
+  | Return_view of view list  (** The function returns a value that views these places. *)
   | Views_temporary of Place.t option
       (** A value that the statement drops is viewed by what the statement binds, or by the given
           place. The origin is the dropped value. *)
   | Keeps_lent_part of T.ty  (** A [let] binds a part that a call lends only for the statement. *)
-  | Gives_function of Place.t list
+  | Gives_function of view list
       (** A function value that views these places is passed to an [own] parameter. The callee may
           keep the function after the caller returns. *)
   | Write_through of Place.t
@@ -64,7 +72,7 @@ type action =
           everything that the slice views. *)
   | Arguments of {
       places : passed list;
-      views : (int * Place.t list * Core.origin) list;
+      views : (int * view list * Core.origin) list;
       yielded : bool;
     }
       (** The places that one call borrows, in argument order. [views] lists the arguments of a view
@@ -150,19 +158,24 @@ let lends_to_call builder (mode : T.mode) type_ =
   (mode <> Own && not (builder.plain type_)) || builder.is_view type_
 
 (* The places that a value may view, before the analysis adds what the
-   roots of those places are known to view. A place used as a value views
-   itself. A slice views its base. A lambda views its captures. The result
-   of a call views the arguments that the call may keep a view of. *)
-let rec viewed builder (value : Core.expression) : Place.t list =
+   roots of those places are known to view. A value read out of a place is
+   a copy or a moved value: it views what the place's root views. A slice
+   refers to the elements of its base, unless the base is itself a slice. A
+   lambda refers to what it captures and to its environment. The result of
+   a call views the arguments that the call may keep a view of. *)
+let rec viewed builder (value : Core.expression) : view list =
   match value.kind with
-  | Use found -> viewed_place builder found
+  | Use found -> taken_from builder found
   | Slice { base; _ } -> (
-      match Place.of_slice value with Some place -> [ place ] | None -> viewed_place builder base)
+      match Place.of_slice value with
+      | Some place -> [ { place; taken = Place.is_slice_type (Core_walk.place_type base) } ]
+      | None -> viewed_place builder base)
   | Lambda { captures = []; _ } -> []
   | Lambda { captures; _ } ->
-      { root = Environment; steps = [] }
+      { place = { root = Environment; steps = [] }; taken = false }
       :: List.map
-           (fun (capture : Core.capture) : Place.t -> { root = Local capture.local; steps = [] })
+           (fun (capture : Core.capture) ->
+             { place = { root = Local capture.local; steps = [] }; taken = false })
            captures
   | Call call -> List.concat_map (viewed_operand builder) (lent_arguments builder call)
   | Construct { fields; _ } ->
@@ -173,12 +186,26 @@ let rec viewed builder (value : Core.expression) : Place.t list =
           | Some (Place found) -> viewed_place builder found
           | _ -> [])
         fields
-  | Echo inner -> viewed builder inner
+  | Collection_literal { elements; _ } ->
+      List.concat_map
+        (fun (element : Core.expression) ->
+          if builder.is_view element.type_ then viewed builder element else [])
+        elements
+  | Echo inner | To_any { value = inner; _ } | Convert { value = inner; _ } -> viewed builder inner
   | _ -> []
 
-and viewed_place builder (found : Core.place) : Place.t list =
+(* What a value that is copied or moved out of a place views. *)
+and taken_from builder (found : Core.place) : view list =
   match (Place.of_core found, found) with
-  | Some place, _ -> [ place ]
+  | Some place, _ -> [ { place; taken = true } ]
+  | None, Lent call -> viewed builder call
+  | None, _ -> []
+
+(* What a borrow of a place views: the place itself. A place of a [Plain]
+   type is copied instead. *)
+and viewed_place builder (found : Core.place) : view list =
+  match (Place.of_core found, found) with
+  | Some place, _ -> [ { place; taken = builder.plain (Core_walk.place_type found) } ]
   | None, Lent call -> viewed builder call
   | None, _ -> []
 
@@ -198,7 +225,8 @@ and lent_arguments builder (call : Core.call) : Core.operand list =
    view. A string literal is in static memory, so it is never dropped. *)
 let rec viewed_temporaries builder (value : Core.expression) : Core.expression list =
   match value.kind with
-  | Echo inner -> viewed_temporaries builder inner
+  | Echo inner | To_any { value = inner; _ } | Convert { value = inner; _ } ->
+      viewed_temporaries builder inner
   | Slice { base; _ } -> owned_temporary_place builder base
   | Call call ->
       List.concat_map
@@ -243,7 +271,8 @@ and owned_temporary_place builder (found : Core.place) : Core.expression list =
 let pending builder (found : Core.operand) : Place.t list =
   match found with
   | Place found -> Option.to_list (Place.of_core found)
-  | Value value when builder.is_view value.type_ -> viewed builder value
+  | Value value when builder.is_view value.type_ ->
+      List.map (fun (view : view) -> view.place) (viewed builder value)
   | Value _ -> []
 
 (* The graph *)
@@ -343,7 +372,7 @@ let rec expression builder frontier (node : Core.expression) : int list =
       expression builder frontier inner
   | Matches { value; pattern } ->
       let frontier = operand builder frontier Read value in
-      emit builder frontier (Bind (pattern_locals pattern)) node.origin
+      binds builder frontier (pattern_locals pattern) [ value ] node.origin
   | Cursor_next cursor -> operand builder frontier Mut (Place cursor)
   | If { condition; then_; else_ } ->
       let after = expression builder frontier condition in
@@ -351,7 +380,7 @@ let rec expression builder frontier (node : Core.expression) : int list =
       let else_end = match else_ with Some else_ -> block builder after else_ | None -> after in
       then_end @ else_end
   | Match { scrutinees; arms; _ } ->
-      arms_ builder (scrutinized frontier scrutinees) arms ~body:(block builder)
+      arms_ builder (scrutinized frontier scrutinees) scrutinees arms ~body:(block builder)
   | Block body -> block builder frontier body
   | Provide { implementations; body } ->
       let frontier =
@@ -382,13 +411,32 @@ and construct builder frontier (mode : T.mode) fields =
     ~pending:(fun field ->
       pending builder field @ List.filter_map Place.of_core (Core_walk.lent_places field))
 
+(* A pattern binds names to parts of what it matches. The names of a
+   pattern on a place refer to the place, so they view it. The names of a
+   pattern on a value view what the value views. *)
+and binds builder frontier (bound : Core.local list) (scrutinees : Core.operand list) origin =
+  let frontier = emit builder frontier (Bind bound) origin in
+  let views =
+    List.concat_map
+      (fun (scrutinee : Core.operand) ->
+        match scrutinee with
+        | Place found -> (
+            match Place.of_core found with
+            | Some place -> [ { place; taken = false } ]
+            | None -> viewed_place builder found)
+        | Value value -> if builder.is_view value.type_ then viewed builder value else [])
+      scrutinees
+  in
+  if bound = [] || views = [] then frontier
+  else emit builder frontier (Hold { holders = bound; views }) origin
+
 (* The arms of a [match], after its scrutinees. [body] builds the body of
    an arm. *)
-and arms_ builder frontier (arms : Core.arm list) ~body =
+and arms_ builder frontier scrutinees (arms : Core.arm list) ~body =
   List.concat_map
     (fun (arm : Core.arm) ->
       let bound = List.concat_map pattern_locals arm.patterns in
-      let frontier = emit builder frontier (Bind bound) arm.origin in
+      let frontier = binds builder frontier bound scrutinees arm.origin in
       let frontier =
         match arm.guard with Some guard -> expression builder frontier guard | None -> frontier
       in
@@ -577,7 +625,10 @@ and place_parts builder frontier (found : Core.place) =
       match (Place.storage_index index, index.kind) with
       | Some collection, Call { arguments = _ :: keys; _ } ->
           let frontier = place_parts builder frontier collection in
-          let added = reserve builder (viewed_place builder collection) in
+          let added =
+            reserve builder
+              (List.map (fun (view : view) -> view.place) (viewed_place builder collection))
+          in
           let frontier = arguments builder frontier keys in
           release builder added;
           frontier
@@ -618,7 +669,7 @@ and returned builder frontier (value : Core.expression) =
           ~evaluate:(fun frontier scrutinee -> operand builder frontier Read scrutinee)
           ~pending:(pending builder)
       in
-      arms_ builder after arms ~body:(returned_block builder)
+      arms_ builder after scrutinees arms ~body:(returned_block builder)
   | _ ->
       let frontier =
         match value.kind with
