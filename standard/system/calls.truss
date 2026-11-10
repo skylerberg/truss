@@ -32,13 +32,17 @@ internal fn read_onto_end(
   buffer: mut intrinsic::Storage[UInt8],
   count: USize,
 ) -> Result[USize, Int32]
-  ensures intrinsic::storage_length(buffer) >= old(intrinsic::storage_length(buffer))
+  ensures !(result is Ok(got) && (got > count
+    || intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)) + got))
+  ensures !(result is Err(_) && intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)))
+  ensures forall index in 0..old(intrinsic::storage_length(buffer)) =>
+    intrinsic::storage_model(buffer)[index] == old(intrinsic::storage_model(buffer))[index]
 {
   growth::reserve(mut buffer, additional: count)
   let length = intrinsic::storage_length(buffer)
   var got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)
   while got < 0 && interrupted_by_signal()
-    invariant intrinsic::storage_length(buffer) == length
+    invariant identical(intrinsic::storage_model(buffer), old(intrinsic::storage_model(buffer)))
     invariant intrinsic::storage_capacity(buffer) >= length + count
     invariant got <= count
   {
@@ -59,13 +63,17 @@ internal fn read_at_onto_end(
   count: USize,
   offset: Int64,
 ) -> Result[USize, Int32]
-  ensures intrinsic::storage_length(buffer) >= old(intrinsic::storage_length(buffer))
+  ensures !(result is Ok(got) && (got > count
+    || intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)) + got))
+  ensures !(result is Err(_) && intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)))
+  ensures forall index in 0..old(intrinsic::storage_length(buffer)) =>
+    intrinsic::storage_model(buffer)[index] == old(intrinsic::storage_model(buffer))[index]
 {
   growth::reserve(mut buffer, additional: count)
   let length = intrinsic::storage_length(buffer)
   var got = intrinsic::libc_pread(descriptor, buffer: mut buffer, count: count, offset: offset)
   while got < 0 && interrupted_by_signal()
-    invariant intrinsic::storage_length(buffer) == length
+    invariant identical(intrinsic::storage_model(buffer), old(intrinsic::storage_model(buffer)))
     invariant intrinsic::storage_capacity(buffer) >= length + count
     invariant got <= count
   {
