@@ -559,7 +559,10 @@ places, may own a value and which may not. Then each `drop(place)` becomes:
   `config.name` is assigned again, `config` is whole again, as DESIGN.md
   describes, and is dropped whole. When the fields of an `indirect`
   variant are moved out, what is left of them is dropped and the variant's
-  block is freed.
+  block is freed. A sum type's value is asked which variant it holds
+  first: a `match` that owns its value moves a payload out in one arm, and
+  where the arms meet the value may hold another variant, which is dropped
+  whole.
 - **a drop behind a flag,** where the place owns a value on some paths and
   not others, as after `if ready { consume(own item) }`. A flag is a `Bool`
   local, set where the place is given a value and cleared where it is moved

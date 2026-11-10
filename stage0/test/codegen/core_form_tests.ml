@@ -1407,6 +1407,67 @@ test "any Cursor, of a cursor that is written and of a yielding method's" {
 }
 |}
 
+let () =
+  passes "a match that owns a sum takes one variant's payload and drops the other variant whole"
+    {|type Problem =
+  | Empty
+  | At(offset: USize)
+
+type Named(first: String, last: String)
+
+fn text_of(place: USize) -> Result[String, Problem] {
+  if place < 100 {
+    return Err(Problem.At(offset: place))
+  }
+  let name = "n${place}"
+  Ok(own name)
+}
+
+fn named(place: USize) -> Result[Named, Problem] {
+  if place == 0 {
+    return Err(Problem.Empty)
+  }
+  if place < 100 {
+    return Err(Problem.At(offset: place))
+  }
+  Ok(Named(first: "a${place}", last: "b"))
+}
+
+fn length_of(place: USize) -> USize {
+  match text_of(place) {
+    Ok(text) => text.length()
+    Err(_) => 0
+  }
+}
+
+fn length_of_own(place: USize) -> USize {
+  let found = text_of(place)
+  match own found {
+    Ok(text) => text.length()
+    Err(_) => 0
+  }
+}
+
+fn offset_of(place: USize) -> USize {
+  match named(place) {
+    Ok(name) => name.first.length() + name.last.length()
+    Err(At(offset)) => offset
+    Err(Empty) => 1000
+  }
+}
+
+test "a match on a call's result takes the payload in one arm and leaves the rest alone in another" {
+  assert length_of(2) == 0
+  assert length_of(99) == 0
+  assert length_of(200) == 4
+  assert length_of_own(2) == 0
+  assert length_of_own(200) == 4
+  assert offset_of(0) == 1000
+  assert offset_of(7) == 7
+  assert offset_of(250) == 5
+}
+|}
+
 (* Checks which of a module's constants fold and which are worked out by
    running their evaluators, and that the module's test passes. *)
 let folds what ~folded ~run source =
