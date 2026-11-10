@@ -188,6 +188,18 @@ let () =
 |}
 
 let () =
+  passes "a string's bytes are its UTF-8 encoding"
+    {|test "bytes" {
+  let text = "h\u{e9}llo"
+  let bytes = text.bytes()
+  assert bytes.length() == 6
+  assert bytes[0] == 104
+  assert bytes[1] == 195
+  assert bytes[2] == 169
+  assert bytes[5] == 111
+  assert "".bytes().length() == 0
+}
+|};
   passes "constants are static data, worked out exactly"
     {|type Point(x: Int64, y: Int64)
   derives Equal

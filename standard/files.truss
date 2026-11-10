@@ -29,7 +29,7 @@ public fn Path.text(self) -> Option[StringSlice]
 public fn Path.bytes(self) -> Slice[UInt8]
   cost time O(1)
 {
-  todo
+  self.text.bytes()
 }
 
 public fn Path.is_absolute(self) -> Bool
@@ -280,44 +280,44 @@ public opaque type File(handle: streams::Handle)
 public fn File.read_at(mut self, offset: UInt64, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
   uses Handles
 {
-  todo
+  Handles.read_at(self.handle, offset: offset, buffer: mut buffer, limit: limit)
 }
 
 public fn File.write_at(mut self, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError]
   uses Handles
 {
-  todo
+  Handles.write_at(self.handle, offset: offset, bytes: bytes)
 }
 
 public fn File.set_length(mut self, length: UInt64) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Handles.set_length(self.handle, length: length)
 }
 
 public fn File.synchronize(mut self) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Handles.synchronize(self.handle)
 }
 
 public fn File.metadata(self) -> Result[Metadata, SystemError]
   uses Handles
 {
-  todo
+  Handles.metadata(self.handle)
 }
 
 public fn File.close(own self) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Handles.close(own self.handle)
 }
 
 impl streams::Reader for File {
   fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
     uses Handles
   {
-    todo
+    Handles.read(self.handle, buffer: mut buffer, limit: limit)
   }
 }
 
@@ -325,7 +325,7 @@ impl streams::Writer for File {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
     uses Handles
   {
-    todo
+    Handles.write(self.handle, bytes: bytes)
   }
 
   fn flush(mut self) -> Result[Unit, SystemError]
@@ -339,7 +339,7 @@ impl streams::Seek for File {
   fn seek(mut self, to: streams::Position) -> Result[UInt64, SystemError]
     uses Handles
   {
-    todo
+    Handles.seek(self.handle, to: to)
   }
 }
 
