@@ -135,6 +135,40 @@ test "lists" {
   assert ends.second.length() == 0
 }
 |};
+  passes "write_all writes until a writer has taken every byte"
+    {|use standard::streams
+
+type Trickle(received: List[UInt8], step: USize)
+
+impl streams::Writer for Trickle {
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    var taken: USize = 0
+    while taken < self.step && taken < bytes.length() {
+      mut self.received.push(bytes[taken])
+      taken += 1
+    }
+    Ok(taken)
+  }
+
+  fn flush(mut self) -> Result[Unit, SystemError] {
+    Ok(Unit)
+  }
+}
+
+test "write all" {
+  provide streams::NoHandles() {
+    var slow = Trickle(received: [], step: 2)
+    assert mut slow.write_text("hello") is Ok(_)
+    assert slow.received.length() == 5
+    assert slow.received[0] == 104
+    assert slow.received[4] == 111
+    var stuck = Trickle(received: [], step: 0)
+    assert mut stuck.write_all("hi".bytes()) is Err(NothingWritten)
+    assert mut stuck.write_all("".bytes()) is Ok(_)
+    assert stuck.received.length() == 0
+  }
+}
+|};
   passes "a question mark returns an error early"
     {|type ParseError = Empty | TooLarge
   derives Equal

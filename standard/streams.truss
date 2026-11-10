@@ -56,6 +56,7 @@ public trait Reader {
 public trait Writer {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
     uses Handles
+    ensures !(result is Ok(count) && count > bytes.length())
 
   fn flush(mut self) -> Result[Unit, SystemError]
     uses Handles
@@ -63,13 +64,23 @@ public trait Writer {
   fn write_all(mut self, bytes: Slice[UInt8]) -> Result[Unit, SystemError]
     uses Handles
   {
-    todo
+    var written: USize = 0
+    while written < bytes.length()
+      invariant written <= bytes.length()
+    {
+      let count = mut self.write(bytes.slice_range(written, stop: bytes.length()))?
+      if count == 0 {
+        return Err(SystemError.NothingWritten)
+      }
+      written += count
+    }
+    Ok(Unit)
   }
 
   fn write_text(mut self, text: StringSlice) -> Result[Unit, SystemError]
     uses Handles
   {
-    todo
+    mut self.write_all(text.bytes())
   }
 }
 
@@ -80,7 +91,7 @@ public trait Seek {
   fn position(mut self) -> Result[UInt64, SystemError]
     uses Handles
   {
-    todo
+    mut self.seek(Position.FromCurrent(offset: 0))
   }
 }
 
