@@ -38,6 +38,19 @@ let check database (key : Resolve.Names.key) : result option =
             (match lowered.interface with
             | Function_interface { output = Yields _; _ } -> true
             | _ -> false);
+          implements_capability =
+            (match Query.demand database Resolve.Names.container key with
+            | Some container -> (
+                match Interface.Impls.impl_interface database container.path with
+                | Some (impl : Types.impl_interface) -> (
+                    match
+                      Query.demand database Interface.Environment.trait_interface
+                        impl.implements.trait
+                    with
+                    | Some trait -> trait.is_capability
+                    | None -> false)
+                | None -> false)
+            | None -> false);
           variables = [];
           diagnostics = [];
           moves = [];

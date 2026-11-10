@@ -17,6 +17,10 @@ type context = {
   types : (Core.local, T.ty) Hashtbl.t;
   mutable parameters : Core.local list;
   yields : bool;  (** The definition is a yielding method, which a loop may stop at a [yield]. *)
+  implements_capability : bool;
+      (** The definition is a method of an [impl] of a capability. Its callers reach it through the
+          capability and cannot see the implementation, so no view may cross into or out of [self].
+      *)
   mutable variables : Core.local list;  (** The locals declared with [var]. *)
   mutable diagnostics : Diagnostic.t list;
   mutable moves : Core.id list;  (** The [Use] nodes that move a place. *)
