@@ -127,8 +127,9 @@ type target =
   | Intrinsic of intrinsic
   | Foreign of Libc.declaration
       (** A function of the C library, given each argument converted to its parameter's C type *)
-  | Evidence_call of { evidence : operand; slot : int; signature : signature }
-      (** A capability's method: entry [slot] of the evidence's table, given the evidence first *)
+  | Evidence_call of { evidence : operand; capability : Path.t; slot : int; signature : signature }
+      (** A method of [capability]: entry [slot] of the evidence's table, given the evidence first
+      *)
   | Table_call of { table : operand; value : operand; slot : int; signature : signature }
       (** Entry [slot] of a table of code, such as an [any] value's, given the value first *)
 
@@ -226,9 +227,15 @@ type static_value =
 
 type data = { data_key : Instance.key; ty : Ground.ty; value : static_value }
 
-(* A capability [impl]'s table: its entries, in the order of the
-   capability's methods. *)
-type table = { table_key : Instance.key; entries : (Instance.key * signature) list }
+(* A table of code: its entries in order, and for a capability [impl]'s
+   table, the capability, whose methods they are in the order it declares
+   them. A build has every entry of a table, and a capability's entry runs
+   only where code calls that method of the capability. *)
+type table = {
+  table_key : Instance.key;
+  capability : Path.t option;
+  entries : (Instance.key * signature) list;
+}
 
 (* What an instance compiles to: code, static data, or a table of entries. *)
 type compiled = Code of t | Data of data | Table of table
