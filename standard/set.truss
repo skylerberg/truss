@@ -59,14 +59,6 @@ public fn Set[Element: Hash + Ordered].insert(mut self, element: own Element)
   }
 }
 
-internal fn Set[Element: Hash + Ordered].empty() -> Set[Element]
-  ensures result.length() == 0
-  ensures forall value: Element => !result.model().contains(value)
-  cost time O(1)
-{
-  Set(elements: [])
-}
-
 public fn Set[Element: Hash + Ordered].with_capacity(capacity: USize) -> Set[Element]
   ensures result.length() == 0
   ensures forall value: Element => !result.model().contains(value)
