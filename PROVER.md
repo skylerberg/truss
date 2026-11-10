@@ -1038,6 +1038,12 @@ It proves, with one canonical, numbered, hashed query per obligation:
   bytes, which costs nothing; one with interpolations is a new `String`
   known only by its type, since each part is written out by its
   `Display`.
+- tagged templates, as a call of the tag's `from_template` with the
+  template: its literal texts, each a `Literal` whose model is its bytes,
+  and its parts, each turned into the tag's `Part` by its `From`. The
+  tag's `requires` is shown of that template, from what the prover knows
+  of its text; a `requires` that needs [running code](#running-code-while-proving)
+  to decide is not proven yet, since `Evaluate` is not built.
 - quantifiers over every value of a type, each in its range and meeting
   its type's invariants
 - bitwise operations, by their facts and then, once more, exactly, as
@@ -1078,7 +1084,7 @@ A call whose callee's contract it cannot read, such as one with errors,
 gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
-definition that uses anything else, such as a tagged template, is
+definition that uses anything else, such as a map literal or `any`, is
 reported as
 `prover.unsupported` with what stopped it, and none of its obligations
 count as proven.

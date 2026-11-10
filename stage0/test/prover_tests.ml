@@ -1102,6 +1102,19 @@ let () =
         \  let part = items[1..3]\n\
         \  part[1]\n\
          }\n");
+  test "a list passed as a slice is a view with its model" (fun () ->
+      proven
+        "fn count(items: Slice[Int64]) -> USize\n\
+        \  ensures result == items.length()\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  items.length()\n\
+         }\n\n\
+         fn f(items: List[Int64]) -> USize\n\
+        \  ensures result == items.length()\n\
+         {\n\
+        \  count(items)\n\
+         }\n");
   test "a slice must be within its collection" (fun () ->
       not_proven "fn f(items: List[Int64]) -> Slice[Int64] {\n  items[0..5]\n}\n" "prover.requires");
   test "two slices lent together must not overlap" (fun () ->
@@ -1140,6 +1153,33 @@ let () =
       not_proven
         "fn f(count: Int64) -> USize\n  ensures result == 1\n{\n  \"${count}\".length()\n}\n"
         "prover.ensures")
+
+(* Tagged templates *)
+
+let shout =
+  "type Shout(text: String)\n\n\
+   impl FromTemplate for Shout {\n\
+  \  type Part = String\n\n\
+  \  fn from_template(template: Template[String]) -> Shout\n\
+  \    requires template.literals.length() == 1\n\
+  \  {\n\
+  \    todo\n\
+  \  }\n\
+   }\n\n"
+
+let () =
+  test "a tagged template meets its tag's requires" (fun () ->
+      proven (shout ^ "fn f() -> Shout {\n  Shout\"hey\"\n}\n"));
+  test "a call of from_template through a bound cannot see the tag's requires" (fun () ->
+      not_proven
+        "fn make[Made: FromTemplate](template: Template[Made.Part]) -> Made {\n\
+        \  Made.from_template(template)\n\
+         }\n"
+        "prover.requires");
+  test "a tagged template that does not meet its tag's requires" (fun () ->
+      not_proven
+        (shout ^ "fn f(name: String) -> Shout {\n  Shout\"hey ${name}\"\n}\n")
+        "prover.requires")
 
 (* Floats *)
 

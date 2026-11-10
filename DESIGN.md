@@ -1018,7 +1018,12 @@ Rust and Swift.
   for a class's method that overrides a trait's: a weaker precondition and a
   stronger postcondition. It is what lets a generic trait such as `Index`
   say nothing about what is lent, while `List`'s `impl` says exactly which
-  element.
+  element. A tag's `from_template` is the one method whose `requires` may
+  ask for more than its trait's, since what it asks of a template's
+  literal text is the point of the tag: a template always names its tag,
+  so it is proven against the tag's `impl`, and a call of `from_template`
+  through a bound or through `any`, which could not see what the tag
+  asks, is an error.
 - **Each type has at most one `impl` of each trait,** whatever its type
   arguments: `impl Display for List[Element: Display]` cannot sit beside
   `impl Display for List[String]`. Rust's long-stalled specialization feature

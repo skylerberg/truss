@@ -1521,8 +1521,9 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
       List.iter
         (fun ((argument : C.argument), (expression_ : expression), term) ->
           if not (exempt && argument.parameter = 0) then
-            check_valid context frame expression_.span (type_of frame expression_) term ~deep:true
-              ~when_:"when it is passed to this call")
+            check_valid context frame expression_.span
+              (argument_type frame argument expression_)
+              term ~deep:true ~when_:"when it is passed to this call")
         values);
   let havoc_mut frame =
     List.fold_left
@@ -1661,6 +1662,13 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
         | _ -> evidence
       in
       assume_laws context frame trait.trait self_type;
+      (match evidence with
+      | (Bound _ | Dynamic) when name = "from_template" && Path.equal trait.trait template_trait ->
+          oblige context frame Requires written.span
+            "A call of `from_template` through a bound or `any` cannot see what the tag requires \
+             of its template: build the value with a template, where the tag is known."
+            (L.Boolean false)
+      | _ -> ());
       let trait_path = Path.Method { owner = trait.trait; name; receiver } in
       (* The trait's clauses are about [Self] and the trait's parameters. *)
       let trait_substitution =
@@ -2279,29 +2287,11 @@ and list_literal context frame (written : expression) items =
     | Named { arguments = T.Type element :: _; _ } -> element
     | _ -> unsupported written.span "a literal of `%s`" (T.show ty)
   in
-  let literal = arrive context frame "literal" ty in
-  let sequence =
-    match ty with
-    | Named { path; _ } when Path.equal path sequence_path -> literal
-    | Named
-        {
-          path = Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" };
-          _;
-        } -> (
-        match model_of context ty literal ~element with
-        | Some model -> model
-        | None -> unsupported written.span "a literal of `%s`" (T.show ty))
-    | _ -> unsupported written.span "a literal of `%s`" (T.show ty)
+  let literal =
+    match sequence_of context frame ty ~element values with
+    | Some literal -> literal
+    | None -> unsupported written.span "a literal of `%s`" (T.show ty)
   in
-  assume_valid context frame ty literal;
-  assume context frame
-    (L.equal (sequence_length context element sequence) (L.int (List.length values)));
-  List.iteri
-    (fun index item ->
-      match sequence_at context element sequence (L.int index) with
-      | Some at -> assume context frame (L.equal at item)
-      | None -> ())
-    values;
   let allocates =
     items <> []
     && match ty with Named { path; _ } -> not (Path.equal path sequence_path) | _ -> false
@@ -2379,21 +2369,33 @@ and slice context frame (written : expression) base (range : expression) =
       (frame, viewed)
   | _ -> unsupported range.span "this slice"
 
+(* An argument's type as the callee gets it: a view's, where an owned
+   value is passed as one. *)
+and argument_type frame (argument : C.argument) (expression_ : expression) =
+  let ty = type_of frame expression_ in
+  match argument.conversion with
+  | Some Owned_to_view -> Option.value (viewed_type ty) ~default:ty
+  | _ -> ty
+
+and viewed_type (owned : T.ty) =
+  let standard modules name : Path.t = Top { module_ = { package = "standard"; modules }; name } in
+  match owned with
+  | Named { path; arguments } when Path.equal path (standard [ "list" ] "List") ->
+      Some (T.Named { path = standard [ "list" ] "Slice"; arguments })
+  | Named { path; arguments } when Path.equal path (standard [ "text" ] "String") ->
+      Some (T.Named { path = standard [ "text" ] "StringSlice"; arguments })
+  | _ -> None
+
 (* A [List] passed as a [Slice], or a [String] as a [StringSlice]: a view
    of the value, with the same model. See DESIGN.md, "Views". *)
 and view_of context frame (owned : T.ty) term =
-  let standard modules name : Path.t = Top { module_ = { package = "standard"; modules }; name } in
-  let viewed =
-    match owned with
-    | Named { path; arguments } when Path.equal path (standard [ "list" ] "List") ->
-        Some (T.Named { path = standard [ "list" ] "Slice"; arguments }, arguments)
-    | Named { path; arguments } when Path.equal path (standard [ "text" ] "String") ->
-        Some (T.Named { path = standard [ "text" ] "StringSlice"; arguments }, arguments)
-    | _ -> None
-  in
-  match viewed with
-  | Some (view_type, arguments) -> (
-      let element = match arguments with T.Type element :: _ -> element | _ -> T.builtin UInt8 in
+  match viewed_type owned with
+  | Some view_type -> (
+      let element =
+        match owned with
+        | Named { arguments = T.Type element :: _; _ } -> element
+        | _ -> T.builtin UInt8
+      in
       let view = arrive context frame "view" view_type in
       match (model_of context owned term ~element, model_of context view_type view ~element) with
       | Some owned_model, Some view_model ->
@@ -2408,30 +2410,191 @@ and view_of context frame (owned : T.ty) term =
    since each part is written out by its [Display]. *)
 and string_literal context frame (written : expression) (literal : string_literal) =
   let ty = type_of frame written in
-  let frame =
-    List.fold_left (fun frame (part, _) -> fst (value context frame part)) frame literal.rest
-  in
   match (literal.tag, literal.rest) with
-  | None, [] ->
-      let text = literal.first.value in
-      let string = arrive context frame "string" ty in
-      let byte = T.builtin UInt8 in
-      (match model_of context ty string ~element:byte with
-      | Some model ->
-          assume context frame
-            (L.equal (sequence_length context byte model) (L.int (String.length text)));
-          String.iteri
-            (fun index character ->
-              match sequence_at context byte model (L.int index) with
-              | Some at -> assume context frame (L.equal at (L.int (Char.code character)))
-              | None -> ())
-            text
-      | None -> ());
-      (frame, string)
+  | None, [] -> (frame, text_value context frame ty literal.first.value)
   | None, _ ->
+      let frame =
+        List.fold_left (fun frame (part, _) -> fst (value context frame part)) frame literal.rest
+      in
       let frame = spend context frame (unknown_amount context frame) in
       (frame, arrive context frame "string" ty)
-  | Some _, _ -> unsupported written.span "a tagged template"
+  | Some _, _ -> tagged_template context frame written literal ty
+
+and template_trait : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "text" ] }; name = "FromTemplate" }
+
+(* A tagged template is a call of its tag's [from_template], with the
+   template: its literal texts, each a [Literal] whose model is its bytes,
+   and its parts, each turned into the tag's [Part] by its [From]. The
+   call's [requires], such as that the text is one character, is shown of
+   that template. See DESIGN.md, "Tagged templates". *)
+and tagged_template context frame (written : expression) (literal : string_literal) tag_type =
+  let template =
+    match frame.source.checked.templates.(literal.id) with
+    | Some template -> template
+    | None -> unsupported written.span "a tagged template without a checked form"
+  in
+  match template.from_template with
+  | Some
+      ({
+         callee = Trait_method { trait; name; receiver; evidence = Impl { impl; _ } as evidence; _ };
+         _;
+       } as call_) -> (
+      let path = Path.Method { owner = impl; name; receiver } in
+      match
+        ( method_contract context.database trait name receiver evidence,
+          Query.demand context.database Interface.Environment.signature path )
+      with
+      | Some contract, Some { parameters = [ { type_ = template_type; _ } ]; _ } ->
+          let part_type =
+            match template_type with
+            | Named { arguments = [ T.Type part ]; _ } -> part
+            | _ -> unsupported written.span "a template of `%s`" (T.show template_type)
+          in
+          let text name : Path.t =
+            Top { module_ = { package = "standard"; modules = [ "text" ] }; name }
+          in
+          let list_of element =
+            T.Named
+              {
+                path =
+                  Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" };
+                arguments = [ T.Type element ];
+              }
+          in
+          let literal_type = T.Named { path = text "Literal"; arguments = [] } in
+          let texts =
+            literal.first.value :: List.map (fun (_, (text : text)) -> text.value) literal.rest
+          in
+          let literals = List.map (text_value context frame literal_type) texts in
+          let frame, parts =
+            List.fold_left2
+              (fun (frame, parts) ((part : expression), _) conversion ->
+                let frame, term =
+                  match conversion with
+                  | Some converting -> (
+                      match resolved_call context frame part converting with
+                      | Some converted -> converted
+                      | None -> unsupported part.span "a part that never returns")
+                  | None -> value context frame part
+                in
+                (frame, parts @ [ term ]))
+              (frame, []) literal.rest template.part_conversions
+          in
+          let made list element items =
+            match sequence_of context frame list ~element items with
+            | Some made -> made
+            | None -> unsupported written.span "a template of `%s`" (T.show template_type)
+          in
+          ignore (sort_of context template_type);
+          let value_ =
+            L.Apply
+              ( constructor_name template_type None,
+                [
+                  made (list_of literal_type) literal_type literals;
+                  made (list_of part_type) part_type parts;
+                ] )
+          in
+          let own = List.hd contract.parts in
+          let entry = part_frame frame own ~arguments:[ (0, value_) ] ~substitution:[] in
+          List.iter
+            (fun (clause : expression) ->
+              oblige context frame Requires written.span
+                (Printf.sprintf "This template may not meet `%s`, which its tag requires."
+                   (quote own.callee clause.span))
+                (snd (value context entry clause)))
+            own.requires;
+          let result = arrive context frame "tagged" tag_type in
+          assume_valid context frame tag_type result;
+          List.iter
+            (fun (clause : expression) ->
+              assume context frame (snd (value context { entry with result = Some result } clause)))
+            own.ensures;
+          let frame =
+            spend context frame
+              (callee_amount context frame ~path ~parts:contract.parts
+                 ~bound_frame:(fun part ->
+                   {
+                     (part_frame frame part ~arguments:[ (0, value_) ] ~substitution:[]) with
+                     result = Some result;
+                   })
+                 ~call_ ~values:[] ~change:None)
+          in
+          (frame, result)
+      | _ -> unsupported written.span "a tagged template whose tag the prover cannot read")
+  | _ -> unsupported written.span "a tagged template whose tag the prover cannot read"
+
+(* A [List] or a [Sequence] of these elements, in order: a value whose
+   sequence, the list's model or the sequence itself, has them. *)
+and sequence_of context frame (ty : T.ty) ~element values =
+  let made = arrive context frame "literal" ty in
+  let sequence =
+    match ty with
+    | Named { path; _ } when Path.equal path sequence_path -> Some made
+    | Named
+        {
+          path = Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" };
+          _;
+        } ->
+        model_of context ty made ~element
+    | _ -> None
+  in
+  Option.map
+    (fun sequence ->
+      assume_valid context frame ty made;
+      assume context frame
+        (L.equal (sequence_length context element sequence) (L.int (List.length values)));
+      List.iteri
+        (fun index item ->
+          match sequence_at context element sequence (L.int index) with
+          | Some at -> assume context frame (L.equal at item)
+          | None -> ())
+        values;
+      made)
+    sequence
+
+(* Text as a value whose model is its UTF-8 bytes. *)
+and text_value context frame (ty : T.ty) text =
+  let made = arrive context frame "string" ty in
+  let byte = T.builtin UInt8 in
+  (match model_of context ty made ~element:byte with
+  | Some model ->
+      assume context frame
+        (L.equal (sequence_length context byte model) (L.int (String.length text)));
+      String.iteri
+        (fun index character ->
+          match sequence_at context byte model (L.int index) with
+          | Some at -> assume context frame (L.equal at (L.int (Char.code character)))
+          | None -> ())
+        text
+  | None -> ());
+  made
+
+(* A callee part's frame, for reading its clauses, with its parameters
+   bound to the given terms by position. *)
+and part_frame frame (part : part) ~arguments ~substitution =
+  let locals, self =
+    List.fold_left
+      (fun (locals, self) (position, binding) ->
+        match (binding, List.assoc_opt position arguments) with
+        | Self_binding, Some term -> (locals, Some term)
+        | Parameter_binding name_, Some term -> (Ids.add name_.id term locals, self)
+        | _ -> (locals, self))
+      (Ids.empty, None)
+      (List.mapi (fun position binding -> (position, binding)) part.binding)
+  in
+  {
+    frame with
+    source = part.callee;
+    locals;
+    old_locals = locals;
+    self;
+    old_self = self;
+    result = None;
+    checking = false;
+    loop = None;
+    substitution;
+  }
 
 (* A value's model, by the standard library's [impl] of [Model] for its
    type, as a call of [model()] would read it. *)
@@ -3421,7 +3584,9 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
               Option.map (fun term -> (argument.parameter, term)) (Ids.find_opt id after.locals)
           | None, true -> Option.map (fun term -> (argument.parameter, term)) after.self
           | None, false ->
-              Some (argument.parameter, arrive context after "changed" (type_of frame expression_))
+              Some
+                ( argument.parameter,
+                  arrive context after "changed" (argument_type frame argument expression_) )
         else None)
       values
   in
@@ -3436,8 +3601,8 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
         (L.Function
            ( symbol,
              List.map
-               (fun ((_ : C.argument), (expression_ : expression), _) ->
-                 sort_of context (type_of frame expression_))
+               (fun ((argument : C.argument), (expression_ : expression), _) ->
+                 sort_of context (argument_type frame argument expression_))
                values,
              sort_of context (substituted frame call_.result) ));
       let term = L.Apply (symbol, own_arguments) in
@@ -3456,7 +3621,7 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
     (fun ((argument : C.argument), (expression_ : expression), _) ->
       if argument.mode = T.Mut && not (helper && argument.parameter = 0) then
         match List.assoc_opt argument.parameter changed with
-        | Some term -> assume_valid context after (type_of frame expression_) term
+        | Some term -> assume_valid context after (argument_type frame argument expression_) term
         | None -> ())
     values;
   if not (List.exists (Path.equal path) context.instantiating) then begin
@@ -3556,7 +3721,7 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
   let change () =
     List.fold_left
       (fun total ((argument : C.argument), (expression_ : expression), before) ->
-        let ty = type_of frame expression_ in
+        let ty = argument_type frame argument expression_ in
         match argument.mode with
         | T.Mut -> (
             match List.assoc_opt argument.parameter changed with
@@ -3934,27 +4099,13 @@ and step_amount context frame (call_ : C.call) values (counter : Costs.counter) 
       | _ -> (
           match capability_part context.database capability name with
           | Some (part, _) ->
-              let locals =
-                List.fold_left
-                  (fun locals (index, binding) ->
-                    match (binding, argument_at_index_opt values index) with
-                    | Parameter_binding name_, Some term -> Ids.add name_.id term locals
-                    | _ -> locals)
-                  Ids.empty
-                  (List.mapi (fun index binding -> (index, binding)) part.binding)
-              in
               let inside =
-                {
-                  frame with
-                  source = part.callee;
-                  locals;
-                  old_locals = locals;
-                  self = None;
-                  old_self = None;
-                  checking = false;
-                  loop = None;
-                  substitution = [];
-                }
+                part_frame frame part
+                  ~arguments:
+                    (List.map
+                       (fun ((argument : C.argument), _, term) -> (argument.parameter, term))
+                       values)
+                  ~substitution:[]
               in
               callee_amount context frame
                 ~path:(Path.Method { owner = capability; name; receiver = Static })
@@ -3968,14 +4119,6 @@ and step_amount context frame (call_ : C.call) values (counter : Costs.counter) 
       | Calls target when not (call_reaches context call_ values target) -> Costs.zero
       | _ -> unknown_amount context frame counter)
 
-and argument_at_index_opt values index =
-  List.find_map
-    (fun ((argument : C.argument), _, term) ->
-      if argument.parameter = index then Some term else None)
-    values
-
-(* Whether building a variant allocates its block. See DESIGN.md,
-   "Recursive types say where they allocate". *)
 and indirect context (ty : T.ty) variant =
   match (ty, variant) with
   | Named { path; _ }, Some variant -> (
@@ -5069,30 +5212,7 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
     | None -> unsupported pattern.span "a loop variable without a type"
   in
   (* The method's frame, with the loop's arguments. *)
-  let method_frame (at : frame) (own : part) =
-    let locals, self =
-      List.fold_left
-        (fun (locals, self) (position, binding) ->
-          match (binding, List.assoc_opt position arguments) with
-          | Self_binding, Some term -> (locals, Some term)
-          | Parameter_binding name_, Some term -> (Ids.add name_.id term locals, self)
-          | _ -> (locals, self))
-        (Ids.empty, None)
-        (List.mapi (fun position binding -> (position, binding)) own.binding)
-    in
-    {
-      at with
-      source = own.callee;
-      locals;
-      old_locals = locals;
-      self;
-      old_self = self;
-      result = None;
-      checking = false;
-      loop = None;
-      substitution;
-    }
-  in
+  let method_frame (at : frame) (own : part) = part_frame at own ~arguments ~substitution in
   (* The method's clauses, read with the loop's arguments, the part handed
      out, and the parts before it. *)
   let method_clauses (at : frame) ~each ~result ~yielded ~finished =
@@ -5605,7 +5725,13 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
   in
   let start =
     match trait_frame start ~result:None with
-    | Some (part, inside) when List.length part.binding = List.length own_terms ->
+    | Some (part, inside)
+      when List.length part.binding = List.length own_terms
+           (* A tag's [from_template] may require more than its trait, since
+              only a template calls it, where the tag is known; a call through
+              a bound is an error, which keeps that sound. See DESIGN.md,
+              "Tagged templates". *)
+           && not (Path.equal part.callee.key.path template_trait) ->
         List.iter
           (fun (clause : expression) -> assume context start (snd (value context inside clause)))
           part.requires;
