@@ -143,7 +143,8 @@ let check_defaults state env (written : parameter list) (signature : T.signature
               signature.parameters
           with
           | Some info ->
-              in_statement state env value.span (fun () -> check state env value info.type_)
+              in_statement state env value.span (fun () -> check state env value info.type_);
+              Constant.check state ~default:true value
           | None -> ())
       | _ -> ())
     written
@@ -206,7 +207,8 @@ let check_definition state (lowered : Environment.lowered) =
                   with
                   | Some lowered ->
                       in_statement state no_output value.span (fun () ->
-                          check state no_output value lowered.field_type)
+                          check state no_output value lowered.field_type);
+                      Constant.check state ~default:true value
                   | None -> ())
               | _ -> ())
             fields
@@ -311,9 +313,11 @@ let check_definition state (lowered : Environment.lowered) =
               | Associated_definition _ | Impl_member_error -> ())
           members
     | Constant { value; _ }, Constant_interface constant ->
-        if not (broken Body) then
+        if not (broken Body) then begin
           in_statement state no_output value.span (fun () ->
-              check state no_output value constant.constant_type)
+              check state no_output value constant.constant_type);
+          Constant.check state ~default:false value
+        end
     | Test { body = written; _ }, _ ->
         if not (broken Body) then
           body state { no_output with output = Some (Returns T.unit) } written

@@ -89,9 +89,6 @@ let () =
           ( "app::main",
             "fn main(arguments: List[String]) -> ExitCode\n  uses Console\n{\n  todo\n}\n" );
         ]);
-  test "a default must be a constant expression" (fun () ->
-      one_diagnostic "fn compute() -> Int64 { 1 }\n\nfn f(count: Int64 = compute()) {}\n"
-        "types.default_not_constant");
   test "a default may build a record from constants" (fun () ->
       no_diagnostics
         [

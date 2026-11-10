@@ -403,20 +403,13 @@ test "names" {
   passes "a constant that needs its code run is worked out while compiling"
     {|type Point(x: Int64, y: Int64)
 
-fn square(value: Int64) -> Int64 {
-  value * value
-}
-
-fn greeting(name: StringSlice) -> String {
-  "hello ${name}"
-}
-
-let area: Int64 = square(7)
-let corner: Point = Point(x: square(2), y: -3)
+let side: Int64 = 7
+let area: Int64 = side * side
+let corner: Point = Point(x: 2 * 2, y: -3)
 let ages: Map[String, Int64] = ["grace": 85, "ada": 36]
 let colors: Set[String] = ["red", "green", "red"]
-let welcome: String = greeting("ada".slice())
-let maybe: Option[Int64] = Some(square(3))
+let welcome: String = "hello ada"
+let maybe: Option[Int64] = Some(3 * 3)
 
 test "constants" {
   assert area == 49

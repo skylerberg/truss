@@ -140,6 +140,8 @@ module Code = struct
     | Private_in_public
     | Method_outside_package
     | Default_not_constant
+    | Not_constant
+    | Constant_overflow
     | Main_signature
     | Duplicate_field
     | Cannot_derive
@@ -361,6 +363,8 @@ module Code = struct
     | Private_in_public -> "private_in_public"
     | Method_outside_package -> "method_outside_package"
     | Default_not_constant -> "default_not_constant"
+    | Not_constant -> "not_constant"
+    | Constant_overflow -> "constant_overflow"
     | Main_signature -> "main_signature"
     | Duplicate_field -> "duplicate_field"
     | Cannot_derive -> "cannot_derive"

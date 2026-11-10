@@ -292,20 +292,18 @@ test "nested" {
   assert table.contains("a")
 }
 |};
-  test "a constant whose sum does not fit its type is run, which reports the overflow" (fun () ->
-      let database, compile =
-        load
-          {|let big: Int8 = 100
-let bigger: Int8 = big + big
-
-test "overflowed" {
-  assert bigger == 0
-}
-|}
-      in
-      match Compile.run_tests compile ~time_limit:2000 (tests_of database) with
-      | Ok _ -> fail "expected the constant not to be worked out"
-      | Error message -> if not (contains message "arithmetic overflow") then fail "got %S" message)
+  test "a constant whose sum does not fit its type is an error before any code is run" (fun () ->
+      let database = Engine.context (Engine.create ()) in
+      Database.load_standard (Engine.of_context database);
+      Database.load_package (Engine.of_context database) ~name:"example" ~dependencies:[]
+        [ (example, "let big: Int8 = 100\nlet bigger: Int8 = big + big\n") ];
+      match
+        List.map
+          (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
+          (Type_checker.diagnostics database example)
+      with
+      | [ "types.constant_overflow" ] -> ()
+      | found -> fail "got [%s]" (String.concat "; " found))
 
 let () =
   test "a derived equal stops at the first field that differs" (fun () ->

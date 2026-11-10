@@ -1352,8 +1352,26 @@ checks them like code, with these differences:
 A constant's type is written, and its value is checked against it as a
 constant expression: literals, arithmetic, other constants, and records,
 variants, lists, maps, arrays, sets, strings, and tagged templates without
-interpolation, built from constant parts. A call is an error. Defaults
-follow the same rules.
+interpolation, built from constant parts. A call is an error. A default of
+a parameter or of a field follows the same rules, and names no parameter.
+
+Whether an expression is constant is read from its checked form, not from
+how it is spelled:
+
+- **Arithmetic is an operator on built-in integers, floats, and `Bool`:**
+  the arithmetic, comparison, logical, and bitwise operators, and shifts. An
+  operator that a type's `impl` defines, such as `==` on a `String`, is a
+  call.
+- **A name is constant when it means a definition:** another constant, a
+  variant, or a function taken as a value. A field of a constant record is
+  constant.
+- **A call is constant only when it builds a record or a variant.** An
+  index is a call of `at`.
+- **Anything else is not:** a branch, a block, a lambda, a string with
+  interpolation.
+
+So a constant uses no capability and always ends, and every build works it
+out alike.
 
 The checker works out a constant's value only where it needs the value: a
 `USize` in a type argument, as in `Array[UInt8, digest_size]`, and a constant
@@ -1362,7 +1380,10 @@ to run: integers are Zarith's, and float operations are the exact IEEE ones,
 which OCaml computes bit for bit. A `Float32` is computed in 64 bits and
 rounded to 32, which gives the correctly rounded 32-bit result for `+`, `-`,
 `*`, `/`, and `sqrt`, because 53 bits is more than twice 24 plus 2. Overflow
-in a constant's arithmetic is an error. Constants that refer to each other
+in a constant's arithmetic is an error, and so is dividing by zero: each
+step of `+`, `-`, `*`, `/`, `%`, and negation on built-in integers must fit
+its type, so `let small: UInt8 = 200 + 100 - 100` is an error at
+`200 + 100`. Constants that refer to each other
 in a cycle are an error. Every other constant is built by code generation,
 which runs compiled code for one whose value cannot be folded, such as a
 `Map` or a `Set`, as CODEGEN.md describes. A result that used a constant's
