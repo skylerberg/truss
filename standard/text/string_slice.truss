@@ -11,7 +11,7 @@ public fn StringSlice.bytes(self) -> Slice[UInt8]
   ensures result.length() == self.length()
   cost time O(1)
 {
-  todo
+  Slice(elements: self.bytes)
 }
 
 public fn StringSlice.is_ascii(self) -> Bool
