@@ -1381,11 +1381,15 @@ function:
   collection, and cannot be stored in a `mut` parameter. It can be passed to a
   call, and stored in a local record or list. DESIGN.md's replacement for a
   `make_adder` is a record with a method.
-- **A function value that is passed to an `own` parameter must capture
-  nothing,** because the callee may store it, and it could then outlive its
-  captures. A capturing lambda is rejected there. So is a function value that
-  the caller does not own, such as a read-only function-typed parameter,
-  because it may be a capturing lambda.
+- **A function value that is passed to an `own` parameter of a function type
+  must capture nothing,** because the callee may store it, and it could then
+  outlive its captures. A capturing lambda is rejected there. So is a function
+  value that the caller does not own, such as a read-only function-typed
+  parameter, because it may be a capturing lambda. The rule applies to a
+  parameter that the callee declares with a function type. A generic `own`
+  parameter that is instantiated with a function type is not one: the callee
+  handles its value as it handles any view, so the view rules above track it.
+  That is why a capturing lambda can be pushed onto a local list.
 
 A lambda cannot mutate a captured variable, which is a type error: captured
 variables are read-only inside the lambda.

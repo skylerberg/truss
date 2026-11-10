@@ -268,6 +268,36 @@ let () =
     "fn give(amount: Int64) {\n  take(fn(value) { value + amount })\n}\n" "ownership.view_escapes";
   rejected "a function value that is not owned cannot be given to an `own` parameter"
     "fn relay(handler: fn(Int64) -> Int64) {\n  take(handler)\n}\n" "ownership.view_escapes";
+  (* A generic [own] parameter is not declared with a function type, so the
+     view rules track a capturing lambda that is passed to one. *)
+  accepted
+    "a capturing lambda can be stored in a local list and passed to a generic `own` parameter"
+    "fn same[Value](value: own Value) -> Value {\n\
+    \  value\n\
+     }\n\n\
+     fn local(amount: Int64) -> Int64 {\n\
+    \  let add: fn(Int64) -> Int64 = fn(value) { value + amount }\n\
+    \  var handlers = [add]\n\
+    \  mut handlers.push(add)\n\
+    \  let again = same(add)\n\
+    \  let first = handlers[0]\n\
+    \  again(first(amount))\n\
+     }\n";
+  rejected "a list that stores a capturing lambda cannot be returned"
+    "fn escape(amount: Int64) -> List[fn(Int64) -> Int64] {\n\
+    \  let add: fn(Int64) -> Int64 = fn(value) { value + amount }\n\
+    \  [add]\n\
+     }\n"
+    "ownership.view_escapes";
+  rejected "a capturing lambda returned through a generic `own` parameter cannot be returned"
+    "fn same[Value](value: own Value) -> Value {\n\
+    \  value\n\
+     }\n\n\
+     fn escape(amount: Int64) -> fn(Int64) -> Int64 {\n\
+    \  let add: fn(Int64) -> Int64 = fn(value) { value + amount }\n\
+    \  same(add)\n\
+     }\n"
+    "ownership.view_escapes";
   accepted "a function that captures nothing can be returned, kept, and given up"
     "fn plain() -> fn(Int64) -> Int64 {\n\
     \  fn(value) { double(value) }\n\
