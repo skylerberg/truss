@@ -219,7 +219,13 @@ and `reads` clauses):
   are the same. A C function is given only an address into a storage, so
   every storage it is lent keeps its length and its capacity; one passed
   as its room keeps its elements too, and one passed as its elements, to
-  change, has elements nothing more is known of. An operation that stops
+  change, has elements nothing more is known of. Each function's row of
+  the C library's table says how many elements it reads or writes through
+  each address, and that many must be there: room after a storage's
+  elements, elements of a view or of a storage it changes, or, for a view
+  it reads up to a zero, a last element that is zero. A result that is not
+  negative is at most the parameter the row names, and each number of the
+  system, such as `PATH_MAX`, is one constant. An operation that stops
   the program on a bad index says what holds when it returns. A part
   `storage_at_mut` lends changes nothing until the lend ends, where the
   storage takes back what the caller left in it, and so for `view_at_mut`

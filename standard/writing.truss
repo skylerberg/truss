@@ -1,5 +1,6 @@
 use standard::growth
 use standard::intrinsic
+use standard::system::calls
 
 internal fn byte(output: mut intrinsic::Storage[UInt8], value: UInt8) {
   if intrinsic::storage_length(output) >= intrinsic::storage_capacity(output) {
@@ -88,7 +89,7 @@ fn shortest_that_reads_back(output: mut intrinsic::Storage[UInt8], value: Float6
     var digits: Int32 = 1
     var text = with_digits(value, digits: digits)
     while digits < 17 && !reads_back(intrinsic::storage_view(text), value: value, as_float32: as_float32)
-      invariant intrinsic::storage_length(text) >= 1
+      invariant calls::ends_with_zero_byte(intrinsic::storage_view(text))
     {
       digits += 1
       text = with_digits(value, digits: digits)
@@ -109,7 +110,7 @@ fn shortest_that_reads_back(output: mut intrinsic::Storage[UInt8], value: Float6
 }
 
 fn with_digits(value: Float64, digits: Int32) -> intrinsic::Storage[UInt8]
-  ensures intrinsic::storage_length(result) >= 1
+  ensures calls::ends_with_zero_byte(intrinsic::storage_view(result))
 {
   var text: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(40)
   let length = intrinsic::libc_snprintf(
@@ -120,11 +121,14 @@ fn with_digits(value: Float64, digits: Int32) -> intrinsic::Storage[UInt8]
     value: value,
   )
   let written: USize = if length < 0 { 0 } else if length > 39 { 39 } else { intrinsic::convert(length) }
-  intrinsic::storage_lengthen(mut text, by: written + 1)
+  intrinsic::storage_lengthen(mut text, by: written)
+  intrinsic::storage_push(mut text, value: 0)
   text
 }
 
-fn reads_back(text: intrinsic::View[UInt8], value: Float64, as_float32: Bool) -> Bool {
+fn reads_back(text: intrinsic::View[UInt8], value: Float64, as_float32: Bool) -> Bool
+  requires calls::ends_with_zero_byte(text)
+{
   let read = intrinsic::libc_strtod(text)
   if as_float32 {
     let narrow_read: Float32 = intrinsic::convert(read)

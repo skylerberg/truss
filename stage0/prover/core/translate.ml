@@ -2171,6 +2171,7 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
   | Compare_bytes, _ ->
       buffer_operation context frame ~node operation (T.builtin UInt8) operands ~changed known
   | Libc function_, _ -> libc_call context frame ~node function_ operands ~changed known
+  | Libc_number number, _ -> libc_number context frame number
   | Convert, [ _; target ] when T.is_builtin Character target -> (
       (* A [Character] is made from an integer only when the integer is a
          Unicode scalar value, which the conversion does not check. *)
@@ -2184,78 +2185,113 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
       | _ -> known)
   | _ -> integer_intrinsic context frame operation types operands known
 
-(* A function of the C library is never given a storage, only an address
-   into its buffer, so each storage it is lent keeps its length and its
-   capacity, whatever the function does. One passed as the room after its
-   elements keeps its elements too; one passed as its elements, for the
-   function to change, has elements nothing more is known of. What is left
-   to each function is the room it needs and what it returns. *)
+(* A function of the C library, by its row of the C library's table. It
+   is given only an address into a storage, so each storage it is lent
+   keeps its length and its capacity, whatever the function does. Each
+   argument it reads or writes through an address names how many elements:
+   room after a storage's elements must be there, elements of a view or of
+   a storage it changes must be there, and a view it reads up to a zero
+   must end with one. A storage passed as room keeps its elements; one
+   passed as its elements to change has elements nothing more is known of.
+   A result that is not negative is at most the parameter the row names. *)
 and libc_call context frame ~(node : expression) (function_ : Libc.function_) operands ~changed
     known =
-  let { Libc.parameters; _ } = Libc.signature function_ in
-  let passed =
+  let { Libc.parameters; at_most; _ } = Libc.signature function_ in
+  let arguments =
     List.concat_map
-      (fun (_, (passes : Libc.passes)) ->
+      (fun (name, (passes : Libc.passes)) ->
         match passes with
-        | Value _ | Elements _ | Room _ | Elements_to_change _ -> [ Some passes ]
-        | Written (_, names) -> List.map (fun _ -> None) names
+        | Value _ | Elements _ | Room _ | Elements_to_change _ -> [ (name, Some passes) ]
+        | Written (_, names) -> List.map (fun name -> (name, None)) names
         | Always _ | Environment -> [])
       parameters
   in
-  let storage_of scalar = T.builtin (Intrinsic.libc_builtin scalar) in
-  let length element term =
-    sequence_length context element (buffer_model context Storage element term)
+  let value_of name =
+    List.find_map
+      (fun (position, (named, _)) -> if named = name then List.nth_opt operands position else None)
+      (List.mapi (fun position argument -> (position, argument)) arguments)
   in
+  let count (extent : Libc.extent) =
+    match extent with
+    | Counted { by; each } ->
+        Option.map
+          (fun value -> if each = 1 then value else L.Apply ("*", [ L.int each; value ]))
+          (value_of by)
+    | Exactly elements -> Some (L.int elements)
+    | Number number -> Some (libc_number context frame number)
+    | Through_zero -> None
+  in
+  let needs what condition =
+    oblige context frame Requires (at frame node)
+      (Printf.sprintf "`%s` may not %s." (quote frame.source node.origin) what)
+      condition
+  in
+  let element_of scalar = T.builtin (Intrinsic.libc_builtin scalar) in
+  let length element sequence = sequence_length context element sequence in
   List.iteri
-    (fun position passes ->
+    (fun position (_, passes) ->
       match (passes, List.nth_opt operands position, List.nth_opt changed position) with
-      | ( Some ((Libc.Room (scalar, _) | Elements_to_change (scalar, _)) as passes),
+      | ( Some ((Libc.Room (scalar, extent) | Elements_to_change (scalar, extent)) as passes),
           Some before,
           Some after ) -> (
-          let element = storage_of scalar in
+          let element = element_of scalar in
           let model term = buffer_model context Storage element term in
+          let capacity term = buffer_capacity context element term in
           assume context frame
             L.(
-              equal (length element after) (length element before)
-              &&& equal
-                    (buffer_capacity context element after)
-                    (buffer_capacity context element before));
-          match passes with
-          | Room _ -> assume context frame (L.equal (model after) (model before))
-          | _ -> ())
+              equal (length element (model after)) (length element (model before))
+              &&& equal (capacity after) (capacity before));
+          match (passes, count extent) with
+          | Room _, counted ->
+              assume context frame (L.equal (model after) (model before));
+              Option.iter
+                (fun counted ->
+                  needs "have the room it writes into"
+                    (L.Apply
+                       ( "<=",
+                         [
+                           L.Apply ("+", [ length element (model before); counted ]);
+                           capacity before;
+                         ] )))
+                counted
+          | _, Some counted ->
+              needs "have the elements it changes"
+                (L.Apply ("<=", [ counted; length element (model before) ]))
+          | _, None -> ())
+      | Some (Libc.Elements (scalar, extent)), Some view, _ -> (
+          let element = element_of scalar in
+          let elements = buffer_model context View element view in
+          match count extent with
+          | Some counted ->
+              needs "have the elements it reads"
+                (L.Apply ("<=", [ counted; length element elements ]))
+          | None ->
+              let last = L.Apply ("-", [ length element elements; L.int 1 ]) in
+              needs "end with a zero, which it reads up to"
+                L.(
+                  Apply (">=", [ length element elements; int 1 ])
+                  &&&
+                  match sequence_at context element elements last with
+                  | Some found -> equal found (int 0)
+                  | None -> Boolean false))
       | _ -> ())
-    passed;
-  let byte = T.builtin UInt8 in
-  let needs room =
-    oblige context frame Requires (at frame node)
-      (Printf.sprintf "`%s` may not have the room it writes into." (quote frame.source node.origin))
-      room
-  in
-  let room_for buffer count =
-    L.Apply
-      ("<=", [ L.Apply ("+", [ length byte buffer; count ]); buffer_capacity context byte buffer ])
-  in
-  (match (function_, operands) with
-  | (Write | Pwrite), _ :: bytes :: count :: _ ->
-      (* It reads at most [count] of the view's bytes, and writes at most
-         as many. *)
-      needs
-        (L.Apply
-           ("<=", [ count; sequence_length context byte (buffer_model context View byte bytes) ]));
-      assume context frame (L.Apply ("<=", [ known; count ]))
-  | (Read | Pread), _ :: buffer :: count :: _ ->
-      (* It fills at most [count] bytes of the room after the storage's
-         elements, which are the storage's only once [storage_lengthen]
-         says so. *)
-      needs (room_for buffer count);
-      assume context frame (L.Apply ("<=", [ known; count ]))
-  | Snprintf, buffer :: size :: _ ->
-      (* It fills at most [size] bytes of the room after the storage's
-         elements. It returns how many it would have written, which may be
-         more. *)
-      needs (room_for buffer size)
-  | _ -> ());
+    arguments;
+  (match Option.bind at_most value_of with
+  | Some bound ->
+      assume context frame L.(Apply (">=", [ known; int 0 ]) ==> Apply ("<=", [ known; bound ]))
+  | None -> ());
   known
+
+(* A number of the system that the C library's headers define, such as
+   [PATH_MAX]: one constant, whatever call gives it, so the room a caller
+   makes for it and the room a function needs are the same term. *)
+and libc_number context frame (number : Libc.number) =
+  let symbol = "libc.number." ^ Libc.number_name number in
+  declare context (L.Constant (symbol, L.Int));
+  let term = L.Symbol symbol in
+  assume context frame
+    (in_range (T.builtin (Intrinsic.libc_builtin (Libc.number_type number))) term);
+  term
 
 and integer_intrinsic context frame (operation : Intrinsic.operation) types operands known =
   let integer = match types with ty :: _ -> bounds ty | [] -> None in
