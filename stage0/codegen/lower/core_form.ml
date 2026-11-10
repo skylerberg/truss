@@ -476,7 +476,7 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
       | Returns _ ->
           call_instance st
             (Code { path; type_arguments })
-            ~signature ~substitution ~arguments ~mask ~destination
+            ~signature ~substitution ~arguments ~mask ~destination ()
       | Yields _ ->
           (* A yielding method called outside a [for] loop makes a cursor,
              which holds its arguments. *)
@@ -973,7 +973,7 @@ and call_with_places st (callee : Core.callee) (places : Lir.place list) ~destin
   in
   call_instance st
     (Code { path; type_arguments })
-    ~signature ~substitution ~arguments ~mask:0 ~destination
+    ~signature ~substitution ~arguments ~destination ()
 
 (* The default of a field, from the core form of the type's definition. *)
 and field_default st (ty : Ground.ty) ~variant ~field : Core.expression =

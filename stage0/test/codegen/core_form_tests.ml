@@ -1506,6 +1506,23 @@ test "a range of characters counts letters, and steps over the surrogates" {
 }
 |}
 
+let () =
+  passes "a function with a default, called through a function value, uses what it is given"
+    {|fn scale(value: Int64, by: Int64 = 3) -> Int64 {
+  value.wrapping_multiply(by)
+}
+
+fn apply(change: fn(Int64, Int64) -> Int64) -> Int64 {
+  change(2, 5)
+}
+
+test "a function with a default, used as a value, uses the argument it is called with" {
+  assert scale(2) == 6
+  assert scale(2, by: 5) == 10
+  assert apply(scale) == 10
+}
+|}
+
 (* Checks which of a module's constants fold and which are worked out by
    running their evaluators, and that the module's test passes. *)
 let folds what ~folded ~run source =

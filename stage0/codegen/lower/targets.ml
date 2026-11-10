@@ -486,8 +486,20 @@ let called (key : Instance.key) : Instance.key =
       | None -> key)
   | key -> key
 
+(* The mask of a call that passes every argument: a bit for each parameter
+   that has a default. *)
+let all_passed (signature : T.signature) =
+  let defaulted =
+    List.length (List.filter (fun (p : T.parameter_info) -> p.has_default) signature.parameters)
+  in
+  (1 lsl defaulted) - 1
+
+(* Calls an instance with an argument in a place for each parameter. [mask]
+   says which of the parameters with defaults were passed, where the call
+   left some to the callee; without it every argument is one to use. *)
 let call_instance st key ~(signature : T.signature) ~substitution
-    ~(arguments : (T.mode * Ground.ty * Lir.place) list) ~mask ~destination =
+    ~(arguments : (T.mode * Ground.ty * Lir.place) list) ?mask ~destination () =
+  let mask = match mask with Some mask -> mask | None -> all_passed signature in
   let lir_signature, result =
     lir_signature st.context substitution ~parameters:(interface_parameters signature)
       ~has_defaults:(has_defaults signature) ~uses:signature.uses signature.output
@@ -709,5 +721,5 @@ let trait_call st ~trait ~name ~(receiver : Path.receiver) ~self ~arguments ~des
         (Code { path; type_arguments })
         ~signature
         ~substitution:(bind signature.generics type_arguments)
-        ~arguments ~mask:0 ~destination
+        ~arguments ~destination ()
   | _ -> bug "%s has no impl of %s" (Ground.to_string self) (Path.show trait)
