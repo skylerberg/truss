@@ -141,9 +141,10 @@ run while compiling, is built with the checks below whether or not the
 prover has finished, so tests run alongside the prover, and a broken
 contract is a failed test rather than a wrong answer or a memory error.
 The checks do not depend on which proofs passed, so neither do the test
-build's LIR and the test results cached under it. A program is built
-without them, once its proofs are done. Stage0 builds programs with the
-checks too, whether or not their proofs are done:
+build's LIR and the test results cached under it. `truss build` builds a
+program without them, since it builds only once every proof the program
+reaches, the standard library's included, is done; `truss run` keeps them,
+since it does not wait for proofs:
 - Each `requires` clause that can run is tested on entry to its function,
   and to each inlined lending or yielding body, with the parameters bound.
   It panics with "requirement not met: requires ...". That is how an index
@@ -1463,12 +1464,6 @@ a command line can hold.
 
 ## Not built
 
-- **Programs built without checks.** A program is to be built without the
-  checks a test build has, once its proofs are done. Stage0 builds programs
-  with the checks too. A flag for testing the compiler, `--check-proofs`, is
-  then to build a program with the checks: a failed check in code whose
-  obligations were all proven reports a prover bug with the obligation's
-  position, which checks the prover against real executions.
 - **A `requires` check that reports its caller's position.** One of a
   function called reports the clause's own. Rust's `#[track_caller]` does
   this by passing the caller's location.

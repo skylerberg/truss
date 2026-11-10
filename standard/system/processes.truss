@@ -16,8 +16,12 @@ impl Processes for SystemProcesses {
     let first = intrinsic::view_address(intrinsic::storage_view(texts))
     let count = intrinsic::storage_length(starts)
     var addresses: intrinsic::Storage[USize] = intrinsic::storage_with_capacity(count + 1)
-    for index in 0..count {
-      intrinsic::storage_push(mut addresses, value: first + intrinsic::view_at(intrinsic::storage_view(starts), index: index))
+    for index in 0..count
+      invariant intrinsic::storage_length(addresses) == yielded.length()
+      invariant intrinsic::storage_capacity(addresses) == count + 1
+    {
+      let start = intrinsic::view_at(intrinsic::storage_view(starts), index: index)
+      intrinsic::storage_push(mut addresses, value: first.wrapping_add(start))
     }
     intrinsic::storage_push(mut addresses, value: 0)
     var process: Int32 = 0
@@ -52,8 +56,13 @@ fn add_ended_with_zero_byte(
   starts: mut intrinsic::Storage[USize],
 ) -> Result[Unit, Int32] {
   growth::push(mut starts, value: intrinsic::storage_length(texts))
-  growth::reserve(mut texts, additional: intrinsic::view_length(bytes) + 1)
-  for index in 0..intrinsic::view_length(bytes) {
+  let start = intrinsic::storage_length(texts)
+  let length = intrinsic::view_length(bytes)
+  growth::reserve(mut texts, additional: length + 1)
+  for index in 0..length
+    invariant intrinsic::storage_length(texts) == start + yielded.length()
+    invariant intrinsic::storage_capacity(texts) >= start + length + 1
+  {
     let byte = intrinsic::view_at(bytes, index: index)
     if byte == 0 {
       return Err(intrinsic::libc_einval())

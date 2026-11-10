@@ -39,41 +39,39 @@ let inherited database impl (signature : signature) name =
    law's name, with the proof's source and body. *)
 let law_proofs database package trait (for_type : Types.ty) =
   let head = match for_type with Named { path; _ } -> Some path | _ -> None in
-  match Workspace.package database package with
-  | None -> []
-  | Some { modules; _ } ->
-      List.concat_map
-        (fun module_ ->
-          List.filter_map
-            (fun (declaration : Names.declaration) ->
-              let key = Names.key_of declaration in
-              match
-                ( Query.demand database Names.definition key,
-                  Query.demand database Resolve.resolved key,
-                  Translate.callee_source database key )
-              with
-              | ( Some { kind = Law_proof { trait_; law; type_; body }; _ },
-                  Some resolved,
-                  Some proof_source ) -> (
-                  let named_trait =
-                    match resolved.names.(trait_.path.last.id) with
-                    | Some (Definition (_, path)) -> Path.equal path trait
-                    | _ -> false
-                  in
-                  let named_type =
-                    match (type_.kind, head) with
-                    | Path_type written, Some head -> (
-                        match resolved.names.(written.path.last.id) with
-                        | Some (Definition (_, path)) -> Path.equal path head
-                        | _ -> false)
-                    | _ -> false
-                  in
-                  match (named_trait, named_type) with
-                  | true, true -> Some (law.text, (proof_source, body))
-                  | _ -> None)
+  let modules = Query.demand database Workspace.modules package in
+  List.concat_map
+    (fun module_ ->
+      List.filter_map
+        (fun (declaration : Names.declaration) ->
+          let key = Names.key_of declaration in
+          match
+            ( Query.demand database Names.definition key,
+              Query.demand database Resolve.resolved key,
+              Translate.callee_source database key )
+          with
+          | ( Some { kind = Law_proof { trait_; law; type_; body }; _ },
+              Some resolved,
+              Some proof_source ) -> (
+              let named_trait =
+                match resolved.names.(trait_.path.last.id) with
+                | Some (Definition (_, path)) -> Path.equal path trait
+                | _ -> false
+              in
+              let named_type =
+                match (type_.kind, head) with
+                | Path_type written, Some head -> (
+                    match resolved.names.(written.path.last.id) with
+                    | Some (Definition (_, path)) -> Path.equal path head
+                    | _ -> false)
+                | _ -> false
+              in
+              match (named_trait, named_type) with
+              | true, true -> Some (law.text, (proof_source, body))
               | _ -> None)
-            (Query.demand database Names.declarations module_))
-        modules
+          | _ -> None)
+        (Query.demand database Names.declarations module_))
+    modules
 
 (* An [impl]'s obligation to keep each law of its trait. *)
 let impl_laws database (key : Names.key) source (definition : definition) =
@@ -89,8 +87,14 @@ let impl_laws database (key : Names.key) source (definition : definition) =
       ]
   | _ -> []
 
+(* [standard::specification]'s contracts say what the mathematical
+   collections are, so they are the trusted base, not obligations. *)
+let specification (key : Names.key) =
+  key.module_ = { package = "standard"; modules = [ "specification" ] }
+
 let prove database (key : Names.key) =
   match (Query.demand database Names.definition key, Translate.callee_source database key) with
+  | _ when specification key -> Not_proven_here
   | Some definition, Some source -> (
       try
         match definition.kind with

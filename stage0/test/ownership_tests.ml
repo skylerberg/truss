@@ -584,6 +584,9 @@ let tally =
    impl Index for Tally {\n\
   \  type Key = USize\n\
   \  type Output = Int64\n\n\
+  \  fn contains_key(self, key: USize) -> Bool {\n\
+  \    key < self.cells.length()\n\
+  \  }\n\n\
   \  fn at(self, key: USize) lends Int64 {\n\
   \    yield self.cells[key]\n\
   \  }\n\n\

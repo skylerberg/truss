@@ -511,8 +511,8 @@ let () =
          {\n\
         \  Counter(count: 5).next()\n\
          }\n");
-  test "a mut argument that is part of a value leaves its value unknown" (fun () ->
-      not_proven
+  test "a mut argument that is a field leaves the rest of its value as it was" (fun () ->
+      proven
         "type Point(x: Int64, y: Int64)\n\n\
          fn bump(value: mut Int64)\n\
         \  requires value < 100\n\
@@ -521,11 +521,24 @@ let () =
         \  value += 1\n\
          }\n\n\
          fn f() -> Int64\n\
-        \  ensures result == 2\n\
+        \  ensures result == 4\n\
          {\n\
         \  var point = Point(x: 1, y: 2)\n\
         \  bump(mut point.x)\n\
-        \  point.y\n\
+        \  point.x + point.y\n\
+         }\n");
+  test "a mut argument that is a field is known only by what the callee promises" (fun () ->
+      not_proven
+        "type Point(x: Int64, y: Int64)\n\n\
+         fn reset(value: mut Int64) {\n\
+        \  value = 0\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  ensures result == 0\n\
+         {\n\
+        \  var point = Point(x: 1, y: 2)\n\
+        \  reset(mut point.x)\n\
+        \  point.x\n\
          }\n"
         "prover.ensures");
   test "assigning a field keeps the other fields" (fun () ->
@@ -2220,6 +2233,42 @@ let () =
       let second = key_of "fn g(total: UInt8) -> UInt8 {\n  total + 1\n}\n" in
       if first <> second || first = "none" then fail "%s and %s" first second)
 
+(* Short-circuit operators *)
+
+let bump =
+  "fn bump(count: mut UInt8) -> Bool\n\
+  \  requires count < 200\n\
+  \  ensures count == old(count) + 1\n\
+  \  ensures result\n\
+   {\n\
+  \  count += 1\n\
+  \  true\n\
+   }\n\n"
+
+let () =
+  test "a change on the right of && happens only where the left holds" (fun () ->
+      proven
+        (bump
+       ^ "fn f(go: Bool) -> UInt8\n\
+         \  ensures go ==> result == 1\n\
+         \  ensures !go ==> result == 0\n\
+          {\n\
+         \  var count: UInt8 = 0\n\
+         \  let _ = go && bump(mut count)\n\
+         \  count\n\
+          }\n"));
+  test "a change on the right of || is not known to have happened" (fun () ->
+      not_proven
+        (bump
+       ^ "fn f(done: Bool) -> UInt8\n\
+         \  ensures result == 1\n\
+          {\n\
+         \  var count: UInt8 = 0\n\
+         \  let _ = done || bump(mut count)\n\
+         \  count\n\
+          }\n")
+        "prover.ensures")
+
 (* Function values in the logic *)
 
 let apply_function =
@@ -2304,6 +2353,16 @@ let () =
       proven
         ("fn half(value: Int64) -> Int64\n  cost time O(1)\n{\n  value / 2\n}\n\n" ^ apply_function
        ^ "fn f() -> Int64\n  ensures result == 3\n{\n  apply(half, value: 7)\n}\n"))
+
+let () =
+  test "a specification spends nothing, whatever it calls" (fun () ->
+      proven
+        "fn f(items: List[Int64], keep: (fn(Int64) -> Bool cost time finite)) -> USize\n\
+        \  requires forall i in 0..items.length() => keep(items.model()[i])\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  items.length()\n\
+         }\n")
 
 (* Sums over sequences *)
 

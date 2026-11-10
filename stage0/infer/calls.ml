@@ -66,7 +66,6 @@ let rec function_value_call state env (value : expression) (callee : expression)
             arguments = checked;
             defaults_left_out = [];
             uses = function_type.uses;
-            capability_arguments = [];
             result;
           };
       Form.draft_call ~through:callee state value;
@@ -297,7 +296,7 @@ and named_call state env ?expected (value : expression) path (signature : T.sign
   let instance = instantiate state value.span signature in
   explicit_type_arguments state value instance type_arguments;
   (match (expected, instance.signature.output) with
-  | Some expected, Returns output -> ignore (unify state output expected)
+  | Some expected, Returns output -> hint state output expected
   | _ -> ());
   let matched, left_out =
     match_arguments state value instance.signature.parameters arguments ~record:false
@@ -319,7 +318,7 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
     | None -> instantiate_type state value.span type_path
   in
   let type_ = T.Named { path = type_path; arguments = type_arguments } in
-  (match expected with Some expected -> ignore (unify state type_ expected) | None -> ());
+  (match expected with Some expected -> hint state type_ expected | None -> ());
   let fields =
     match variant with
     | None -> (
@@ -380,7 +379,6 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
             arguments = checked;
             defaults_left_out = left_out;
             uses = [];
-            capability_arguments = [];
             result = type_;
           };
       Form.draft_call state value;

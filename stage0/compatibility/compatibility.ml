@@ -97,7 +97,10 @@ let signature ~(before : T.signature) ~(after : T.signature) =
           | T.Capability path ->
               Breaks (Printf.sprintf "uses `%s`, which it did not" (Path.show path))
           | T.Capability_parameter parameter ->
-              Breaks (Printf.sprintf "uses `%s`, which it did not" parameter.name))
+              Breaks (Printf.sprintf "uses `%s`, which it did not" parameter.name)
+          | T.Capability_variable _ ->
+              Compiler_bug.bug ~stage:"Compatibility"
+                "a signature holds an unknown set of capabilities")
         more;
       (if fewer <> [] then [ Grows "uses fewer capabilities" ] else []);
       (if gained_default then [ Grows "has a default it did not" ] else []);

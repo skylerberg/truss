@@ -3,14 +3,20 @@
 
    This runs on a definition's core form, where every call the code makes is
    a node, whether it was written as a call or as a loop, an operator, or an
-   interpolation. It sets on each call what each capability parameter of
-   what is called stands for there, and on each [provide] what its
-   implementations provide. Each walk returns the capabilities its code
-   uses, which is what a lambda's [uses] are inferred from. *)
+   interpolation. What each call needs must be within what is available
+   where it is: the function's [uses] and what an enclosing [provide]
+   provides, or inside a lambda the [uses] of the lambda's type.
+
+   A capability parameter of what a call calls stands there for an unknown
+   set, which is in the type of everything that got it from the call. What
+   a call needs and what a lambda's type lists may hold such unknowns, so
+   nothing is decided as the form is walked: each need is noted, with those
+   that checking the bodies noted where a function value met a function
+   type, and then every unknown is solved as the least set that holds what
+   must be within it. *)
 
 open Syntax
 module T = Types
-module C = Checked
 module Names = Resolve.Names
 module Environment = Interface.Environment
 open State
@@ -33,62 +39,34 @@ let show_capability = function
   | T.Capability (Top { name; _ }) -> name
   | T.Capability path -> Path.show path
   | T.Capability_parameter { name; _ } -> name
+  | T.Capability_variable _ -> "_"
 
 let union left right = List.sort_uniq compare (left @ right)
-let minus left right = List.filter (fun capability -> not (List.mem capability right)) left
 
-(* Where code is: what it may use, and whether it reports what it may not
-   (inside a lambda, what it uses is collected instead, for its [uses]).
-   [restricted] names code that may use less than the function declares: a
-   [parallel] branch, which may use only [Panic], or a specification or a
-   proof, which may use nothing. *)
+(* Where code is, by what it may use. *)
+type place =
+  | Body  (** A function's or a test's own code. *)
+  | Lambda of Core.origin
+      (** A lambda's body, which may use what the lambda's type lists: where that holds an unknown,
+          the unknown comes to hold what the body needs. *)
+  | Restricted of string
+      (** Code that may use less than the function declares: a [parallel] branch, which may use only
+          [Panic], or a specification or a proof, which may use nothing. *)
+
 type scope = {
   available : T.capability list;
-  collecting : bool;
-  restricted : string option;
+  place : place;
   handed_on : T.capability option;
       (** In an implementation of a capability, that capability, which only calls through function
           values may use. *)
-  own : T.parameter list;
-      (** The capability parameters of the function being checked, each of which stands for itself.
-      *)
-  passed : (T.parameter * T.capability list ref) list;
-      (** In the arguments of a call, each capability parameter of what it calls, with what has been
-          passed for it so far, nearest call first. *)
 }
 
 (* Code that may use only [Panic], whatever the function declares. *)
-let only_panic scope reason =
-  { scope with available = [ panic ]; collecting = false; restricted = Some reason }
+let only_panic reason = { available = [ panic ]; place = Restricted reason; handed_on = None }
 
 (* Code that may use no capability at all, not even [Panic]: a
    specification or a proof, whose meaning must be a value. *)
-let pure_only scope reason =
-  { scope with available = []; collecting = false; restricted = Some reason }
-
-(* The capabilities a type implements, each with the [impl] that provides
-   it, its generic arguments, and its interface. An [impl] lives with its
-   type or its capability, so it is in the type's package, this one, or the
-   standard library, where the capabilities a dependency could not see are
-   not. *)
-let capability_impls (state : state) (type_ : T.ty) =
-  match type_ with
-  | T.Named { path; _ } ->
-      List.filter_map
-        (fun (trait, _) ->
-          if Interface.Summary.kind_of state.database trait = Some Capability then
-            match implements state type_ (trait_reference trait) with
-            | Some (Interface.Impls.From_impl { impl; substitution }) ->
-                Option.map
-                  (fun interface ->
-                    ({ Core.capability = trait; impl; arguments = substitution }, interface))
-                  (Interface.Impls.impl_interface state.database impl)
-            | _ -> None
-          else None)
-        (List.concat_map
-           (fun package -> Interface.Impls.impls_for state.database path package)
-           (List.sort_uniq compare [ Path.package path; state.package; "standard" ]))
-  | _ -> []
+let pure_only reason = { available = []; place = Restricted reason; handed_on = None }
 
 (* A dependency may use only what its manifest entry grants: [what] of the
    [package] uses [uses], except what reaches it through a capability
@@ -99,40 +77,6 @@ let check_grant checking (origin : Core.origin) ~what package (uses : T.capabili
       report checking Not_granted origin (Interface.Grants.message ~what ~of_:package capability))
     (Interface.Grants.missing checking.state.database ~package:checking.state.package ~of_:package
        uses)
-
-(* A function value that uses more than the function type it meets lists.
-   What the type does not list is passed for the type's capability
-   parameters, each of which the nearest call around of the function it
-   belongs to solves. With no such call, nothing allows it. *)
-let pass checking scope (origin : Core.origin) ~what ~uses ~unlisted =
-  if unlisted <> [] then
-    match
-      List.filter_map
-        (function
-          | T.Capability_parameter parameter -> List.assoc_opt parameter scope.passed
-          | T.Capability _ -> None)
-        uses
-    with
-    | [] ->
-        List.iter
-          (fun capability ->
-            report checking Lambda_uses origin
-              (Printf.sprintf
-                 "%s uses `%s`, which the function type it is passed as does not allow." what
-                 (show_capability capability)))
-          unlisted
-    | solving -> List.iter (fun passed -> passed := union !passed unlisted) solving
-
-(* The signature of what a call calls, whose capability parameters the call
-   solves: a function's, or a trait's method's as the trait declares it. *)
-let called state (callee : Core.callee) : T.signature option =
-  match callee with
-  | Function { path; _ } -> Query.demand state.database Environment.signature path
-  | Trait_method { trait; name; receiver; _ } ->
-      Option.map
-        (fun (method_ : T.trait_method) -> method_.method_signature)
-        (Members.trait_method state.database trait.trait name receiver)
-  | Capability_method _ | Intrinsic _ | Value _ -> None
 
 (* What a dependency's code that is called uses must be granted to it: a
    function's, and for a trait's method what the trait declares for it and
@@ -172,186 +116,55 @@ let check_grants checking (origin : Core.origin) (callee : Core.callee) =
       | Bound | Dynamic -> ())
   | Capability_method _ | Intrinsic _ | Value _ -> ()
 
-(* What is needed must be available where the code is, unless the code is
-   a lambda's, whose needs are collected. *)
-let check_available checking scope (origin : Core.origin) ~through_value needed =
-  if not scope.collecting then
-    List.iter
-      (fun capability ->
-        if
-          not
-            (List.mem capability scope.available
-            || (through_value && scope.handed_on = Some capability))
-        then
-          report checking Not_available origin
-            (match scope.restricted with
-            | Some reason when scope.available = [] ->
-                Printf.sprintf
-                  "This call uses `%s`, but %s may use no capabilities, not even `Panic`: what it \
-                   means must be a value. A function that fails on some inputs says so with \
-                   `requires` instead."
-                  (show_capability capability) reason
-            | Some reason ->
-                Printf.sprintf
-                  "This call uses `%s`, but %s may use only `Panic`, whatever the function \
-                   declares."
-                  (show_capability capability) reason
-            | None ->
-                Printf.sprintf
-                  "This call uses `%s`, which is not available here. Declare it with `uses %s`, or \
-                   `provide` an implementation."
-                  (show_capability capability) (show_capability capability)))
-      needed
-
-(* What the tables hold of a call that was written as one is kept the same
-   as the form's, for the stages that still read them. *)
-let record_in_tables state (origin : Core.origin) (call : Core.call) =
-  match state.tables.calls.(origin) with
-  | Some recorded
-    when match (recorded.callee, call.callee) with
-         | Function { path; _ }, Function { path = called; _ } -> Path.equal path called
-         | Trait_method { trait; name; _ }, Trait_method { trait = called; name = called_name; _ }
-           ->
-             Path.equal trait.trait called.trait && name = called_name
-         | Capability_method { capability; name }, Capability_method called ->
-             Path.equal capability called.capability && name = called.name
-         | Intrinsic { operation; _ }, Intrinsic called -> operation = called.operation
-         | Function_value, Value _ -> true
-         | _ -> false ->
-      state.tables.calls.(origin) <-
-        Some { recorded with capability_arguments = call.capability_arguments; uses = call.uses }
-  | _ -> ()
-
-let rec expression checking scope (node : Core.expression) : T.capability list =
+(* What code needs must be within what is available where it is. *)
+let need checking scope (origin : Core.origin) ?(implementation = false) ?(through_value = false)
+    (needed : T.capability list) =
   let state = checking.state in
-  (match node.kind with
-  | Convert { conversion = Widen; _ } -> (
-      match Hashtbl.find_opt state.widened node.origin with
-      | Some (uses, unlisted) ->
-          pass checking scope node.origin ~what:"This function" ~uses ~unlisted
-      | None -> ())
-  | _ -> ());
-  match node.kind with
-  | Lambda { body; _ } -> lambda checking scope node body
-  | Provide { implementations; body } -> provide checking scope node implementations body
-  | Quantified _ ->
-      (* A quantifier's body may use no capability, in code as in a
-         specification, since what it means must be a value the prover can
-         read. *)
-      ignore (inside checking (pure_only scope "a quantifier's body") (`Expression node));
-      []
-  | Function_value { path; _ } ->
-      (* A function taken as a value is named as surely as one that is
-         called, and whoever is handed the value may call it. *)
-      check_grants checking node.origin (Function { path; type_arguments = [] });
-      []
-  | Call call ->
-      (* What the arguments pass for each capability parameter of what is
-         called, which a call of a function by itself leaves as it is. *)
-      let callee = called state call.callee in
-      let passed =
-        match callee with
-        | Some signature ->
-            List.filter_map
-              (fun parameter ->
-                if List.mem parameter scope.own then None else Some (parameter, ref []))
-              (T.capability_parameters signature.generics)
-        | None -> []
-      in
-      let inner =
-        inside checking { scope with passed = passed @ scope.passed } (`Expression node)
-      in
-      union inner (call_needs checking scope node call passed)
-  | _ -> inside checking scope (`Expression node)
-
-(* What the nodes directly inside a node use. *)
-and inside checking scope node : T.capability list =
-  let used = ref [] in
-  let visit : Core_walk.visit =
-    {
-      expression = (fun inner -> used := union !used (expression checking scope inner));
-      statement = (fun inner -> used := union !used (statement checking scope inner));
-      pattern = (fun inner -> used := union !used (inside checking scope (`Pattern inner)));
-      callee = (fun called -> used := union !used (callee_needs checking scope node called));
-    }
+  let wanted =
+    if through_value then union scope.available (Option.to_list scope.handed_on)
+    else scope.available
   in
-  (match node with
-  | `Expression inner -> Core_walk.expression_parts visit inner
-  | `Statement inner -> Core_walk.statement_parts visit inner
-  | `Pattern inner -> Core_walk.pattern_parts visit inner);
-  !used
-
-and block checking scope (body : Core.block) : T.capability list =
-  let used =
-    List.fold_left
-      (fun used written -> union used (statement checking scope written))
-      [] body.statements
+  let lacking =
+    List.iter (fun capability ->
+        let shown = show_capability capability in
+        match scope.place with
+        | Lambda lambda ->
+            report checking Lambda_uses lambda
+              (Printf.sprintf
+                 "This lambda uses `%s`, which the function type it is passed as does not allow."
+                 shown)
+        | Restricted reason when scope.available = [] ->
+            report checking Not_available origin
+              (Printf.sprintf
+                 "This call uses `%s`, but %s may use no capabilities, not even `Panic`: what it \
+                  means must be a value. A function that fails on some inputs says so with \
+                  `requires` instead."
+                 shown reason)
+        | Restricted reason ->
+            report checking Not_available origin
+              (Printf.sprintf
+                 "This call uses `%s`, but %s may use only `Panic`, whatever the function declares."
+                 shown reason)
+        | Body when implementation ->
+            report checking Not_available origin
+              (Printf.sprintf "This implementation uses `%s`, which is not available here." shown)
+        | Body ->
+            report checking Not_available origin
+              (Printf.sprintf
+                 "This call uses `%s`, which is not available here. Declare it with `uses %s`, or \
+                  `provide` an implementation."
+                 shown shown))
   in
-  match body.value with Some value -> union used (expression checking scope value) | None -> used
-
-and statement checking scope (written : Core.statement) : T.capability list =
-  match written.kind with
-  | Parallel branches ->
-      (* Branches have only [Panic], so their results do not depend on the
-         order they run in. *)
-      List.iter
-        (fun branch -> ignore (statement checking (only_panic scope "a `parallel` branch") branch))
-        branches;
-      []
-  | For { parallel; pattern; drive; clauses; body } ->
-      let used =
-        match drive with
-        | Count { start; stop; _ } ->
-            union (expression checking scope start) (expression checking scope stop)
-        | Each each -> expression checking scope each
-        | Pull { cursor; next } ->
-            union
-              (expression checking scope cursor)
-              (match next with
-              | Some next -> callee_needs checking scope (`Statement written) next
-              | None -> [])
-      in
-      let used = union used (inside checking scope (`Pattern pattern)) in
-      specifications checking scope clauses;
-      if parallel then begin
-        ignore (block checking (only_panic scope "a `parallel for`") body);
-        used
-      end
-      else union used (block checking scope body)
-  | While { condition; clauses; body } ->
-      let used = expression checking scope condition in
-      specifications checking scope clauses;
-      union used (block checking scope body)
-  | Proof body ->
-      ignore (block checking (pure_only scope "a proof") body);
-      []
-  | _ -> inside checking scope (`Statement written)
-
-(* A loop's clauses are specifications, which may use nothing, whatever
-   the function around them declares. *)
-and specifications checking scope (clauses : Core.loop_clause list) =
-  List.iter
-    (Core_walk.loop_clause
-       {
-         Core_walk.nothing with
-         expression =
-           (fun value -> ignore (expression checking (pure_only scope "a specification") value));
-       })
-    clauses
+  if needed <> [] then state.within <- { given = needed; wanted; lacking } :: state.within
 
 (* What is called without being a call of its own: what a piece is
    displayed by, the method that gives a view, what builds a collection.
    It needs what its signature says it uses. *)
-and callee_needs checking scope node (callee : Core.callee) : T.capability list =
+let callee_needs checking scope (origin : Core.origin) (callee : Core.callee) =
   let state = checking.state in
-  let origin =
-    match node with
-    | `Expression (inner : Core.expression) -> inner.origin
-    | `Statement (inner : Core.statement) -> inner.origin
-    | `Pattern (inner : Core.pattern) -> inner.origin
-  in
-  let needed =
-    match callee with
+  check_grants checking origin callee;
+  need checking scope origin
+    (match callee with
     | Function { path; _ } -> (
         match Interface.Impls.signature state.database path with
         | Some signature -> signature.uses
@@ -361,69 +174,110 @@ and callee_needs checking scope node (callee : Core.callee) : T.capability list 
         | Some method_ -> method_.method_signature.uses
         | None -> [])
     | Capability_method { capability; _ } -> [ T.Capability capability ]
-    | Intrinsic _ | Value _ -> []
-  in
-  check_grants checking origin callee;
-  check_available checking scope origin ~through_value:false needed;
-  needed
+    | Intrinsic _ | Value _ -> [])
 
-(* What a call needs, with each capability parameter of what it calls
-   solved as what was passed for it. *)
-and call_needs checking scope (node : Core.expression) (call : Core.call) passed : T.capability list
-    =
-  let solved = List.map (fun (parameter, passed) -> (parameter, !passed)) passed in
-  let needed =
-    List.sort_uniq compare
-      (List.concat_map
-         (function
-           | T.Capability_parameter parameter as capability -> (
-               match List.assoc_opt parameter solved with Some set -> set | None -> [ capability ])
-           | capability -> [ capability ])
-         call.uses)
-  in
-  call.capability_arguments <- solved;
-  call.uses <- needed;
-  record_in_tables checking.state node.origin call;
-  (* A dependency may use only what its manifest grants, except what reaches
-     it through a capability parameter, which is the caller's own. *)
-  check_grants checking node.origin call.callee;
-  check_available checking scope node.origin
-    ~through_value:(match call.callee with Value _ -> true | _ -> false)
-    needed;
-  needed
+let rec expression checking scope (node : Core.expression) =
+  match node.kind with
+  | Lambda { body; _ } ->
+      (* A lambda's body may use what the lambda's type lists, which is the
+         function type it was checked against. *)
+      let uses = match node.type_ with T.Function { uses; _ } -> uses | _ -> [] in
+      block checking { available = uses; place = Lambda node.origin; handed_on = None } body
+  | Provide { implementations; body } -> provide checking scope implementations body
+  | Quantified _ ->
+      (* A quantifier's body may use no capability, in code as in a
+         specification, since what it means must be a value the prover can
+         read. *)
+      inside checking (pure_only "a quantifier's body") (`Expression node)
+  | Function_value { path; _ } ->
+      (* A function taken as a value is named as surely as one that is
+         called, and whoever is handed the value may call it. *)
+      check_grants checking node.origin (Function { path; type_arguments = [] })
+  | Call call ->
+      inside checking scope (`Expression node);
+      (* A dependency may use only what its manifest grants, except what
+         reaches it through a capability parameter, which is the caller's
+         own. *)
+      check_grants checking node.origin call.callee;
+      need checking scope node.origin
+        ~through_value:(match call.callee with Value _ -> true | _ -> false)
+        call.uses
+  | _ -> inside checking scope (`Expression node)
 
-(* A lambda's [uses] are inferred from its body, and must be within the
-   [uses] of the function type it is checked against, but for what a call
-   around it solves a capability parameter of that type as. *)
-and lambda checking scope (node : Core.expression) body =
-  let used = block checking { scope with available = []; collecting = true } body in
-  (match node.type_ with
-  | T.Function { uses; _ } ->
-      pass checking scope node.origin ~what:"This lambda" ~uses ~unlisted:(minus used uses)
-  | _ -> ());
-  []
+(* The nodes directly inside a node. *)
+and inside checking scope node =
+  let origin =
+    match node with
+    | `Expression (inner : Core.expression) -> inner.origin
+    | `Statement (inner : Core.statement) -> inner.origin
+    | `Pattern (inner : Core.pattern) -> inner.origin
+  in
+  let visit : Core_walk.visit =
+    {
+      expression = expression checking scope;
+      statement = statement checking scope;
+      pattern = (fun inner -> inside checking scope (`Pattern inner));
+      callee = callee_needs checking scope origin;
+    }
+  in
+  match node with
+  | `Expression inner -> Core_walk.expression_parts visit inner
+  | `Statement inner -> Core_walk.statement_parts visit inner
+  | `Pattern inner -> Core_walk.pattern_parts visit inner
+
+and block checking scope (body : Core.block) =
+  List.iter (statement checking scope) body.statements;
+  Option.iter (expression checking scope) body.value
+
+and statement checking scope (written : Core.statement) =
+  match written.kind with
+  | Parallel branches ->
+      (* Branches have only [Panic], so their results do not depend on the
+         order they run in. *)
+      List.iter (statement checking (only_panic "a `parallel` branch")) branches
+  | For { parallel; pattern; drive; clauses; body } ->
+      (match drive with
+      | Count { start; stop; _ } ->
+          expression checking scope start;
+          expression checking scope stop
+      | Each each -> expression checking scope each
+      | Pull { cursor; next } ->
+          expression checking scope cursor;
+          Option.iter (callee_needs checking scope written.origin) next);
+      inside checking scope (`Pattern pattern);
+      specifications checking clauses;
+      block checking (if parallel then only_panic "a `parallel for`" else scope) body
+  | While { condition; clauses; body } ->
+      expression checking scope condition;
+      specifications checking clauses;
+      block checking scope body
+  | Proof body -> block checking (pure_only "a proof") body
+  | _ -> inside checking scope (`Statement written)
+
+(* A loop's clauses are specifications, which may use nothing, whatever
+   the function around them declares. *)
+and specifications checking (clauses : Core.loop_clause list) =
+  List.iter
+    (Core_walk.loop_clause
+       { Core_walk.nothing with expression = expression checking (pure_only "a specification") })
+    clauses
 
 (* [provide]: each implementation's type provides every capability it
    implements, each of whose [impl]s needs its own [uses] here. A place is
    marked [mut] exactly when one of those [impl]s changes it. *)
-and provide checking scope (node : Core.expression) implementations body =
+and provide checking scope implementations body =
   let state = checking.state in
-  let used = ref [] in
   let provided = ref [] in
   List.iter
     (fun (implementation : Core.implementation) ->
-      let visit : Core_walk.visit =
-        {
-          Core_walk.nothing with
-          expression = (fun inner -> used := union !used (expression checking scope inner));
-        }
-      in
-      Core_walk.operand visit implementation.value;
-      let type_ = implementation.type_ in
-      let impls = capability_impls state type_ in
+      Core_walk.operand
+        { Core_walk.nothing with expression = expression checking scope }
+        implementation.value;
+      let impls = Form.capability_impls state implementation.type_ in
       if impls = [] then
         report checking Not_an_implementation implementation.origin
-          (Printf.sprintf "`%s` implements no capability, so it provides nothing." (T.show type_));
+          (Printf.sprintf "`%s` implements no capability, so it provides nothing."
+             (T.show implementation.type_));
       let changes =
         List.exists
           (fun (_, (interface : T.impl_interface)) ->
@@ -452,48 +306,67 @@ and provide checking scope (node : Core.expression) implementations body =
               (Printf.sprintf "The `impl` of `%s` for `%s`" (Path.show found.capability)
                  (T.show interface.for_type))
             (Path.package found.impl) interface.impl_uses;
-          used := union !used interface.impl_uses;
-          if not scope.collecting then
-            List.iter
-              (fun capability ->
-                if not (List.mem capability scope.available) then
-                  report checking Not_available implementation.origin
-                    (Printf.sprintf "This implementation uses `%s`, which is not available here."
-                       (show_capability capability)))
-              interface.impl_uses)
+          need checking scope implementation.origin ~implementation:true interface.impl_uses)
         impls;
       provided :=
         union !provided
-          (List.map (fun ((found : Core.provided), _) -> T.Capability found.capability) impls);
-      implementation.provides <- List.map fst impls)
+          (List.map (fun ((found : Core.provided), _) -> T.Capability found.capability) impls))
     implementations;
-  state.tables.provides.(node.origin) <-
-    Some
-      {
-        implementations =
-          List.map
-            (fun (implementation : Core.implementation) ->
-              ( implementation.origin,
-                List.map
-                  (fun ({ capability; impl; arguments } : Core.provided) : C.provided ->
-                    { capability; impl; arguments })
-                  implementation.provides ))
-            implementations;
-      };
-  let body_used = block checking { scope with available = union scope.available !provided } body in
-  union !used (minus body_used !provided)
+  block checking { scope with available = union scope.available !provided } body
+
+(* Solves every unknown set as the least that holds what must be within
+   it, and then reports what is still not within what it must be. *)
+let solve (state : state) =
+  let solution = Hashtbl.create 8 in
+  let known capabilities =
+    List.concat_map
+      (function
+        | T.Capability_variable unknown ->
+            Option.value ~default:[] (Hashtbl.find_opt solution unknown)
+        | capability -> [ capability ])
+      capabilities
+  in
+  let lacking (constraint_ : within) =
+    let have = known constraint_.wanted in
+    List.sort_uniq compare
+      (List.filter (fun capability -> not (List.mem capability have)) (known constraint_.given))
+  in
+  let rec grow () =
+    let grew =
+      List.fold_left
+        (fun grew (constraint_ : within) ->
+          match
+            ( List.filter_map
+                (function T.Capability_variable unknown -> Some unknown | _ -> None)
+                constraint_.wanted,
+              lacking constraint_ )
+          with
+          | [], _ | _, [] -> grew
+          | unknowns, lacking ->
+              List.iter
+                (fun unknown ->
+                  Hashtbl.replace solution unknown
+                    (union lacking (Option.value ~default:[] (Hashtbl.find_opt solution unknown))))
+                unknowns;
+              true)
+        false state.within
+    in
+    if grew then grow ()
+  in
+  grow ();
+  state.capabilities <- Some solution;
+  List.iter
+    (fun (constraint_ : within) ->
+      match lacking constraint_ with [] -> () | lacking -> constraint_.lacking lacking)
+    (List.rev state.within)
 
 let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
   let checking = { state; spans = Syntax_walk.spans state.definition } in
-  let scope ?(own = []) available =
-    { available; collecting = false; restricted = None; handed_on = None; own; passed = [] }
-  in
+  let body ?handed_on available = { available; place = Body; handed_on } in
   (* What states and does not run may use nothing: a contract, what a
      function-typed parameter requires, an invariant, a potential, and a
      law. *)
-  let specification value =
-    ignore (expression checking (pure_only (scope []) "a specification") value)
-  in
+  let specification = expression checking (pure_only "a specification") in
   (match form.parts with
   | Function { parameters; contract; _ } ->
       List.iter
@@ -518,11 +391,12 @@ let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
       List.iter
         (fun (law : Core.law) ->
           List.iter specification law.requires;
-          ignore (block checking (pure_only (scope []) "a law") law.body))
+          block checking (pure_only "a law") law.body)
         laws
   | Constant _ | Test _ | Law_proof _ | Nothing -> ());
-  match (form.parts, state.definition.kind, lowered.interface) with
-  | Function { body; _ }, (Function _ | Method_declaration _), Function_interface signature ->
+  (match (form.parts, state.definition.kind, lowered.interface) with
+  | Function { body = code; _ }, (Function _ | Method_declaration _), Function_interface signature
+    ->
       (* Inside an implementation of a capability, a function value it
          calls may use the capability, which there means this
          implementation, as [write_with] hands [FileWrite] to its
@@ -537,17 +411,9 @@ let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
                 Some (T.Capability impl.implements.trait)
             | _ -> None)
       in
-      Option.iter
-        (fun body ->
-          ignore
-            (block checking
-               {
-                 (scope ~own:(T.capability_parameters signature.generics) signature.uses) with
-                 handed_on;
-               }
-               body))
-        body
-  | Test body, _, Test_interface uses -> ignore (block checking (scope (union uses [ panic ])) body)
-  | Function { body = Some body; _ }, Theorem _, _ | Law_proof body, _, _ ->
-      ignore (block checking (pure_only (scope []) "a proof") body)
-  | _ -> ()
+      Option.iter (block checking (body ?handed_on signature.uses)) code
+  | Test code, _, Test_interface uses -> block checking (body (union uses [ panic ])) code
+  | Function { body = Some code; _ }, Theorem _, _ | Law_proof code, _, _ ->
+      block checking (pure_only "a proof") code
+  | _ -> ());
+  solve state

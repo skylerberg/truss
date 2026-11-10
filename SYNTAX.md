@@ -2403,13 +2403,18 @@ A trait can leave a type for each implementation to choose:
 trait Index {
   type Key
   type Output
+  fn contains_key(self, key: Self.Key) -> Bool
+    cost time finite
   fn at(self, key: Self.Key) lends Self.Output
+    requires self.contains_key(key)
   fn at(mut self, key: Self.Key) lends mut Self.Output
+    requires self.contains_key(key)
 }
 
 impl Index for Grid {
   type Key = Position
   type Output = Cell
+  fn contains_key(self, key: Position) -> Bool { todo }
   fn at(self, key: Position) lends Cell { todo }
   fn at(mut self, key: Position) lends mut Cell { todo }
 }
@@ -2425,6 +2430,10 @@ fn first[Items: Iterable](items: Items) -> Option[Items.Element]
 - A trait's own type parameters are the types an implementation can be
   chosen by, as in `From[Source]`. Its associated types are the types each
   implementation decides, as in `Index`'s `Output`.
+- A trait states its methods' preconditions through its own methods, as
+  `Index` does with `contains_key`, so generic code can show them, and an
+  implementation says what they mean for its type: a `List`'s keys are the
+  indexes below its length.
 
 ### Deriving
 

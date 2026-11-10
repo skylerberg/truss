@@ -17,4 +17,5 @@
   ownership
   intrinsic
   intrinsic_signatures
+  libc
   zarith))

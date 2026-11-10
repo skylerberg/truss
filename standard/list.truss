@@ -13,7 +13,7 @@ impl Model for List[Element] {
   fn model(self) -> Sequence[Element]
     cost time finite
   {
-    todo
+    intrinsic::storage_model(self.storage)
   }
 }
 
@@ -23,7 +23,7 @@ impl Model for Slice[Element] {
   fn model(self) -> Sequence[Element]
     cost time finite
   {
-    todo
+    intrinsic::view_model(self.elements)
   }
 }
 
@@ -58,10 +58,7 @@ public fn List[Element].push(mut self, item: own Element)
   ensures identical(self.model(), old(self.model()).append(item))
   cost amortized time O(1)
 {
-  if intrinsic::storage_length(self.storage) >= intrinsic::storage_capacity(self.storage) {
-    growth::reserve(mut self.storage, additional: 1)
-  }
-  intrinsic::storage_push(mut self.storage, value: own item)
+  growth::push(mut self.storage, value: own item)
 }
 
 public fn List[Element].pop(mut self) -> Option[Element] {
@@ -70,18 +67,38 @@ public fn List[Element].pop(mut self) -> Option[Element] {
 
 public fn List[Element].insert_at(mut self, position: USize, item: own Element)
   requires position <= self.length()
+  ensures self.model().length() == old(self.model()).length() + 1
+  ensures forall i in 0..position => identical(self.model()[i], old(self.model())[i])
+  ensures identical(self.model()[position], item)
+  ensures forall i: Integer =>
+    position <= i && i < old(self.model()).length() ==>
+      identical(self.model()[i + 1], old(self.model())[i])
+  ensures forall i: Integer =>
+    position < i && i < self.model().length() ==> identical(self.model()[i], old(self.model())[i - 1])
   cost time O(self.length())
 {
   growth::reserve(mut self.storage, additional: 1)
   intrinsic::storage_insert(mut self.storage, index: position, value: own item)
 }
 
-public fn List[Element].partition_point(self, before: fn(Element) -> Bool) -> USize
-  cost time O(log(self.length()))
+public fn List[Element].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> USize
+  requires forall i in 0..self.length() => forall j in i..self.length() =>
+    before(self.model()[j]) ==> before(self.model()[i])
+  ensures result <= self.length()
+  ensures forall i in 0..result => before(self.model()[i])
+  ensures forall i in result..self.length() => !before(self.model()[i])
+  cost time O(log(self.length()) * time(before))
 {
   var low: USize = 0
   var high = self.length()
-  while low < high {
+  while low < high
+    invariant low <= high
+    invariant high <= self.length()
+    invariant forall i in 0..low => before(self.model()[i])
+    invariant forall i in high..self.length() => !before(self.model()[i])
+    decreases high - low
+    cost time O((log(self.length()) - log(high - low)) * time(before))
+  {
     let middle = low + (high - low) / 2
     if before(self[middle]) {
       low = middle + 1
@@ -102,19 +119,31 @@ public fn List[Element].slice(self) -> Slice[Element]
 public fn List[Element].each(self) yields Element
   ensures identical(result, self[yielded.length()])
   ensures yielded.length() <= self.length()
-  ensures forall i in 0..yielded.length() => identical(yielded[i], self[i])
+  ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
   ensures finished ==> yielded.length() == self.length()
   ensures finished ==> identical(yielded, self.model())
   cost time O(self.length())
 {
-  for index in 0..self.length() {
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant yielded.length() == index
+    invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+    decreases self.length() - index
+  {
     yield self[index]
+    index += 1
   }
 }
 
 public fn List[Element].each(mut self) yields mut Element {
-  for index in 0..self.length() {
+  var index: USize = 0
+  while index < self.length()
+    invariant self.length() == old(self.length())
+    invariant index <= self.length()
+  {
     yield mut self[index]
+    index += 1
   }
 }
 
@@ -140,19 +169,32 @@ public fn Slice[Element].length(self) -> USize
 public fn Slice[Element].each(self) yields Element
   ensures identical(result, self[yielded.length()])
   ensures yielded.length() <= self.length()
-  ensures forall i in 0..yielded.length() => identical(yielded[i], self[i])
+  ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
   ensures finished ==> yielded.length() == self.length()
   ensures finished ==> identical(yielded, self.model())
   cost time O(self.length())
 {
-  for index in 0..self.length() {
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant yielded.length() == index
+    invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+    decreases self.length() - index
+  {
     yield self[index]
+    index += 1
   }
 }
 
 impl Index for List[Element] {
   type Key = USize
   type Output = Element
+
+  fn contains_key(self, key: USize) -> Bool
+    cost time O(1)
+  {
+    key < self.length()
+  }
 
   fn at(self, key: USize) lends Element
     requires key < self.length()
@@ -176,6 +218,12 @@ impl Index for Slice[Element] {
   type Key = USize
   type Output = Element
 
+  fn contains_key(self, key: USize) -> Bool
+    cost time O(1)
+  {
+    key < self.length()
+  }
+
   fn at(self, key: USize) lends Element
     requires key < self.length()
     ensures identical(result, self.model()[key])
@@ -190,14 +238,23 @@ impl Index for Slice[Element] {
 }
 
 impl Equal for List[Element: Equal] {
-  fn equal(self, other: List[Element]) -> Bool {
+  fn equal(self, other: List[Element]) -> Bool
+    ensures result == (self.length() == other.length()
+      && forall i in 0..self.length() => self.model()[i] == other.model()[i])
+  {
     if self.length() != other.length() {
       return false
     }
-    for index in 0..self.length() {
+    var index: USize = 0
+    while index < self.length()
+      invariant index <= self.length()
+      invariant forall i in 0..index => self.model()[i] == other.model()[i]
+      decreases self.length() - index
+    {
       if self[index] != other[index] {
         return false
       }
+      index += 1
     }
     true
   }
