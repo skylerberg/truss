@@ -100,3 +100,59 @@ test "a path is made from bytes only when they are UTF-8" {
   let invalid: List[UInt8] = [47, 255]
   assert Path.from_bytes(own invalid) is None
 }
+
+test "normalizing drops empty and single-dot components and resolves double dots" {
+  assert shows(Path.new("a/b/../c").normalized(), expected: "a/c")
+  assert shows(Path.new("a/./b").normalized(), expected: "a/b")
+  assert shows(Path.new("a//b/").normalized(), expected: "a/b")
+  assert shows(Path.new("./a").normalized(), expected: "a")
+  assert shows(Path.new("a/b/c/../../d").normalized(), expected: "a/d")
+  assert shows(Path.new("a/..").normalized(), expected: ".")
+  assert shows(Path.new("").normalized(), expected: ".")
+  assert shows(Path.new(".").normalized(), expected: ".")
+  assert shows(Path.new("a/../b").normalized(), expected: "b")
+  assert shows(Path.new("abc/def").normalized(), expected: "abc/def")
+}
+
+test "normalizing keeps the double dots that lead out of a relative path, and none above the root" {
+  assert shows(Path.new("../a").normalized(), expected: "../a")
+  assert shows(Path.new("a/../..").normalized(), expected: "..")
+  assert shows(Path.new("../../a/../b").normalized(), expected: "../../b")
+  assert shows(Path.new("a/../../b/../c").normalized(), expected: "../c")
+  assert shows(Path.new("/").normalized(), expected: "/")
+  assert shows(Path.new("//").normalized(), expected: "/")
+  assert shows(Path.new("/..").normalized(), expected: "/")
+  assert shows(Path.new("/a/../..").normalized(), expected: "/")
+  assert shows(Path.new("/a/b/../../../c").normalized(), expected: "/c")
+  assert shows(Path.new("/a/b/..").normalized(), expected: "/a")
+  assert shows(Path.new("/usr//local/./bin/").normalized(), expected: "/usr/local/bin")
+}
+
+fn within(base: StringSlice, part: StringSlice, expected: StringSlice) -> Bool {
+  match Path.new(base).join_within(Path.new(part)) {
+    Ok(joined) => shows(joined, expected: expected)
+    Err(_) => false
+  }
+}
+
+fn refused(base: StringSlice, part: StringSlice) -> Bool {
+  Path.new(base).join_within(Path.new(part)) is Err(error) && error == SystemError.PermissionDenied
+}
+
+test "joining within a directory refuses a part that would leave it" {
+  assert within("/srv/data", part: "a/b", expected: "/srv/data/a/b")
+  assert within("/srv/data", part: "a/../b", expected: "/srv/data/b")
+  assert within("/srv/data", part: "./a//b/", expected: "/srv/data/a/b")
+  assert within("/srv/data", part: ".", expected: "/srv/data")
+  assert within("/srv/data", part: "", expected: "/srv/data")
+  assert within("/srv/data", part: "a/..", expected: "/srv/data")
+  assert within("data", part: "x", expected: "data/x")
+  assert within("", part: "x", expected: "x")
+  assert within("/srv/data", part: "..a", expected: "/srv/data/..a")
+  assert refused("/srv/data", part: "..")
+  assert refused("/srv/data", part: "../x")
+  assert refused("/srv/data", part: "a/../../x")
+  assert refused("/srv/data", part: "a/b/../../..")
+  assert refused("/srv/data", part: "/etc/passwd")
+  assert refused("data", part: "/x")
+}

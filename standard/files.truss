@@ -49,6 +49,8 @@ internal fn component_after(text: StringSlice, from: USize) -> Span
   ensures from <= result.start
   ensures result.start <= result.end
   ensures result.end <= text.length()
+  ensures result.start == text.length() || text.byte(result.start) != 47
+  ensures result.end == text.length() || text.byte(result.end) == 47
   cost time O(result.end - from)
   cost allocations == 0
 {
@@ -138,6 +140,7 @@ internal fn extension_start(text: StringSlice, name: Span) -> USize
 }
 
 internal fn join_texts(first: StringSlice, second: StringSlice) -> Path
+  ensures result.text.length() <= first.length() + second.length() + 1
   cost time O(first.length() + second.length())
 {
   if second.length() > 0 && second.byte(0) == 47 {
@@ -183,7 +186,20 @@ public fn Path.join_within(self, part: Path) -> Result[Path, SystemError]
   }
   cost time O(self.text.length() + part.text.length())
 {
-  todo
+  if part.is_absolute() {
+    return Err(SystemError.PermissionDenied)
+  }
+  let inner = part.normalized()
+  let within = inner.text.slice()
+  if within.length() >= 2 && within.byte(0) == 46 && within.byte(1) == 46 && (within.length() == 2 || within.byte(2) == 47) {
+    return Err(SystemError.PermissionDenied)
+  }
+  let joined = if within.length() == 1 && within.byte(0) == 46 {
+    Path(text: self.text.slice().to_string())
+  } else {
+    self.join_path(inner)
+  }
+  if joined.starts_with(self) { Ok(own joined) } else { Err(SystemError.PermissionDenied) }
 }
 
 public fn Path.parent(self) -> Option[Path]
@@ -301,10 +317,84 @@ public fn Path.components(self) yields StringSlice
   }
 }
 
+internal fn parent_length(output: intrinsic::Storage[UInt8], floor: USize) -> USize
+  requires floor <= intrinsic::storage_length(output)
+  ensures floor <= result
+  ensures result <= intrinsic::storage_length(output)
+  cost time O(intrinsic::storage_length(output) - result)
+  cost allocations == 0
+{
+  var length = intrinsic::storage_length(output)
+  while length > floor && intrinsic::storage_at(output, index: length - 1) != 47
+    invariant floor <= length
+    invariant length <= intrinsic::storage_length(output)
+    decreases length
+    cost time O(intrinsic::storage_length(output) - length)
+    cost allocations == 0
+  {
+    length -= 1
+  }
+  if length > floor { length - 1 } else { length }
+}
+
 public fn Path.normalized(self) -> Path
+  ensures result.text.length() <= self.text.length() + 1
   cost time O(self.text.length())
 {
-  todo
+  let text = self.text.slice()
+  let absolute = self.is_absolute()
+  if text.length() > USize.maximum / 4 {
+    intrinsic::crash("a path cannot hold that many bytes".slice())
+  }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(text.length() + 1)
+  if absolute {
+    intrinsic::storage_push(mut output, value: 47)
+  }
+  var floor = intrinsic::storage_length(output)
+  var index: USize = 0
+  while index < text.length()
+    invariant index <= text.length()
+    invariant index == 0 || index == text.length() || text.byte(index) == 47
+    invariant !absolute || (text.length() > 0 && text.byte(0) == 47)
+    invariant floor <= intrinsic::storage_length(output)
+    invariant intrinsic::storage_length(output) <= index + 1
+    invariant index == 0 ==> floor == intrinsic::storage_length(output)
+    invariant index == 0 && !absolute ==> intrinsic::storage_length(output) == 0
+    invariant intrinsic::storage_capacity(output) == text.length() + 1
+    decreases text.length() - index
+    cost time O(3 * index + 1 - intrinsic::storage_length(output))
+  {
+    let span = component_after(text, from: index)
+    if span.is_empty() {
+      index = text.length()
+    } else {
+      let length = intrinsic::storage_length(output)
+      if is_dots(text, span: span) {
+        if span.end - span.start == 2 {
+          if length > floor {
+            intrinsic::storage_shorten(mut output, length: parent_length(output, floor: floor))
+          } else if !absolute {
+            if length > 0 {
+              intrinsic::storage_push(mut output, value: 47)
+            }
+            intrinsic::storage_push(mut output, value: 46)
+            intrinsic::storage_push(mut output, value: 46)
+            floor = intrinsic::storage_length(output)
+          }
+        }
+      } else {
+        if length > floor || (length > 0 && !absolute) {
+          intrinsic::storage_push(mut output, value: 47)
+        }
+        text.part(span.start, to: span.end).copy_onto(mut output)
+      }
+      index = span.end
+    }
+  }
+  if intrinsic::storage_length(output) == 0 {
+    intrinsic::storage_push(mut output, value: 46)
+  }
+  Path(text: String(storage: own output))
 }
 
 public fn Path.starts_with(self, base: Path) -> Bool
