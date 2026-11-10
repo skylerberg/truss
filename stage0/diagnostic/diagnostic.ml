@@ -186,6 +186,7 @@ module Code = struct
     | Provide_mark
     | Not_an_implementation
     | Callback_may_deadlock
+    | Monitor_needs_tasks
 
   type prover =
     | Overflow
@@ -424,6 +425,7 @@ module Code = struct
     | Provide_mark -> "provide_mark"
     | Not_an_implementation -> "not_an_implementation"
     | Callback_may_deadlock -> "callback_may_deadlock"
+    | Monitor_needs_tasks -> "monitor_needs_tasks"
 
   let package_name code =
     match code with

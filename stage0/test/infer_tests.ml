@@ -557,6 +557,107 @@ let () =
           \    serve(1)\n\
           \    serve(2)\n\
           \  }\n\
+           }\n"));
+   let tally =
+     "capability Counter {\n\
+     \  fn bump()\n\
+      }\n\n\
+      type Tally(count: USize)\n\n\
+      impl Counter for Tally {\n\
+     \  fn bump(mut self) {\n\
+     \    self.count = 1\n\
+     \  }\n\
+      }\n\n\
+      type Scheduler(turn: UInt64)\n\n\
+      impl Tasks for Scheduler {\n\
+     \  fn open(self) -> UInt64 {\n\
+     \    0\n\
+     \  }\n\n\
+     \  fn spawn(self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {\n\
+     \    false\n\
+     \  }\n\n\
+     \  fn join(self, task_group: UInt64) {}\n\n\
+     \  fn cancel(self, task_group: UInt64) -> Bool {\n\
+     \    false\n\
+     \  }\n\n\
+     \  fn cancelled(self) -> Bool {\n\
+     \    false\n\
+     \  }\n\n\
+     \  fn watch(self, key: UInt64) -> UInt64 {\n\
+     \    0\n\
+     \  }\n\n\
+     \  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {}\n\n\
+     \  fn wake(self, key: UInt64) {}\n\n\
+     \  fn lock(self, mutex: UInt64) {}\n\n\
+     \  fn unlock(self, mutex: UInt64) {}\n\n\
+     \  fn yield_now(self) {}\n\
+      }\n\n\
+      fn count_once()\n\
+     \  uses Counter\n\
+      {\n\
+     \  Counter.bump()\n\
+      }\n\n"
+   in
+   test "a monitor needs `Tasks` at its `provide`, not only in a nested one" (fun () ->
+       one_diagnostic
+         (tally
+        ^ "fn f() {\n\
+          \  var tally = Tally(count: 0)\n\
+          \  let scheduler = Scheduler(turn: 0)\n\
+          \  provide mut tally {\n\
+          \    provide scheduler {\n\
+          \      concurrent {\n\
+          \        count_once()\n\
+          \        count_once()\n\
+          \      }\n\
+          \    }\n\
+          \  }\n\
+           }\n")
+         "capabilities.monitor_needs_tasks");
+   test "a monitor needs `Tasks` when the body uses a capability parameter" (fun () ->
+       one_diagnostic
+         (tally
+        ^ "fn f[capability Granted](run: (fn() uses Granted))\n\
+          \  uses Granted\n\
+           {\n\
+          \  var tally = Tally(count: 0)\n\
+          \  provide mut tally {\n\
+          \    run()\n\
+          \  }\n\
+           }\n")
+         "capabilities.monitor_needs_tasks");
+   test "a monitor can lock through `Tasks` of the same or an enclosing `provide`" (fun () ->
+       fine
+         (tally
+        ^ "fn same() {\n\
+          \  var tally = Tally(count: 0)\n\
+          \  let scheduler = Scheduler(turn: 0)\n\
+          \  provide mut tally, scheduler {\n\
+          \    concurrent {\n\
+          \      count_once()\n\
+          \      count_once()\n\
+          \    }\n\
+          \  }\n\
+           }\n\n\
+           fn enclosing() {\n\
+          \  var tally = Tally(count: 0)\n\
+          \  let scheduler = Scheduler(turn: 0)\n\
+          \  provide scheduler {\n\
+          \    provide mut tally {\n\
+          \      concurrent {\n\
+          \        count_once()\n\
+          \        count_once()\n\
+          \      }\n\
+          \    }\n\
+          \  }\n\
+           }\n\n\
+           fn declared[capability Granted](run: (fn() uses Granted))\n\
+          \  uses Granted, Tasks\n\
+           {\n\
+          \  var tally = Tally(count: 0)\n\
+          \  provide mut tally {\n\
+          \    run()\n\
+          \  }\n\
            }\n")));
   test "an assignment through an index of a map takes the key as an owned value" (fun () ->
       fine

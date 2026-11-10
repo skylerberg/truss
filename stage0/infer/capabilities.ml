@@ -40,8 +40,9 @@ let tasks : T.capability = Capability Core_walk.tasks_capability
 type checking = {
   state : state;
   spans : span array;
-  mutable provides : (Core.implementation list * Core.block) list;
-      (** Every [provide] of the definition: its implementations and its body. *)
+  mutable provides : (T.capability list * Core.implementation list * Core.block) list;
+      (** Every [provide] of the definition: the capabilities available at it, its implementations,
+          and its body. *)
 }
 
 let report checking ?(fixes = []) code (origin : Core.origin) message =
@@ -370,7 +371,7 @@ and check_provide checking scope implementations body =
         union !provided
           (List.map (fun ((found : Core.provided), _) -> T.Capability found.capability) impls))
     implementations;
-  checking.provides <- (implementations, body) :: checking.provides;
+  checking.provides <- (scope.available, implementations, body) :: checking.provides;
   check_block checking { scope with available = union scope.available !provided } body
 
 (* Solves the definition's capability constraints.
@@ -472,6 +473,43 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
          | None -> false)
   | T.Projection _ | T.Never | T.Integer | T.Literal _ | T.Variable _ | T.Hole | T.Error _ -> false
 
+(* Data race prevention. A monitor locks its methods through [Tasks]: code
+   generation wraps each method with [Tasks.lock] and [Tasks.unlock], using
+   the implementation of [Tasks] in the same [provide], or else the one
+   that is available at the [provide]. If neither exists, the methods have
+   no lock, and two tasks could run a [mut self] method at the same time.
+   That happens when the only implementation of [Tasks] is provided in a
+   nested [provide], or when the body uses a capability parameter that is
+   instantiated with [Tasks]. An implementation of [Tasks] itself is not a
+   monitor. *)
+let check_monitor_lock checking ~solved available implementations =
+  let state = checking.state in
+  let provides_tasks (implementation : Core.implementation) =
+    List.exists
+      (fun ((found : Core.provided), (_ : T.impl_interface)) ->
+        Path.equal found.capability Core_walk.tasks_capability)
+      (Form.capability_impls state implementation.type_)
+  in
+  let available =
+    List.concat_map
+      (function T.Capability_variable variable -> solved variable | capability -> [ capability ])
+      available
+  in
+  if not (List.mem tasks available || List.exists provides_tasks implementations) then
+    List.iter
+      (fun (implementation : Core.implementation) ->
+        if implementation.mode = Mut && not (provides_tasks implementation) then
+          report checking Monitor_needs_tasks implementation.origin
+            (Printf.sprintf
+               "`%s` is provided `mut`, and the body of this `provide` can use `Tasks`, so two \
+                tasks could call its methods at the same time. Its methods are locked through \
+                `Tasks`, but `Tasks` is not available at this `provide`, and no implementation in \
+                it provides `Tasks`. Without the lock, the two calls are a data race. Provide the \
+                implementation of `Tasks` in this `provide` or in an enclosing one, or declare \
+                `uses Tasks`."
+               (T.show implementation.type_)))
+      implementations
+
 (* Deadlock prevention. Where the body of a [provide] can use [Tasks], an
    implementation that is provided [mut] is a monitor: each call of its
    methods runs to completion before the next call starts.
@@ -483,50 +521,49 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
    while the outer monitor is held. So a capability that a monitor
    implements has no method with a parameter that can call code with a
    [uses] clause. *)
-let check_monitor_callbacks checking ~solved (implementations, body) =
+let check_monitor_callbacks checking implementations =
   let state = checking.state in
-  if Core_walk.can_use_tasks ~solved body then
-    List.iter
-      (fun (implementation : Core.implementation) ->
-        if implementation.mode = Mut then
-          List.iter
-            (fun ((found : Core.provided), (_ : T.impl_interface)) ->
-              match Query.demand state.database Environment.trait_interface found.capability with
-              | Some capability ->
-                  List.iter
-                    (fun (method_ : T.trait_method) ->
-                      let signature = method_.method_signature in
-                      let bounds (parameter : T.parameter) =
-                        List.concat_map
-                          (fun (generic : T.generic) ->
-                            match generic.kind with
-                            | Type_generic bounds when generic.generic = parameter -> bounds
-                            | _ -> [])
-                          signature.generics
-                      in
-                      match
-                        List.find_opt
-                          (fun (parameter : T.parameter_info) ->
-                            can_call_capability_code state ~bounds parameter.type_)
-                          signature.parameters
-                      with
-                      | Some parameter ->
-                          report checking Callback_may_deadlock implementation.origin
-                            (Printf.sprintf
-                               "The body of this `provide` can use `Tasks`, so this implementation \
-                                is a monitor: each call of its methods runs to completion before \
-                                the next call starts. `%s.%s` takes `%s`, which can call code that \
-                                uses a capability. Called while the monitor is held, that code \
-                                could enter the monitor of a nested `provide`, and two tasks could \
-                                deadlock. Pass the method the values that it needs instead of a \
-                                callback."
-                               (show_capability (T.Capability found.capability))
-                               method_.method_name parameter.name)
-                      | None -> ())
-                    capability.methods
-              | None -> ())
-            (Form.capability_impls state implementation.type_))
-      implementations
+  List.iter
+    (fun (implementation : Core.implementation) ->
+      if implementation.mode = Mut then
+        List.iter
+          (fun ((found : Core.provided), (_ : T.impl_interface)) ->
+            match Query.demand state.database Environment.trait_interface found.capability with
+            | Some capability ->
+                List.iter
+                  (fun (method_ : T.trait_method) ->
+                    let signature = method_.method_signature in
+                    let bounds (parameter : T.parameter) =
+                      List.concat_map
+                        (fun (generic : T.generic) ->
+                          match generic.kind with
+                          | Type_generic bounds when generic.generic = parameter -> bounds
+                          | _ -> [])
+                        signature.generics
+                    in
+                    match
+                      List.find_opt
+                        (fun (parameter : T.parameter_info) ->
+                          can_call_capability_code state ~bounds parameter.type_)
+                        signature.parameters
+                    with
+                    | Some parameter ->
+                        report checking Callback_may_deadlock implementation.origin
+                          (Printf.sprintf
+                             "The body of this `provide` can use `Tasks`, so this implementation \
+                              is a monitor: each call of its methods runs to completion before the \
+                              next call starts. `%s.%s` takes `%s`, which can call code that uses \
+                              a capability. Called while the monitor is held, that code could \
+                              enter the monitor of a nested `provide`, and two tasks could \
+                              deadlock. Pass the method the values that it needs instead of a \
+                              callback."
+                             (show_capability (T.Capability found.capability))
+                             method_.method_name parameter.name)
+                    | None -> ())
+                  capability.methods
+            | None -> ())
+          (Form.capability_impls state implementation.type_))
+    implementations
 
 let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
   let checking = { state; spans = Syntax_walk.spans state.definition; provides = [] } in
@@ -591,4 +628,10 @@ let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
     | Some solution -> Option.value ~default:[] (Hashtbl.find_opt solution variable)
     | None -> []
   in
-  List.iter (check_monitor_callbacks checking ~solved) (List.rev checking.provides)
+  List.iter
+    (fun (available, implementations, body) ->
+      if Core_walk.can_use_tasks ~solved body then begin
+        check_monitor_callbacks checking implementations;
+        check_monitor_lock checking ~solved available implementations
+      end)
+    (List.rev checking.provides)

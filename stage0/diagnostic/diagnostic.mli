@@ -194,6 +194,7 @@ module Code : sig
     | Provide_mark
     | Not_an_implementation
     | Callback_may_deadlock
+    | Monitor_needs_tasks
 
   type prover =
     | Overflow
