@@ -391,7 +391,7 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
 and with_ st (base : S.expression) (updates : S.update list) destination =
   let ty = type_of st base.id in
   (match place_expression st base with
-  | Some place -> emit st.b (Assign (destination, Use (owned st place ty)))
+  | Some place -> take st place ty ~destination
   | None -> into st base destination);
   List.iter
     (fun (update : S.update) ->

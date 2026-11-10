@@ -21,9 +21,9 @@ type context = {
   checks : bool;
       (** Whether the program checks at run time what the prover would prove: [requires] clauses,
           integer overflow, and division *)
-  evaluate : (Path.t -> Ground.ty -> Lir.static_value) ref;
-      (** A constant's value, worked out by running its [Evaluator], which the driver builds and
-          runs, for a constant whose value is not folded while compiling *)
+  constant : (Path.t -> Lir.static_value option) ref;
+      (** Another constant's value, where it folds, which the driver reads through whatever keeps
+          each constant's lowering, so that one is folded once and what reads it is known *)
 }
 
 let standard_text name : Ground.ty =
@@ -56,12 +56,8 @@ let context ?(checks = false) database target =
     bool = Monomorphic.builtin Bool;
     cursor_fields;
     checks;
-    evaluate = ref (fun path _ -> bug "no driver works out %s" (Path.show path));
+    constant = ref (fun path -> bug "no driver gives the value of %s" (Path.show path));
   }
-
-(* A constant expression whose value needs its code run: a call, a [Map] or
-   [Set], a tagged template. *)
-exception Needs_running
 
 let test_key path = Instance.Code { path; type_arguments = [] }
 

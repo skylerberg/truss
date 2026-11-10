@@ -77,6 +77,15 @@ let () =
           Verify.instance
             (shape_env ~extra:[ ("Quad", four) ] ())
             (entry [ local (value quad) ] [ block [ swapped ] (Return (Some (constant_int32 0))) ])));
+  test "a move out of a constant's static data is a bug" (fun () ->
+      let constant : Lir.place =
+        { root = Static { key = Constant (definition "words"); ty = text }; projections = [] }
+      in
+      expect_bug ~saying:"a move out of test::words, which is static data" (fun () ->
+          Verify.instance (shape_env ~extra:drop_shapes ())
+            (entry
+               [ local (value text) ]
+               [ block [ Assign (at 0, Use (Move constant)) ] (Return (Some (constant_int32 0))) ])));
   test "an instance whose calls fit their targets passes" (fun () ->
       Verify.instance env (caller [ constant_int32 1 ]));
   let find units key =

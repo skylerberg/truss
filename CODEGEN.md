@@ -687,12 +687,19 @@ and its siblings. Full-width multiplication, used by hashing and
   can go in a read-only section. What an instance compiles to is either
   code, its LIR, or data: a ground type and a static value, which the
   emitter writes as C initializers, with the elements of storage and the
-  blocks of `indirect` variants as static objects of their own. Lowering
-  works a constant's value out exactly from its constant expression:
-  integers with Zarith, floats with IEEE arithmetic rounded once to their
-  type, and records, variants, strings, lists, and arrays from their parts.
-  Another constant's value is written in place, since C cannot initialize
-  static data from another object.
+  blocks of `indirect` variants as static objects of their own.
+- **A constant's value is what running its expression gives.** Lowering
+  folds what it can to exactly that, to save the run: literals, operators
+  on integers, with Zarith, on floats, with IEEE arithmetic rounded once to
+  their type, and on `Bool`, and records, variants, strings, lists, and
+  arrays of parts that fold. Another constant's value, where it folds, is
+  written in place, since C cannot initialize static data from another
+  object. Whatever the folder does not know, or cannot give exactly, such
+  as a sum that does not fit its type, is not folded: the constant's
+  evaluator is run (see [Code run while compiling](#code-run-while-compiling)),
+  so folding can be incomplete and never wrong. A constant made of one that
+  is run is run too, and its evaluator copies that one's static data,
+  since nothing is moved out of a constant.
 - **A list or map literal in a function body** allocates its buffer and
   fills it, which is the one allocation DESIGN.md counts. A literal whose
   parts are all constant, and which is only read, can be static data
