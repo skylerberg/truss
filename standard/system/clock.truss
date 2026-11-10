@@ -1,0 +1,9 @@
+use standard::intrinsic
+
+internal type SystemClock()
+
+impl Clock for SystemClock {
+  fn now(self) -> Instant {
+    Instant(nanoseconds: intrinsic::clock_now())
+  }
+}

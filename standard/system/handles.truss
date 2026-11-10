@@ -1,0 +1,46 @@
+use standard::intrinsic
+
+internal fn open_handle(file: Path, flags: Int32) -> Result[intrinsic::Handle, FileError] {
+  var error: Int32 = 0
+  let handle = intrinsic::open_file(file.text.slice().bytes, flags: flags, error: mut error)
+  if error == 0 {
+    Ok(own handle)
+  } else if error == 2 {
+    Err(FileError.NotFound)
+  } else if error == 13 {
+    Err(FileError.PermissionDenied)
+  } else {
+    Err(FileError.Other(code: error))
+  }
+}
+
+internal fn read_all(handle: mut intrinsic::Handle) -> Result[intrinsic::Storage[UInt8], FileError] {
+  var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+  var reading = true
+  var failed = false
+  while reading {
+    let got = intrinsic::handle_read(mut handle, buffer: mut bytes, count: 65536)
+    if got < 0 {
+      failed = true
+      reading = false
+    } else if got == 0 {
+      reading = false
+    }
+  }
+  if failed { Err(FileError.Other(code: 5)) } else { Ok(own bytes) }
+}
+
+internal fn write_all(handle: mut intrinsic::Handle, bytes: intrinsic::View[UInt8]) -> Result[Unit, FileError] {
+  var at: USize = 0
+  var failed = false
+  while !failed && at < intrinsic::view_length(bytes) {
+    let wrote = intrinsic::handle_write(mut handle, bytes: intrinsic::view_slice(bytes, start: at, stop: intrinsic::view_length(bytes)))
+    if wrote <= 0 {
+      failed = true
+    } else {
+      let count: USize = intrinsic::convert(wrote)
+      at += count
+    }
+  }
+  if failed { Err(FileError.Other(code: 5)) } else { Ok(Unit) }
+}
