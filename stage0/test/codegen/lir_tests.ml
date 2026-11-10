@@ -785,4 +785,31 @@ let () =
       expect_status ~extra ~anchors 101
         (taking_back (fun b storage view -> other b storage view 0 4)))
 
+let () =
+  test "a small read-only value is passed by value unless it holds an array's elements" (fun () ->
+      let array_of count : Ground.ty =
+        Named
+          {
+            path = Intrinsic.builtin_path Array;
+            arguments = [ Type int32; Value (Z.of_int count) ];
+          }
+      in
+      let pair = named "Pair" in
+      let extra = [ ("Pair", Memory_layout.Record [ field "cells" (array_of 2) ]) ] in
+      let env = shape_env ~extra () in
+      let by_value ty =
+        match Convention.parameter env Read ty with
+        | Some (Value _) -> true
+        | Some _ -> false
+        | None ->
+            fail "a parameter with a size is not passed";
+            false
+      in
+      if not (by_value int64) then fail "a number is passed by address";
+      if by_value (array_of 4) then fail "a small array is passed by value";
+      if by_value pair then fail "a small record that holds an array is passed by value";
+      match Convention.parameter env Own (array_of 4) with
+      | Some (Value _) -> ()
+      | _ -> fail "a small array that is given away is passed by address")
+
 let () = Harness.finish ()
