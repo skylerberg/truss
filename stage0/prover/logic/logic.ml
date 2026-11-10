@@ -57,12 +57,6 @@ let ite condition then_ else_ =
 
 let conjunction terms = List.fold_left ( &&& ) (Boolean true) terms
 let disjunction terms = List.fold_left ( ||| ) (Boolean false) terms
-
-let patterned body groups =
-  match groups with
-  | [] -> body
-  | _ -> Apply ("!", body :: List.map (fun terms -> Apply ("pattern", terms)) groups)
-
 let zero = Integer Z.zero
 let negate value = Apply ("-", [ value ])
 
@@ -262,22 +256,6 @@ let integer_text value =
 let rec print numbering bound buffer term =
   let add = Buffer.add_string buffer in
   match term with
-  | Apply ("!", body :: groups) ->
-      add "(! ";
-      print numbering bound buffer body;
-      List.iter
-        (function
-          | Apply ("pattern", terms) ->
-              add " :pattern (";
-              List.iteri
-                (fun index term ->
-                  if index > 0 then add " ";
-                  print numbering bound buffer term)
-                terms;
-              add ")"
-          | _ -> invalid_arg "Logic.text: a pattern that is not one")
-        groups;
-      add ")"
   | Symbol name -> (
       match List.assoc_opt name bound with
       | Some canonical -> add canonical

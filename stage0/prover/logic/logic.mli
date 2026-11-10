@@ -52,10 +52,6 @@ val not_ : term -> term
 val equal : term -> term -> term
 val ite : term -> term -> term -> term
 val conjunction : term list -> term
-
-val patterned : term -> term list list -> term
-(** A quantifier's body with the patterns the solver instantiates it by: each group a set of terms
-    that together name every bound variable. In SMT-LIB, [(! body :pattern (...))]. *)
 val disjunction : term list -> term
 
 val truncated_divide : term -> term -> term

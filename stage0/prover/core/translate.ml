@@ -511,38 +511,6 @@ let in_range ty term =
       L.(Apply ("<=", [ Integer low; term ]) &&& Apply ("<=", [ term; Integer high ]))
   | None -> L.Boolean true
 
-(* Whether a term can be a quantifier's pattern: an application of a
-   function the solver does not interpret, naming every bound variable. *)
-let is_pattern bound (term : L.term) =
-  let interpreted =
-    [
-      "+";
-      "-";
-      "*";
-      "div";
-      "mod";
-      "<";
-      "<=";
-      ">";
-      ">=";
-      "=";
-      "and";
-      "or";
-      "not";
-      "=>";
-      "ite";
-      "distinct";
-      "!";
-      "pattern";
-    ]
-  in
-  match term with
-  | Apply (name, _) ->
-      (not (List.mem name interpreted))
-      && (not (String.length name > 3 && String.sub name 0 3 = "fp."))
-      && List.for_all (fun variable -> L.mentions [ variable ] term) bound
-  | _ -> false
-
 (* A sort's name, as part of a symbol's. *)
 let sort_label (sort : L.sort) =
   match sort with
@@ -2378,14 +2346,7 @@ and lambda_definition context frame (function_type : T.function_type) parameters
         let application =
           applied context function_type term (List.map (fun (name, _) -> L.Symbol name) bound)
         in
-        (* It is instantiated where it is applied, and where a term of its
-           body's shape is, so a fact about the body reaches the
-           function. *)
-        let patterns =
-          [ application ]
-          :: (if is_pattern (List.map fst bound) defined then [ [ defined ] ] else [])
-        in
-        fact context frame (L.Forall (bound, L.patterned (L.equal application defined) patterns));
+        fact context frame (L.Forall (bound, L.equal application defined));
         (* Its body's value is in the range of the body's type, which may be
            narrower than the function type's [Integer]. *)
         (match List.rev body.statements with
