@@ -142,12 +142,27 @@ let () =
       match Solver.find ~cache:(Filename.concat home ".cache/truss/proofs") () with
       | Error message -> fail "%s" message
       | Ok solver ->
+          (* A template's check is decided by running it, through the same
+             compiler [truss run] builds with, made only if one is asked. *)
+          let compiler = lazy (compiler database) in
+          let evaluate (evaluation : Prover.Translate.evaluation) : Prover.evaluated option =
+            match
+              Compile.check_template ?results (Lazy.force compiler) ~time_limit:10_000
+                ~from_template:evaluation.from_template ~texts:evaluation.texts
+            with
+            | Ok (Ran found) ->
+                Option.map
+                  (fun holds -> if holds then Prover.Holds else Prover.Fails)
+                  (List.assoc_opt evaluation.clause found)
+            | Ok Ran_too_long -> Some Too_long
+            | Error _ -> None
+          in
           let found =
             List.concat_map
               (fun module_ ->
                 let source = (Query.demand database Workspace.file module_).source in
                 List.map (Diagnostic.render source)
-                  (Diagnostic.shown (Prover.diagnostics database solver module_)))
+                  (Diagnostic.shown (Prover.diagnostics ~evaluate database solver module_)))
               modules
           in
           List.iter prerr_string found;

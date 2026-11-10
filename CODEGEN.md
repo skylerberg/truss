@@ -1077,8 +1077,17 @@ the type's shape. The binary form is:
 - a value of zero size writes nothing
 
 The value is worked out once in a compiler's run, and its program's objects
-are cached as any others are. Stage0 has no result cache yet, and does not
-run template checks.
+are cached as any others are. Stage0 has no result cache for constants yet.
+
+A tagged template's check has a `Template_check` instance, of the tag's
+`from_template` and the template's literal texts: it builds a template of
+those texts and no parts, works out each of `from_template`'s `requires`
+clauses that can run, and writes each out as a `Bool`. The prover asks it
+only of a clause that reads the template's literals alone, which its parts
+cannot change (see PROVER.md, "Running code while proving"). It runs with
+the test time limit, and its results are kept under the key of the code
+that ran, as test results are, so a check runs again only when its texts
+or its code change.
 
 ## Tests
 

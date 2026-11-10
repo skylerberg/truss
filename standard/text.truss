@@ -167,6 +167,21 @@ public fn StringSlice.length(self) -> USize
   intrinsic::view_length(self.bytes)
 }
 
+public fn StringSlice.byte(self, index: USize) -> UInt8
+  requires index < self.length()
+  ensures result == self.model()[index]
+  cost time O(1)
+{
+  intrinsic::view_at(self.bytes, index: index)
+}
+
+public fn Literal.text(self) -> StringSlice
+  ensures identical(result.model(), self.model())
+  cost time O(1)
+{
+  self.text
+}
+
 public fn StringSlice.to_string(self) -> String
   ensures identical(result.model(), self.model())
 {

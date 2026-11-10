@@ -18,9 +18,20 @@ val proof : (Resolve.Names.key, proof) Query.query
 (** A definition's obligations, each a canonical query, stored with its trace like every stage's
     results. *)
 
-val diagnostics : Query.database -> Solver.t -> Path.module_ -> Diagnostic.t list
+(** What running the code that decides a clause gave: that it holds, that it does not, or that it
+    ran past its time limit. *)
+type evaluated = Holds | Fails | Too_long
+
+val diagnostics :
+  ?evaluate:(Translate.evaluation -> evaluated option) ->
+  Query.database ->
+  Solver.t ->
+  Path.module_ ->
+  Diagnostic.t list
 (** Every obligation of a file's definitions that the solver could not prove, and every definition
-    the prover could not read, in the file's offsets and in order. *)
+    the prover could not read, in the file's offsets and in order. [evaluate] decides a clause by
+    running compiled code, as code generation's [Compile.check_template] does, where it can; the
+    prover does not depend on code generation, so the caller gives it. *)
 
 val holes : Query.database -> Path.module_ -> Source.span list
 (** Each [todo] in a file's theorems, [proof] blocks, and laws' proofs, in the file's offsets and in

@@ -39,8 +39,9 @@ val link :
 (* Runs a program and returns its exit status, its standard output, and its
    standard error. A program ended by a signal has status [128 + signal].
    With [input], the program reads that as its standard input; without, it
-   reads this process's. *)
-val run : ?input:string -> string -> string list -> int * string * string
+   reads this process's. With [time_limit], in milliseconds, a program still
+   running then is killed, and its status is [128 + SIGKILL]. *)
+val run : ?input:string -> ?time_limit:int -> string -> string list -> int * string * string
 
 (* Runs a program on this process's standard input, output, and error, and
    returns its exit status, as [run] gives it. *)

@@ -2183,7 +2183,9 @@ impl FromTemplate for Regex {
 ```
 
 The literal text is known when the code is compiled, so the compiler proves the
-`requires` by running `is_valid_pattern` on it. `Regex"[a-z"` is a compile
+`requires` by running `is_valid_pattern` on it. A check reads each piece's
+text with `literal.text()`, a `StringSlice`, and its bytes with
+`text.byte(index)`. `Regex"[a-z"` is a compile
 error, and `Regex"[a-z]+"` needs no `?`, because building it cannot fail. Text
 that is only known at runtime goes through a function that returns a `Result`,
 such as `Regex.parse(text)`. DESIGN.md explains why tagged templates make

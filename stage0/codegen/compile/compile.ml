@@ -69,6 +69,8 @@ let make t (key : Instance.key) : Lir.compiled =
   | Encode ty -> code (Glue.encode glue ty)
   | Any_drop ty -> code (Glue.any_drop glue ty)
   | Evaluator path -> code (Lower.evaluator t.context path)
+  | Template_check { from_template; texts } ->
+      code (Lower.template_check t.context key ~from_template ~texts)
   | Entry _ | Program_main _ | Any_entry _ | Adapter _ -> code (Lower.instance t.context key)
   | Any_table _ -> Table (Lower.any_table t.context key)
   | Table _ -> Table (Lower.table t.context key)
@@ -122,7 +124,7 @@ let build t ~roots ~startup ~output =
 
 (* Builds what the roots reach into a temporary program and runs it with
    [arguments], then removes it. *)
-let build_and_run ?input t ~roots ~startup ~arguments =
+let build_and_run ?input ?time_limit t ~roots ~startup ~arguments =
   let output =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "truss-%d-%d" (Unix.getpid ()) (Hashtbl.hash roots))
@@ -130,7 +132,7 @@ let build_and_run ?input t ~roots ~startup ~arguments =
   match build t ~roots ~startup ~output with
   | Error message -> Error message
   | Ok () ->
-      let result = Toolchain.run ?input output arguments in
+      let result = Toolchain.run ?input ?time_limit output arguments in
       (try Sys.remove output with Sys_error _ -> ());
       Ok result
 
@@ -202,20 +204,25 @@ let file_name key =
   String.concat ""
     (List.map (Printf.sprintf "%02x") (List.map Char.code (List.of_seq (String.to_seq key))))
 
-let stored directory key =
+(* What is kept under a key: a test's outcome, or a template check's
+   results. *)
+let stored_text directory key =
   let path = Filename.concat directory (file_name key) in
-  if Sys.file_exists path then
-    Some
-      { outcome = In_channel.with_open_bin path In_channel.input_all; message = None; echo = None }
-  else None
+  if Sys.file_exists path then Some (In_channel.with_open_bin path In_channel.input_all) else None
 
-(* Writes a kept result, a pass with nothing to show, whole or not at all. *)
-let store directory key record =
+(* Writes what is kept under a key, whole or not at all. *)
+let store_text directory key text =
   ensure_directory directory;
   let path = Filename.concat directory (file_name key) in
   let temporary = Printf.sprintf "%s.%d" path (Unix.getpid ()) in
-  Out_channel.with_open_bin temporary (fun channel -> output_string channel record.outcome);
+  Out_channel.with_open_bin temporary (fun channel -> output_string channel text);
   Sys.rename temporary path
+
+let stored directory key =
+  Option.map (fun outcome -> { outcome; message = None; echo = None }) (stored_text directory key)
+
+(* Writes a kept result, a pass with nothing to show. *)
+let store directory key record = store_text directory key record.outcome
 
 let run_tests ?results t ~time_limit tests =
   let roots = List.map Lower.test_key tests in
@@ -383,6 +390,63 @@ let evaluate t path ty =
       invalid_arg
         (Printf.sprintf "Compile: working out %s ended with status %d: %s" (Path.show path) status
            errors)
+
+(* Works out a tagged template's check: each of the tag's [from_template]'s
+   clauses that can run, for a template of these literal texts, by its
+   position among the clauses, with whether it holds. Results are kept for
+   the compiler's run. *)
+type template_check = Ran of (int * bool) list | Ran_too_long
+
+let checked_templates : (Instance.key, template_check) Hashtbl.t = Hashtbl.create 8
+
+let check_template ?results t ~time_limit ~from_template ~texts =
+  let root = Instance.Template_check { from_template; texts } in
+  let run () =
+    build_and_run t ~time_limit ~roots:[ root ]
+      ~startup:(Startup.evaluator_calling (Instance.symbol root))
+      ~arguments:[]
+  in
+  match Hashtbl.find_opt checked_templates root with
+  | Some found -> Ok found
+  | None -> (
+      match Lower.template_checked t.context from_template with
+      | exception Invalid_argument message -> Error message
+      | [] -> Ok (Ran [])
+      | positions -> (
+          (* Results are kept under the key of the code that ran, which its
+             texts are part of, so a check runs again only when they or its
+             code change. *)
+          let key =
+            match results with
+            | Some directory -> (
+                match Reachable.test_key t.context.env ~lookup:(compiled t) root with
+                | key -> Some (directory, key)
+                | exception Invalid_argument _ -> None)
+            | None -> None
+          in
+          let output =
+            match Option.bind key (fun (directory, key) -> stored_text directory key) with
+            | Some output -> Ok (0, output, "")
+            | None -> run ()
+          in
+          match output with
+          | Error message -> Error message
+          | Ok (0, output, _) when String.length output = List.length positions ->
+              Option.iter (fun (directory, key) -> store_text directory key output) key;
+              let found =
+                Ran
+                  (List.mapi (fun index position -> (position, output.[index] <> '\000')) positions)
+              in
+              Hashtbl.replace checked_templates root found;
+              Ok found
+          | Ok (137, _, _) ->
+              (* Killed at its time limit. *)
+              Hashtbl.replace checked_templates root Ran_too_long;
+              Ok Ran_too_long
+          | Ok (status, _, errors) ->
+              Error
+                (Printf.sprintf "Compile: checking a template of %s ended with status %d: %s"
+                   (Path.show from_template) status errors)))
 
 let create ?(checks = true) database target toolchain cache settings =
   let t =

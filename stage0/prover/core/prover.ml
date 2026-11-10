@@ -334,6 +334,11 @@ let within database (key : Names.key) (span : span) =
    definition says what the operation is, so the second query means what
    the first does, and its answer is as sound. See PROVER.md, "Types as
    sorts". *)
+(* An obligation's answer: the solver's, or what running the code that
+   decides it gave, or that it ran past its time limit. *)
+type answer = Solved of Solver.answer | Ran_false | Ran_too_long
+type evaluated = Holds | Fails | Too_long
+
 let bitwise_operations = [ "and"; "or"; "xor"; "complement"; "shift_left"; "shift_right" ]
 
 let integer_width = function
@@ -408,7 +413,7 @@ let exactly (query : L.query) =
    with the constants it is shown with; the first choice that proves them
    all is taken, and if none does, the answers are the first choice's. See
    PROVER.md, "Asymptotic bounds". *)
-let answers solver (obligations : Translate.obligation list) =
+let answers ?(evaluate = fun _ -> None) solver (obligations : Translate.obligation list) =
   let solve (obligation : Translate.obligation) choice =
     let pins =
       List.map
@@ -418,10 +423,19 @@ let answers solver (obligations : Translate.obligation list) =
     in
     let query = { obligation.query with facts = obligation.query.facts @ pins } in
     let values = List.map fst obligation.values in
-    match Solver.solve solver ~values query with
-    | Proven -> Solver.Proven
-    | first -> (
-        match exactly query with Some exact -> Solver.solve solver ~values exact | None -> first)
+    (* A clause running code decides is decided so, and the solver never
+       asked. *)
+    match Option.bind obligation.evaluation evaluate with
+    | Some Holds -> Solved Proven
+    | Some Fails -> Ran_false
+    | Some Too_long -> Ran_too_long
+    | None -> (
+        match Solver.solve solver ~values query with
+        | Proven -> Solved Proven
+        | first -> (
+            match exactly query with
+            | Some exact -> Solved (Solver.solve solver ~values exact)
+            | None -> Solved first))
   in
   let groups =
     List.fold_left
@@ -449,7 +463,7 @@ let answers solver (obligations : Translate.obligation list) =
     match
       List.find_opt
         (fun choice ->
-          List.for_all (fun obligation -> solve obligation choice = Solver.Proven) bounded)
+          List.for_all (fun obligation -> solve obligation choice = Solved Proven) bounded)
         all_choices
     with
     | Some choice -> choice
@@ -457,7 +471,7 @@ let answers solver (obligations : Translate.obligation list) =
   in
   List.map (fun obligation -> (obligation, solve obligation chosen)) obligations
 
-let definition_diagnostics database solver (key : Names.key) =
+let definition_diagnostics ?evaluate database solver (key : Names.key) =
   let source_span span = source_span (within database key span) in
   match Query.demand database proof key with
   | Not_proven_here -> []
@@ -469,21 +483,31 @@ let definition_diagnostics database solver (key : Names.key) =
       ]
   | Obligations outcome ->
       List.filter_map
-        (fun ((obligation : Translate.obligation), (answer : Solver.answer)) ->
+        (fun ((obligation : Translate.obligation), (answer : answer)) ->
           match answer with
-          | Proven -> None
-          | Counterexample values ->
+          | Solved Proven -> None
+          | Ran_false ->
+              Some
+                (diagnostic obligation.code (source_span obligation.span)
+                   (obligation.message ^ " Running it on this template's text gives `false`."))
+          | Ran_too_long ->
+              Some
+                (diagnostic obligation.code (source_span obligation.span)
+                   (obligation.message
+                  ^ " Running it on this template's text took longer than the time limit, so it is \
+                     not known."))
+          | Solved (Counterexample values) ->
               Some
                 (diagnostic obligation.code (source_span obligation.span)
                    (obligation.message
                    ^ counterexample (Logic.members obligation.query) obligation.values values))
-          | Out_of_steps ->
+          | Solved Out_of_steps ->
               Some
                 (diagnostic obligation.code (source_span obligation.span)
                    (obligation.message
                   ^ " The solver ran out of steps, so it may hold but needs help: a `proof` block \
                      or a theorem.")))
-        (answers solver outcome.obligations)
+        (answers ?evaluate solver outcome.obligations)
 
 (* Each hole in a file's proofs, in the file's offsets and in order. A
    hole in a law's proof is found where an [impl] uses the proof, and shown
@@ -504,5 +528,5 @@ let holes database module_ =
     (Query.demand database Names.declarations module_)
   |> List.sort_uniq compare
 
-let diagnostics database solver module_ =
-  Names.per_definition database module_ (definition_diagnostics database solver)
+let diagnostics ?evaluate database solver module_ =
+  Names.per_definition database module_ (definition_diagnostics ?evaluate database solver)

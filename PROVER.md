@@ -72,7 +72,7 @@ checked forms, interfaces, contracts
 | `Prune` | The facts each query needs, and no others |
 | `Query` | A query's canonical text, its hash, and its cached result |
 | `Solver` | Running the pinned solver on one query, within its limit |
-| `Evaluate` | Running compiled code on known arguments |
+| `Evaluate` | Running compiled code on known arguments: code generation's `Compile.check_template`, which the caller gives `Prover` |
 | `Counterexample` | The solver's model as Truss values and the path it takes |
 | `Prover` | The entry point, as queries over the definitions of a build |
 
@@ -782,6 +782,29 @@ regular-expression parser.
   limit is an error that names the call.
 - **Results are cached** by the function's compiled code and the arguments.
 
+**What stage0 runs.** Stage0 decides a tagged template's checks by running
+them, as [Tagged templates](DESIGN.md#tagged-templates) intends:
+
+- **A clause of a tag's `from_template` that reads its template only as
+  `template.literals`** is decided by running it, for an `impl` that is not
+  generic. A template's parts are values known only at run time, and such
+  a clause cannot see them, so it is run on a template of the same literal
+  texts and no parts, which gives what it gives for every parts. Any other
+  clause is proven by the solver from what the prover knows of the
+  template.
+- **Code generation runs it**, as a `Template_check` instance (see
+  CODEGEN.md, "Code run while compiling"): each clause that can run is
+  worked out and written out. A clause that cannot run, such as one that
+  calls a function for specifications only, is left to the solver.
+- **The prover does not depend on code generation.** `Prover.diagnostics`
+  is given the running, and `truss prove` gives it through the compiler it
+  builds programs with, made only when a template asks for it. So proofs
+  stay queries of their own, and what ran is decided only when obligations
+  are asked, as the solver's answers are.
+- **A clause that runs true is proven, and one that runs false is an
+  error** that says so. A run past the test time limit is an error that
+  says the check is not known.
+
 ## Holes
 
 A `todo` in a theorem, a `proof` block, or a `proof` definition is the one
@@ -1055,8 +1078,8 @@ It proves, with one canonical, numbered, hashed query per obligation:
   template: its literal texts, each a `Literal` whose model is its bytes,
   and its parts, each turned into the tag's `Part` by its `From`. The
   tag's `requires` is shown of that template, from what the prover knows
-  of its text; a `requires` that needs [running code](#running-code-while-proving)
-  to decide is not proven yet, since `Evaluate` is not built.
+  of its text, or, for a clause that reads only its literals, by
+  [running it](#running-code-while-proving).
 - quantifiers over every value of a type, each in its range and meeting
   its type's invariants
 - bitwise operations, by their facts and then, once more, exactly, as

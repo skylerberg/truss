@@ -33,6 +33,11 @@ exception Foreign_unsupported of string
 let unsupported span format =
   Printf.ksprintf (fun message -> raise (Unsupported (span, message))) format
 
+(* A clause that running compiled code can decide: one of a tag's
+   [from_template]'s, by its position, for a template of these literal
+   texts. See PROVER.md, "Running code while proving". *)
+type evaluation = { from_template : Path.t; texts : string list; clause : int }
+
 type obligation = {
   code : Code.prover;
   span : span;  (** Relative to the definition being proven. *)
@@ -41,6 +46,7 @@ type obligation = {
   values : (string * string) list;  (** Each prover symbol a counterexample shows, with its name. *)
   constants : Costs.constants list;
       (** The constants of each [O(...)] bound the query mentions, which each try pins. *)
+  evaluation : evaluation option;  (** Running code that decides it, where there is any. *)
 }
 
 type outcome = {
@@ -232,11 +238,11 @@ let assume context frame fact =
    after it. Inside a quantifier there is no path to state it on, so it is
    left to the definition of the quantifier's body, which this stage does
    not check yet. *)
-let rec oblige context frame code span message goal =
+let rec oblige ?evaluation context frame code span message goal =
   if frame.checking && not (L.mentions frame.bound goal || L.mentions frame.bound frame.condition)
   then begin
     context.obligations <-
-      make_obligation context frame code span message goal :: context.obligations;
+      make_obligation ?evaluation context frame code span message goal :: context.obligations;
     assume context frame goal
   end
 
@@ -247,7 +253,7 @@ and obligation_at context frame code span message goal =
   then Some (make_obligation context frame code span message goal)
   else None
 
-and make_obligation context frame code span message goal =
+and make_obligation ?evaluation context frame code span message goal =
   let query =
     L.prune
       {
@@ -263,7 +269,7 @@ and make_obligation context frame code span message goal =
         L.mentions names query.goal || List.exists (L.mentions names) query.facts)
       context.groups
   in
-  { code; span; message; query; values = context.values; constants }
+  { code; span; message; query; values = context.values; constants; evaluation }
 
 (* Source text, for messages. *)
 let quote source (span : span) =
@@ -2556,6 +2562,27 @@ and string_literal context frame (written : expression) (literal : string_litera
       (frame, arrive context frame "string" ty)
   | Some _, _ -> tagged_template context frame written literal ty
 
+(* Whether a clause reads its template parameter only as
+   [template.literals], so that a template's parts cannot change it. *)
+and reads_only_literals (source : source) (parameter : name) (clause : expression) =
+  let names_parameter (expression_ : expression) =
+    match (expression_.kind, source.checked.meanings.(expression_.id)) with
+    | Name _, Some (Local_value id) -> id = parameter.id
+    | _ -> false
+  in
+  let fine = ref true in
+  let rec visit (expression_ : expression) =
+    match expression_.kind with
+    | Member (base, { text = "literals"; _ }) when names_parameter base -> ()
+    | _ ->
+        if names_parameter expression_ then fine := false;
+        Syntax_walk.expression_parts ~expression:visit
+          ~statement:(fun _ -> fine := false)
+          expression_
+  in
+  visit clause;
+  !fine
+
 and template_trait : Path.t =
   Top { module_ = { package = "standard"; modules = [ "text" ] }; name = "FromTemplate" }
 
@@ -2633,9 +2660,21 @@ and tagged_template context frame (written : expression) (literal : string_liter
           in
           let own = List.hd contract.parts in
           let entry = part_frame frame own ~arguments:[ (0, value_) ] ~substitution:[] in
-          List.iter
-            (fun (clause : expression) ->
-              oblige context frame Requires written.span
+          (* A clause that reads only the template's literal texts, of a tag
+             whose [impl] is not generic, can be decided by running it. *)
+          let evaluable (clause : expression) =
+            match (evidence, own.binding) with
+            | Impl { arguments = []; _ }, [ Parameter_binding parameter ] ->
+                reads_only_literals own.callee parameter clause
+            | _ -> false
+          in
+          List.iteri
+            (fun index (clause : expression) ->
+              let evaluation =
+                if evaluable clause then Some { from_template = path; texts; clause = index }
+                else None
+              in
+              oblige ?evaluation context frame Requires written.span
                 (Printf.sprintf "This template may not meet `%s`, which its tag requires."
                    (quote own.callee clause.span))
                 (snd (value context entry clause)))

@@ -81,6 +81,29 @@ and template_into st (literal : S.string_literal) (template : C.template) destin
     | [ (mode, ty) ] -> (mode, Monomorphic.ground st.context.monomorphic substitution ty)
     | _ -> bug "from_template takes one template"
   in
+  let texts =
+    literal.first.value :: List.map (fun (_, (text : S.text)) -> text.value) literal.rest
+  in
+  let built =
+    template_value st template_ty texts ~span
+      ~parts:
+        (List.map2
+           (fun ((part : S.expression), _) conversion value ->
+             match conversion with
+             | Some (call_ : C.call) ->
+                 call_with st call_ ~expressions:[ part ] ~arguments:call_.arguments value ~span
+             | None -> into st part value)
+           literal.rest template.part_conversions)
+  in
+  call_instance st
+    (Code { path; type_arguments })
+    ~signature ~substitution
+    ~arguments:[ (mode, template_ty, built) ]
+    ~mask:0 ~destination
+
+(* A [Template] of these literal texts, each piece a [Literal] of static
+   bytes, with its parts each filled in by one of [parts]. *)
+and template_value st template_ty texts ~span ~parts =
   let field_type ty name =
     match Monomorphic.shape st.context.monomorphic ty with
     | Record fields -> (
@@ -101,9 +124,6 @@ and template_into st (literal : S.string_literal) (template : C.template) destin
   let parts_ty = field_type template_ty "parts" in
   let literal_ty = element literals_ty in
   let slice_ty = field_type literal_ty "text" in
-  let texts =
-    literal.first.value :: List.map (fun (_, (text : S.text)) -> text.value) literal.rest
-  in
   let built = temporary st template_ty in
   list_of st literals_ty (built / Field "literals") ~span
     (List.map
@@ -113,19 +133,8 @@ and template_into st (literal : S.string_literal) (template : C.template) destin
            (Assign
               (value, Build { ty = literal_ty; variant = None; fields = [ ("text", Copy slice) ] })))
        texts);
-  list_of st parts_ty (built / Field "parts") ~span
-    (List.map2
-       (fun ((part : S.expression), _) conversion value ->
-         match conversion with
-         | Some (call_ : C.call) ->
-             call_with st call_ ~expressions:[ part ] ~arguments:call_.arguments value ~span
-         | None -> into st part value)
-       literal.rest template.part_conversions);
-  call_instance st
-    (Code { path; type_arguments })
-    ~signature ~substitution
-    ~arguments:[ (mode, template_ty, built) ]
-    ~mask:0 ~destination
+  list_of st parts_ty (built / Field "parts") ~span parts;
+  built
 
 (* A [Set] or [Map] literal: the collection made empty, then each item
    inserted with the type's own [insert], which keeps it in order and keeps

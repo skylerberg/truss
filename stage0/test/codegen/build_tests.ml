@@ -139,4 +139,11 @@ let () =
                  ])
             out)
 
+let () =
+  test "a program still running at its time limit is stopped" (fun () ->
+      let started = Unix.gettimeofday () in
+      let status, _, _ = Toolchain.run ~time_limit:100 "/bin/sleep" [ "5" ] in
+      if status <> 137 then fail "status %d" status;
+      if Unix.gettimeofday () -. started > 2. then fail "it was not stopped")
+
 let () = Harness.finish ()

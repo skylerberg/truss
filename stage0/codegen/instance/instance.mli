@@ -19,6 +19,9 @@ type key =
       (** A value's binary form, which code run while compiling writes its result in *)
   | Evaluator of Path.t
       (** Code run while compiling: works out a constant's value and writes its binary form *)
+  | Template_check of { from_template : Path.t; texts : string list }
+      (** Code run while compiling: a tag's [from_template] clauses that can run, worked out for a
+          template of these literal texts and no parts, each written out as a [Bool] *)
   | Cursor_next of Ground.yielding
       (** The state machine of a pulled yielding method. Its drop is the [Drop] of its cursor type.
       *)
