@@ -1258,7 +1258,14 @@ The console's input and its two outputs as streams are each a new
 descriptor for the same open file, made with `fcntl`, so that a stream
 owns the descriptor it closes and the process keeps its first three. The
 console's terminal is `/dev/tty`, the terminal the process is controlled
-from, whatever its input and output were redirected to. `SystemLog`
+from, whatever its input and output were redirected to. Its size is
+`ioctl`'s `TIOCGWINSZ`, and a handle that is no terminal has none, which
+is how a program learns that it has no terminal. Raw mode reads the
+terminal's settings with `tcgetattr` as the bytes of a `struct termios`,
+changes the flags at the offsets the table's numbers give, and writes them
+with `tcsetattr`: on, the terminal gives each byte as it is typed, with no
+echo, no signals from keys, and no changes to what is written; off, those
+are set again. `SystemLog`
 writes each record to standard error as one line and with one `write`,
 `level=warning message="..."` and then each field as `name=value`, with
 text in quotes.

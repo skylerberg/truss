@@ -1,0 +1,65 @@
+use standard::intrinsic
+use standard::system::calls
+
+internal fn set_raw_mode(descriptor: Int32, enabled: Bool) -> Result[Unit, Int32] {
+  let size = intrinsic::libc_termios_size()
+  let flag_size = intrinsic::libc_termios_flag_size()
+  let input_at = intrinsic::libc_termios_iflag_offset()
+  let output_at = intrinsic::libc_termios_oflag_offset()
+  let control_at = intrinsic::libc_termios_cflag_offset()
+  let local_at = intrinsic::libc_termios_lflag_offset()
+  let characters_at = intrinsic::libc_termios_cc_offset()
+  let least = intrinsic::libc_vmin()
+  let wait = intrinsic::libc_vtime()
+  if size > 1024 || flag_size > 8 || characters_at > 1024 || least > 64 || wait > 64 {
+    return Err(intrinsic::libc_enosys())
+  }
+  let least_at = characters_at + least
+  let wait_at = characters_at + wait
+  var settings: List[UInt8] = []
+  for _ in 0..size
+    invariant settings.length() == yielded.length()
+  {
+    mut settings.push(0)
+  }
+  calls::done(intrinsic::libc_tcgetattr(descriptor, settings: mut settings.storage))?
+  let input = intrinsic::libc_ixon() | intrinsic::libc_icrnl() | intrinsic::libc_brkint()
+  let stripped = intrinsic::libc_inpck() | intrinsic::libc_istrip()
+  let local = intrinsic::libc_icanon() | intrinsic::libc_echo() | intrinsic::libc_isig() | intrinsic::libc_iexten()
+  if enabled {
+    change(mut settings, at: input_at, size: flag_size, clear: input | stripped, set: 0)
+    change(mut settings, at: output_at, size: flag_size, clear: intrinsic::libc_opost(), set: 0)
+    change(mut settings, at: control_at, size: flag_size, clear: 0, set: intrinsic::libc_cs8())
+    change(mut settings, at: local_at, size: flag_size, clear: local, set: 0)
+    put(mut settings, at: least_at, byte: 1)
+    put(mut settings, at: wait_at, byte: 0)
+  } else {
+    change(mut settings, at: input_at, size: flag_size, clear: 0, set: input)
+    change(mut settings, at: output_at, size: flag_size, clear: 0, set: intrinsic::libc_opost())
+    change(mut settings, at: local_at, size: flag_size, clear: 0, set: local)
+  }
+  calls::done(intrinsic::libc_tcsetattr(descriptor, settings: settings.slice().elements))
+}
+
+fn change(settings: mut List[UInt8], at: USize, size: USize, clear: UInt64, set: UInt64)
+  ensures settings.length() == old(settings.length())
+{
+  let before = calls::number_at(settings.slice().elements, offset: at, size: size)
+  var left = (before & ~clear) | set
+  var index: USize = 0
+  while index < size && index < 8
+    invariant settings.length() == old(settings.length())
+  {
+    put(mut settings, at: at.wrapping_add(index), byte: intrinsic::convert(left & 255))
+    left = left >> 8
+    index += 1
+  }
+}
+
+fn put(settings: mut List[UInt8], at: USize, byte: UInt8)
+  ensures settings.length() == old(settings.length())
+{
+  if at < settings.length() {
+    settings[at] = byte
+  }
+}

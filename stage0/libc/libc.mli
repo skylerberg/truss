@@ -100,6 +100,28 @@ type number =
   | Vreg
   | Vdir
   | Vlnk
+  | Termios_size  (** How many bytes a [struct termios] takes, and where its flags are *)
+  | Termios_iflag_offset
+  | Termios_oflag_offset
+  | Termios_cflag_offset
+  | Termios_lflag_offset
+  | Termios_flag_size  (** How many bytes one of its sets of flags takes *)
+  | Termios_cc_offset  (** Where its control characters start, which [Vmin] and [Vtime] index *)
+  | Vmin
+  | Vtime
+  | Tcsaflush
+  | Tiocgwinsz
+  | Icanon
+  | Echo
+  | Isig
+  | Iexten
+  | Ixon
+  | Icrnl
+  | Brkint
+  | Inpck
+  | Istrip
+  | Opost
+  | Cs8
 
 (** How many elements a function reads or writes through an address it is given. The prover holds
     every call to it: a view has that many elements, and storage has room for that many. *)
@@ -210,6 +232,9 @@ type function_ =
   | Posix_spawn_file_actions_addchdir  (** [posix_spawn_file_actions_addchdir_np] *)
   | Getdents64  (** Only Linux has it *)
   | Getattrlistbulk  (** Only macOS has it *)
+  | Ioctl_tiocgwinsz  (** [ioctl] with the request [TIOCGWINSZ] *)
+  | Tcgetattr
+  | Tcsetattr  (** With [TCSAFLUSH] *)
 
 val functions : function_ list
 

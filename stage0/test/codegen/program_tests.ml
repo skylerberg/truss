@@ -725,6 +725,126 @@ fn main(arguments: List[String]) -> ExitCode
         output)
 
 let () =
+  test "a program finds its terminal, makes it raw, and restores it, or finds it has none"
+    (fun () ->
+      let directory = Lazy.force scratch in
+      let program = Filename.concat directory "terminal-program" in
+      let _, compile =
+        load
+          {|use standard::processes
+
+fn holds(bytes: List[UInt8], word: String) -> Bool {
+  let wanted = word.bytes()
+  if wanted.length() > bytes.length() {
+    return false
+  }
+  for start in 0..=(bytes.length() - wanted.length()) {
+    var same = true
+    for index in 0..wanted.length() {
+      if bytes[start + index] != wanted[index] {
+        same = false
+      }
+    }
+    if same {
+      return true
+    }
+  }
+  false
+}
+
+fn settings() -> List[UInt8]
+  uses Processes
+{
+  let asked = processes::Command.new("sh")
+    .argument("-c")
+    .argument("stty -a < /dev/tty")
+    .output(processes::Redirect.Capture)
+  match Processes.run(asked) {
+    Ok(output) => output.output.copy()
+    Err(_) => []
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Handles, Processes, FileWrite
+{
+  var report = TextBuilder.new()
+  var terminal = Console.terminal()
+  mut report.write("interactive ${terminal.is_interactive()}\n")
+  mut report.write("size known ${terminal.size() is Ok(_)}\n")
+  let before = settings()
+  mut report.write("starts raw ${holds(before, word: "-icanon")}\n")
+  mut report.write("made raw ${mut terminal.set_raw_mode(true) is Ok(_)}\n")
+  let raw = settings()
+  mut report.write("raw ${holds(raw, word: "-icanon")} ${holds(raw, word: "-isig")} ${holds(raw, word: "-opost")}\n")
+  mut report.write("restored ${mut terminal.set_raw_mode(false) is Ok(_)}\n")
+  let after = settings()
+  mut report.write("after ${holds(after, word: "-icanon")} ${holds(after, word: "-isig")} ${holds(after, word: "-opost")}\n")
+  let text = own report.finish()
+  let _ = FileWrite.write_text(Path.new(arguments[1]), contents: text)
+  ExitCode(0)
+}
+|}
+      in
+      (match
+         Compile.build_program compile
+           ~main:(Top { module_ = example; name = "main" })
+           ~output:program
+       with
+      | Ok () -> ()
+      | Error message -> failwith message);
+      let report name =
+        let path = Filename.concat directory name in
+        (path, fun () -> In_channel.with_open_text path In_channel.input_all)
+      in
+      (* [script] runs a program with a terminal of its own, which this test
+         may not have. *)
+      let path, in_terminal = report "terminal-report.txt" in
+      let status, _, errors =
+        Toolchain.run ~input:"" "script"
+          (match host.os with
+          | Macos -> [ "-q"; "/dev/null"; program; path ]
+          | Linux -> [ "-qec"; Filename.quote_command program [ path ]; "/dev/null" ])
+      in
+      if status <> 0 then fail "script ended with %d: %s" status errors;
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               "interactive true";
+               "size known true";
+               "starts raw false";
+               "made raw true";
+               "raw true true true";
+               "restored true";
+               "after false false false";
+               "";
+             ])
+        (in_terminal ());
+      (* Run as it is, the program has this test's terminal, which a run
+         under CI lacks. Only there can the test say what it finds. *)
+      match Unix.openfile "/dev/tty" [ O_RDWR ] 0 with
+      | terminal -> Unix.close terminal
+      | exception Unix.Unix_error _ ->
+          let path, without = report "no-terminal-report.txt" in
+          let status, _, _ = Toolchain.run ~input:"" program [ path ] in
+          expect_int ~expected:0 status;
+          expect_string
+            ~expected:
+              (String.concat "\n"
+                 [
+                   "interactive false";
+                   "size known false";
+                   "starts raw false";
+                   "made raw false";
+                   "raw false false false";
+                   "restored false";
+                   "after false false false";
+                   "";
+                 ])
+            (without ()))
+
+let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"
     (fun () ->
       let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in
