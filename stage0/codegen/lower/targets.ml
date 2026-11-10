@@ -103,19 +103,12 @@ let entry_signature context (signature : T.signature) =
   in
   ({ lir with parameters = Convention.evidence :: lir.parameters }, result)
 
-(* Whether a trait's method can be called through [any]: it has no generic
-   parameters of its own, and neither takes nor returns [Self]. *)
+(* Whether a trait's method has an entry in an [any] table: the checker
+   lets a call through [any] reach it, and it returns a value. *)
 let callable_through_any trait (m : T.trait_method) =
-  let self = T.Parameter { owner = trait; name = "Self" } in
-  let mentions ty = T.equal ty self in
   m.method_receiver <> Static
-  && List.for_all
-       (fun (g : T.generic) -> Path.equal g.generic.owner trait)
-       m.method_signature.generics
-  && List.for_all
-       (fun (p : T.parameter_info) -> not (mentions p.type_))
-       m.method_signature.parameters
-  && match m.method_signature.output with Returns ty -> not (mentions ty) | _ -> false
+  && Interface.Impls.through_any ~trait m = Callable
+  && match m.method_signature.output with Returns _ -> true | _ -> false
 
 (* The methods of a trait an [any] table has an entry for, in order. *)
 let any_methods context trait =
@@ -132,11 +125,33 @@ let dynamic_slot context trait name =
   in
   find 1 (any_methods context trait)
 
+(* What a trait's [Self] and parameters stand for in a method called
+   through an [any] type: [Self] is the [any] type, which fixes each
+   associated type. *)
+let any_substitution context ~(any : T.trait_reference) trait : T.substitution =
+  match demand context Environment.trait_interface trait with
+  | Some interface ->
+      let reference =
+        if Path.equal trait any.trait then any
+        else
+          match
+            List.find_opt
+              (fun (bound : T.trait_reference) -> Path.equal bound.trait trait)
+              (Interface.Properties.bound_closure context.database ~self:(T.Any any) any)
+          with
+          | Some bound -> bound
+          | None -> bug "%s is not a trait of %s" (Path.show trait) (T.show (T.Any any))
+      in
+      Interface.Properties.trait_substitution interface ~self:(T.Any any) reference
+  | None -> bug "no interface for %s" (Path.show trait)
+
 (* The C signature of an entry in an [any] table: the value's pointer, then
-   the method's own, with the evidence for what it uses. *)
-let any_entry_signature context (signature : T.signature) =
+   the method's own, with the evidence for what it uses. The method is
+   [trait]'s, read for the [any] type. *)
+let any_entry_signature context ~any ~trait (signature : T.signature) =
   let lir, result =
-    lir_signature context []
+    lir_signature context
+      (any_substitution context ~any trait)
       ~parameters:(interface_parameters { signature with receiver = None })
       ~has_defaults:false ~uses:signature.uses signature.output
   in
@@ -333,10 +348,10 @@ let call_indirect st ~(function_type : Ground.function_type) ~(value : Lir.place
 
 (* Calls a method through an [any] value: the entry in its table, given the
    value's pointer, then the arguments, then the evidence the method uses. *)
-let call_through_any st ~trait ~name ~(any : Lir.place)
+let call_through_any st ~(any_type : T.trait_reference) ~trait ~name ~(any : Lir.place)
     ~(arguments : (T.mode * Ground.ty * Lir.place) list) destination =
   let slot, signature = dynamic_slot st.context trait name in
-  let lir_signature, result = any_entry_signature st.context signature in
+  let lir_signature, result = any_entry_signature st.context ~any:any_type ~trait signature in
   let passed = List.filter_map (fun (mode, ty, place) -> pass st mode ty place) arguments in
   let evidence = List.map (evidence_of st) (evidence_for [] signature.uses) in
   let target =

@@ -338,7 +338,8 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   let _, trait_signature = dynamic_slot context trait name in
   let method_signature = signature_of context path in
   let substitution = bind method_signature.generics type_arguments in
-  let _, result = any_entry_signature context trait_signature in
+  let any = T.substitute_trait substitution interface.implements in
+  let _, result = any_entry_signature context ~any ~trait trait_signature in
   let st = generated_state context ~anchor:impl ~substitution in
   let b = st.b in
   let value = local b ~name:"value" (Raw (Pointer Opaque)) in
@@ -386,6 +387,7 @@ let any_table context (key : Instance.key) : Lir.table =
       let trait = interface.implements.trait in
       let substitution = bind interface.impl_generics type_arguments in
       let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
+      let any = T.substitute_trait substitution interface.implements in
       let drop_signature : Lir.signature =
         { parameters = [ Raw (Pointer Opaque) ]; result = None; returns = true }
       in
@@ -403,7 +405,8 @@ let any_table context (key : Instance.key) : Lir.table =
               Instance.Code
                 { path = Method { owner = impl; name = m.method_name; receiver }; type_arguments }
             in
-            (Instance.Any_entry method_key, fst (any_entry_signature context m.method_signature)))
+            ( Instance.Any_entry method_key,
+              fst (any_entry_signature context ~any ~trait m.method_signature) ))
           (any_methods context trait)
       in
       {
