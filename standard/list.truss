@@ -240,6 +240,13 @@ public fn List[Element].each(own self) yields own Element
   }
 }
 
+public fn Array[Element, count: USize].to_list(own self) -> List[Element]
+  ensures identical(result.model(), self.model())
+  cost time O(count)
+{
+  List(storage: intrinsic::storage_from_array(own self))
+}
+
 public fn Slice[Element].length(self) -> USize
   ensures result == self.model().length()
   cost time O(1)

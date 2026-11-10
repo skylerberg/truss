@@ -1469,6 +1469,29 @@ let () =
          \    Dice.roll()\n\
          \  }\n\
           }\n"));
+  test "an implementation of a capability keeps the capability's contract" (fun () ->
+      not_proven
+        (dice
+       ^ "type Loaded()\n\nimpl Dice for Loaded {\n  fn roll(self) -> UInt8 {\n    9\n  }\n}\n")
+        "prover.ensures");
+  test "a capability's broken contract is named as the capability's" (fun () ->
+      let found =
+        message
+          (dice
+         ^ "type Loaded()\n\nimpl Dice for Loaded {\n  fn roll(self) -> UInt8 {\n    9\n  }\n}\n")
+      in
+      if not (contains found "The capability's `result >= 1 && result <= 6`") then
+        fail "found: %s" found);
+  test "an implementation of a capability that keeps its contract proves" (fun () ->
+      proven
+        (dice
+       ^ "type Fair(face: UInt8)\n\
+         \  invariant face >= 1 && face <= 6\n\n\
+          impl Dice for Fair {\n\
+         \  fn roll(self) -> UInt8 {\n\
+         \    self.face\n\
+         \  }\n\
+          }\n"));
   test "let else continues where its pattern matched" (fun () ->
       proven
         "fn f(found: Option[UInt8]) -> UInt8 {\n\

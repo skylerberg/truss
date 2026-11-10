@@ -6427,6 +6427,15 @@ let promises context (source : source) locals (costs : Core.cost list) ~inherite
               Some { counter; clause = cost; constants; written_in = source; inherited }))
     costs
 
+(* What a method's inherited clauses come from, for messages: its trait,
+   or its capability. *)
+let promised_by database (source : source) =
+  match source.key with
+  | Some { path = Method { owner; _ }; _ }
+    when Interface.Summary.kind_of database owner = Some Names.Capability ->
+      "capability"
+  | _ -> "trait"
+
 (* A promise shown where its definition returns: what was spent within
    its bound, read with the parameters as they were on entry. *)
 let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span ~change =
@@ -6451,7 +6460,8 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
   in
   oblige context frame Cost span
     (if promise.inherited then
-       Printf.sprintf "This method may spend more than its trait's `%s` allows."
+       Printf.sprintf "This method may spend more than its %s's `%s` allows."
+         (promised_by context.database promise.written_in)
          (quote promise.written_in promise.clause.origin)
      else
        Printf.sprintf "This may spend more than `%s` allows."
@@ -6529,11 +6539,25 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
         match parameter.local with Self -> at.self | local -> Locals.find_opt local at.locals)
       parameters
   in
+  (* A capability's method takes no [self], but the method an [impl] of the
+     capability writes does, so the [impl]'s [self] is left out when the
+     two are paired. *)
+  let paired terms =
+    match (inherited, parameters, terms) with
+    | Some ((part : part), _, _), { local = Self; _ } :: _, _ :: rest
+      when not
+             (List.exists
+                (fun (parameter : Core.parameter) -> parameter.local = Self)
+                part.parameters) ->
+        rest
+    | _ -> terms
+  in
+  let values_of (at : frame) = paired (values_of at) in
   let own_terms = values_of start in
-  (* An [impl]'s method also keeps its trait's contract: the trait's
-     precondition is what callers through a bound show, so it is assumed,
-     and implies the method's own; the trait's postcondition is what they
-     assume, so it is shown. *)
+  (* An [impl]'s method also keeps its trait's or its capability's contract:
+     the precondition is what callers through a bound or the capability
+     show, so it is assumed, and implies the method's own; the
+     postcondition is what they assume, so it is shown. *)
   let trait_frame (at : frame) ~result =
     match inherited with
     | Some ((part : part), substitution, _) when List.length part.parameters = List.length own_terms
@@ -6742,7 +6766,8 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
             (fun (clause : expression) ->
               let _, term = clause_value context inside clause in
               oblige context frame Ensures returns_span
-                (Printf.sprintf "The trait's `%s` may not hold when this method returns."
+                (Printf.sprintf "The %s's `%s` may not hold when this method returns."
+                   (promised_by database part.callee)
                    (quote part.callee clause.origin))
                 term)
             part.ensures;

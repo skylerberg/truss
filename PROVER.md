@@ -109,7 +109,7 @@ Every fact the prover must show, and where it comes from:
 | Recursion and loops end | Each call in a cycle of the call graph, and each loop, in a function with a `time` clause |
 | A cost clause holds | Each function with one (see [Costs](#costs)) |
 | A law holds | Each law of each trait an `impl` implements by hand |
-| An `impl` keeps its trait's contract | Each method of an `impl` with clauses of its own |
+| An `impl` keeps its trait's or its capability's contract | Each method of an `impl` |
 | A replacement gives the provided result | Each method that replaces a provided one |
 | `assert` holds | Each `assert` in a theorem or a proof |
 | A specification is well defined | Each call's `requires`, index, and division in a function's `requires` and `ensures` and in a loop's invariants |
@@ -579,11 +579,13 @@ the invariants before it.
 - **A derived `Equal`** is the solver's equality, or its definition field
   by field, as [Equality](#equality) says. Nothing is proven for a derived
   implementation, as DESIGN.md says.
-- **An `impl`'s method keeps its trait's contract.** The trait's `requires`
-  is assumed and must imply the method's own, and the trait's `ensures` is
-  shown at each way the method returns, since calls through a bound rely on
-  them. The method's own `ensures` and cost clauses are shown as a
-  function's are.
+- **An `impl`'s method keeps its trait's or its capability's contract.**
+  The trait's or capability's `requires` is assumed and must imply the
+  method's own, and its `ensures` is shown at each way the method returns,
+  since calls through a bound, or of the capability, rely on them. A
+  capability's method takes no `self`, so the `impl`'s `self` is left out
+  when their parameters are paired. The method's own `ensures` and cost
+  clauses are shown as a function's are.
 - **A method that replaces a provided one** proves that its result equals
   the provided body, which is a definition, with the trait's `requires`
   assumed.
