@@ -89,7 +89,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
     ~arguments:
       ((self_mode, self_ty, { Lir.root = Local implementation; projections = [ Deref ] })
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) taken)
-    ~mask:0 ~destination:(passed_on st result_ty);
+    ~destination:(passed_on st result_ty) ();
   {
     key;
     main =
@@ -179,8 +179,8 @@ let real_implementations st ~user capabilities =
           in
           call_instance st
             (Code { path = made; type_arguments = [] })
-            ~signature:(signature_of st.context made) ~substitution:[] ~arguments:[] ~mask:0
-            ~destination:value;
+            ~signature:(signature_of st.context made) ~substitution:[] ~arguments:[]
+            ~destination:value ();
           Address { place = value; writable = true }
         end
       in
@@ -259,7 +259,7 @@ let program_main context (key : Instance.key) main_path : Lir.t =
     ~signature:(signature_of context text_copied_from)
     ~substitution:[]
     ~arguments:[ (Read, view_ty, view) ]
-    ~mask:0 ~destination:text;
+    ~destination:text ();
   lower Storage_push [ string_ty ] [ Place (list / Field storage_field); Value (Move text) ] None;
   emit b (Assign (at index, Binary (Add, Copy (at index), Constant (Integer (Int32, Z.one)))));
   finish b (Goto test);
@@ -275,7 +275,7 @@ let program_main context (key : Instance.key) main_path : Lir.t =
     (Code { path = main_path; type_arguments = [] })
     ~signature ~substitution:[]
     ~arguments:[ (list_mode, list_ty, list) ]
-    ~mask:0 ~destination:exit;
+    ~destination:exit ();
   (match (Monomorphic.shape context.monomorphic exit_ty, result_place st) with
   | Record [ (field, _) ], Some status ->
       emit b (Assign (status, Convert (Copy (exit / Field field), Integer Int32)))
@@ -310,7 +310,7 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
   start b (block b);
   call_instance st function_ ~signature ~substitution
     ~arguments:(List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) taken)
-    ~mask:0 ~destination:(passed_on st result_ty);
+    ~destination:(passed_on st result_ty) ();
   {
     key;
     main =
@@ -366,7 +366,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
     ~arguments:
       ((self_mode, self_ty, { Lir.root = Local typed; projections = [ Deref ] })
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) taken)
-    ~mask:0 ~destination:(passed_on st result_ty);
+    ~destination:(passed_on st result_ty) ();
   {
     key;
     main =

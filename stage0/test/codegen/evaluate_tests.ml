@@ -129,6 +129,31 @@ let () =
       | [ _ ] -> ()
       | found -> fail "%d diagnostics" (List.length found))
 
+let () =
+  test "a call that is run uses the argument it gives a parameter that has a default" (fun () ->
+      let source promised =
+        "fn count_to(limit: UInt8 = 3) -> UInt8\n\
+        \  cost time finite\n\
+         {\n\
+        \  var count: UInt8 = 0\n\
+        \  for _ in 0..limit\n\
+        \    invariant count == yielded.length()\n\
+        \  {\n\
+        \    count += 1\n\
+        \  }\n\
+        \  count\n\
+         }\n\n\
+         fn f() -> UInt8\n\
+        \  ensures result == " ^ promised ^ "\n{\n  count_to(limit: 4)\n}\n"
+      in
+      (match proven_with_running (source "4") with
+      | [] -> ()
+      | found ->
+          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found)));
+      match proven_with_running (source "3") with
+      | [ _ ] -> ()
+      | found -> fail "%d diagnostics for the default's value" (List.length found))
+
 (* The same tag at the same path with the same text, checked by code that
    differs: a check is kept under the code that ran, not under its name. *)
 let () =
