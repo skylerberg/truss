@@ -30,7 +30,7 @@ runs:
       run: |
         base="opam-${{ runner.os }}-${{ runner.arch }}-${ImageOS}-${{ inputs.opam-version }}-${{ inputs.ocaml-version }}-"
         echo "base=$base" >> "$GITHUB_OUTPUT"
-        echo "key=$base${{ hashFiles('truss.opam') }}" >> "$GITHUB_OUTPUT"
+        echo "key=${base}trial-${{ hashFiles('truss.opam') }}" >> "$GITHUB_OUTPUT"
 
     - id: restore
       uses: actions/cache/restore@v6.1.0
