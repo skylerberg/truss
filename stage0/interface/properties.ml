@@ -2,11 +2,13 @@
    place, worked out from its shape.
 
    An opaque type has [Copyable] or [Plain] only when it declares so with
-   [derives], and then exactly when its type arguments have it, as for a
-   derived [impl]: changing its hidden fields never changes what other code
-   may do with it. A generic parameter has them only when bounded, and so
-   does an associated type of one, by its declared bounds. Whether a type
-   is a view is part of its shape, so it is worked out from the fields. *)
+   [derives]. It then has the property under the conditions that its fields
+   give, as any other type does: [Slice[Element]] is [Plain] whatever
+   [Element] is, because it holds a view of its elements, and
+   [List[Element]] is [Copyable] when [Element] is. A generic parameter has
+   them only when bounded, and so does an associated type of one, by its
+   declared bounds. Whether a type is a view is part of its shape, so it is
+   worked out from the fields. *)
 
 module T = Types
 
@@ -240,18 +242,12 @@ let facts_from database ~facts_of (interface : T.type_interface) =
     | Sum variants -> List.exists (fun (variant : T.variant) -> variant.indirect) variants
     | _ -> false
   in
+  let undeclared property =
+    interface.opaque
+    && not (declared plain_trait || (property = Copyable && declared copyable_trait))
+  in
   let owned property =
-    if interface.opaque then
-      if declared plain_trait || (property = Copyable && declared copyable_trait) then
-        conditions property
-          (List.filter_map
-             (fun (generic : T.generic) ->
-               match generic.kind with
-               | Type_generic _ -> Some (T.Parameter generic.generic)
-               | Value_generic | Capability_generic -> None)
-             interface.type_generics)
-      else None
-    else if property = Plain && allocates then None
+    if undeclared property || (property = Plain && allocates) then None
     else conditions property contents
   in
   match interface.shape with

@@ -504,11 +504,22 @@ is `Plain` exactly when `Value` is.
   everything, including handles.
 - **An opaque type has them only when declared** with `derives Copyable` or
   `derives Plain`. The checker verifies that the fields allow it. Other
-  packages rely only on the declaration, so changing an opaque type's fields
-  never changes what other packages may do, which is the freedom `opaque`
-  promises. Every other type has them by inference, and declaring them on a
-  type that is not opaque is an error with a fix that removes the
-  declaration, since its fields already say it.
+  packages rely on the declaration, so adding a field that cannot be copied
+  is an error at the type and never a surprise elsewhere. Every other type
+  has them by inference, and declaring them on a type that is not opaque is
+  an error with a fix that removes the declaration, since its fields already
+  say it.
+- **A generic opaque type has them under the conditions its fields give,**
+  as any other generic type does. `Slice[Element]` holds a view of its
+  elements, so it is `Plain` whatever `Element` is. `List[Element]` holds
+  its elements, so it is `Copyable` when `Element` is. A type parameter that
+  no field holds, as in `opaque type Id[Entity](value: UInt64)`, is no
+  condition. Swift checks a declared `BitwiseCopyable` against the fields
+  the same way. Rust's `derive` instead requires the property of every type
+  parameter, which is why a `Copy` type with an unused parameter needs a
+  hand-written `impl` there. The cost is that changing a generic opaque
+  type's fields can change which of its type arguments must have the
+  property.
 - **`copy()` is always the compiler's.** It is the method of `Copyable`, and
   no type can give copying a cost or an effect of its own, as no type can
   define a destructor.
