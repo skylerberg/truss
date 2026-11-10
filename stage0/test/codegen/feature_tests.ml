@@ -612,7 +612,7 @@ test "defaults" {
   passes "names an is test binds are used where it holds"
     {|fn describe(found: Option[String], limit: USize) -> String {
   if found is Some(text) && text.length() > limit {
-    text
+    text.copy()
   } else if !(found is Some(_)) || limit == 0 {
     "nothing"
   } else {
@@ -636,7 +636,7 @@ test "is" {
   passes "a guard that fails leaves the value for the next arm"
     {|fn classify(found: Option[String]) -> String {
   match found {
-    Some(text) if text.length() > 3 => text
+    Some(text) if text.length() > 3 => text.copy()
     Some(text) => "short ${text}"
     None => "none"
   }
