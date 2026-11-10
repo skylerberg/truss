@@ -212,13 +212,19 @@ public fn Instant.from_unix_nanoseconds(nanoseconds: Int64) -> Instant
 public fn Instant.from_unix_milliseconds(milliseconds: Int64) -> Option[Instant]
   cost time O(1)
 {
-  todo
+  match milliseconds.checked_multiply(1000000) {
+    Some(nanoseconds) => Some(Instant(nanoseconds: nanoseconds))
+    None => None
+  }
 }
 
 public fn Instant.from_unix_seconds(seconds: Int64) -> Option[Instant]
   cost time O(1)
 {
-  todo
+  match seconds.checked_multiply(1000000000) {
+    Some(nanoseconds) => Some(Instant(nanoseconds: nanoseconds))
+    None => None
+  }
 }
 
 public fn Instant.unix_nanoseconds(self) -> Int64
