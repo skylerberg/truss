@@ -402,6 +402,12 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
       || Properties.has database ~bounds ~normalize:(normalize database ~bounds) property type_
     then Some Built_in
     else None
+  else if Path.equal wanted.trait Properties.storable_trait then
+    if
+      (not conditions)
+      || Properties.storable database ~bounds ~normalize:(normalize database ~bounds) type_
+    then Some Built_in
+    else None
   else
     match type_ with
     | T.Error _ | T.Hole | T.Variable _ -> Some (Accepted type_)

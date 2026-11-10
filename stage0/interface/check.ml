@@ -475,6 +475,7 @@ type view = {
 let compiler_implements (impl : T.impl_interface) =
   Path.equal impl.implements.trait Properties.copyable_trait
   || Path.equal impl.implements.trait Properties.plain_trait
+  || Path.equal impl.implements.trait Properties.storable_trait
 
 let impl_view database ~bounds (impl : T.impl_interface) (trait_path : path_type) =
   let shown_trait = Names.spell_path trait_path.path in

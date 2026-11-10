@@ -598,7 +598,11 @@ views are *second-class*, as in Hylo:
   argument, but it cannot be returned except as below, and cannot go where
   an owned value that may be stored is required. Putting a view into a
   record or a list makes the record or list a view, so a view can never be
-  stored past its function.
+  stored past its function. Every type that is not a view type is
+  `Storable`, a trait the compiler implements, so generic code asks for a
+  value that may be stored with a bound, as in `Channel[Message: Storable]`.
+  An `any Trait` does not name the type of the value it holds, so it is a
+  view type unless `Trait` requires `Storable`.
 - **A call's result views what its arguments view.** A function may return a
   view only of what reached it through its parameters, never of its own
   locals. The caller then treats the result as viewing everything its
@@ -2055,10 +2059,12 @@ effect: code that does it declares `uses Tasks`.
   a queue with a fixed capacity: `send` waits while it is full, `receive`
   waits while it is empty, and `close` ends the loops of the tasks that
   receive from it. A message is owned, so sending one moves it and copies
-  nothing. Its type is never a view type, since what a view views could be
-  gone before the message is received. A function's type and an `any` type
-  do not say what the value holds, so they are view types too (see
-  [Views](#views)), and a message is a record or a sum type of owned data.
+  nothing. Its type is `Storable`, so never a view type, since what a view
+  views could be gone before the message is received. A function's type
+  does not say what the value holds, and neither does an `any` type whose
+  trait does not require `Storable`, so they are view types too (see
+  [Views](#views)). A message is a record or a sum type of owned data, or
+  an `any` of a trait that requires `Storable`.
   A channel is a token, as a file handle is: the queue is held by whatever
   provides `Tasks`, so a channel's methods take `self` read-only and every
   branch can use the one channel. A task that waits for several kinds of

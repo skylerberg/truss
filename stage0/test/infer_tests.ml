@@ -565,6 +565,63 @@ let () =
         "types.missing_mark";
       one_diagnostic "fn f(ports: Map[String, Int64]) {\n  ports[\"ftp\"] = 21\n}\n"
         "types.not_assignable");
+  (let keep =
+     "type Labeled(view: Slice[Int64], name: String)\n\n\
+      type Boxed[Value](value: Value)\n\n\
+      fn keep[Value: Storable](value: own Value) {}\n\n\
+      fn double(value: Int64) -> Int64 {\n\
+     \  value\n\
+      }\n\n\
+      trait Job: Storable {\n\
+     \  fn run(self) -> Int64\n\
+      }\n\n\
+      trait Task {\n\
+     \  fn run(self) -> Int64\n\
+      }\n\n\
+      type Count(value: Int64)\n\n\
+      impl Job for Count {\n\
+     \  fn run(self) -> Int64 {\n\
+     \    self.value\n\
+     \  }\n\
+      }\n\n\
+      impl Task for Count {\n\
+     \  fn run(self) -> Int64 {\n\
+     \    self.value\n\
+     \  }\n\
+      }\n\n"
+   in
+   test "a type that holds no view is Storable" (fun () ->
+       fine
+         (keep
+        ^ "fn f[Element: Storable](names: own List[String], element: own Element) {\n\
+          \  keep(5)\n\
+          \  keep(own names)\n\
+          \  keep(Boxed(value: \"a\".copy()))\n\
+          \  keep(own element)\n\
+           }\n"));
+   test "an any type is Storable when its trait requires Storable" (fun () ->
+       fine (keep ^ "fn f() {\n  let job: any Job = any Count(value: 1)\n  keep(own job)\n}\n"));
+   test "a trait that requires Storable cannot be implemented for a view type" (fun () ->
+       one_diagnostic
+         (keep ^ "impl Job for Labeled {\n  fn run(self) -> Int64 {\n    0\n  }\n}\n")
+         "types.missing_required_impl");
+   List.iter
+     (fun (name, body) ->
+       test name (fun () -> one_diagnostic (keep ^ body) "types.unsatisfied_bound"))
+     [
+       ("a slice is not Storable", "fn f(items: List[Int64]) {\n  keep(items[..])\n}\n");
+       ( "a record that holds a slice is not Storable",
+         "fn f(items: List[Int64]) {\n  keep(Labeled(view: items[..], name: \"a\".copy()))\n}\n" );
+       ( "a generic type is not Storable where its argument is not",
+         "fn f(items: List[Int64]) {\n  keep(Boxed(value: items[..]))\n}\n" );
+       ("a function type is not Storable", "fn f() {\n  keep(double)\n}\n");
+       ( "an any type is not Storable when its trait does not require it",
+         "fn f() {\n  let task: any Task = any Count(value: 1)\n  keep(own task)\n}\n" );
+       ( "a type parameter is Storable only when it is bounded",
+         "fn f[Element](element: own Element) {\n  keep(own element)\n}\n" );
+     ];
+   test "no impl of Storable can be written" (fun () ->
+       one_diagnostic (keep ^ "impl Storable for Labeled {}\n") "types.implements_built_in"));
   test "the body of a concurrent block gets its types" (fun () ->
       has_type
         "fn g(count: UInt16) {}\n\n\
