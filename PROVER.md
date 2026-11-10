@@ -569,7 +569,10 @@ and each division has a nonzero divisor, reading `&&`, `||`, `==>`, and
 `if` from left to right, so the right side may rely on the left. A
 `requires` is checked with the `requires` before it, an `ensures` with
 every `requires` and the `ensures` before it, and a loop's invariant with
-the invariants before it.
+the invariants before it. Inside a quantifier, these are checked for each
+value its range admits, so `forall i in 0..items.length() => items[i] > 0`
+is well defined and `forall i in 0..items.length() + 1 => items[i] > 0` is
+not.
 
 - **Arithmetic is exact** on `Integer`, and an `Integer` passed where a
   built-in integer is expected carries the type checker's obligation that
@@ -1084,11 +1087,11 @@ sanitized runs, test the trusted base against real executions.
   what a C function returns beyond the counts `read`, `write`, and
   `snprintf` give, is known only by its type, and what the standard library states no contract for, such as
   the `ieee_` comparisons, is known only by its type.
-- **Obligations and facts under a quantifier.** An obligation that names a
-  quantifier's bound name, such as the bounds of an index on it, is not
-  made, so nothing checks that a quantifier's body is well defined. A fact
-  that names one, such as what a callee's `ensures` says of a call on it,
-  is not kept.
+- **Facts under a quantifier.** A fact that names a quantifier's bound
+  name, such as what a callee's `ensures` says of a call on it, is not
+  kept. Closed over the quantifier it would be true, but a body's calls give
+  many such facts, and with them the solver runs out of steps on the
+  standard library's maps; keeping them waits on choosing triggers.
 - **Choosing triggers.** A quantified fact helps the solver only when it
   knows when to use it, which SMT solvers decide by triggers: terms that,
   when they appear, make the solver use the fact. Truss has no syntax for
