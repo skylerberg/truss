@@ -28,11 +28,13 @@ parameter defaults and `requires` checks are lowered from the core form
 with its body, and so are the lending and yielding methods inlined into it
 and the pulled version of a yielding method.
 
+Constant folding, a constant's evaluator, and the check of a tagged
+template read the core form too.
+
 The older lowering, which walks the syntax tree and the checked form's
 tables, is still in the compiler. A body falls back to it when lowering
 from the core form raises `Unhandled_node`, which no body in the tests
-does. Constant folding and the checks of tagged templates still read the
-syntax tree.
+does.
 
 Code generation:
 
@@ -745,7 +747,11 @@ and its siblings. Full-width multiplication, used by hashing and
   folds what it can to exactly that, to save the run: literals, operators
   on integers, with Zarith, on floats, with IEEE arithmetic rounded once to
   their type, and on `Bool`, and records, variants, strings, lists, and
-  arrays of parts that fold. Another constant's value, where it folds, is
+  arrays of parts that fold. The core form desugars a list literal into a
+  block that makes a storage, pushes each element, and calls
+  `List.from_storage`, so the folder follows a block's `let`s and pushes,
+  and a call of a function whose body is one expression. Another constant's
+  value, where it folds, is
   written in place, since C cannot initialize static data from another
   object. Whatever the folder does not know, such as a `Map` literal, or
   cannot give exactly, such as a shift whose result does not fit its type,
@@ -1528,9 +1534,9 @@ a command line can hold.
 - **A float's text without the C library.** DESIGN.md has it written in
   Truss so that it is the same on every system. The loop is Truss; the
   digits are `snprintf`'s and the check `strtod`'s.
-- **Deleting the syntax-tree lowering.** Constant folding and the checks of
-  tagged templates still read the syntax tree. Once they read the core
-  form, the syntax-tree lowering of bodies is deleted with them.
+- **Deleting the syntax-tree lowering.** Nothing needs it any more: bodies,
+  constants, and template checks all read the core form. The modules that
+  walk the syntax tree, and the fallback to them, are still to be removed.
 - **A slice of a range of elements,** `items[1..3]`. The type checker
   accepts it, and lowering reports it as unsupported.
 - **`for` over a value of a type that implements `Cursor`.** Only the

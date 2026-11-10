@@ -901,4 +901,47 @@ test "cursors" {
 }
 |}
 
+(* Checks which of a module's constants fold and which are worked out by
+   running their evaluators, and that the module's test passes. *)
+let folds what ~folded ~run source =
+  test what (fun () ->
+      let database, _ = load source in
+      let context = Lower.context ~checks:true database target_64 in
+      let value path =
+        match Lower.constant context path with Folded data -> Some data.value | Run _ -> None
+      in
+      context.constant := value;
+      let constant name : Path.t = Top { module_ = example; name } in
+      List.iter
+        (fun name -> if value (constant name) = None then fail "%s is run, and should fold" name)
+        folded;
+      List.iter
+        (fun name -> if value (constant name) <> None then fail "%s folds, and should be run" name)
+        run;
+      expect_output source "test 0 passed\n")
+
+let () =
+  folds "constants fold from their core forms, except a set, which is built by running"
+    ~folded:[ "small"; "flag"; "names"; "rows"; "corner"; "primes" ]
+    ~run:[ "colors" ]
+    {|type Point(x: Int64, y: Int64)
+
+let small: Int64 = 2 + 3 * 4
+let flag: Bool = small > 10 && !false
+let names: List[String] = ["a", "bc"]
+let rows: List[List[Int64]] = [[1, 2], [3]]
+let corner: Point = Point(x: 1, y: small)
+let primes: Array[Int64, 3] = [2, 3, 5]
+let colors: Set[String] = ["red", "green", "red"]
+
+test "constants" {
+  assert small == 14
+  assert flag
+  assert names.length() == 2 && names[1] == "bc"
+  assert rows[0][1] == 2 && rows[1].length() == 1
+  assert corner.y == 14
+  assert colors.length() == 2
+}
+|}
+
 let () = Harness.finish ()

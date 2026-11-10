@@ -138,7 +138,7 @@ let bind_name st (bound : bound_name) =
 let rec place st (source : Core.place) : Lir.place =
   match source with
   | Local { local; _ } -> local_place st local
-  | Constant { path; _ } -> Matching.static_constant st path
+  | Constant { path; _ } -> static_constant st path
   | Field { base; field; _ } -> place st base / Field field
   | Temporary value -> value_place st value
   | Lent { kind = Call call; origin; _ } -> lend st call ~call_site:(site_of st origin)
