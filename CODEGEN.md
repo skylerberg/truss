@@ -1073,7 +1073,7 @@ until both handle it.
 | Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits`, `from_bits` |
 | Storage | empty, with a capacity, from an array, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view, view to change the elements through, take a view back |
 | Views | length, lend an element, lend an element to change, swap, slice, take a view back |
-| Arrays | a view of the elements, lend an element to change, take a view back |
+| Arrays | from a storage, a view of the elements, lend an element to change, take a view back |
 | Operating system | the C library's functions and numbers, which system the program is built for, an entry of the environment, a handle from a descriptor and its descriptor, the address of a view, crash |
 | A test program | run a test by its number, have failures reported to a descriptor, how many blocks are allocated and not freed |
 
@@ -1113,6 +1113,14 @@ moved-from afterwards. That is the only way to take an array's elements
 out one at a time: the elements are then popped from the storage, which
 stays valid after each pop, so a loop that ends early drops only the
 elements it has not taken.
+
+`array_from_storage` is the other way: it moves the elements of an `own`
+storage into a new array whose length is the storage's, and frees the
+storage's buffer. That is how an array whose length is a type parameter is
+made, since an array literal writes each element out: the elements are
+pushed onto a storage, which may stop partway and still be dropped, and
+become the array together. A build with checks stops if the storage's
+length is not the array's, which the prover is to show never happens.
 
 Storage never grows by itself. `storage_set_capacity` gives it a buffer of
 its own with room for exactly as many elements as it is told, and
