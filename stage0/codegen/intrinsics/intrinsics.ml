@@ -407,6 +407,42 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
           end;
           add_to_length (at result) (Constant (Integer (USize, count)));
           set (Use (Move (at result)))
+      | Array_from_storage ->
+          (* The storage's buffer holds the elements one after another, as
+             the array does, so the whole array is read out of it at once.
+             The storage is moved into a local that nothing drops: its
+             elements are the array's now, and only its buffer is freed. *)
+          let count =
+            match value_arguments with
+            | [ count ] -> count
+            | _ -> bug "array_from_storage without the array's length"
+          in
+          let array_ty : Ground.ty =
+            Named
+              {
+                path = Intrinsic.builtin_path Array;
+                arguments = [ Type (element ()); Value count ];
+              }
+          in
+          let taken = at (local b ~borrowed:true (Value (Storage.of_elements (element ())))) in
+          emit b (Assign (taken, Use (Move (place (argument 0)))));
+          if checks then begin
+            let other = local b (Raw Bool) in
+            emit b
+              (Assign (at other, Binary (Not_equal, length taken, Constant (Integer (USize, count)))));
+            panic_when (Copy (at other)) "a storage made into an array of another length"
+          end;
+          if Z.sign count > 0 && (Memory_layout.of_type env array_ty).size > 0 then begin
+            let untyped = local b (Raw (Pointer Opaque)) in
+            emit b (Assign (at untyped, Use (Copy (Storage.buffer taken))));
+            let typed = local b (Pointer { target = Value array_ty; writable = true }) in
+            emit b (Assign (at typed, Use (Copy (at untyped))));
+            set (Use (Move { root = Local typed; projections = [ Deref ] }))
+          end;
+          (* Static elements have no buffer to free. *)
+          let owns = local b (Raw Bool) in
+          emit b (Assign (at owns, Binary (Greater, Copy (Storage.capacity taken), usize 0)));
+          when_ b (Copy (at owns)) (fun () -> call Free [ Copy (Storage.buffer taken) ])
       | Array_view ->
           (* An array's elements are one after another from its start. An
              array with no bytes has no address, and its view is of
