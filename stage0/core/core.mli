@@ -1,175 +1,208 @@
-(** The core form of a definition: what the type checker decided, as a tree.
+(** The core form: the type checker's output for one definition.
 
-    The stages after the type checker read this in place of the syntax tree. Everything the checker
-    chose is written where it chose it: a call names what it calls and lists its arguments in the
-    callee's order, an operator is the call or the built-in operation it means, sugar is the
-    construct it stands for, a place is told from a value, and every type is solved and normalized.
-    A stage that has to ask again which method a name means, or what shape a type has, has found
-    something missing here.
+    The core form is a typed, desugared tree. Ownership checking, the prover, and code generation
+    read it instead of the syntax tree. It records every decision the type checker made, so a
+    later stage never repeats one:
 
-    Every node has an [id], its number within the definition, which later results are keyed by, and
-    an [origin], the node of the syntax tree it came from, which is how a diagnostic about it finds
-    the text to quote. One syntax node can be the origin of several nodes. No node holds a span: the
-    form of a definition that was only laid out again is the same form. *)
+    - every call names its callee, and lists one argument per parameter, in parameter order;
+    - every operator is either a built-in operation or a call of a trait method;
+    - syntactic sugar is desugared ([?], compound assignment, [for] over a collection, list
+      literals);
+    - every expression says whether it denotes a place or a value;
+    - every type is fully inferred and normalized.
+
+    If a later stage has to look up which method a name refers to, or inspect the shape of a type to
+    decide what a node means, the core form is missing something.
+
+    Every node has an [id], unique within the definition. Later results (such as ownership's) are
+    keyed by it. Every node also has an [origin]: the id of the syntax node it was built from.
+    Several core nodes can share one origin. Core nodes hold no source spans, so reformatting a
+    definition does not change its core form. To show source text for a node, look up its origin in
+    [Resolve.Names.spans]. *)
 
 type id = int
+
 type origin = Syntax.id
+(** The id of the syntax node a core node was built from. *)
 
+(** A local variable. *)
 type local =
-  | Bound of Syntax.id  (** A parameter or a binding, by the id of the name that binds it. *)
+  | Named of Syntax.id
+      (** A parameter or a pattern binding, identified by the id of the name that declares it. *)
   | Self
-  | Made of int
-      (** A local the checker made, numbered within the definition: what a [?] found, in the arm
-          that gives it back. *)
+  | Synthetic of int
+      (** A local introduced by desugaring, numbered from 0 within the definition. For example, [?]
+          binds the success value to a synthetic local. *)
 
-(** How a trait's [impl] was found. *)
+(** How a trait method call finds the [impl] it dispatches to. *)
 type evidence =
-  | Impl of { impl : Path.t; arguments : Types.substitution }  (** A written or derived [impl]. *)
+  | Impl of { impl : Path.t; arguments : Types.substitution }
+      (** A known [impl], written or derived, with the type arguments for its generic parameters.
+      *)
   | Bound
-      (** A bound in scope, on a generic parameter or on an associated type of one, which the code's
-          instantiation resolves. *)
-  | Dynamic  (** Through an [any] value's table. *)
+      (** A trait bound on a generic parameter (or on one of its associated types). The [impl] is
+          known only after monomorphization. *)
+  | Dynamic  (** Dynamic dispatch through the method table of an [any Trait] value. *)
 
 type callee =
   | Function of { path : Path.t; type_arguments : Types.argument list }
-      (** A function or a type's own method, with its generic arguments, the type head's first. *)
+      (** A function, or a method defined directly on a type. For a method, the type arguments of
+          the type come first. *)
   | Trait_method of {
       trait : Types.trait_reference;
       name : string;
       receiver : Path.receiver;
       self_type : Types.ty;
-      type_arguments : Types.argument list;  (** The method's own generic arguments. *)
+      type_arguments : Types.argument list;
+          (** Type arguments for the method's own generic parameters. *)
       evidence : evidence;
     }
-      (** A trait's method. With [Impl] evidence, the method at the [impl] is
-          [Method { owner = impl; name; receiver }], whose signature and whose body, written there
-          or left to the trait, the interface answers for. *)
+      (** A method declared by a trait. With [Impl] evidence, the method that runs has the path
+          [Method { owner = impl; name; receiver }]. [Infer.core_of_path] gives its body and
+          [Interface.Impls.signature] gives its signature, whether the [impl] defines the method or
+          inherits the trait's default. *)
   | Capability_method of { capability : Path.t; name : string }
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
-      (** An operation of [standard::intrinsic], called by name: exact when it returns, with nothing
-          for the prover to show first. *)
-  | Through of operand
-      (** A function value, called by position: one held in a place is called where it is. *)
+      (** A direct call of a [standard::intrinsic] operation. Unlike {!Operator}, the prover does
+          not generate overflow or division checks for it. *)
+  | Indirect of operand
+      (** A call through a function value. If the function value is stored in a place, the operand
+          is that place: calling it does not move it. *)
 
 and call = {
   callee : callee;
   arguments : argument list;
-      (** One for each parameter, in the callee's order, a method's receiver first. *)
+      (** One argument per parameter, in parameter order. For a method, the receiver is first. *)
   lends : Types.mode option;
-      (** For a lending method, how the part it gives is lent. The part is a place: see [Lent]. *)
+      (** [Some mode] if the callee is a lending method ([lends] in its signature). The result of
+          such a call is a place: see {!Lent}. *)
   uses : Types.capability list;
-      (** The capabilities the call needs: what is called says it uses, with each of its capability
-          parameters replaced by the set that is its type argument here. *)
+      (** The capabilities this call requires: the callee's [uses] clause, with the callee's
+          capability parameters substituted by this call's type arguments. *)
 }
 
 and argument =
-  | Passed of { mode : Types.mode;  (** The parameter's. *) value : operand }
-  | Default  (** The parameter's default, which the callee's own core form holds. *)
+  | Passed of { mode : Types.mode;  (** The parameter's mode. *) value : operand }
+  | Default
+      (** The argument was omitted, so the parameter takes its default value. The default expression
+          is in the callee's core form. *)
 
-(** What something is given: a place, used where it is, or a value. *)
+(** An operand is either a place, which is borrowed, or a value. *)
 and operand =
   | Place of place
-      (** A place, used in place. As an argument it is lent for the call, read-only or to change for
-          a [mut] parameter; an [own] parameter never takes a place, it takes the value there, as
-          [Value (Use place)]. Matched or bound, its parts are bound where they are. *)
+      (** The place itself. It is borrowed, not moved or copied. As an argument, it is borrowed for
+          the duration of the call (mutably for a [mut] parameter). As the scrutinee of a [match],
+          [is], or [let], the pattern's bindings refer to parts of the place. An [own] parameter
+          never receives a [Place]: it receives [Value (Use place)]. *)
   | Value of expression
-      (** A value: an [own] parameter takes it, and a read-only one sees it for the call. A [mut]
-          parameter takes one only as a [Slice], the view through which part of a place is changed.
-      *)
+      (** A value. An [own] parameter takes ownership of it. A read-only parameter borrows it for
+          the call. A [mut] parameter receives a [Value] only when the value is a {!Slice}, which
+          is a mutable view of part of a place. *)
 
-(** Where a value is. *)
+(** A memory location. *)
 and place =
   | Local of local
   | Field of { base : place; field : string; type_ : Types.ty }
-      (** A field of a record; [type_] is the field's. A part of a sum is no place of this kind: it
-          is reached only through a pattern that binds it. *)
+      (** A field of a record. [type_] is the field's type. The fields of a sum type's variant are
+          never places of this kind: they are only reachable through pattern bindings. *)
   | Lent of expression
-      (** The part a lending call lends, for the rest of the statement: [items[index]], which is
-          [at], and [grid.cell(position)]. The expression is the [Call], of a method or of an
-          intrinsic that lends. *)
+      (** The part of a value that a lending call returns, such as [items[index]] (a call of
+          [Index.at]) or [grid.cell(position)]. The expression is a {!Call} whose [lends] is
+          [Some _]. The borrow lasts until the end of the enclosing statement. *)
   | Temporary of expression
-      (** A value with no place of its own, held for the statement so that a part of it can be
-          named: [origin().x]. *)
+      (** A value that has no place of its own, stored in a temporary for the enclosing statement
+          so that part of it can be accessed, as in [origin().x]. *)
 
 and expression = { id : id; origin : origin; type_ : Types.ty; kind : kind }
 
 and kind =
-  (* Values *)
-  | Integer of Z.t  (** Of a built-in integer type, [Integer], or [Character]. *)
-  | Float of float  (** Already rounded to its type. *)
+  (* Literals and simple values *)
+  | Integer of Z.t  (** A literal of a built-in integer type, of [Integer], or of [Character]. *)
+  | Float of float  (** A float literal, already rounded to the precision of its type. *)
   | Boolean of bool
-  | String of string  (** A string literal with nothing interpolated. *)
+  | String of string  (** A string literal without interpolation. *)
   | Interpolated of {
-      pieces : piece list;  (** The text they make, in order. *)
-      start : callee;  (** [TextBuilder.new] *)
-      write : callee;  (** [TextBuilder.write], for a [Text] piece. *)
-      finish : callee;  (** [TextBuilder.finish] *)
+      pieces : piece list;
+      builder_new : callee;  (** [TextBuilder.new] *)
+      builder_write : callee;  (** [TextBuilder.write], used for each {!Text} piece. *)
+      builder_finish : callee;  (** [TextBuilder.finish] *)
     }
-  | Template of { literals : string list; made : expression }
-      (** A tagged string. [made] is what makes it: the call of the tag's [from_template] on the
-          template built from its texts and its parts, each already the tag's part. [literals] are
-          the texts between the parts, which that template holds, as they were written: one more
-          than there are parts. *)
+      (** A string literal with interpolation. The result is the concatenation of the pieces. This
+          node will be desugared into the builder calls once the standard library gives them
+          [time] clauses. *)
+  | Template of { literals : string list; call : expression }
+      (** A tagged string, such as [Sql"select ${column}"]. [call] is the call of the tag's
+          [from_template] that produces the value; its argument is the constructed [Template]
+          record. [literals] are the literal text segments between the interpolated values (one
+          more segment than there are values). The prover evaluates the tag's [requires] clauses
+          on them. *)
   | Use of place
-      (** The value at a place, taken from it: copied where its type copies implicitly, and moved
-          otherwise. What only reads a place, or changes it, is given the place itself, as an
-          {!operand}, and never this. *)
-  | Copy of operand  (** [value.copy()] where the compiler implements [Copyable]. *)
+      (** Reads the value out of a place, consuming it: the value is copied if its type copies
+          implicitly ([Plain]), and moved otherwise. Code that only borrows a place receives the
+          place as an {!operand} instead, never a [Use]. *)
+  | Copy of operand
+      (** An explicit [value.copy()] where the compiler implements [Copyable] for the type. *)
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
-      (** A named function or method as a value. A variant used as a function is a [Lambda] that
-          builds it. *)
+      (** A reference to a named function or method, used as a value. A variant constructor used as
+          a function is desugared to a {!Lambda}. *)
   | Constant of Path.t
-  | Generic_value of Types.parameter  (** A [USize] generic parameter. *)
+  | Value_parameter of Types.parameter
+      (** A use of a [USize] generic parameter as a value. *)
   | Lambda of {
       parameters : pattern list;
-      captures : local list;  (** The outer locals it reads, in order. *)
+      captures : local list;
+          (** The locals of the enclosing function that the body reads, in order of first use. *)
       body : block;
       result : Types.ty;
     }
   | Construct of { variant : string option; fields : (string * expression option) list }
-      (** A value of a record type or of a variant, of the node's type: every field, in the order
-          the type declares them. A field with no expression takes its default, which the type's
-          core form holds. A range written as a value is one of these. *)
-  | Collection of { elements : expression list; built : collection }
-      (** An array or a set literal, or a specification's sequence or set: the node's type says
-          which. A list literal is no node of its own: it is the storage its elements are pushed
-          onto, made into a list. *)
-  | Entries of { entries : (expression * expression) list; built : collection }
-      (** A map literal. *)
-  | Updated of { base : expression; updates : (string list * expression) list }
-      (** [base with (...)]: the record with the field at each path replaced. *)
+      (** Constructs a record, or a variant of a sum type; the node's type says which type. [fields]
+          lists every field in declaration order. A field with [None] takes its default value,
+          which is in the type's core form. A range expression such as [1..5] is desugared to
+          this. *)
+  | Collection_literal of { elements : expression list; construction : construction }
+      (** An array literal, a set literal, or a specification-only sequence or set. The node's type
+          says which. List literals are not this node: they are desugared to calls. *)
+  | Map_literal of { entries : (expression * expression) list; construction : construction }
+  | Record_update of { base : expression; updates : (string list * expression) list }
+      (** [base with (...)]: a copy of the record [base] with some fields replaced. Each update
+          gives the path to a field (for a nested field, several names) and the new value. *)
   | Slice of { base : place; start : expression option; stop : expression option; inclusive : bool }
-      (** [items[start..stop]]: a view of part of a list, a slice, or an array. *)
-  (* Calls and operations *)
+      (** [items[start..stop]]: a view of a range of a list, slice, or array. *)
+  (* Calls and operators *)
   | Call of call
   | Operator of { operation : Intrinsic.operation; arguments : expression list }
-      (** Arithmetic, a bitwise operator, or a shift on built-in types, however it was written, as
-          [left + right] or as [left.add(right)]. The prover shows it defined: that it does not
-          overflow, divide by zero, or shift too far. *)
+      (** An arithmetic, bitwise, or shift operation on built-in types. [left + right] and
+          [left.add(right)] both produce this node. The prover checks that the operation is
+          defined: no overflow, no division by zero, no out-of-range shift. *)
   | Compare of { comparison : comparison; left : expression; right : expression }
-      (** A comparison of two values of one built-in type, or in a specification of two integers by
-          value. On any other type a comparison is a [Call] of [equal], or of [compare] under a
-          [Matches]. *)
+      (** A comparison of two values of the same built-in type. In a specification, also a
+          comparison of two integers by mathematical value. A comparison of any other type is a
+          {!Call} of [Equal.equal], or a {!Matches} on the result of [Ordered.compare]. *)
   | Not of expression
-  | Both of expression * expression  (** [&&]: the right side only when the left holds. *)
-  | Either of expression * expression  (** [||] *)
-  | Implies of expression * expression  (** [==>], in specifications. *)
+  | And of expression * expression  (** [&&]. The right operand is evaluated only if the left is
+                                        true. *)
+  | Or of expression * expression  (** [||]. The right operand is evaluated only if the left is
+                                       false. *)
+  | Implies of expression * expression  (** [==>]. Specifications only. *)
   | Matches of { value : operand; pattern : pattern }
-      (** [value is pattern], and what [<] asks of the [Ordering] its [compare] gives. *)
-  | Next of place
-      (** The next part of the cursor a call of a yielding method made, or none when it has ended.
-      *)
+      (** [value is pattern]. Also used for ordering comparisons of non-built-in types:
+          [first < second] is [compare(first, second) is Less]. *)
+  | Cursor_next of place
+      (** Advances the cursor produced by a call of a yielding method. The result is an [Option] of
+          the next yielded value. *)
   | Convert of { conversion : conversion; value : expression }
-  | Any of { value : expression; trait : Types.trait_reference; evidence : evidence }
-      (** A value made an [any Trait]. *)
-  (* Control *)
+  | To_any of { value : expression; trait : Types.trait_reference; evidence : evidence }
+      (** Converts a value to [any Trait]. [evidence] is the [impl] of the trait for the value's
+          type. *)
+  (* Control flow *)
   | If of { condition : expression; then_ : block; else_ : block option }
   | Match of {
       scrutinees : operand list;
       arms : arm list;
-      guards_cover : bool;
-          (** Whether its last arm is [_ => unreachable] after guards, so that the prover shows the
-              guards cover. *)
+      guards_exhaustive : bool;
+          (** True if the last arm is [_ => unreachable] and an earlier arm has a guard. The prover
+              must then show that the guards cover every case. *)
     }
   | Block of block
   | Provide of { implementations : implementation list; body : block }
@@ -179,80 +212,96 @@ and kind =
   | Todo
   | Unreachable
   | Echo of expression
-  (* Specifications *)
-  | Result  (** [result], in an [ensures]. *)
-  | Old of expression
-  | Updating
-      (** What the target of an [Update] holds before. It appears once in the update's value, as an
-          argument of the [Call] or the [Operator] that the value is, and the argument's mode says
-          whether the target is given up to the call or lent to it. *)
+  (* Specification-only expressions *)
+  | Result  (** [result] in an [ensures] clause: the function's return value. *)
+  | Old of expression  (** [old(e)]: the value of [e] when the function was called. *)
+  | Current_target
+      (** The value of the target of the enclosing {!Compound_assign} before the assignment. It
+          appears exactly once, as a direct argument of the {!Call} or {!Operator} that computes
+          the new value. *)
   | Quantified of { quantifier : Syntax.quantifier; binder : binder; body : expression }
-  | Yielded  (** The parts handed out so far, in order. *)
-  | Finished
+  | Yielded
+      (** [yielded]: the sequence of values a yielding method has yielded so far. *)
+  | Finished  (** [finished]: whether a yielding method has returned. *)
   | Identical of expression * expression  (** [identical(first, second)] *)
-  | Measure of { function_ : measure; arguments : expression list }
-      (** [log(count)], [power(base, exponent)], [time(visit)], or [calls(visit)], in a [cost]
-          bound. *)
+  | Cost_function of { function_ : cost_function; arguments : expression list }
+      (** A cost function inside a [cost] bound: [log(count)], [power(base, exponent)],
+          [time(visit)], or [calls(visit)]. *)
 
-and measure = Log | Power | Time | Calls
+and cost_function = Log | Power | Time | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
 
+(** One piece of an interpolated string. *)
 and piece =
   | Text of string
   | Displayed of { value : operand; display : callee }
-      (** A value written out by its [Display], which only reads it. *)
+      (** An interpolated value, converted to text by [display] (its [Display.display]). The value
+          is only borrowed. *)
 
-(** How a collection literal is built, where it is one that runs. *)
-and collection =
-  | Array  (** In place, at its size. *)
-  | Inserted of { empty : callee; insert : callee }  (** A set or a map. *)
-  | Modelled  (** A specification's sequence, set, or map, which no code builds. *)
+(** How a collection literal is constructed at run time. *)
+and construction =
+  | Array  (** An array, constructed in place. *)
+  | By_insertion of { empty : callee; insert : callee }
+      (** A set or a map: call [empty], then call [insert] for each element. This will be desugared
+          into the calls once the standard library has [Set.empty] and [Map.empty]. *)
+  | Specification_only
+      (** A [Sequence], [FiniteSet], or [FiniteMap]. These exist only in specifications and are
+          never constructed at run time. *)
 
-(** The only conversions, each a node where it happens. *)
+(** An implicit conversion. *)
 and conversion =
   | Widen
-      (** A function value to a function type with more [uses] or weaker costs. The prover shows the
-          costs imply: the value's type is what is given, and the node's what is expected. *)
-  | To_integer  (** A built-in integer to [Integer], in specifications. *)
+      (** A function value converted to a function type with more [uses] or weaker [cost] clauses.
+          The prover checks that the value's costs imply the expected costs. The value's type is
+          the source type and the node's type is the target type. *)
+  | To_integer  (** A built-in integer converted to [Integer]. Specifications only. *)
   | From_integer
-      (** An [Integer] where a built-in integer is expected, which the prover shows fits. *)
+      (** An [Integer] converted to a built-in integer type. Specifications only. The prover checks
+          that the value fits. *)
 
+(** The variable a quantifier binds, and what it ranges over. *)
 and binder =
   | Over_type of { local : local; name : string; type_ : Types.ty }  (** [value: Int64] *)
   | Over_range of { pattern : pattern; start : expression; stop : expression; inclusive : bool }
   | Over_collection of { pattern : pattern; collection : expression }
 
+(** One implementation given to a [provide] block. *)
 and implementation = {
   origin : origin;
   mode : Types.mode;
   value : operand;
-      (** A place provided [mut] keeps what the implementation changes; a value is held for the
-          body. *)
+      (** A place (borrowed for the block, mutably if [mode] is [Mut]) or a value (owned by the
+          block). *)
   type_ : Types.ty;
-  provides : provided list;  (** The capabilities its type provides, each with its [impl]. *)
+  provides : provided list;
+      (** Each capability that the implementation's type implements, with the [impl]. *)
 }
 
 and provided = { capability : Path.t; impl : Path.t; arguments : Types.substitution }
 
 and block = {
   statements : statement list;
-  value : expression option;  (** The expression the block ends with, whose value is its own. *)
-  ends : bool;  (** Whether what follows the block can be reached from inside it. *)
+  value : expression option;  (** The block's final expression, which is the block's value. *)
+  diverges : bool;
+      (** True if control never reaches the end of the block: it always returns, breaks, continues,
+          or loops forever. *)
 }
 
 and statement = { id : id; origin : origin; kind : statement_kind }
 
 and statement_kind =
-  | Let of { pattern : pattern; value : operand; otherwise : block option }
-      (** [otherwise] is the [else] of a [let] whose pattern can fail; it leaves the block. *)
+  | Let of { pattern : pattern; value : operand; else_ : block option }
+      (** [else_] is the block of a [let ... else]. It runs if the pattern does not match, and it
+          always diverges. *)
   | Evaluate of expression
   | Assign of { target : place; value : expression }
-  | Update of { target : place; value : expression }
-      (** A compound assignment: the target takes [value], in which [Updating] is what the target
-          holds before. The target is worked out once. *)
+  | Compound_assign of { target : place; value : expression }
+      (** A compound assignment such as [total += step]. [value] computes the new value; inside it,
+          {!Current_target} is the target's value before the assignment. The target place is
+          evaluated once. *)
   | For of {
       pattern : pattern;
-      drive : drive;
+      iteration : iteration;
       clauses : loop_clause list;
       body : block;
       parallel : bool;
@@ -260,61 +309,72 @@ and statement_kind =
   | While of { condition : expression; clauses : loop_clause list; body : block }
   | Parallel of statement list
   | Proof of block
-  | Assert of clause
+  | Assert of condition
   | Yield of { mode : Types.mode; part : operand }
-      (** The part a lending or yielding method gives, a place or a value it made, lent as the
-          method's signature says. *)
+      (** [yield] in a lending or yielding method. [mode] is the mode in the method's signature. *)
 
-(** What a [for] loop goes over. *)
-and drive =
-  | Count of { start : expression; stop : expression; inclusive : bool }
+(** What a [for] loop iterates over. *)
+and iteration =
+  | Integer_range of { start : expression; stop : expression; inclusive : bool }
       (** A range of built-in integers or characters. *)
-  | Each of expression
-      (** A [Call] of a yielding method, with the loop's mode: [each] where the loop names a value,
-          or the call the loop wrote out. *)
-  | Pull of { cursor : place; next : callee option }
-      (** A cursor, pulled until it ends: by its [Cursor.next], or as [Next] does when it is the
-          cursor of a yielding method's call. *)
+  | Yielding_call of expression
+      (** A {!Call} of a yielding method. [for item in items] is desugared to a call of
+          [items.each()] with the loop's mode. *)
+  | Cursor of { cursor : place; next : callee option }
+      (** An existing cursor, advanced until it is exhausted. [next] is the cursor type's
+          [Cursor.next]. It is [None] for the built-in cursor of a yielding method, which is
+          advanced as {!Cursor_next} does. *)
 
 and loop_clause =
   | Invariant of expression
   | Decreases of expression list
-  | Cost of cost  (** What the loop has spent since it started, at each iteration. *)
+  | Cost of cost  (** A bound on what the loop has spent so far, checked at every iteration. *)
 
-and cost = { origin : origin; amortized : bool; resource : resource; bound : bound }
-and resource = Time | Allocations | Allocated_bytes | Calls of target
+and cost = {
+  origin : origin;  (** The [cost] clause. *)
+  amortized : bool;
+  resource : resource;
+  bound : bound;
+}
 
-(** What a [calls] clause counts. *)
-and target =
-  | Through of local  (** Calls through a function value: one of the parameters. *)
-  | Capability of Path.t  (** Calls of a capability's methods. *)
-  | Capability_method of Path.t * string  (** Calls of one of them. *)
+(** What a [cost] clause counts. *)
+and resource = Time | Allocations | Allocated_bytes | Calls of calls_target
+
+(** What a [calls(...)] clause counts calls of. *)
+and calls_target =
+  | Function_parameter of local  (** Calls through a function-typed parameter. *)
+  | Capability of Path.t  (** Calls of any method of a capability. *)
+  | Capability_method of Path.t * string  (** Calls of one method of a capability. *)
 
 and bound = Finite | Order_of of expression | At_most of expression | Exactly of expression
 
-and clause = { value : expression; runs : bool }
-(** A condition that is stated, and checked when the program runs if it [runs]: when nothing in it
-    is only for specifications. That is no quantifier, no [Integer], no [old] or [result], no
-    function for specifications only, and every comparison a call or of one built-in type. *)
+and condition = { value : expression; executable : bool }
+(** A [requires] clause or an [assert]. [executable] is true if the condition can be evaluated at
+    run time. It is false if the condition contains a quantifier, a value of type [Integer], [old],
+    [result], or a call of a specification-only function. *)
 
 and arm = { patterns : pattern list; guard : expression option; body : block; origin : origin }
 and pattern = { id : id; origin : origin; type_ : Types.ty; kind : pattern_kind }
 
 and pattern_kind =
-  | Anything
+  | Wildcard
   | Bind of { local : local; name : string; mutable_ : bool; mode : Types.mode }
-      (** [mode] is how the binding holds what it matched: its own, or a part lent to it. *)
+      (** Binds the matched value to a local. [mode] is [Own] if the binding owns the value, and
+          [Read] or [Mut] if it borrows part of the scrutinee. *)
   | Variant of { variant : string; fields : (string * pattern) list }
-      (** The fields it looks at, by name, in the order the variant declares them. *)
+      (** The fields that the pattern matches, by name, in declaration order. Fields not listed are
+          ignored. *)
   | Record of (string * pattern) list
-  | Literal of expression  (** An [Integer] or a [Boolean] node, compared as built-in values. *)
-  | Within of { start : expression; stop : expression; inclusive : bool }
+  | Literal of expression
+      (** An {!Integer} or {!Boolean} literal, compared with built-in equality. *)
+  | Range of { start : expression; stop : expression; inclusive : bool }
       (** A range of literals or constants. *)
-  | Equals of { value : expression; equal : callee }
-      (** A constant or a string, compared with the type's [Equal]. *)
+  | Equal_to of { value : expression; equal : callee }
+      (** A constant or a string literal, compared by calling [equal] (the type's [Equal.equal]).
+      *)
   | Alternatives of pattern list
 
-(** A definition's parts, each checked on its own. *)
+(** {1 Definitions} *)
 
 type parameter = {
   local : local;
@@ -322,15 +382,16 @@ type parameter = {
   mode : Types.mode;
   type_ : Types.ty;
   default : expression option;
-  accepts : accepts option;
+  callback_contract : callback_contract option;
 }
 
-and accepts = { inputs : (local * string) list; requires : expression list }
-(** What a parameter of a function type requires of each call through it, when the type names its
-    inputs: [transform: (fn(element: Element) -> Output requires ...)]. *)
+and callback_contract = { inputs : (local * string) list; requires : expression list }
+(** The [requires] clauses of a function-typed parameter that names its inputs, as in
+    [transform: (fn(element: Element) -> Output requires ...)]. Every call through the parameter
+    must satisfy them. [inputs] are the named inputs, which the clauses can mention. *)
 
 type contract = {
-  requires : clause list;
+  requires : condition list;
   ensures : expression list;
   decreases : expression list;
   costs : cost list;
@@ -338,13 +399,15 @@ type contract = {
 
 type law = { name : string; parameters : parameter list; requires : expression list; body : block }
 
-type parts =
+(** The checked content of a definition. *)
+type definition =
   | Function of { parameters : parameter list; contract : contract; body : block option }
-      (** A function, a method, or a theorem; [body] is absent for a method a trait or a capability
-          only declares. *)
+      (** A function, method, or theorem. [body] is [None] for a trait or capability method that is
+          declared without a body. *)
   | Type of {
       defaults : (string option * string * expression) list;
-          (** Each field's default, by its variant, if it is in one, and its name. *)
+          (** Field defaults: the variant name (for a sum type), the field name, and the default
+              expression. *)
       invariants : expression list;
       potential : expression option;
     }
@@ -352,13 +415,15 @@ type parts =
   | Constant of expression
   | Test of block
   | Law_proof of block
-  | Nothing  (** An [impl] or a capability, which holds only its methods. *)
+  | Empty  (** An [impl] or a capability. Its methods are separate definitions. *)
 
 type t = {
-  parts : parts;
-  nodes : int;  (** One more than the largest id. *)
-  made : int;  (** How many locals the checker made. *)
+  definition : definition;
+  node_count : int;  (** Every node id is less than this. *)
+  synthetic_local_count : int;  (** Every [Synthetic] local's number is less than this. *)
 }
-(** A definition's core form. What the type checker obliges the prover to show is in its nodes: a
-    [From_integer] must fit, a [Widen]'s costs must imply, and the guards of a [Match] that says so
-    must cover. *)
+(** The core form of one definition.
+
+    Three kinds of node carry a proof obligation that the type checker created: a
+    {!From_integer} conversion (the value must fit), a {!Widen} conversion (the costs must imply),
+    and a {!Match} with [guards_exhaustive] (the guards must cover every case). *)
