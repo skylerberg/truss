@@ -283,8 +283,10 @@ public type Utf8Error(valid_up_to: USize)
   derives Equal
 
 impl Display for Utf8Error {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write("the bytes are not UTF-8 at offset ")
+    self.valid_up_to.display(mut output)
   }
 }
 
@@ -292,8 +294,10 @@ public type Utf16Error(valid_up_to: USize)
   derives Equal
 
 impl Display for Utf16Error {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write("the units are not UTF-16 at index ")
+    self.valid_up_to.display(mut output)
   }
 }
 
@@ -324,16 +328,178 @@ public fn String.from_utf8(bytes: own List[UInt8]) -> Result[String, Utf8Error]
   Ok(own text)
 }
 
+internal fn StringSlice.malformed_length(self, offset: USize) -> USize
+  requires offset < self.length()
+  ensures 1 <= result && result <= 3
+  ensures result <= self.length() - offset
+  cost time O(1)
+  cost allocations == 0
+{
+  let lead = self.byte(offset)
+  let wanted: USize = if lead >= 194 && lead <= 223 {
+    2
+  } else if lead >= 224 && lead <= 239 {
+    3
+  } else if lead >= 240 && lead <= 244 {
+    4
+  } else {
+    1
+  }
+  if wanted == 1 || offset + 1 >= self.length() {
+    return 1
+  }
+  let second = self.byte(offset + 1)
+  let low: UInt8 = if lead == 224 { 160 } else if lead == 240 { 144 } else { 128 }
+  let high: UInt8 = if lead == 237 { 159 } else if lead == 244 { 143 } else { 191 }
+  if second < low || second > high {
+    return 1
+  }
+  if wanted == 2 || offset + 2 >= self.length() {
+    return 2
+  }
+  let third = self.byte(offset + 2)
+  if third < 128 || third > 191 || wanted == 3 {
+    return 2
+  }
+  3
+}
+
+internal fn StringSlice.is_malformed_at(self, offset: USize) -> Bool
+  requires offset < self.length()
+  cost time O(1)
+  cost allocations == 0
+{
+  self.decode(offset).length == 1 && self.byte(offset) >= 128
+}
+
+internal fn reverse_run(storage: mut intrinsic::Storage[UInt8], from: USize, to: USize)
+  requires from <= to
+  requires to <= intrinsic::storage_length(storage)
+  ensures intrinsic::storage_length(storage) == old(intrinsic::storage_length(storage))
+  cost time O(to - from)
+  cost allocations == 0
+{
+  var low = from
+  var high = to
+  while low + 1 < high
+    invariant from <= low
+    invariant low <= high
+    invariant high <= to
+    invariant intrinsic::storage_length(storage) == old(intrinsic::storage_length(storage))
+    decreases high - low
+    cost time O(low - from)
+    cost allocations == 0
+  {
+    high -= 1
+    intrinsic::storage_swap(mut storage, first: low, second: high)
+    low += 1
+  }
+}
+
 public fn String.from_utf8_lossy(bytes: Slice[UInt8]) -> String
   cost time O(bytes.length())
 {
-  todo
+  let text = StringSlice(bytes: bytes.elements)
+  if text.length() > USize.maximum / 4 {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  var budget: USize = 0
+  var offset: USize = 0
+  while offset < text.length()
+    invariant offset <= text.length()
+    invariant budget <= 2 * offset
+    decreases text.length() - offset
+    cost time O(offset)
+  {
+    if text.is_malformed_at(offset) {
+      let run = text.malformed_length(offset)
+      budget += 3 - run
+      offset += run
+    } else {
+      offset += text.decode(offset).length
+    }
+  }
+  let capacity = text.length() + budget
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(capacity)
+  var position: USize = 0
+  while position < text.length()
+    invariant position <= text.length()
+    invariant intrinsic::storage_length(output) + (text.length() - position) + budget <= capacity
+    invariant intrinsic::storage_capacity(output) == capacity
+    decreases text.length() - position
+    cost time O(position)
+  {
+    if text.is_malformed_at(position) {
+      let run = text.malformed_length(position)
+      if budget >= 3 - run {
+        intrinsic::storage_push(mut output, value: 239)
+        intrinsic::storage_push(mut output, value: 191)
+        intrinsic::storage_push(mut output, value: 189)
+        budget -= 3 - run
+      }
+      position += run
+    } else {
+      let length = text.decode(position).length
+      text.part(position, to: position + length).copy_onto(mut output)
+      position += length
+    }
+  }
+  String(storage: own output)
 }
 
 public fn String.from_utf16(units: Slice[UInt16]) -> Result[String, Utf16Error]
   cost time O(units.length())
 {
-  todo
+  if units.length() > USize.maximum / 4 {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  var size: USize = 0
+  var index: USize = 0
+  while index < units.length()
+    invariant index <= units.length()
+    invariant size <= 3 * index
+    decreases units.length() - index
+    cost time O(index)
+  {
+    let unit = units[index]
+    if unit < 55296 || unit > 57343 {
+      size += if unit < 128 { 1 } else if unit < 2048 { 2 } else { 3 }
+      index += 1
+    } else if unit <= 56319 && index + 1 < units.length() && units[index + 1] >= 56320 && units[index + 1] <= 57343 {
+      size += 4
+      index += 2
+    } else {
+      return Err(Utf16Error(valid_up_to: index))
+    }
+  }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(size)
+  var room = size
+  var position: USize = 0
+  while position < units.length()
+    invariant position <= units.length()
+    invariant intrinsic::storage_length(output) + room == size
+    invariant intrinsic::storage_capacity(output) == size
+    decreases units.length() - position
+    cost time O(position)
+  {
+    let unit: UInt32 = intrinsic::convert(units[position])
+    var code = unit
+    var step: USize = 1
+    if unit >= 55296 && unit <= 56319 && position + 1 < units.length() {
+      let low: UInt32 = intrinsic::convert(units[position + 1])
+      if low >= 56320 && low <= 57343 {
+        code = 65536 + (unit - 55296) * 1024 + (low - 56320)
+        step = 2
+      }
+    }
+    let character: Character = if code >= 55296 && code <= 57343 { Character"\u{fffd}" } else { intrinsic::convert(code) }
+    if room >= character.utf8_length() {
+      character.encode_onto(mut output)
+      room -= character.utf8_length()
+    }
+    position += step
+  }
+  Ok(String(storage: own output))
 }
 
 public fn String.collect[Source: Cursor[Element = Character]](source: own Source) -> String {
@@ -388,7 +554,20 @@ public fn String.pop_character(mut self) -> Option[Character]
   cost time O(1)
   cost allocations == 0
 {
-  todo
+  if self.length() == 0 {
+    return None
+  }
+  let start = self.slice().previous_start(self.length())
+  let character = self.slice().decode(start).character
+  while self.length() > start
+    invariant start <= self.length()
+    invariant self.length() <= old(self.length())
+    decreases self.length() - start
+    cost allocations == 0
+  {
+    let _ = intrinsic::storage_pop(mut self.storage)
+  }
+  Some(character)
 }
 
 public fn String.insert(mut self, offset: USize, text: StringSlice)
@@ -397,7 +576,12 @@ public fn String.insert(mut self, offset: USize, text: StringSlice)
   ensures self.length() == old(self.length()) + text.length()
   cost amortized time O(old(self.length()) + text.length())
 {
-  todo
+  let end = self.length() + text.length()
+  growth::reserve(mut self.storage, additional: text.length())
+  text.copy_onto(mut self.storage)
+  reverse_run(mut self.storage, from: offset, to: end)
+  reverse_run(mut self.storage, from: offset, to: offset + text.length())
+  reverse_run(mut self.storage, from: offset + text.length(), to: end)
 }
 
 public fn String.remove_range(mut self, from: USize, to: USize)
@@ -409,7 +593,31 @@ public fn String.remove_range(mut self, from: USize, to: USize)
   cost time O(old(self.length()))
   cost allocations == 0
 {
-  todo
+  let width = to - from
+  if width == 0 {
+    return
+  }
+  var index = to
+  while index < self.length()
+    invariant self.length() == old(self.length())
+    invariant to <= index
+    invariant index <= self.length()
+    decreases self.length() - index
+    cost allocations == 0
+  {
+    intrinsic::storage_swap(mut self.storage, first: index - width, second: index)
+    index += 1
+  }
+  var removed: USize = 0
+  while removed < width
+    invariant self.length() == old(self.length()) - removed
+    invariant removed <= width
+    decreases width - removed
+    cost allocations == 0
+  {
+    let _ = intrinsic::storage_pop(mut self.storage)
+    removed += 1
+  }
 }
 
 public fn String.truncate(mut self, length: USize)

@@ -103,6 +103,7 @@ internal fn StringSlice.previous_start(self, offset: USize) -> USize
   ensures result < offset
   ensures offset - result <= 4
   cost time O(1)
+  cost allocations == 0
 {
   var start = offset - 1
   var steps: USize = 0
@@ -808,14 +809,71 @@ public fn StringSlice.replace(self, pattern: StringSlice, replacement: StringSli
   requires pattern.length() > 0
   cost time O(self.length() + result.length())
 {
-  todo
+  if pattern.length() > self.length() {
+    return self.to_string()
+  }
+  let count = self.occurrences(pattern)
+  if count == 0 {
+    return self.to_string()
+  }
+  if replacement.length() > USize.maximum / 4 / count || self.length() > USize.maximum / 4 {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  var budget = count * replacement.length()
+  let capacity = self.length() + budget
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(capacity)
+  let table = failure_table(pattern)
+  var copied: USize = 0
+  var matched: USize = 0
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant matched < pattern.length()
+    invariant copied + matched <= index
+    invariant intrinsic::storage_length(output) + (self.length() - copied) + budget <= capacity
+    invariant intrinsic::storage_capacity(output) == capacity
+    decreases self.length() - index
+    cost time O(2 * index - matched + intrinsic::storage_length(output))
+  {
+    matched = self.advance(pattern, table: table.slice(), matched: matched, index: index)
+    index += 1
+    if matched == pattern.length() {
+      if self.is_boundary(index - matched) && budget >= replacement.length() {
+        self.part(copied, to: index - matched).copy_onto(mut output)
+        replacement.copy_onto(mut output)
+        budget -= replacement.length()
+        copied = index
+        matched = 0
+      } else {
+        matched = table[matched - 1]
+      }
+    }
+  }
+  self.part(copied, to: self.length()).copy_onto(mut output)
+  String(storage: own output)
 }
 
 public fn StringSlice.replace_first(self, pattern: StringSlice, replacement: StringSlice) -> String
   requires pattern.length() > 0
   cost time O(self.length() + replacement.length())
 {
-  todo
+  if pattern.length() > self.length() {
+    return self.to_string()
+  }
+  match self.find(pattern) {
+    Some(offset) => {
+      if replacement.length() > USize.maximum / 4 || self.length() > USize.maximum / 4 {
+        intrinsic::crash("a string cannot hold that many bytes".slice())
+      }
+      var output: intrinsic::Storage[UInt8] =
+        intrinsic::storage_with_capacity(self.length() - pattern.length() + replacement.length())
+      self.part(0, to: offset).copy_onto(mut output)
+      replacement.copy_onto(mut output)
+      self.part(offset + pattern.length(), to: self.length()).copy_onto(mut output)
+      String(storage: own output)
+    }
+    None => self.to_string()
+  }
 }
 
 public fn StringSlice.repeated(self, times: USize) -> String
@@ -930,16 +988,58 @@ public fn StringSlice.equal_ignoring_ascii_case(self, other: StringSlice) -> Boo
   true
 }
 
+internal fn StringSlice.padded(self, width: USize, fill: Character, at_start: Bool) -> String
+  cost time O(self.length() + width)
+{
+  let count = self.character_count()
+  if count >= width {
+    return self.to_string()
+  }
+  let missing = width - count
+  let unit = fill.utf8_length()
+  if missing > USize.maximum / 16 || self.length() > USize.maximum / 4 {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  var room: USize = if unit == 1 {
+    missing
+  } else if unit == 2 {
+    missing * 2
+  } else if unit == 3 {
+    missing * 3
+  } else {
+    missing * 4
+  }
+  let after: USize = if at_start { self.length() } else { 0 }
+  let capacity = self.length() + room
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(capacity)
+  if !at_start {
+    self.copy_onto(mut output)
+  }
+  while room >= unit
+    invariant intrinsic::storage_length(output) + room + after <= capacity
+    invariant intrinsic::storage_capacity(output) == capacity
+    decreases room
+    cost time O(intrinsic::storage_length(output))
+  {
+    fill.encode_onto(mut output)
+    room -= unit
+  }
+  if at_start {
+    self.copy_onto(mut output)
+  }
+  String(storage: own output)
+}
+
 public fn StringSlice.pad_start(self, width: USize, fill: Character = Character" ") -> String
   cost time O(self.length() + width)
 {
-  todo
+  self.padded(width, fill: fill, at_start: true)
 }
 
 public fn StringSlice.pad_end(self, width: USize, fill: Character = Character" ") -> String
   cost time O(self.length() + width)
 {
-  todo
+  self.padded(width, fill: fill, at_start: false)
 }
 
 public fn StringSlice.to_bytes(self) -> List[UInt8]

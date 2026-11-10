@@ -9,6 +9,7 @@ internal fn Character.code(self) -> UInt32
   ensures result <= 1114111
   ensures result < 55296 || result > 57343
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::convert(self)
 }
@@ -29,12 +30,38 @@ internal fn Character.at_scalar_index(index: UInt32) -> Character
   if index < 55296 { intrinsic::convert(index) } else { intrinsic::convert(index + 2048) }
 }
 
+internal fn Character.encode_onto(self, output: mut intrinsic::Storage[UInt8])
+  requires intrinsic::storage_length(output) + self.utf8_length() <= intrinsic::storage_capacity(output)
+  ensures intrinsic::storage_length(output) == old(intrinsic::storage_length(output)) + self.utf8_length()
+  ensures intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
+  cost time O(1)
+  cost allocations == 0
+{
+  let code = self.code()
+  if code < 128 {
+    intrinsic::storage_push(mut output, value: intrinsic::convert(code))
+  } else if code < 2048 {
+    intrinsic::storage_push(mut output, value: intrinsic::convert(192 + code / 64))
+    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code % 64))
+  } else if code < 65536 {
+    intrinsic::storage_push(mut output, value: intrinsic::convert(224 + code / 4096))
+    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code / 64 % 64))
+    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code % 64))
+  } else {
+    intrinsic::storage_push(mut output, value: intrinsic::convert(240 + code / 262144))
+    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code / 4096 % 64))
+    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code / 64 % 64))
+    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code % 64))
+  }
+}
+
 public fn Character.utf8_length(self) -> USize
   ensures 1 <= result && result <= 4
   ensures (result == 1) == (self.code() < 128)
   ensures (result == 2) == (128 <= self.code() && self.code() < 2048)
   ensures (result == 3) == (2048 <= self.code() && self.code() < 65536)
   cost time O(1)
+  cost allocations == 0
 {
   let code = self.code()
   if code < 128 {
