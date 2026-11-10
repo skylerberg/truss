@@ -1,9 +1,8 @@
-(* The entry points of checking that its parts call across files. Checking
-   an expression is one recursive whole, split into files by what each part
-   checks. A part calls the parts before it directly, and calls [expression]
-   and [check], which [Expressions] defines after them all, through these.
-   [Expressions] sets them when it is linked, which every caller of
-   checking ensures by reaching it. *)
+(* Forward references to [Expressions.expression] and [Expressions.check].
+   The expression checker is one set of mutually recursive functions, split
+   across files. A file calls the files before it directly, and calls these
+   two functions, which [Expressions] defines last, through this module.
+   [Expressions] sets them when it is linked. *)
 
 open Syntax
 module T = Types

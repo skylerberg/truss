@@ -8,8 +8,9 @@ type t = {
   values : (int, T.value) Hashtbl.t;  (** What each solved value variable is. *)
   mutable capability_variable_count : int;  (** The number of capability variables created. *)
   mutable deferred_capability_equalities : (T.capability list * T.capability list) list;
-      (** Sets of capabilities that two types unified hold in the same place, of which one is not
-          known yet: they must turn out the same. *)
+      (** Pairs of capability sets that unification found in the same position of two types, where
+          at least one has a capability variable. They must be equal once the variables are solved.
+      *)
 }
 
 let create () =
@@ -56,8 +57,8 @@ let unify_capabilities unifier left right =
        true
      end
 
-(* The type a variable stands for, one step at a time, until it is not a
-   solved variable. *)
+(* Follows the solutions of inference variables until the type is not a
+   solved variable. Only the top of the type is resolved. *)
 let rec resolve unifier (type_ : T.ty) =
   match type_ with
   | Variable index | Literal (_, index) -> (
@@ -74,7 +75,7 @@ let rec resolve_value unifier (value : T.value) =
       | None -> value)
   | _ -> value
 
-(* Replaces every solved variable, at any depth. *)
+(* Replaces every solved inference variable in a type, at any depth. *)
 let rec zonk unifier (type_ : T.ty) : T.ty =
   let zonk = zonk unifier in
   match resolve unifier type_ with
@@ -144,9 +145,9 @@ type unknown =
   | Unknown_literal of T.literal_kind * int
   | Unknown_value of int
 
-(* Every unknown a type still holds, at any depth: type variables,
-   undecided literals, and unknown [USize] values. The one walk that
-   settling a statement uses, so every part of a type is seen alike. *)
+(* Every unsolved variable in a type, at any depth: type variables, literal
+   variables, and [USize] value variables. The end of a statement's
+   inference uses only this function to find them. *)
 let unknowns unifier (type_ : T.ty) =
   let found = ref [] in
   let rec go (type_ : T.ty) =
@@ -184,23 +185,24 @@ let argument_unknowns unifier = function
       | _ -> [])
   | T.Capabilities _ -> []
 
-(* Unifies two types, solving variables in either. Errors and holes agree
-   with anything, so one mistake is reported once. Types are equal or they
-   are not: function types with other [uses] or costs are other types, and
-   only a value that meets an expected type converts, which is not done
+(* Unifies two types, solving inference variables in either. An error or a
+   hole unifies with any type, so one mistake is reported once. Unification
+   is equality: function types with different [uses] or costs do not unify.
+   Implicit conversions happen where a value meets an expected type, not
    here. *)
 let rec unify unifier (left : T.ty) (right : T.ty) =
   let left = resolve unifier left and right = resolve unifier right in
   match (left, right) with
-  (* An error, or a hole, solves a variable it meets, so that one mistake is
-     not reported again as a type that cannot be worked out. *)
+  (* A variable that meets an error or a hole is solved as that error or
+     hole, so the mistake is not reported again as a type that cannot be
+     inferred. *)
   | (T.Variable index | T.Literal (_, index)), ((T.Error _ | T.Hole) as unknown)
   | ((T.Error _ | T.Hole) as unknown), (T.Variable index | T.Literal (_, index)) ->
       Hashtbl.replace unifier.types index unknown;
       true
   | ((T.Error _ | T.Hole) as unknown), other | other, ((T.Error _ | T.Hole) as unknown) ->
-      (* Every variable inside what an error meets is solved as an error
-         too, so nothing it held is reported as unknown. *)
+      (* Every variable inside a type that meets an error is solved as that
+         error too, so none of them is reported as unsolved. *)
       List.iter
         (function
           | Unknown_type index | Unknown_literal (_, index) ->
