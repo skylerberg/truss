@@ -3709,7 +3709,7 @@ and signature_terminates context path =
 
 (* A field of a value, which is in its type's range like every value. *)
 and field_of context frame ty variant field field_type term =
-  let part = L.Apply (selector_name ty variant field, [ term ]) in
+  let part = selected context ty variant field term in
   assume context frame (in_range field_type part);
   (* A part of a value is below it, whatever its type, which is how
      structural recursion is shown to end. *)
@@ -3719,6 +3719,16 @@ and field_of context frame ty variant field field_type term =
       L.(Apply ("<=", [ int 0; below ]) &&& Apply ("<", [ below; rank context ty term ]))
   end;
   part
+
+(* A field of a value: of one built here, what it was built from. *)
+and selected context ty variant field term =
+  match (term, constructors context ty) with
+  | L.Apply (name, arguments), Some shape when name = constructor_name ty variant -> (
+      let fields = Option.value (List.assoc_opt variant shape) ~default:[] in
+      match List.find_index (fun (named, _) -> named = field) fields with
+      | Some index when index < List.length arguments -> List.nth arguments index
+      | _ -> L.Apply (selector_name ty variant field, [ term ]))
+  | _ -> L.Apply (selector_name ty variant field, [ term ])
 
 (* A value's place in the order of parts, as Dafny's datatypes have one:
    any field is below the value it is in. *)
@@ -4229,7 +4239,7 @@ and with_ context frame (node : expression) base updates =
           ( constructor_name ty None,
             List.map
               (fun (name_, field_type) ->
-                let current = L.Apply (selector_name ty None name_, [ term ]) in
+                let current = selected context ty None name_ term in
                 if name_ = field then replace field_type current rest replacement else current)
               fields )
     | _ -> unsupported span "`with` on `%s`" (T.show ty)
@@ -4293,7 +4303,7 @@ and validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = []) t
                      (fun (field, field_type) ->
                        let part =
                          validity context frame ~assuming ~deep ~seen:(ty :: seen) field_type
-                           (L.Apply (selector_name ty variant field, [ term ]))
+                           (selected context ty variant field term)
                        in
                        match (variant, part) with
                        | _, L.Boolean true -> part
@@ -5837,7 +5847,7 @@ and has_potential context ?(seen = []) (ty : T.ty) =
    zero for a valid value, as each type with a potential shows, and its
    type's own potential plus its parts', unfolded once for each value it is
    asked of. *)
-and potential context frame (ty : T.ty) term =
+and potential context frame ?(seen = []) (ty : T.ty) term =
   if not (has_potential context ty) then Costs.zero
   else begin
     let held = held_symbol context ty term in
@@ -5889,24 +5899,19 @@ and potential context frame (ty : T.ty) term =
                 when Option.is_some (buffer_elements context field_type) ->
                   fact context frame
                     (L.equal slack
-                       (buffer_slack context field_type
-                          (L.Apply (selector_name ty None field, [ term ]))))
+                       (buffer_slack context field_type (selected context ty None field term)))
               | _ -> ())
           | None -> ())
-      | Some (source, written), Some shape -> (
-          let inner = type_frame context frame source ty ~self:(Some term) in
+      | clause, Some shape -> (
           try
-            let own = snd (value context inner written) in
-            let parts (variant, fields) =
-              List.fold_left
-                (fun total (field, field_type) ->
-                  if has_potential context field_type then
-                    Costs.plus total
-                      (held_symbol context field_type
-                         (L.Apply (selector_name ty variant field, [ term ])))
-                  else total)
-                Costs.zero fields
+            (* Without a clause, a type holds nothing of its own. *)
+            let own =
+              match clause with
+              | Some (source, written) ->
+                  snd (value context (type_frame context frame source ty ~self:(Some term)) written)
+              | None -> Costs.zero
             in
+            let parts = parts_potential context frame ~seen ty term in
             let parts =
               match shape with
               | [ (None, fields) ] -> parts (None, fields)
@@ -5925,8 +5930,28 @@ and potential context frame (ty : T.ty) term =
           with Unsupported _ | Foreign_unsupported _ -> ())
       | _ -> ()
     end;
-    held
+    (* A record that holds nothing of its own holds what its parts hold,
+       which is the same term as theirs wherever they change. *)
+    match (potential_clause context ty, constructors context ty) with
+    | None, Some [ (None, fields) ] when Option.is_none (buffer_elements context ty) -> (
+        try parts_potential context frame ~seen ty term (None, fields)
+        with Unsupported _ | Foreign_unsupported _ -> held)
+    | _ -> held
   end
+
+(* The potential a value's parts hold, for one variant's fields: each
+   unfolded in turn, except a part of a type already being unfolded, which
+   would unfold forever. *)
+and parts_potential context frame ~seen ty term (variant, fields) =
+  List.fold_left
+    (fun total (field, field_type) ->
+      if has_potential context field_type then
+        let part = selected context ty variant field term in
+        Costs.plus total
+          (if List.exists (T.equal field_type) (ty :: seen) then held_symbol context field_type part
+           else potential context frame ~seen:(ty :: seen) field_type part)
+      else total)
+    Costs.zero fields
 
 (* A growable buffer's elements and model: a storage, by its own model, or
    a type whose [Model] is the sequence of the storage it holds in its one
@@ -6310,7 +6335,7 @@ and store context frame (place : place) new_value =
                 List.map
                   (fun (name_, _) ->
                     if name_ = field then new_value
-                    else L.Apply (selector_name base_type None name_, [ base_value ]))
+                    else selected context base_type None name_ base_value)
                   fields )
           in
           store context frame base rebuilt
