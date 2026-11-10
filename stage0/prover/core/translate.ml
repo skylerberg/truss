@@ -3845,7 +3845,7 @@ and invariants_of context (ty : T.ty) =
    a value of it comes from the type's own package, which shows it, so
    here it is assumed where a value arrives and shown where one leaves, and
    never unfolded. *)
-and validity context frame ~assuming ?(deep = true) ?(seen = []) ty term =
+and validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = []) ty term =
   if List.exists (T.equal ty) seen || List.exists (T.equal ty) context.validating then
     L.Boolean true
   else
@@ -3854,6 +3854,7 @@ and validity context frame ~assuming ?(deep = true) ?(seen = []) ty term =
     Fun.protect ~finally:(fun () -> context.validating <- validating) @@ fun () ->
     let own =
       match invariants_of context ty with
+      | _ when not own -> L.Boolean true
       | Some _ when constructors context ty = None ->
           let symbol = "valid." ^ type_key ty in
           declare context (L.Function (symbol, [ sort_of context ty ], L.Bool));
@@ -5098,6 +5099,10 @@ and loop_entry context frame costs =
     (fun cost ->
       match cost.rule with
       | Clause_bound (written, constants) ->
+          (* The bound is well defined, as every specification must be. *)
+          (match written.bound with
+          | Order_of g | At_most g | Exactly g -> ignore (value context frame g)
+          | Finite -> ());
           oblige context frame Cost
             (span_of frame.source written.origin)
             (Printf.sprintf "The loop's `%s` may not hold on entry to the loop."
@@ -5571,9 +5576,7 @@ and handing_out context frame (node : statement) (mode : T.mode) (part : operand
         List.iter
           (fun (clause : expression) ->
             let _, term =
-              value context
-                { at with result; yielded = Some yielded; finished; checking = false }
-                clause
+              value context { at with result; yielded = Some yielded; finished } clause
             in
             oblige context at Ensures (span_of at.source clause.origin)
               (Printf.sprintf "`%s` may not hold %s." (quote at.source clause.origin) when_)
@@ -6756,6 +6759,17 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
             frame)
           start own_requires
   in
+  (* Each of its own cost bounds is well defined, read where it is
+     checked: on entry, with any result. *)
+  List.iter
+    (fun (promise : promise) ->
+      if not promise.inherited then
+        match promise.clause.bound with
+        | Order_of g | At_most g | Exactly g ->
+            let result = Option.map (arrive context start "result") output in
+            ignore (value context { start with result } g)
+        | Finite -> ())
+    promised;
   let finished = block_value context start body in
   let returns =
     (match finished with Some (frame, term) -> [ (frame, Some term) ] | None -> [])
@@ -6804,12 +6818,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
             (fun (ensured : expression) ->
               let _, term =
                 value context
-                  {
-                    frame with
-                    yielded = Some handed_out;
-                    finished = Some (L.Boolean true);
-                    checking = false;
-                  }
+                  { frame with yielded = Some handed_out; finished = Some (L.Boolean true) }
                   ensured
               in
               oblige context frame Ensures (at frame ensured)
@@ -6958,16 +6967,16 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
     (laws_of context trait);
   outcome context
 
-(* A type's [cost potential] is never below zero for a value that meets
-   its invariants, which is what makes each potential a fact about every
-   valid value. *)
-let type_potential database (source : source) ~path =
-  let home =
-    match source.key with Some key -> key | None -> invalid_arg "Translate.type_potential"
-  in
+(* A type's own clauses. Each invariant is well defined for a value whose
+   fields meet their own types' invariants, given the invariants before
+   it. The type's [cost potential] is well defined and never below zero
+   for a value that meets its invariants, which is what makes each
+   potential a fact about every valid value. *)
+let type_ database (source : source) ~path =
+  let home = match source.key with Some key -> key | None -> invalid_arg "Translate.type_" in
   let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
-  match source.core.definition with
-  | Type { potential = Some written; _ } ->
+  (match source.core.definition with
+  | Type { invariants; potential; _ } ->
       let ty =
         match Query.demand database Interface.Environment.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
@@ -6977,16 +6986,24 @@ let type_potential database (source : source) ~path =
       in
       let start = { (empty_frame source) with self_type = Some ty } in
       let value_ = arrive context start "value" ty in
-      assume_valid context start ty value_;
+      assume context start (validity context start ~assuming:true ~own:false ty value_);
       let at_value = { start with self = Some value_; old_self = Some value_ } in
-      let _, own = value context { at_value with checking = false } written in
-      oblige context at_value Cost (at at_value written)
-        (Printf.sprintf
-           "The potential of `%s` may be below zero for a value that meets its invariants."
-           (T.show ty))
-        (L.Apply ("<=", [ L.int 0; own ]));
-      outcome context
-  | _ -> outcome context
+      List.iter
+        (fun invariant ->
+          let after, holds = value context at_value invariant in
+          assume context after holds)
+        invariants;
+      Option.iter
+        (fun written ->
+          let _, own = value context at_value written in
+          oblige context at_value Cost (at at_value written)
+            (Printf.sprintf
+               "The potential of `%s` may be below zero for a value that meets its invariants."
+               (T.show ty))
+            (L.Apply ("<=", [ L.int 0; own ])))
+        potential
+  | _ -> ());
+  outcome context
 
 let test database (source : source) ~path =
   let home = match source.key with Some key -> key | None -> invalid_arg "Translate.test" in
