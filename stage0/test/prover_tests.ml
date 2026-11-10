@@ -2445,6 +2445,39 @@ let () =
         \  x\n\
          }\n"
         "prover.ensures");
+  test "a quantifier over an empty range shows nothing of the path" (fun () ->
+      not_proven
+        "fn hang() -> Bool\n\
+        \  ensures false\n\
+         {\n\
+        \  while true {}\n\
+         }\n\n\
+         fn f(x: Int64) -> Int64\n\
+        \  ensures result <= 0\n\
+         {\n\
+        \  if x > 0 {\n\
+        \    let _ = exists _ in 0..0 => hang()\n\
+        \  }\n\
+        \  x\n\
+         }\n"
+        "prover.ensures");
+  test "a lambda over a type no value has shows nothing of the path" (fun () ->
+      not_proven
+        "type Empty(value: Int64)\n\
+        \  invariant value > 0\n\
+        \  invariant value < 0\n\n\
+         fn ignore(visit: fn(Empty) -> Int64) -> Int64 {\n\
+        \  0\n\
+         }\n\n\
+         fn f(x: Int64) -> Int64\n\
+        \  ensures result <= 0\n\
+         {\n\
+        \  if x > 0 {\n\
+        \    let _ = ignore(fn(e) { e.value })\n\
+        \  }\n\
+        \  x\n\
+         }\n"
+        "prover.ensures");
   test "a law's proof that never ends shows nothing" (fun () ->
       not_proven
         (monoid ^ flag_impl "true" ^ "\nproof Monoid.left_identity for Flag {\n  while true {}\n}\n")
@@ -2455,6 +2488,31 @@ let () =
       in
       proven text;
       if holes text <> 1 then fail "%d holes" (holes text))
+
+(* What a caller assumes is what was shown *)
+
+let () =
+  test "a trait's ensures holds of an impl's method only where the trait's requires does" (fun () ->
+      not_proven
+        "trait Scaled {\n\
+        \  fn scale(self, n: Int64) -> Int64\n\
+        \    requires n > 0\n\
+        \    ensures result > 0\n\
+         }\n\n\
+         type Box()\n\n\
+         impl Scaled for Box {\n\
+        \  fn scale(self, n: Int64) -> Int64\n\
+        \    requires n >= 0\n\
+        \  {\n\
+        \    n\n\
+        \  }\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  ensures result > 0\n\
+         {\n\
+        \  Box().scale(0)\n\
+         }\n"
+        "prover.ensures")
 
 (* Concurrent code *)
 

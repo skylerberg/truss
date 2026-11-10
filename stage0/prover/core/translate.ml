@@ -4090,15 +4090,17 @@ and contract_for_every_argument context frame (contract : contract) parameters v
       | own :: others -> if own.requires <> [] || others = [] then [ own ] else others
       | [] -> []
     in
-    let required =
+    let requires_of parts =
       L.conjunction
         (List.concat_map
            (fun (part : part) ->
              List.map (fun clause -> snd (clause_value context (read part) clause)) part.requires)
-           requiring)
+           parts)
     in
+    let required = requires_of requiring in
     List.iter
       (fun (part : part) ->
+        let required = if List.memq part requiring then required else requires_of [ part ] in
         List.iter
           (fun clause ->
             let ensured = snd (clause_value context (read part) clause) in
@@ -4710,7 +4712,23 @@ and contract_call context frame (node : expression) (call_ : call) path contract
       requiring
   in
   let required = L.conjunction required in
+  (* Each part's [ensures] holds where its [requires] does: a trait's, of
+     an [impl]'s method whose own precondition is weaker, only where the
+     trait's holds too. *)
+  let required_by (part : part) =
+    if List.memq part requiring then required
+    else
+      L.conjunction
+        (List.map
+           (fun (clause : expression) -> snd (clause_value context (entry_frame part) clause))
+           part.requires)
+  in
   let after = havoc_mut frame in
+  (* A pure call's [ensures], where its [requires] holds, and its
+     definition are facts of mathematics, true whether or not the body of a
+     quantifier around the call runs. *)
+  let in_quantifier = contract.pure && frame.binders <> [] in
+  let state term = if in_quantifier then fact context after term else assume context after term in
   (* What each [mut] argument holds after the call: what its place holds,
      which [havoc_mut] gave a fresh value. *)
   let changed =
@@ -4782,11 +4800,16 @@ and contract_call context frame (node : expression) (call_ : call) path contract
        the prover cannot read is simply not unfolded. *)
     (match contract.definition with
     | Some (part, body) when not (List.exists (L.mentions after.bound) own_arguments) ->
-        let unfolding = { (entry_frame part) with condition = after.condition } in
+        let unfolding =
+          {
+            (entry_frame part) with
+            condition = (if in_quantifier then L.Boolean true else after.condition);
+          }
+        in
         let mark = List.length context.facts in
         (try
            match block_value context unfolding body with
-           | Some (_, defined) -> assume context after (L.( ==> ) required (L.equal result defined))
+           | Some (_, defined) -> state (L.( ==> ) required (L.equal result defined))
            | None -> ()
          with Unsupported _ | Foreign_unsupported _ -> ());
         List.iter (fun fact -> Hashtbl.replace context.unfolded fact ()) (facts_since context mark)
@@ -4850,7 +4873,11 @@ and contract_call context frame (node : expression) (call_ : call) path contract
               else ensures_frame
             in
             match clause_value context frame_for_clause clause with
-            | _, term -> assume context after (L.( ==> ) required term))
+            | _, term ->
+                (* A pure call's [ensures], where its [requires] holds, is a
+                   fact of mathematics, true whether or not a quantifier's
+                   body around it runs. *)
+                state (L.( ==> ) (required_by part) term))
           part.ensures)
       (* A yielding method's clauses are about each part it hands out and
          how it ends, which each pull of the cursor it makes meets. *)
@@ -7764,6 +7791,15 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
     | _ -> None
   in
   let own_requires = List.map (fun (clause : condition) -> clause.value) contract.requires in
+  (* The trait's precondition, on entry: what its postcondition and cost
+     clauses are promised under. *)
+  let trait_requires =
+    match trait_frame start ~result:None with
+    | Some (part, inside) ->
+        L.conjunction
+          (List.map (fun clause -> snd (clause_value context inside clause)) part.requires)
+    | None -> L.Boolean true
+  in
   (* Its cost clauses, and its trait's, each count from zero. *)
   let promised =
     promises context source start.locals contract.costs ~inherited:false
@@ -7783,7 +7819,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
   in
   let start =
     match trait_frame start ~result:None with
-    | Some (part, inside)
+    | Some (part, _)
     (* A tag's [from_template] may require more than its trait, since only
        a template calls it, where the tag is known; a call through a bound
        is an error, which keeps that sound. *)
@@ -7791,21 +7827,30 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
              (match part.callee.key with
              | Some { path = Method { owner; _ }; _ } -> Path.equal owner template_trait
              | _ -> false) ->
-        List.iter
-          (fun (clause : expression) ->
-            assume context start (snd (clause_value context inside clause)))
-          part.requires;
-        List.fold_left
-          (fun frame (clause : expression) ->
-            let frame, term = clause_value context frame clause in
-            oblige context frame Requires (at frame clause)
-              (Printf.sprintf
-                 "`%s` may not follow from the trait's precondition, which callers through the \
-                  trait show, and an `impl`'s precondition must."
-                 (quote source clause.origin))
-              term;
-            frame)
-          start own_requires
+        if own_requires = [] then begin
+          assume context start trait_requires;
+          start
+        end
+        else begin
+          ignore
+            (List.fold_left
+               (fun frame (clause : expression) ->
+                 let frame, term = clause_value context frame clause in
+                 oblige context frame Requires (at frame clause)
+                   (Printf.sprintf
+                      "`%s` may not follow from the trait's precondition, which callers through \
+                       the trait show, and an `impl`'s precondition must."
+                      (quote source clause.origin))
+                   term;
+                 frame)
+               (restrict start trait_requires) own_requires);
+          List.fold_left
+            (fun frame (clause : expression) ->
+              let frame, term = clause_value context frame clause in
+              assume context frame term;
+              frame)
+            start own_requires
+        end
     | _ ->
         List.fold_left
           (fun frame (clause : expression) ->
@@ -7929,12 +7974,13 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
         | Some term, Some output -> Costs.plus given (potential context frame output term)
         | _ -> given
       in
+      let under_trait = restrict frame trait_requires in
       List.iter
         (fun promise ->
           if promise.inherited then
             match trait_frame frame ~result:returned with
             | Some (_, inside) ->
-                keep_promise context frame promise
+                keep_promise context under_trait promise
                   ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
                   ~span:returns_span ~change
             | None -> ()
@@ -7949,7 +7995,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
           List.iter
             (fun (clause : expression) ->
               let _, term = clause_value context inside clause in
-              oblige context frame Ensures returns_span
+              oblige context under_trait Ensures returns_span
                 (Printf.sprintf "The %s's `%s` may not hold when this method returns."
                    (promised_by database part.callee)
                    (quote part.callee clause.origin))
