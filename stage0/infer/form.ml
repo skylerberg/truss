@@ -888,16 +888,16 @@ let loop_clause state (clause : loop_clause) : Core.loop_clause =
   | Loop_decreases measures -> Decreases (List.map (build_expression state) measures)
   | Loop_cost written -> Cost (cost state ~origin:clause.id written)
 
-(* [inner?], desugared to a match. The first variant of the operand's type
-   is the success variant: its arm evaluates to the variant's field. The
-   second is the failure variant: its arm returns the failure variant of
-   the function's result type, with the same fields. *)
-(* An exit, inside a [Leaving] if it ends tasks early. *)
-let leaving (tasks : Core.task list) state ~origin (exit : Core.kind) : Core.kind =
+(* An early exit. It is wrapped in a [Leaving] node if it terminates tasks. *)
+let early_exit (tasks : Core.task list) state ~origin (exit : Core.kind) : Core.kind =
   match tasks with
   | [] -> exit
   | _ -> Leaving { tasks; exit = synthetic_expression state ~origin T.Never exit }
 
+(* [inner?], desugared to a match. The first variant of the operand's type
+   is the success variant: its arm evaluates to the variant's field. The
+   second is the failure variant: its arm returns the failure variant of
+   the function's result type, with the same fields. *)
 let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leaves : Core.task list)
     : Core.kind =
   let scrutinee = build_expression state inner in
@@ -968,7 +968,7 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leav
               value =
                 Some
                   (make T.Never
-                     (leaving leaves state ~origin:value.id
+                     (early_exit leaves state ~origin:value.id
                         (Return
                            (Some
                               (make output

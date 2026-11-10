@@ -17,26 +17,26 @@ module Lower = Interface.Lower
 type local = { type_ : T.ty; mutable_ : bool; mode : T.mode }
 
 (* The context of the code that is being checked. *)
-(* What is around a piece of code, up to the enclosing function or lambda:
-   a loop, or a task of [concurrent] code. An iteration of a
-   [concurrent for] is both. *)
+(* An enclosing construct that an early exit can leave: a loop, or a task
+   of [concurrent] code. An iteration of a [concurrent for] is both. *)
 type enclosing = Loop | Task of Core.task
 type exit = Return_exit | Break_exit | Continue_exit
 
-(* The tasks that an exit ends early, innermost first. A [return] ends
-   every task around it. A [break] or a [continue] ends the tasks inside
-   its loop. A [break] of a [concurrent for] also ends its own iteration
-   early, and a [continue] of one does not: it only ends its iteration. *)
-let left_by (exit : exit) (around : enclosing list) : Core.task list =
+(* The tasks that an early exit terminates, innermost first, given the
+   enclosing constructs. A [return] terminates every enclosing task. A
+   [break] or a [continue] terminates the tasks between it and its loop. A
+   [break] in a [concurrent for] also terminates the task of its own
+   iteration. A [continue] in one does not: the iteration ends normally. *)
+let tasks_exited_by (exit : exit) (enclosing : enclosing list) : Core.task list =
   match exit with
-  | Return_exit -> List.filter_map (function Task task -> Some task | Loop -> None) around
+  | Return_exit -> List.filter_map (function Task task -> Some task | Loop -> None) enclosing
   | Break_exit | Continue_exit ->
       let rec within_loop = function
         | [] | Loop :: _ -> []
         | Task (Iteration _ as task) :: _ -> if exit = Break_exit then [ task ] else []
         | Task (Branch _ as task) :: rest -> task :: within_loop rest
       in
-      within_loop around
+      within_loop enclosing
 
 type env = {
   output : T.result option;
@@ -53,9 +53,9 @@ type env = {
   compile_time : bool;
       (** The expression is a constant expression, which the compiler evaluates: the value of a
           constant, or a default. *)
-  around : enclosing list;
-      (** The loops and the [concurrent] tasks around the code, innermost first, up to the enclosing
-          function or lambda. *)
+  enclosing : enclosing list;
+      (** The enclosing loops and [concurrent] tasks, innermost first, up to the enclosing function
+          or lambda. *)
 }
 
 (* Whether an expression runs in the compiled program. A specification

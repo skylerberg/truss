@@ -24,7 +24,7 @@ let rec try_ state env (value : expression) (inner : expression) =
       match output with
       | Some output ->
           Form.try_ state value inner ~output:(final state output)
-            ~leaves:(left_by Return_exit env.around)
+            ~leaves:(tasks_exited_by Return_exit env.enclosing)
       | None -> bug "`?` where nothing is returned");
   match (inner_type, output) with
   | ( T.Named { path; arguments = [ T.Type ok; T.Type error ] },
