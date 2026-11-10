@@ -29,7 +29,7 @@ let local_type context local = Hashtbl.find_opt context.types local
    none: a value read from it views what the local views. *)
 let has_own_value context (root : Place.root) =
   match root with
-  | Constant _ | Local Self -> true
+  | Constant _ | Environment | Local Self -> true
   | Local local -> (
       List.mem local context.parameters
       || kind context root = Owned
@@ -54,6 +54,7 @@ let resolve context (holdings : holdings) (places : Place.t list) : Place.t list
 let ends_with_function context (place : Place.t) =
   match place.root with
   | Constant _ -> false
+  | Environment -> true
   | Local local ->
       let owned =
         kind context place.root = Owned
@@ -68,7 +69,10 @@ let ends_with_function context (place : Place.t) =
    parameter, or [self] in a [mut self] method. *)
 let kept_by_caller context (place : Place.t) =
   kind context place.root = Mut_access
-  && match place.root with Local local -> List.mem local context.parameters | Constant _ -> false
+  &&
+  match place.root with
+  | Local local -> List.mem local context.parameters
+  | Constant _ | Environment -> false
 
 let transfer context (point : point) (before : holdings) : holdings =
   match point.action with
@@ -87,7 +91,8 @@ let transfer context (point : point) (before : holdings) : holdings =
       | [] -> before
       | viewed -> hold before place.root viewed)
   | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Assign _ | Ends _ | Suspend | Exit
-  | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Write_through _ | Arguments _ ->
+  | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Gives_function _ | Write_through _
+  | Arguments _ ->
       before
 
 (* What each holder may view before each point. *)
@@ -135,7 +140,7 @@ let used_after (graph : Graph.t) : Core.local list array =
   let uses (point : point) =
     match point.action with
     | Read place | Mutate place | Assign place | Move { place; _ } -> (
-        match place.root with Local local -> [ local ] | Constant _ -> [])
+        match place.root with Local local -> [ local ] | Constant _ | Environment -> [])
     | _ -> []
   in
   let changed = ref true in
@@ -248,7 +253,7 @@ let check context (graph : Graph.t) =
               match holder with
               | Local local when not (kept_by_caller context { root = holder; steps = [] }) ->
                   List.mem local after.(index)
-              | Local _ | Constant _ -> true
+              | Local _ | Constant _ | Environment -> true
             in
             if in_use && List.exists (fun viewed -> overlaps viewed place) viewed then
               report context Changed_while_viewed at
@@ -339,10 +344,41 @@ let check context (graph : Graph.t) =
                else [])
             "This part is lent only for this statement, so a name cannot keep it. Use it in this \
              statement, or copy it."
+      | Gives_function views -> (
+          (* Only a function that captures nothing may be kept. A function
+             value that is not owned here may be a lambda that captures. *)
+          match
+            List.find_opt
+              (fun (viewed : Place.t) ->
+                match viewed.root with
+                | Environment -> true
+                | Constant _ -> false
+                | Local _ -> kind context viewed.root <> Owned)
+              (resolve context before.(index) views)
+          with
+          | Some { root = Environment; _ } ->
+              report context Stores_local_view at
+                "This lambda captures, and an `own` parameter may keep the function it is given \
+                 after this function returns. Only a function that captures nothing can be given \
+                 to an `own` parameter."
+          | Some viewed ->
+              report context Stores_local_view at
+                (Printf.sprintf
+                   "`%s` is not owned here, so it may be a lambda that captures, and an `own` \
+                    parameter may keep the function it is given. Only a function that captures \
+                    nothing can be given to an `own` parameter."
+                   (show context viewed))
+          | None -> ())
       | Return_view views -> (
           match
             List.find_opt (ends_with_function context) (resolve context before.(index) views)
           with
+          | Some { root = Environment; _ } ->
+              report context Returns_local_view at
+                "This returns a lambda that captures. What a lambda captures is kept in the \
+                 function that the lambda is written in, so the lambda would outlive it. Only a \
+                 function that captures nothing can be returned. Return a record that holds what \
+                 the lambda needs instead, with a method that does the work."
           | Some local ->
               report context Returns_local_view at
                 (Printf.sprintf
@@ -355,6 +391,14 @@ let check context (graph : Graph.t) =
             match
               List.find_opt (ends_with_function context) (resolve context before.(index) views)
             with
+            | Some { root = Environment; _ } ->
+                report context Stores_local_view at
+                  (Printf.sprintf
+                     "This puts a lambda that captures in `%s`, which the caller keeps. What a \
+                      lambda captures is kept in the function that the lambda is written in, so \
+                      the lambda would outlive it. Only a function that captures nothing can be \
+                      kept."
+                     (show_root context place.root))
             | Some local ->
                 report context Stores_local_view at
                   (Printf.sprintf
@@ -372,7 +416,7 @@ let check context (graph : Graph.t) =
              writable if its mode is [mut], which the type checker checks. *)
           let mutable_root (root : Place.root) =
             match root with
-            | Constant _ -> false
+            | Constant _ | Environment -> false
             | Local local -> (
                 match kind context root with
                 | Mut_access -> true
@@ -480,7 +524,7 @@ let check context (graph : Graph.t) =
         (fun ((place : Place.t), origin) ->
           let outside =
             match place.root with
-            | Constant _ | Local Self -> true
+            | Constant _ | Environment | Local Self -> true
             | Local local -> not (List.mem local !bound)
           in
           if outside then

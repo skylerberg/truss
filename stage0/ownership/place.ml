@@ -2,7 +2,12 @@
 
 module T = Types
 
-type root = Local of Core.local | Constant of Path.t
+type root =
+  | Local of Core.local
+  | Constant of Path.t
+  | Environment
+      (** What a lambda captures, as the lambda holds it: a record that is a local of the function
+          the lambda is written in. Every lambda that captures views it. *)
 
 (* [Element] names the index call or the slice that selects the elements,
    by its node id and its origin. The check does not compare indexes, so an

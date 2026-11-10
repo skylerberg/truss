@@ -48,6 +48,7 @@ let kind_of_mode : T.mode -> kind = function Own -> Owned | Read -> Viewing | Mu
 let kind context (root : Place.root) =
   match root with
   | Constant _ -> Viewing
+  | Environment -> Owned
   | Local local -> Option.value ~default:Owned (Hashtbl.find_opt context.kinds local)
 
 let show_root context (root : Place.root) =
@@ -56,6 +57,7 @@ let show_root context (root : Place.root) =
   | Local local -> Option.value ~default:"this" (Hashtbl.find_opt context.names local)
   | Constant (Top { name; _ } | Member_constant { name; _ }) -> name
   | Constant path -> Path.show path
+  | Environment -> "what a lambda captures"
 
 let show context (place : Place.t) =
   show_root context place.root

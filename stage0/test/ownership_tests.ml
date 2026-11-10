@@ -226,6 +226,72 @@ let () =
            }\n")
         "ownership.not_pullable")
 
+(* Lambdas that capture *)
+
+let () =
+  let helpers =
+    "type Handlers(first: fn(Int64) -> Int64)\n\n\
+     fn take(handler: own fn(Int64) -> Int64) {}\n\n\
+     fn apply(handler: fn(Int64) -> Int64, to: Int64) -> Int64 {\n\
+    \  handler(to)\n\
+     }\n\n\
+     fn double(value: Int64) -> Int64 {\n\
+    \  value\n\
+     }\n\n"
+  in
+  let rejected name body code = test name (fun () -> one_diagnostic (helpers ^ body) code) in
+  let accepted name body = test name (fun () -> fine (helpers ^ body)) in
+  rejected "a lambda that captures a parameter cannot be returned"
+    "fn adder(amount: Int64) -> fn(Int64) -> Int64 {\n  fn(value) { value + amount }\n}\n"
+    "ownership.returns_local_view";
+  rejected "a lambda that captures a local cannot be returned"
+    "fn adder(amount: Int64) -> fn(Int64) -> Int64 {\n\
+    \  let extra = amount\n\
+    \  fn(value) { value + extra }\n\
+     }\n"
+    "ownership.returns_local_view";
+  rejected "a lambda that captures cannot be returned through a name"
+    "fn adder(amount: Int64) -> fn(Int64) -> Int64 {\n\
+    \  let add: fn(Int64) -> Int64 = fn(value) { value + amount }\n\
+    \  add\n\
+     }\n"
+    "ownership.returns_local_view";
+  rejected "a record that holds a lambda that captures cannot be returned"
+    "fn build(amount: Int64) -> Handlers {\n  Handlers(first: fn(value) { value + amount })\n}\n"
+    "ownership.returns_local_view";
+  rejected "a lambda that captures cannot be put in what the caller keeps"
+    "fn keep(handlers: mut Handlers, amount: Int64) {\n\
+    \  handlers.first = fn(value) { value + amount }\n\
+     }\n"
+    "ownership.stores_local_view";
+  rejected "a lambda that captures cannot be given to an `own` parameter"
+    "fn give(amount: Int64) {\n  take(fn(value) { value + amount })\n}\n"
+    "ownership.stores_local_view";
+  rejected "a function value that is not owned cannot be given to an `own` parameter"
+    "fn relay(handler: fn(Int64) -> Int64) {\n  take(handler)\n}\n" "ownership.stores_local_view";
+  accepted "a function that captures nothing can be returned, kept, and given up"
+    "fn plain() -> fn(Int64) -> Int64 {\n\
+    \  fn(value) { double(value) }\n\
+     }\n\n\
+     fn named() -> fn(Int64) -> Int64 {\n\
+    \  double\n\
+     }\n\n\
+     fn keep(handlers: mut Handlers) {\n\
+    \  handlers.first = double\n\
+     }\n\n\
+     fn give() {\n\
+    \  take(double)\n\
+    \  take(fn(value) { double(value) })\n\
+     }\n\n\
+     fn relay(handler: own fn(Int64) -> Int64) {\n\
+    \  take(handler)\n\
+     }\n";
+  accepted "a lambda that captures can be passed down and held in a local record"
+    "fn f(amount: Int64) -> Int64 {\n\
+    \  let handlers = Handlers(first: fn(value) { value + amount })\n\
+    \  apply(handlers.first, to: 1) + apply(fn(value) { value + amount }, to: 2)\n\
+     }\n"
+
 (* Constants *)
 
 let () =
