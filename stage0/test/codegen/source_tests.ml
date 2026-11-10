@@ -307,4 +307,42 @@ test "overflowed" {
       | Ok _ -> fail "expected the constant not to be worked out"
       | Error message -> if not (contains message "arithmetic overflow") then fail "got %S" message)
 
+let () =
+  test "a derived equal stops at the first field that differs" (fun () ->
+      let _, compile = load "type Both(first: Int64, second: Int64)\n  derives Equal\n" in
+      let equal : Instance.key =
+        Code
+          {
+            path =
+              Method
+                {
+                  owner =
+                    Derived
+                      {
+                        type_ = Top { module_ = example; name = "Both" };
+                        trait =
+                          Top
+                            {
+                              module_ = { package = "standard"; modules = [ "core" ] };
+                              name = "Equal";
+                            };
+                      };
+                  name = "equal";
+                  receiver = Read;
+                };
+            type_arguments = [];
+          }
+      in
+      match Compile.compiled compile equal with
+      | Code instance ->
+          let branches =
+            Array.to_list instance.main.blocks
+            |> List.filter (fun (block : Lir.basic_block) ->
+                match block.terminator with Switch _ -> true | _ -> false)
+          in
+          if List.length branches <> 2 then
+            fail "expected a branch after each field, got %d:\n%s" (List.length branches)
+              (Lir.to_string instance)
+      | _ -> fail "expected code")
+
 let () = Harness.finish ()
