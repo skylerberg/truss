@@ -176,6 +176,7 @@ module Code : sig
     | Conflicting_loan
     | Changed_while_viewed
     | Returns_local_view
+    | Stores_local_view
     | Needs_owned
     | Lends_count
     | Not_pullable

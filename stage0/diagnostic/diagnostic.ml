@@ -168,6 +168,7 @@ module Code = struct
     | Conflicting_loan
     | Changed_while_viewed
     | Returns_local_view
+    | Stores_local_view
     | Needs_owned
     | Lends_count
     | Not_pullable
@@ -399,6 +400,7 @@ module Code = struct
     | Conflicting_loan -> "conflicting_loan"
     | Changed_while_viewed -> "changed_while_viewed"
     | Returns_local_view -> "returns_local_view"
+    | Stores_local_view -> "stores_local_view"
     | Needs_owned -> "needs_owned"
     | Lends_count -> "lends_count"
     | Not_pullable -> "not_pullable"

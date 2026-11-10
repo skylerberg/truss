@@ -127,6 +127,11 @@ binding, each pattern's variants, and so on.
 - **An id means something only within its definition.** A result never
   names a node in another definition. It names the definition, by path, as
   every reference across definitions does.
+- **A generic parameter is named by what declares it and its name,** not by
+  a node. Resolution records a use of `Element` as the parameter `Element` of
+  `List.push`, or of the `impl` the method is in, which is the same pair a
+  type names it by. So a parameter means the same thing in every tree that
+  can see it, and nothing maps a node to it.
 - **Tables are dense arrays** indexed by id, kept like every other result. A
   node a stage says nothing about has an empty entry.
 
@@ -1048,28 +1053,47 @@ in SYNTAX.md's example.
 ### Views
 
 DESIGN.md's views are second class: they never outlive the function that
-made them. The checker keeps them so with two rules, which together need no
-annotations:
+made them. The checker keeps them so with rules that need no annotations,
+all read from one account of what a value views:
 
-- **A call's result views everything its arguments view.** A result of a
-  view type holds the loans of every read-only argument and every view-typed
-  argument of the call. A view-typed `mut` argument also takes on those
-  loans, since the callee may store a view in it. `found.unwrap_or(default:
-  backup[..])` therefore views `backup`, and `mut backup.push(9)` is rejected
-  while the result is in use. Plain-data arguments, such as an index, lend
-  nothing, so the rule rarely holds more than it must.
+- **A call's result views everything its arguments lend it.** A result of a
+  view type holds the loans of every argument lent to the call, read-only or
+  `mut`, that is not `Plain`, and of every view-typed argument.
+  `found.unwrap_or(default: backup[..])` therefore views `backup`, and
+  `mut backup.push(9)` is rejected while the result is in use. Plain-data
+  arguments, such as an index, lend nothing, so the rule rarely holds more
+  than it must.
+- **A place given `mut` that can hold views takes on the same loans,** since
+  the callee may keep a view in it. After `mut views.push(data[0..2])`,
+  `views` views `data`, and `mut data.push(4)` is rejected while `views` is
+  in use.
+- **A place assigned a view views what the value does.** After
+  `holder.view = data[0..2]`, `holder` views `data`. A variable assigned
+  again still views what it viewed before, since the checker follows no
+  path one at a time.
+- **A local that is a view stands for what it views.** A value read from
+  `part`, after `let part = items[0..2]`, views `items` and not `part`, so a
+  function may return it when `items` is a parameter.
 - **A function returns views only of what reached it through its
   parameters.** A returned view-typed value may hold loans only of its
-  parameters and of what they view, never of its own locals. A method
-  returning `self.items[1..4]` and `Option.unwrap_or` both meet this.
+  parameters and of what they view, never of what ends with the function:
+  its locals, and a parameter or `self` it takes `own`, unless that is
+  itself a view. A method returning `self.items[1..4]` and
+  `Option.unwrap_or` both meet this.
+- **What the caller keeps views only the same.** A `mut` parameter, and
+  `self` in a `mut self` method, outlive the function, so a view put in one,
+  by assignment or by a call that takes it `mut`, must not be of what ends
+  with the function. And since the caller goes on using it, nothing it views
+  may be changed in the rest of the function.
 
-- **A binding may not view a temporary.** A temporary lives until the end
+- **Nothing kept may view a temporary.** A temporary lives until the end
   of its statement, so a `let` or `var` whose view, or whose cursor, views
   an owned temporary passed read-only to the call that made it is an error
-  that asks to bind the temporary to a name first, as Rust's E0716 does. A
-  cursor views what its call's read-only arguments view, as a view would.
-  A string literal without interpolation is in static memory, so viewing
-  one is fine.
+  that asks to bind the temporary to a name first, as Rust's E0716 does. So
+  is a view of a temporary assigned to a place, or passed to a call beside
+  a place given `mut` that can hold views. A cursor views what its call's
+  read-only arguments view, as a view would. A string literal without
+  interpolation is in static memory, so viewing one is fine.
 
 A value of a view type may be bound by `let` or `var`, held in local records
 and collections, and passed as an argument. It cannot be returned except by
