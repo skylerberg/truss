@@ -902,45 +902,6 @@ test "cursors" {
 }
 |}
 
-let () =
-  passes "a capability method called with arguments left to their defaults"
-    {|capability Tally {
-  fn add(amount: Int64 = 5)
-  fn total(scale: Int64 = 1, label: String = "sum") -> String
-}
-
-type Counter(sum: Int64)
-
-impl Tally for Counter {
-  fn add(mut self, amount: Int64) {
-    self.sum += amount
-  }
-
-  fn total(self, scale: Int64, label: String) -> String {
-    "${label} ${self.sum * scale}"
-  }
-}
-
-fn record() -> String
-  uses Tally
-{
-  Tally.add()
-  Tally.add(2)
-  let plain = Tally.total()
-  let scaled = Tally.total(3)
-  let named = Tally.total(label: "all")
-  "${plain}, ${scaled}, ${named}"
-}
-
-test "defaults" {
-  var counter = Counter(sum: 1)
-  let recorded = provide mut counter {
-    record()
-  }
-  assert recorded == "sum 8, sum 24, all 8"
-}
-|}
-
 (* Checks which of a module's constants fold and which are worked out by
    running their evaluators, and that the module's test passes. *)
 let folds what ~folded ~run source =

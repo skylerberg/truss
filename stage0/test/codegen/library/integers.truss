@@ -1,0 +1,30 @@
+test "floor division rounds down for each combination of signs" {
+  let seven: Int64 = 7
+  let minus_seven: Int64 = -7
+  assert seven.floor_divide(2) == 3
+  assert minus_seven.floor_divide(2) == -4
+  assert seven.floor_divide(-2) == -4
+  assert minus_seven.floor_divide(-2) == 3
+  let six: Int64 = 6
+  assert six.floor_divide(-3) == -2
+}
+
+test "floor modulo has the sign of the divisor" {
+  let seven: Int64 = 7
+  let minus_seven: Int64 = -7
+  assert seven.floor_modulo(3) == 1
+  assert minus_seven.floor_modulo(3) == 2
+  assert seven.floor_modulo(-3) == -2
+  assert minus_seven.floor_modulo(-3) == -1
+  let six: Int64 = 6
+  assert six.floor_modulo(-3) == 0
+}
+
+test "floor division works at the lowest value of a type and on unsigned types" {
+  let lowest: Int8 = -128
+  assert lowest.floor_divide(127) == -2
+  assert lowest.floor_modulo(127) == 126
+  let byte: UInt8 = 200
+  assert byte.floor_divide(7) == 28
+  assert byte.floor_modulo(7) == 4
+}
