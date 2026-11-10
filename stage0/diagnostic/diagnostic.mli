@@ -182,6 +182,7 @@ module Code : sig
     | Not_pullable
     | Parallel_conflict
     | Keeps_lent_part
+    | Read_only_view
 
   type capabilities =
     | Not_available

@@ -174,6 +174,7 @@ module Code = struct
     | Not_pullable
     | Parallel_conflict
     | Keeps_lent_part
+    | Read_only_view
 
   type capabilities =
     | Not_available
@@ -406,6 +407,7 @@ module Code = struct
     | Not_pullable -> "not_pullable"
     | Parallel_conflict -> "parallel_conflict"
     | Keeps_lent_part -> "keeps_lent_part"
+    | Read_only_view -> "read_only_view"
 
   let capabilities_name code =
     match code with
