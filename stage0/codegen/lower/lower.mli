@@ -21,9 +21,9 @@ type context = {
   checks : bool;
       (** Whether the program checks at run time what the prover would prove: [requires] clauses,
           integer overflow, and division *)
-  evaluate : (Path.t -> Ground.ty -> Lir.static_value) ref;
-      (** A constant's value, worked out by running its [Evaluator], which the driver builds and
-          runs, for a constant whose value is not folded while compiling *)
+  constant : (Path.t -> Lir.static_value option) ref;
+      (** Another constant's value, where it folds, which the driver reads through whatever keeps
+          each constant's lowering, so that one is folded once and what reads it is known *)
 }
 
 val context : ?checks:bool -> Query.context -> Memory_layout.target -> context
@@ -32,10 +32,14 @@ val context : ?checks:bool -> Query.context -> Memory_layout.target -> context
    test, before drop elaboration. *)
 val instance : context -> Instance.key -> Lir.t
 
-(* A constant's static data: its value worked out exactly from its
-   constant expression, or by running its [Evaluator] through the context's
-   [evaluate]. *)
-val constant : context -> Path.t -> Lir.data
+(* A constant's static data, where its value folds: literals, operators on
+   numbers and on [Bool], other constants that fold, and records, variants,
+   strings, lists, and arrays of parts that fold. Otherwise the type of the
+   value its [Evaluator] works out. Folding gives exactly what running
+   would, and anything it does not know is run. *)
+type constant = Folded of Lir.data | Run of Ground.ty
+
+val constant : context -> Path.t -> constant
 
 (* The [Evaluator] of a constant: its value worked out and written out in
    its binary form. *)

@@ -95,6 +95,7 @@ type t = {
   captures : local list option array;
   own_operator : bool array;
   provides : provide option array;
+  lends : Types.mode option array;
   obligations : obligation list;
 }
 
@@ -112,6 +113,7 @@ let create size =
     captures = Array.make size None;
     own_operator = Array.make size false;
     provides = Array.make size None;
+    lends = Array.make size None;
     obligations = [];
   }
 

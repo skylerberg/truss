@@ -357,7 +357,7 @@ let build_c context fc ty variant (values : (string * Lir.operand) list) =
 let prototype context current symbol ?names ~linkage (signature : Lir.signature) =
   let result = match signature.result with None -> "void" | Some ty -> c_ty context current ty in
   Printf.sprintf "%s%s%s %s(%s)"
-    (match linkage with Internal -> "static " | External -> "")
+    (match linkage with Internal -> "static inline " | External -> "")
     (if signature.returns then "" else "_Noreturn ")
     result symbol
     (signature_parameters context current signature.parameters names)

@@ -52,7 +52,11 @@ let function_ env (instance : Lir.t) what (f : Lir.function_) =
         (fun place ->
           (match place.root with Local l -> local l | Static _ -> ());
           ignore (Lir.place_type env ~environment:(environment instance) f place));
-      operand = ignore;
+      operand =
+        (function
+        | Move { root = Static { key; _ }; _ } | Moved_address { root = Static { key; _ }; _ } ->
+            bug "a move out of %s, which is static data" (Instance.to_string key)
+        | _ -> ());
     }
   in
   let nested_value : Lir.statement -> unit = function

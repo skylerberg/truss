@@ -59,6 +59,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
           pairs
       in
       let result = output_type function_type.output in
+      note_lending state value function_type.output;
       state.tables.calls.(value.id) <-
         Some
           {

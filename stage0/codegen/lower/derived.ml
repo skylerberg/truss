@@ -83,36 +83,40 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
   let trait_name = Ground.path_name trait in
   (match (trait_name, name, places) with
   | "Equal", "equal", [ self; other ] ->
-      let bool = context.bool in
-      emit b (Assign (result_place, Use (Constant (Bool true))));
+      (* Two values differ at the first thing that differs: another variant,
+         or a field that is not equal, after which no other field is
+         compared. *)
+      let differ = block b and done_ = block b in
+      let unless_equal value =
+        let go_on = block b in
+        finish b (Switch { value; cases = [ (Z.one, go_on) ]; default = Some differ });
+        start b go_on
+      in
       each_variant st ty self (fun variant _ ->
-          let same = local b (Raw Bool) in
-          emit b
-            (Assign
-               ( at same,
-                 match variant with
-                 | Some v -> Is_variant (other, v)
-                 | None -> Use (Constant (Bool true)) ));
-          let different = local b (Raw Bool) in
-          emit b (Assign (at different, Unary (Not, Copy (at same))));
-          when_ b
-            (Copy (at different))
-            (fun () -> emit b (Assign (result_place, Use (Constant (Bool false)))));
-          when_ b
-            (Copy (at same))
-            (fun () ->
-              List.iter
-                (fun (field, field_ty) ->
-                  let equal = temporary st bool in
-                  trait_call st ~trait:(core "Equal") ~name:"equal" ~receiver:Read ~self:field_ty
-                    ~arguments:
-                      [
-                        (Read, field_ty, field_place self variant field);
-                        (Read, field_ty, field_place other variant field);
-                      ]
-                    ~destination:equal;
-                  emit b (Assign (result_place, Binary (Bit_and, Copy result_place, Copy equal))))
-                (typed_fields (shape_fields st ty variant))))
+          Option.iter
+            (fun v ->
+              let same = local b (Raw Bool) in
+              emit b (Assign (at same, Is_variant (other, v)));
+              unless_equal (Copy (at same)))
+            variant;
+          List.iter
+            (fun (field, field_ty) ->
+              let equal = temporary st context.bool in
+              trait_call st ~trait:(core "Equal") ~name:"equal" ~receiver:Read ~self:field_ty
+                ~arguments:
+                  [
+                    (Read, field_ty, field_place self variant field);
+                    (Read, field_ty, field_place other variant field);
+                  ]
+                ~destination:equal;
+              unless_equal (Copy equal))
+            (typed_fields (shape_fields st ty variant)));
+      emit b (Assign (result_place, Use (Constant (Bool true))));
+      finish b (Goto done_);
+      start b differ;
+      emit b (Assign (result_place, Use (Constant (Bool false))));
+      finish b (Goto done_);
+      start b done_
   | "Hash", "hash", [ self; hasher ] ->
       let hasher_ty = match List.nth ground_parameters 1 with _, t -> t in
       let hasher_path = match hasher_ty with Named { path; _ } -> path | _ -> bug "a hasher" in

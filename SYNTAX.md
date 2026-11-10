@@ -1250,6 +1250,14 @@ mut grid.cell(position).visit()
   method always continues after its `yield`, even if the statement leaves
   early with `?` or `return`. So a type can update what depends on the part,
   such as a cached total, after the caller changes it.
+- **For that long, `grid` is lent whole.** The statement cannot use `grid`
+  again when the part is lent `mut`, and cannot change it when the part is
+  lent read-only.
+- **The mark is on the place the part is lent from.** In
+  `mut grid.cell(position).visit()`, `mut` chooses the `cell` that lends
+  `mut`, and the part it lends is then changed by `visit` with no mark of
+  its own. A part cannot be given up with `own`, and `let` keeps one only by
+  copying it.
 - **A lending method yields exactly once on every path.** A path with no
   `yield`, or with two, is a compile error.
 - A lending method cannot drive a `for` loop or be pulled.

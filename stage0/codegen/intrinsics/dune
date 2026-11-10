@@ -1,6 +1,7 @@
 (library
  (name intrinsics)
  (libraries
+  storage
   compiler_bug
   intrinsic
   ground

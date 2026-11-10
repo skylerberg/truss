@@ -125,7 +125,9 @@ function's; that its run checks them too changes nothing here.
   collection takes the element back.
 - **A slice,** `items[a..b]`, must be within its collection.
 - **Two places lent together** are shown to be at different indexes, each
-  read as it is evaluated. A slice is some elements of its collection, so
+  read as it is evaluated. Only elements of a `List`, a `Slice`, or an
+  `Array` are lent together: the type checker lets no other collection lend
+  two parts in one statement when either is `mut`. A slice is some elements of its collection, so
   two slices, or a slice and an index, lent together reach different
   elements too.
 

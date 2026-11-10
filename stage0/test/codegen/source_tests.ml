@@ -273,4 +273,93 @@ test "any" {
 }
 |}
 
+let () =
+  passes "a constant that compares constants is folded"
+    {|let small: Int64 = 3
+let is_small: Bool = small < 10 && !(small == 4)
+
+test "compared" {
+  assert is_small
+}
+|};
+  passes "a constant made of one that is worked out by running is worked out by running too"
+    {|let table: Map[String, Int64] = ["a": 1]
+let tables: List[Map[String, Int64]] = [table]
+
+test "nested" {
+  assert tables.length() == 1
+  assert tables[0].contains("a")
+  assert table.contains("a")
+}
+|};
+  test "a constant whose sum does not fit its type is run, which reports the overflow" (fun () ->
+      let database, compile =
+        load
+          {|let big: Int8 = 100
+let bigger: Int8 = big + big
+
+test "overflowed" {
+  assert bigger == 0
+}
+|}
+      in
+      match Compile.run_tests compile ~time_limit:2000 (tests_of database) with
+      | Ok _ -> fail "expected the constant not to be worked out"
+      | Error message -> if not (contains message "arithmetic overflow") then fail "got %S" message)
+
+let () =
+  test "a derived equal stops at the first field that differs" (fun () ->
+      let _, compile = load "type Both(first: Int64, second: Int64)\n  derives Equal\n" in
+      let equal : Instance.key =
+        Code
+          {
+            path =
+              Method
+                {
+                  owner =
+                    Derived
+                      {
+                        type_ = Top { module_ = example; name = "Both" };
+                        trait =
+                          Top
+                            {
+                              module_ = { package = "standard"; modules = [ "core" ] };
+                              name = "Equal";
+                            };
+                      };
+                  name = "equal";
+                  receiver = Read;
+                };
+            type_arguments = [];
+          }
+      in
+      match Compile.compiled compile equal with
+      | Code instance ->
+          let branches =
+            Array.to_list instance.main.blocks
+            |> List.filter (fun (block : Lir.basic_block) ->
+                match block.terminator with Switch _ -> true | _ -> false)
+          in
+          if List.length branches <> 2 then
+            fail "expected a branch after each field, got %d:\n%s" (List.length branches)
+              (Lir.to_string instance)
+      | _ -> fail "expected code")
+
+let () =
+  test "negating the least value of a signed type panics, where the checks are on" (fun () ->
+      expect_output
+        {|fn flip(value: Int8) -> Int8 {
+  -value
+}
+
+fn least() -> Int8 {
+  -128
+}
+
+test "negated" {
+  assert flip(least()) == 0
+}
+|}
+        "test 0 panicked\nmessage 47\narithmetic overflow\n  at example/main.truss:2:3\n")
+
 let () = Harness.finish ()

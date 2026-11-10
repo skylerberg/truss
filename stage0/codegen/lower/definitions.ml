@@ -21,9 +21,9 @@ type context = {
   checks : bool;
       (** Whether the program checks at run time what the prover would prove: [requires] clauses,
           integer overflow, and division *)
-  evaluate : (Path.t -> Ground.ty -> Lir.static_value) ref;
-      (** A constant's value, worked out by running its [Evaluator], which the driver builds and
-          runs, for a constant whose value is not folded while compiling *)
+  constant : (Path.t -> Lir.static_value option) ref;
+      (** Another constant's value, where it folds, which the driver reads through whatever keeps
+          each constant's lowering, so that one is folded once and what reads it is known *)
 }
 
 let standard_text name : Ground.ty =
@@ -56,12 +56,8 @@ let context ?(checks = false) database target =
     bool = Monomorphic.builtin Bool;
     cursor_fields;
     checks;
-    evaluate = ref (fun path _ -> bug "no driver works out %s" (Path.show path));
+    constant = ref (fun path -> bug "no driver gives the value of %s" (Path.show path));
   }
-
-(* A constant expression whose value needs its code run: a call, a [Map] or
-   [Set], a tagged template. *)
-exception Needs_running
 
 let test_key path = Instance.Code { path; type_arguments = [] }
 
@@ -131,43 +127,9 @@ let receiver_of (parameters : S.parameter list) : Path.receiver =
 let name_of (signature : S.signature) =
   match signature.name with Plain_name name -> name.text | Member_name (_, name) -> name.text
 
-let rec back : Ground.ty -> T.ty = function
-  | Named { path; arguments } -> Named { path; arguments = List.map back_argument arguments }
-  | Never -> Never
-  | Function f ->
-      let mode : Ground.mode -> T.mode = function Read -> Read | Mut -> Mut | Own -> Own in
-      Function
-        {
-          inputs = List.map (fun (m, ty) -> (mode m, back ty)) f.parameters;
-          output =
-            (match f.result with
-            | Returns ty -> Returns (back ty)
-            | Yields (m, ty) -> Yields (mode m, back ty)
-            | Lends (m, ty) -> Lends (mode m, back ty));
-          uses = List.map (fun path -> T.Capability path) f.uses;
-          costs = [];
-        }
-  | Any { trait; arguments; associated } ->
-      Any
-        {
-          trait;
-          trait_arguments = List.map back_argument arguments;
-          associated = List.map (fun (name, ty) -> (name, back ty)) associated;
-        }
-  | Cursor { method_; type_arguments } ->
-      Cursor { method_; arguments = List.map back_argument type_arguments }
-
-and back_argument : Ground.argument -> T.argument = function
-  | Type ty -> Type (back ty)
-  | Value v -> Value (Known v)
-  | Capabilities set -> Capabilities (List.map (fun path -> T.Capability path) set)
-
-let bind (generics : T.generic list) arguments =
-  if List.length generics <> List.length arguments then
-    bug "%d generic parameters for %d arguments" (List.length generics) (List.length arguments);
-  List.map2
-    (fun (generic : T.generic) argument -> (generic.generic, back_argument argument))
-    generics arguments
+let back = Monomorphic.back
+let back_argument = Monomorphic.back_argument
+let bind = Monomorphic.substitution
 
 let impl_interface context impl =
   match Interface.Impls.impl_interface context.database impl with

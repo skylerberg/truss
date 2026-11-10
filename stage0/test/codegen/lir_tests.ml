@@ -370,6 +370,37 @@ let () =
       in
       expect_int ~expected:101 status;
       expect_string ~expected:"panic: boom\n  at test.truss:13:5\n" errors);
+  test "a copy of a callee is a static inline function, declared before its caller" (fun () ->
+      let callee =
+        instance "callee"
+          (function_ ~parameters:[ 0 ] ~result:(value int32)
+             [ local (value int32) ]
+             [ block [] (Return (Some (copy 0))) ])
+      in
+      let caller =
+        entry
+          [ local (value int32) ]
+          [
+            block
+              [ call "callee" ~parameters:[ value int32 ] [ constant_int32 7 ] (Some (at 0)) ]
+              (Return (Some (copy 0)));
+          ]
+      in
+      let c = Emit_c.file (shape_env ()) Development [ (caller, External); (callee, Internal) ] in
+      let copy = "static inline int32_t t_test__callee(int32_t l0) {" in
+      if not (contains c copy) then fail "no %S in:\n%s" copy c;
+      if contains c "\nint32_t t_test__callee(int32_t);" then
+        fail "the callee is also declared as another file's:\n%s" c);
+  test "the C checks each type's size and alignment against its layout" (fun () ->
+      let pair_shape = ("Pair", Record [ field "first" int32; field "second" int64 ]) in
+      let holder =
+        instance "holder" (function_ [ local (value pair) ] [ block [] (Return None) ])
+      in
+      let c = Emit_c.file (shape_env ~extra:[ pair_shape ] ()) Development [ (holder, External) ] in
+      let expected =
+        "_Static_assert(sizeof(t_test__Pair) == 16 && _Alignof(t_test__Pair) == 8, \"layout\");"
+      in
+      if not (contains c expected) then fail "no %S in:\n%s" expected c);
   test "emitting the same instances twice gives the same C" (fun () ->
       let instances = [ (bump, Emit_c.External) ] in
       expect_string

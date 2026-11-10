@@ -104,11 +104,21 @@ and defines only the small helpers it uses, such as the one that gives a
 float's bits with every NaN made canonical. Every local starts zeroed, which
 the C compiler removes wherever it is overwritten.
 
+The compiler lays every type out itself (see [Data layout](#data-layout)),
+and the C compiler lays each one out again from the `struct` it is given.
+Code generation relies on the two agreeing: the size it allocates for a
+value, and whether a value is passed by address, come from its own layout.
+So each type a file defines is followed by a static assertion of its size
+and alignment, and a layout the C compiler would not make is a C file that
+does not compile, on whatever target that is.
+
 The runtime (see [Program startup and failure](#program-startup-and-failure))
 is the exception. It is one fixed file for each target, compiled once and
 cached, and it includes the system's headers, since its declarations of
 signals and alternate stacks differ between systems and parsing them costs
-nothing on an edit.
+nothing on an edit. A test program's runtime is a second such file: it adds
+the test runner and the count of blocks a test must free, which a program
+that ships has no use for.
 
 Generated code has no undefined behavior, even if the prover were wrong
 about an overflow or a shift:
@@ -141,7 +151,8 @@ checks too, whether or not their proofs are done:
   mathematical `Integer`, a quantifier, a conversion to or from one, or a
   comparison of integers of two types.
 - Integer `+`, `-`, and `*` panic with "arithmetic overflow", through
-  `__builtin_*_overflow`. The `wrapping_` operations still wrap.
+  `__builtin_*_overflow`, and so does negating the least value of a signed
+  type. The `wrapping_` operations still wrap.
 - Integer division panics on a zero divisor, and on the least value over
   -1.
 
@@ -577,11 +588,21 @@ so they are compiled once and shared:
   is `Copyable`; handles and the types that hold one have none. A trivial
   type is a memory copy. A copy function takes the value as a read-only
   parameter and returns the copy, by the
-  [calling convention](#calling-convention). `Storage` with capacity 0, as
-  static bytes have, or with no elements, is shared, not copied, so a
-  static `String` is shared. Otherwise its copy is one allocation of
-  exactly its length, and for trivial elements one memory copy, the fast
-  path DESIGN.md mentions; other elements are copied one by one.
+  [calling convention](#calling-convention). A `Storage` is in one of
+  three states, which its capacity and length say, and its copy follows
+  the state:
+  - *empty*, with capacity 0 and no elements, and *static*, with capacity
+    0 and elements it does not own, as a string literal has: it owns no
+    buffer, so it is shared, not copied
+  - *owning*, with a capacity that is not 0: it owns a buffer on the heap,
+    which is never shared, since both would free it. With no elements its
+    copy is empty. Otherwise its copy is one allocation of exactly its
+    length, and for trivial elements one memory copy, the fast path
+    DESIGN.md mentions; other elements are copied one by one.
+
+  One module defines the two built-in types that hold a buffer, `Storage`
+  and `View`: their fields, these states, and how each is built. Nothing
+  else in code generation names their fields.
 - **Debug output:** the built-in debug output every type has, used by
   `echo`, failed `assert`s, and the test runner, and to write out values
   computed while compiling. A debug function takes a read-only pointer to
@@ -635,10 +656,10 @@ and its siblings. Full-width multiplication, used by hashing and
 
 ### Control flow and patterns
 
-- **`match`** compiles to a decision tree that tests each part of the value
-  once, in the order the patterns need, and switches on tags and integers.
-  Maranget's "Compiling Pattern Matching to Good Decision Trees" (2008) is
-  the method. The tree is built deterministically from the arms in order.
+- **`match`** tests its arms in order: each arm tests its patterns against
+  the values, part by part, and jumps to the next arm at the first part
+  that does not match. The value is evaluated once, and the first arm that
+  matches runs.
 - **`?`** is a tag test and an early return, with the drops elaboration
   inserted.
 - **Conditions are lowered as jumps.** `if`, `while`, a guard, and a
@@ -663,10 +684,9 @@ and its siblings. Full-width multiplication, used by hashing and
 ### Strings and templates
 
 - **String interpolation builds into one buffer.** `"${count} items in
-  ${name}"` adds up the literal lengths, calls each part's `display` into a
-  `TextBuilder` with that much room reserved, and returns the `String`. It
-  never builds a `Template` or its lists. A `TextBuilder` grows only if a
-  part writes more than its first estimate.
+  ${name}"` writes each piece of literal text and each part's `display`
+  into one `TextBuilder`, and returns the `String`. It never builds a
+  `Template` or its lists.
 - **Numbers display as their debug output does.** Integers are written in
   decimal by the standard library. A float is written by the
   `write_float` intrinsic, the shortest decimal that reads back as the same
@@ -687,12 +707,19 @@ and its siblings. Full-width multiplication, used by hashing and
   can go in a read-only section. What an instance compiles to is either
   code, its LIR, or data: a ground type and a static value, which the
   emitter writes as C initializers, with the elements of storage and the
-  blocks of `indirect` variants as static objects of their own. Lowering
-  works a constant's value out exactly from its constant expression:
-  integers with Zarith, floats with IEEE arithmetic rounded once to their
-  type, and records, variants, strings, lists, and arrays from their parts.
-  Another constant's value is written in place, since C cannot initialize
-  static data from another object.
+  blocks of `indirect` variants as static objects of their own.
+- **A constant's value is what running its expression gives.** Lowering
+  folds what it can to exactly that, to save the run: literals, operators
+  on integers, with Zarith, on floats, with IEEE arithmetic rounded once to
+  their type, and on `Bool`, and records, variants, strings, lists, and
+  arrays of parts that fold. Another constant's value, where it folds, is
+  written in place, since C cannot initialize static data from another
+  object. Whatever the folder does not know, or cannot give exactly, such
+  as a sum that does not fit its type, is not folded: the constant's
+  evaluator is run (see [Code run while compiling](#code-run-while-compiling)),
+  so folding can be incomplete and never wrong. A constant made of one that
+  is run is run too, and its evaluator copies that one's static data,
+  since nothing is moved out of a constant.
 - **A list or map literal in a function body** allocates its buffer and
   fills it, which is the one allocation DESIGN.md counts. A literal whose
   parts are all constant, and which is only read, can be static data
@@ -801,14 +828,25 @@ loop the C compiler would make of the loop form, and needs no rewriting of
 the caller into continuation-passing style. The caller then reads the
 method's body, and depends on it.
 
-An inlined lending method runs to its end before the caller's statement
-uses the part, where DESIGN.md has it go on only after that statement. So
-stage0 lowers a lending method only when the two cannot be told apart, and
-refuses any other as one it cannot build yet:
-- each `yield` is the last thing its path does, so nothing of the method is
-  left to run
-- what it lends is none of the method's own values, which are dropped as its
-  body ends
+A lending method goes on after the caller's statement, as DESIGN.md has
+it, and its own values live until then, so it may lend one it made. The
+LIR is a graph of blocks, so this needs no function for the rest of the
+statement:
+
+- The method's body is written into the caller up to its `yield`, which
+  jumps to the rest of the caller's statement with the place it lends.
+- What is left of the method, its code after the `yield` and the drops of
+  what it owns, is written once, in blocks nothing reaches yet.
+- The scope the lending call is in owns the lend, as it owns a temporary.
+  As that scope ends, on each way out of it, the code sets a selector to
+  the way it was going and jumps to what is left of the method, which ends
+  by going on that way. So a `return` or a `?` in the statement finishes
+  the method first, as an ordinary end does, and lends in one statement
+  finish in reverse order.
+
+Where nothing is left, as for an index into a `List`, whose method ends at
+its `yield` owning nothing, the method simply ends there and the lend costs
+nothing.
 
 A loop over a yielding method that is already inlined around it, as a
 tree's `each` loops over its subtrees, would be inlined forever. Stage0
@@ -1110,9 +1148,10 @@ the worker is also what lets an `assert` inside a lambda end its test, which
 an early return could not. The runner kills a worker whose test exceeds the
 project's time limit.
 
-A test must free every block it allocates. The runtime counts the blocks
-that are allocated and not yet freed, and a test that ends with more than it
-started with panics with a compiler-bug message saying how many it left.
+A test must free every block it allocates. A test program's runtime counts
+the blocks that are allocated and not yet freed, and a test that ends with
+more than it started with panics with a compiler-bug message saying how
+many it left.
 Truss has no garbage collector and no way to leak a value on purpose, so a
 leak is a bug in code generation, most likely in drop elaboration. Every
 test that compiles Truss is therefore also a check of its drops.
@@ -1166,8 +1205,11 @@ the tests that can reach the edited code, and costs what can reach it:
   keys nothing but the keys of what can reach the edit.
 - **The test's key** is the key of everything the test's own instance can
   reach, with the version of code generation and the target. `USize` is a
-  `typedef` in the generated C, so the LIR is the same for 32-bit and 64-bit
-  targets, but results such as `USize.maximum` are not.
+  `typedef` in the generated C, so code that differs between 32-bit and
+  64-bit targets only in a `USize` has the same LIR for both, while results
+  such as `USize.maximum` are not the same. An instance is lowered for one
+  target all the same, since whether a value is passed by address depends
+  on its size.
 
 Two programs that differ only in names give the same key, and any change to
 what the test can run changes it. A layout change appears in the LIR of
@@ -1283,17 +1325,21 @@ so upgrading clang recompiles objects but invalidates no test result.
   name and renamed into place, so a build that stops partway leaves no
   broken object. Files that need compiling are compiled in parallel, across
   the machine's cores.
-- **Development builds compile one C file per instance.** The C compiler
-  runs once for each instance whose LIR changed, in parallel across cores.
-  Small standard-library and dependency instances that the instance calls
-  are emitted into the same file as `static` functions, so the C compiler
-  can inline them, as DESIGN.md allows for development builds. They are
-  chosen by size, and every yielding method is chosen. Each one is recorded
-  as a body the instance reads.
-- **A package's own code compiles at `-O1`** in development builds, which is
-  fast to compile and avoids the stack traffic of `-O0`.
-- **The standard library and dependencies compile at `-O2`** and are cached,
-  so development builds of a project run them at full speed.
+- **Every build compiles one C file per instance.** The C compiler runs
+  once for each instance whose C changed, in parallel across cores, and
+  each instance is an external function of its own file.
+- **A development build puts small callees in the caller's file.** A
+  function an instance calls, from another package than the instance's
+  own, with little code and no lambdas, is emitted into the instance's
+  file too, as a `static inline` copy, so the C compiler can inline it, as
+  DESIGN.md allows for development builds. A package's own small functions
+  stay calls, so that an edit to one compiles only it again. An object
+  file is found by its C's text, which the copies are part of, so a change
+  to a callee compiles its callers' files again. Lowering writes lending
+  and yielding methods and primitive operations into their callers
+  itself, whatever the build.
+- **Development builds compile at `-O1`,** which is fast to compile and
+  avoids the stack traffic of `-O0`.
 - **Release builds** compile at `-O2` and optimize across every file as
   they are linked, with ThinLTO where the C compiler is clang and LTO
   otherwise, so the C compiler can inline across every definition. They
@@ -1340,14 +1386,26 @@ a command line can hold.
 - **Checkers shipped compiled.** The standard library's are to ship already
   compiled with the toolchain, for each host and both widths of `USize`, and
   a dependency's to be compiled once per version.
+- **`match` as a decision tree.** A tree would test each part of the value
+  once, in the order the patterns need, and switch on tags and integers,
+  where arms tested in order may test one part again for each arm.
+  Maranget's "Compiling Pattern Matching to Good Decision Trees" (2008) is
+  the method.
+- **Room reserved for an interpolation.** The literal lengths are known, so
+  the `TextBuilder` can start with that much room and grow only if a part
+  writes more than its estimate.
+- **Small callees of small callees, and generated functions, in the
+  caller's C file.** Only the functions an instance calls itself are
+  copied in, and a type's drop and copy functions are not.
+- **The standard library and dependencies at `-O2` in development
+  builds,** cached, so a project's development builds run them at full
+  speed.
 - **A quantifier in code.** It is to be a loop over its range or collection,
   through the same `each` a `for` loop calls, that stops at the first
   element that decides the answer: `forall` at the first false body,
   `exists` at the first true one.
-- **A lending method that goes on after the caller's statement.** One that
-  does more after its `yield`, or lends a value it made, or lends through a
-  call to itself, is refused (see
-  [Loops and lending calls](#loops-and-lending-calls)).
+- **A lending method with more than one `yield`,** one on each of several
+  paths, and one that lends through a call to itself.
 - **A lambda in a yielding method that is pulled,** and in a pulled method
   a default for a parameter that is passed by address or is a view.
 - **A range without both of its ends, as a value.**

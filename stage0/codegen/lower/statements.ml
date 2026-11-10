@@ -17,7 +17,13 @@ let rec block_into st (block : S.block) destination =
         | [] -> ()
         | [ ({ S.kind = Expression e; _ } : S.statement) ] -> (
             match destination with
-            | Some d -> in_statement st (fun () -> into st e d)
+            | Some d ->
+                in_statement st (fun () ->
+                    (* An early [return] writes the result too, and where its
+                       path and this one meet again, as after a lend, the
+                       slot may read as written. *)
+                    if Some d = result_place st then clear_result st;
+                    into st e d)
             | None ->
                 statement st
                   { kind = Expression e; span = e.span; blank_line_before = false; id = e.id })
@@ -177,7 +183,7 @@ and let_ st ~mutable_ (pattern : S.pattern) (value : S.expression) =
           bind (snapshot st place)
       | Some place ->
           let local = binding st ~name:name.text ty in
-          emit st.b (Assign (local, Use (owned st place ty)));
+          take st place ty ~destination:local;
           bind local
       | None ->
           let local = binding st ~name:name.text ty in

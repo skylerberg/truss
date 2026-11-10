@@ -178,6 +178,7 @@ module Code : sig
     | Lends_count
     | Not_pullable
     | Parallel_conflict
+    | Keeps_lent_part
 
   type capabilities =
     | Not_available

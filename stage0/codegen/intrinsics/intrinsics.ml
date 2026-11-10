@@ -44,17 +44,17 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
     | _ -> type_argument 0
   in
   let element_layout () = Memory_layout.of_type env (element ()) in
-  let field storage name = storage / Lir.Field name in
-  let length storage = Lir.Copy (field storage "length") in
-  let element_at storage index = field storage "buffer" / Index index in
+  let length storage = Lir.Copy (Storage.length storage) in
+  let view_length view = Lir.Copy (Storage.view_length view) in
+  let element_at = Storage.at in
   (* Gives the storage room for at least [minimum] elements. *)
   let grow storage minimum =
     let layout = element_layout () in
     call Grow
       [
-        Address { place = field storage "buffer"; writable = true };
+        Address { place = Storage.buffer storage; writable = true };
         length storage;
-        Address { place = field storage "capacity"; writable = true };
+        Address { place = Storage.capacity storage; writable = true };
         usize layout.size;
         usize layout.alignment;
         minimum;
@@ -64,13 +64,13 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
      the capacity, holds. *)
   let grow_when op storage minimum =
     let needed = local b (Raw Bool) in
-    emit b (Assign (at needed, Binary (op, minimum, Copy (field storage "capacity"))));
+    emit b (Assign (at needed, Binary (op, minimum, Copy (Storage.capacity storage))));
     when_ b (Copy (at needed)) (fun () -> grow storage minimum)
   in
   (* Static storage gets a buffer of its own before it is written. *)
   let own storage = grow_when Greater (place storage) (length (place storage)) in
   let add_to_length storage amount =
-    emit b (Assign (field storage "length", Binary (Add, length storage, amount)))
+    emit b (Assign (Storage.length storage, Binary (Add, length storage, amount)))
   in
   let lent place = Some place in
   match (operation : Intrinsic.operation) with
@@ -78,7 +78,7 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
   | Storage_at_mut ->
       own (argument 0);
       lent (element_at (place (argument 0)) (value 1))
-  | View_at -> lent (place (argument 0) / Field "elements" / Index (value 1))
+  | View_at -> lent (Storage.view_at (place (argument 0)) (value 1))
   | _ ->
       let integer_argument () =
         match (Memory_layout.of_type env (type_argument 0)).form with
@@ -147,7 +147,18 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
       | Multiply -> checked_arithmetic Multiply Multiply_overflow
       | Divide -> checked_division Divide
       | Remainder -> checked_division Remainder
-      | Negate -> unary Negate
+      | Negate -> (
+          (* The least value of a signed type has no negation in the type. *)
+          match integer_argument () with
+          | Some ((Int8 | Int16 | Int32 | Int64 | ISize) as integer) when checks ->
+              let bits = 8 * Memory_layout.integer_size (Memory_layout.target env) integer in
+              let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
+              let of_least = local b (Raw Bool) in
+              emit b
+                (Assign (at of_least, Binary (Equal, value 0, Constant (Integer (integer, least)))));
+              panic_when (Copy (at of_least)) "arithmetic overflow";
+              unary Negate
+          | _ -> unary Negate)
       | Wrapping_add -> binary Add
       | Wrapping_subtract -> binary Subtract
       | Wrapping_multiply -> binary Multiply
@@ -175,12 +186,14 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           let left = place (argument 0) and right = place (argument 1) in
           let shorter = local b (Raw Bool) in
           let count = usize_local "count" in
-          emit b (Assign (at shorter, Binary (Less, length left, length right)));
-          emit b (Assign (at count, Use (length right)));
-          when_ b (Copy (at shorter)) (fun () -> emit b (Assign (at count, Use (length left))));
+          emit b (Assign (at shorter, Binary (Less, view_length left, view_length right)));
+          emit b (Assign (at count, Use (view_length right)));
+          when_ b (Copy (at shorter)) (fun () -> emit b (Assign (at count, Use (view_length left))));
           let order = local b (Raw (Integer Int32)) in
           call ~result:(at order) Compare_bytes
-            [ Copy (left / Field "elements"); Copy (right / Field "elements"); Copy (at count) ];
+            [
+              Copy (Storage.view_elements left); Copy (Storage.view_elements right); Copy (at count);
+            ];
           let same = local b (Raw Bool) in
           emit b
             (Assign (at same, Binary (Equal, Copy (at order), Constant (Integer (Int32, Z.zero)))));
@@ -188,8 +201,8 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
             (Copy (at same))
             (fun () ->
               let longer = local b (Raw Bool) and shorter = local b (Raw Bool) in
-              emit b (Assign (at longer, Binary (Greater, length left, length right)));
-              emit b (Assign (at shorter, Binary (Less, length left, length right)));
+              emit b (Assign (at longer, Binary (Greater, view_length left, view_length right)));
+              emit b (Assign (at shorter, Binary (Less, view_length left, view_length right)));
               let first = local b (Raw (Integer Int32))
               and second = local b (Raw (Integer Int32)) in
               emit b (Assign (at first, Convert (Copy (at longer), Integer Int32)));
@@ -247,41 +260,15 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           let same = local b (Raw Bool) in
           emit b (Assign (at same, Binary (Ieee_equal, value 0, value 0)));
           set (Unary (Not, Copy (at same)))
-      | Storage_empty ->
-          (* An empty storage's buffer points at nothing, but is never null,
-         which is the niche [Option] of a storage uses. *)
-          set
-            (Build
-               {
-                 ty =
-                   Named
-                     { path = Intrinsic.builtin_path Storage; arguments = [ Type (element ()) ] };
-                 variant = None;
-                 fields =
-                   [ ("buffer", Constant (Bytes "")); ("length", usize 0); ("capacity", usize 0) ];
-               })
+      | Storage_empty -> set (Storage.empty (Storage.of_elements (element ())))
       | Storage_with_capacity ->
-          let ty =
-            Ground.Named
-              { path = Intrinsic.builtin_path Storage; arguments = [ Type (element ()) ] }
-          in
+          let ty = Storage.of_elements (element ()) in
           let result = local b (Value ty) in
-          emit b
-            (Assign
-               ( at result,
-                 Build
-                   {
-                     ty;
-                     variant = None;
-                     fields =
-                       [
-                         ("buffer", Constant (Bytes "")); ("length", usize 0); ("capacity", usize 0);
-                       ];
-                   } ));
+          emit b (Assign (at result, Storage.empty ty));
           grow_when Greater (at result) (value 0);
           set (Use (Move (at result)))
       | Storage_length -> set (Use (length (place (argument 0))))
-      | Storage_capacity -> set (Use (Copy (field (place (argument 0)) "capacity")))
+      | Storage_capacity -> set (Use (Copy (Storage.capacity (place (argument 0)))))
       | Storage_reserve ->
           let storage = place (argument 0) in
           let wanted = usize_local "wanted" in
@@ -296,7 +283,7 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           add_to_length storage (usize 1)
       | Storage_pop ->
           let storage = place (argument 0) in
-          emit b (Assign (field storage "length", Binary (Subtract, length storage, usize 1)));
+          emit b (Assign (Storage.length storage, Binary (Subtract, length storage, usize 1)));
           set (Use (Move (element_at storage (length storage))))
       | Storage_insert ->
           let storage = place (argument 0) in
@@ -335,7 +322,7 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
               Address { place = element_at storage (Copy (at after)); writable = true };
               Copy (at bytes);
             ];
-          emit b (Assign (field storage "length", Binary (Subtract, length storage, usize 1)))
+          emit b (Assign (Storage.length storage, Binary (Subtract, length storage, usize 1)))
       | Storage_swap ->
           own (argument 0);
           let storage = place (argument 0) in
@@ -346,33 +333,20 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
       | Storage_view ->
           let storage = place (argument 0) in
           set
-            (Build
-               {
-                 ty =
-                   Named { path = Intrinsic.builtin_path View; arguments = [ Type (element ()) ] };
-                 variant = None;
-                 fields =
-                   [ ("elements", Copy (field storage "buffer")); ("length", length storage) ];
-               })
-      | View_length -> set (Use (length (place (argument 0))))
+            (Storage.view
+               (Storage.view_of_elements (element ()))
+               ~elements:(Copy (Storage.buffer storage))
+               ~length:(length storage))
+      | View_length -> set (Use (view_length (place (argument 0))))
       | View_slice ->
           let view = place (argument 0) in
           let count = usize_local "count" in
           emit b (Assign (at count, Binary (Subtract, value 2, value 1)));
           set
-            (Build
-               {
-                 ty =
-                   Named { path = Intrinsic.builtin_path View; arguments = [ Type (element ()) ] };
-                 variant = None;
-                 fields =
-                   [
-                     ( "elements",
-                       Address
-                         { place = view / Field "elements" / Index (value 1); writable = false } );
-                     ("length", Copy (at count));
-                   ];
-               })
+            (Storage.view
+               (Storage.view_of_elements (element ()))
+               ~elements:(Address { place = Storage.view_at view (value 1); writable = false })
+               ~length:(Copy (at count)))
       | Crash ->
           (* The message is a [StringSlice], a record of one field: its view of
          bytes. *)
@@ -386,15 +360,15 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
             (Fail
                {
                  failure = Panic;
-                 message = Copy (bytes / Field "elements");
-                 length = Copy (bytes / Field "length");
+                 message = Copy (Storage.view_elements bytes);
+                 length = Copy (Storage.view_length bytes);
                  site;
                });
           start b (block b)
       | Write_bytes ->
           let view = place (argument 1) in
           call ?result:destination System_write
-            [ value 0; Copy (view / Field "elements"); Copy (view / Field "length") ]
+            [ value 0; Copy (Storage.view_elements view); Copy (Storage.view_length view) ]
       | Read_bytes ->
           let storage = place (argument 1) in
           let count = value 2 in
@@ -433,8 +407,8 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           let descriptor = local b ~name:"descriptor" (Raw (Integer Int32)) in
           call ~result:(at descriptor) System_open
             [
-              Copy (path / Field "elements");
-              Copy (path / Field "length");
+              Copy (Storage.view_elements path);
+              Copy (Storage.view_length path);
               value 1;
               Address { place = place (argument 2); writable = true };
             ];
@@ -450,8 +424,8 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           call ?result:destination System_write
             [
               Copy (place (argument 0) / Field "descriptor");
-              Copy (view / Field "elements");
-              Copy (view / Field "length");
+              Copy (Storage.view_elements view);
+              Copy (Storage.view_length view);
             ]
       | Handle_read ->
           let storage = place (argument 1) in
@@ -481,10 +455,10 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           let program = place (argument 0) and packed = place (argument 1) in
           call ?result:destination System_run
             [
-              Copy (program / Field "elements");
-              Copy (program / Field "length");
-              Copy (packed / Field "elements");
-              Copy (packed / Field "length");
+              Copy (Storage.view_elements program);
+              Copy (Storage.view_length program);
+              Copy (Storage.view_elements packed);
+              Copy (Storage.view_length packed);
               Address { place = place (argument 2); writable = true };
             ]
       | Environment_variable ->
@@ -494,8 +468,8 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           let count = usize_local "count" in
           call ~result:(at found) System_environment
             [
-              Copy (name / Field "elements");
-              Copy (name / Field "length");
+              Copy (Storage.view_elements name);
+              Copy (Storage.view_length name);
               Address { place = at count; writable = true };
             ];
           let present = local b ~name:"present" (Raw Bool) in

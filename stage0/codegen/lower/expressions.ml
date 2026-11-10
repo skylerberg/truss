@@ -156,7 +156,7 @@ and into st (e : S.expression) (destination : Lir.place) =
       assign (Build { ty = ty (); variant = None; fields = [ (field, Move built) ] })
   | Name _ | Self_value | Member _ -> (
       match place_expression st e with
-      | Some place -> assign (Use (owned st place (ty ())))
+      | Some place -> take st place (ty ()) ~destination
       | None -> name_value st e destination)
   | Call (callee, arguments) -> call st e ~callee ~arguments destination
   | Binary { operator = And | Or; _ } | Is _ ->
@@ -225,7 +225,7 @@ and into st (e : S.expression) (destination : Lir.place) =
   | Lambda { parameters; body } -> lambda st e ~parameters ~body destination
   | Bracket _ -> (
       match place_expression st e with
-      | Some place -> assign (Use (owned st place (ty ())))
+      | Some place -> take st place (ty ()) ~destination
       | None -> bug "an index with no meaning")
   | Any inner -> any_value st e inner destination
   | Map entries ->
@@ -252,60 +252,59 @@ and into st (e : S.expression) (destination : Lir.place) =
   | Self_type_value -> bug "Self as a value"
   | Expression_error -> bug "an expression that did not parse"
 
+(* The primitive operation a binary operator is on built-in values, for
+   those that have one: the bitwise operators, the shifts, and the
+   comparisons. *)
+and built_in : S.binary -> Lir.binary option = function
+  | Bit_and -> Some Bit_and
+  | Bit_or -> Some Bit_or
+  | Bit_xor -> Some Bit_xor
+  | Shift_left -> Some Shift_left
+  | Shift_right -> Some Shift_right
+  | operator -> comparison operator
+
+and comparison : S.binary -> Lir.binary option = function
+  | Equal -> Some Equal
+  | Not_equal -> Some Not_equal
+  | Less -> Some Less
+  | Less_equal -> Some Less_equal
+  | Greater -> Some Greater
+  | Greater_equal -> Some Greater_equal
+  | _ -> None
+
 (* An operator: a call of the trait method or intrinsic the checked form
    chose, with the operands as its arguments in order, or a built-in
    operation on [Bool] or integers. *)
 and operator st (e : S.expression) operands destination =
-  match st.frame.code.checked.calls.(e.id) with
-  | Some { callee = Built_in_operator; _ } -> (
-      let operand_values = List.map (operand st) operands in
-      let rvalue : Lir.rvalue =
-        match (e.kind, operand_values) with
-        | Binary { operator; _ }, [ left; right ] ->
-            Binary
-              ( (match operator with
-                | Bit_and -> Bit_and
-                | Bit_or -> Bit_or
-                | Bit_xor -> Bit_xor
-                | Shift_left -> Shift_left
-                | Shift_right -> Shift_right
-                | Equal -> Equal
-                | Not_equal -> Not_equal
-                | Less -> Less
-                | Less_equal -> Less_equal
-                | Greater -> Greater
-                | Greater_equal -> Greater_equal
-                | _ -> bug "a built-in binary operator"),
-                left,
-                right )
-        | Prefix (Not, _), [ value ] -> Unary (Not, value)
-        | Prefix (Complement, _), [ value ] -> Unary (Complement, value)
-        | Prefix (Negate, _), [ value ] -> Unary (Negate, value)
-        | _ -> bug "a built-in operator"
-      in
-      match e.kind with _ -> emit st.b (Assign (destination, rvalue)))
-  | Some _
-    when match (e.kind, operands) with
-         | ( Binary { operator = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal; _ },
-             [ left; _ ] ) ->
-             primitive (type_of st left.id)
-         | _ -> false -> (
+  let assign rvalue = emit st.b (Assign (destination, rvalue)) in
+  let compared =
+    match (e.kind, operands) with
+    | Binary { operator; _ }, [ left; right ] ->
+        Option.map (fun compare -> (compare, left, right)) (comparison operator)
+    | _ -> None
+  in
+  match (st.frame.code.checked.calls.(e.id), compared) with
+  | Some { callee = Built_in_operator; _ }, _ -> (
+      match (e.kind, List.map (operand st) operands) with
+      | Binary { operator; _ }, [ left; right ] -> (
+          match built_in operator with
+          | Some operation -> assign (Binary (operation, left, right))
+          | None -> bug "a built-in binary operator")
+      | Prefix (Not, _), [ value ] -> assign (Unary (Not, value))
+      | Prefix (Complement, _), [ value ] -> assign (Unary (Complement, value))
+      | Prefix (Negate, _), [ value ] ->
+          (* Through the intrinsic, which a checked build has test for the
+             one value that has no negation. *)
+          ignore
+            (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types Negate
+               ~type_arguments:[ type_of st e.id ]
+               [ Value value ] ~destination:(Some destination) ~site:(site st e.span))
+      | _ -> bug "a built-in operator")
+  | Some _, Some (compare, left, right) when primitive (type_of st left.id) ->
       (* A comparison of built-in values is a primitive operation, with the
          lawful rules for floats. *)
-      match (e.kind, operands) with
-      | Binary { operator; _ }, [ left; right ] ->
-          let compare : Lir.binary =
-            match operator with
-            | Equal -> Equal
-            | Not_equal -> Not_equal
-            | Less -> Less
-            | Less_equal -> Less_equal
-            | Greater -> Greater
-            | _ -> Greater_equal
-          in
-          emit st.b (Assign (destination, Binary (compare, operand st left, operand st right)))
-      | _ -> bug "a comparison")
-  | Some call_ -> (
+      assign (Binary (compare, operand st left, operand st right))
+  | Some call_, _ -> (
       let arguments =
         List.mapi
           (fun i (operand : S.expression) ->
@@ -329,8 +328,7 @@ and operator st (e : S.expression) operands destination =
         call_with st call_ ~expressions:operands ~arguments ordering ~span:e.span;
         let is = local st.b (Raw Bool) in
         emit st.b (Assign (at is, Is_variant (ordering, variant)));
-        emit st.b
-          (Assign (destination, if negate then Unary (Not, Copy (at is)) else Use (Copy (at is))))
+        assign (if negate then Unary (Not, Copy (at is)) else Use (Copy (at is)))
       in
       match e.kind with
       | Binary { operator = Less; _ } -> test "Less" ~negate:false
@@ -340,23 +338,11 @@ and operator st (e : S.expression) operands destination =
       | Binary { operator = Not_equal; _ } ->
           let equal = temporary st st.context.bool in
           call_with st call_ ~expressions:operands ~arguments equal ~span:e.span;
-          emit st.b (Assign (destination, Unary (Not, Copy equal)))
+          assign (Unary (Not, Copy equal))
       | _ -> call_with st call_ ~expressions:operands ~arguments destination ~span:e.span)
-  | None -> (
+  | None, Some (compare, left, right) ->
       (* A specification's comparison of built-in integers, which is of
          their values, with no call: exact when both are of one type, the
          only case [executable] lets run. *)
-      match (e.kind, operands) with
-      | Binary { operator; _ }, [ left; right ] ->
-          let compare : Lir.binary =
-            match operator with
-            | Equal -> Equal
-            | Not_equal -> Not_equal
-            | Less -> Less
-            | Less_equal -> Less_equal
-            | Greater -> Greater
-            | Greater_equal -> Greater_equal
-            | _ -> bug "an operator with no call: %s" (source st e.span)
-          in
-          emit st.b (Assign (destination, Binary (compare, operand st left, operand st right)))
-      | _ -> bug "an operator with no call: %s" (source st e.span))
+      assign (Binary (compare, operand st left, operand st right))
+  | None, None -> bug "an operator with no call: %s" (source st e.span)

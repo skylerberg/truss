@@ -1,6 +1,7 @@
 (library
  (name lower)
  (libraries
+  storage
   compiler_bug
   path
   intrinsic
