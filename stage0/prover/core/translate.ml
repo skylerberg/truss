@@ -1756,16 +1756,24 @@ and quantified context frame (node : expression) (quantifier : Syntax.quantifier
    nothing more of. *)
 and value_term context frame (value : T.value) =
   match value with
-  | Known number -> L.Integer number
   | Value_parameter parameter -> (
       match List.assoc_opt parameter frame.substitution with
       | Some (T.Value given) when given <> Value_parameter parameter ->
           value_term context frame given
-      | _ ->
-          let symbol = Printf.sprintf "generic.%s.%s" (Path.show parameter.owner) parameter.name in
+      | _ -> substituted_value_term context value)
+  | Known _ | Value_variable _ -> substituted_value_term context value
+
+(* A value already substituted: a number, or a generic, which is a [USize]
+   on every path. *)
+and substituted_value_term context (value : T.value) =
+  match value with
+  | Known number -> L.Integer number
+  | Value_parameter parameter ->
+      let symbol = Printf.sprintf "generic.%s.%s" (Path.show parameter.owner) parameter.name in
+      once context ("range." ^ symbol) (fun () ->
           declare context (L.Constant (symbol, Int));
-          assume context frame (in_range (T.builtin USize) (L.Symbol symbol));
-          L.Symbol symbol)
+          context.facts <- in_range (T.builtin USize) (L.Symbol symbol) :: context.facts);
+      L.Symbol symbol
   | Value_variable _ -> raise (Foreign_unsupported "an unsolved size")
 
 (* The value of an intrinsic's [USize] generic argument, by the generic's
@@ -1782,14 +1790,13 @@ and generic_argument context frame (operation : Intrinsic.operation) type_argume
 (* An array's elements: a sequence as long as its type says. *)
 and array_model context frame (ty : T.ty) term =
   match ty with
-  | Named { arguments = [ T.Type element; T.Value count ]; _ } ->
-      let symbol = "model." ^ type_key ty in
-      declare context
-        (L.Function (symbol, [ sort_of context ty ], sort_of context (sequence_type element)));
-      let sequence = L.Apply (symbol, [ term ]) in
-      assume context frame
-        (L.equal (sequence_length context element sequence) (value_term context frame count));
-      sequence
+  | Named { arguments = [ T.Type element; T.Value count ]; _ } -> (
+      match model_of context ty term ~element with
+      | Some sequence ->
+          assume context frame
+            (L.equal (sequence_length context element sequence) (value_term context frame count));
+          sequence
+      | None -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (T.show ty))))
   | _ -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (T.show ty)))
 
 (* Calls *)
@@ -3376,6 +3383,21 @@ and model_function context (ty : T.ty) ~(model : T.ty) =
       let symbol = "function." ^ Path.show path ^ "[" ^ type_key ty ^ "]" in
       declare context (L.Function (symbol, [ sort_of context ty ], sort_of context model));
       model_ranked context ty ~model symbol;
+      (* An array's model is its elements, as many as its type says. *)
+      (match ty with
+      | Named { path; arguments = [ T.Type element; T.Value count ] }
+        when Intrinsic.builtin_of_path path = Some Array ->
+          once context ("array." ^ symbol) (fun () ->
+              let each = "array.value" in
+              let elements = L.Apply (symbol, [ L.Symbol each ]) in
+              context.facts <-
+                L.Forall
+                  ( [ (each, sort_of context ty) ],
+                    L.equal
+                      (sequence_length context element elements)
+                      (substituted_value_term context count) )
+                :: context.facts)
+      | _ -> ());
       Some (fun term -> L.Apply (symbol, [ term ]))
   | [] -> None
 
@@ -5652,7 +5674,9 @@ and potential context frame (ty : T.ty) term =
                   in
                   fact context frame
                     (L.equal slack (L.ite (L.Apply (">=", [ saved; L.int 0 ])) saved (L.int 0)))
-              | Named { path; _ } when Intrinsic.builtin_of_path path = Some View ->
+              | Named { path; _ }
+                when Intrinsic.builtin_of_path path = Some View
+                     || Intrinsic.builtin_of_path path = Some Array ->
                   fact context frame (L.equal slack (L.int 0))
               | _ -> ());
               let elements =
@@ -5712,6 +5736,11 @@ and potential context frame (ty : T.ty) term =
    field, as a [List] and a [String] are. *)
 and buffer_elements context (ty : T.ty) =
   match ty with
+  | Named { path; arguments = [ T.Type element; T.Value _ ] }
+    when Intrinsic.builtin_of_path path = Some Array ->
+      Option.map
+        (fun model_of -> (element, model_of))
+        (model_function context ty ~model:(sequence_type element))
   | Named { path; arguments = [ T.Type element ] }
     when Intrinsic.builtin_of_path path = Some Storage ->
       Some (element, fun term -> buffer_model context Storage element term)
