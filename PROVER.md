@@ -642,14 +642,44 @@ of it.
 
 A query holds only the facts that can matter to it. Starting from the
 symbols of the obligation, each fact that mentions one of them is kept,
-with its symbols, until nothing more is added. A quantified equation whose
-left side names every bound name, such as a lambda's definition or the sum
-over a longer sequence, waits until every symbol of its left side is kept,
-since the solver can use it only where a term of that shape is; this also
-keeps quantifiers out of queries that do not need them, which the solver
-decides by other means. Dropping a fact is always sound, and a fact about
+with its symbols, until nothing more is added. A quantified fact waits
+until every symbol of one of its triggers is kept, since the solver uses
+it only where terms of that shape are; this also keeps quantifiers out of
+queries that do not need them. Dropping a fact is always sound, and a fact about
 symbols the obligation never reaches cannot help to prove it. A change to a function that no kept fact mentions leaves the
 query's text, and so its kept answer, alone.
+
+### Triggers
+
+A quantified fact helps the solver only when it knows when to use it,
+which SMT solvers decide by triggers: terms that, when they appear, make
+the solver use the fact for them. Truss has no syntax for triggers, so the
+prover chooses them, as Dafny does, and states them in the query:
+
+- **A trigger is a set of applications** of the query's own functions,
+  including a datatype's constructors and fields, that together name every
+  bound name. A bound name may appear only as an argument, never under
+  arithmetic, since the solver matches a trigger by its shape: `items[i]`
+  is a trigger and `items[i + 1]` is not.
+- **The smallest terms are chosen.** An application that contains another
+  naming the same bound names is left out for the smaller one, and a
+  single application naming every bound name is preferred to a set.
+- **Matching loops are avoided.** An application that the fact's own body
+  would match with a larger term, as `f(i)` matches `f(i + 1)` in
+  `forall i => f(i) < f(i + 1)`, would make each use of the fact give the
+  term for another, without end, so it is left out when anything else is
+  left.
+- **A definition triggers on what it defines.** An equation whose left
+  side is an application naming every bound name, such as a lambda's
+  definition, is triggered by its left side alone.
+
+When no trigger is found, the query states none and the solver chooses its
+own.
+
+A value made inside a quantifier, such as a call's result, is a function of
+the quantifier's bound names in the logic, since it can differ for each of
+their values: `forall i in 0..items.length() => same(items[i]) == items[i]`
+is about one result for each `i`, not one result for all of them.
 
 ### The canonical form
 
@@ -1089,18 +1119,14 @@ sanitized runs, test the trusted base against real executions.
   the `ieee_` comparisons, is known only by its type.
 - **Facts under a quantifier.** A fact that names a quantifier's bound
   name, such as what a callee's `ensures` says of a call on it, is not
-  kept. Closed over the quantifier it would be true, but a body's calls give
-  many such facts, and with them the solver runs out of steps on the
-  standard library's maps; keeping them waits on choosing triggers.
-- **Choosing triggers.** A quantified fact helps the solver only when it
-  knows when to use it, which SMT solvers decide by triggers: terms that,
-  when they appear, make the solver use the fact. Truss has no syntax for
-  them, so the prover is to choose them, as Dafny does: the smallest sets
-  of applications, indexes, and fields that together mention every bound
-  name, with pruning then keeping a fact by its triggers' symbols, and a
-  diagnostic that says so when a proof needed a fact that has none. Stage0
-  states no triggers, and the solver chooses its own; pruning reads only a
-  quantified equation's left side as its trigger.
+  kept. Closed over the quantifier it would be true, but the standard
+  library's maps state nested quantifiers over calls, each call's facts
+  are about values made for every combination of bound names, and with
+  them the solver runs out of steps even with triggers chosen.
+- **A diagnostic for a quantifier with no trigger.** When no set of
+  applications names every bound name, the solver chooses its own
+  triggers; the prover does not yet say so where a proof needed such a
+  fact.
 - **A function value's contract in the logic.** A lambda whose body is not
   functional, or a named function with a `requires`, is applied as a
   function the solver knows nothing more about, so a contract such as
