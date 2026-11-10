@@ -137,12 +137,36 @@ let any_entry_signature context (signature : T.signature) =
   in
   ({ lir with parameters = Lir.Raw (Pointer Opaque) :: lir.parameters }, result)
 
-(* The evidence for a capability, where the code being lowered has it. *)
+(* Evidence on the stack that a capability is implemented by the value
+   [implementation] points at: its [impl]'s table, and the evidence the
+   [impl] uses, which the code here has. *)
+let implementation_evidence st ~impl ~type_arguments ~implementation =
+  let outer =
+    List.map
+      (fun captured ->
+        match List.find_opt (fun (path, _) -> Path.equal path captured) st.evidence with
+        | Some (_, operand) -> operand
+        | None -> bug "no evidence for %s here" (Path.show captured))
+      (evidence_for [] (impl_interface st.context impl).impl_uses)
+  in
+  let slot = local st.b (Evidence (List.length outer)) in
+  emit st.b
+    (Call
+       {
+         target = Intrinsic Evidence_fill;
+         arguments =
+           Address { place = at slot; writable = true }
+           :: implementation
+           :: Constant (Symbol_address (Table { impl; type_arguments }))
+           :: outer;
+         result = Discarded;
+       });
+  Lir.Address { place = at slot; writable = false }
+
 (* The evidence for a capability, where the code being lowered has it. In a
    method of an [impl] of the capability that does not use it, a function
    value that uses it means the implementation itself, so the evidence is
-   the implementation's own, made on the stack: its [self], its table, and
-   what it captured. *)
+   the implementation's own: its [self]. *)
 let evidence_of st capability =
   match List.find_opt (fun (path, _) -> Path.equal path capability) st.evidence with
   | Some (_, operand) -> operand
@@ -168,27 +192,7 @@ let evidence_of st capability =
                 | None -> bug "an unbound parameter of %s" (Path.show impl))
               interface.impl_generics
           in
-          let outer =
-            List.map
-              (fun captured ->
-                match List.find_opt (fun (path, _) -> Path.equal path captured) st.evidence with
-                | Some (_, operand) -> operand
-                | None -> bug "no evidence for %s here" (Path.show captured))
-              (evidence_for [] interface.impl_uses)
-          in
-          let slot = local st.b (Evidence (List.length outer)) in
-          emit st.b
-            (Call
-               {
-                 target = Intrinsic Evidence_fill;
-                 arguments =
-                   Address { place = at slot; writable = true }
-                   :: implementation
-                   :: Constant (Symbol_address (Table { impl; type_arguments }))
-                   :: outer;
-                 result = Discarded;
-               });
-          Lir.Address { place = at slot; writable = false }
+          implementation_evidence st ~impl ~type_arguments ~implementation
       | _ -> missing ())
 
 let call_instance st key ~(signature : T.signature) ~substitution

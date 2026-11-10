@@ -211,11 +211,7 @@ let () =
         Ground.Named { path = Intrinsic.builtin_path Storage; arguments = [ Type element ] }
       in
       let intrinsic_types : Intrinsics.types =
-        {
-          usize = Monomorphic.builtin USize;
-          isize = Monomorphic.builtin ISize;
-          string_slice = standard "text" "StringSlice" ();
-        }
+        { usize = Monomorphic.builtin USize; string_slice = standard "text" "StringSlice" () }
       in
       let site : Lir.site = { definition = definition "entry"; line = 0; column = 1 } in
       let echo b ty place =

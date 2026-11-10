@@ -117,7 +117,6 @@ let intrinsic_name = function
   | Float_bits -> "float_bits"
   | Float_from_bits -> "float_from_bits"
   | Grow -> "grow"
-  | System_read -> "system_read"
   | Float_text -> "float_text"
   | Evidence_fill -> "evidence_fill"
   | System_environment -> "system_environment"

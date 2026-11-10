@@ -1,6 +1,6 @@
 use standard::capabilities
-use standard::intrinsic
 use standard::system::handles
+use standard::system::lines
 
 internal type SystemFileRead()
 
@@ -19,6 +19,6 @@ impl FileRead for SystemFileRead {
 
   fn open(self, file: Path) -> Result[capabilities::FileReader, FileError] {
     let handle = handles::open_to_read(file)?
-    Ok(capabilities::FileReader(handle: own handle, pending: intrinsic::storage_empty(), start: 0, ended: false))
+    Ok(capabilities::FileReader(handle: own handle, input: lines::LineInput.new()))
   }
 }

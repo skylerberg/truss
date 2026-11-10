@@ -67,7 +67,6 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
         (helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
   | Grow -> Printf.sprintf "t_runtime_storage_grow((void **)%s)" all
-  | System_read -> "t_runtime_read(" ^ all ^ ")"
   | System_environment -> "t_runtime_environment(" ^ all ^ ")"
   | System_run -> "t_runtime_run(" ^ all ^ ")"
   | Evidence_fill ->

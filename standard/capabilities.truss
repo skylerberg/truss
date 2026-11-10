@@ -1,6 +1,6 @@
 use standard::intrinsic
-use standard::system::calls
 use standard::system::handles
+use standard::system::lines
 
 public capability Console {
   fn print_line(text: StringSlice)
@@ -85,55 +85,19 @@ public fn Path.new(text: StringSlice) -> Path {
 
 public type Bytes(data: List[UInt8])
 
-public opaque type FileReader(
-  handle: intrinsic::Handle,
-  pending: intrinsic::Storage[UInt8],
-  start: USize,
-  ended: Bool,
-)
+public opaque type FileReader(handle: intrinsic::Handle, input: lines::LineInput)
 
 public fn FileReader.read_line(mut self) -> Result[String, FileError]
   uses FileRead
 {
-  var found = false
-  var end: USize = self.start
-  var failed = false
-  while !found && !failed {
-    if end < intrinsic::storage_length(self.pending) {
-      if intrinsic::view_at(intrinsic::storage_view(self.pending), index: end) == 10 {
-        found = true
-      } else {
-        end += 1
-      }
-    } else if self.ended {
-      found = true
-    } else {
-      match calls::read_onto_end(intrinsic::handle_descriptor(self.handle), buffer: mut self.pending, count: 65536) {
-        Ok(read) => {
-          if read == 0 {
-            self.ended = true
-          }
-        }
-        Err(_) => {
-          failed = true
-        }
+  match mut self.input.next_line(intrinsic::handle_descriptor(self.handle)) {
+    Ok(line) => {
+      match own line {
+        Some(text) => Ok(own text)
+        None => Ok("")
       }
     }
-  }
-  if failed {
-    Err(FileError.Other(code: 5))
-  } else {
-    let pending = intrinsic::storage_view(self.pending)
-    var line: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(end - self.start)
-    for index in self.start..end {
-      intrinsic::storage_push(mut line, value: intrinsic::view_at(pending, index: index))
-    }
-    if end < intrinsic::storage_length(self.pending) {
-      self.start = end + 1
-    } else {
-      self.start = end
-    }
-    Ok(String.from_bytes(own line))
+    Err(number) => Err(handles::file_error(number))
   }
 }
 

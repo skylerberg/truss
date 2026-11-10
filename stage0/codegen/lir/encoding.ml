@@ -144,7 +144,6 @@ let intrinsic_tag = function
   | Float_bits -> 22
   | Float_from_bits -> 23
   | Grow -> 24
-  | System_read -> 26
   | Debug_begin -> 29
   | Debug_text -> 30
   | Debug_signed -> 31
@@ -325,11 +324,6 @@ let encode_table ?(path = Ground.encode_path) ?instance (table : table) =
         (fun (key, s) -> Cbor.Array [ instance key; encode_signature encoders_default s ])
         table.entries;
     ]
-
-let encode_evidence ?(path = Ground.encode_path) ?instance (evidence : evidence) =
-  let instance = match instance with Some instance -> instance | None -> Instance.encode ~path in
-  Cbor.Array
-    [ instance evidence.evidence_key; instance evidence.table; list instance evidence.outer ]
 
 let hash t =
   Blake3.hash

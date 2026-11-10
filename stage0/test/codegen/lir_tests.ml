@@ -485,8 +485,7 @@ let () =
 
 (* Intrinsic operations *)
 
-let intrinsic_types : Intrinsics.types =
-  { usize; isize = named "ISize"; string_slice = named "StringSlice" }
+let intrinsic_types : Intrinsics.types = { usize; string_slice = named "StringSlice" }
 
 (* An [entry] built with the builder: [body] writes its statements and
    returns the local to exit with. *)

@@ -146,7 +146,6 @@ type operation =
   | View_at
   | View_slice
   | Crash
-  | Read_bytes
   | Write_float
   | Handle_from
   | Handle_descriptor
@@ -216,7 +215,6 @@ let operations =
     View_at;
     View_slice;
     Crash;
-    Read_bytes;
     Write_float;
     Handle_from;
     Handle_descriptor;
@@ -286,7 +284,6 @@ let operation_name = function
   | View_at -> "view_at"
   | View_slice -> "view_slice"
   | Crash -> "crash"
-  | Read_bytes -> "read_bytes"
   | Write_float -> "write_float"
   | Handle_from -> "handle_from"
   | Handle_descriptor -> "handle_descriptor"
