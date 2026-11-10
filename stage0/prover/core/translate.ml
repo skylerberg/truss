@@ -1723,8 +1723,12 @@ and if_ context frame (node : expression) condition (then_ : block) (else_ : blo
 and quantified context frame (node : expression) (quantifier : Syntax.quantifier) binder body =
   let make ?count bound_symbol sort premise body_frame =
     let mark = context.fresh in
+    (* The body runs only for the values the premise admits, which may be
+       none, so what it assumes is only for them. *)
     let body_frame =
-      { body_frame with binders = (bound_symbol, sort, premise) :: body_frame.binders }
+      restrict
+        { body_frame with binders = (bound_symbol, sort, premise) :: body_frame.binders }
+        premise
     in
     let after, body_value = value context body_frame body in
     let bound = [ (bound_symbol, sort) ] in
