@@ -1,20 +1,36 @@
 use standard::intrinsic
 
 public fn Array[Element: Copyable, count: USize].filled(value: Element) -> Array[Element, count]
-  cost time O(count)
-  cost allocations == 0
+  ensures forall i in 0..count => identical(result.model()[i], value)
+  cost time O(count * time(Element.copy))
 {
-  todo
+  var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
+  for _ in 0..count
+    invariant intrinsic::storage_length(elements) == yielded.length()
+    invariant intrinsic::storage_capacity(elements) == count
+    invariant forall i in 0..yielded.length() => identical(intrinsic::storage_model(elements)[i], value)
+  {
+    intrinsic::storage_push(mut elements, value: value.copy())
+  }
+  intrinsic::array_from_storage(own elements)
 }
 
 public fn Array[Element, count: USize].generate(
   make: (fn(index: USize) -> Element requires index < count cost time finite),
 ) -> Array[Element, count]
+  ensures forall i in 0..count => identical(result.model()[i], make(i))
   cost calls(make) == count
   cost time O(count * time(make))
-  cost allocations == 0
 {
-  todo
+  var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
+  for index in 0..count
+    invariant intrinsic::storage_length(elements) == yielded.length()
+    invariant intrinsic::storage_capacity(elements) == count
+    invariant forall i in 0..yielded.length() => identical(intrinsic::storage_model(elements)[i], make(i))
+  {
+    intrinsic::storage_push(mut elements, value: make(index))
+  }
+  intrinsic::array_from_storage(own elements)
 }
 
 public fn Array[Element, count: USize].length(self) -> USize
@@ -151,9 +167,19 @@ public fn Array[Element, count: USize].map_each[Output, capability Granted](
   uses Granted
   cost calls(transform) == count
   cost time O(count * time(transform))
-  cost allocations == 0
 {
-  todo
+  var remaining = own self.to_list()
+  mut remaining.reverse()
+  var outputs: intrinsic::Storage[Output] = intrinsic::storage_with_capacity(count)
+  for _ in 0..count
+    invariant remaining.length() + yielded.length() == count
+    invariant intrinsic::storage_length(outputs) == yielded.length()
+    invariant intrinsic::storage_capacity(outputs) == count
+  {
+    var item = intrinsic::storage_pop(mut remaining.storage)
+    intrinsic::storage_push(mut outputs, value: transform(own item))
+  }
+  intrinsic::array_from_storage(own outputs)
 }
 
 impl Equal for Array[Element: Equal, count: USize] {

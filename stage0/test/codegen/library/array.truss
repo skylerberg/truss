@@ -78,3 +78,35 @@ test "an array lends its elements to change with their indexes, in pairs, and ba
   }
   assert same_items(fixed[..], expected: [3, 2, 1])
 }
+
+test "an array is made of copies of one value, or of what a function gives for each index" {
+  let zeros: Array[Int64, 4] = Array.filled(0)
+  assert same_items(zeros[..], expected: [0, 0, 0, 0])
+  let words: Array[String, 3] = Array.filled("ab${1}")
+  assert words[0] == "ab1"
+  assert words[2] == "ab1"
+  let squares: Array[Int64, 5] = Array.generate(fn(index) { counted_square(index) })
+  assert same_items(squares[..], expected: [0, 1, 4, 9, 16])
+  let none: Array[Int64, 0] = Array.filled(7)
+  assert none[..].length() == 0
+}
+
+fn counted_square(index: USize) -> Int64 {
+  var total = 0
+  for _ in 0..index {
+    for _ in 0..index {
+      total += 1
+    }
+  }
+  total
+}
+
+test "an array's elements are each given to a function, which makes a new array" {
+  let numbers: Array[Int64, 3] = [1, 2, 3]
+  let doubled: Array[Int64, 3] = numbers.map_each(fn(item) { item * 2 })
+  assert same_items(doubled[..], expected: [2, 4, 6])
+  let words: Array[String, 2] = ["a${1}", "bb${2}"]
+  let lengths: Array[USize, 2] = own words.map_each(fn(word) { word.length() })
+  assert lengths[0] == 2
+  assert lengths[1] == 3
+}
