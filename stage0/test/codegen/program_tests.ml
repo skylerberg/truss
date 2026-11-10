@@ -636,6 +636,95 @@ fn main(arguments: List[String]) -> ExitCode
         output)
 
 let () =
+  test "a program lists a directory: its files, directories, and links, however many" (fun () ->
+      let status, output, _ =
+        run_main
+          ~arguments:[ Lazy.force scratch ]
+          {|use standard::files
+
+fn say(text: String) uses Console {
+  Console.print_line(text.slice())
+}
+
+fn kind_of(entries: List[files::DirectoryEntry], name: String) -> String {
+  for entry in entries {
+    if entry.name == name {
+      return if entry.kind == files::FileKind.File {
+        "a file".copy()
+      } else if entry.kind == files::FileKind.Directory {
+        "a directory".copy()
+      } else if entry.kind == files::FileKind.SymbolicLink {
+        "a link".copy()
+      } else {
+        "something else".copy()
+      }
+    }
+  }
+  "missing".copy()
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, FileRead, FileWrite
+{
+  let directory = Path.new("${arguments[1]}/listed")
+  let file = Path.new("${arguments[1]}/listed/plain.txt")
+  let inner = Path.new("${arguments[1]}/listed/inner")
+  let link = Path.new("${arguments[1]}/listed/pointer")
+  if FileWrite.create_directory(directory) is Err(_) {
+    return ExitCode(1)
+  }
+  if FileRead.list(directory) is Ok(entries) {
+    say("empty ${entries.length()}")
+  }
+  let _ = FileWrite.write_text(file, contents: "contents")
+  let _ = FileWrite.create_directory(inner)
+  let _ = FileWrite.link(file, link: link, kind: files::LinkKind.Symbolic)
+  var count: USize = 0
+  while count < 600 {
+    let _ = FileWrite.write_text(Path.new("${arguments[1]}/listed/inner/a file with a fairly long name, number ${count}"), contents: "x")
+    count += 1
+  }
+  if FileRead.list(directory) is Ok(entries) {
+    say("holds ${entries.length()}")
+    say("plain.txt is ${kind_of(entries, name: "plain.txt")}")
+    say("inner is ${kind_of(entries, name: "inner")}")
+    say("pointer is ${kind_of(entries, name: "pointer")}")
+    say(". is ${kind_of(entries, name: ".")}")
+  }
+  if FileRead.list(inner) is Ok(entries) {
+    say("inner holds ${entries.length()}")
+    say("number 599 is ${kind_of(entries, name: "a file with a fairly long name, number 599")}")
+  }
+  if FileRead.list(Path.new("${arguments[1]}/listed/absent")) is Err(NotFound) {
+    say("absent is not found")
+  }
+  if FileRead.list(file) is Err(error) {
+    say("a file is no directory ${error == SystemError.NotADirectory}")
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               "empty 0";
+               "holds 3";
+               "plain.txt is a file";
+               "inner is a directory";
+               "pointer is a link";
+               ". is missing";
+               "inner holds 600";
+               "number 599 is a file";
+               "absent is not found";
+               "a file is no directory true";
+               "";
+             ])
+        output)
+
+let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"
     (fun () ->
       let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in

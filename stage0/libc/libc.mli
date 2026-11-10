@@ -84,6 +84,22 @@ type number =
   | Spawn_file_actions_size  (** How many bytes a [posix_spawn_file_actions_t] takes *)
   | Sigusr1
   | Sigusr2
+  | O_directory
+  | Dirent_length_offset
+      (** Where in a [struct dirent64] its length is, then its kind, then its name. Linux's. *)
+  | Dirent_kind_offset
+  | Dirent_name_offset
+  | Dt_unknown
+  | Dt_dir
+  | Dt_reg
+  | Dt_lnk
+  | Attr_bit_map_count  (** This and the six after it are macOS's, and 0 elsewhere *)
+  | Attr_cmn_returned_attrs
+  | Attr_cmn_name
+  | Attr_cmn_objtype
+  | Vreg
+  | Vdir
+  | Vlnk
 
 (** How many elements a function reads or writes through an address it is given. The prover holds
     every call to it: a view has that many elements, and storage has room for that many. *)
@@ -192,6 +208,8 @@ type function_ =
   | Posix_spawn_file_actions_adddup2
   | Posix_spawn_file_actions_addopen
   | Posix_spawn_file_actions_addchdir  (** [posix_spawn_file_actions_addchdir_np] *)
+  | Getdents64  (** Only Linux has it *)
+  | Getattrlistbulk  (** Only macOS has it *)
 
 val functions : function_ list
 

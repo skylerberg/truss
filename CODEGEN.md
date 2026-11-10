@@ -1277,7 +1277,16 @@ where a symbolic link points with `readlink` and resolves a path with
 `realpath`, each into room for the longest path the system allows.
 `SystemClock.sleep` calls `nanosleep`, and sleeps again for the time left
 when a signal interrupts it; the monotonic clock is `clock_gettime` with
-`CLOCK_MONOTONIC`.
+`CLOCK_MONOTONIC`. `SystemFileRead.list` opens the directory and reads
+its entries a block at a time through the descriptor, with the call each
+system has for that: `getdents64` on Linux and `getattrlistbulk` on
+macOS. Each fills bytes with entries of the system's own layout, which
+the standard library reads at the offsets the table's numbers give, and
+it holds every length an entry states to the bytes that were filled. The
+C library's `opendir` and `readdir` are not used, since they keep the
+directory in a structure of the C library's that Truss would have to hold
+an address of. Where Linux does not say what kind an entry is, the kind
+comes from `lstat`.
 `SystemEnvironment` reads one variable with `getenv` and all of them with
 `environment_entry`, an intrinsic that gives the entry at an index of the
 environment the process was started with and counts from the first entry
