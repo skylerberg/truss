@@ -115,7 +115,6 @@ type operation =
       (** [(view) -> USize]: the address of a view's elements as a number, for the lists of
           addresses that some functions of the C library take *)
   | Crash
-  | Write_float  (** [(buffer, value)]: appends the shortest decimal that reads back as the float *)
   | Handle_from
       (** [(descriptor) -> Handle]: owns a descriptor that is open, which dropping it closes *)
   | Handle_descriptor  (** [(handle) -> Int32]: the descriptor a handle owns *)

@@ -232,28 +232,29 @@ let constant context path =
   | Some value -> Folded { data_key = Constant path; ty; value }
   | None -> Run ty
 
-(* Code run while compiling leaves what it works out in the debug buffer, in
-   its binary form, and writes the buffer to standard output as it ends,
-   with the standard library's function that writes every byte. *)
+(* Code run while compiling appends what it works out, in its binary form,
+   to an output it owns, and writes that to standard output as it ends, with
+   the standard library's function that writes every byte. *)
 let begin_output st =
-  emit st.b (Call { target = Intrinsic Debug_begin; arguments = []; result = Discarded })
+  let output = temporary st Glue.output_ty in
+  emit st.b (Assign (output, Storage.empty Glue.output_ty));
+  output
 
 let write_fully : Path.t =
   Top { module_ = { package = "standard"; modules = [ "system"; "calls" ] }; name = "write_fully" }
 
-let write_output st =
+let write_output st output =
   let b = st.b in
-  let call intrinsic result =
-    emit b (Call { target = Intrinsic intrinsic; arguments = []; result = Returned result })
-  in
-  let bytes = local b (Raw (Pointer Opaque)) and length = temporary st st.context.types.usize in
-  call Debug_bytes (at bytes);
-  call Debug_length length;
   let int32 = Monomorphic.builtin Int32 in
   let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
-  let output = temporary st int32 and view = temporary st view_ty in
-  emit b (Assign (output, Use (Constant (Integer (Int32, Z.one)))));
-  emit b (Assign (view, Storage.view view_ty ~elements:(Copy (at bytes)) ~length:(Copy length)));
+  let descriptor = temporary st int32 and view = temporary st view_ty in
+  emit b (Assign (descriptor, Use (Constant (Integer (Int32, Z.one)))));
+  emit b
+    (Assign
+       ( view,
+         Storage.view view_ty
+           ~elements:(Copy (Storage.buffer output))
+           ~length:(Copy (Storage.length output)) ));
   let signature = signature_of st.context write_fully in
   let result =
     match signature.output with
@@ -263,7 +264,7 @@ let write_output st =
   call_instance st
     (Code { path = write_fully; type_arguments = [] })
     ~signature ~substitution:[]
-    ~arguments:[ (Read, int32, output); (Read, view_ty, view) ]
+    ~arguments:[ (Read, int32, descriptor); (Read, view_ty, view) ]
     ~mask:0 ~destination:(temporary st result)
 
 (* Code run while compiling: works out a constant's value and writes its
@@ -274,9 +275,11 @@ let evaluator context path : Lir.t =
   in_scope st (fun () ->
       let place = temporary st ty in
       into st value place;
-      begin_output st;
-      Glue.encode_call context.glue st.b ty place;
-      write_output st);
+      let output = begin_output st in
+      Glue.encode_call context.glue st.b
+        ~output:(Address { place = output; writable = true })
+        ty place;
+      write_output st output);
   {
     key = Evaluator path;
     main = finish_function st ~first:[] ~rest:[] ();

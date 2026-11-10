@@ -11,7 +11,7 @@ val host : os option
     [None] where that is a system it knows no C library of. *)
 
 (** A number that Truss and C both have. *)
-type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize
+type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize | Float64
 
 (** How an argument reaches the function. There is no pointer type in Truss, so memory is passed as
     a view or as storage, and the function is given an address into it. *)
@@ -60,6 +60,8 @@ type function_ =
   | Getenv
   | Posix_spawnp
   | Waitpid
+  | Snprintf
+  | Strtod
 
 val functions : function_ list
 

@@ -112,20 +112,6 @@ type intrinsic =
   | Float_from_bits
   | Environment  (** [() -> pointer] to the environment the process was started with *)
   | Terminated_length  (** [(bytes) -> USize]: how many bytes come before the first zero byte *)
-  | Float_text
-      (** [(value, bytes) -> USize]: writes the shortest decimal that reads back as the float, at
-          most [float_text_limit] bytes, as [Display] shows it *)
-  | Debug_begin  (** Empties the debug output buffer *)
-  | Debug_text  (** [(bytes, count)]: appends text as it is *)
-  | Debug_signed  (** [(Int64)] *)
-  | Debug_unsigned  (** [(UInt64)] *)
-  | Debug_float32
-  | Debug_float64  (** The shortest decimal that reads back as the same float *)
-  | Debug_bool
-  | Debug_character  (** As [Character"x"] *)
-  | Debug_string  (** [(bytes, count)]: as a quoted string with escapes *)
-  | Debug_bytes  (** [() -> pointer] to the buffer's bytes *)
-  | Debug_length  (** [() -> USize] *)
   | Evidence_implementation  (** [(evidence) -> pointer] to the value that implements it *)
   | Evidence_outer  (** [(evidence, index) -> evidence] the implementation captured *)
   | Program_argument
@@ -133,8 +119,6 @@ type intrinsic =
   | Evidence_fill
       (** [(evidence's address, implementation, table, captured evidence...)]: fills evidence a
           [provide] builds *)
-
-let float_text_limit = 32
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
