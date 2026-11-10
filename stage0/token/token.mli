@@ -7,6 +7,7 @@ type keyword =
   | Assert
   | Break
   | Capability
+  | Concurrent
   | Continue
   | Cost
   | Decreases

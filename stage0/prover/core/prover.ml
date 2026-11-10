@@ -313,7 +313,18 @@ let within database (key : Names.key) (span : span) =
 type answer = Solved of Solver.answer | Ran_false | Ran_too_long
 type evaluated = Holds | Fails | Too_long
 
-let bitwise_operations = [ "and"; "or"; "xor"; "complement"; "shift_left"; "shift_right" ]
+let bitwise_operations =
+  [
+    "and";
+    "or";
+    "xor";
+    "complement";
+    "shift_left";
+    "shift_right";
+    "rotate_left";
+    "rotate_right";
+    "swap_bytes";
+  ]
 
 let integer_width = function
   | "Int8" -> Some (8, true)
@@ -358,6 +369,25 @@ let exactly (query : L.query) =
               | "shift_left", [ b ] -> Some (L.Apply ("bvshl", [ a; bits_of b ]))
               | "shift_right", [ b ] ->
                   Some (L.Apply ((if signed then "bvashr" else "bvlshr"), [ a; bits_of b ]))
+              | ("rotate_left" | "rotate_right"), [ b ] ->
+                  (* By the amount modulo the width, with what leaves one end
+                     coming in at the other. *)
+                  let by = bits_of (L.Apply ("mod", [ b; L.int bits ])) in
+                  let rest = L.Apply ("bvsub", [ bits_of (L.int bits); by ]) in
+                  let towards, back =
+                    if operation = "rotate_left" then ("bvshl", "bvlshr") else ("bvlshr", "bvshl")
+                  in
+                  Some
+                    (L.Apply ("bvor", [ L.Apply (towards, [ a; by ]); L.Apply (back, [ a; rest ]) ]))
+              | "swap_bytes", _ ->
+                  let byte index =
+                    L.Apply (Printf.sprintf "(_ extract %d %d)" ((8 * index) + 7) (8 * index), [ a ])
+                  in
+                  let bytes = List.init (bits / 8) byte in
+                  Some
+                    (List.fold_left
+                       (fun swapped next -> L.Apply ("concat", [ swapped; next ]))
+                       (List.hd bytes) (List.tl bytes))
               | _ -> None
             in
             Option.map

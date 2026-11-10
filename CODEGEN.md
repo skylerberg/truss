@@ -1804,15 +1804,35 @@ a command line can hold.
   allocated by `from_template` too, and the copy writes no byte that
   `from_template` did not write.
 - **A template's list of literals as static data.** It is allocated.
-- **Tasks on threads.** Each task is to run on an operating-system thread.
-  DESIGN.md requires that calls into one implementation never overlap, so
-  when a task is spawned, each piece of evidence it receives is wrapped in
-  evidence whose vtable takes that implementation's lock around every call.
-  Code in the task cannot tell the difference, and a fake implementation in
-  a test needs no locking of its own. A seeded `Tasks` implementation for
-  tests runs tasks one at a time, and needs no threads or locks at all.
-- **`parallel` branches at once.** Branches can go to a thread pool with no
-  change to the LIR above the statement that starts them.
+- **`parallel` branches at once.** Each branch is to become a function of
+  its own that takes the address of the enclosing function's locals, and
+  the statement that starts them hands all but the first to a pool of
+  threads, one for each core, runs the first itself, and then runs or waits
+  for the rest. A thread with nothing to do takes a branch that another has
+  not started. A `parallel for` splits its range in halves down to a size
+  that depends only on the range. The pool starts at the first such
+  statement a program reaches. A test program runs branches in order.
+- **`concurrent`.** A branch is to become a function as a `parallel`
+  branch does, started as a task through the evidence for `Tasks`, which
+  also ends the block: it waits for every branch, and cancels the rest
+  when one leaves early. A branch that leaves early records where control
+  goes, and the code after the block goes there.
+- **Tasks.** The real `Tasks` is first to give each task a thread of the
+  operating system, so that the real capability implementations wait as
+  they do now. Later a task is to have a stack of its own and run on the
+  pool's threads: a call that would wait registers what it waits for with
+  the operating system and switches to another task. A call the operating
+  system cannot wait for that way, such as reading a file or looking up a
+  host, runs on a thread kept for such calls. Each call that waits returns
+  the cancelled error at once in a cancelled task.
+- **Turns for a `mut` implementation.** At a `provide mut` whose body can
+  use `Tasks`, the evidence is to point at entries that take the
+  implementation's turn through the evidence for `Tasks`, call the method,
+  and give the turn back. Any other `provide` is lowered as it is now.
+- **The seeded `Tasks`.** It is to run one task at a time and pick the
+  next by its seed at each capability call that waits, starts a task, or
+  takes a turn. It needs the operations that start a task and switch to
+  one, which the real `Tasks` is built on too.
 - **Keeping an instance's C and a linked program.** The C is emitted again
   for each build, and found as an object by its text. It could be kept by
   the LIR's hash and the emitter's version, and a program by its objects,

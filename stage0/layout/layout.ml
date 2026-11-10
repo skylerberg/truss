@@ -24,10 +24,10 @@ let can_begin = function
   | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ | Reserved _ | Foreign _ -> true
   | Punctuation (Open _ | Minus | Bang | Tilde) -> true
   | Keyword
-      ( Any | Assert | Break | Capability | Continue | Echo | Exists | False | Fn | For | Forall
-      | If | Impl | Internal | Law | Let | Match | Mut | Own | Parallel | Proof | Provide | Public
-      | Return | Self_value | Self_type | Test | Theorem | Todo | Trait | True | Type | Unreachable
-      | Use | Var | While | Yield ) ->
+      ( Any | Assert | Break | Capability | Concurrent | Continue | Echo | Exists | False | Fn | For
+      | Forall | If | Impl | Internal | Law | Let | Match | Mut | Own | Parallel | Proof | Provide
+      | Public | Return | Self_value | Self_type | Test | Theorem | Todo | Trait | True | Type
+      | Unreachable | Use | Var | While | Yield ) ->
       true
   | Keyword
       ( Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends

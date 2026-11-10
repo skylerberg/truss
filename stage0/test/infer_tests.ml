@@ -475,6 +475,35 @@ let () =
   test "a lambda takes its parameter types from the function type it is passed as" (fun () ->
       has_type "fn f(items: List[Int64]) -> List[Int64] {\n  items.map(fn(item) { item + 1 })\n}\n"
         "item + 1" "Int64");
+  test "concurrent is reported as not built, at the keyword of a block and of a loop" (fun () ->
+      let at_the_keyword text =
+        let database = setup [ ("app::main", text) ] in
+        match check database (module_of "app::main") with
+        | [ (diagnostic : Diagnostic.t) ] ->
+            let keyword = Documents.find text "concurrent" ~occurrence:1 in
+            if Diagnostic.Code.name diagnostic.code <> "types.not_built" then
+              fail "got %s" (Diagnostic.Code.name diagnostic.code);
+            if diagnostic.span.start <> keyword || diagnostic.span.stop <> keyword + 10 then
+              fail "reported at %d to %d" diagnostic.span.start diagnostic.span.stop
+        | diagnostics -> fail "got [%s]" (String.concat "; " (codes diagnostics))
+      in
+      at_the_keyword "fn g() {}\n\nfn f() {\n  concurrent {\n    g()\n    g()\n  }\n}\n";
+      at_the_keyword
+        "fn g(item: Int64) {}\n\n\
+         fn f(items: List[Int64]) {\n\
+        \  concurrent for item in items {\n\
+        \    g(item)\n\
+        \  }\n\
+         }\n");
+  test "the body of a concurrent block gets its types" (fun () ->
+      has_type
+        "fn g(count: UInt16) {}\n\n\
+         fn f(count: UInt16) {\n\
+        \  concurrent {\n\
+        \    g(count + 2)\n\
+        \  }\n\
+         }\n"
+        "2" "UInt16");
   test "a lambda's captures are the outer locals it reads" (fun () ->
       let text =
         "fn f(items: List[Int64], step: Int64) -> List[Int64] {\n\

@@ -18,7 +18,7 @@
 
 %token UPPER LOWER UNDERSCORE INTEGER FLOAT STRING TAGGED NEWLINE EOF
 
-%token ANY ASSERT BREAK CAPABILITY CONTINUE COST DECREASES DERIVES ECHO ELSE
+%token ANY ASSERT BREAK CAPABILITY CONCURRENT CONTINUE COST DECREASES DERIVES ECHO ELSE
 %token ENSURES EXISTS FALSE FN FOR FORALL IF IMPL IN INDIRECT INTERNAL INVARIANT IS LAW LENDS
 %token LET MATCH MUT OPAQUE OWN PARALLEL PROOF PROVIDE PUBLIC REQUIRES RETURN
 %token SELF SELF_TYPE TEST THEOREM TODO TRAIT TRUE TYPE UNREACHABLE USE USES
@@ -356,6 +356,8 @@ statement:
   | WHILE expression list(loop_clause) newline_opt block { () }
   | PARALLEL block { () }
   | PARALLEL FOR pattern IN expression list(loop_clause) newline_opt block { () }
+  | CONCURRENT block { () }
+  | CONCURRENT FOR pattern IN expression list(loop_clause) newline_opt block { () }
   | PROOF block { () }
   | ASSERT expression { () }
   | YIELD expression { () }

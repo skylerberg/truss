@@ -14,6 +14,13 @@ open Lookups
 open Pattern_typing
 open Operators
 
+(* A [concurrent] block or loop is checked as a [parallel] one is, and has
+   no core form yet. *)
+let not_built state (written : statement) =
+  report state Not_built
+    (Span.make written.span.start (written.span.start + String.length "concurrent"))
+    "`concurrent` is not built yet."
+
 (* A block used as a value. Its last expression is checked against the
    expected type of the block, as part of the enclosing statement. *)
 let rec block_value state env ?expected (written : block) =
@@ -170,7 +177,7 @@ and statement state env (written : statement) ~last : unit =
                           (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
                              (T.show resolved));
                       true)))
-  | For { pattern = written_pattern; iterable; clauses; body; _ } ->
+  | For { mode = running; pattern = written_pattern; iterable; clauses; body } ->
       let mode, inner =
         match iterable.kind with
         | Mode (Mut, inner) when Option.is_none (marked_call state inner) -> (T.Mut, inner)
@@ -193,18 +200,21 @@ and statement state env (written : statement) ~last : unit =
       List.iter
         (loop_clause state { env with loop_element = Option.map (resolve state) !loop_element })
         clauses;
-      register_statement state written (fun () ->
-          let iteration = Form.iteration state written inner in
-          let pattern = build_pattern state written_pattern in
-          let clauses = List.map (Form.loop_clause state) clauses in
-          For
-            {
-              pattern;
-              iteration;
-              clauses;
-              body = build_block state body;
-              parallel = (match written.kind with For { parallel; _ } -> parallel | _ -> false);
-            });
+      (match running with
+      | Concurrent_loop -> not_built state written
+      | Sequential | Parallel_loop ->
+          register_statement state written (fun () ->
+              let iteration = Form.iteration state written inner in
+              let pattern = build_pattern state written_pattern in
+              let clauses = List.map (Form.loop_clause state) clauses in
+              For
+                {
+                  pattern;
+                  iteration;
+                  clauses;
+                  body = build_block state body;
+                  parallel = running = Parallel_loop;
+                }));
       loop_body state env body
   | While { condition = test; clauses; body } ->
       in_statement state env test.span (fun () -> check state env test T.bool);
@@ -214,9 +224,12 @@ and statement state env (written : statement) ~last : unit =
           let clauses = List.map (Form.loop_clause state) clauses in
           While { condition; clauses; body = build_block state body });
       loop_body state env body
-  | Parallel body ->
-      register_statement state written (fun () ->
-          Parallel (List.map (build_statement state) body.statements));
+  | Parallel body | Concurrent body ->
+      (match written.kind with
+      | Concurrent _ -> not_built state written
+      | _ ->
+          register_statement state written (fun () ->
+              Parallel (List.map (build_statement state) body.statements)));
       List.iter
         (fun (branch : statement) ->
           in_statement state env branch.span (fun () -> statement state env branch ~last:false))

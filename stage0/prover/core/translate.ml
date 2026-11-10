@@ -2280,6 +2280,67 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
       buffer_operation context frame ~node operation (T.builtin UInt8) operands ~changed known
   | Libc function_, _ -> libc_call context frame ~node function_ operands ~changed known
   | Libc_number number, _ -> libc_number context frame number
+  | (Ieee_equal | Ieee_less), ty :: _ when float_format ty <> None -> (
+      match operands with
+      | [ left; right ] ->
+          L.Apply ((if operation = Ieee_equal then "fp.eq" else "fp.lt"), [ left; right ])
+      | _ -> known)
+  | (Square_root | Floor | Ceiling | Truncate | Round_to_even), ty :: _ when float_format ty <> None
+    -> (
+      (* The rounding the compiled operation does, as IEEE 754 names it. *)
+      match operands with
+      | [ value ] -> (
+          match operation with
+          | Square_root -> L.Apply ("fp.sqrt", [ L.Apply ("RNE", []); value ])
+          | Floor -> L.Apply ("fp.roundToIntegral", [ L.Apply ("RTN", []); value ])
+          | Ceiling -> L.Apply ("fp.roundToIntegral", [ L.Apply ("RTP", []); value ])
+          | Truncate -> L.Apply ("fp.roundToIntegral", [ L.Apply ("RTZ", []); value ])
+          | _ -> L.Apply ("fp.roundToIntegral", [ L.Apply ("RNE", []); value ]))
+      | _ -> known)
+  | Fused_multiply_add, ty :: _ when float_format ty <> None -> (
+      match operands with
+      | [ value; multiplier; addend ] ->
+          L.Apply ("fp.fma", [ L.Apply ("RNE", []); value; multiplier; addend ])
+      | _ -> known)
+  | Is_nan, ty :: _ when float_format ty <> None -> (
+      match operands with [ value ] -> is_nan value | _ -> known)
+  | From_bits, [ bits; target ] when bounds bits <> None -> (
+      match (operands, float_format target, width bits) with
+      | [ value ], Some (exponent, significand), Some width ->
+          L.Apply
+            ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
+              [ L.Apply (Printf.sprintf "(_ int2bv %d)" width, [ value ]) ] )
+      | _ -> known)
+  | To_bits, [ source; bits ] when bounds bits <> None -> (
+      (* A float's bits are those that make it again, which every float but
+         a NaN has one of. *)
+      match (operands, float_format source, width bits) with
+      | [ value ], Some (exponent, significand), Some width ->
+          assume context frame
+            L.(
+              not_ (is_nan value)
+              ==> equal
+                    (Apply
+                       ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
+                         [ Apply (Printf.sprintf "(_ int2bv %d)" width, [ known ]) ] ))
+                    value);
+          known
+      | _ -> known)
+  | Multiply_high, ty :: _ when bounds ty <> None -> (
+      (* The product's upper word: the exact product divided by the type's
+         size, rounded down, which is its upper word signed or not. *)
+      match (operands, width ty) with
+      | [ left; right ], Some bits ->
+          L.Apply ("div", [ L.Apply ("*", [ left; right ]); L.Integer (Z.shift_left Z.one bits) ])
+      | _ -> known)
+  | (Rotate_left | Rotate_right | Swap_bytes), ty :: _ when bounds ty <> None ->
+      let name =
+        match operation with
+        | Rotate_left -> "rotate_left"
+        | Rotate_right -> "rotate_right"
+        | _ -> "swap_bytes"
+      in
+      opaque_operation context frame ty name operands
   | Convert, [ source; target ] when float_format source <> None && bounds target <> None -> (
       (* A float becomes an integer by being cut toward zero, which must be
          a number in the target's range: the conversion does not check. *)

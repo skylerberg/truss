@@ -80,12 +80,13 @@ the documents of stage0's stages, which
 
 These keywords are reserved everywhere and cannot be used as names:
 
-`any` `assert` `break` `capability` `continue` `cost` `decreases` `derives`
-`echo` `else` `ensures` `exists` `false` `fn` `for` `forall` `if` `impl` `in`
-`indirect` `internal` `is` `invariant` `law` `lends` `let` `match` `mut`
-`opaque` `own` `parallel` `proof` `provide` `public` `requires` `return`
-`self` `Self` `test` `theorem` `todo` `trait` `true` `type` `unreachable`
-`use` `uses` `var` `while` `with` `yield` `yields`
+`any` `assert` `break` `capability` `concurrent` `continue` `cost`
+`decreases` `derives` `echo` `else` `ensures` `exists` `false` `fn` `for`
+`forall` `if` `impl` `in` `indirect` `internal` `is` `invariant` `law`
+`lends` `let` `match` `mut` `opaque` `own` `parallel` `proof` `provide`
+`public` `requires` `return` `self` `Self` `test` `theorem` `todo` `trait`
+`true` `type` `unreachable` `use` `uses` `var` `while` `with` `yield`
+`yields`
 
 A few words have a special meaning in one position only, and are ordinary
 names everywhere else, because they are common names for variables and
@@ -1984,7 +1985,7 @@ These capabilities are in the prelude:
 | `Environment` | Environment variables, the current directory, and which operating system and processor the program runs on |
 | `Processes` | Running other programs |
 | `Signals` | Waiting for a signal sent to the program |
-| `Tasks` | Starting concurrent tasks and using channels |
+| `Tasks` | Running `concurrent` code and using channels |
 | `Log` | Recording what the program did |
 | `Panic` | Ending the program |
 
@@ -2151,7 +2152,9 @@ fn total_score(players: Slice[Player]) -> Int64
   branches.
 - Any branch may read any place. A place that one branch changes, by assigning
   to it or passing it as `mut` or `own`, cannot be used by any other branch.
-- Branches cannot use capabilities, except `Panic`.
+- Branches cannot use capabilities, except `Panic`. Branches that use
+  capabilities are written with `concurrent` (see
+  [Concurrency](#concurrency)).
 - A branch cannot leave the block early with `return`, `break`, `continue`, or
   `?`. Return a `Result` from the branch and use `?` after the block.
 
@@ -2167,6 +2170,191 @@ It works with every form of `for`. The body may read any place but may only
 change its own element and its own variables. It cannot use capabilities other
 than `Panic`, and it cannot use `break`, `return`, or `?`. `continue` is
 allowed.
+
+## Concurrency
+
+A `concurrent` block runs each of its statements as a task and ends when
+every task has ended. The function that contains it needs `uses Tasks`:
+
+```truss
+fn profile(id: UserId) -> Result[Profile, DatabaseError]
+  uses Tasks, Database
+{
+  concurrent {
+    let user = Database.user(id)?
+    let orders = Database.orders(id)?
+  }
+  Ok(Profile(user: own user, orders: own orders))
+}
+```
+
+- Branches are written as in a `parallel` block: each statement directly
+  inside the block is a branch, and a `let` in a branch is in scope after
+  the block, not in the other branches.
+- A branch may use the capabilities of the code around it.
+- Any branch may read any place. A place that one branch changes, by
+  assigning to it or passing it as `mut` or `own`, cannot be used by any
+  other branch.
+- A `?`, `return`, or `break` that leaves the block cancels the other
+  branches, waits for them to end, and then leaves. Above, a query that
+  fails cancels the other query, and `profile` returns the error.
+- The code after the block does not run when a branch leaves early, so a
+  branch that takes a value out of a place gives one back before it ends.
+- In a cancelled task, a call of the standard capabilities that would wait
+  returns at once: `Err(SystemError.Cancelled)` where it returns a
+  `Result`, and `None` where it returns an `Option`. `Tasks.cancelled()`
+  tells whether the task has been cancelled.
+
+`concurrent for` runs each iteration of a loop as a task:
+
+```truss
+fn serve(listener: network::Listener)
+  uses Tasks, Handles, Log
+{
+  concurrent for connection in listener.connections() {
+    handle(own connection)
+  }
+}
+```
+
+It works with every form of `for`. The body may read any place but may only
+change its own element and its own variables. `break` leaves the loop and
+cancels the iterations that are still running, and `continue` ends one
+iteration.
+
+A time limit is a function. Each of its two branches returns from the
+function when it finishes, which cancels the other:
+
+```truss
+public fn within[Output, capability Granted](
+  limit: Duration,
+  work: (fn() -> Output uses Granted),
+) -> Option[Output]
+  uses Tasks, Clock, Granted
+{
+  concurrent {
+    return Some(work())
+    {
+      Clock.sleep(limit)
+      return None
+    }
+  }
+}
+```
+
+### Channels
+
+A task waits for another through a channel, a queue with a fixed capacity.
+`send` waits while the channel is full, `receive` waits while it is empty,
+and `close` ends the loops that receive from it:
+
+```truss
+fn total_size(paths: Slice[Path]) -> USize
+  uses Tasks, FileRead
+{
+  let texts = Channel[String].new(capacity: 16)
+  var total: USize = 0
+  concurrent {
+    {
+      for path in paths {
+        if FileRead.read_text(path) is Ok(text) {
+          let _ = texts.send(own text)
+        }
+      }
+      texts.close()
+    }
+    for text in texts.messages() {
+      total = total.saturating_add(size(text))
+    }
+  }
+  total
+}
+```
+
+- A message is owned: sending it moves it. Its type is a record or a sum
+  type of owned data, and never a view, a function, or an `any` type.
+- A channel's methods take `self` read-only, so every branch can use a
+  channel that is declared before the block.
+- A task that waits for several kinds of message receives a sum type from
+  one channel.
+- `tasks::Limiter` bounds how many tasks do something at once:
+  `limiter.hold(work)` runs `work` when one of the limiter's permits is
+  free.
+
+### Shared state
+
+State that several tasks change belongs to a capability implementation.
+When the code inside a `provide mut` can use `Tasks`, calls of the
+implementation's methods take turns: each runs from start to end before the
+next begins.
+
+```truss
+capability Sessions {
+  fn open(user: UserId) -> SessionId
+  fn close(session: SessionId)
+}
+
+type SessionTable(open: Map[SessionId, UserId], next: UInt64)
+
+impl Sessions for SessionTable {
+  fn open(mut self, user: UserId) -> SessionId {
+    let session = SessionId(self.next)
+    self.next = self.next.wrapping_add(1)
+    self.open[session] = user
+    session
+  }
+
+  fn close(mut self, session: SessionId) {
+    let _ = mut self.open.remove(session)
+  }
+}
+
+fn run(listener: network::Listener)
+  uses Tasks, Handles, Log
+{
+  var table = SessionTable(open: [:], next: 0)
+  provide mut table {
+    serve_sessions(listener)
+  }
+}
+```
+
+- A check and the change that depends on it go in one method, since other
+  tasks' calls can come between two calls.
+- An implementation whose calls take turns has no method with a parameter
+  that can hold a function, or an `any` value, that uses a capability.
+- A capability's method keeps no view that it is given and returns no view
+  of its implementation's state.
+- An implementation provided without `mut` is only read, so calls into it
+  do not take turns.
+
+### Testing concurrent code
+
+A test provides a `Tasks` implementation that runs one task at a time and
+chooses by a seed which runs next, so a test of concurrent code gives the
+same result on every run:
+
+```truss
+test "two deposits both arrive" {
+  for seed in 0..64 {
+    var bank = Bank.new()
+    provide mut bank, tasks::SeededTasks(seed: seed) {
+      concurrent {
+        Accounts.deposit(alice, amount: 10)
+        Accounts.deposit(alice, amount: 5)
+      }
+    }
+    assert bank.balance(alice) == 15
+  }
+}
+```
+
+- The seeded implementation switches tasks only at capability calls, which
+  are the only points where one task can see what another did.
+- `simulation::World` adds a clock that moves when every task is waiting,
+  so a test of a timeout takes no real time.
+- A test in which no task can go on fails, and reports what each task was
+  waiting for.
 
 ## Strings and templates
 

@@ -200,7 +200,15 @@ and `reads` clauses):
   to one must fit, since the compiled cast is undefined otherwise, and is
   the float cut toward zero. An integer's `convert` to a float is the float nearest it,
   ties to even, as the compiled cast rounds, so exactly it where the float
-  can hold it. The standard library's integer methods each
+  can hold it. The rest of a float's operations are IEEE 754's: the
+  `ieee_` comparisons, `square_root` and `fused_multiply_add` rounding to
+  nearest, ties to even, `floor`, `ceiling`, `truncate`, and
+  `round_to_even` rounding to an integer as their names say, and
+  `is_nan`. `from_bits` is the float the bits encode, and `to_bits` gives
+  bits that encode the float, for any float but a NaN. `multiply_high` is
+  the upper word of the exact product. `rotate_left`, `rotate_right`, and
+  `swap_bytes` are known first only by their range, as the bitwise
+  operations are, and exactly when a query asks again. The standard library's integer methods each
   have a `time` clause, so `wrapping_add`, `saturating_add`,
   `checked_add`, `try_from`, and the rest are definitions their callers
   unfold.
@@ -1167,13 +1175,10 @@ sanitized runs, test the trusted base against real executions.
 
 ## Not built
 
-- **Contracts for the intrinsic module's floats and system calls.** Only
-  the integer operations, float arithmetic and comparisons, `fits` and
-  `convert` between floats and integers, storage, views, and what a C
-  function keeps of the storages it is lent have meanings. A call of any other intrinsic, and
-  what a C function returns beyond the counts `read`, `write`, and
-  `snprintf` give, is known only by its type, and what the standard library states no contract for, such as
-  the `ieee_` comparisons, is known only by its type.
+- **Contracts for the intrinsic module's system calls.** A handle's
+  descriptor, the environment's entries, the operating system and
+  architecture, a view's address, and what a C function returns beyond
+  what its row of the table says are known only by their types.
 - **Facts under a quantifier.** A fact that names a quantifier's bound
   name, such as what a callee's `ensures` says of a call on it, is not
   kept. Closed over the quantifier it would be true, but the standard
@@ -1222,6 +1227,22 @@ sanitized runs, test the trusted base against real executions.
 - **The limit in steps** is not settled. Its value, and whether it should
   grow with the size of a query, are to be set by measuring the standard
   library's proofs.
-- **Contracts for concurrency** are not designed. Tasks and channels are
-  capabilities, so their contracts are what code can rely on, but what
-  those contracts should say about ordering is not decided.
+- **`concurrent`.** Its branches are to be proven as `parallel`'s are, one
+  after another. They change disjoint places, and a capability call
+  already gives a fresh value, so nothing a proof relies on is changed by
+  what another task does between two calls.
+  - A branch's `?`, `return`, or `break` is taken where the block ends,
+    after the other branches, which run on as far as cancellation lets
+    them. The places they change are disjoint, so the state there is each
+    branch's where it ended.
+  - Cancellation asks nothing more. The cancelled value is returned by an
+    implementation, which is proven against its method's contract like any
+    other result, so a method's `ensures` hold of it too.
+  - A channel's `receive` and `send` have no `time` clause, so a function
+    that must end cannot wait on one.
+  - A message that is received is known by its type's invariant, as a
+    capability call's result is. What a channel's contract should say
+    about the order of messages is not decided.
+- **`span`** is not a resource yet. Its rules are `time`'s, with the
+  largest of the branches' costs at a `parallel` block where `time` has
+  their sum.
