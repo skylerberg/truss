@@ -354,6 +354,58 @@ internal fn open_file(path: intrinsic::View[UInt8], flags: Int32) -> Result[intr
   }
 }
 
+internal fn current_directory() -> Result[intrinsic::Storage[UInt8], Int32] {
+  let room = intrinsic::libc_path_max()
+  var buffer: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
+  var found = false
+  let path = intrinsic::libc_getcwd(mut buffer, size: room, found: mut found)
+  if found { Ok(copy_of(path)) } else { Err(intrinsic::libc_errno()) }
+}
+
+internal fn host_name() -> intrinsic::Storage[UInt8] {
+  let room: USize = 256
+  var name: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
+  for _ in 0..room
+    invariant intrinsic::storage_length(name) == yielded.length()
+    invariant intrinsic::storage_capacity(name) == room
+  {
+    intrinsic::storage_push(mut name, value: 0)
+  }
+  let _ = intrinsic::libc_gethostname(mut name, size: room)
+  before_zero_byte(intrinsic::storage_view(name))
+}
+
+internal fn executable() -> Result[intrinsic::Storage[UInt8], Int32] {
+  if intrinsic::system_is_macos() {
+    let room = intrinsic::libc_path_max()
+    var path: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
+    let length = intrinsic::libc_proc_pidpath(intrinsic::libc_getpid(), buffer: mut path, size: room)
+    if length <= 0 {
+      return Err(intrinsic::libc_errno())
+    }
+    let written: USize = intrinsic::convert(length)
+    intrinsic::storage_lengthen(mut path, by: written)
+    Ok(own path)
+  } else {
+    read_link("/proc/self/exe".slice().bytes)
+  }
+}
+
+internal fn before_zero_byte(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
+  let length = intrinsic::view_length(bytes)
+  var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
+  var index: USize = 0
+  while index < length && intrinsic::view_at(bytes, index: index) != 0
+    invariant index <= length
+    invariant intrinsic::storage_length(copy) == index
+    invariant intrinsic::storage_capacity(copy) == length
+  {
+    intrinsic::storage_push(mut copy, value: intrinsic::view_at(bytes, index: index))
+    index += 1
+  }
+  copy
+}
+
 internal fn copy_of(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
   let length = intrinsic::view_length(bytes)
   var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)

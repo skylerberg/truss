@@ -158,6 +158,15 @@ type operation =
       (** [(descriptor)]: from here on a panic, a failed [assert], a [todo], and an [echo] are
           written as records to the descriptor, for a test's worker *)
   | Live_blocks  (** [() -> USize]: how many blocks a test program has allocated and not freed *)
+  | Environment_entry
+      (** [environment_entry(index, found: mut found)]: the text of the entry at an index of the
+          environment the process was started with, [NAME=value], as a view, with [found] false
+          where the environment has no entry there. It counts from the first entry each time, so it
+          never reads past the last. *)
+  | System_is_os of Libc.os
+      (** [system_is_linux()], [system_is_macos()]: whether the program is built for that operating
+          system, which lowering knows *)
+  | System_is_architecture of Libc.architecture  (** [system_is_x86_64()], [system_is_arm64()] *)
   | Libc of Libc.function_
       (** A function of the system's C library, named [libc_] and its name: [libc_write] *)
   | Libc_number of Libc.number

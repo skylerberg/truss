@@ -1,42 +1,209 @@
 use standard::environment
 use standard::intrinsic
 use standard::system::calls
+use standard::system::handles
 
 internal type SystemEnvironment()
 
 impl Environment for SystemEnvironment {
   fn variable(self, name: StringSlice) -> Option[String] {
-    match calls::ended_with_zero_byte(name.bytes) {
-      Ok(name_for_c) => {
-        var found = false
-        let value = intrinsic::libc_getenv(intrinsic::storage_view(name_for_c), found: mut found)
-        if found { Some(calls::text_copied_from(value)) } else { None }
+    variable(name)
+  }
+
+  fn variables(self) -> List[environment::Variable] {
+    var all: List[environment::Variable] = []
+    var index: USize = 0
+    var found = true
+    while found {
+      let entry = intrinsic::environment_entry(index, found: mut found)
+      if found {
+        mut all.push(variable_from(entry))
+        index = index.wrapping_add(1)
       }
+    }
+    all
+  }
+
+  fn current_directory(self) -> Result[Path, SystemError] {
+    let path = handles::with_file_error(calls::current_directory())?
+    Ok(Path(text: String.from_bytes(own path)))
+  }
+
+  fn platform(self) -> environment::Platform {
+    let online = intrinsic::libc_sysconf(intrinsic::libc_sc_nprocessors_onln())
+    let process = intrinsic::libc_getpid()
+    environment::Platform(
+      operating_system: operating_system(),
+      architecture: architecture(),
+      processor_count: if online > 0 { intrinsic::convert(online) } else { 1 },
+      host_name: String.from_bytes(calls::host_name()),
+      process_identifier: if process > 0 { intrinsic::convert(process) } else { 0 },
+    )
+  }
+
+  fn location(self, location: environment::Location) -> Option[Path] {
+    match location {
+      Home => home()
+      Temporary => Some(set_or(variable("TMPDIR".slice()), otherwise: "/tmp".slice()))
+      Executable => match calls::executable() {
+        Ok(path) => Some(Path(text: String.from_bytes(own path)))
+        Err(_) => None
+      }
+      Configuration => for_this_user(
+        "XDG_CONFIG_HOME".slice(),
+        on_linux: ".config".slice(),
+        on_macos: "Library/Application Support".slice(),
+      )
+      Cache => for_this_user(
+        "XDG_CACHE_HOME".slice(),
+        on_linux: ".cache".slice(),
+        on_macos: "Library/Caches".slice(),
+      )
+      Data => for_this_user(
+        "XDG_DATA_HOME".slice(),
+        on_linux: ".local/share".slice(),
+        on_macos: "Library/Application Support".slice(),
+      )
+    }
+  }
+
+  fn local_zone(self) -> Option[String] {
+    if variable("TZ".slice()) is Some(zone) && !zone.is_empty() {
+      let bytes = zone.slice().bytes
+      let start: USize = if intrinsic::view_at(bytes, index: 0) == 58 { 1 } else { 0 }
+      return Some(calls::text_copied_from(intrinsic::view_slice(bytes, start: start, stop: intrinsic::view_length(bytes))))
+    }
+    match calls::read_link("/etc/localtime".slice().bytes) {
+      Ok(target) => after_last(intrinsic::storage_view(target), marker: "zoneinfo/".slice().bytes)
       Err(_) => None
     }
   }
 
-  fn variables(self) -> List[environment::Variable] {
-    todo
-  }
-
-  fn current_directory(self) -> Result[Path, SystemError] {
-    todo
-  }
-
-  fn platform(self) -> environment::Platform {
-    todo
-  }
-
-  fn location(self, location: environment::Location) -> Option[Path] {
-    todo
-  }
-
-  fn local_zone(self) -> Option[String] {
-    todo
-  }
-
   fn zone_rules(self, name: StringSlice) -> Option[List[UInt8]] {
-    todo
+    if !names_a_zone(name.bytes) {
+      return None
+    }
+    match zone_file(name) {
+      Ok(rules) => Some(own rules)
+      Err(_) => None
+    }
   }
+}
+
+fn variable(name: StringSlice) -> Option[String] {
+  match calls::ended_with_zero_byte(name.bytes) {
+    Ok(name_for_c) => {
+      var found = false
+      let value = intrinsic::libc_getenv(intrinsic::storage_view(name_for_c), found: mut found)
+      if found { Some(calls::text_copied_from(value)) } else { None }
+    }
+    Err(_) => None
+  }
+}
+
+fn variable_from(entry: intrinsic::View[UInt8]) -> environment::Variable {
+  let length = intrinsic::view_length(entry)
+  var split: USize = 0
+  while split < length && intrinsic::view_at(entry, index: split) != 61
+    invariant split <= length
+  {
+    split += 1
+  }
+  let value_start = if split < length { split + 1 } else { length }
+  environment::Variable(
+    name: calls::text_copied_from(intrinsic::view_slice(entry, start: 0, stop: split)),
+    value: calls::text_copied_from(intrinsic::view_slice(entry, start: value_start, stop: length)),
+  )
+}
+
+fn operating_system() -> environment::OperatingSystem {
+  if intrinsic::system_is_linux() {
+    environment::OperatingSystem.Linux
+  } else if intrinsic::system_is_macos() {
+    environment::OperatingSystem.MacOs
+  } else {
+    environment::OperatingSystem.Other
+  }
+}
+
+fn architecture() -> environment::Architecture {
+  if intrinsic::system_is_x86_64() {
+    environment::Architecture.X86With64Bits
+  } else if intrinsic::system_is_arm64() {
+    environment::Architecture.Arm64
+  } else {
+    environment::Architecture.Other
+  }
+}
+
+fn set_or(value: Option[String], otherwise: StringSlice) -> Path {
+  if value is Some(text) && !text.is_empty() {
+    Path.new(text.slice())
+  } else {
+    Path.new(otherwise)
+  }
+}
+
+fn home() -> Option[Path] {
+  if variable("HOME".slice()) is Some(text) && !text.is_empty() {
+    Some(Path.new(text.slice()))
+  } else {
+    None
+  }
+}
+
+fn for_this_user(name: StringSlice, on_linux: StringSlice, on_macos: StringSlice) -> Option[Path] {
+  if intrinsic::system_is_linux() && variable(name) is Some(text) && !text.is_empty() {
+    return Some(Path.new(text.slice()))
+  }
+  let under_home = if intrinsic::system_is_macos() { on_macos } else { on_linux }
+  match home() {
+    Some(directory) => Some(Path(text: "${directory.text}/${under_home}"))
+    None => None
+  }
+}
+
+fn after_last(bytes: intrinsic::View[UInt8], marker: intrinsic::View[UInt8]) -> Option[String] {
+  let length = intrinsic::view_length(bytes)
+  let size = intrinsic::view_length(marker)
+  if size > length {
+    return None
+  }
+  var start = length - size
+  var looking = true
+  while looking
+    invariant start + size <= length
+  {
+    if intrinsic::compare_bytes(intrinsic::view_slice(bytes, start: start, stop: start + size), right: marker) == 0 {
+      return Some(calls::text_copied_from(intrinsic::view_slice(bytes, start: start + size, stop: length)))
+    }
+    if start == 0 {
+      looking = false
+    } else {
+      start -= 1
+    }
+  }
+  None
+}
+
+fn names_a_zone(name: intrinsic::View[UInt8]) -> Bool {
+  let length = intrinsic::view_length(name)
+  if length == 0 || intrinsic::view_at(name, index: 0) == 47 {
+    return false
+  }
+  var before: UInt8 = 0
+  for index in 0..length {
+    let byte = intrinsic::view_at(name, index: index)
+    if byte == 0 || (byte == 46 && before == 46) {
+      return false
+    }
+    before = byte
+  }
+  true
+}
+
+fn zone_file(name: StringSlice) -> Result[List[UInt8], SystemError] {
+  var handle = handles::open_to_read(Path(text: "/usr/share/zoneinfo/${name}"))?
+  let rules = handles::read_all(mut handle)?
+  Ok(List.from_storage(own rules))
 }

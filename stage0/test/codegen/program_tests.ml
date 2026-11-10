@@ -412,6 +412,95 @@ fn main(arguments: List[String]) -> ExitCode
         output)
 
 let () =
+  test "a program reads its variables, directory, platform, locations, and time zone" (fun () ->
+      let home = Lazy.force scratch in
+      Unix.putenv "TRUSS_TEST_MARK" "first=second";
+      Unix.putenv "HOME" home;
+      Unix.putenv "TMPDIR" "";
+      Unix.putenv "XDG_CACHE_HOME" "/caches";
+      Unix.putenv "TZ" ":Europe/Paris";
+      let status, output, _ =
+        run_main
+          {|use standard::environment
+
+fn say(text: String) uses Console {
+  Console.print_line(text.slice())
+}
+
+fn shown(path: Option[Path]) -> String {
+  if path is Some(found) && found.text() is Some(text) { "${text}" } else { "none".copy() }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Environment, FileRead
+{
+  var marked = 0
+  for variable in Environment.variables() {
+    if variable.name == "TRUSS_TEST_MARK" {
+      say("${variable.name} is ${variable.value}")
+      marked += 1
+    }
+  }
+  say("marked ${marked}")
+  if Environment.variable("TRUSS_TEST_MARK".slice()) is Some(value) {
+    say("read ${value}")
+  }
+  if Environment.current_directory() is Ok(directory) {
+    say("in ${shown(Some(directory.copy()))}")
+  }
+  let platform = Environment.platform()
+  let known = platform.operating_system == environment::OperatingSystem.Linux
+    || platform.operating_system == environment::OperatingSystem.MacOs
+  say("system known ${known}, processors ${platform.processor_count > 0}")
+  say("host named ${!platform.host_name.is_empty()}, process ${platform.process_identifier > 1}")
+  say("home ${shown(Environment.location(environment::Location.Home))}")
+  say("temporary ${shown(Environment.location(environment::Location.Temporary))}")
+  if Environment.location(environment::Location.Executable) is Some(program)
+    && FileRead.metadata(program) is Ok(metadata)
+  {
+    say("executable is a file ${metadata.is_file()}")
+  }
+  if platform.operating_system == environment::OperatingSystem.Linux {
+    say("cache ${shown(Environment.location(environment::Location.Cache))}")
+  } else {
+    say("cache /caches")
+  }
+  say("data set ${Environment.location(environment::Location.Data) is Some(_)}")
+  if Environment.local_zone() is Some(zone) {
+    say("zone ${zone}")
+  }
+  if Environment.zone_rules("UTC".slice()) is Some(rules) && rules.length() > 4 {
+    say("rules start ${rules[0]} ${rules[1]} ${rules[2]} ${rules[3]}")
+  }
+  say("outside ${Environment.zone_rules("../../../etc/hosts".slice()) is Some(_)}")
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               "TRUSS_TEST_MARK is first=second";
+               "marked 1";
+               "read first=second";
+               "in " ^ Sys.getcwd ();
+               "system known true, processors true";
+               "host named true, process true";
+               "home " ^ home;
+               "temporary /tmp";
+               "executable is a file true";
+               "cache /caches";
+               "data set true";
+               "zone Europe/Paris";
+               "rules start 84 90 105 102";
+               "outside false";
+               "";
+             ])
+        output)
+
+let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"
     (fun () ->
       let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in
