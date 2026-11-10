@@ -164,4 +164,4 @@ let diagnostics database module_ =
       | Some result -> result.diagnostics
       | None -> [])
 
-module Moves = Moves
+module On_core = Check

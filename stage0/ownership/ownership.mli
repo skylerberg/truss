@@ -29,10 +29,16 @@ val pullable : (Path.t, pulling) Query.query
 val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
 (** Every ownership error of a file, in its offsets and in order. *)
 
-(** The check of moves on the core form. It is not used yet: the tests compare it with the check
+(** The ownership check on the core form. It is not used yet: the tests compare it with the check
     above. *)
-module Moves : sig
-  type result = { diagnostics : Diagnostic.t list; moves : Core.id list }
+module On_core : sig
+  type result = {
+    diagnostics : Diagnostic.t list;
+    moves : Core.id list;  (** The [Use] nodes that move a place. *)
+    disjoint : (Core.origin * Core.origin) list;
+        (** Pairs of index calls or slices of one collection, by origin, that must select different
+            elements. The prover shows that they do. *)
+  }
 
-  val moves : Query.context -> Resolve.Names.key -> result option
+  val check : Query.context -> Resolve.Names.key -> result option
 end

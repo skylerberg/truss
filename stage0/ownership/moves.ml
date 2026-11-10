@@ -19,9 +19,14 @@ type context = {
   text : string;  (** The definition's source text, in which the spans are offsets. *)
   names : (Core.local, string) Hashtbl.t;
   kinds : (Core.local, kind) Hashtbl.t;
+  types : (Core.local, T.ty) Hashtbl.t;
+  mutable parameters : Core.local list;
   mutable mut_parameters : Core.local list;
   mutable diagnostics : Diagnostic.t list;
   mutable moves : Core.id list;  (** The [Use] nodes that move a place. *)
+  mutable disjoint : (Core.origin * Core.origin) list;
+      (** Pairs of index calls or slices of one collection, by origin, that must select different
+          elements, which the prover shows. *)
 }
 
 let plain context type_ = Interface.Impls.plain context.database ~bounds:context.bounds type_
@@ -70,6 +75,8 @@ let collect context (definition : Core.definition) =
         (fun (parameter : Core.parameter) ->
           Hashtbl.replace context.names parameter.local parameter.name;
           Hashtbl.replace context.kinds parameter.local (kind_of_mode parameter.mode);
+          Hashtbl.replace context.types parameter.local parameter.type_;
+          context.parameters <- parameter.local :: context.parameters;
           if parameter.mode = Mut && parameter.local <> Self then
             context.mut_parameters <- parameter.local :: context.mut_parameters)
         parameters
@@ -82,25 +89,39 @@ let collect context (definition : Core.definition) =
           match node.kind with
           | Bind { local; name; mode; _ } ->
               Hashtbl.replace context.names local name;
-              Hashtbl.replace context.kinds local (kind_of_mode mode)
+              Hashtbl.replace context.kinds local (kind_of_mode mode);
+              Hashtbl.replace context.types local node.type_
           | _ -> ());
     }
     definition
 
+(* Where the mark written before a place starts, if the place has that
+   mark. The core form does not record marks, so this reads the source. *)
+let mark_start context (place : Syntax.span) ~mark : int option =
+  let rec skip_space index =
+    if index > 0 && (context.text.[index - 1] = ' ' || context.text.[index - 1] = '\n') then
+      skip_space (index - 1)
+    else index
+  in
+  let stop = skip_space (min place.start (String.length context.text)) in
+  let length = String.length mark in
+  if stop < place.start && stop >= length && String.sub context.text (stop - length) length = mark
+  then Some (stop - length)
+  else None
+
 (* The edits that copy at a move: [.copy()] after the place, and the [own]
    mark before it removed. *)
 let copy_at context (moved : Syntax.span) =
-  let before = String.sub context.text 0 (min moved.start (String.length context.text)) in
-  let trimmed =
-    let rec last index =
-      if index > 0 && (before.[index - 1] = ' ' || before.[index - 1] = '\n') then last (index - 1)
-      else index
-    in
-    last (String.length before)
-  in
-  let marked = trimmed >= 3 && trimmed < moved.start && String.sub before (trimmed - 3) 3 = "own" in
-  (if marked then [ Diagnostic.delete (Source.span (trimmed - 3) moved.start) ] else [])
+  (match mark_start context moved ~mark:"own" with
+    | Some start -> [ Diagnostic.delete (Source.span start moved.start) ]
+    | None -> [])
   @ [ Diagnostic.insert moved.stop ".copy()" ]
+
+(* The span of a place together with the [mut] or [own] mark before it. *)
+let with_mark context (place : Syntax.span) : Syntax.span =
+  match (mark_start context place ~mark:"mut", mark_start context place ~mark:"own") with
+  | Some start, _ | None, Some start -> Syntax.Span.make start place.stop
+  | None, None -> place
 
 (* What a [Move] point does, by the place and the kind of its root. *)
 type verdict =
@@ -164,7 +185,9 @@ let transfer verdicts (index : int) (point : point) (before : moved list) : move
         (fun ((moved : Place.t), _) ->
           match moved.root with Local local -> not (List.mem local locals) | Constant _ -> true)
         before
-  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Exit -> before
+  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Exit | Hold _ | Store _ | Return_view _
+  | Views_temporary _ | Keeps_lent_part _ | Arguments _ ->
+      before
 
 (* The places that may have been moved before each point. *)
 let moved_before (graph : Graph.t) verdicts : moved list array =
@@ -272,52 +295,7 @@ let check context (graph : Graph.t) =
                        (show context moved))
               | _ -> ())
             before.(index)
-      | Enter | Bind _ -> ())
+      | Enter | Bind _ | Hold _ | Store _ | Return_view _ | Views_temporary _ | Keeps_lent_part _
+      | Arguments _ ->
+          ())
     points
-
-type result = { diagnostics : Diagnostic.t list; moves : Core.id list }
-
-(* The move diagnostics of a definition, and the [Use] nodes that move.
-   [None] if the definition has no core form. *)
-let moves database (key : Resolve.Names.key) : result option =
-  match
-    ( Query.demand database Infer.core key,
-      Query.demand database Resolve.Names.spans key,
-      Query.demand database Resolve.Names.text key,
-      Query.demand database Interface.Environment.lowered key )
-  with
-  | Some form, Some spans, Some text, Some lowered ->
-      let context =
-        {
-          database;
-          bounds =
-            (fun parameter -> Option.value ~default:[] (List.assoc_opt parameter lowered.bounds));
-          spans;
-          text;
-          names = Hashtbl.create 32;
-          kinds = Hashtbl.create 32;
-          mut_parameters = [];
-          diagnostics = [];
-          moves = [];
-        }
-      in
-      collect context form.definition;
-      (* A function for specifications only never runs, so it moves nothing. *)
-      let runs =
-        match lowered.interface with
-        | Function_interface signature | Theorem_interface signature ->
-            not signature.specification_only
-        | _ -> true
-      in
-      if runs then
-        Option.iter (check context) (Graph.of_definition ~plain:(plain context) form.definition);
-      Some
-        {
-          diagnostics =
-            List.sort_uniq
-              (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
-                compare (left.span, left.message) (right.span, right.message))
-              context.diagnostics;
-          moves = List.sort_uniq compare context.moves;
-        }
-  | _ -> None
