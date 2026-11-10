@@ -1416,7 +1416,8 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       let frame, second_value = value context frame second in
       extensional context frame (type_of context frame first) first_value second_value;
       Some (frame, L.equal first_value second_value)
-  | Cost_function { function_; arguments } -> cost_function context frame node function_ arguments
+  | Specification_function { function_; arguments } ->
+      specification_function context frame node function_ arguments
   | Method_time callee -> Some (frame, method_time context frame callee)
 
 (* The right side of [&&], [||], or [==>], which runs only where [runs]
@@ -5173,7 +5174,8 @@ and indirect context (ty : T.ty) variant =
   | _ -> false
 
 (* [log(n)], [power(b, e)], and [time(f)] in a cost bound. *)
-and cost_function context frame (node : expression) (measure : cost_function) arguments =
+and specification_function context frame (node : expression) (measure : specification_function)
+    arguments =
   let values = List.map (fun argument -> snd (value context frame argument)) arguments in
   match (measure, values, arguments) with
   | Log, [ n ], [ argument ] ->
@@ -5194,7 +5196,7 @@ and cost_function context frame (node : expression) (measure : cost_function) ar
   | Power, [ base; exponent ], _ -> Some (frame, power_of context frame base exponent)
   | Time, [ f ], [ function_value ] ->
       Some (frame, time_of context frame (type_of context frame function_value) f)
-  | _ -> unsupported (at frame node) "this cost function"
+  | _ -> unsupported (at frame node) "this specification function"
 
 and log_of context frame n =
   declare context (L.Function (Costs.log_symbol, [ L.Int ], L.Int));

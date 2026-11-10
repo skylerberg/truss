@@ -2,7 +2,7 @@ module Names = Names
 module Parts = Parts
 module Prelude = Prelude
 
-type cost_function = Walk.cost_function = Log | Power | Time | Calls
+type specification_function = Walk.specification_function = Log | Power | Time | Calls
 
 type target = Walk.target =
   | Binding
@@ -19,7 +19,7 @@ type target = Walk.target =
   | Identical
   | Yielded
   | Finished
-  | Cost_function of cost_function
+  | Specification_function of specification_function
   | Unknown of Diagnostic.reported
 
 type bracket = Walk.bracket = Index | Type_arguments | Method_bracket

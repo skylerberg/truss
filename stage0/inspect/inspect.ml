@@ -87,7 +87,7 @@ let describe_target (target : Resolve.target) =
   | Identical -> ("identity of two values, in a specification", None)
   | Yielded -> ("the parts handed out so far, in a specification", None)
   | Finished -> ("whether the method has ended, in a specification", None)
-  | Cost_function _ -> ("a cost function", None)
+  | Specification_function _ -> ("a specification function", None)
   | Unknown _ -> ("nothing: the name is not known", None)
 
 let contains (span : span) offset = span.start <= offset && offset <= span.stop

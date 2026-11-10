@@ -230,8 +230,11 @@ can have a version for each mode.
   same way against the file's types and the prelude.
 - **Specification words** get their meaning by where they are. `result`
   names the return value inside `ensures` and `cost`; `old(...)` is the
-  value on entry inside specifications and proofs; `log`, `power`,
-  `time(...)`, and `calls(...)` are the cost functions inside a `cost` bound;
+  value on entry inside specifications and proofs; `log(...)` and
+  `power(...)` are functions on `Integer` inside any specification, unless
+  a local or a definition of the file has the name; `time(...)` and
+  `calls(...)` are the cost of a call and the number of calls inside a
+  `cost` bound;
   `identical(a, b)` is identity, for two values of one type, inside
   specifications;
   `yielded` and `finished` are what a lending or yielding method has handed

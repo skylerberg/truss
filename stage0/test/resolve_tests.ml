@@ -138,7 +138,7 @@ let describe names base (target : Resolve.target option) =
   | Some Identical -> "identical"
   | Some Yielded -> "yielded"
   | Some Finished -> "finished"
-  | Some (Cost_function _) -> "cost function"
+  | Some (Specification_function _) -> "specification function"
   | Some (Unknown _) -> "unknown"
 
 let refers ?(others = []) text ~name:(written, occurrence) expected =
@@ -391,9 +391,9 @@ let () =
   test "old in a specification is the value on entry" (fun () ->
       refers "fn f(items: mut List[Int64])\n  ensures old(items) == items\n{\n}\n" ~name:("old", 1)
         "old");
-  test "log in a cost bound is the cost function" (fun () ->
+  test "log in a cost bound is the specification function" (fun () ->
       refers "fn f(count: USize)\n  cost time O(log(count))\n{\n}\n" ~name:("log", 1)
-        "cost function");
+        "specification function");
   test "a record's fields are in scope in its invariant" (fun () ->
       refers "type Range(low: Int64, high: Int64)\n  invariant low <= high\n" ~name:("low", 2)
         "field low")

@@ -67,7 +67,7 @@ and call_named state env ?expected (value : expression) (callee : expression)
             (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
             value.span "`identical` takes two values of one type.";
           arguments_alone state env arguments T.bool)
-  | Cost_function function_ -> (
+  | Specification_function function_ -> (
       let bound_method =
         match (function_, arguments) with
         | Time, [ { value = { kind = Member (base, member); _ }; _ } ] -> (
@@ -80,7 +80,7 @@ and call_named state env ?expected (value : expression) (callee : expression)
       | Some (type_, member) -> method_time state value type_ member
       | None ->
           register_expression state value (fun () ->
-              Cost_function
+              Specification_function
                 {
                   function_ =
                     (match function_ with

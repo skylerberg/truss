@@ -333,7 +333,7 @@ let rec expression builder frontier (node : Core.expression) : int list =
   | Slice { call = { kind = Call call; _ }; _ } -> arguments builder frontier call.arguments
   | Slice { call; _ } -> expression builder frontier call
   | Call call -> call_ builder frontier node call
-  | Operator { arguments; _ } | Cost_function { arguments; _ } -> all frontier arguments
+  | Operator { arguments; _ } | Specification_function { arguments; _ } -> all frontier arguments
   | Compare { left; right; _ } | Identical (left, right) -> all frontier [ left; right ]
   | And (left, right) | Or (left, right) | Implies (left, right) ->
       let after_left = expression builder frontier left in

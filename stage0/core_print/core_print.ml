@@ -144,7 +144,7 @@ let rec expression names (node : expression) =
   | Identical (left, right) ->
       Printf.sprintf "identical(%s, %s)" (expression left) (expression right)
   | Method_time method_ -> Printf.sprintf "time(%s)" (callee names method_)
-  | Cost_function { function_; arguments } ->
+  | Specification_function { function_; arguments } ->
       Printf.sprintf "%s(%s)"
         (match function_ with Log -> "log" | Power -> "power" | Time -> "time" | Calls -> "calls")
         (list expression arguments)

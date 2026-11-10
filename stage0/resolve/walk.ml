@@ -9,7 +9,7 @@
 open Syntax
 module String_map = Map.Make (String)
 
-type cost_function = Log | Power | Time | Calls
+type specification_function = Log | Power | Time | Calls
 
 type target =
   | Binding  (** This name binds a local, a parameter, or a generic parameter. *)
@@ -27,7 +27,7 @@ type target =
   | Identical  (** [identical], in specifications and proofs: identity, for every type. *)
   | Yielded  (** [yielded], what a lending or yielding method handed out so far. *)
   | Finished  (** [finished], whether a yielding method ran to its end. *)
-  | Cost_function of cost_function
+  | Specification_function of specification_function
       (** [log], [power], [time], or [calls] in a [cost] bound, or [log] or [power] in another
           specification. *)
   | Unknown of Diagnostic.reported  (** A name that refers to nothing, with its report. *)
@@ -40,7 +40,7 @@ type value = Value_local of id | Value_generic of Types.parameter | Value_field 
 type specification = {
   active : bool;  (** In a specification or a proof, where [old] has its meaning. *)
   result : bool;  (** In [ensures] or [cost], where [result] does. *)
-  cost_bound : bool;  (** In a [cost] bound, where the cost functions do. *)
+  cost_bound : bool;  (** In a [cost] bound, where [time] and [calls] have their meaning. *)
   yielded : bool;
       (** In a lending or yielding method's [ensures], or a [for] loop's clauses, where [yielded]
           names what was handed out so far. *)
@@ -505,10 +505,9 @@ and expression state scope (value : expression) =
   | Name path -> name_expression state scope path
   | Member (base, _) -> expression state scope base
   | Bracket (base, items) -> bracket state scope value base items
-  (* In a [cost] bound, the four names are the cost functions. [log] and
-     [power] are also specification functions on [Integer] in any other
-     specification, unless a local or a definition of the file has the
-     name. *)
+  (* In a [cost] bound, the four names are the specification functions.
+     [log] and [power] are also that in any other specification, on
+     [Integer], unless a local or a definition of the file has the name. *)
   | Call ({ kind = Name { modules = []; last }; _ }, arguments)
     when (scope.specification.cost_bound && List.mem last.text [ "log"; "power"; "time"; "calls" ])
          || scope.specification.active
@@ -519,7 +518,7 @@ and expression state scope (value : expression) =
             | Some item -> not (Names.is_value_kind item.kind)
             | None -> true ->
       set state last
-        (Cost_function
+        (Specification_function
            (match last.text with "log" -> Log | "power" -> Power | "time" -> Time | _ -> Calls));
       List.iter (fun (argument : argument) -> expression state scope argument.value) arguments
   | Call (callee, arguments) ->

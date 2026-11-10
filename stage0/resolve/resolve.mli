@@ -9,7 +9,7 @@ module Names = Names
 module Parts = Parts
 module Prelude = Prelude
 
-type cost_function = Walk.cost_function = Log | Power | Time | Calls
+type specification_function = Walk.specification_function = Log | Power | Time | Calls
 
 type target = Walk.target =
   | Binding  (** This name binds a local, a parameter, or a generic parameter. *)
@@ -27,7 +27,7 @@ type target = Walk.target =
   | Identical  (** [identical], in specifications and proofs: identity, for every type. *)
   | Yielded  (** [yielded], what a lending or yielding method handed out so far. *)
   | Finished  (** [finished], whether a yielding method ran to its end. *)
-  | Cost_function of cost_function
+  | Specification_function of specification_function
   | Unknown of Diagnostic.reported  (** A name that refers to nothing, with its report. *)
 
 type bracket = Walk.bracket =
