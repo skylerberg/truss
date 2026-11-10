@@ -1,9 +1,7 @@
-(** The prover's entry point: the obligations of each definition, proven one query at a time. See
-    PROVER.md, "What the prover does".
+(** The prover's entry point: the obligations of each definition, proven one query at a time.
 
-    Stage0's prover is being built. What it proves so far is listed in PROVER.md, "What is built"; a
-    definition that uses anything else is reported as [prover.unsupported], and none of its
-    obligations count as proven. *)
+    A definition that uses what the prover cannot read yet is reported as [prover.unsupported], and
+    none of its obligations count as proven. *)
 
 module Translate = Translate
 

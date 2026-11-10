@@ -1,4 +1,4 @@
-(* The pinned solver. See PROVER.md, "The solver". *)
+(* The pinned solver. *)
 
 let version = "5.3.3"
 let steps = 2_000_000

@@ -155,8 +155,7 @@ let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list
    the literal texts and no parts, given to the tag's [from_template]'s
    clauses that can run, each worked out and written out as a [Bool], in
    order. A clause that reads the template's parts is not asked of it; the
-   prover asks only those that read its literals. See CODEGEN.md, "Code run
-   while compiling". *)
+   prover asks only those that read its literals. *)
 let check_state context from_template =
   let code = code_of context from_template [] in
   let st =
