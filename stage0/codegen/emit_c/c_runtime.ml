@@ -75,6 +75,12 @@ let runtime_declarations (target : Memory_layout.target) =
       "void t_runtime_parallel(const struct t_branch *branches, t_usize count);\n";
       "void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t \
        last), void *environment, uint64_t first, uint64_t last);\n";
+      "t_usize t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void \
+       *environment, uint64_t item);\n";
+      "uint8_t t_runtime_coroutine_resume(t_usize coroutine);\n";
+      "void t_runtime_coroutine_suspend(void);\n";
+      "uint8_t t_runtime_tasks_spawn(uint64_t group, void (*code)(void *environment, uint64_t \
+       item), void *environment, uint64_t item);\n";
       "void t_runtime_run_test(uint32_t index);\n";
       "void t_runtime_report_tests_to(int32_t descriptor);\n";
       "t_usize t_runtime_live_blocks(void);\n";

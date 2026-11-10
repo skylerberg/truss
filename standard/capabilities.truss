@@ -124,6 +124,16 @@ public capability Signals {
 }
 
 public capability Tasks {
+  fn open() -> UInt64
+  fn spawn(task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool
+  fn join(task_group: UInt64)
+  fn cancel(task_group: UInt64) -> Bool
+  fn cancelled() -> Bool
+  fn watch(key: UInt64) -> UInt64
+  fn wait(key: UInt64, ticket: UInt64, reason: StringSlice)
+  fn wake(key: UInt64)
+  fn lock(mutex: UInt64)
+  fn unlock(mutex: UInt64)
   fn yield_now()
 }
 

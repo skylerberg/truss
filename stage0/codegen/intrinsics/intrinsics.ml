@@ -623,6 +623,12 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
           emit b (Assign (at released, Use (value 0)));
           set (Use (Copy (at released / Field "descriptor")))
       | Run_test -> call Run_test [ value 0 ]
+      | Coroutine_start ->
+          call ?result:destination Coroutine_start [ Copy (read (argument 0)); value 1 ]
+      | Coroutine_resume -> call ?result:destination Coroutine_resume [ value 0 ]
+      | Coroutine_suspend -> call Coroutine_suspend []
+      | Tasks_spawn ->
+          call ?result:destination Tasks_spawn [ value 0; Copy (read (argument 1)); value 2 ]
       | Report_tests_to -> call Report_tests_to [ value 0 ]
       | Live_blocks -> call ?result:destination Live_blocks []
       | System_is_os os -> set (Use (Constant (Bool ((Memory_layout.target env).system.os = os))))
