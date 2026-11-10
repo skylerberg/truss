@@ -228,6 +228,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           | Function_value { type_arguments; _ } ->
               List.iter (argument "a function value's type argument") type_arguments
           | Value_parameter named -> parameter "a value" named
+          | Method_time method_ -> callee method_
           | Lambda { result; captures; _ } ->
               type_ "a lambda's result" result;
               List.iter

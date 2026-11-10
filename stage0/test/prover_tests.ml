@@ -2314,6 +2314,25 @@ let () =
         \  first > second\n\
          }\n"
         "prover.ensures");
+  test "recursion on an element of a field's list ends" (fun () ->
+      proven
+        "type Tree(value: Int64, children: List[Tree])\n\n\
+         fn visit(tree: Tree)\n\
+        \  cost time finite\n\
+         {\n\
+        \  for child in tree.children {\n\
+        \    visit(child)\n\
+        \  }\n\
+         }\n");
+  test "recursion on what is not a part does not end" (fun () ->
+      not_proven
+        "type Tree(value: Int64, children: List[Tree])\n\n\
+         fn visit(tree: Tree)\n\
+        \  cost time finite\n\
+         {\n\
+        \  visit(Tree(value: 0, children: tree.children.copy()))\n\
+         }\n"
+        "prover.termination");
   test "a trait's provided body keeps the trait's clauses on its own" (fun () ->
       not_proven
         "trait Sized {\n\
@@ -2337,6 +2356,38 @@ let () =
         \    self.size() / 2\n\
         \  }\n\
          }\n");
+  test "a slice changed through a call changes its run of the list" (fun () ->
+      proven
+        (""
+       ^ "fn zero(part: mut Slice[Int64])\n\
+         \  ensures part.length() == old(part.length())\n\
+         \  ensures forall i in 0..part.length() => part.model()[i] == 0\n\
+          {\n\
+         \  todo\n\
+          }\n\n\
+          fn f(items: mut List[Int64])\n\
+         \  requires items.length() >= 4\n\
+         \  ensures items[1] == 0\n\
+         \  ensures items[3] == old(items[3])\n\
+          {\n\
+         \  zero(mut items[..2])\n\
+          }\n"));
+  test "a slice changed through a call changes nothing more than it says" (fun () ->
+      not_proven
+        (""
+       ^ "fn zero(part: mut Slice[Int64])\n\
+         \  ensures part.length() == old(part.length())\n\
+         \  ensures forall i in 0..part.length() => part.model()[i] == 0\n\
+          {\n\
+         \  todo\n\
+          }\n\n\
+          fn f(items: mut List[Int64])\n\
+         \  requires items.length() >= 4\n\
+         \  ensures items[2] == 0\n\
+          {\n\
+         \  zero(mut items[..2])\n\
+          }\n")
+        "prover.ensures");
   test "alternatives bind each name to the part that matched" (fun () ->
       proven
         "type Side =\n\

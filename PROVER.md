@@ -220,9 +220,18 @@ and `reads` clauses):
   every storage it is lent keeps its length and its capacity; one passed
   as its room keeps its elements too, and one passed as its elements, to
   change, has elements nothing more is known of. An operation that stops
-  the program on a bad index says what holds when it returns. A part `storage_at_mut` lends
-  changes nothing until the lend ends, where the storage takes back what
-  the caller left in it.
+  the program on a bad index says what holds when it returns. A part
+  `storage_at_mut` lends changes nothing until the lend ends, where the
+  storage takes back what the caller left in it, and so for `view_at_mut`
+  and a view. `storage_view_mut` is a view of the storage's elements to
+  change them through, and `storage_take_view`, `view_take_view`, and
+  `array_take_view` say the owner's elements from `start` are now the
+  view's: the run must lie within the owner, which keeps its length (and a
+  storage its capacity) and is otherwise as it was.
+- **A slice passed to change** changes only its run of its owner: after
+  the call, the owner is as long as it was and the same outside the run,
+  and the slice read again is a view of the new run, which the callee's
+  postconditions are about.
 - **Bitwise operations get a second encoding.** On integers, `&`, `|`, `^`,
   `~`, and shifts are functions the solver knows only by a few facts, such
   as `0 <= a & b <= a` for unsigned values. That proves the bounds most bit
@@ -685,7 +694,12 @@ cycle can only be seen across definitions:
   argument is a part of the caller's argument, compared in the parameters'
   order.
 - **Parts are ordered.** Each field read is below the value it is read
-  from, in an order of ranks, as Dafny orders its datatypes.
+  from, in an order of ranks, as Dafny orders its datatypes. An element of
+  a sequence is below the sequence, and a value's model is no higher than
+  the value, so an element of a field's `List` is below the value too:
+  recursion over a tree whose children are a list ends without a
+  `decreases`. The order is stated only in a function that can call itself
+  again with no `decreases`, the one place it is used.
 - **Every call from a function with a `time` clause** must reach something
   with one, or the function may not end.
 - **An edge from using an `impl`, or from naming a function as a value,
@@ -1068,10 +1082,6 @@ sanitized runs, test the trusted base against real executions.
   function the solver knows nothing more about, so a contract such as
   `List.map`'s `ensures result[i] == transform(self[i])` gives the caller
   facts about its own lambda only when the lambda's body is functional.
-- **Ranks for a collection's elements.** An element of a standard
-  collection is to be smaller than the collection, as Dafny orders its
-  sequences, so that recursion over a tree whose children are a list ends
-  without a `decreases`. Only fields are ranked.
 - **The potential of a set's or a map's elements.** A value's potential is
   to include that of the elements of a `Set` or a `Map` it holds, through
   its model, as it does for a collection modeled by a sequence. The

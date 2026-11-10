@@ -591,7 +591,11 @@ the definition's interface: the types of its parameters and result, its
   `uses` names capabilities or capability parameters. Each `cost` clause's
   bound is an `Integer` expression; `calls(target)` names a parameter that
   is a function, a capability, or a method the capability has, and anything
-  else is an error; and `time(visit)` names a function parameter.
+  else is an error. `time(visit)` names a function-typed parameter.
+  `time(Element.equal)` names a method of a trait that bounds a type
+  parameter of the definition, or that bounds `Self` in a trait. It is a
+  bound on the time of any one call of that method. If the bounds have
+  several versions of the method, the term names the read-only version.
 - **`lends` and `yields`** state how the method gives out parts of `self`:
   `lends` exactly once, `yields` any number of times. A lent part stays with
   `self`, so `lends` takes no mode or `mut`, and `lends own` is an error.
@@ -1182,6 +1186,16 @@ all read from one account of what a value views:
   with the function. And since the caller goes on using it, nothing it views
   may be changed in the rest of the function.
 
+- **Writing through a slice needs `mut` access to what it views.** A `var`
+  that holds a `Slice` or a `StringSlice` can be passed `mut`, or assigned
+  through, only if every place it views is mutable: a `var`, a `mut`
+  parameter, the variable of a `mut` loop, or `mut self`. A slice held in a
+  field is read-only whatever the mode of its holder, because that mode
+  says nothing about what the field views. A slice parameter is writable if
+  its mode is `mut`. The rule is for the two slice types only: a `var` of
+  another view type, such as a cursor, can be passed `mut` over a read-only
+  source.
+
 - **Nothing kept may view a temporary.** A temporary lives until the end
   of its statement, so a `let` or `var` whose view, or whose cursor, views
   an owned temporary passed read-only to the call that made it is an error
@@ -1670,6 +1684,9 @@ The core form records these decisions:
   builder. Widening a function value, and
   converting between a built-in integer and `Integer`, are explicit
   conversion nodes.
+- **A cost term over a bound names the trait method.** `time(Element.equal)`
+  in a cost bound is a node that holds the trait method, with the type
+  parameter as its self type.
 - **Every node has a type.** The type is fully inferred and normalized. It
   contains no inference variable and no hole.
 - **A condition says whether it is executable.** A `requires` clause or an

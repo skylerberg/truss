@@ -35,6 +35,7 @@ let check database (key : Resolve.Names.key) : result option =
           types = Hashtbl.create 32;
           parameters = [];
           mut_parameters = [];
+          variables = [];
           diagnostics = [];
           moves = [];
           disjoint = [];

@@ -20,420 +20,6 @@ let host =
 
 type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize | Float64
 
-type passes =
-  | Value of scalar
-  | Elements of scalar
-  | Room of scalar
-  | Elements_to_change of scalar
-  | Written of scalar * string list
-  | Always of int
-  | Environment
-
-type result = Returns of scalar | Points_at of scalar | Text | Never
-type signature = { parameters : (string * passes) list; result : result }
-
-type declaration = {
-  symbol : string;
-  returns : string;
-  takes : string list;
-  variadic_from : int option;
-}
-
-type function_ =
-  | Write
-  | Read
-  | Open
-  | Close
-  | Errno
-  | Clock_gettime
-  | Getentropy
-  | Getenv
-  | Posix_spawnp
-  | Waitpid
-  | Snprintf
-  | Strtod
-  | Fork
-  | Pipe
-  | Poll
-  | Kill
-  | Sysconf
-  | Exit
-  | Pread
-  | Pwrite
-  | Lseek
-  | Ftruncate
-  | Fsync
-  | Fstat
-  | Stat
-  | Lstat
-
-let functions =
-  [
-    Write;
-    Read;
-    Open;
-    Close;
-    Errno;
-    Clock_gettime;
-    Getentropy;
-    Getenv;
-    Posix_spawnp;
-    Waitpid;
-    Snprintf;
-    Strtod;
-    Fork;
-    Pipe;
-    Poll;
-    Kill;
-    Sysconf;
-    Exit;
-    Pread;
-    Pwrite;
-    Lseek;
-    Ftruncate;
-    Fsync;
-    Fstat;
-    Stat;
-    Lstat;
-  ]
-
-let function_name = function
-  | Write -> "write"
-  | Read -> "read"
-  | Open -> "open"
-  | Close -> "close"
-  | Errno -> "errno"
-  | Clock_gettime -> "clock_gettime"
-  | Getentropy -> "getentropy"
-  | Getenv -> "getenv"
-  | Posix_spawnp -> "posix_spawnp"
-  | Waitpid -> "waitpid"
-  | Snprintf -> "snprintf"
-  | Strtod -> "strtod"
-  | Fork -> "fork"
-  | Pipe -> "pipe"
-  | Poll -> "poll"
-  | Kill -> "kill"
-  | Sysconf -> "sysconf"
-  | Exit -> "exit_at_once"
-  | Pread -> "pread"
-  | Pwrite -> "pwrite"
-  | Lseek -> "lseek"
-  | Ftruncate -> "ftruncate"
-  | Fsync -> "fsync"
-  | Fstat -> "fstat"
-  | Stat -> "stat"
-  | Lstat -> "lstat"
-
-(* Everything about a function, written once: each parameter with how Truss
-   passes it and its C type on each system. Only the check reads the rest:
-   [headers] declare the function; [layout] is what must hold of a structure
-   it takes for the storage passed to be that structure; and [named] gives a
-   parameter the type the headers call it by, where that is a name only the
-   headers have and the C that is emitted says [void]. *)
-type row = {
-  symbol : system -> string;
-  returns : system -> string;
-  result : result;
-  parameters : (string * passes * (system -> string)) list;
-  variadic_from : int option;
-  headers : string list;
-  layout : string list;
-  named : (string * string) list;
-}
-
-let everywhere c (_ : system) = c
-let by_os choose (system : system) = choose system.os
-let size = everywhere "__SIZE_TYPE__"
-
-(* The symbol of a function that fills a [struct stat]. On macOS for
-   x86-64 the plain symbol is an old function that fills a smaller
-   structure, and the one the headers call has this suffix. *)
-let status_symbol name (system : system) =
-  match system with { os = Macos; architecture = X86_64 } -> name ^ "$INODE64" | _ -> name
-
-(* [off_t], a position in a file. *)
-let offset = by_os (function Linux -> "long" | Macos -> "long long")
-
-let describe function_ =
-  let row ?(symbol = everywhere (function_name function_)) ?variadic_from ?(layout = [])
-      ?(named = []) returns result parameters ~headers =
-    { symbol; returns; result; parameters; variadic_from; headers; layout; named }
-  in
-  match function_ with
-  | Write ->
-      row (everywhere "long") (Returns ISize)
-        [
-          ("descriptor", Value Int32, everywhere "int");
-          ("bytes", Elements UInt8, everywhere "const void *");
-          ("count", Value USize, size);
-        ]
-        ~headers:[ "unistd.h" ]
-  | Read ->
-      row (everywhere "long") (Returns ISize)
-        [
-          ("descriptor", Value Int32, everywhere "int");
-          ("buffer", Room UInt8, everywhere "void *");
-          ("count", Value USize, size);
-        ]
-        ~headers:[ "unistd.h" ]
-  | Open ->
-      row (everywhere "int") (Returns Int32) ~variadic_from:2
-        [
-          ("path", Elements UInt8, everywhere "const char *");
-          ("flags", Value Int32, everywhere "int");
-          ("mode", Value Int32, everywhere "int");
-        ]
-        ~headers:[ "fcntl.h" ]
-  | Close ->
-      row (everywhere "int") (Returns Int32)
-        [ ("descriptor", Value Int32, everywhere "int") ]
-        ~headers:[ "unistd.h" ]
-  | Errno ->
-      row (everywhere "int *") (Points_at Int32) []
-        ~symbol:(by_os (function Linux -> "__errno_location" | Macos -> "__error"))
-        ~headers:[ "errno.h" ]
-  | Clock_gettime ->
-      row (everywhere "int") (Returns Int32)
-        [
-          (* macOS makes [clockid_t] an enumeration with no negative member,
-             which C gives the representation of this type. *)
-          ("clock", Value Int32, by_os (function Linux -> "int" | Macos -> "unsigned int"));
-          ("time", Written (Int64, [ "seconds"; "nanoseconds" ]), everywhere "struct timespec *");
-        ]
-        ~headers:[ "time.h" ]
-        ~layout:
-          [
-            "sizeof(struct timespec) == 16";
-            "__builtin_offsetof(struct timespec, tv_sec) == 0";
-            "sizeof(((struct timespec *)0)->tv_sec) == 8";
-            "__builtin_offsetof(struct timespec, tv_nsec) == 8";
-            "sizeof(((struct timespec *)0)->tv_nsec) == 8";
-          ]
-  | Getentropy ->
-      (* Eight random bytes are a random [UInt64], whatever order the system
-         keeps a number's bytes in. *)
-      row (everywhere "int") (Returns Int32)
-        [
-          ("buffer", Written (UInt64, [ "value" ]), everywhere "void *"); ("count", Always 8, size);
-        ]
-        ~headers:[ "sys/types.h"; "sys/random.h" ]
-  | Getenv ->
-      row (everywhere "char *") Text
-        [ ("name", Elements UInt8, everywhere "const char *") ]
-        ~headers:[ "stdlib.h" ]
-  | Posix_spawnp ->
-      row (everywhere "int") (Returns Int32)
-        [
-          ("process", Written (Int32, [ "process" ]), everywhere "int *");
-          ("program", Elements UInt8, everywhere "const char *");
-          ("file_actions", Always 0, everywhere "const void *");
-          ("attributes", Always 0, everywhere "const void *");
-          ("arguments", Elements USize, everywhere "char *const *");
-          ("environment", Environment, everywhere "char *const *");
-        ]
-        ~named:
-          [
-            ("file_actions", "const posix_spawn_file_actions_t *");
-            ("attributes", "const posix_spawnattr_t *");
-          ]
-        ~headers:[ "spawn.h" ]
-        ~layout:[ "sizeof(char *) == sizeof(__SIZE_TYPE__)" ]
-  | Waitpid ->
-      row (everywhere "int") (Returns Int32)
-        [
-          ("process", Value Int32, everywhere "int");
-          ("status", Written (Int32, [ "status" ]), everywhere "int *");
-          ("options", Value Int32, everywhere "int");
-        ]
-        ~headers:[ "sys/wait.h" ]
-  | Snprintf ->
-      (* The one use: a float written with a number of digits, by a format
-         that takes the two. *)
-      row (everywhere "int") (Returns Int32) ~variadic_from:3
-        [
-          ("buffer", Room UInt8, everywhere "char *");
-          ("size", Value USize, size);
-          ("format", Elements UInt8, everywhere "const char *");
-          ("precision", Value Int32, everywhere "int");
-          ("value", Value Float64, everywhere "double");
-        ]
-        ~headers:[ "stdio.h" ]
-  | Strtod ->
-      row (everywhere "double") (Returns Float64)
-        [
-          ("text", Elements UInt8, everywhere "const char *");
-          ("end", Always 0, everywhere "char **");
-        ]
-        ~headers:[ "stdlib.h" ]
-  | Fork -> row (everywhere "int") (Returns Int32) [] ~headers:[ "unistd.h" ]
-  | Pipe ->
-      row (everywhere "int") (Returns Int32)
-        [ ("ends", Written (Int32, [ "read_end"; "write_end" ]), everywhere "int *") ]
-        ~headers:[ "unistd.h" ]
-  | Poll ->
-      (* A [pollfd] is its descriptor and then two numbers of half the
-         size, what to wait for and what was found, which are the low and
-         the high half of one [Int32] where the low byte comes first. *)
-      row (everywhere "int") (Returns Int32)
-        [
-          ("waited_for", Elements_to_change Int32, everywhere "struct pollfd *");
-          ( "count",
-            Value USize,
-            by_os (function Linux -> "unsigned long" | Macos -> "unsigned int") );
-          ("timeout", Value Int32, everywhere "int");
-        ]
-        ~headers:[ "poll.h" ]
-        ~layout:
-          [
-            "sizeof(struct pollfd) == 8";
-            "__builtin_offsetof(struct pollfd, fd) == 0";
-            "sizeof(((struct pollfd *)0)->fd) == 4";
-            "__builtin_offsetof(struct pollfd, events) == 4";
-            "sizeof(((struct pollfd *)0)->events) == 2";
-            "__builtin_offsetof(struct pollfd, revents) == 6";
-            "sizeof(((struct pollfd *)0)->revents) == 2";
-            "__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__";
-          ]
-  | Kill ->
-      row (everywhere "int") (Returns Int32)
-        [ ("process", Value Int32, everywhere "int"); ("signal", Value Int32, everywhere "int") ]
-        ~headers:[ "signal.h" ]
-  | Sysconf ->
-      row (everywhere "long") (Returns ISize)
-        [ ("name", Value Int32, everywhere "int") ]
-        ~headers:[ "unistd.h" ]
-  | Exit ->
-      row (everywhere "_Noreturn void") Never
-        [ ("status", Value Int32, everywhere "int") ]
-        ~symbol:(everywhere "_exit") ~headers:[ "unistd.h" ]
-  | Pread ->
-      row (everywhere "long") (Returns ISize)
-        [
-          ("descriptor", Value Int32, everywhere "int");
-          ("buffer", Room UInt8, everywhere "void *");
-          ("count", Value USize, size);
-          ("offset", Value Int64, offset);
-        ]
-        ~headers:[ "unistd.h" ]
-  | Pwrite ->
-      row (everywhere "long") (Returns ISize)
-        [
-          ("descriptor", Value Int32, everywhere "int");
-          ("bytes", Elements UInt8, everywhere "const void *");
-          ("count", Value USize, size);
-          ("offset", Value Int64, offset);
-        ]
-        ~headers:[ "unistd.h" ]
-  | Lseek ->
-      row offset (Returns Int64)
-        [
-          ("descriptor", Value Int32, everywhere "int");
-          ("offset", Value Int64, offset);
-          ("whence", Value Int32, everywhere "int");
-        ]
-        ~headers:[ "unistd.h" ]
-  | Ftruncate ->
-      row (everywhere "int") (Returns Int32)
-        [ ("descriptor", Value Int32, everywhere "int"); ("length", Value Int64, offset) ]
-        ~headers:[ "unistd.h" ]
-  | Fsync ->
-      row (everywhere "int") (Returns Int32)
-        [ ("descriptor", Value Int32, everywhere "int") ]
-        ~headers:[ "unistd.h" ]
-  | Fstat ->
-      (* The structure is filled as bytes, which the standard library reads
-         at the offsets the table's numbers give. *)
-      row (everywhere "int") (Returns Int32)
-        [
-          ("descriptor", Value Int32, everywhere "int"); ("status", Room UInt8, everywhere "void *");
-        ]
-        ~symbol:(status_symbol "fstat")
-        ~named:[ ("status", "struct stat *") ]
-        ~headers:[ "sys/stat.h" ]
-        ~layout:
-          [
-            "sizeof(((struct stat *)0)->st_size) == 8";
-            "sizeof(struct timespec) == 16";
-            "__builtin_offsetof(struct timespec, tv_sec) == 0";
-            "__builtin_offsetof(struct timespec, tv_nsec) == 8";
-            "__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__";
-          ]
-  | Stat ->
-      row (everywhere "int") (Returns Int32)
-        [
-          ("path", Elements UInt8, everywhere "const char *");
-          ("status", Room UInt8, everywhere "void *");
-        ]
-        ~symbol:(status_symbol "stat")
-        ~named:[ ("status", "struct stat *") ]
-        ~headers:[ "sys/stat.h" ]
-  | Lstat ->
-      row (everywhere "int") (Returns Int32)
-        [
-          ("path", Elements UInt8, everywhere "const char *");
-          ("status", Room UInt8, everywhere "void *");
-        ]
-        ~symbol:(status_symbol "lstat")
-        ~named:[ ("status", "struct stat *") ]
-        ~headers:[ "sys/stat.h" ]
-
-let signature function_ =
-  let row = describe function_ in
-  {
-    parameters = List.map (fun (name, passes, _) -> (name, passes)) row.parameters;
-    result = row.result;
-  }
-
-let declaration system function_ : declaration =
-  let row = describe function_ in
-  {
-    symbol = row.symbol system;
-    returns = row.returns system;
-    takes = List.map (fun (_, _, c) -> c system) row.parameters;
-    variadic_from = row.variadic_from;
-  }
-
-(* The structures a C type names, which a file that includes no header
-   declares before it can mention them. *)
-let structures c =
-  let word = "struct " in
-  let length = String.length c and skip = String.length word in
-  let rec from start found =
-    if start + skip > length then List.rev found
-    else if String.sub c start skip = word then begin
-      let stop = ref (start + skip) in
-      while
-        !stop < length
-        && match c.[!stop] with 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true | _ -> false
-      do
-        incr stop
-      done;
-      from !stop (String.sub c start (!stop - start) :: found)
-    end
-    else from (start + 1) found
-  in
-  from 0 []
-
-let prototype (declaration : declaration) =
-  let named =
-    List.filteri
-      (fun index _ ->
-        match declaration.variadic_from with Some first -> index < first | None -> true)
-      declaration.takes
-  in
-  let declared =
-    List.sort_uniq String.compare (List.concat_map structures (declaration.returns :: named))
-  in
-  let parameters =
-    match (named, declaration.variadic_from) with
-    | [], None -> "void"
-    | named, None -> String.concat ", " named
-    | named, Some _ -> String.concat ", " (named @ [ "..." ])
-  in
-  String.concat "" (List.map (fun structure -> structure ^ ";\n") declared)
-  ^ Printf.sprintf "%s %s(%s);\n" declaration.returns declaration.symbol parameters
-
 type number =
   | O_rdonly
   | O_wronly
@@ -489,6 +75,544 @@ type number =
   | S_ifreg
   | S_ifdir
   | S_iflnk
+  | At_fdcwd
+  | Utime_omit
+  | Path_max
+
+type extent =
+  | Counted of { by : string; each : int }
+  | Exactly of int
+  | Number of number
+  | Through_zero
+
+type passes =
+  | Value of scalar
+  | Elements of scalar * extent
+  | Room of scalar * extent
+  | Elements_to_change of scalar * extent
+  | Written of scalar * string list
+  | Always of int
+  | Environment
+
+type result = Returns of scalar | Points_at of scalar | Text | Never
+type signature = { parameters : (string * passes) list; result : result; at_most : string option }
+
+type declaration = {
+  symbol : string;
+  returns : string;
+  takes : string list;
+  variadic_from : int option;
+}
+
+type function_ =
+  | Write
+  | Read
+  | Open
+  | Close
+  | Errno
+  | Clock_gettime
+  | Getentropy
+  | Getenv
+  | Posix_spawnp
+  | Waitpid
+  | Snprintf
+  | Strtod
+  | Fork
+  | Pipe
+  | Poll
+  | Kill
+  | Sysconf
+  | Exit
+  | Pread
+  | Pwrite
+  | Lseek
+  | Ftruncate
+  | Fsync
+  | Fstat
+  | Stat
+  | Lstat
+  | Mkdir
+  | Remove
+  | Rename
+  | Symlink
+  | Link
+  | Chmod
+  | Utimensat
+  | Readlink
+  | Realpath
+  | Nanosleep
+
+let functions =
+  [
+    Write;
+    Read;
+    Open;
+    Close;
+    Errno;
+    Clock_gettime;
+    Getentropy;
+    Getenv;
+    Posix_spawnp;
+    Waitpid;
+    Snprintf;
+    Strtod;
+    Fork;
+    Pipe;
+    Poll;
+    Kill;
+    Sysconf;
+    Exit;
+    Pread;
+    Pwrite;
+    Lseek;
+    Ftruncate;
+    Fsync;
+    Fstat;
+    Stat;
+    Lstat;
+    Mkdir;
+    Remove;
+    Rename;
+    Symlink;
+    Link;
+    Chmod;
+    Utimensat;
+    Readlink;
+    Realpath;
+    Nanosleep;
+  ]
+
+let function_name = function
+  | Write -> "write"
+  | Read -> "read"
+  | Open -> "open"
+  | Close -> "close"
+  | Errno -> "errno"
+  | Clock_gettime -> "clock_gettime"
+  | Getentropy -> "getentropy"
+  | Getenv -> "getenv"
+  | Posix_spawnp -> "posix_spawnp"
+  | Waitpid -> "waitpid"
+  | Snprintf -> "snprintf"
+  | Strtod -> "strtod"
+  | Fork -> "fork"
+  | Pipe -> "pipe"
+  | Poll -> "poll"
+  | Kill -> "kill"
+  | Sysconf -> "sysconf"
+  | Exit -> "exit_at_once"
+  | Pread -> "pread"
+  | Pwrite -> "pwrite"
+  | Lseek -> "lseek"
+  | Ftruncate -> "ftruncate"
+  | Fsync -> "fsync"
+  | Fstat -> "fstat"
+  | Stat -> "stat"
+  | Lstat -> "lstat"
+  | Mkdir -> "mkdir"
+  | Remove -> "remove"
+  | Rename -> "rename"
+  | Symlink -> "symlink"
+  | Link -> "link"
+  | Chmod -> "chmod"
+  | Utimensat -> "utimensat"
+  | Readlink -> "readlink"
+  | Realpath -> "realpath"
+  | Nanosleep -> "nanosleep"
+
+(* Everything about a function, written once: each parameter with how Truss
+   passes it and its C type on each system. Only the check reads the rest:
+   [headers] declare the function; [layout] is what must hold of a structure
+   it takes for the storage passed to be that structure; and [named] gives a
+   parameter the type the headers call it by, where that is a name only the
+   headers have and the C that is emitted says [void]. *)
+type row = {
+  symbol : system -> string;
+  returns : system -> string;
+  result : result;
+  at_most : string option;
+  parameters : (string * passes * (system -> string)) list;
+  variadic_from : int option;
+  headers : string list;
+  layout : string list;
+  named : (string * string) list;
+}
+
+let everywhere c (_ : system) = c
+let by_os choose (system : system) = choose system.os
+let size = everywhere "__SIZE_TYPE__"
+
+(* The symbol of a function that fills a [struct stat]. On macOS for
+   x86-64 the plain symbol is an old function that fills a smaller
+   structure, and the one the headers call has this suffix. *)
+let status_symbol name (system : system) =
+  match system with { os = Macos; architecture = X86_64 } -> name ^ "$INODE64" | _ -> name
+
+(* [mode_t], a file's permission bits. *)
+let mode = by_os (function Linux -> "unsigned int" | Macos -> "unsigned short")
+
+(* [off_t], a position in a file. *)
+let offset = by_os (function Linux -> "long" | Macos -> "long long")
+
+let describe function_ =
+  let row ?(symbol = everywhere (function_name function_)) ?variadic_from ?(layout = [])
+      ?(named = []) ?at_most returns result parameters ~headers =
+    { symbol; returns; result; at_most; parameters; variadic_from; headers; layout; named }
+  in
+  let counted by = Counted { by; each = 1 } in
+  match function_ with
+  | Write ->
+      row ~at_most:"count" (everywhere "long") (Returns ISize)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("bytes", Elements (UInt8, counted "count"), everywhere "const void *");
+          ("count", Value USize, size);
+        ]
+        ~headers:[ "unistd.h" ]
+  | Read ->
+      row ~at_most:"count" (everywhere "long") (Returns ISize)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("buffer", Room (UInt8, counted "count"), everywhere "void *");
+          ("count", Value USize, size);
+        ]
+        ~headers:[ "unistd.h" ]
+  | Open ->
+      row (everywhere "int") (Returns Int32) ~variadic_from:2
+        [
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("flags", Value Int32, everywhere "int");
+          ("mode", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "fcntl.h" ]
+  | Close ->
+      row (everywhere "int") (Returns Int32)
+        [ ("descriptor", Value Int32, everywhere "int") ]
+        ~headers:[ "unistd.h" ]
+  | Errno ->
+      row (everywhere "int *") (Points_at Int32) []
+        ~symbol:(by_os (function Linux -> "__errno_location" | Macos -> "__error"))
+        ~headers:[ "errno.h" ]
+  | Clock_gettime ->
+      row (everywhere "int") (Returns Int32)
+        [
+          (* macOS makes [clockid_t] an enumeration with no negative member,
+             which C gives the representation of this type. *)
+          ("clock", Value Int32, by_os (function Linux -> "int" | Macos -> "unsigned int"));
+          ("time", Written (Int64, [ "seconds"; "nanoseconds" ]), everywhere "struct timespec *");
+        ]
+        ~headers:[ "time.h" ]
+        ~layout:
+          [
+            "sizeof(struct timespec) == 16";
+            "__builtin_offsetof(struct timespec, tv_sec) == 0";
+            "sizeof(((struct timespec *)0)->tv_sec) == 8";
+            "__builtin_offsetof(struct timespec, tv_nsec) == 8";
+            "sizeof(((struct timespec *)0)->tv_nsec) == 8";
+          ]
+  | Getentropy ->
+      (* Eight random bytes are a random [UInt64], whatever order the system
+         keeps a number's bytes in. *)
+      row (everywhere "int") (Returns Int32)
+        [
+          ("buffer", Written (UInt64, [ "value" ]), everywhere "void *"); ("count", Always 8, size);
+        ]
+        ~headers:[ "sys/types.h"; "sys/random.h" ]
+  | Getenv ->
+      row (everywhere "char *") Text
+        [ ("name", Elements (UInt8, Through_zero), everywhere "const char *") ]
+        ~headers:[ "stdlib.h" ]
+  | Posix_spawnp ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("process", Written (Int32, [ "process" ]), everywhere "int *");
+          ("program", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("file_actions", Always 0, everywhere "const void *");
+          ("attributes", Always 0, everywhere "const void *");
+          ("arguments", Elements (USize, Through_zero), everywhere "char *const *");
+          ("environment", Environment, everywhere "char *const *");
+        ]
+        ~named:
+          [
+            ("file_actions", "const posix_spawn_file_actions_t *");
+            ("attributes", "const posix_spawnattr_t *");
+          ]
+        ~headers:[ "spawn.h" ]
+        ~layout:[ "sizeof(char *) == sizeof(__SIZE_TYPE__)" ]
+  | Waitpid ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("process", Value Int32, everywhere "int");
+          ("status", Written (Int32, [ "status" ]), everywhere "int *");
+          ("options", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "sys/wait.h" ]
+  | Snprintf ->
+      (* The one use: a float written with a number of digits, by a format
+         that takes the two. *)
+      row (everywhere "int") (Returns Int32) ~variadic_from:3
+        [
+          ("buffer", Room (UInt8, counted "size"), everywhere "char *");
+          ("size", Value USize, size);
+          ("format", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("precision", Value Int32, everywhere "int");
+          ("value", Value Float64, everywhere "double");
+        ]
+        ~headers:[ "stdio.h" ]
+  | Strtod ->
+      row (everywhere "double") (Returns Float64)
+        [
+          ("text", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("end", Always 0, everywhere "char **");
+        ]
+        ~headers:[ "stdlib.h" ]
+  | Fork -> row (everywhere "int") (Returns Int32) [] ~headers:[ "unistd.h" ]
+  | Pipe ->
+      row (everywhere "int") (Returns Int32)
+        [ ("ends", Written (Int32, [ "read_end"; "write_end" ]), everywhere "int *") ]
+        ~headers:[ "unistd.h" ]
+  | Poll ->
+      (* A [pollfd] is its descriptor and then two numbers of half the
+         size, what to wait for and what was found, which are the low and
+         the high half of one [Int32] where the low byte comes first. *)
+      row ~at_most:"count" (everywhere "int") (Returns Int32)
+        [
+          ( "waited_for",
+            Elements_to_change (Int32, Counted { by = "count"; each = 2 }),
+            everywhere "struct pollfd *" );
+          ( "count",
+            Value USize,
+            by_os (function Linux -> "unsigned long" | Macos -> "unsigned int") );
+          ("timeout", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "poll.h" ]
+        ~layout:
+          [
+            "sizeof(struct pollfd) == 8";
+            "__builtin_offsetof(struct pollfd, fd) == 0";
+            "sizeof(((struct pollfd *)0)->fd) == 4";
+            "__builtin_offsetof(struct pollfd, events) == 4";
+            "sizeof(((struct pollfd *)0)->events) == 2";
+            "__builtin_offsetof(struct pollfd, revents) == 6";
+            "sizeof(((struct pollfd *)0)->revents) == 2";
+            "__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__";
+          ]
+  | Kill ->
+      row (everywhere "int") (Returns Int32)
+        [ ("process", Value Int32, everywhere "int"); ("signal", Value Int32, everywhere "int") ]
+        ~headers:[ "signal.h" ]
+  | Sysconf ->
+      row (everywhere "long") (Returns ISize)
+        [ ("name", Value Int32, everywhere "int") ]
+        ~headers:[ "unistd.h" ]
+  | Exit ->
+      row (everywhere "_Noreturn void") Never
+        [ ("status", Value Int32, everywhere "int") ]
+        ~symbol:(everywhere "_exit") ~headers:[ "unistd.h" ]
+  | Pread ->
+      row ~at_most:"count" (everywhere "long") (Returns ISize)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("buffer", Room (UInt8, counted "count"), everywhere "void *");
+          ("count", Value USize, size);
+          ("offset", Value Int64, offset);
+        ]
+        ~headers:[ "unistd.h" ]
+  | Pwrite ->
+      row ~at_most:"count" (everywhere "long") (Returns ISize)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("bytes", Elements (UInt8, counted "count"), everywhere "const void *");
+          ("count", Value USize, size);
+          ("offset", Value Int64, offset);
+        ]
+        ~headers:[ "unistd.h" ]
+  | Lseek ->
+      row offset (Returns Int64)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("offset", Value Int64, offset);
+          ("whence", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "unistd.h" ]
+  | Ftruncate ->
+      row (everywhere "int") (Returns Int32)
+        [ ("descriptor", Value Int32, everywhere "int"); ("length", Value Int64, offset) ]
+        ~headers:[ "unistd.h" ]
+  | Fsync ->
+      row (everywhere "int") (Returns Int32)
+        [ ("descriptor", Value Int32, everywhere "int") ]
+        ~headers:[ "unistd.h" ]
+  | Fstat ->
+      (* The structure is filled as bytes, which the standard library reads
+         at the offsets the table's numbers give. *)
+      row (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("status", Room (UInt8, Number Stat_size), everywhere "void *");
+        ]
+        ~symbol:(status_symbol "fstat")
+        ~named:[ ("status", "struct stat *") ]
+        ~headers:[ "sys/stat.h" ]
+        ~layout:
+          [
+            "sizeof(((struct stat *)0)->st_size) == 8";
+            "sizeof(struct timespec) == 16";
+            "__builtin_offsetof(struct timespec, tv_sec) == 0";
+            "__builtin_offsetof(struct timespec, tv_nsec) == 8";
+            "__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__";
+          ]
+  | Stat ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("status", Room (UInt8, Number Stat_size), everywhere "void *");
+        ]
+        ~symbol:(status_symbol "stat")
+        ~named:[ ("status", "struct stat *") ]
+        ~headers:[ "sys/stat.h" ]
+  | Lstat ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("status", Room (UInt8, Number Stat_size), everywhere "void *");
+        ]
+        ~symbol:(status_symbol "lstat")
+        ~named:[ ("status", "struct stat *") ]
+        ~headers:[ "sys/stat.h" ]
+  | Mkdir ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("mode", Value Int32, mode);
+        ]
+        ~headers:[ "sys/stat.h" ]
+  | Remove ->
+      row (everywhere "int") (Returns Int32)
+        [ ("path", Elements (UInt8, Through_zero), everywhere "const char *") ]
+        ~headers:[ "stdio.h" ]
+  | Rename ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("from", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("to", Elements (UInt8, Through_zero), everywhere "const char *");
+        ]
+        ~headers:[ "stdio.h" ]
+  | Symlink ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("target", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("link", Elements (UInt8, Through_zero), everywhere "const char *");
+        ]
+        ~headers:[ "unistd.h" ]
+  | Link ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("target", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("link", Elements (UInt8, Through_zero), everywhere "const char *");
+        ]
+        ~headers:[ "unistd.h" ]
+  | Chmod ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("mode", Value Int32, mode);
+        ]
+        ~headers:[ "sys/stat.h" ]
+  | Utimensat ->
+      (* The times are two [timespec]s, the time of access and then the time
+         of modification, as four numbers. *)
+      row (everywhere "int") (Returns Int32)
+        [
+          ("directory", Value Int32, everywhere "int");
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("times", Elements (Int64, Exactly 4), everywhere "const struct timespec *");
+          ("flags", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "fcntl.h"; "sys/stat.h" ]
+  | Readlink ->
+      row ~at_most:"count" (everywhere "long") (Returns ISize)
+        [
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("buffer", Room (UInt8, counted "count"), everywhere "char *");
+          ("count", Value USize, size);
+        ]
+        ~headers:[ "unistd.h" ]
+  | Realpath ->
+      (* The resolved path is written into the room given, which is to hold
+         [PATH_MAX] bytes, and the address returned is that room's. *)
+      row (everywhere "char *") Text
+        [
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("resolved", Room (UInt8, Number Path_max), everywhere "char *");
+        ]
+        ~headers:[ "stdlib.h"; "limits.h" ]
+  | Nanosleep ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("duration", Elements (Int64, Exactly 2), everywhere "const struct timespec *");
+          ( "remaining",
+            Written (Int64, [ "remaining_seconds"; "remaining_nanoseconds" ]),
+            everywhere "struct timespec *" );
+        ]
+        ~headers:[ "time.h" ]
+
+let signature function_ =
+  let row = describe function_ in
+  {
+    parameters = List.map (fun (name, passes, _) -> (name, passes)) row.parameters;
+    result = row.result;
+    at_most = row.at_most;
+  }
+
+let declaration system function_ : declaration =
+  let row = describe function_ in
+  {
+    symbol = row.symbol system;
+    returns = row.returns system;
+    takes = List.map (fun (_, _, c) -> c system) row.parameters;
+    variadic_from = row.variadic_from;
+  }
+
+(* The structures a C type names, which a file that includes no header
+   declares before it can mention them. *)
+let structures c =
+  let word = "struct " in
+  let length = String.length c and skip = String.length word in
+  let rec from start found =
+    if start + skip > length then List.rev found
+    else if String.sub c start skip = word then begin
+      let stop = ref (start + skip) in
+      while
+        !stop < length
+        && match c.[!stop] with 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true | _ -> false
+      do
+        incr stop
+      done;
+      from !stop (String.sub c start (!stop - start) :: found)
+    end
+    else from (start + 1) found
+  in
+  from 0 []
+
+let prototype (declaration : declaration) =
+  let named =
+    List.filteri
+      (fun index _ ->
+        match declaration.variadic_from with Some first -> index < first | None -> true)
+      declaration.takes
+  in
+  let declared =
+    List.sort_uniq String.compare (List.concat_map structures (declaration.returns :: named))
+  in
+  let parameters =
+    match (named, declaration.variadic_from) with
+    | [], None -> "void"
+    | named, None -> String.concat ", " named
+    | named, Some _ -> String.concat ", " (named @ [ "..." ])
+  in
+  String.concat "" (List.map (fun structure -> structure ^ ";\n") declared)
+  ^ Printf.sprintf "%s %s(%s);\n" declaration.returns declaration.symbol parameters
 
 let numbers =
   [
@@ -546,6 +670,9 @@ let numbers =
     S_ifreg;
     S_ifdir;
     S_iflnk;
+    At_fdcwd;
+    Utime_omit;
+    Path_max;
   ]
 
 let number_name = function
@@ -603,6 +730,9 @@ let number_name = function
   | S_ifreg -> "S_IFREG"
   | S_ifdir -> "S_IFDIR"
   | S_iflnk -> "S_IFLNK"
+  | At_fdcwd -> "AT_FDCWD"
+  | Utime_omit -> "UTIME_OMIT"
+  | Path_max -> "PATH_MAX"
 
 (* A size or an offset in a structure is a [USize], and the bits of a
    file's mode are compared with a number read out of the structure. *)
@@ -611,6 +741,8 @@ let number_type = function
   | Stat_modified_offset | Stat_created_offset ->
       USize
   | S_ifmt | S_ifreg | S_ifdir | S_iflnk -> UInt64
+  | Utime_omit -> Int64
+  | Path_max -> USize
   | _ -> Int32
 
 let number_headers = function
@@ -626,8 +758,11 @@ let number_headers = function
   | Pollin | Pollhup -> [ "poll.h" ]
   | Sigkill -> [ "signal.h" ]
   | Stat_size | Stat_mode_offset | Stat_mode_size | Stat_length_offset | Stat_accessed_offset
-  | Stat_modified_offset | Stat_created_offset | S_ifmt | S_ifreg | S_ifdir | S_iflnk ->
+  | Stat_modified_offset | Stat_created_offset | S_ifmt | S_ifreg | S_ifdir | S_iflnk | Utime_omit
+    ->
       [ "sys/stat.h" ]
+  | At_fdcwd -> [ "fcntl.h" ]
+  | Path_max -> [ "limits.h" ]
 
 (* The C expression that a number is the value of, which the check compares
    with the table's value. Most numbers are constants that the headers
@@ -732,6 +867,12 @@ let value (system : system) number =
   | S_ifreg, (Linux | Macos) -> 0o100000
   | S_ifdir, (Linux | Macos) -> 0o040000
   | S_iflnk, (Linux | Macos) -> 0o120000
+  | At_fdcwd, Linux -> -100
+  | At_fdcwd, Macos -> -2
+  | Utime_omit, Linux -> 1073741822
+  | Utime_omit, Macos -> -2
+  | Path_max, Linux -> 4096
+  | Path_max, Macos -> 1024
 
 (* How many bytes a number the function reaches through an address takes,
    which the C type it is declared with must take too. [USize] has no one

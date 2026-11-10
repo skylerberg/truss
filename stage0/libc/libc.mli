@@ -18,85 +18,6 @@ val host : system option
 (** A number that Truss and C both have. *)
 type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize | Float64
 
-(** How an argument reaches the function. There is no pointer type in Truss, so memory is passed as
-    a view or as storage, and the function is given an address into it. *)
-type passes =
-  | Value of scalar  (** A number, converted to the parameter's C type *)
-  | Elements of scalar  (** A view: the address of its elements, which the function only reads *)
-  | Room of scalar
-      (** Storage: the address after its last element, for a function that fills room the storage
-          has beyond its length *)
-  | Elements_to_change of scalar
-      (** Storage: the address of its first element, for a function that reads the elements the
-          storage has and writes some of them *)
-  | Written of scalar * string list
-      (** A structure of numbers of one type that the function writes: the address of one, whose
-          numbers then go to [mut] arguments of these names, one each *)
-  | Always of int
-      (** A number that is no argument of the Truss call: the function always gets it *)
-  | Environment
-      (** The environment the process was started with, which is no argument of the Truss call *)
-
-type result =
-  | Returns of scalar
-  | Points_at of scalar  (** The number at the address returned, which is how [errno] is reached *)
-  | Text
-      (** The bytes at the address returned, up to a zero byte, as a view, with a last [mut Bool]
-          argument, [found], that says whether the function returned an address at all *)
-  | Never  (** The function does not return *)
-
-type signature = { parameters : (string * passes) list; result : result }
-(** A function as Truss calls it: how each parameter of the C function is given. *)
-
-type declaration = {
-  symbol : string;
-  returns : string;  (** The C type it returns *)
-  takes : string list;  (** The C type of each parameter *)
-  variadic_from : int option;
-      (** The first parameter that C passes through [...], which some systems pass differently from
-          a named parameter *)
-}
-(** A function as one system's headers declare it. *)
-
-type function_ =
-  | Write
-  | Read
-  | Open
-  | Close
-  | Errno
-  | Clock_gettime
-  | Getentropy
-  | Getenv
-  | Posix_spawnp
-  | Waitpid
-  | Snprintf
-  | Strtod
-  | Fork
-  | Pipe
-  | Poll
-  | Kill
-  | Sysconf
-  | Exit  (** [_exit], which ends the process at once *)
-  | Pread
-  | Pwrite
-  | Lseek
-  | Ftruncate
-  | Fsync
-  | Fstat
-  | Stat
-  | Lstat
-
-val functions : function_ list
-
-val function_name : function_ -> string
-(** The name the standard library calls it by. *)
-
-val signature : function_ -> signature
-val declaration : system -> function_ -> declaration
-
-val prototype : declaration -> string
-(** What a C file that includes no header writes before it calls the function. *)
-
 type number =
   | O_rdonly
   | O_wronly
@@ -152,6 +73,116 @@ type number =
   | S_ifreg
   | S_ifdir
   | S_iflnk
+  | At_fdcwd
+  | Utime_omit
+  | Path_max
+
+(** How many elements a function reads or writes through an address it is given. The prover holds
+    every call to it: a view has that many elements, and storage has room for that many. *)
+type extent =
+  | Counted of { by : string; each : int }
+      (** [each] elements for each one of the number passed for the parameter [by] *)
+  | Exactly of int
+  | Number of number  (** As many as a number of the system, such as [PATH_MAX] *)
+  | Through_zero
+      (** Up to the first element that is zero. The view's last element is zero, so the function
+          reads no further than the view. *)
+
+(** How an argument reaches the function. There is no pointer type in Truss, so memory is passed as
+    a view or as storage, and the function is given an address into it. *)
+type passes =
+  | Value of scalar  (** A number, converted to the parameter's C type *)
+  | Elements of scalar * extent
+      (** A view: the address of its elements, which the function only reads *)
+  | Room of scalar * extent
+      (** Storage: the address after its last element, for a function that fills room the storage
+          has beyond its length *)
+  | Elements_to_change of scalar * extent
+      (** Storage: the address of its first element, for a function that reads the elements the
+          storage has and writes some of them *)
+  | Written of scalar * string list
+      (** A structure of numbers of one type that the function writes: the address of one, whose
+          numbers then go to [mut] arguments of these names, one each *)
+  | Always of int
+      (** A number that is no argument of the Truss call: the function always gets it *)
+  | Environment
+      (** The environment the process was started with, which is no argument of the Truss call *)
+
+type result =
+  | Returns of scalar
+  | Points_at of scalar  (** The number at the address returned, which is how [errno] is reached *)
+  | Text
+      (** The bytes at the address returned, up to a zero byte, as a view, with a last [mut Bool]
+          argument, [found], that says whether the function returned an address at all *)
+  | Never  (** The function does not return *)
+
+type signature = {
+  parameters : (string * passes) list;
+  result : result;
+  at_most : string option;
+      (** The parameter that bounds the result: a result that is not negative is at most the number
+          passed for it, as [read] returns no more than the count it was given *)
+}
+(** A function as Truss calls it: how each parameter of the C function is given. *)
+
+type declaration = {
+  symbol : string;
+  returns : string;  (** The C type it returns *)
+  takes : string list;  (** The C type of each parameter *)
+  variadic_from : int option;
+      (** The first parameter that C passes through [...], which some systems pass differently from
+          a named parameter *)
+}
+(** A function as one system's headers declare it. *)
+
+type function_ =
+  | Write
+  | Read
+  | Open
+  | Close
+  | Errno
+  | Clock_gettime
+  | Getentropy
+  | Getenv
+  | Posix_spawnp
+  | Waitpid
+  | Snprintf
+  | Strtod
+  | Fork
+  | Pipe
+  | Poll
+  | Kill
+  | Sysconf
+  | Exit  (** [_exit], which ends the process at once *)
+  | Pread
+  | Pwrite
+  | Lseek
+  | Ftruncate
+  | Fsync
+  | Fstat
+  | Stat
+  | Lstat
+  | Mkdir
+  | Remove
+  | Rename
+  | Symlink
+  | Link
+  | Chmod
+  | Utimensat
+  | Readlink
+  | Realpath
+  | Nanosleep
+
+val functions : function_ list
+
+val function_name : function_ -> string
+(** The name the standard library calls it by. *)
+
+val signature : function_ -> signature
+val declaration : system -> function_ -> declaration
+
+val prototype : declaration -> string
+(** What a C file that includes no header writes before it calls the function. *)
 
 val numbers : number list
 

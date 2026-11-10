@@ -732,6 +732,7 @@ let is_executable state (condition : Core.expression) =
           if node.type_ = T.Integer then executable := false;
           match node.kind with
           | Quantified _ | Result | Old _ | Yielded | Finished | Identical _ | Cost_function _
+          | Method_time _
           | Convert { conversion = To_integer | From_integer; _ } ->
               executable := false
           | Call { callee; _ } -> if specification_only callee then executable := false

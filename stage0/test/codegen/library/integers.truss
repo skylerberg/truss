@@ -1,3 +1,5 @@
+use standard::core
+
 test "floor division rounds down for each combination of signs" {
   let seven: Int64 = 7
   let minus_seven: Int64 = -7
@@ -169,4 +171,57 @@ test "powers of two, divisors, multiples, and square roots of unsigned integers"
   assert square.integer_square_root() == 25
   let below: UInt16 = 624
   assert below.integer_square_root() == 24
+}
+
+test "an integer is parsed from decimal digits with an optional sign" {
+  assert Int32.parse("0") == Ok(0)
+  assert Int32.parse("42") == Ok(42)
+  assert Int32.parse("+42") == Ok(42)
+  assert Int32.parse("-42") == Ok(-42)
+  assert Int32.parse("-0") == Ok(0)
+  assert Int32.parse("007") == Ok(7)
+  assert UInt8.parse("255") == Ok(255)
+  assert UInt8.parse("+255") == Ok(255)
+  assert UInt64.parse("18446744073709551615") == Ok(18446744073709551615)
+}
+
+test "parsing reaches both ends of a type and refuses the next value" {
+  assert Int8.parse("127") == Ok(127)
+  assert Int8.parse("128") == Err(core::ParseIntegerError.OutOfRange)
+  assert Int8.parse("-128") == Ok(-128)
+  assert Int8.parse("-129") == Err(core::ParseIntegerError.OutOfRange)
+  assert Int64.parse("9223372036854775807") == Ok(9223372036854775807)
+  assert Int64.parse("9223372036854775808") == Err(core::ParseIntegerError.OutOfRange)
+  assert Int64.parse("-9223372036854775808") == Ok(Int64.minimum)
+  assert Int64.parse("-9223372036854775809") == Err(core::ParseIntegerError.OutOfRange)
+  assert UInt8.parse("256") == Err(core::ParseIntegerError.OutOfRange)
+  assert UInt64.parse("18446744073709551616") == Err(core::ParseIntegerError.OutOfRange)
+  assert UInt64.parse("99999999999999999999999999") == Err(core::ParseIntegerError.OutOfRange)
+}
+
+test "parsing says what is wrong with text that is not an integer" {
+  assert Int32.parse("") == Err(core::ParseIntegerError.Empty)
+  assert Int32.parse("-") == Err(core::ParseIntegerError.Empty)
+  assert Int32.parse("+") == Err(core::ParseIntegerError.Empty)
+  assert Int32.parse("12a") == Err(core::ParseIntegerError.InvalidDigit(offset: 2))
+  assert Int32.parse(" 12") == Err(core::ParseIntegerError.InvalidDigit(offset: 0))
+  assert Int32.parse("1 2") == Err(core::ParseIntegerError.InvalidDigit(offset: 1))
+  assert Int32.parse("--1") == Err(core::ParseIntegerError.InvalidDigit(offset: 1))
+  assert UInt32.parse("-1") == Err(core::ParseIntegerError.InvalidDigit(offset: 0))
+  assert Int32.parse("1_000") == Err(core::ParseIntegerError.InvalidDigit(offset: 1))
+}
+
+test "an integer is parsed in any radix from 2 to 36, in either case" {
+  assert Int32.parse_radix("ff", radix: 16) == Ok(255)
+  assert Int32.parse_radix("FF", radix: 16) == Ok(255)
+  assert Int32.parse_radix("-7f", radix: 16) == Ok(-127)
+  assert UInt8.parse_radix("11111111", radix: 2) == Ok(255)
+  assert UInt8.parse_radix("100000000", radix: 2) == Err(core::ParseIntegerError.OutOfRange)
+  assert Int32.parse_radix("z", radix: 36) == Ok(35)
+  assert Int32.parse_radix("Zz", radix: 36) == Ok(1295)
+  assert Int32.parse_radix("8", radix: 8) == Err(core::ParseIntegerError.InvalidDigit(offset: 0))
+  assert Int32.parse_radix("12", radix: 2) == Err(core::ParseIntegerError.InvalidDigit(offset: 1))
+  assert Int32.parse_radix("g", radix: 16) == Err(core::ParseIntegerError.InvalidDigit(offset: 0))
+  assert ISize.parse_radix("-80", radix: 16) == Ok(-128)
+  assert USize.parse_radix("777", radix: 8) == Ok(511)
 }

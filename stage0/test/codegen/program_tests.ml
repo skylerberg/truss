@@ -321,6 +321,97 @@ fn main(arguments: List[String]) -> ExitCode
         output)
 
 let () =
+  test "a program makes a directory, renames, links, sets permissions and times, and removes"
+    (fun () ->
+      let status, output, _ =
+        run_main
+          ~arguments:[ Lazy.force scratch ]
+          {|use standard::files
+
+fn say(text: String) uses Console {
+  Console.print_line(text.slice())
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, FileRead, FileWrite, Handles, Clock
+{
+  let directory = Path.new("${arguments[1]}/made".slice())
+  let file = Path.new("${arguments[1]}/made/first.txt".slice())
+  let renamed = Path.new("${arguments[1]}/made/second.txt".slice())
+  let symbolic = Path.new("${arguments[1]}/made/link".slice())
+  let hard = Path.new("${arguments[1]}/made/hard.txt".slice())
+  if FileWrite.create_directory(directory) is Ok(_) {
+    say("made")
+  }
+  if FileWrite.create_directory(directory) is Err(AlreadyExists) {
+    say("exists")
+  }
+  if FileWrite.write_text(file, contents: "contents".slice()) is Err(_) {
+    return ExitCode(1)
+  }
+  if FileWrite.rename(file, to: renamed) is Ok(_) && FileRead.metadata(file) is Err(NotFound) {
+    say("renamed")
+  }
+  if FileWrite.link(renamed, link: symbolic, kind: files::LinkKind.Symbolic) is Ok(_) {
+    if FileRead.metadata(symbolic, follow_links: false) is Ok(metadata) {
+      say("symbolic ${metadata.kind == files::FileKind.SymbolicLink}")
+    }
+    if FileRead.read_link(symbolic) is Ok(target) && FileRead.read_text(target) is Ok(text) {
+      say("target holds ${text}")
+    }
+    if FileRead.resolve(symbolic) is Ok(resolved) && FileRead.metadata(resolved, follow_links: false) is Ok(metadata) {
+      say("resolved to a file ${metadata.is_file()}")
+    }
+  }
+  if FileWrite.link(renamed, link: hard, kind: files::LinkKind.Hard) is Ok(_) && FileRead.read_text(hard) is Ok(text) {
+    say("hard ${text}")
+  }
+  if FileWrite.set_modified(renamed, time: Instant.from_unix_nanoseconds(1000000000123456789)) is Ok(_) {
+    if FileRead.metadata(renamed) is Ok(metadata) {
+      say("modified ${metadata.modified.unix_nanoseconds()}")
+    }
+  }
+  if FileWrite.set_permissions(renamed, permissions: files::Permissions.from_mode(0o444)) is Ok(_) {
+    if FileRead.metadata(renamed) is Ok(metadata) {
+      say("read only ${metadata.permissions.is_read_only()}")
+    }
+  }
+  if FileWrite.remove(directory) is Err(DirectoryNotEmpty) {
+    say("not empty")
+  }
+  if FileWrite.remove(symbolic) is Ok(_) && FileWrite.remove(hard) is Ok(_) && FileWrite.remove(renamed) is Ok(_) {
+    say("emptied")
+  }
+  if FileWrite.remove(directory) is Ok(_) && FileRead.metadata(directory) is Err(NotFound) {
+    say("removed")
+  }
+  let before = Clock.monotonic()
+  Clock.sleep(Duration.nanoseconds(20000000))
+  let after = Clock.monotonic()
+  say("slept ${after.total_nanoseconds() - before.total_nanoseconds() >= 20000000}")
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string
+        ~expected:
+          "made\n\
+           exists\n\
+           renamed\n\
+           symbolic true\n\
+           target holds contents\n\
+           resolved to a file true\n\
+           hard contents\n\
+           modified 1000000000123456789\n\
+           read only true\n\
+           not empty\n\
+           emptied\n\
+           removed\n\
+           slept true\n"
+        output)
+
+let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"
     (fun () ->
       let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in

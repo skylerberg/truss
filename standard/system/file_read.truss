@@ -36,10 +36,12 @@ impl FileRead for SystemFileRead {
   }
 
   fn read_link(self, link: Path) -> Result[Path, SystemError] {
-    todo
+    let target = handles::with_file_error(calls::read_link(link.text.slice().bytes))?
+    Ok(Path(text: String.from_bytes(own target)))
   }
 
   fn resolve(self, path: Path) -> Result[Path, SystemError] {
-    todo
+    let resolved = handles::with_file_error(calls::resolve(path.text.slice().bytes))?
+    Ok(Path(text: String.from_bytes(own resolved)))
   }
 }

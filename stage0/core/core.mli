@@ -245,6 +245,10 @@ and kind =
   | Cost_function of { function_ : cost_function; arguments : expression list }
       (** A cost function inside a [cost] bound: [log(count)], [power(base, exponent)],
           [time(visit)], or [calls(visit)]. *)
+  | Method_time of callee
+      (** [time(Element.equal)] inside a [cost] bound: a bound on the time of any one call of a
+          method of a trait that bounds a type parameter. The callee is a {!Trait_method} whose
+          [self_type] is the type parameter and whose evidence is [Bound]. *)
 
 and capture = { local : local; type_ : Types.ty }
 and cost_function = Log | Power | Time | Calls

@@ -87,7 +87,7 @@ let transfer context (point : point) (before : holdings) : holdings =
       | [] -> before
       | viewed -> hold before place.root viewed)
   | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Assign _ | Exit | Return_view _
-  | Views_temporary _ | Keeps_lent_part _ | Arguments _ ->
+  | Views_temporary _ | Keeps_lent_part _ | Write_through _ | Arguments _ ->
       before
 
 (* What each holder may view before each point. *)
@@ -318,6 +318,42 @@ let check context (graph : Graph.t) =
                      (show_root context local.root) (show_root context place.root)
                      (show_root context local.root))
             | None -> ())
+      | Write_through slice -> (
+          (* Writing through a slice changes what the slice views, so every
+             place it views must be mutable. A slice held in a field is
+             read-only, whatever the mode of its holder: the holder's mode
+             says nothing about what the field views. A slice parameter is
+             writable if its mode is [mut], which the type checker checks. *)
+          let mutable_root (root : Place.root) =
+            match root with
+            | Constant _ -> false
+            | Local local -> (
+                match kind context root with
+                | Mut_access -> true
+                | Owned -> List.mem local context.variables
+                | Viewing -> false)
+          in
+          match slice with
+          | { steps = _ :: _; _ } ->
+              report context Read_only_view at
+                (Printf.sprintf
+                   "`%s` is a slice held in a field, so nothing can be changed through it. Change \
+                    the collection it views instead."
+                   (show context slice))
+          | { root = Local local; _ } when List.mem local context.parameters -> ()
+          | _ -> (
+              match
+                List.find_opt
+                  (fun (viewed : Place.t) -> viewed <> slice && not (mutable_root viewed.root))
+                  (resolve context before.(index) [ slice ])
+              with
+              | Some viewed ->
+                  report context Read_only_view at
+                    (Printf.sprintf
+                       "`%s` views `%s`, which is read-only here, so nothing can be changed \
+                        through `%s`."
+                       (show context slice) (show context viewed) (show context slice))
+              | None -> ()))
       | Enter | Take_lent _ | Bind _ | Exit | Hold _ -> ())
     graph.points;
   (* What a stretch of code changes and uses, for [parallel]. *)

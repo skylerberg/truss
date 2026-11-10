@@ -67,18 +67,33 @@ and call_named state env ?expected (value : expression) (callee : expression)
             (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
             value.span "`identical` takes two values of one type.";
           arguments_alone state env arguments T.bool)
-  | Cost_function function_ ->
-      register_expression state value (fun () ->
-          Cost_function
-            {
-              function_ =
-                (match function_ with Log -> Log | Power -> Power | Time -> Time | Calls -> Calls);
-              arguments =
-                List.map
-                  (fun (argument : argument) -> build_expression state argument.value)
-                  arguments;
-            });
-      arguments_alone state env arguments T.Integer
+  | Cost_function function_ -> (
+      let bound_method =
+        match (function_, arguments) with
+        | Time, [ { value = { kind = Member (base, member); _ }; _ } ] -> (
+            match static_ state base with
+            | Some (Static_type (T.Parameter _ as type_)) -> Some (type_, member)
+            | _ -> None)
+        | _ -> None
+      in
+      match bound_method with
+      | Some (type_, member) -> method_time state value type_ member
+      | None ->
+          register_expression state value (fun () ->
+              Cost_function
+                {
+                  function_ =
+                    (match function_ with
+                    | Log -> Log
+                    | Power -> Power
+                    | Time -> Time
+                    | Calls -> Calls);
+                  arguments =
+                    List.map
+                      (fun (argument : argument) -> build_expression state argument.value)
+                      arguments;
+                });
+          arguments_alone state env arguments T.Integer)
   | Definition (Type, path) -> (
       match named_type state callee path type_arguments with
       | T.Named { arguments = type_arguments; _ } ->
@@ -104,6 +119,66 @@ and call_named state env ?expected (value : expression) (callee : expression)
   | Field _ | Result_value | Yielded | Finished ->
       function_value_call state env value callee arguments
   | Binding | Module _ -> bug "the name `%s` is not resolved" name.text
+
+(* [time(Element.equal)] in a [cost] bound: a bound on the time of any one
+   call of a method of a trait that bounds a type parameter. If the bounds
+   have several versions of the method, the term names the read-only
+   version. *)
+and method_time state (value : expression) (type_ : T.ty) (member : name) =
+  let versions =
+    List.fold_left
+      (fun found (bound : T.trait_reference) ->
+        List.fold_left
+          (fun found (method_ : T.trait_method) ->
+            if
+              List.exists
+                (fun ((other : T.trait_reference), (known : T.trait_method)) ->
+                  Path.equal other.trait bound.trait
+                  && known.method_receiver = method_.method_receiver)
+                found
+            then found
+            else found @ [ (bound, method_) ])
+          found
+          (Members.trait_methods state.database bound.trait member.text))
+      []
+      (Properties.known_bounds state.database ~bounds:(bounds state) type_)
+  in
+  let chosen =
+    match versions with
+    | [ only ] -> Some only
+    | several -> (
+        match
+          List.filter
+            (fun (_, (method_ : T.trait_method)) -> method_.method_receiver = Read)
+            several
+        with
+        | [ read_only ] -> Some read_only
+        | _ -> None)
+  in
+  match (chosen, versions) with
+  | Some (trait, method_), _ ->
+      register_expression state value (fun () ->
+          Method_time
+            (Trait_method
+               {
+                 trait;
+                 name = member.text;
+                 receiver = method_.method_receiver;
+                 self_type = type_;
+                 type_arguments = [];
+                 evidence = Bound;
+               }));
+      T.Integer
+  | None, [] ->
+      error state Unknown_member member.span
+        (Printf.sprintf "`%s` has no method `%s`: no trait that bounds it declares one."
+           (show state type_) member.text)
+  | None, _ ->
+      error state Ambiguous_method member.span
+        (Printf.sprintf
+           "`%s` has more than one method `%s`, and none of them is the only one that takes `self` \
+            read-only, so `time` cannot tell which one is meant."
+           (show state type_) member.text)
 
 (* [Type.name(...)]: a variant constructor, a static method, or a method
    called in full form with its receiver as the first argument. *)

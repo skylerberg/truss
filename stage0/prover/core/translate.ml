@@ -217,6 +217,9 @@ type context = {
   mutable holes : (Names.key * span) list;  (** Reversed. *)
   mutable call_targets : (L.term * Core.local) list;
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
+  ranking : bool;
+      (** Whether the definition proven may show a recursive call ends by being on a part of its
+          parameters, the one use of the order of parts, which is stated only then. *)
   mutable validating : T.ty list;
       (** The types whose invariants are being read, around this point. A type is valid inside the
           reading of its own invariant, as it is inside its own fields, so a type that holds itself
@@ -557,6 +560,14 @@ let in_range ty term =
           within &&& not_ (Apply ("<=", [ int 0xD800; term ]) &&& Apply ("<=", [ term; int 0xDFFF ])))
       else within
   | None -> L.Boolean true
+
+(* Runs [make] the first time a key is met in a definition's proof, for a
+   fact that is stated once. *)
+let once context key make =
+  if not (Hashtbl.mem context.declared key) then begin
+    Hashtbl.replace context.declared key ();
+    make ()
+  end
 
 (* A sort's name, as part of a symbol's. *)
 let sort_label (sort : L.sort) =
@@ -1364,6 +1375,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       extensional context frame (type_of context frame first) first_value second_value;
       Some (frame, L.equal first_value second_value)
   | Cost_function { function_; arguments } -> cost_function context frame node function_ arguments
+  | Method_time _ -> unsupported (at frame node) "the time of a method of a type parameter"
 
 (* The right side of [&&], [||], or [==>], which runs only where [runs]
    holds. One that changes a local, as a call with a [mut] argument does,
@@ -1834,7 +1846,13 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
             let changed = arrive context frame "changed" passed.type_ in
             try store context frame place changed
             with Unsupported _ | Foreign_unsupported _ -> havoc_root context frame place)
-        | T.Mut, Some (Value { kind = Slice { base; _ }; _ }) -> havoc_root context frame base
+        | T.Mut, Some (Value { kind = Slice { base; call }; _ }) -> (
+            (* The callee changes the elements of the run the slice views,
+               and nothing else of its owner: the slice read again after the
+               call is a view of the new run, which the callee's
+               postconditions are about. *)
+            try sliced_owner_changed context frame base call
+            with Unsupported _ | Foreign_unsupported _ -> havoc_root context frame base)
         | _ -> frame)
       frame values
   in
@@ -2026,7 +2044,9 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       (* Lending a part of a storage changes nothing until the lend ends,
          where what the caller left is written back. *)
       let frame =
-        match operation with Storage_at_mut | Array_at_mut -> frame | _ -> havoc_mut frame
+        match operation with
+        | Storage_at_mut | Array_at_mut | View_at_mut -> frame
+        | _ -> havoc_mut frame
       in
       let operands = List.map (fun (passed : passed) -> passed.term) values in
       (* What each argument holds after the call: a [mut] one read again. *)
@@ -2048,6 +2068,28 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       let result =
         match (operation, values) with
         | Array_model, [ array ] -> array_model context frame array.type_ array.term
+        | Array_take_view, [ array; part; start ] -> (
+            match (array.type_, changed) with
+            | Named { arguments = T.Type element :: _; _ }, after :: _ ->
+                let before = array_model context frame array.type_ array.term in
+                let run = buffer_model context View element part.term in
+                oblige context frame Requires (at frame node)
+                  (Printf.sprintf "`%s` may not take back a view within the array."
+                     (quote frame.source node.origin))
+                  L.(
+                    Apply
+                      ( "<=",
+                        [
+                          Apply ("+", [ start.term; sequence_length context element run ]);
+                          sequence_length context element before;
+                        ] ));
+                run_replaced context frame element ~before
+                  ~after:(array_model context frame array.type_ after)
+                  ~start:start.term
+                  ~stop:(L.Apply ("+", [ start.term; sequence_length context element run ]))
+                  ~run:(Some run);
+                arrive context frame "result" result_type
+            | _ -> arrive context frame "result" result_type)
         | Array_view, [ array ] -> (
             (* A view of the array's elements. *)
             match array.type_ with
@@ -2108,6 +2150,7 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
   | ( ( Storage_model | View_model | Storage_empty | Storage_with_capacity | Storage_length
       | Storage_capacity | Storage_set_capacity | Storage_lengthen | Storage_push | Storage_pop
       | Storage_insert | Storage_remove | Storage_swap | Storage_at | Storage_at_mut | Storage_view
+      | View_at_mut | View_swap | Storage_view_mut | Storage_take_view | View_take_view
       | View_length | View_at | View_slice ),
       element :: _ ) ->
       buffer_operation context frame ~node operation element operands ~changed known
@@ -2152,8 +2195,9 @@ and libc_call context frame ~(node : expression) (function_ : Libc.function_) op
   List.iteri
     (fun position passes ->
       match (passes, List.nth_opt operands position, List.nth_opt changed position) with
-      | Some ((Libc.Room scalar | Elements_to_change scalar) as passes), Some before, Some after
-        -> (
+      | ( Some ((Libc.Room (scalar, _) | Elements_to_change (scalar, _)) as passes),
+          Some before,
+          Some after ) -> (
           let element = storage_of scalar in
           let model term = buffer_model context Storage element term in
           assume context frame
@@ -2791,7 +2835,26 @@ and sequence_at context element term index =
       let symbol = "function." ^ Path.show path ^ "[" ^ type_key sequence ^ "]" in
       declare context
         (L.Function (symbol, [ sort_of context sequence; L.Int ], sort_of context element));
-      Some (L.Apply (symbol, [ term; index ]))
+      let at sequence index = L.Apply (symbol, [ sequence; index ]) in
+      (* An element of a sequence of parts is below the sequence, as a
+         field is below its value, so recursion on an element ends. *)
+      if context.ranking && constructors context element <> None then
+        once context
+          ("ranked." ^ type_key sequence)
+          (fun () ->
+            let each = "ranked.sequence" and index = "ranked.index" in
+            let ranked = L.Symbol each and position = L.Symbol index in
+            let below = rank context element (at ranked position) in
+            context.facts <-
+              L.Forall
+                ( [ (each, sort_of context sequence); (index, L.Int) ],
+                  L.(
+                    Apply ("<=", [ int 0; position ])
+                    &&& Apply ("<", [ position; sequence_length context element ranked ])
+                    ==> (Apply ("<=", [ int 0; below ])
+                        &&& Apply ("<", [ below; rank context sequence ranked ]))) )
+              :: context.facts);
+      Some (at term index)
   | [] -> None
 
 (* Two sequences with the same length and the same elements are identical:
@@ -3194,8 +3257,27 @@ and model_function context (ty : T.ty) ~(model : T.ty) =
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
       let symbol = "function." ^ Path.show path ^ "[" ^ type_key ty ^ "]" in
       declare context (L.Function (symbol, [ sort_of context ty ], sort_of context model));
+      model_ranked context ty ~model symbol;
       Some (fun term -> L.Apply (symbol, [ term ]))
   | [] -> None
+
+(* A value's model is no higher in the order of parts than the value, so
+   an element of a list's model is below the list. [symbol] is the model's
+   function. *)
+and model_ranked context (ty : T.ty) ~(model : T.ty) symbol =
+  if context.ranking then
+    once context ("ranked." ^ symbol) (fun () ->
+        let each = "ranked.value" in
+        context.facts <-
+          L.Forall
+            ( [ (each, sort_of context ty) ],
+              L.Apply
+                ( "<=",
+                  [
+                    rank context model (L.Apply (symbol, [ L.Symbol each ]));
+                    rank context ty (L.Symbol each);
+                  ] ) )
+          :: context.facts)
 
 (* Cursors. A cursor carries what it has handed out and whether it has
    ended as ghost parts of its value. *)
@@ -3345,9 +3427,9 @@ and signature_terminates context path =
 and field_of context frame ty variant field field_type term =
   let part = L.Apply (selector_name ty variant field, [ term ]) in
   assume context frame (in_range field_type part);
-  (* A part of a value is below it, which is how structural recursion is
-     shown to end. *)
-  if constructors context field_type <> None then begin
+  (* A part of a value is below it, whatever its type, which is how
+     structural recursion is shown to end. *)
+  if context.ranking then begin
     let below = rank context field_type part in
     assume context frame
       L.(Apply ("<=", [ int 0; below ]) &&& Apply ("<", [ below; rank context ty term ]))
@@ -4093,6 +4175,14 @@ and contract_call context frame (node : expression) (call_ : call) path contract
           own_bound
       in
       declare context (L.Function (symbol, sorts, sort_of context result_type));
+      (match (path, own_bound) with
+      | Method { name = "model"; receiver = Read; _ }, [ (self, _) ] when self.local = Self ->
+          model_ranked context
+            (Interface.Impls.normalize context.database
+               ~bounds:(fun _ -> [])
+               (T.substitute (substitution_of own) self.type_))
+            ~model:result_type symbol
+      | _ -> ());
       let term = L.Apply (symbol, own_arguments) in
       assume context after (in_range result_type term);
       note_known_call context call_ path term own_arguments;
@@ -4687,8 +4777,11 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
         (each_sum (fun sum measure ->
              L.equal (sum before) (L.Apply ("+", [ sum after; measure known ]))));
       known
-  | Storage_swap, [ buffer; first; second ] ->
-      let before = storage buffer and after = changed_storage () in
+  | (Storage_swap | View_swap), [ buffer; first; second ] ->
+      let before, after =
+        if operation = View_swap then (view buffer, view (List.hd changed))
+        else (storage buffer, changed_storage ())
+      in
       let k = bound () in
       assume context frame
         (L.conjunction
@@ -4710,6 +4803,30 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
   | (Storage_at | Storage_at_mut), [ buffer; index ] ->
       assume context frame (in_bounds index (storage buffer));
       at (storage buffer) index
+  | View_at_mut, [ buffer; index ] ->
+      assume context frame (in_bounds index (view buffer));
+      at (view buffer) index
+  | Storage_view_mut, [ buffer ] ->
+      (* A view of the storage's elements, to change them through. The
+         storage keeps its elements; a static one gets a buffer of its own,
+         so its capacity may change. *)
+      assume context frame
+        L.(equal (view known) (storage buffer) &&& equal (changed_storage ()) (storage buffer));
+      known
+  | (Storage_take_view | View_take_view), [ owner; part; start ] ->
+      (* The owner's elements from [start] are the view's, which changed
+         them, and the owner is otherwise as it was. *)
+      let before, after =
+        if operation = View_take_view then (view owner, view (List.hd changed))
+        else (storage owner, changed_storage ())
+      in
+      let run = view part in
+      needs L.(Apply ("<=", [ Apply ("+", [ start; length run ]); length before ]));
+      if operation = Storage_take_view then keeps_capacity ();
+      run_replaced context frame element ~before ~after ~start
+        ~stop:(L.Apply ("+", [ start; length run ]))
+        ~run:(Some run);
+      known
   | View_at, [ buffer; index ] ->
       assume context frame (in_bounds index (view buffer));
       at (view buffer) index
@@ -5635,6 +5752,66 @@ and array_updated context frame (array_type : T.ty) array index part =
       updated
   | _ -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (T.show array_type)))
 
+(* The owner of a slice lent to change, after the change: as long as it
+   was, and the same outside the slice's run. *)
+and sliced_owner_changed context frame (base : place) (call : expression) =
+  match call.kind with
+  | Call
+      {
+        arguments =
+          [ _; Passed { value = Value start_node; _ }; Passed { value = Value stop_node; _ } ];
+        _;
+      } -> (
+      let owner_type = place_type context frame base in
+      let element =
+        match owner_type with
+        | Named { arguments = T.Type element :: _; _ } -> element
+        | _ -> raise (Foreign_unsupported (Printf.sprintf "a slice of `%s`" (T.show owner_type)))
+      in
+      let _, start = value context { frame with checking = false } start_node in
+      let _, stop = value context { frame with checking = false } stop_node in
+      let frame, owner = place_value context frame base in
+      let changed = arrive context frame "changed" owner_type in
+      match
+        (model_of context owner_type owner ~element, model_of context owner_type changed ~element)
+      with
+      | Some before, Some after ->
+          run_replaced context frame element ~before ~after ~start ~stop ~run:None;
+          assume_valid context frame owner_type changed;
+          store context frame base changed
+      | _ -> raise (Foreign_unsupported (Printf.sprintf "a slice of `%s`" (T.show owner_type))))
+  | _ -> raise (Foreign_unsupported "a slice whose call is not of `slice_range`")
+
+(* That one sequence is another as long, the same outside the run from
+   [start] to before [stop], and, where [run] is given, [run]'s elements in
+   that run. *)
+and run_replaced context frame element ~before ~after ~start ~stop ~run =
+  let length sequence = sequence_length context element sequence in
+  let at sequence index =
+    match sequence_at context element sequence index with
+    | Some term -> term
+    | None -> raise (Foreign_unsupported "the elements of a sequence")
+  in
+  context.fresh <- context.fresh + 1;
+  let k = Printf.sprintf "index.%d" context.fresh in
+  let index = L.Symbol k in
+  let inside =
+    match run with
+    | Some run -> L.equal (at after index) (at run (L.Apply ("-", [ index; start ])))
+    | None -> L.Boolean true
+  in
+  assume context frame (L.equal (length after) (length before));
+  assume context frame
+    (L.Forall
+       ( [ (k, L.Int) ],
+         L.(
+           Apply ("<=", [ int 0; index ])
+           &&& Apply ("<", [ index; length before ])
+           ==> ite
+                 (Apply ("<=", [ start; index ]) &&& Apply ("<", [ index; stop ]))
+                 inside
+                 (equal (at after index) (at before index))) ))
+
 (* That one sequence is another with the element at [index] replaced by
    [part]. *)
 and replaced context frame element ~before ~after index part =
@@ -5732,6 +5909,26 @@ and store context frame (place : place) new_value =
       let array_type = place_type context frame array in
       let frame, before = place_value context frame array in
       store context frame array (array_updated context frame array_type before index new_value)
+  | Lent
+      {
+        kind =
+          Call
+            {
+              callee = Intrinsic { operation = View_at_mut; type_arguments = T.Type element :: _ };
+              arguments = [ Passed { value = Place owner; _ }; Passed { value = index; _ } ];
+              _;
+            };
+        _;
+      } ->
+      let element = substituted context frame element in
+      let _, index = operand_value context { frame with checking = false } index in
+      let frame, before = place_value context frame owner in
+      let updated = arrive context frame "changed" (place_type context frame owner) in
+      replaced context frame element
+        ~before:(buffer_model context View element before)
+        ~after:(buffer_model context View element updated)
+        index new_value;
+      store context frame owner updated
   | Lent ({ kind = Call ({ lends = Some T.Mut; _ } as call_); _ } as node) -> (
       match resolved_call ~lent_final:new_value context frame node call_ with
       | Some (after, _) -> after
@@ -6458,6 +6655,11 @@ let new_context database ~home ~current ~terminates ~measures =
     holes = [];
     call_targets = [];
     validating = [];
+    ranking =
+      terminates && measures = []
+      && Call_graph.recursive
+           (Query.demand database Call_graph.graph (Path.package current))
+           current;
     disjoint =
       (match Query.demand database Ownership.ownership home with
       | Some ownership ->
