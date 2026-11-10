@@ -135,7 +135,9 @@ let () =
       let path = Filename.concat (Lazy.force scratch) "written.txt" in
       let status, output, _ =
         run_main ~arguments:[ path ]
-          {|fn main(arguments: List[String]) -> ExitCode
+          {|use standard::files
+
+fn main(arguments: List[String]) -> ExitCode
   uses Console, FileRead, FileWrite, Handles
 {
   let path = Path.new(arguments[1].slice())
@@ -144,6 +146,14 @@ let () =
   }
   if FileRead.read_text(path) is Ok(text) {
     Console.print_line("${text.length()} bytes".slice())
+  }
+  let streamed = Path.new("${arguments[1]}.streamed".slice())
+  let wrote = files::write_with(streamed, write: fn(writer) {
+    mut writer.write("one ".slice())?
+    mut writer.write("two".slice())
+  })
+  if wrote is Ok(_) && FileRead.read_text(streamed) is Ok(text) {
+    Console.print_line("streamed ${text}".slice())
   }
   match FileRead.open(path) {
     Ok(file) => {
@@ -165,7 +175,7 @@ let () =
 |}
       in
       expect_int ~expected:0 status;
-      expect_string ~expected:"22 bytes\nfirst\nsecond line\nmissing\n" output)
+      expect_string ~expected:"22 bytes\nstreamed one two\nfirst\nsecond line\nmissing\n" output)
 
 let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"

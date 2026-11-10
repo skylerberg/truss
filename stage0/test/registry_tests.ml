@@ -59,8 +59,13 @@ let () =
       match Lock.parse text with
       | [
           { name = "acme::geometry_v2"; version = 2, 1, 3; holds = []; _ };
-          { name = "truss::http"; version = 1, 12, 0; holds = [ "Clock"; "NetworkClient" ]; _ };
-          { name = "truss::json"; version = 1, 9, 4; holds = []; _ };
+          {
+            name = "truss::http";
+            version = 1, 12, 0;
+            holds = [ "Clock"; "Handles"; "NetworkClient" ];
+            _;
+          };
+          { name = "truss::toml"; version = 1, 9, 4; holds = []; _ };
         ] as entries ->
           if Lock.print entries <> text then fail "written as %S" (Lock.print entries)
       | _ -> fail "read differently");

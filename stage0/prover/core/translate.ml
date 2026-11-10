@@ -195,9 +195,9 @@ type context = {
   mutable holes : (Names.key * span) list;  (** Reversed. *)
   mutable validating : T.ty list;
       (** The types whose invariants are being read. An invariant that calls a function reads the
-          validity of what the call takes and gives, and for a type that contains itself through
-          a type with such an invariant, as a tree whose children are a [Map], that would go on
-          for ever. *)
+          validity of what the call takes and gives, and for a type that contains itself through a
+          type with such an invariant, as a tree whose children are a [Map], that would go on for
+          ever. *)
   mutable call_targets : (L.term * C.local) list;
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
 }

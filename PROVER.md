@@ -505,6 +505,13 @@ invariants and the validity of its fields.
 - **Functions in an invariant are definitions or contracts like any
   others,** so a type's validity may unfold `is_sorted` or rely on its
   contract.
+- **A type's validity is read once on the way down.** A type may contain
+  itself through a type that has an invariant, as a tree whose children are
+  a `Map`, whose invariant calls functions of its entries. Reading that
+  invariant asks for the validity of an entry, and so of the tree again.
+  While a type's validity is being read, a second reading of the same
+  type's is taken to hold, as it is for a type that contains itself in its
+  own fields.
 - **Another package's opaque type** has a validity that is a predicate the
   prover never unfolds there: a value of the type comes from its own
   package, which shows the invariant, so elsewhere validity is assumed
@@ -911,6 +918,15 @@ regardless, with their run-time checks.
   through a hole ends there for the prover, as an `assume false` would,
   and the obligations after it hold trivially. That is sound because a
   hole is never in a program that is built.
+- **A `todo` in code ends its path too.** A function whose body is `todo`
+  has contracts that wait for the body, and none of them is a failure:
+  DESIGN.md has a package's signatures and contracts written before its
+  code. A `todo` partway through a body leaves what is before it proven and
+  what is after it on that path waiting. It is not recorded as a hole,
+  since `truss holes` lists every `todo` already.
+- **An `impl`'s laws wait for its methods.** A law is about what an
+  `impl`'s methods return, so while a method the `impl` writes holds a
+  `todo`, its laws are not obligations.
 - **Holes are not errors.** Truss has no warnings, so a hole is not a
   diagnostic: each definition's outcome lists its holes, `truss holes`
   lists every `todo` with what it blocks, and `truss build` refuses a
