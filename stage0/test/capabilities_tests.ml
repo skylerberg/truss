@@ -1,6 +1,5 @@
 (* The tests of capabilities: what code may call, lambdas' uses,
-   capability parameters, provide, and dependency grants. See
-   TYPECHECKER.md, "Capabilities". *)
+   capability parameters, provide, and dependency grants. *)
 
 open Harness
 open Support

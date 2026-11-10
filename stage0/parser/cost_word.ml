@@ -1,6 +1,5 @@
 (* The words of a [cost] clause. The lexer reads them as names, and the
-   parser recognizes them by their spelling where a clause expects them. See
-   GRAMMAR.md, "Keywords". *)
+   parser recognizes them by their spelling where a clause expects them. *)
 
 type t = Amortized | Time | Allocations | Allocated_bytes | Calls | O | Finite | Potential
 

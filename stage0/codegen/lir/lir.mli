@@ -1,6 +1,5 @@
 (* The lowered IR: a small typed control-flow graph for each instance, which
    drop elaboration and yield lowering transform and the C emitter prints.
-   See CODEGEN.md, "The lowered IR".
 
    Locals are mutable slots, not SSA. Every choice about how a value is
    passed is already explicit: a parameter that arrives as a pointer has a
@@ -80,7 +79,7 @@ type binary =
   | Bit_xor
   | Shift_left  (** The amount is masked to the width of the value *)
   | Shift_right  (** Arithmetic on signed integers, logical on unsigned *)
-  | Equal  (** On floats, every NaN equals every NaN, as DESIGN.md's lawful equality says *)
+  | Equal  (** On floats, every NaN equals every NaN *)
   | Not_equal
   | Less  (** On floats, NaN comes after every number *)
   | Less_equal
@@ -90,9 +89,8 @@ type binary =
   | Ieee_less
   | Ieee_less_equal
 
-(* The operations the intrinsic module lowers to directly. See CODEGEN.md,
-   "The system interface". Operating-system calls are added with the
-   standard library's real implementations. *)
+(* The operations the intrinsic module lowers to directly. Operating-system
+   calls are added with the standard library's real implementations. *)
 type intrinsic =
   | Allocate
       (** [(size: USize, alignment: USize) -> pointer]; ends the process when memory runs out *)
@@ -185,10 +183,9 @@ type rvalue =
   | Function_value of { code : function_ref; environment : operand option }
 
 (* A position within a definition, which the definition's anchor turns into
-   a file and line. See CODEGEN.md, "Positions". It names its definition,
-   rather than taking the instance's, because code can come from another
-   definition: a trait's provided method compiled for an [impl] reports
-   positions in the trait. *)
+   a file and line. It names its definition, rather than taking the
+   instance's, because code can come from another definition: a trait's
+   provided method compiled for an [impl] reports positions in the trait. *)
 type site = { definition : Path.t; line : int; column : int }
 
 (* Why a [fail] ends the run: a panic, a failed [assert] in a test, or a
@@ -308,8 +305,7 @@ val version : int
 (* The canonical encoding, in deterministic CBOR. Each path, in a type or a
    site, is written by [path], and each reference to another instance by
    [instance], which by default encode them; test keys pass ones that
-   number them instead, so that no name is in them. See CODEGEN.md, "Test
-   results". *)
+   number them instead, so that no name is in them. *)
 val encode : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> t -> Cbor.t
 val encode_data : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> data -> Cbor.t
 val encode_table : ?path:(Path.t -> Cbor.t) -> ?instance:(Instance.key -> Cbor.t) -> table -> Cbor.t

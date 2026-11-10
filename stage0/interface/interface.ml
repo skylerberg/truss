@@ -1,5 +1,4 @@
-(* Checking interfaces. See TYPECHECKER.md, "Checking signatures and
-   definitions", "Properties of types", and "Finding an impl". *)
+(* Checking interfaces. *)
 
 module Summary = Summary
 module Lower = Lower

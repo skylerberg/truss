@@ -1,6 +1,6 @@
 (* What the ownership check knows about a definition: places and how two
    overlap, what each local is, and reachability, which decides how long a
-   loan lasts. See TYPECHECKER.md, "Places". *)
+   loan lasts. *)
 
 open Syntax
 module T = Types

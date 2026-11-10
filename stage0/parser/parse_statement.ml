@@ -1,5 +1,5 @@
 (* Blocks and statements, with a block's lines, trailing lambdas, and loops.
-   See PARSER.md, "Statements". This module sets [Parse_hooks]. *)
+   This module sets [Parse_hooks]. *)
 
 open Syntax
 open Atoms

@@ -1,7 +1,6 @@
 (* The line on standard error that shows how a long step is getting on,
    redrawn in place. It is drawn only when standard error is a terminal, and
-   erased when the step ends, so logs hold only the report. See CLI.md,
-   "Testing". *)
+   erased when the step ends, so logs hold only the report. *)
 
 type t = { enabled : bool; mutable drawn : bool }
 

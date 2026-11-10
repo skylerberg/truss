@@ -1,5 +1,4 @@
-(* The checks on each name on its own (LEXER.md, "Names and keywords"): that
-   it is ASCII, and the case rules.
+(* The checks on each name on its own: that it is ASCII, and the case rules.
 
    A name with a problem gets one diagnostic, for the first check it fails.
    A case problem has a fix that rewrites the name to pass every check. A

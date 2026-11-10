@@ -1,5 +1,5 @@
 (* Static data as C: constants' values, storage and blocks as static
-   objects of their own, capability tables, and evidence. See emit_c.ml. *)
+   objects of their own, capability tables, and evidence. *)
 
 open C_runtime
 open C_types

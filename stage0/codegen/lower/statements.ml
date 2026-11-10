@@ -1,5 +1,5 @@
 (* Statements: blocks, statements, [let], loops, conditions lowered as
-   jumps, and [match]. See lower.ml. *)
+   jumps, and [match]. *)
 
 open Definitions
 open Lowering

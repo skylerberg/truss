@@ -1,6 +1,5 @@
-(* Lowering: the checked form of one instance to its LIR. See CODEGEN.md,
-   "Lowering expressions". The library's modules, in the order each builds
-   on the ones before it:
+(* Lowering: the checked form of one instance to its LIR. The library's
+   modules, in the order each builds on the ones before it:
 
    - [Definitions]: lowering's context, and finding an instance's code and
      signature

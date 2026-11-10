@@ -1,4 +1,4 @@
-(* [truss show]: the signatures at each path. See CLI.md, "truss show". *)
+(* [truss show]: the signatures at each path. *)
 
 module Names = Resolve.Names
 

@@ -1,4 +1,4 @@
-(* Expressions. See PARSER.md, "Expressions", and GRAMMAR.md.
+(* Expressions.
 
    Types, clauses, expressions, and statements contain each other: a
    statement has a type annotation, a type in parentheses can carry a [cost]

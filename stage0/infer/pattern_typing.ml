@@ -1,6 +1,5 @@
 (* Typing patterns: what each binds and with which mode, constants and
-   literals in patterns, and the values of character and byte literals. See
-   TYPECHECKER.md, "Typing patterns". *)
+   literals in patterns, and the values of character and byte literals. *)
 
 open Syntax
 module T = Types
@@ -264,7 +263,7 @@ and check_literal_fits state (value : expression) number type_ =
 
 (* The width of [USize] and [ISize] the package's code must hold for: 32
    bits unless its manifest says [usize_bits = 64], so that code checked
-   once holds on every target. See DESIGN.md, "Integers". *)
+   once holds on every target. *)
 and usize_bits state =
   match Workspace.package state.database state.package with
   | Some package -> package.usize_bits
@@ -291,7 +290,7 @@ and builtin_range ?(usize_bits = 64) type_ =
 
 (* [Character"a"] and [UInt8"\n"]: a single character or byte is a tagged
    string, of one Unicode scalar value or one ASCII character, without
-   [${...}]. See SYNTAX.md, "Characters and bytes". *)
+   [${...}]. *)
 and character_tag state (literal : string_literal) =
   match literal.tag with
   | Some tag -> (

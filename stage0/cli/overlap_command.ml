@@ -1,7 +1,6 @@
 (* [truss overlap]: where this worktree's changes meet those of other open
    worktrees of the repository, or of a branch, and with [--merge], the
-   errors a merge of the two would have that neither has. See DATABASE.md,
-   "Parallel work". *)
+   errors a merge of the two would have that neither has. *)
 
 let describe (place : Database.place) =
   match place.path with

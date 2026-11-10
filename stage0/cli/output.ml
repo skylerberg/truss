@@ -2,7 +2,7 @@
    standard output and error. One run in the background process writes its
    output to a buffer, which goes back with the answer, and its errors,
    such as the status line, straight to the client as progress, so they show
-   while it works. See CLI.md, "Output streams and exit status". *)
+   while it works. *)
 
 type t = {
   out : string -> unit;

@@ -1,5 +1,5 @@
 (* Places, operands, constants, operators, and the values a statement
-   builds, as C expressions. See emit_c.ml. *)
+   builds, as C expressions. *)
 
 open C_runtime
 open C_types
@@ -167,8 +167,8 @@ let bit_width context (scalar : Memory_layout.scalar) =
 let unsigned_of context (scalar : Memory_layout.scalar) =
   match scalar with Integer integer -> unsigned_c integer | _ -> scalar_c context scalar
 
-(* Float comparisons follow DESIGN.md's lawful rules: every NaN equals every
-   NaN, and NaN comes after every number. *)
+(* Float comparisons are lawful: every NaN equals every NaN, and NaN comes
+   after every number. *)
 let lawful_equal a b = Printf.sprintf "(%s == %s || (%s != %s && %s != %s))" a b a a b b
 let lawful_less a b = Printf.sprintf "(%s < %s || (%s == %s && %s != %s))" a b a a b b
 

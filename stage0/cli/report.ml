@@ -1,8 +1,7 @@
 (* The diagnostics of the packages a command is about, shown for people on
-   standard error or as JSON. See CLI.md, "Output streams and exit status".
-   A manifest that cannot be read, or a package name used twice, is a
-   problem in the code too, which the session finds before any file is
-   checked. *)
+   standard error or as JSON. A manifest that cannot be read, or a package
+   name used twice, is a problem in the code too, which the session finds
+   before any file is checked. *)
 
 type file = { module_ : Path.module_; source : Source.t; diagnostics : Diagnostic.t list }
 type t = { files : file list; problems : string list }

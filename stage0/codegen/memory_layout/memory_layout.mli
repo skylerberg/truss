@@ -1,10 +1,9 @@
 (* The memory layout of every ground type: its size, its alignment, where its
    fields go, how its variants are told apart, and which of its values are
-   spare for an enclosing type to use. See CODEGEN.md, "Data layout".
+   spare for an enclosing type to use.
 
    No program can observe a layout, so the compiler is free to choose it.
-   The rules here are the ones CODEGEN.md states: fields placed by
-   alignment, largest first, then by name; sum types as a tag and a union of
+   The rules are: fields placed by alignment, largest first, then by name; sum types as a tag and a union of
    their variants; and niches that remove the tag where a field has spare
    values. *)
 

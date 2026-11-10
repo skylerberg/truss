@@ -1,5 +1,5 @@
 (* The state of lowering one function: its frame, scopes, loops, and
-   temporaries, and the small helpers every part of lowering shares. See lower.ml. *)
+   temporaries, and the small helpers every part of lowering shares. *)
 
 open Definitions
 open Lir_builder
@@ -54,8 +54,7 @@ let trivial st ty = Glue.trivial st.context.glue ty
 let zero_size st ty = (Memory_layout.of_type st.context.env ty).size = 0
 
 (* Whether a type is one of the built-in numbers, [Bool], or [Character],
-   whose operators are primitive operations, never calls. See CODEGEN.md,
-   "Primitive operations". *)
+   whose operators are primitive operations, never calls. *)
 let primitive_methods =
   [
     ("add", "Add");

@@ -1,5 +1,5 @@
 (* Reading a package's manifest, [truss.toml]: the subset of TOML a
-   manifest uses. See SYNTAX.md, "Package manifest".
+   manifest uses.
 
      [package]
      name = "weather"

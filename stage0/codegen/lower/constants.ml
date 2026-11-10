@@ -1,5 +1,5 @@
 (* Constants: a constant's value folded exactly from its expression, or
-   worked out by running its evaluator. See lower.ml. *)
+   worked out by running its evaluator. *)
 
 open Definitions
 open Lowering

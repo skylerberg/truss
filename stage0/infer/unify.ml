@@ -1,5 +1,4 @@
-(* Inference variables and unification, within one statement. See
-   TYPECHECKER.md, "Bidirectional, one statement at a time". *)
+(* Inference variables and unification, within one statement. *)
 
 module T = Types
 

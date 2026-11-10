@@ -1,4 +1,4 @@
-(* Deterministic CBOR. See cbor.mli and RFC 8949, sections 3 and 4.2. *)
+(* Deterministic CBOR. *)
 
 type t =
   | Integer of Z.t

@@ -1,6 +1,5 @@
-(* The JSON the commands write with --json. See CLI.md, "Common options".
-   Strings are written as diagnostics write them, so the output is always
-   valid UTF-8. *)
+(* The JSON the commands write with --json. Strings are written as diagnostics
+   write them, so the output is always valid UTF-8. *)
 
 type t =
   | Null

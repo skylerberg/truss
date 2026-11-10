@@ -1,4 +1,4 @@
-(** Inserts [Newline] tokens and matches brackets. See LEXER.md, "Layout".
+(** Inserts [Newline] tokens and matches brackets.
 
     Each function pulls raw tokens until [End_of_file] and returns the tokens, ending with
     [End_of_file]. Layout makes each token from its raw token, adding the line-break flags. Brackets
@@ -29,10 +29,10 @@ type input =
       *)
 
 val can_end : Token.kind -> bool
-(** Whether a token can end a statement, as GRAMMAR.md lists them. *)
+(** Whether a token can end a statement. *)
 
 val can_begin : Token.kind -> bool
-(** Whether a token can begin a statement, as GRAMMAR.md lists them. *)
+(** Whether a token can begin a statement. *)
 
 val file :
   source:Source.t ->

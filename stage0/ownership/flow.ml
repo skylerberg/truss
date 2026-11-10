@@ -1,6 +1,6 @@
 (* The flow of the walk: the places that may have been moved, the views and
    loans live at a point, and what each read, change, and move of a place
-   must respect. See TYPECHECKER.md, "Moves", "Loans", and "Views". *)
+   must respect. *)
 
 open Syntax
 module T = Types

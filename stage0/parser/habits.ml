@@ -1,5 +1,5 @@
 (* Syntax from other languages that is made of valid tokens: the message and
-   exact fix for each. See PARSER.md, "Syntax from other languages".
+   exact fix for each.
 
    The parsing modules recognize each habit at the point where the ordinary
    grammar has already rejected a token, so a recognizer can never change

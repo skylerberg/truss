@@ -1,7 +1,6 @@
 (* The documents agree with the parser: every example parses, GRAMMAR.md's
    grammar accepts what the parser accepts and rejects what it rejects, and
-   GRAMMAR.md lists the words the parser recognizes by spelling. See
-   PARSER.md, "Testing". *)
+   GRAMMAR.md lists the words the parser recognizes by spelling. *)
 
 open Harness
 open Parse_support

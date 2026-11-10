@@ -1,5 +1,5 @@
-(* Checks on the source text (LEXER.md, "Source text"): UTF-8, forbidden
-   characters, and line breaks, in code and in strings alike. *)
+(* Checks on the source text: UTF-8, forbidden characters, and line breaks,
+   in code and in strings alike. *)
 
 open Cursor
 

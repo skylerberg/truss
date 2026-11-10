@@ -1,5 +1,5 @@
 (* The tests of the standard library's source: each module checks through
-   every stage with no diagnostic. See TYPECHECKER.md, "The prelude". *)
+   every stage with no diagnostic. *)
 
 open Harness
 

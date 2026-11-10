@@ -1,5 +1,4 @@
-(* The tests of the rules on use: unused variables and unreachable code.
-   See TYPECHECKER.md, "Unreachable code". *)
+(* The tests of the rules on use: unused variables and unreachable code. *)
 
 open Harness
 open Support

@@ -1,5 +1,5 @@
 (* Reading commits from git, for sessions opened for a commit rather than a
-   directory. See DATABASE.md, "Sessions for commits". *)
+   directory. *)
 
 let run ?(environment = []) ~directory arguments =
   let command =

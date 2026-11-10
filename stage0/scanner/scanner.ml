@@ -1,4 +1,4 @@
-(* Bytes to raw tokens. See LEXER.md.
+(* Bytes to raw tokens.
 
    The scanner is an index moving over the file's bytes. ASCII bytes are
    handled directly, and a byte of 0x80 or above starts a UTF-8 sequence,

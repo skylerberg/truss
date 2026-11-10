@@ -1,5 +1,4 @@
-(** The checked form of a definition: what the prover and code generation read. See TYPECHECKER.md,
-    "The checked form".
+(** The checked form of a definition: what the prover and code generation read.
 
     It is a set of dense tables keyed by the tree's node ids, so it never copies the tree. Every
     type in it is solved: no [Variable], [Literal], or [Hole] remains. A local is named by the id of
@@ -33,7 +32,7 @@ type callee =
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
   | Built_in_operator  (** [&&], [||], [!], and the bitwise operators, on built-in types. *)
 
-(** The only conversions, each recorded where it happens. See TYPECHECKER.md, "No subtyping". *)
+(** The only conversions, each recorded where it happens. *)
 type conversion =
   | From_never
   | Owned_to_view
@@ -104,8 +103,7 @@ type template = {
   interpolated : bool;
 }
 
-(** An obligation the type checker creates, which the prover discharges. See TYPECHECKER.md,
-    "Obligations the type checker creates". *)
+(** An obligation the type checker creates, which the prover discharges. *)
 type obligation =
   | Disjoint of { first : Syntax.id; second : Syntax.id }
   | Integer_fits of { expression : Syntax.id; type_ : Types.ty }

@@ -1,5 +1,4 @@
-(* Lowering: the checked form of one instance to its LIR. See CODEGEN.md,
-   "Lowering expressions".
+(* Lowering: the checked form of one instance to its LIR.
 
    Lowering reads a definition's syntax tree with its checked form's tables,
    which say what every node means, and writes LIR with every choice made:

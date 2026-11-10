@@ -1,5 +1,5 @@
 (* [truss test]: checks the package, then runs the tests whose results are
-   not kept. See CLI.md, "Testing". *)
+   not kept. *)
 
 type test = { path : Path.t; module_ : Path.module_; name : string; file : string; line : int }
 

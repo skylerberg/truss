@@ -1,4 +1,4 @@
-(* The lowered IR. See lir.mli. Its parts:
+(* The lowered IR. Its parts:
 
    - [Ir]: the types, the queries over them, and the canonical form
    - [Encoding]: the canonical encoding and the hash

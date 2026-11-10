@@ -1,6 +1,6 @@
 (* The C every file starts with: the build and linkage kinds, the
    runtime's declarations, and the helpers a file includes when it uses
-   them. See emit_c.ml. *)
+   them. *)
 
 type build = Development | Release
 type linkage = External | Internal

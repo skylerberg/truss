@@ -1,6 +1,6 @@
 (* The sequences from other languages that lex as whitespace: comments, `;`,
-   and characters Truss does not use (LEXER.md, "Rejected sequences"). Each
-   is reported, and its fix removes it with [Source_text.remove_trivia]. *)
+   and characters Truss does not use. Each is reported, and its fix removes
+   it with [Source_text.remove_trivia]. *)
 
 open Cursor
 

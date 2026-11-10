@@ -1,5 +1,5 @@
 (** The type checker's entry point: loading a build's packages and gathering every stage's
-    diagnostics. See TYPECHECKER.md, "Structure". *)
+    diagnostics. *)
 
 module Manifest = Manifest
 

@@ -1,6 +1,5 @@
 (* Whether a type is [Copyable], [Plain], or a view, worked out from its
-   shape, as a condition on its type arguments. See TYPECHECKER.md,
-   "Properties of types".
+   shape, as a condition on its type arguments.
 
    An opaque type has [Copyable] or [Plain] only when it declares so with
    [derives], and then exactly when its type arguments have it, as for a

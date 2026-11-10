@@ -1,5 +1,5 @@
 (* [truss run] and [truss build]: the package's program, built from its
-   [main]. See CLI.md, "Running and building". *)
+   [main]. *)
 
 exception Stop of int
 (** The command reported why it stopped, and exits with this status. *)
