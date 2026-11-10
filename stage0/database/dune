@@ -11,5 +11,6 @@
   diagnostic
   standard_library
   type_checker
+  registry
   resolve
   compile))

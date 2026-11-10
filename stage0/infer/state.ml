@@ -10,7 +10,6 @@ module C = Checked
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Properties = Interface.Properties
 module Lower = Interface.Lower
 
 (* State *)
@@ -27,6 +26,9 @@ type env = {
   loop_element : T.ty option;
       (** In a [for] loop's clauses, what each iteration receives, which [yielded] is a sequence of.
       *)
+  own : T.parameter list;
+      (** The capability parameters of the function being checked. Each stands for itself throughout
+          the body, in a call of the function by itself too. *)
 }
 
 type frame = {
@@ -37,6 +39,9 @@ type frame = {
   mutable pending : (unit -> bool) list;
       (** Checks that wait for types the statement has not decided yet; each says whether it is
           done. *)
+  mutable unmet : (T.ty * T.trait_reference) list;
+      (** The bounds reported as not holding, each with its type, so that a statement reports one
+          once however many of its parts need it. *)
   frame_specification : bool;
   span : span;
 }
@@ -62,6 +67,12 @@ type state = {
   mutable lambdas : span list;  (** The lambdas being checked, innermost first. *)
   mutable unsolved : Diagnostic.reported option;
       (** The report of the first statement whose types could not be worked out. *)
+  widened : (id, T.capability list * T.capability list) Hashtbl.t;
+      (** By its expression, each function value that uses more than the function type it meets
+          lists: that type's [uses], which have a capability parameter of what an enclosing call
+          calls, and the capabilities they do not list, which the call's check takes as passed for
+          the parameter. *)
+  mutable evidence : string list;  (** The packages whose [impl]s met a bound here. *)
 }
 
 let reported state ?(fixes = []) code (span : span) message =
@@ -122,10 +133,20 @@ let implements state type_ trait =
   Impls.implements state.database ~bounds:(bounds state) (zonk state type_)
     (Unify.zonk_trait state.unifier trait)
 
-let copyable state type_ =
-  Properties.copyable state.database ~bounds:(bounds state) (zonk state type_)
+(* A bound that is met by an [impl] names the [impl]'s code, so what the
+   [impl] uses must be granted to its package. *)
+let check_evidence_grants state (span : span) evidence =
+  let impls = Interface.Grants.evidence_uses state.database ~bounds:(bounds state) evidence in
+  state.evidence <- List.map (fun (impl, _, _) -> Path.package impl) impls @ state.evidence;
+  List.iter
+    (fun message ->
+      state.diagnostics <-
+        Diagnostic.make ~code:(Capabilities Not_granted) (Source.span span.start span.stop) message
+        :: state.diagnostics)
+    (Interface.Grants.messages state.database ~package:state.package impls)
 
-let plain state type_ = Properties.plain state.database ~bounds:(bounds state) (zonk state type_)
+let copyable state type_ = Impls.copyable state.database ~bounds:(bounds state) (zonk state type_)
+let plain state type_ = Impls.plain state.database ~bounds:(bounds state) (zonk state type_)
 
 (* The associated type the [impl] of a trait for a type gives. An [impl]
    that leaves one out has that reported as its own error, which is the
@@ -176,10 +197,6 @@ let string_type = T.Named { path = string_path; arguments = [] }
 
 let is_named path type_ =
   match type_ with T.Named named -> Path.equal named.path path | _ -> false
-
-let element_of = function
-  | T.Named { arguments = T.Type element :: _; _ } -> Some element
-  | _ -> None
 
 (* Statements *)
 
@@ -285,6 +302,7 @@ let in_statement state env (span : span) body =
       bindings = [];
       patterns = [];
       pending = [];
+      unmet = [];
       frame_specification = env.specification;
       span;
     }
@@ -399,6 +417,145 @@ type static_ =
       (** With the trait's arguments, when they are written. *)
   | Static_capability of Path.t
 
+(* Where a value of one type goes where another is expected, which is the
+   one place a type converts, and the conversion made:
+
+   - [Never] becomes any type.
+   - A function value becomes a function type with more [uses] or weaker
+     costs. A capability the expected type does not list is allowed only
+     when the type has a capability parameter of another function, which a
+     call of that function solves as what is passed for it: the value is
+     noted for the check of capabilities, which knows the call. Costs that
+     the types' constants do not show to be weaker are the prover's to
+     show: of what is passed for a parameter where it checks the call, and
+     of [expression] elsewhere, as an obligation.
+   - Where a value is passed for a parameter, an owned collection becomes
+     its view and, in a specification, a built-in integer becomes an
+     [Integer] or an [Integer] a built-in integer that it fits.
+
+   Anything else must be the type expected. *)
+let convert state env ?(argument = false) ?expression (span : span) ~found ~expected :
+    C.conversion option =
+  let given = normalize state found and wanted = normalize state expected in
+  let refused () =
+    mismatch state span ~expected ~found;
+    None
+  in
+  match (given, wanted, expression) with
+  | T.Never, _, _ -> Some From_never
+  | T.Named given_named, T.Named wanted_named, _
+    when argument
+         && List.exists
+              (fun (owned, view) ->
+                Path.equal given_named.path owned && Path.equal wanted_named.path view)
+              [ (list_path, slice_path); (string_path, string_slice_path) ] ->
+      if not (Unify.unify_arguments state.unifier wanted_named.arguments given_named.arguments) then
+        mismatch state span ~expected ~found;
+      Some Owned_to_view
+  | T.Integer, _, Some expression when argument && env.specification && T.is_integer_type wanted ->
+      state.obligations <- Integer_fits { expression; type_ = wanted } :: state.obligations;
+      Some From_integer
+  (* A built-in integer is an [Integer] wherever a specification gives one. *)
+  | _, T.Integer, _ when env.specification && T.is_integer_type given -> Some To_integer
+  | T.Function given_function, T.Function wanted_function, _
+    when not (T.same_clauses given_function wanted_function) ->
+      let unlisted =
+        List.filter
+          (fun capability -> not (List.mem capability wanted_function.uses))
+          given_function.uses
+      in
+      let solved_by_a_call =
+        List.exists
+          (function
+            | T.Capability_parameter parameter -> not (List.mem parameter env.own)
+            | T.Capability _ -> false)
+          wanted_function.uses
+      in
+      let proven = T.costs_imply ~given:given_function.costs ~wanted:wanted_function.costs in
+      if
+        Unify.unify state.unifier wanted
+          (T.Function
+             { given_function with uses = wanted_function.uses; costs = wanted_function.costs })
+        && (unlisted = [] || (solved_by_a_call && Option.is_some expression))
+        && (proven || argument || Option.is_some expression)
+      then begin
+        Option.iter
+          (fun expression ->
+            if unlisted <> [] then
+              Hashtbl.replace state.widened expression (wanted_function.uses, unlisted);
+            if not (proven || argument) then
+              state.obligations <-
+                Costs_imply { expression; given = given_function; expected = wanted_function }
+                :: state.obligations)
+          expression;
+        Some Function_widening
+      end
+      else refused ()
+  | _ -> if Unify.unify state.unifier wanted given then None else refused ()
+
+(* Bounds *)
+
+(* Holds a type to a bound, once the statement has worked the type out. The
+   type must implement the trait, and each associated type the bound fixes
+   must equal the one the [impl] gives, which can be what works out the
+   rest of the statement. [unmet] reports the type with [None] when it does
+   not implement the trait, and with an associated type's name and what
+   the [impl] gives when that is another type. What the [impl] uses and its
+   package is not granted is reported at [at]. *)
+let require state ~(at : span) type_ (bound : T.trait_reference) ~unmet =
+  let trait = { bound with associated = [] } in
+  defer state (fun () ->
+      let type_ = normalize state type_ in
+      if Unify.unknowns state.unifier type_ <> [] then false
+      else begin
+        (match implements state type_ trait with
+        | None -> unmet type_ None
+        | Some evidence ->
+            check_evidence_grants state at evidence;
+            List.iter
+              (fun (name, wanted) ->
+                match
+                  Impls.associated_type state.database ~bounds:(bounds state) type_ trait name
+                with
+                | Some given when not (unify state given wanted) -> unmet type_ (Some (name, given))
+                | _ -> ())
+              bound.associated);
+        true
+      end)
+
+(* Holds what stands for a definition's generic parameters to their
+   bounds. [of_type] is the type whose parameters they are, and without it
+   they are those of what a call calls. *)
+let require_bounds state (span : span) ?of_type generics substitution =
+  List.iter
+    (fun (argument, bound) ->
+      require state ~at:span argument bound ~unmet:(fun argument other ->
+          let bound = Unify.zonk_trait state.unifier bound in
+          let reported =
+            match current_frame state with
+            | Some frame ->
+                let reported = List.mem (argument, bound) frame.unmet in
+                frame.unmet <- (argument, bound) :: frame.unmet;
+                reported
+            | None -> false
+          in
+          if not reported then
+            let needs =
+              Printf.sprintf "%s needs `%s: %s`"
+                (match of_type with
+                | Some type_ -> Printf.sprintf "`%s`" (show state type_)
+                | None -> "This")
+                (T.show argument) (T.show_trait bound)
+            in
+            report state Unsatisfied_bound span
+              (match other with
+              | None -> needs ^ ", which does not hold."
+              | Some (name, given) ->
+                  Printf.sprintf "%s, and its `%s` is `%s`." needs name (show state given))))
+    (Impls.required generics substitution)
+
+(* Instantiating types *)
+
 let fresh_arguments state (path : Path.t) =
   match Query.demand state.database Environment.type_interface path with
   | Some interface ->
@@ -411,16 +568,31 @@ let fresh_arguments state (path : Path.t) =
         interface.type_generics
   | None -> []
 
+let require_type_bounds state span path arguments =
+  match Query.demand state.database Environment.type_interface path with
+  | Some interface ->
+      Option.iter
+        (require_bounds state span ~of_type:(T.Named { path; arguments }) interface.type_generics)
+        (T.substitution_of interface.type_generics arguments)
+  | None -> ()
+
+(* Unknown arguments for a type, which the statement works out, each held to
+   the bounds of its parameter. *)
+let instantiate_type state span path =
+  let arguments = fresh_arguments state path in
+  require_type_bounds state span path arguments;
+  arguments
+
 let rec static_ state (value : expression) : static_ option =
   match (value.kind, head state value) with
   | Self_type_value, _ -> Option.map (fun self -> Static_type self) state.context.self_type
   | _, Some { target = Definition (Type, path); type_arguments; _ } ->
       Some (Static_type (named_type state value path type_arguments))
-  | _, Some { target = Type_parameter id; name; type_arguments } ->
+  | _, Some { target = Type_parameter parameter; name; type_arguments } ->
       if Option.is_some type_arguments then
         report state Arity value.span
           (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." name.text);
-      Some (Static_type (T.Parameter (Lower.declared state.context id name)))
+      Some (Static_type (T.Parameter parameter))
   | _, Some { target = Definition (Trait, path); type_arguments; _ } ->
       Some (Static_trait (path, Option.map (written_arguments state) type_arguments))
   | _, Some { target = Definition (Capability, path); _ } -> Some (Static_capability path)
@@ -437,7 +609,7 @@ and named_type state (value : expression) path type_arguments =
     | _ -> T.Named { path; arguments }
   in
   match type_arguments with
-  | None -> type_ (fresh_arguments state path)
+  | None -> type_ (instantiate_type state value.span path)
   | Some items ->
       let arguments = written_arguments state items in
       (match Query.demand state.database Interface.Summary.generics_of path with
@@ -449,7 +621,7 @@ and named_type state (value : expression) path type_arguments =
                (if List.length expected = 1 then "argument" else "arguments")
                (List.length arguments)
                (if List.length arguments = 1 then "is" else "are"))
-      | _ -> ());
+      | _ -> require_type_bounds state value.span path arguments);
       type_ arguments
 
 (* Type arguments written in an expression, as in [List[String].new()]. *)
@@ -467,8 +639,7 @@ and written_arguments state items =
 and type_argument_of_expression state (value : expression) : T.argument =
   match (value.kind, head state value) with
   | Integer value, _ -> T.Value (Known value)
-  | _, Some { target = Value_parameter id; name; _ } ->
-      T.Value (Value_parameter (Lower.declared state.context id name))
+  | _, Some { target = Value_parameter parameter; _ } -> T.Value (Value_parameter parameter)
   | _, Some { target = Definition (Constant, path); name; _ } -> (
       match Query.demand state.database Interface.Constants.value_of path with
       | Some value -> T.Value (Known value)
@@ -493,7 +664,9 @@ type instance = {
   type_arguments : T.argument list;
 }
 
-let instantiate state ?span ?(extra = []) (signature : T.signature) =
+(* What a signature is where it is used: unknowns for its generic
+   parameters, which the statement works out, each held to its bounds. *)
+let instantiate state (span : span) ?(extra = []) (signature : T.signature) =
   let substitution =
     List.map
       (fun (generic : T.generic) ->
@@ -506,32 +679,7 @@ let instantiate state ?span ?(extra = []) (signature : T.signature) =
       signature.generics
     @ extra
   in
-  (* Each type argument must meet its parameter's bounds, once the
-     statement has worked it out. *)
-  (match span with
-  | Some (span : span) ->
-      List.iter
-        (fun (generic : T.generic) ->
-          match (generic.kind, List.assoc_opt generic.generic substitution) with
-          | Type_generic generic_bounds, Some (T.Type argument) ->
-              List.iter
-                (fun bound ->
-                  defer state (fun () ->
-                      let argument = normalize state argument in
-                      let bound = T.substitute_trait substitution bound in
-                      if Unify.unknowns state.unifier argument <> [] then false
-                      else begin
-                        if Option.is_none (implements state argument bound) then
-                          report state Unsatisfied_bound span
-                            (Printf.sprintf "This call needs `%s: %s`, which does not hold."
-                               (T.show argument)
-                               (T.show_trait (Unify.zonk_trait state.unifier bound)));
-                        true
-                      end))
-                generic_bounds
-          | _ -> ())
-        signature.generics
-  | None -> ());
+  require_bounds state span signature.generics substitution;
   let substitute = T.substitute substitution in
   let output =
     match signature.output with
@@ -575,15 +723,68 @@ let function_signature state (path : Path.t) =
   | Some signature -> Some (Ok signature)
   | None -> Environment.signature_or_report state.database path
 
+(* Lending *)
+
+(* A call of a lending method is the part the method gives, lent for the
+   rest of the caller's statement. It is not a temporary: it is never moved,
+   and what may be done with it follows how it is lent. *)
+let note_lending state (value : expression) (output : T.result) =
+  match output with
+  | Lends (mode, _) -> state.tables.lends.(value.id) <- Some mode
+  | Returns _ | Yields _ -> ()
+
+(* How an expression is lent, when it is what a lending call gives or a
+   part of that, a field or an element. A mark before it is the mark of the
+   place it is lent from. *)
+let rec lent state (value : expression) : T.mode option =
+  match value.kind with
+  | Call _ -> state.tables.lends.(value.id)
+  | Member (base, _) | Parenthesized base -> lent state base
+  | Bracket (base, _) when state.resolved.brackets.(value.id) <> Some Type_arguments ->
+      lent state base
+  | Mode (_, inner) when Option.is_some (marked_call state inner) -> lent state inner
+  | _ -> None
+
+(* Whether a value is borrowed where it is: a place, or a part that is
+   lent. What binds it views it, and what matches it binds views of its
+   parts. *)
+let borrowed state (value : expression) = is_place state value || Option.is_some (lent state value)
+
+(* A place that is assigned or lent [mut]: each index on its way is the
+   [mut] version of [at], which lends its element [mut]. *)
+let rec mutable_place state (value : expression) =
+  match value.kind with
+  | Member (base, _) | Parenthesized base | Mode (_, base) -> mutable_place state base
+  | Bracket (base, _) ->
+      (match state.tables.calls.(value.id) with
+      | Some ({ callee = Trait_method ({ name = "at"; _ } as method_); arguments; _ } as call) ->
+          state.tables.calls.(value.id) <-
+            Some
+              {
+                call with
+                callee = Trait_method { method_ with receiver = Mut };
+                arguments =
+                  List.map
+                    (fun (argument : C.argument) ->
+                      if argument.parameter = 0 then { argument with mode = T.Mut } else argument)
+                    arguments;
+              }
+      | _ -> ());
+      mutable_place state base
+  | _ -> ()
+
 (* Arguments and modes *)
 
-type argument_form = Marked of T.mode * expression | Place | Temporary
+type argument_form = Marked of T.mode * expression | Place | Lent of T.mode | Temporary
 
 let argument_form state (value : expression) =
   match value.kind with
   | Mode (mode, inner) when Option.is_none (marked_call state inner) ->
       Marked ((match mode with Mut -> Mut | Own -> Own), inner)
-  | _ -> if is_place state value then Place else Temporary
+  | _ -> (
+      match lent state value with
+      | Some mode -> Lent mode
+      | None -> if is_place state value then Place else Temporary)
 
 let mark_span (value : expression) (inner : expression) =
   Span.make value.span.start inner.span.start
@@ -591,7 +792,7 @@ let mark_span (value : expression) (inner : expression) =
 let check_mode state (value : expression) (parameter : T.parameter_info) type_ =
   let name = parameter.name in
   match (parameter.mode, argument_form state value) with
-  | Read, (Place | Temporary) -> ()
+  | Read, (Place | Temporary | Lent _) -> ()
   | Read, Marked (_, inner) ->
       report state Redundant_mark value.span
         ~fixes:
@@ -600,11 +801,29 @@ let check_mode state (value : expression) (parameter : T.parameter_info) type_ =
               [ Diagnostic.delete (Source.span value.span.start inner.span.start) ];
           ]
         (Printf.sprintf "`%s` only reads its argument, so it takes no mark." name)
-  | Mut, Marked (Mut, _) -> ()
+  | Mut, Marked (Mut, inner) -> mutable_place state inner
   | Mut, Place ->
       report state Missing_mark value.span
         ~fixes:[ fix "Mark it `mut`." [ insert value.span.start "mut " ] ]
         (Printf.sprintf "`%s` may change its argument, so the call marks it `mut`." name)
+  | Mut, Lent Mut -> mutable_place state value
+  | Mut, Lent (Read | Own) ->
+      report state Wrong_mark value.span
+        (Printf.sprintf
+           "`%s` may change its argument, and this part is lent read-only. Mark the place it is \
+            lent from `mut`, so that it is lent `mut`."
+           name)
+  | Own, Lent _ ->
+      if not (plain state type_) then
+        report state Missing_mark value.span
+          ~fixes:
+            (if copyable state type_ then
+               [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
+             else [])
+          (Printf.sprintf
+             "`%s` takes ownership of its argument, and a part that is lent cannot be given up. \
+              Pass a copy."
+             name)
   | Mut, (Temporary | Marked (Own, _)) ->
       report state Wrong_mark value.span
         (Printf.sprintf "`%s` changes its argument in place, so it must be a place marked `mut`."

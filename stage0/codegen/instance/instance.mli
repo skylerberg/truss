@@ -1,7 +1,6 @@
 (* Instances: one copy of a definition's code, for one set of type arguments
    and capability sets. *)
 
-(** A named function used as a function value: it takes the environment and ignores it *)
 type key =
   | Code of { path : Path.t; type_arguments : Ground.argument list }
       (** A function, a method, or a method of an [impl], whether written, derived, or provided by
@@ -20,15 +19,16 @@ type key =
   | Evaluator of Path.t
       (** Code run while compiling: works out a constant's value and writes its binary form *)
   | Template_check of { from_template : Path.t; texts : string list }
+      (** Code run while compiling: a tag's [from_template] clauses that can run, worked out for a
+          template of these literal texts and no parts, each written out as a [Bool] *)
   | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
       (** Code run while compiling: a call of a function that is not generic, with each argument a
           known integer, or a [Bool] as 0 or 1, its result written out *)
-      (** Code run while compiling: a tag's [from_template] clauses that can run, worked out for a
-          template of these literal texts and no parts, each written out as a [Bool] *)
   | Cursor_next of Ground.yielding
       (** The state machine of a pulled yielding method. Its drop is the [Drop] of its cursor type.
       *)
   | Adapter of { function_ : key; ty : Ground.function_type }
+      (** A named function used as a function value: it takes the environment and ignores it *)
   | Entry of key
       (** The entry for an [impl]'s method of a capability: takes the evidence, then calls the
           method on its implementation with the evidence that implementation captured *)

@@ -58,23 +58,21 @@ let index =
                 (Query.demand database Names.declarations module_))
             package.modules)
 
-module Path_map = Map.Make (Path)
-
 (* A package's impls by the type they are for: each with its trait. *)
 let by_type =
   Query.query ~name:"impls_by_type" ~phase:Interfaces ~show:Fun.id (fun database package ->
       List.fold_left
         (fun table ((trait, type_), impl) ->
-          Path_map.update type_
+          Path.Map.update type_
             (fun found -> Some ((trait, impl) :: Option.value ~default:[] found))
             table)
-        Path_map.empty
+        Path.Map.empty
         (Query.demand database index package)
-      |> Path_map.map List.rev)
+      |> Path.Map.map List.rev)
 
 (* The impls of a package for a type, each with its trait. *)
 let impls_for database (type_ : Path.t) package =
-  Option.value ~default:[] (Path_map.find_opt type_ (Query.demand database by_type package))
+  Option.value ~default:[] (Path.Map.find_opt type_ (Query.demand database by_type package))
 
 let impls_in =
   Query.query ~name:"impls" ~phase:Interfaces ~saved:true
@@ -149,6 +147,17 @@ let impl_interface database (path : Path.t) =
   | Derived { type_; trait } -> derived_interface database ~type_ ~trait
   | _ -> Query.demand database Environment.impl_interface path
 
+(* What a trait's [Self] and parameters stand for in an [impl] of it, in
+   terms of the [impl]'s own generic parameters. A method the trait gives a
+   body is read with this for an [impl] that leaves the method to it, and so
+   are the trait's clauses that an [impl]'s method keeps. *)
+let trait_substitution database (impl : Path.t) =
+  Option.bind (impl_interface database impl) (fun (interface : T.impl_interface) ->
+      Option.map
+        (fun trait ->
+          Properties.trait_substitution trait ~self:interface.for_type interface.implements)
+        (Query.demand database Environment.trait_interface interface.implements.trait))
+
 (* Matching *)
 
 let open_type = function T.Error _ | T.Variable _ | T.Hole -> true | _ -> false
@@ -212,15 +221,10 @@ let cursor_trait : Path.t =
    with the method's type arguments. *)
 let cursor_element database (method_ : Path.t) arguments =
   match Query.demand database Environment.signature method_ with
-  | Some signature when List.length signature.generics = List.length arguments -> (
-      let substitution =
-        List.combine
-          (List.map (fun (generic : T.generic) -> generic.generic) signature.generics)
-          arguments
-      in
-      match signature.output with
-      | Yields (_, element) -> Some (T.substitute substitution element)
-      | _ -> None)
+  | Some ({ output = Yields (_, element); _ } as signature) ->
+      Option.map
+        (fun substitution -> T.substitute substitution element)
+        (T.substitution_of signature.generics arguments)
   | _ -> None
 
 let copyable_path = Properties.copyable_trait
@@ -230,7 +234,23 @@ let plain_path = Properties.plain_trait
    bounds, as the definition asking declares them. *)
 type bounds = T.parameter -> T.trait_reference list
 
-let rec implements database ~(bounds : bounds) ?(depth = 0) (type_ : T.ty)
+(* What a definition's bounds ask of what stands for its generic
+   parameters: each type, with a bound it must meet. *)
+let required (generics : T.generic list) (substitution : T.substitution) =
+  List.concat_map
+    (fun (generic : T.generic) ->
+      match (generic.kind, List.assoc_opt generic.generic substitution) with
+      | Type_generic generic_bounds, Some (T.Type argument) ->
+          List.map (fun bound -> (argument, T.substitute_trait substitution bound)) generic_bounds
+      | _ -> [])
+    generics
+
+(* The evidence that a type implements a trait. Without [conditions] it is
+   the [impl] that answers for the type, whether or not the bounds on its
+   parameters hold, which is what an associated type is read from: a bound
+   that does not hold is reported where the trait is asked for, and reading
+   the type asks nothing more of the type's arguments. *)
+let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true) (type_ : T.ty)
     (wanted : T.trait_reference) : evidence option =
   let arguments_match given_arguments =
     List.length given_arguments = List.length wanted.trait_arguments
@@ -270,9 +290,12 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) (type_ : T.ty)
   else if Option.is_some broken_trait then
     Option.map (fun report -> Accepted (T.Error report)) broken_trait
   else if Path.equal wanted.trait copyable_path || Path.equal wanted.trait plain_path then
+    let property : Properties.property =
+      if Path.equal wanted.trait plain_path then Plain else Copyable
+    in
     if
-      (Path.equal wanted.trait copyable_path && Properties.copyable database ~bounds type_)
-      || (Path.equal wanted.trait plain_path && Properties.plain database ~bounds type_)
+      (not conditions)
+      || Properties.has database ~bounds ~normalize:(normalize database ~bounds) property type_
     then Some Built_in
     else None
   else
@@ -338,21 +361,12 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) (type_ : T.ty)
                             impl.implements.associated
                         in
                         let conditions_hold =
-                          List.for_all
-                            (fun (generic : T.generic) ->
-                              match generic.kind with
-                              | Type_generic generic_bounds -> (
-                                  match List.assoc_opt generic.generic substitution with
-                                  | Some (T.Type argument) ->
-                                      List.for_all
-                                        (fun bound ->
-                                          Option.is_some
-                                            (implements database ~bounds ~depth:(depth + 1) argument
-                                               (T.substitute_trait substitution bound)))
-                                        generic_bounds
-                                  | _ -> true)
-                              | Value_generic | Capability_generic -> true)
-                            impl.impl_generics
+                          (not conditions)
+                          || List.for_all
+                               (fun (argument, bound) ->
+                                 Option.is_some
+                                   (implements database ~bounds ~depth:(depth + 1) argument bound))
+                               (required impl.impl_generics substitution)
                         in
                         if conditions_hold && associated_match ~base:None associated then
                           Some (From_impl { impl = impl_path; substitution })
@@ -364,7 +378,7 @@ and associated_type database ~bounds type_ (trait : T.trait_reference) name =
   match List.assoc_opt name trait.associated with
   | Some fixed -> Some fixed
   | None -> (
-      match implements database ~bounds type_ trait with
+      match implements database ~bounds ~conditions:false type_ trait with
       | Some (From_impl { impl; substitution }) -> (
           match impl_interface database impl with
           | Some impl ->
@@ -420,3 +434,17 @@ and normalize database ~bounds (type_ : T.ty) : T.ty =
               | None -> Some (T.Projection { base; trait; name })))
       | _ -> None)
     type_
+
+(* Whether a type is [Copyable], [Plain], or a view, with each associated
+   type that its definition's facts turn on replaced by what its [impl]
+   chooses. *)
+let has property database ~bounds type_ =
+  Properties.has database ~bounds ~normalize:(normalize database ~bounds) property type_
+
+let copyable = has Copyable
+let plain = has Plain
+let is_view = has View
+
+(* The named types a value of a type holds in place. *)
+let held_in_place database ~bounds type_ =
+  Properties.held database ~normalize:(normalize database ~bounds) type_

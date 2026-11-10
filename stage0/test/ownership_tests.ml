@@ -102,6 +102,33 @@ let () =
       one_diagnostic
         "fn f() -> Slice[Int64] {\n  let items: List[Int64] = [1, 2, 3]\n  items[0..2]\n}\n"
         "ownership.returns_local_view");
+  test "a function cannot return a view of its local nested in a type nested in itself" (fun () ->
+      one_diagnostic
+        "type Holder[Value](value: Value)\n\n\
+         fn f() -> Holder[Holder[Slice[Int64]]] {\n\
+        \  let items: List[Int64] = [1, 2, 3]\n\
+        \  Holder(Holder(items[0..2]))\n\
+         }\n"
+        "ownership.returns_local_view");
+  test "a function cannot return a view of its local kept as an associated type" (fun () ->
+      one_diagnostic
+        "trait Shown {\n\
+        \  type Part\n\
+        \  fn part(self) -> Self.Part\n\
+         }\n\n\
+         type Numbers(items: List[Int64])\n\n\
+         impl Shown for Numbers {\n\
+        \  type Part = Slice[Int64]\n\n\
+        \  fn part(self) -> Slice[Int64] {\n\
+        \    self.items[0..2]\n\
+        \  }\n\
+         }\n\n\
+         type Kept[Source: Shown](part: Source.Part)\n\n\
+         fn f() -> Kept[Numbers] {\n\
+        \  let numbers = Numbers([1, 2, 3])\n\
+        \  Kept(numbers.part())\n\
+         }\n"
+        "ownership.returns_local_view");
   test "a function can return a view of its parameter" (fun () ->
       fine "fn f(items: List[Int64]) -> Slice[Int64] {\n  items[0..2]\n}\n");
   test "a var needs an owned value, with fixes that give up or copy the place" (fun () ->
@@ -526,5 +553,295 @@ let () =
            }\n"
       in
       if found <> 1 then fail "%d obligations" found)
+
+(* Lending: a call of a lending method is a part, lent for the rest of the
+   statement, and the place it is lent from is lent whole for as long. *)
+
+let grid =
+  "type Cell(name: String)\n\n\
+   type Grid(cells: List[Cell])\n\n\
+   fn Cell.visit(mut self) {\n\
+  \  self.name = \"seen\"\n\
+   }\n\n\
+   fn Grid.cell(self, index: USize) lends Cell {\n\
+  \  yield self.cells[index]\n\
+   }\n\n\
+   fn Grid.cell(mut self, index: USize) lends mut Cell {\n\
+  \  yield mut self.cells[index]\n\
+   }\n\n"
+
+let counter =
+  "type Counter(count: Int64)\n\n\
+   fn Counter.current(self) lends Int64 {\n\
+  \  yield self.count\n\
+   }\n\n\
+   fn Counter.step(mut self) {\n\
+  \  self.count = 3\n\
+   }\n\n"
+
+let tally =
+  "type Tally(cells: List[Int64])\n\n\
+   impl Index for Tally {\n\
+  \  type Key = USize\n\
+  \  type Output = Int64\n\n\
+  \  fn contains_key(self, key: USize) -> Bool {\n\
+  \    key < self.cells.length()\n\
+  \  }\n\n\
+  \  fn at(self, key: USize) lends Int64 {\n\
+  \    yield self.cells[key]\n\
+  \  }\n\n\
+  \  fn at(mut self, key: USize) lends mut Int64 {\n\
+  \    yield mut self.cells[key]\n\
+  \  }\n\
+   }\n\n\
+   fn bump(first: mut Int64, second: mut Int64) {\n\
+  \  first = 1\n\
+  \  second = 2\n\
+   }\n\n"
+
+let () =
+  test "a part lent `mut` is changed through its `mut self` method, with no mark of its own"
+    (fun () -> fine (grid ^ "fn f(grid: mut Grid) {\n  mut grid.cell(0).visit()\n}\n"));
+  test "a part lent `mut` is assigned to" (fun () ->
+      fine (grid ^ "fn f(grid: mut Grid) {\n  mut grid.cell(0).name = \"new\"\n}\n"));
+  test "a part lent read-only is not assigned to" (fun () ->
+      one_diagnostic
+        (grid ^ "fn f(grid: mut Grid) {\n  grid.cell(0).name = \"new\"\n}\n")
+        "types.not_assignable");
+  test "a part lent read-only is not passed `mut`" (fun () ->
+      one_diagnostic
+        (grid
+       ^ "fn change(cell: mut Cell) {}\n\nfn f(grid: mut Grid) {\n  change(grid.cell(0))\n}\n")
+        "types.wrong_mark");
+  test "a part that is lent cannot be given up" (fun () ->
+      one_diagnostic
+        (grid ^ "fn take(cell: own Cell) {}\n\nfn f(grid: Grid) {\n  take(grid.cell(0))\n}\n")
+        "types.missing_mark");
+  test "a part that is lent cannot be returned" (fun () ->
+      one_diagnostic
+        (grid ^ "fn f(grid: Grid) -> Cell {\n  grid.cell(0)\n}\n")
+        "ownership.not_owned");
+  test "a name cannot keep a part that is lent" (fun () ->
+      one_diagnostic
+        (grid
+       ^ "fn look(cell: Cell) {}\n\n\
+          fn f(grid: Grid) {\n\
+         \  let kept = grid.cell(0)\n\
+         \  look(kept)\n\
+          }\n")
+        "ownership.keeps_lent_part");
+  test "a name copies a `Plain` part that is lent" (fun () ->
+      fine (counter ^ "fn f(counter: Counter) -> Int64 {\n  let now = counter.current()\n  now\n}\n"));
+  test "matching a part that is lent binds views of it, which cannot be given up" (fun () ->
+      one_diagnostic
+        (grid
+       ^ "fn take(name: own String) {}\n\n\
+          fn f(grid: Grid) {\n\
+         \  match grid.cell(0) {\n\
+         \    (name) => take(own name)\n\
+         \  }\n\
+          }\n")
+        "ownership.not_owned");
+  test "a place is lent whole, so two parts of it are not lent `mut` in one statement" (fun () ->
+      one_diagnostic
+        (grid
+       ^ "fn touch(first: mut Cell, second: mut Cell) {}\n\n\
+          fn f(grid: mut Grid) {\n\
+         \  touch(mut grid.cell(0), second: mut grid.cell(1))\n\
+          }\n")
+        "ownership.conflicting_loan");
+  test "a place and a part it lends `mut` do not go to one call" (fun () ->
+      one_diagnostic
+        (grid
+       ^ "fn both(grid: Grid, cell: mut Cell) {}\n\n\
+          fn f(grid: mut Grid) {\n\
+         \  both(grid, cell: mut grid.cell(0))\n\
+          }\n")
+        "ownership.conflicting_loan");
+  test "a place lent read-only is not changed in the same statement" (fun () ->
+      one_diagnostic
+        (tally ^ "fn f(tally: mut Tally) {\n  tally[0] = tally[1]\n}\n")
+        "ownership.changed_while_viewed");
+  test "two parts of a place are lent read-only in one statement" (fun () ->
+      fine (tally ^ "fn f(tally: Tally) -> Int64 {\n  tally[0] + tally[1]\n}\n"));
+  test "a lend ends with its statement" (fun () ->
+      fine
+        (grid
+       ^ "fn f(grid: mut Grid) -> USize {\n  mut grid.cell(0).visit()\n  grid.cells.length()\n}\n"));
+  test "what a `while` loop's test lends goes back before its body" (fun () ->
+      fine
+        (counter
+       ^ "fn f(counter: mut Counter) {\n\
+         \  while counter.current() < 3 {\n\
+         \    mut counter.step()\n\
+         \  }\n\
+          }\n"));
+  test "two indexes of a user's collection are not lent `mut` together" (fun () ->
+      one_diagnostic
+        (tally ^ "fn f(tally: mut Tally) {\n  bump(mut tally[0], second: mut tally[1])\n}\n")
+        "ownership.conflicting_loan");
+  test "two indexes of a list are lent `mut` together, for the prover to show apart" (fun () ->
+      fine
+        "fn bump(first: mut Int64, second: mut Int64) {\n\
+        \  first = 1\n\
+        \  second = 2\n\
+         }\n\n\
+         fn f(items: mut List[Int64]) {\n\
+        \  bump(mut items[0], second: mut items[1])\n\
+         }\n")
+
+(* What comes to hold a view *)
+
+let window = "type Window(view: Slice[Int64])\n\n"
+
+let () =
+  test "a list given mut views what was passed to the call" (fun () ->
+      one_diagnostic
+        "fn f() -> USize {\n\
+        \  var data: List[Int64] = [1, 2, 3]\n\
+        \  var views: List[Slice[Int64]] = []\n\
+        \  mut views.push(data[0..2])\n\
+        \  mut data.push(4)\n\
+        \  views.length()\n\
+         }\n"
+        "ownership.changed_while_viewed");
+  test "a list given mut no longer views what was passed once it is not used" (fun () ->
+      fine
+        "fn f() -> USize {\n\
+        \  var data: List[Int64] = [1, 2, 3]\n\
+        \  var views: List[Slice[Int64]] = []\n\
+        \  mut views.push(data[0..2])\n\
+        \  let count = views.length()\n\
+        \  mut data.push(4)\n\
+        \  count\n\
+         }\n");
+  test "a place given mut to a function views what the function was lent" (fun () ->
+      one_diagnostic
+        "fn keep(kept: mut List[Slice[Int64]], view: Slice[Int64]) {\n\
+        \  mut kept.push(view)\n\
+         }\n\n\
+         fn f() -> USize {\n\
+        \  var data: List[Int64] = [1, 2, 3]\n\
+        \  var views: List[Slice[Int64]] = []\n\
+        \  keep(mut views, view: data[0..2])\n\
+        \  mut data.push(4)\n\
+        \  views.length()\n\
+         }\n"
+        "ownership.changed_while_viewed");
+  test "a view put in a place inside a branch is still held after it" (fun () ->
+      one_diagnostic
+        "fn f(often: Bool) -> USize {\n\
+        \  var data: List[Int64] = [1, 2, 3]\n\
+        \  var views: List[Slice[Int64]] = []\n\
+        \  if often {\n\
+        \    mut views.push(data[0..2])\n\
+        \  }\n\
+        \  mut data.push(4)\n\
+        \  views.length()\n\
+         }\n"
+        "ownership.changed_while_viewed");
+  test "a field assigned a view makes its record view what the value does" (fun () ->
+      one_diagnostic
+        (window
+       ^ "fn f() -> USize {\n\
+         \  var data: List[Int64] = [1, 2, 3]\n\
+         \  var other: List[Int64] = [7]\n\
+         \  var window = Window(other[0..1])\n\
+         \  window.view = data[0..2]\n\
+         \  mut data.push(4)\n\
+         \  window.view.length()\n\
+          }\n")
+        "ownership.changed_while_viewed");
+  test "a place given mut cannot keep a view of a temporary" (fun () ->
+      one_diagnostic
+        "fn make() -> List[Int64] {\n\
+        \  [1, 2, 3]\n\
+         }\n\n\
+         fn f() -> USize {\n\
+        \  var views: List[Slice[Int64]] = []\n\
+        \  mut views.push(make()[0..2])\n\
+        \  views.length()\n\
+         }\n"
+        "ownership.views_temporary");
+  test "a mut parameter cannot be given a view of a local" (fun () ->
+      one_diagnostic
+        "fn f(kept: mut List[Slice[Int64]]) {\n\
+        \  let local: List[Int64] = [1, 2, 3]\n\
+        \  mut kept.push(local[0..2])\n\
+         }\n"
+        "ownership.stores_local_view");
+  test "a mut parameter can be given a view of another parameter" (fun () ->
+      fine
+        "fn f(kept: mut List[Slice[Int64]], source: List[Int64]) {\n\
+        \  mut kept.push(source[0..2])\n\
+         }\n");
+  test "what a mut parameter views cannot be changed in the rest of the function" (fun () ->
+      one_diagnostic
+        "fn f(kept: mut List[Slice[Int64]], source: mut List[Int64]) {\n\
+        \  mut kept.push(source[0..2])\n\
+        \  mut source.push(4)\n\
+         }\n"
+        "ownership.changed_while_viewed");
+  test "a mut self method cannot put a view of a local in self" (fun () ->
+      one_diagnostic
+        (window
+       ^ "fn Window.narrow(mut self) {\n\
+         \  let local: List[Int64] = [1, 2, 3]\n\
+         \  self.view = local[0..1]\n\
+          }\n")
+        "ownership.stores_local_view");
+  test "a mut self method can put a view of a parameter in self" (fun () ->
+      fine (window ^ "fn Window.widen(mut self, data: List[Int64]) {\n  self.view = data[0..2]\n}\n"));
+  test "what a mut self method was lent is viewed by what it was called on" (fun () ->
+      one_diagnostic
+        (window
+       ^ "fn Window.widen(mut self, data: List[Int64]) {\n\
+         \  self.view = data[0..2]\n\
+          }\n\n\
+          fn f() -> USize {\n\
+         \  var data: List[Int64] = [1, 2, 3]\n\
+         \  var other: List[Int64] = [7]\n\
+         \  var window = Window(other[0..1])\n\
+         \  mut window.widen(data)\n\
+         \  mut data.push(4)\n\
+         \  window.view.length()\n\
+          }\n")
+        "ownership.changed_while_viewed");
+  test "a result views what was lent mut to its call" (fun () ->
+      one_diagnostic
+        "fn first(data: mut List[Int64]) -> Slice[Int64] {\n\
+        \  data[0..1]\n\
+         }\n\n\
+         fn f() -> USize {\n\
+        \  var numbers: List[Int64] = [1, 2]\n\
+        \  let view = first(mut numbers)\n\
+        \  mut numbers.push(3)\n\
+        \  view.length()\n\
+         }\n"
+        "ownership.changed_while_viewed");
+  test "a function cannot return a view of a parameter it owns" (fun () ->
+      one_diagnostic "fn f(data: own List[Int64]) -> Slice[Int64] {\n  data[0..1]\n}\n"
+        "ownership.returns_local_view");
+  test "a function can return a view it was given to own" (fun () ->
+      fine "fn f(view: own Slice[Int64]) -> Slice[Int64] {\n  view\n}\n");
+  test "a function can return a local that views its parameter" (fun () ->
+      fine
+        "fn f(items: List[Int64]) -> Slice[Int64] {\n\
+        \  let part = items[0..2]\n\
+        \  let again = part\n\
+        \  again\n\
+         }\n");
+  test "a function can return a record that views its parameter" (fun () ->
+      fine
+        (window
+       ^ "fn f(items: List[Int64]) -> Window {\n  let made = Window(items[0..2])\n  made\n}\n"));
+  test "a function cannot return a local that views its local" (fun () ->
+      one_diagnostic
+        "fn f() -> Slice[Int64] {\n\
+        \  let items: List[Int64] = [1, 2, 3]\n\
+        \  let part = items[0..2]\n\
+        \  part\n\
+         }\n"
+        "ownership.returns_local_view")
 
 let () = finish ()

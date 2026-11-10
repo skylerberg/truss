@@ -165,46 +165,26 @@ let output_type : T.result -> T.ty = function
 let type_arguments arguments =
   List.filter_map (function T.Type type_ -> Some type_ | _ -> None) arguments
 
-(* Whether a generic type holds its [index]th parameter in place: in a field
-   of a variant that is not [indirect], outside collections' storage,
-   functions, and [any]. [visiting] cuts recursion, as the least answer. *)
-let rec holds database visiting (path, index) =
-  if List.mem (path, index) visiting then false
-  else
-    let parameters, fields = type_fields database path in
-    match List.nth_opt parameters index with
-    | None -> false
-    | Some parameter ->
-        let visiting = (path, index) :: visiting in
-        List.exists
-          (fun (_, indirect, field_type) ->
-            (not indirect)
-            && List.exists
-                 (function `Parameter found -> found = parameter | `Path _ -> false)
-                 (in_place database visiting field_type))
-          fields
-
-(* What a value of a type holds in place: the named types, and the
-   generic parameters, through the arguments of generic types that hold them
+(* The named types each field of a type definition holds in place, with the
+   variant the field is in. The fields of an [indirect] variant hold nothing
    in place. *)
-and in_place database visiting (type_ : T.ty) =
-  match type_ with
-  | T.Parameter parameter -> [ `Parameter parameter ]
-  | T.Named { path; arguments } -> (
-      let arguments = type_arguments arguments in
-      match Intrinsic.builtin_of_path path with
-      | Some Array -> List.concat_map (in_place database visiting) arguments
-      | Some _ -> []
-      | None ->
-          `Path path
-          :: List.concat
-               (List.mapi
-                  (fun index argument ->
-                    if holds database visiting (path, index) then
-                      in_place database visiting argument
-                    else [])
-                  arguments))
-  | _ -> []
+let held database path =
+  let bounds parameter =
+    match Query.demand database Environment.type_interface path with
+    | Some interface ->
+        List.concat_map
+          (fun (generic : T.generic) ->
+            match generic.kind with
+            | Type_generic bounds when generic.generic = parameter -> bounds
+            | _ -> [])
+          interface.type_generics
+    | None -> []
+  in
+  List.filter_map
+    (fun (variant, indirect, field_type) ->
+      if indirect then None
+      else Some (variant, Interface.Impls.held_in_place database ~bounds field_type))
+    (snd (type_fields database path))
 
 (* A cycle of types that hold each other in place, from a type back to it:
    [Some variant] with the variant of [start] where the cycle leaves it,
@@ -216,19 +196,12 @@ let find_cycle database (start : Path.t) =
     || (not (Hashtbl.mem visited path))
        && begin
          Hashtbl.replace visited path ();
-         List.exists
-           (fun (_, indirect, field_type) -> (not indirect) && reaches_any field_type)
-           (snd (type_fields database path))
+         List.exists (fun (_, held) -> List.exists reaches held) (held database path)
        end
-  and reaches_any field_type =
-    List.exists
-      (function `Path path -> reaches path | `Parameter _ -> false)
-      (in_place database [] field_type)
   in
   List.find_map
-    (fun (variant, indirect, field_type) ->
-      if (not indirect) && reaches_any field_type then Some variant else None)
-    (snd (type_fields database start))
+    (fun (variant, held) -> if List.exists reaches held then Some variant else None)
+    (held database start)
 
 (* Whether a generic type contains itself with growing type arguments,
    through any field at all, so that it has no fixed set of instances. As in
@@ -545,6 +518,101 @@ let check =
           location @ names @ overlaps @ recursion
           @ check_instantiation database package
           @ check_tests database package)
+
+(* The manifest *)
+
+(* The packages a definition uses: those it names in a path, those with a
+   trait whose method it calls with a dot, and those with an [impl] that
+   answers a call or meets a bound in it. *)
+let used_packages =
+  Query.query ~name:"used_packages" ~phase:Bodies ~saved:true ~show:Names.show_key
+    (fun database (key : Names.key) ->
+      let named =
+        match Query.demand database Resolve.resolved key with
+        | Some resolved ->
+            List.filter_map
+              (function
+                | Some (Resolve.Definition (_, path) | Variant (path, _)) ->
+                    Some (Path.package path)
+                | Some (Module module_) -> Some module_.package
+                | _ -> None)
+              (Array.to_list resolved.names)
+        | None -> []
+      in
+      let checked =
+        match Query.demand database Infer.checked key with
+        | Some { checked; evidence; _ } ->
+            evidence
+            @ List.concat_map
+                (function
+                  | Some ({ callee = Trait_method { trait; evidence; _ }; _ } : Checked.call) ->
+                      Path.package trait.trait
+                      :: (match evidence with Impl { impl; _ } -> [ Path.package impl ] | _ -> [])
+                  | _ -> [])
+                (Array.to_list checked.calls)
+        | None -> []
+      in
+      List.sort_uniq compare (named @ checked))
+
+(* The packages a package's code uses, its tests apart. A dependency that is
+   not among them is one only its tests use, which a project that uses the
+   package once it is published does not take on. *)
+let code_packages =
+  Query.query ~name:"code_packages" ~phase:Checks ~saved:true ~show:Fun.id
+    (fun database package_name ->
+      match Workspace.package database package_name with
+      | None -> []
+      | Some package ->
+          List.sort_uniq compare
+            (List.concat_map
+               (fun (declaration : Names.declaration) ->
+                 match declaration.path with
+                 | Test _ -> []
+                 | _ -> Query.demand database used_packages (Names.key_of declaration))
+               (declarations database package)))
+
+(* What only a package's code shows to be wrong with its manifest. *)
+type manifest_problem =
+  | Not_a_capability of { dependency : string; name : string }
+      (** A grant's entry that names no capability *)
+  | Unused of string  (** A dependency that nothing in the package uses *)
+
+let manifest_sentence ~package = function
+  | Not_a_capability { dependency; name } ->
+      Printf.sprintf
+        "`%s`, in the entry for `%s`, names no capability. A grant names a capability of the \
+         prelude by its name, such as `Clock`, and any other by its full path."
+        name dependency
+  | Unused dependency ->
+      Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." package dependency
+
+(* Which dependencies a package uses is known only once all of its code
+   checks: a call in a body with an error may not have been worked out. So a
+   package with an error elsewhere is not told that a dependency is unused,
+   which a fix would then delete. *)
+let manifest_problems =
+  Query.query ~name:"manifest_problems" ~phase:Checks ~saved:true ~show:Fun.id
+    (fun database package_name ->
+      match Workspace.package database package_name with
+      | None -> []
+      | Some package ->
+          let keys = List.map Names.key_of (declarations database package) in
+          let checks = List.for_all (fun key -> Infer.clean database key <> None) keys in
+          let used = List.concat_map (Query.demand database used_packages) keys in
+          List.concat_map
+            (fun (dependency : Workspace.dependency) ->
+              (match
+                 Query.demand database Interface.Grants.granted (package_name, dependency.package)
+               with
+                | Some grant ->
+                    List.map
+                      (fun name -> Not_a_capability { dependency = dependency.package; name })
+                      grant.unknown
+                | None -> [])
+              @
+              if checks && not (List.mem dependency.package used) then [ Unused dependency.package ]
+              else [])
+            package.dependencies)
 
 let diagnostics database (module_ : Path.module_) =
   List.filter_map

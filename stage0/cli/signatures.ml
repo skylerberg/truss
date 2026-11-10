@@ -19,15 +19,7 @@ let bodies ~opaque (definition : definition) =
   | Trait { members; _ } ->
       List.concat_map
         (fun (member : trait_member line) ->
-          match member.kind with
-          | Trait_method { body = Some body; _ } -> [ body.span ]
-          | Law law -> [ law.body.span ]
-          | _ -> [])
-        members
-  | Impl { members; _ } ->
-      List.concat_map
-        (fun (member : impl_member line) ->
-          match member.kind with Impl_method f -> function_body f | _ -> [])
+          match member.kind with Law law -> [ law.body.span ] | _ -> [])
         members
   | Type_definition { name; generics; _ } when opaque ->
       (* Everything after the name and its generic parameters. *)
@@ -39,7 +31,9 @@ let bodies ~opaque (definition : definition) =
       (* The closing bracket of the generic parameters. *)
       let stop = if generics = [] then stop else stop + 1 in
       [ Span.make stop definition.span.stop ]
-  | Type_definition _ | Capability _ | Constant _ | Definition_error _ -> []
+  | Method_declaration _ | Type_definition _ | Impl _ | Capability _ | Constant _
+  | Definition_error _ ->
+      []
 
 (* Removes the spans from the text, and the spaces left at the end of each
    line, and the lines left empty. *)
@@ -74,7 +68,27 @@ let text database ~body ~opaque (key : Resolve.Names.key) =
       Query.demand database Resolve.Names.definition key )
   with
   | Some text, Some definition ->
-      Some (if body then String.trim text else cut text (bodies ~opaque definition))
+      (* The bodies of the methods written inside it, which are definitions
+         of their own, at their places in its text. *)
+      let contained =
+        match Query.demand database Resolve.Names.base key with
+        | Some (_, base) ->
+            List.concat_map
+              (fun member ->
+                match
+                  ( Query.demand database Resolve.Names.base member,
+                    Query.demand database Resolve.Names.definition member )
+                with
+                | Some (_, member_base), Some written ->
+                    List.map
+                      (fun (span : span) ->
+                        Span.make (span.start + member_base - base) (span.stop + member_base - base))
+                      (bodies ~opaque:false written)
+                | _ -> [])
+              (Query.demand database Resolve.Names.contained key)
+        | None -> []
+      in
+      Some (if body then String.trim text else cut text (bodies ~opaque definition @ contained))
   | _ -> None
 
 let kind_word : Resolve.Names.kind -> string = function

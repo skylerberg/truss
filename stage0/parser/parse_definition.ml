@@ -204,11 +204,13 @@ let body cursor ~signature =
         | _ -> false
       in
       if ends_member && not cursor.cut_off then begin
-        (* The whitespace before the signature on its line, within the
-           definition's own text. *)
+        (* The whitespace before the signature on its line. *)
         let signature_start = (Cursor.token_at cursor signature).span.start in
-        let line_start = max cursor.base (Source.line_start cursor.source signature_start) in
-        let indentation = Cursor.text cursor (Source.span line_start signature_start) in
+        let before =
+          Cursor.text cursor
+            (Source.span (Source.line_start cursor.source signature_start) signature_start)
+        in
+        let indentation = if String.trim before = "" then before else "" in
         Cursor.report cursor Missing_body (Source.zero_width stop)
           "A function needs a body; write `{ todo }` for one that is not written yet."
           ~fixes:
@@ -274,33 +276,42 @@ let member_signature cursor : signature =
   check_name cursor name;
   signature cursor ~name ~method_:true
 
-(* The members of a trait, an [impl], or a capability, one per line. *)
+(* The members of a trait, an [impl], or a capability, one per line. A
+   method is a definition of its own: its tokens are noted and passed over,
+   and it is parsed apart, with a cursor of its own. *)
 let members cursor ~member ~error =
   Parse_statement.body_opening cursor;
-  Cursor.lines cursor
-    ~item:(fun cursor ->
-      let start = cursor.Cursor.index in
-      let kind = member cursor in
-      {
-        kind;
-        span = Cursor.span_from cursor start;
-        blank_line_before = Cursor.blank_line_before cursor start;
-        id = Cursor.fresh cursor;
-      })
-    ~recover:(fun start span ->
-      {
-        kind = error;
-        span;
-        blank_line_before = Cursor.blank_line_before cursor start;
-        id = Cursor.fresh cursor;
-      })
+  List.filter_map Fun.id
+    (Cursor.lines cursor
+       ~item:(fun cursor ->
+         let start = cursor.Cursor.index in
+         if Cursor.is_keyword cursor Fn then begin
+           let stop = Split.stop cursor.tokens ~first:start in
+           cursor.methods := (start, stop) :: !(cursor.methods);
+           Cursor.skip_to cursor stop;
+           None
+         end
+         else
+           let kind = member cursor in
+           Some
+             {
+               kind;
+               span = Cursor.span_from cursor start;
+               blank_line_before = Cursor.blank_line_before cursor start;
+               id = Cursor.fresh cursor;
+             })
+       ~recover:(fun start span ->
+         Some
+           {
+             kind = error;
+             span;
+             blank_line_before = Cursor.blank_line_before cursor start;
+             id = Cursor.fresh cursor;
+           }))
 
 (* [type Key], or [type Element: Ordered], in a trait. *)
 let trait_member cursor =
   match Cursor.peek_kind cursor with
-  | Keyword Fn ->
-      let signature = member_signature cursor in
-      Trait_method { signature; body = optional_body cursor }
   | Keyword Type ->
       Cursor.advance cursor;
       let name = Atoms.upper cursor "the name of an associated type" in
@@ -321,10 +332,6 @@ let trait_member cursor =
 
 let impl_member cursor =
   match Cursor.peek_kind cursor with
-  | Keyword Fn ->
-      let start = cursor.Cursor.index in
-      let signature = member_signature cursor in
-      Impl_method { signature; body = body cursor ~signature:start }
   | Keyword Type ->
       Cursor.advance cursor;
       let name = Atoms.upper cursor "the name of an associated type" in
@@ -332,21 +339,40 @@ let impl_member cursor =
       Associated_definition (name, Parse_type.type_expression cursor)
   | _ -> Cursor.fail cursor "`fn` or `type` to start a member of the `impl`"
 
-let capability_member cursor =
-  if not (Cursor.is_keyword cursor Fn) then
-    Cursor.fail cursor "`fn` to start a method of the capability";
+let capability_member cursor : capability_member =
+  Cursor.fail cursor "`fn` to start a method of the capability"
+
+(* What a method is written inside. *)
+type container = In_trait | In_impl | In_capability
+
+(* A method written inside a trait, an [impl], or a capability, from the
+   start of its slice. A trait's may have a body, an [impl]'s must, and a
+   capability's has none. *)
+let method_ cursor ~(within : container) ~visibility : definition =
+  let start = cursor.Cursor.index in
   let signature = member_signature cursor in
-  List.iter
-    (fun (parameter : parameter) ->
-      match parameter.kind with
-      | Self_parameter _ ->
-          Cursor.report cursor Misplaced_self
-            (Cursor.absolute cursor parameter.span)
-            "A capability's methods take no `self`; they are called as `Capability.method(...)`, \
-             and only an implementation's methods take `self`."
-      | _ -> ())
-    signature.parameters;
-  Capability_method signature
+  let kind =
+    match within with
+    | In_trait -> (
+        match optional_body cursor with
+        | Some body -> Function { signature; body }
+        | None -> Method_declaration signature)
+    | In_impl -> Function { signature; body = body cursor ~signature:start }
+    | In_capability ->
+        List.iter
+          (fun (parameter : parameter) ->
+            match parameter.kind with
+            | Self_parameter _ ->
+                Cursor.report cursor Misplaced_self
+                  (Cursor.absolute cursor parameter.span)
+                  "A capability's methods take no `self`; they are called as \
+                   `Capability.method(...)`, and only an implementation's methods take `self`."
+            | _ -> ())
+          signature.parameters;
+        Method_declaration signature
+  in
+  if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break or `}` after the method";
+  finish cursor start visibility kind
 
 (* Fields in parentheses, as a record or a variant declares them. *)
 let fields cursor : field list =

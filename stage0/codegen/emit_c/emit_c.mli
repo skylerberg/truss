@@ -10,7 +10,8 @@
 type build = Development | Release
 
 (* An instance defined in a file is [External], called from other files, or
-   [Internal], a copy of a small callee that the C compiler may inline. *)
+   [Internal], a copy of a small callee, which is [static inline], so that
+   the C compiler may inline it at any level and drops it where it does. *)
 type linkage = External | Internal
 
 (* One C file holding the given instances, in order, and the given static

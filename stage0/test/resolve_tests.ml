@@ -127,8 +127,8 @@ let describe names base (target : Resolve.target option) =
   | None -> "nothing"
   | Some Binding -> "binding"
   | Some (Local id) -> Printf.sprintf "local at %d" (offset id)
-  | Some (Type_parameter id | Capability_parameter id | Value_parameter id) ->
-      Printf.sprintf "generic at %d" (offset id)
+  | Some (Type_parameter parameter | Capability_parameter parameter | Value_parameter parameter) ->
+      Printf.sprintf "generic %s of %s" parameter.name (Path.show parameter.owner)
   | Some (Definition (_, path)) -> Path.show path
   | Some (Variant (type_, name)) -> Printf.sprintf "variant %s of %s" name (Path.show type_)
   | Some (Module module_) -> "module " ^ Path.show_module module_
@@ -573,6 +573,55 @@ let () =
             \  }\n\
              }\n" );
         ])
+
+(* A package with an owner in its name *)
+
+let () =
+  let geometry : Path.module_ = { package = "acme::geometry"; modules = [ "vector" ] } in
+  let with_geometry ~dependencies text =
+    let database = setup [ ("app::main", text) ] in
+    let engine = Engine.of_context database in
+    Engine.set engine Workspace.file_text geometry
+      "public fn length(value: Int64) -> Int64 {\n  value\n}\n";
+    Engine.set engine Workspace.packages "acme::geometry"
+      { name = "acme::geometry"; dependencies = []; modules = [ geometry ]; usize_bits = 32 };
+    Engine.set engine Workspace.packages "app"
+      {
+        name = "app";
+        dependencies =
+          List.map (fun package -> { Workspace.package; capabilities = [] }) dependencies;
+        modules = [ module_of "app::main" ];
+        usize_bits = 32;
+      };
+    database
+  in
+  let uses_both =
+    "use acme::geometry::vector\n\n\
+     fn f() -> Int64 {\n\
+    \  vector::length(1) + acme::geometry::vector::length(2)\n\
+     }\n"
+  in
+  test "a path into a package with an owner starts with the owner and the name" (fun () ->
+      let database = with_geometry ~dependencies:[ "acme::geometry" ] uses_both in
+      (match diagnostics database "app::main" with
+      | [] -> ()
+      | found -> fail "found [%s]" (String.concat "; " (codes found)));
+      match Query.demand database Resolve.Names.imports (module_of "app::main") with
+      | [ ("vector", imported) ] when imported = geometry -> ()
+      | _ -> fail "imported differently");
+  test "a package with an owner that the manifest does not list cannot be named" (fun () ->
+      let database = with_geometry ~dependencies:[] uses_both in
+      match codes (diagnostics database "app::main") with
+      | "resolve.unknown_module" :: _ -> ()
+      | found -> fail "found [%s]" (String.concat "; " found));
+  test "an owner alone names no package" (fun () ->
+      let database =
+        with_geometry ~dependencies:[ "acme::geometry" ]
+          "use acme::vector\n\nfn f() -> Int64 {\n  vector::length(1)\n}\n"
+      in
+      match codes (diagnostics database "app::main") with
+      | "resolve.unknown_module" :: _ -> ()
+      | found -> fail "found [%s]" (String.concat "; " found))
 
 let () =
   test "a name used through an import of standard::intrinsic is not an error of its own" (fun () ->

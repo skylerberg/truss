@@ -22,6 +22,14 @@ let diagnostics database module_ =
 
 (* The same, as a query, which the database keeps current for each file of
    a worktree and saves, so that a check after a restart finds it done. *)
+type manifest_problem = Package_checks.manifest_problem =
+  | Not_a_capability of { dependency : string; name : string }
+  | Unused of string
+
+let manifest_problems = Package_checks.manifest_problems
+let manifest_sentence = Package_checks.manifest_sentence
+let code_packages = Package_checks.code_packages
+
 let file_diagnostics =
   Query.query ~name:"all_diagnostics" ~phase:Diagnostics ~show:Path.show_module ~saved:true
     diagnostics

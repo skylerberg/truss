@@ -30,6 +30,17 @@ let name_of (signature : signature) =
 
 let head_of (ty : T.ty) = match ty with Named { path; _ } -> Some path | _ -> None
 
+(* The trait, the [impl], or the capability a method is written inside. *)
+let container database (key : Names.key) =
+  Option.bind (Query.demand database Names.container key) (fun (container : Names.key) ->
+      Option.map
+        (fun definition -> (container, definition))
+        (Query.demand database Names.definition container))
+
+(* Whether a definition is a method written inside a trait. *)
+let in_trait database key =
+  match container database key with Some (_, { kind = Trait _; _ }) -> true | _ -> false
+
 (* The traits a trait requires, and itself, so that using an [impl] of
    [Ordered] also uses one of [Equal]. *)
 let rec traits_with_required database (trait : Path.t) =
@@ -55,22 +66,11 @@ let impls database (modules : Path.module_ list) =
                 ( Query.demand database Interface.Environment.interface declaration.path,
                   Query.demand database Names.definition key )
               with
-              | ( Some (Interface.Environment.Impl_interface interface),
-                  Some { kind = Impl { members; _ }; _ } ) ->
+              | Some (Interface.Environment.Impl_interface interface), Some { kind = Impl _; _ } ->
                   let methods =
-                    List.filter_map
-                      (fun (member : impl_member line) ->
-                        match member.kind with
-                        | Impl_method { signature; _ } ->
-                            Some
-                              (Path.Method
-                                 {
-                                   owner = declaration.path;
-                                   name = name_of signature;
-                                   receiver = receiver_of signature.parameters;
-                                 })
-                        | _ -> None)
-                      members
+                    List.map
+                      (fun (member : Names.key) -> member.path)
+                      (Query.demand database Names.contained key)
                   in
                   Some
                     ( declaration.path,
@@ -193,24 +193,11 @@ let build database package =
                     (path, edges database impls checked ids @ any_edges database impls checked anys)
                   in
                   match definition.kind with
-                  | Function { body; _ } -> [ node declaration.path body ]
+                  (* A trait's own method is reached through an [impl], as
+                     it always was, and is no node of its own. *)
+                  | Function { body; _ } when not (in_trait database key) ->
+                      [ node declaration.path body ]
                   | Theorem { body; _ } -> [ node declaration.path body ]
-                  | Impl { members; _ } ->
-                      List.filter_map
-                        (fun (member : impl_member line) ->
-                          match member.kind with
-                          | Impl_method { signature; body } ->
-                              Some
-                                (node
-                                   (Path.Method
-                                      {
-                                        owner = declaration.path;
-                                        name = name_of signature;
-                                        receiver = receiver_of signature.parameters;
-                                      })
-                                   body)
-                          | _ -> None)
-                        members
                   | _ -> [])
               | _ -> [])
             (Query.demand database Names.declarations module_))

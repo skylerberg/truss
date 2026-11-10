@@ -25,11 +25,7 @@ let no_diagnostics text diagnostics =
 let definitions text expected =
   let file, diagnostics = parse text in
   no_diagnostics text diagnostics;
-  let actual =
-    List.map
-      (fun (item : Syntax.definition Syntax.item) -> Syntax_print.definition item.value)
-      file.definitions
-  in
+  let actual = Syntax_print.definitions file.definitions in
   if actual <> expected then
     fail "expected [%s], got [%s]" (String.concat "; " expected) (String.concat "; " actual)
 

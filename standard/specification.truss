@@ -65,6 +65,12 @@ impl Index for Sequence[Element] {
   type Key = Integer
   type Output = Element
 
+  fn contains_key(self, key: Integer) -> Bool
+    cost time finite
+  {
+    0 <= key && key < self.length()
+  }
+
   fn at(self, key: Integer) lends Element
     requires 0 <= key && key < self.length()
     cost time finite

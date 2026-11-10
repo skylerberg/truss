@@ -151,7 +151,10 @@ let argument_unknowns unifier = function
   | T.Capabilities _ -> []
 
 (* Unifies two types, solving variables in either. Errors and holes agree
-   with anything, so one mistake is reported once. *)
+   with anything, so one mistake is reported once. Types are equal or they
+   are not: function types with other [uses] or costs are other types, and
+   only a value that meets an expected type converts, which is not done
+   here. *)
 let rec unify unifier (left : T.ty) (right : T.ty) =
   let left = resolve unifier left and right = resolve unifier right in
   match (left, right) with
@@ -181,7 +184,8 @@ let rec unify unifier (left : T.ty) (right : T.ty) =
       Path.equal left.path right.path && unify_arguments unifier left.arguments right.arguments
   | Parameter left, Parameter right -> left = right
   | Function left, Function right ->
-      List.length left.inputs = List.length right.inputs
+      T.same_clauses left right
+      && List.length left.inputs = List.length right.inputs
       && List.for_all2
            (fun (left_mode, left) (right_mode, right) ->
              left_mode = right_mode && unify unifier left right)
@@ -191,6 +195,7 @@ let rec unify unifier (left : T.ty) (right : T.ty) =
   | Projection left, Projection right ->
       left.name = right.name
       && Path.equal left.trait.trait right.trait.trait
+      && unify_arguments unifier left.trait.trait_arguments right.trait.trait_arguments
       && unify unifier left.base right.base
   | Cursor left, Cursor right ->
       Path.equal left.method_ right.method_
@@ -214,7 +219,8 @@ and unify_arguments unifier left right =
          | T.Type left, T.Type right -> unify unifier left right
          | T.Value left, T.Value right -> unify_value unifier left right
          | T.Type (T.Error _), _ | _, T.Type (T.Error _) -> true
-         | T.Capabilities _, T.Capabilities _ -> true
+         | T.Capabilities left, T.Capabilities right ->
+             List.sort_uniq compare left = List.sort_uniq compare right
          | _ -> false)
        left right
 

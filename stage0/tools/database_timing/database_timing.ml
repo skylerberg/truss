@@ -41,7 +41,7 @@ let () =
   let directory = Filename.concat root "demo" in
   Unix.mkdir directory 0o755;
   let file name = Filename.concat directory name in
-  write (file "truss.toml") "[package]\nname = \"demo\"\n";
+  write (file "truss.toml") "[package]\nname = \"demo\"\ntruss = \"0.1\"\n";
   write (file "core.truss") (core_text "value");
   for index = 0 to modules - 1 do
     write (file (Printf.sprintf "m%d.truss" index)) (module_text index)

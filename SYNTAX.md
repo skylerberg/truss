@@ -1250,6 +1250,14 @@ mut grid.cell(position).visit()
   method always continues after its `yield`, even if the statement leaves
   early with `?` or `return`. So a type can update what depends on the part,
   such as a cached total, after the caller changes it.
+- **For that long, `grid` is lent whole.** The statement cannot use `grid`
+  again when the part is lent `mut`, and cannot change it when the part is
+  lent read-only.
+- **The mark is on the place the part is lent from.** In
+  `mut grid.cell(position).visit()`, `mut` chooses the `cell` that lends
+  `mut`, and the part it lends is then changed by `visit` with no mark of
+  its own. A part cannot be given up with `own`, and `let` keeps one only by
+  copying it.
 - **A lending method yields exactly once on every path.** A path with no
   `yield`, or with two, is a compile error.
 - A lending method cannot drive a `for` loop or be pulled.
@@ -1904,8 +1912,8 @@ early returns from `?`.
 
 ### main
 
-A program starts at `main`, which always has this signature, plus whatever
-capabilities it uses:
+A program starts at the `main` of its package's `main` module, which always
+has this signature, plus whatever capabilities it uses:
 
 ```truss
 fn main(arguments: List[String]) -> ExitCode
@@ -2375,13 +2383,18 @@ A trait can leave a type for each implementation to choose:
 trait Index {
   type Key
   type Output
+  fn contains_key(self, key: Self.Key) -> Bool
+    cost time finite
   fn at(self, key: Self.Key) lends Self.Output
+    requires self.contains_key(key)
   fn at(mut self, key: Self.Key) lends mut Self.Output
+    requires self.contains_key(key)
 }
 
 impl Index for Grid {
   type Key = Position
   type Output = Cell
+  fn contains_key(self, key: Position) -> Bool { todo }
   fn at(self, key: Position) lends Cell { todo }
   fn at(mut self, key: Position) lends mut Cell { todo }
 }
@@ -2397,6 +2410,10 @@ fn first[Items: Iterable](items: Items) -> Option[Items.Element]
 - A trait's own type parameters are the types an implementation can be
   chosen by, as in `From[Source]`. Its associated types are the types each
   implementation decides, as in `Index`'s `Output`.
+- A trait states its methods' preconditions through its own methods, as
+  `Index` does with `contains_key`, so generic code can show them, and an
+  implementation says what they mean for its type: a `List`'s keys are the
+  indexes below its length.
 
 ### Deriving
 
@@ -2799,7 +2816,8 @@ fn score(player: Player) -> Int64 {
 
 ## Modules and visibility
 
-Each file is a module. A package is a directory with a `truss.toml` manifest.
+Each file is a module. A package is a directory with a `truss.toml` manifest
+that has a `[package]` table.
 
 `use` imports a module, never individual names. Names from the module are
 then written with the module's name and `::` in front:
@@ -2840,6 +2858,9 @@ package's name, then the directories it is in, then its file name:
 - Every path starts with a package name: `standard`, a dependency's name from
   the manifest, or the package's own name. A file names another file of its
   own package the same way other packages do: `use weather::forecast::hourly`.
+- A package from the registry has its owner in its name, so a path into one
+  starts with two parts: `use acme::geometry::vector` imports the module
+  `vector` of the package `acme::geometry`. A path holds no version.
 - There are no relative paths, such as Rust's `super::`, so a module is
   written the same way wherever it is used.
 - A directory is not a module by itself. `forecast.truss` and a `forecast/`
@@ -2922,24 +2943,109 @@ capability, so a test can provide a different answer.
 
 ### Package manifest
 
-The manifest names the package and its dependencies, and grants each
-dependency the capabilities it may use:
+A package's manifest, `truss.toml`, names the package, says which Truss it is
+written for, and lists the packages its code may use, each with the
+capabilities it is granted:
 
 ```toml
 [package]
 name = "weather"
-version = "0.3.0"
+truss = "0.1"
 
 [dependencies]
-json = { version = "2.1" }
-http = { version = "4.0", capabilities = ["NetworkClient", "Clock"] }
+forecast = []
+"truss::json" = []
+"truss::http" = ["NetworkClient", "Clock"]
 ```
 
-A dependency with no `capabilities` list gets none, so it can only do pure
-computation. The build fails if a dependency uses a capability it was not
-granted.
+- **`name`** is a `lower_snake_case` name, or two joined by `::`, an owner
+  and a name, as in `"acme::geometry"`. A package must have an owner in its
+  name to be published. `standard` is the standard library's name, and a
+  name of one part cannot be the owner of another package of the build.
+- **`truss`** is the language version the package's files are read as, and
+  the least toolchain that can build it.
+- **Each entry of `[dependencies]`** is a package's name and the list of
+  capabilities it is granted. An empty list grants none, so the package can
+  only do pure computation. A prelude capability is written by its name, and
+  any other by its full path, as in
+  `"acme::store::connection::ReadDatabase"`. The build fails where code
+  names something of a dependency that uses a capability the dependency was
+  not granted.
+- **A dependency is a package of the project** if the project has one by
+  that name, and otherwise a package from the registry, at the version in
+  the project's lock file. A manifest holds no versions and no paths to
+  other packages.
+- **A dependency the package never uses is a compile error,** as an unused
+  `use` is. A package uses a dependency by naming one of its modules, or by
+  calling a method of one of its traits with a dot.
+- **A manifest is TOML, read strictly.** A table or a key that is not
+  described here is an error, and so is a version, which manifests in other
+  languages hold.
+
+A package's program starts at the `main` of its `main` module, the file
+`main.truss` beside the manifest. A package without that module is a library.
 
 A package is verified for both widths of `USize`, 32 and 64 bits, unless its
 `[package]` table says `usize_bits = 64`. Its code may then rely on 64 bits,
 it cannot be built for a 32-bit target, and only packages that say the same
 can depend on it. See [DESIGN.md](DESIGN.md#integers).
+
+### Projects
+
+A manifest with a `[project]` table makes its directory a project: every
+package under it is one of the project's, except those under a directory
+whose manifest has a `[project]` table of its own. A package with no such
+manifest above it is a project by itself.
+
+```toml
+[project]
+
+[test]
+time_limit = 10
+```
+
+- The project's manifest may also hold a `[package]`, when the project's
+  root is itself a package.
+- `time_limit` is the time each test of the project may take, in seconds. It
+  is 10 unless the manifest says otherwise.
+- Two packages of a project cannot have the same name.
+
+### The lock file
+
+`truss.lock`, beside the project's manifest, holds the version and content of
+every registry package the project's packages use, their dependencies' and
+their dependencies' in turn. `truss add` and `truss upgrade` write it. It is
+kept in version control.
+
+```text
+format 1
+acme::geometry_v2 2.1.3 6f1c2f0f8f0b7a1e3d9c4a5b6e7d8c9f0a1b2c3d4e5f60718293a4b5c6d7e8f9
+truss::http 1.12.0 0d4e8a1b7c3f2e6d5a9b8c7f1e0d3a2b4c6e8f0a1c3e5a7b9d1f3e5c7a9b0d2f holds Clock, NetworkClient
+truss::json 1.9.4 a3b1c5d7e9f20416283a4c6e8f0b2d4f6a8c0e2f4b6d8a0c2e4f6b8d0a2c4e6f
+```
+
+- The first line names the format. Each line after it is one package: its
+  name, its version, the hash of its content, and after `holds`, the
+  capabilities it holds, which are those its users in the build grant it.
+  The lines are in order of name.
+- A version is three numbers. The first is the number after `_v` at the end
+  of the package's name, or 1 for a name without one.
+- The hash is of the package's files as the registry holds them. It is the
+  BLAKE3 hash of a line for each file, in the order of the bytes of their
+  paths: the path, a space, the BLAKE3 hash of the file's bytes as 64
+  hexadecimal digits, and a line feed. It is written as 64 hexadecimal
+  digits too.
+- A lock file that does not match the project's manifests is a compile
+  error: a dependency with no line, a line no package uses, or a `holds`
+  that the manifests' grants do not give. `truss check --fix` removes a
+  line that is not used and corrects a `holds`, and `truss add` adds a
+  line.
+
+A published package holds its `truss.toml`, its modules, the Markdown files
+beside them, and a `truss.lock` with a line for each registry package it
+was published with, without `holds`: those its code uses, its tests apart,
+and those that they use in turn. Only the lock file at a project's
+root decides a build's versions directly. The others are what
+[DESIGN.md](DESIGN.md#choosing-versions) calls a package's record: a build
+uses the highest version that the project's lock file or any of its
+packages' records names.

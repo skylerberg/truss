@@ -69,44 +69,45 @@ and ground_function context substitution (f : Types.function_type) : Ground.func
 let usize = builtin USize
 let types_mode : Ground.mode -> Types.mode = function Read -> Read | Mut -> Mut | Own -> Own
 
-(* The substitution of a type's generic parameters by its arguments, which
-   are ground, written back as the checker's types so the checker's own
-   substitution applies them. *)
+(* A ground type, written back as the checker's, so that the checker's own
+   substitution and its lookups apply to it. *)
+let rec back : Ground.ty -> Types.ty = function
+  | Named { path; arguments } -> Named { path; arguments = List.map back_argument arguments }
+  | Never -> Never
+  | Function f ->
+      Function
+        {
+          inputs = List.map (fun (m, ty) -> (types_mode m, back ty)) f.parameters;
+          output =
+            (match f.result with
+            | Returns ty -> Returns (back ty)
+            | Yields (m, ty) -> Yields (types_mode m, back ty)
+            | Lends (m, ty) -> Lends (types_mode m, back ty));
+          uses = List.map (fun path -> Types.Capability path) f.uses;
+          costs = [];
+        }
+  | Any { trait; arguments; associated } ->
+      Any
+        {
+          trait;
+          trait_arguments = List.map back_argument arguments;
+          associated = List.map (fun (name, ty) -> (name, back ty)) associated;
+        }
+  | Cursor { method_; type_arguments } ->
+      Cursor { method_; arguments = List.map back_argument type_arguments }
+
+and back_argument : Ground.argument -> Types.argument = function
+  | Type ty -> Type (back ty)
+  | Value v -> Value (Known v)
+  | Capabilities set -> Capabilities (List.map (fun path -> Types.Capability path) set)
+
+(* The substitution of generic parameters by their arguments, which are
+   ground. *)
 let substitution (generics : Types.generic list) arguments =
   if List.length generics <> List.length arguments then
-    bug "a type with the wrong number of arguments";
+    bug "%d generic parameters for %d arguments" (List.length generics) (List.length arguments);
   List.map2
-    (fun (generic : Types.generic) (argument : Ground.argument) ->
-      let rec back : Ground.ty -> Types.ty = function
-        | Named { path; arguments } -> Named { path; arguments = List.map back_argument arguments }
-        | Never -> Never
-        | Function f ->
-            Function
-              {
-                inputs = List.map (fun (m, ty) -> (types_mode m, back ty)) f.parameters;
-                output =
-                  (match f.result with
-                  | Returns ty -> Returns (back ty)
-                  | Yields (m, ty) -> Yields (types_mode m, back ty)
-                  | Lends (m, ty) -> Lends (types_mode m, back ty));
-                uses = List.map (fun path -> Types.Capability path) f.uses;
-                costs = [];
-              }
-        | Any { trait; arguments; associated } ->
-            Any
-              {
-                trait;
-                trait_arguments = List.map back_argument arguments;
-                associated = List.map (fun (name, ty) -> (name, back ty)) associated;
-              }
-        | Cursor { method_; type_arguments } ->
-            Cursor { method_; arguments = List.map back_argument type_arguments }
-      and back_argument : Ground.argument -> Types.argument = function
-        | Type ty -> Type (back ty)
-        | Value v -> Value (Known v)
-        | Capabilities set -> Capabilities (List.map (fun path -> Types.Capability path) set)
-      in
-      (generic.generic, back_argument argument))
+    (fun (generic : Types.generic) argument -> (generic.generic, back_argument argument))
     generics arguments
 
 let fields context substitution (fields : Types.field list) =
@@ -140,15 +141,8 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
       | Some Unit, [] -> Record []
       | Some Never, [] -> Sum []
       | Some Array, [ Type element; Value count ] -> Array (element, Z.to_int count)
-      | Some Storage, [ Type element ] ->
-          Record
-            [
-              ("buffer", Raw (Pointer (Data element)));
-              ("length", Typed usize);
-              ("capacity", Typed usize);
-            ]
-      | Some View, [ Type element ] ->
-          Record [ ("elements", Raw (Pointer (Data element))); ("length", Typed usize) ]
+      | Some Storage, [ Type element ] -> Storage.shape ~usize element
+      | Some View, [ Type element ] -> Storage.view_shape ~usize element
       | Some Handle, [] -> Record [ ("descriptor", Raw (Integer Int32)) ]
       | Some Integer, _ -> bug "Integer exists only in specifications"
       | Some _, _ -> bug "a built-in type with the wrong arguments: %s" (Ground.to_string ty)
@@ -174,13 +168,11 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
               | Error_shape _ -> bug "%s did not parse, which no build reaches" (Path.show path))))
 
 let kind context ty : Glue.kind =
-  match ty with
-  | Ground.Named { path; arguments = [ Type element ] }
-    when Intrinsic.builtin_of_path path = Some Storage ->
-      Storage element
-  | Ground.Named { path; arguments = [] } when Intrinsic.builtin_of_path path = Some Handle ->
+  match (Storage.elements_of ty, ty) with
+  | Some element, _ -> Storage element
+  | None, Ground.Named { path; arguments = [] } when Intrinsic.builtin_of_path path = Some Handle ->
       Handle
-  | _ -> Shape (shape context ty)
+  | None, _ -> Shape (shape context ty)
 
 let debug_form : Ground.ty -> Glue.debug_form = function
   | Named

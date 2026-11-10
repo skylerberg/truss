@@ -37,5 +37,9 @@ val file : (Path.module_, file) Query.query
 val package : Query.context -> string -> package option
 (** A package, or [None] if there is no such package. *)
 
+val split_path : Query.context -> string list -> (string * string list) option
+(** The package that the names of a full path start with, which is two of them when it has an owner,
+    and the names after it; [None] when they start with no package's name. *)
+
 val module_exists : (Path.module_, bool) Query.query
 (** Whether a package has the module, which a [use] line or a full path asks. *)

@@ -173,6 +173,12 @@ impl Index for List[Element] {
   type Key = USize
   type Output = Element
 
+  fn contains_key(self, key: USize) -> Bool
+    cost time O(1)
+  {
+    key < self.length()
+  }
+
   fn at(self, key: USize) lends Element
     requires key < self.length()
     ensures identical(result, self.model()[key])
@@ -194,6 +200,12 @@ impl Index for List[Element] {
 impl Index for Slice[Element] {
   type Key = USize
   type Output = Element
+
+  fn contains_key(self, key: USize) -> Bool
+    cost time O(1)
+  {
+    key < self.length()
+  }
 
   fn at(self, key: USize) lends Element
     requires key < self.length()

@@ -188,6 +188,7 @@ let definition ?statement:visit f (definition : definition) =
   in
   match definition.kind with
   | Function function_ -> function_definition ?statement:visit f function_
+  | Method_declaration declared -> signature f declared
   | Type_definition { generics; body; clauses; _ } ->
       List.iter (generic_parameter f) generics;
       (match body with
@@ -209,9 +210,6 @@ let definition ?statement:visit f (definition : definition) =
       List.iter
         (fun (member : trait_member line) ->
           match member.kind with
-          | Trait_method { signature = method_; body } ->
-              signature f method_;
-              Option.iter block body
           | Associated_type (_, bounds) -> List.iter (path_type f) bounds
           | Law law ->
               List.iter (parameter f) law.parameters;
@@ -226,17 +224,10 @@ let definition ?statement:visit f (definition : definition) =
       List.iter
         (fun (member : impl_member line) ->
           match member.kind with
-          | Impl_method function_ -> function_definition ?statement:visit f function_
           | Associated_definition (_, type_) -> type_expression f type_
           | Impl_member_error -> ())
         members
-  | Capability { members; _ } ->
-      List.iter
-        (fun (member : capability_member line) ->
-          match member.kind with
-          | Capability_method method_ -> signature f method_
-          | Capability_member_error -> ())
-        members
+  | Capability _ -> ()
   | Constant { name; type_; value } ->
       definition_name f name;
       type_expression f type_;
@@ -466,6 +457,7 @@ let walk_names ~on_name:add (definition_ : definition) =
   | Function { signature = written; body } ->
       signature_ written;
       block_ body
+  | Method_declaration written -> signature_ written
   | Type_definition { name; generics; body; clauses } ->
       add name;
       List.iter generic generics;
@@ -491,9 +483,6 @@ let walk_names ~on_name:add (definition_ : definition) =
       List.iter
         (fun (member : trait_member line) ->
           match member.kind with
-          | Trait_method { signature = written; body } ->
-              signature_ written;
-              Option.iter block_ body
           | Associated_type (name, bounds) ->
               add name;
               List.iter path_type_ bounds
@@ -511,22 +500,12 @@ let walk_names ~on_name:add (definition_ : definition) =
       List.iter
         (fun (member : impl_member line) ->
           match member.kind with
-          | Impl_method { signature = method_; body } ->
-              signature_ method_;
-              block_ body
           | Associated_definition (name, written) ->
               add name;
               type_ written
           | Impl_member_error -> ())
         members
-  | Capability { name; members } ->
-      add name;
-      List.iter
-        (fun (member : capability_member line) ->
-          match member.kind with
-          | Capability_method written -> signature_ written
-          | Capability_member_error -> ())
-        members
+  | Capability { name; _ } -> add name
   | Constant { name; type_ = written; value } ->
       definition_name name;
       type_ written;

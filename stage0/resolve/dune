@@ -1,3 +1,12 @@
 (library
  (name resolve)
- (libraries query path intrinsic workspace source diagnostic token syntax))
+ (libraries
+  query
+  path
+  intrinsic
+  types
+  workspace
+  source
+  diagnostic
+  token
+  syntax))

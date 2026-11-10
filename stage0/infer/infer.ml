@@ -2,7 +2,11 @@
 
 module Members = Members
 
-type result = Body.result = { checked : Checked.t; diagnostics : Diagnostic.t list }
+type result = Body.result = {
+  checked : Checked.t;
+  diagnostics : Diagnostic.t list;
+  evidence : string list;
+}
 
 let checked = Body.checked
 let diagnostics = Body.diagnostics
@@ -18,8 +22,14 @@ let clean database key =
       Query.demand database Resolve.resolved key,
       Query.demand database checked key )
   with
-  | Some definition, Some resolved, Some { checked; diagnostics = [] }
+  | Some definition, Some resolved, Some { checked; diagnostics = []; _ }
     when resolved.diagnostics = []
-         && not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body) ->
+         && (not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body))
+         &&
+         (* A method written inside what did not parse has nothing known
+            of it. *)
+         match Query.demand database Interface.Environment.lowered key with
+         | Some { interface = Error_interface _; _ } -> false
+         | _ -> true ->
       Some checked
   | _ -> None

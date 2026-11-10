@@ -125,7 +125,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           | Some method_path -> (
               match function_signature state method_path with
               | Some (Ok signature) ->
-                  let instance = instantiate state ~span:value.span signature in
+                  let instance = instantiate state value.span signature in
                   (* The type's arguments, as written or inferred, are the
                      head's generic arguments. *)
                   let head =
@@ -239,11 +239,9 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
   in
   let extra =
     (({ owner = trait.trait; name = "Self" } : T.parameter), T.Type self_type)
-    :: List.combine
-         (List.map (fun (generic : T.generic) -> generic.generic) trait_generics)
-         trait_arguments
+    :: Option.value ~default:[] (T.substitution_of trait_generics trait_arguments)
   in
-  let instance = instantiate state ~span:value.span ~extra method_.method_signature in
+  let instance = instantiate state value.span ~extra method_.method_signature in
   let parameters = instance.signature.parameters in
   let receiver_argument, receiver_offset, parameters, arguments =
     match instance.signature.receiver with
@@ -269,6 +267,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
   in
   let reference = { trait with trait_arguments } in
   let result = output_type instance.signature.output in
+  note_lending state value instance.signature.output;
   let own_arguments =
     List.filteri
       (fun index _ -> index < List.length method_.method_signature.generics)
@@ -314,7 +313,7 @@ and trait_call_in_full state env (value : expression) trait ~trait_arguments (me
 and capability_call state env (value : expression) capability (member : name) arguments =
   match Members.trait_methods state.database capability member.text with
   | method_ :: _ ->
-      let instance = instantiate state method_.method_signature in
+      let instance = instantiate state value.span method_.method_signature in
       let matched, left_out =
         match_arguments state value instance.signature.parameters arguments ~record:false
       in
@@ -340,20 +339,25 @@ and capability_call state env (value : expression) capability (member : name) ar
 and method_call state env ?expected (value : expression) (base : expression) (member : name)
     ~type_arguments arguments =
   let receiver_type = default_literal state (normalize state (expression state env base)) in
+  let marked = List.mem_assoc value.id state.receiver_modes in
+  (* A part that is lent [mut] is changed through its [mut self] methods
+     with no mark of its own: the mark is on the place it is lent from. *)
+  let lent_mode = if marked then None else lent state base in
   let wanted : Path.receiver =
-    match List.assoc_opt value.id state.receiver_modes with
-    | Some Mut -> Mut
-    | Some Own -> Own
+    match (List.assoc_opt value.id state.receiver_modes, lent_mode) with
+    | Some Mut, _ | None, Some Mut -> Mut
+    | Some Own, _ -> Own
     | _ -> Read
   in
-  let marked = List.mem_assoc value.id state.receiver_modes in
-  let place = is_place state base in
+  let place = is_place state base || Option.is_some lent_mode in
   let choose versions =
     (* No mark picks the read-only version; on a temporary, the [own]
        version if there is one; a [Plain] place may give its [own] version a
        copy. *)
     match List.assoc_opt wanted versions with
     | Some found -> Some (wanted, found)
+    | None when lent_mode = Some T.Mut && List.mem_assoc Path.Read versions ->
+        Some (Path.Read, List.assoc Path.Read versions)
     | None when (not marked) && ((not place) || plain state receiver_type) -> (
         match List.assoc_opt Path.Own versions with
         | Some found -> Some (Path.Own, found)
@@ -361,11 +365,19 @@ and method_call state env ?expected (value : expression) (base : expression) (me
     | None -> None
   in
   let choose_temporary versions =
-    if (not marked) && not place then
-      match List.assoc_opt Path.Own versions with
-      | Some found -> Some (Path.Own, found)
-      | None -> choose versions
-    else choose versions
+    let chosen =
+      if (not marked) && not place then
+        match List.assoc_opt Path.Own versions with
+        | Some found -> Some (Path.Own, found)
+        | None -> choose versions
+      else choose versions
+    in
+    (* A [mut self] method of a lent part changes it through each index on
+       the way to it. *)
+    (match (chosen, lent_mode) with
+    | Some (Path.Mut, _), Some _ -> mutable_place state base
+    | _ -> ());
+    chosen
   in
   let wrong_receiver versions =
     let shown = function
@@ -503,7 +515,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
   | None -> bug "the method `%s` has no signature" (Path.show method_path)
   | Some (Error report) -> arguments_alone state env arguments (T.Error report)
   | Some (Ok signature) ->
-      let instance = instantiate state ~span:value.span signature in
+      let instance = instantiate state value.span signature in
       explicit_type_arguments
         ~head:
           (match receiver_type with T.Named { arguments; _ } -> List.length arguments | _ -> 0)
@@ -550,11 +562,9 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
   in
   let extra =
     (({ owner = trait.trait; name = "Self" } : T.parameter), T.Type receiver_type)
-    :: List.combine
-         (List.map (fun (generic : T.generic) -> generic.generic) trait_generics)
-         trait_arguments
+    :: Option.value ~default:[] (T.substitution_of trait_generics trait_arguments)
   in
-  let instance = instantiate state ~span:value.span ~extra method_.method_signature in
+  let instance = instantiate state value.span ~extra method_.method_signature in
   explicit_type_arguments state value instance type_arguments;
   let matched, left_out =
     match_arguments state value instance.signature.parameters arguments ~record:false
@@ -562,6 +572,7 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
   let checked = check_arguments state env instance.signature.parameters matched ~offset:1 in
   let reference = { trait with trait_arguments } in
   let result = output_type instance.signature.output in
+  note_lending state value instance.signature.output;
   let receiver_argument =
     {
       C.expression = receiver.id;

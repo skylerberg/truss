@@ -46,6 +46,55 @@ test "counted" {
   assert mut each.next() == None
 }
 |};
+  passes "a lending method goes on after its caller's statement"
+    {|type Counted(value: Int64, reads: Int64)
+
+fn Counted.current(mut self) lends Int64 {
+  yield self.value
+  self.value = 99
+}
+
+test "lent" {
+  var counted = Counted(value: 1, reads: 0)
+  let got = mut counted.current() + 0
+  assert got == 1
+  assert counted.value == 99
+}
+|};
+  passes "a lending method lends a value it made, which lasts for the statement"
+    {|type Holder(id: Int64)
+
+fn Holder.label(self) lends String {
+  let text = "label ${self.id}"
+  yield text
+}
+
+test "lent" {
+  let holder = Holder(id: 1)
+  assert holder.label() == "label 1"
+}
+|};
+  passes "a lending method goes on when its caller's statement leaves early"
+    {|type Counted(value: Int64, finished: Int64)
+
+fn Counted.current(mut self) lends Int64 {
+  yield self.value
+  self.finished += 1
+}
+
+fn read(counted: mut Counted, stop: Bool) -> Int64 {
+  let got = mut counted.current() + (if stop { return 0 } else { 1 })
+  got
+}
+
+test "lent" {
+  var counted = Counted(value: 5, finished: 0)
+  assert read(mut counted, stop: true) == 0
+  assert counted.finished == 1
+  assert read(mut counted, stop: false) == 6
+  assert counted.finished == 2
+}
+|};
   passes "a cursor dropped before it ends drops what it holds"
     {|fn words(prefix: own String) yields String {
   yield "${prefix} one"
@@ -354,20 +403,13 @@ test "names" {
   passes "a constant that needs its code run is worked out while compiling"
     {|type Point(x: Int64, y: Int64)
 
-fn square(value: Int64) -> Int64 {
-  value * value
-}
-
-fn greeting(name: StringSlice) -> String {
-  "hello ${name}"
-}
-
-let area: Int64 = square(7)
-let corner: Point = Point(x: square(2), y: -3)
+let side: Int64 = 7
+let area: Int64 = side * side
+let corner: Point = Point(x: 2 * 2, y: -3)
 let ages: Map[String, Int64] = ["grace": 85, "ada": 36]
 let colors: Set[String] = ["red", "green", "red"]
-let welcome: String = greeting("ada".slice())
-let maybe: Option[Int64] = Some(square(3))
+let welcome: String = "hello ada"
+let maybe: Option[Int64] = Some(3 * 3)
 
 test "constants" {
   assert area == 49

@@ -4,31 +4,30 @@
 exception Stop of int
 (** The command reported why it stopped, and exits with this status. *)
 
-let mains (project : Project.t) =
-  List.concat_map
-    (fun module_ ->
-      List.filter_map
-        (fun (declaration : Resolve.Names.declaration) ->
-          match declaration.path with
-          | Top { name = "main"; _ } when declaration.kind = Function && declaration.ordinal = 0 ->
-              Some declaration.path
-          | _ -> None)
-        (Query.demand project.context Resolve.Names.declarations module_))
-    (Project.modules project)
+(* A package's program starts at the [main] of its [main] module. *)
+let main_of (project : Project.t) (package : Project.package) =
+  let module_ : Path.module_ = { package = package.name; modules = [ "main" ] } in
+  if not (List.mem module_ (Project.modules project)) then None
+  else
+    List.find_map
+      (fun (declaration : Resolve.Names.declaration) ->
+        match declaration.path with
+        | Top { name = "main"; _ } when declaration.kind = Function && declaration.ordinal = 0 ->
+            Some declaration.path
+        | _ -> None)
+      (Query.demand project.context Resolve.Names.declarations module_)
 
-(* The package's [main]. A package with none has no program, which is not a
-   problem in its code, so it stops with 2; one with several does have a
-   problem, and stops with 1. *)
+let mains (project : Project.t) = List.filter_map (main_of project) project.packages
+
+(* The package's [main]. A package with none is a library, which is not a
+   problem in its code, so the command stops with 2. *)
 let main (project : Project.t) =
-  match mains project with
-  | [ main ] -> main
-  | [] ->
-      Project.cannot_run "The package %s has no `main`, so it has no program."
-        (Project.package project).name
-  | several ->
-      Output.eprintf "The package has more than one `main`: %s.\n"
-        (String.concat ", " (List.map (fun path -> "`" ^ Path.show path ^ "`") several));
-      raise (Stop 1)
+  let package = Project.package project in
+  match main_of project package with
+  | Some main -> main
+  | None ->
+      Project.cannot_run "The package %s has no `main` in a `main` module, so it has no program."
+        package.name
 
 let stop_at_diagnostics ?proofs ~json project =
   let report = Report.gather ?proofs project in

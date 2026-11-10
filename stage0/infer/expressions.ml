@@ -20,7 +20,6 @@ module C = Checked
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
 open Lookups
@@ -37,7 +36,7 @@ let rec expression state env ?expected (value : expression) : T.ty =
 
 and check state env (value : expression) (expected : T.ty) =
   let found = expression state env ~expected value in
-  coerce state value ~found ~expected
+  ignore (coerce state env value ~found ~expected)
 
 and expression_kind state env ?expected (value : expression) : T.ty =
   match value.kind with
@@ -242,28 +241,10 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
             | Some evidence ->
                 let associated name = associated state base_type index_trait name ~at:value.span in
                 let key_type = associated "Key" and output = associated "Output" in
-                let key_conversion : C.conversion option =
-                  if env.specification then
-                    let found = expression state env ~expected:key_type key in
-                    if resolve state found = T.Integer && T.is_integer_type key_type then begin
-                      state.obligations <-
-                        Integer_fits { expression = key.id; type_ = key_type } :: state.obligations;
-                      Some From_integer
-                    end
-                    else if
-                      T.is_integer_type (normalize state found)
-                      && resolve state key_type = T.Integer
-                    then
-                      (* A built-in integer is an [Integer] in a specification. *)
-                      Some To_integer
-                    else begin
-                      coerce state key ~found ~expected:key_type;
-                      None
-                    end
-                  else begin
-                    check state env key key_type;
-                    None
-                  end
+                (* A key is passed for the parameter of [at]. *)
+                let key_conversion =
+                  let found = expression state env ~expected:key_type key in
+                  coerce state env ~argument:true key ~found ~expected:key_type
                 in
                 state.tables.calls.(value.id) <-
                   Some

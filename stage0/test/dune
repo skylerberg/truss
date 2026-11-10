@@ -20,6 +20,8 @@
   package_checks_tests
   documents_tests
   manifest_tests
+  registry_tests
+  compatibility_tests
   prover_tests
   scale_tests)
  (libraries
@@ -63,7 +65,9 @@
   ownership
   package_checks
   syntax_walk
-  type_checker)
+  type_checker
+  registry
+  compatibility)
  (deps
   (glob_files %{workspace_root}/*.md)
   (glob_files_rec %{workspace_root}/stage0/**dune)))

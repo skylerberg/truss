@@ -140,6 +140,8 @@ module Code = struct
     | Private_in_public
     | Method_outside_package
     | Default_not_constant
+    | Not_constant
+    | Constant_overflow
     | Main_signature
     | Duplicate_field
     | Cannot_derive
@@ -166,10 +168,12 @@ module Code = struct
     | Conflicting_loan
     | Changed_while_viewed
     | Returns_local_view
+    | Stores_local_view
     | Needs_owned
     | Lends_count
     | Not_pullable
     | Parallel_conflict
+    | Keeps_lent_part
 
   type capabilities =
     | Not_available
@@ -360,6 +364,8 @@ module Code = struct
     | Private_in_public -> "private_in_public"
     | Method_outside_package -> "method_outside_package"
     | Default_not_constant -> "default_not_constant"
+    | Not_constant -> "not_constant"
+    | Constant_overflow -> "constant_overflow"
     | Main_signature -> "main_signature"
     | Duplicate_field -> "duplicate_field"
     | Cannot_derive -> "cannot_derive"
@@ -394,10 +400,12 @@ module Code = struct
     | Conflicting_loan -> "conflicting_loan"
     | Changed_while_viewed -> "changed_while_viewed"
     | Returns_local_view -> "returns_local_view"
+    | Stores_local_view -> "stores_local_view"
     | Needs_owned -> "needs_owned"
     | Lends_count -> "lends_count"
     | Not_pullable -> "not_pullable"
     | Parallel_conflict -> "parallel_conflict"
+    | Keeps_lent_part -> "keeps_lent_part"
 
   let capabilities_name code =
     match code with

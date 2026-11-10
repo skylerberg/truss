@@ -27,11 +27,14 @@ val roots : (lowering, Instance.key list) Query.input
    program reports, by its module, and is [Workspace.file_path] unless a
    driver shows files another way. [want] is told which instances' keys are
    about to be asked for, and adds them to [roots]; without it, asking for
-   a key is an error. *)
+   a key is an error. [worked_on] says whether a package is one of the
+   project's own, whose code a development build never copies into
+   another's file; without it, every package but the standard library is. *)
 val create :
   ?checks:bool ->
   ?file_name:(Path.module_ -> string) ->
   ?want:(lowering -> Instance.key list -> unit) ->
+  ?worked_on:(string -> bool) ->
   Query.context ->
   Memory_layout.target ->
   Toolchain.t ->

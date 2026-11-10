@@ -5,7 +5,6 @@
 open Syntax
 module T = Types
 module C = Checked
-module Properties = Interface.Properties
 open Context
 
 let prepare context =
@@ -16,10 +15,12 @@ let prepare context =
      a method call's receiver, as in [mut file.read_line()], leaves the
      call's result, which is owned. *)
   let matched (value : expression) =
-    match value.kind with
-    | Mode (Mut, inner) when place_of context inner <> None -> Mut_access
-    | Mode (_, _) -> Owned
-    | _ -> if place_of context value <> None then Viewing else Owned
+    match (lending context value, value.kind) with
+    | Some (_, T.Mut), _ -> Mut_access
+    | Some _, _ -> Viewing
+    | None, Mode (Mut, inner) when place_of context inner <> None -> Mut_access
+    | None, Mode (_, _) -> Owned
+    | None, _ -> if place_of context value <> None then Viewing else Owned
   in
   let rec expression ~path ~loop_ids (value : expression) =
     Hashtbl.replace paths value.span.start path;
@@ -106,16 +107,6 @@ let prepare context =
     match context.definition.kind with
     | Function { body; _ } | Test { body; _ } | Theorem { body; _ } | Law_proof { body; _ } ->
         [ body ]
-    | Impl { members; _ } ->
-        List.filter_map
-          (fun (line : impl_member line) ->
-            match line.kind with Impl_method { body; _ } -> Some body | _ -> None)
-          members
-    | Trait { members; _ } ->
-        List.filter_map
-          (fun (line : trait_member line) ->
-            match line.kind with Trait_method { body; _ } -> body | _ -> None)
-          members
     | _ -> []
   in
   List.iter (block ~path:[] ~loop_ids:[]) bodies

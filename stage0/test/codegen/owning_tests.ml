@@ -125,6 +125,25 @@ test "ignored" {
   assert apply("a${1}", using: fn(_) { 7 }) == 7
 }
 |};
+  passes "a copy of a list with room and no elements has a buffer of its own"
+    {|test "copied" {
+  var first: List[Int64] = List.with_capacity(8)
+  var second = first.copy()
+  mut second.push(1)
+  mut first.push(2)
+  assert first[0] == 2
+  assert second[0] == 1
+}
+|};
+  passes "a copy of a list of values of no size is dropped once"
+    {|type Quiet()
+
+test "copied" {
+  var first: List[Quiet] = [Quiet(), Quiet()]
+  let second = first.copy()
+  assert second.length() == 2
+}
+|};
   passes "a compound assignment evaluates its target once"
     {|fn next_index(calls: mut Int64) -> USize {
   calls += 1

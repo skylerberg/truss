@@ -23,6 +23,13 @@ val ground_argument : context -> Types.substitution -> Types.argument -> Ground.
 val ground_function : context -> Types.substitution -> Types.function_type -> Ground.function_type
 val mode : Types.mode -> Ground.mode
 
+(* A ground type, written back as the checker's, so that the checker's own
+   substitution and its lookups apply to it, and the substitution of
+   generic parameters by ground arguments. *)
+val back : Ground.ty -> Types.ty
+val back_argument : Ground.argument -> Types.argument
+val substitution : Types.generic list -> Ground.argument list -> Types.substitution
+
 (* The ground type of a built-in. *)
 val builtin : Intrinsic.builtin -> Ground.ty
 

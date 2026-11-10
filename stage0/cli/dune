@@ -23,6 +23,7 @@
   inspect
   interface
   type_checker
+  registry
   memory_layout
   toolchain
   build
@@ -33,4 +34,6 @@
   solver
   prover
   running
+  compatibility
+  token
   database))

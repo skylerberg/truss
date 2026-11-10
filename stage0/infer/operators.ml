@@ -7,7 +7,6 @@ module C = Checked
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
 open Hooks
@@ -243,29 +242,6 @@ and literal_operands state ~left ~right =
   | other, T.Literal (kind, _) when Unify.literal_fits kind other -> ignore (unify state left right)
   | T.Literal (left_kind, _), T.Literal (right_kind, _) when left_kind = right_kind ->
       ignore (unify state left right)
-  | _ -> ()
-
-(* A place that is assigned or lent [mut]: each index on its way is the
-   [mut] version of [at], which lends its element [mut]. *)
-and mutable_place state (value : expression) =
-  match value.kind with
-  | Member (base, _) | Parenthesized base -> mutable_place state base
-  | Bracket (base, _) ->
-      (match state.tables.calls.(value.id) with
-      | Some ({ callee = Trait_method ({ name = "at"; _ } as method_); arguments; _ } as call) ->
-          state.tables.calls.(value.id) <-
-            Some
-              {
-                call with
-                callee = Trait_method { method_ with receiver = Mut };
-                arguments =
-                  List.map
-                    (fun (argument : C.argument) ->
-                      if argument.parameter = 0 then { argument with mode = T.Mut } else argument)
-                    arguments;
-              }
-      | _ -> ());
-      mutable_place state base
   | _ -> ()
 
 (* [&&], [||], [!], [~], the bitwise operators, and shifts, which are
@@ -537,16 +513,15 @@ and any_ state env ?expected (value : expression) (inner : expression) =
   match Option.map (normalize state) expected with
   | Some (T.Any trait as any_type) ->
       let inner_type = expression state env inner in
-      defer state (fun () ->
-          let inner_type = normalize state inner_type in
-          if T.contains_unsolved inner_type then false
-          else begin
-            if Option.is_none (implements state inner_type { trait with associated = [] }) then
-              report state No_impl value.span
-                (Printf.sprintf "`%s` does not implement `%s`." (T.show inner_type)
-                   (T.show_trait trait));
-            true
-          end);
+      require state ~at:value.span inner_type trait ~unmet:(fun inner_type other ->
+          report state No_impl value.span
+            (match other with
+            | None ->
+                Printf.sprintf "`%s` does not implement `%s`." (T.show inner_type)
+                  (T.show_trait trait)
+            | Some (name, given) ->
+                Printf.sprintf "`%s` is expected, and the `%s` of `%s` is `%s`." (T.show any_type)
+                  name (T.show inner_type) (show state given)));
       any_type
   | _ ->
       ignore (expression state env inner);

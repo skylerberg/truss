@@ -9,7 +9,10 @@
    overflowing the stack, each reported to the test runner when in a test,
    and otherwise on standard error. *)
 
-val runtime : Memory_layout.target -> string
+(* With [tests], the runtime of a test program: it counts the blocks that
+   are allocated and not freed, and has the test runner. A program that is
+   not a test program has neither. *)
+val runtime : Memory_layout.target -> tests:bool -> string
 
 (* A C [main] that installs the stack-overflow handler, calls the C
    function [entry], which takes nothing and returns an [Int32], and exits

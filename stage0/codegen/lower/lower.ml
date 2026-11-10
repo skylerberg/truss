@@ -50,12 +50,15 @@ type context = Definitions.context = {
   bool : Ground.ty;
   cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
   checks : bool;
-  evaluate : (Path.t -> Ground.ty -> Lir.static_value) ref;
+  constant : (Path.t -> Lir.static_value option) ref;
 }
 
 let context = Definitions.context
 let test_key = Definitions.test_key
 let cursor_result = Targets.cursor_result
+
+type constant = Constants.constant = Folded of Lir.data | Run of Ground.ty
+
 let constant = Constants.constant
 let evaluator = Constants.evaluator
 let table = Generated.table
@@ -63,16 +66,7 @@ let any_table = Generated.any_table
 let real_evidence = Generated.real_evidence
 
 let trait_provides context ~trait ~name ~receiver =
-  match demand context Names.definition (key_of context trait) with
-  | Some { kind = Trait { members; _ }; _ } ->
-      List.exists
-        (fun (member : S.trait_member S.line) ->
-          match member.kind with
-          | Trait_method { signature; body = Some _ } ->
-              name_of signature = name && receiver_of signature.parameters = receiver
-          | _ -> false)
-        members
-  | _ -> false
+  written context (Method { owner = trait; name; receiver }) <> None
 
 (* Binds the parameters of the code being lowered, each as [how] passes it.
    The function owns each [own] one, apart from one with a default, which

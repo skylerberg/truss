@@ -95,19 +95,13 @@ and convert st (argument : C.argument) place ty =
           with
           | Record [ (storage_field, _) ], Record [ (view_field, Typed view) ] ->
               let viewed = temporary st view_ty in
+              let storage = place / Field storage_field in
               emit st.b
                 (Assign
                    ( viewed / Field view_field,
-                     Build
-                       {
-                         ty = view;
-                         variant = None;
-                         fields =
-                           [
-                             ("elements", Copy (place / Field storage_field / Field "buffer"));
-                             ("length", Copy (place / Field storage_field / Field "length"));
-                           ];
-                       } ));
+                     Storage.view view
+                       ~elements:(Copy (Storage.buffer storage))
+                       ~length:(Copy (Storage.length storage)) ));
               (viewed, view_ty)
           | _ -> bug "a view of %s" (Ground.to_string ty))
       | _ -> bug "a view of %s" (Ground.to_string ty))
@@ -130,7 +124,7 @@ and evaluate_arguments ?(evaluated = []) st ~(expressions : S.expression list)
     let ty = type_of st e.id in
     let moved place =
       let taken = temporary st ty in
-      emit st.b (Assign (taken, Use (owned st place ty)));
+      take st place ty ~destination:taken;
       taken
     in
     let place =
@@ -196,33 +190,61 @@ and inline st path type_arguments ~arguments ~call_site ~on_yield =
   start st.b exit;
   st.frame <- caller
 
-(* The place a lending method lends, by inlining it. The method's body runs
-   to its end before the caller uses the place, so stage0 lowers only a
-   method that has nothing left to do then: each [yield] is the last thing
-   its path does, and what it lends is none of the method's own values,
-   which are dropped as its body ends. *)
+(* The place a lending method lends. The method's body is written into the
+   caller up to its [yield], and the caller's statement goes on from there
+   with the place. What is left of the method, its code after the [yield]
+   and the drops of what it owns, runs as the statement ends, on every way
+   out of it, so the innermost scope owns the lend. Where nothing is left,
+   as for an index into a [List], the method simply ends at its [yield]. *)
 and lend ?evaluated st call_ ~expressions ~arguments ~span =
   match resolve_callee st call_ with
   | Some (path, type_arguments) -> (
       let call_site = site st span in
       let arguments = evaluate_arguments ?evaluated st ~expressions ~arguments in
-      if not (yields_last (code_of st.context path type_arguments).body) then
-        unsupported st span "%s, a lending method that does more after its yield" (Path.show path);
-      let own_from = local_count st.b in
-      let lent = ref None in
+      let body = (code_of st.context path type_arguments).body in
+      if yields_in body > 1 then
+        unsupported st span "%s, a lending method with more than one yield" (Path.show path);
+      let depth = List.length st.scopes in
+      let goes_on = block st.b in
+      let lent = ref None and waits = ref None in
       inline st path type_arguments ~arguments ~call_site ~on_yield:(fun place ~resume ~stop:_ ->
-          (match place.root with
-          | Local local when local >= own_from -> (
-              match local_type st.b local with
-              | Value ty when not (trivial st ty) ->
-                  Compiler_bug.unsupported ~at:(at_site call_site)
-                    "%s, a lending method that lends a value it made" (Path.show path)
-              | _ -> ())
-          | _ -> ());
           lent := Some place;
-          finish st.b (Goto resume));
+          let owns_nothing =
+            List.for_all
+              (fun (scope : scope) -> scope.owned = [])
+              (List.filteri (fun i _ -> List.length st.scopes - i > depth) st.scopes)
+          in
+          if yields_last body && owns_nothing then finish st.b (Goto resume)
+          else begin
+            waits := Some resume;
+            finish st.b (Goto goes_on)
+          end);
+      (match !waits with
+      | Some resume ->
+          let scope = innermost_scope st in
+          scope.owned <-
+            Finish_lend
+              {
+                resume;
+                finished = current st.b;
+                selector = local st.b (Raw (Integer UInt32));
+                ways = [];
+              }
+            :: scope.owned;
+          start st.b goes_on
+      | None -> ());
       match !lent with Some place -> place | None -> bug "a lending method that lends nothing")
   | None -> bug "a lending call that is not to a method"
+
+(* How many [yield]s a body has. *)
+and yields_in (body : S.block) =
+  let count = ref 0 in
+  let rec statement (s : S.statement) =
+    (match s.kind with Yield _ -> incr count | _ -> ());
+    Syntax_walk.statement_parts ~expression ~statement s
+  and expression (e : S.expression) = Syntax_walk.expression_parts ~expression ~statement e in
+  List.iter statement body.statements;
+  !count
 
 (* Whether each [yield] in a body is the last thing its path does. *)
 and yields_last (body : S.block) =
@@ -273,14 +295,7 @@ and call st (e : S.expression) ~callee ~arguments destination =
   match st.frame.code.checked.calls.(e.id) with
   | Some { callee = Function_value; _ } -> call_function_value st ~callee ~arguments destination
   | Some call_ ->
-      let expressions = List.map (fun (a : S.argument) -> a.value) arguments in
-      let expressions =
-        match (call_.callee, callee.kind) with
-        | Trait_method { receiver = Read | Mut | Own; _ }, Member (receiver, _)
-        | Function { path = Method { receiver = Read | Mut | Own; _ }; _ }, Member (receiver, _) ->
-            receiver :: expressions
-        | _ -> expressions
-      in
+      let expressions = call_expressions call_ callee arguments in
       call_with st call_ ~expressions
         ~arguments:(with_receiver st call_ ~expressions call_.arguments)
         destination ~span:e.span
@@ -426,11 +441,9 @@ and call_with ?evaluated st (call_ : C.call) ~(expressions : S.expression list)
         let intrinsic_arguments =
           List.map
             (fun (_, mode, ty, place) ->
-              match (Monomorphic.kind st.context.monomorphic ty, mode) with
-              | Storage _, _ -> Intrinsics.Place place
-              | _, T.Mut -> Intrinsics.Place place
-              | Shape (Record [ ("elements", _); ("length", _) ]), _ -> Intrinsics.Place place
-              | _ -> Intrinsics.Value (if mode = T.Own then owned st place ty else Copy place))
+              if mode = T.Mut || Storage.elements_of ty <> None || Storage.viewed ty <> None then
+                Intrinsics.Place place
+              else Intrinsics.Value (if mode = T.Own then owned st place ty else Copy place))
             in_order
         in
         match
@@ -542,6 +555,10 @@ and call_next st (yielding : Ground.yielding) cursor destination =
 
 and default_mask (signature : T.signature) (call_ : C.call) =
   let defaulted = List.filter (fun (p : T.parameter_info) -> p.has_default) signature.parameters in
+  (* The mask is 64 bits in the code, and worked out here in an OCaml
+     integer, which has one bit fewer for a sign. *)
+  if List.length defaulted > 62 then
+    Compiler_bug.unsupported "a function with more than 62 parameters that have defaults";
   let bits =
     List.mapi
       (fun i (p : T.parameter_info) ->
@@ -587,6 +604,7 @@ and field_defaults st ty variant left_out =
         caller.code with
         definition_key = key;
         anchor = path;
+        within = None;
         text = text_of st.context key;
         checked = checked_of st.context key;
         substitution = bind interface.type_generics type_args;

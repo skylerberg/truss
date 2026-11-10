@@ -5,7 +5,6 @@
 open Syntax
 module T = Types
 module C = Checked
-module Properties = Interface.Properties
 
 type root = Local of id | Self_root
 
@@ -70,6 +69,7 @@ type context = {
   mutable parameters : id list;  (** The body's parameters, which a returned view may come from. *)
   mutable mutable_parameters : id list;
   mutable self_kind : kind option;
+  mutable self_type : T.ty option;
   paths : (int, (id * int) list) Hashtbl.t;
       (** For each position, the branches it is in: a branch's id and the arm. *)
   loops : (int, id list) Hashtbl.t;  (** For each position, the loops it is in. *)
@@ -94,9 +94,24 @@ let report context ?(fixes = []) ?(notes = []) code (span : span) message =
     :: context.diagnostics
 
 let type_of context (value : expression) = C.type_of context.checked value
-let plain context type_ = Properties.plain context.database ~bounds:context.bounds type_
-let copyable context type_ = Properties.copyable context.database ~bounds:context.bounds type_
-let is_view context type_ = Properties.is_view context.database ~bounds:context.bounds type_
+let plain context type_ = Interface.Impls.plain context.database ~bounds:context.bounds type_
+let copyable context type_ = Interface.Impls.copyable context.database ~bounds:context.bounds type_
+let is_view context type_ = Interface.Impls.is_view context.database ~bounds:context.bounds type_
+
+(* The collections whose elements are places the compiler knows: an index
+   or a slice of one is a part of it, so two of them can be shown to be
+   apart. An index of any other collection is a call of its [at], which
+   lends, and may go on after what it lends is used. *)
+let storage (type_ : T.ty) =
+  match type_ with
+  | T.Named
+      {
+        path =
+          Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" | "Slice" };
+        _;
+      } ->
+      true
+  | _ -> T.is_builtin Array type_
 
 (* The place an expression names, from a definition's resolved and checked
    forms alone. *)
@@ -116,11 +131,12 @@ let rec place_in (resolved : Resolve.resolved) (checked : C.t) (value : expressi
             (place_of () base)
       | _ -> None)
   | Bracket (base, [ Item key ])
-    when resolved.brackets.(value.id) = Some Index
+    when (resolved.brackets.(value.id) = Some Index
          ||
          match checked.calls.(value.id) with
          | Some { callee = Trait_method { name = "at"; _ }; _ } -> true
-         | _ -> false ->
+         | _ -> false)
+         && match checked.types.(base.id) with Some type_ -> storage type_ | None -> false ->
       (* A slice, as [items[a..b]], is some elements, as an index is one. *)
       Option.map
         (fun place -> { place with steps = place.steps @ [ Element key.id ] })
@@ -130,9 +146,61 @@ let rec place_in (resolved : Resolve.resolved) (checked : C.t) (value : expressi
 
 let place_of context value = place_in context.resolved context.checked value
 
+(* What lends an expression, when it is a part that is lent: the lending
+   call, and how the part is lent. A call of a lending method gives a part,
+   and so does an index of a collection that is not storage. A field or an
+   element of a lent part is lent with it. *)
+let rec lending context (value : expression) : (expression * T.mode) option =
+  match value.kind with
+  | Call _ -> Option.map (fun mode -> (value, mode)) context.checked.lends.(value.id)
+  | Bracket (base, _) when context.resolved.brackets.(value.id) <> Some Type_arguments -> (
+      match (place_of context value, context.checked.calls.(value.id)) with
+      | Some _, _ -> None
+      | None, Some { callee = Trait_method { name = "at"; receiver; _ }; _ }
+        when not (storage (type_of context base)) ->
+          Some (value, if receiver = Mut then T.Mut else T.Read)
+      | None, _ -> lending context base)
+  | Member (base, _) | Parenthesized base | Mode (_, base) -> lending context base
+  | _ -> None
+
+(* The place a lending call lends from, and how: its receiver, when that is
+   a place. *)
+let lender context (call : expression) =
+  match context.checked.calls.(call.id) with
+  | Some { arguments; _ } ->
+      Option.bind
+        (List.find_opt (fun (argument : C.argument) -> argument.parameter = 0) arguments)
+        (fun (argument : C.argument) ->
+          Option.bind (Hashtbl.find_opt context.nodes argument.expression)
+            (fun (receiver : expression) ->
+              let receiver = match receiver.kind with Mode (_, inner) -> inner | _ -> receiver in
+              Option.map
+                (fun place -> (place, if argument.mode = T.Mut then T.Mut else T.Read))
+                (place_of context receiver)))
+  | None -> None
+
 let kind_of context = function
   | Local id -> Option.value ~default:Owned (Hashtbl.find_opt context.kinds id)
   | Self_root -> Option.value ~default:Viewing context.self_kind
+
+(* Whether a place is gone once the function returns, so that nothing the
+   caller keeps may view it: a local, and a parameter or [self] that the
+   function owns. An owned view stands for what it views, which the caller
+   has. *)
+let ends_with_function context (place : place) =
+  let owned type_ =
+    kind_of context place.root = Owned
+    && match type_ with Some type_ -> not (is_view context type_) | None -> true
+  in
+  match place.root with
+  | Self_root -> owned context.self_type
+  | Local id -> (not (List.mem id context.parameters)) || owned context.checked.local_types.(id)
+
+(* Whether the caller keeps what a place is part of once the function
+   returns: a [mut] parameter, or [self] in a [mut self] method. *)
+let kept_by_caller context (place : place) =
+  kind_of context place.root = Mut_access
+  && match place.root with Self_root -> true | Local id -> List.mem id context.parameters
 
 (* Reachability, for liveness *)
 

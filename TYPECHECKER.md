@@ -86,7 +86,8 @@ the type checker adds is which results there are, and what each reads:
   ordinary mutual recursion between functions never makes a query cycle. The
   few real cycles are the subject of a rule: constants that refer to each
   other, types that contain each other (checked for `indirect` by a package
-  check), and traits that require each other.
+  check, and with their facts worked out for the whole group in one
+  result), and traits that require each other.
 
 ### Deterministic results
 
@@ -126,6 +127,16 @@ binding, each pattern's variants, and so on.
 - **An id means something only within its definition.** A result never
   names a node in another definition. It names the definition, by path, as
   every reference across definitions does.
+- **A method is a definition wherever it is written.** One written inside a
+  trait, an `impl`, or a capability has its own tree, its own ids, and its
+  own results, exactly as one written `fn Type.name` has, so editing one
+  method of an `impl` checks only that method again. Its path names what it
+  is written inside, its own name, and how it takes `self`.
+- **A generic parameter is named by what declares it and its name,** not by
+  a node. Resolution records a use of `Element` as the parameter `Element` of
+  `List.push`, or of the `impl` the method is in, which is the same pair a
+  type names it by. So a parameter means the same thing in every tree that
+  can see it, and nothing maps a node to it.
 - **Tables are dense arrays** indexed by id, kept like every other result. A
   node a stage says nothing about has an empty entry.
 
@@ -153,6 +164,11 @@ Names live in separate namespaces, which the case rules keep apart:
   prelude. Exactly one can match, because no name may hide another.
 - **A qualified name** `module::name` is looked up in that module. Its
   module is either imported by a `use` or written in full from its package.
+  A full path starts with the name of a package the file may name, its own,
+  `standard`, or one its manifest lists, and that name is two of the path's
+  names when the package has an owner: `acme::geometry::vector` is the
+  module `vector` of `acme::geometry` where the manifest lists that package,
+  and otherwise names a module of a package `acme`.
 - **A member,** after `.`, is not resolved here. Its meaning depends on the
   type before the dot, which only type checking knows. The one exception is
   a name before the dot that resolution already knows is a type, as in
@@ -249,14 +265,16 @@ parser keeps:
   for each part that failed, and its signature as written when every
   diagnostic lies in its body.
 - **The members of a trait, an `impl`, or a capability recover one by one.**
-  A broken member is an `Error` member, or a method whose own signature or
-  body holds the diagnostic. The members around it are as written.
+  A broken associated type or law is an `Error` member, and the members
+  around it are as written. A method is a definition of its own, so what
+  breaks in it is its own.
 - **Nodes built for a habit** lie in the same signature or body as the
   habit's diagnostic.
 
 **A part is broken only when its tree differs from its source.** The unit is
 one signature, one body, or one type's definition, whether of a definition or
-of a member. The parser lists, on each definition, the spans where it built a
+of a member that a trait or an `impl` holds itself, an associated type or a
+law. The parser lists, on each definition, the spans where it built a
 tree that is not the source as written: where it built an `Error` node or a
 node for a habit, or consumed a closer the lexer inserted. A part is broken
 when one of its definition's recovered spans lies in the part's span: a
@@ -290,8 +308,10 @@ The type checker uses that as follows:
   A broken member of a trait, an `impl`, or a capability affects only that
   member: a trait with one broken method keeps every other method's
   interface, so uses of those are checked as usual, and only uses of the
-  broken method get `Error`. Since nodes built for a habit lie in a broken
-  part, no invented code is ever checked.
+  broken method get `Error`. Nothing written inside a trait, an `impl`, or
+  a capability whose own header is broken is checked, since what it is
+  inside is not known. Since nodes built for a habit lie in a broken part,
+  no invented code is ever checked.
 - **Everything is accepted of an `Error` interface or shape, silently.** A
   call to such a function takes any arguments and has type `Error`. Building
   such a type, reading its fields, matching on it, and looking up its
@@ -323,8 +343,9 @@ same there and goes no further:
 |---|---|---|
 | Function or method | Its *signature*: generic parameters and bounds, the receiver, parameter names, types, and modes, which parameters have defaults, the result or `yields` or `lends` form, `uses`, and whether it has a `time` clause | Its body, each default, and its `requires`, `ensures`, `decreases`, and `cost` clauses |
 | Type | Its *shape*: generic parameters, fields and variants with their types, which fields have defaults, `indirect` marks, `opaque`, and `derives` | Its invariants, its potential, and its fields' defaults |
-| Trait | Its *interface*: parameters, required traits, associated types, and each member's signature | Its provided methods' bodies, and its laws |
-| `impl` | Its *interface*: generic parameters, the trait, the type, `uses`, and each method's signature | Each method's body |
+| Trait | Its *interface*: parameters, required traits, associated types, and each method's signature | Its laws |
+| `impl` | Its *interface*: generic parameters, the trait, the type, `uses`, and each method's signature | Nothing |
+| A method written inside a trait, an `impl`, or a capability | Its signature, as a function's, read with what the one it is inside says of `Self`, its associated types, and its generic parameters | Its body, if it has one, and its clauses |
 | Constant | Its type, and its value where the checker needs one | Its expression |
 | Test, theorem, law proof | Nothing | Its body |
 
@@ -418,24 +439,40 @@ without a report: it holds a value that only a report gives, as rustc's
 
 ### No subtyping
 
-Types are invariant, and there is no subtyping relation. Exactly four
-conversions happen, each at a known place, and each is recorded in the
-checked form:
+Types are invariant, and there is no subtyping relation. Two types are
+equal or they are not, and function types with other `uses` or other costs
+are other types. Exactly four conversions happen, all decided in the one
+place where a value meets the type expected of it. One made for an argument
+is recorded with the argument in the checked form:
 
 | Conversion | Where |
 |---|---|
 | `Never` to any type | Wherever an expression of type `Never` meets an expected type, such as `None => return Err(error)` in a `match` whose value is an `Int64` |
-| `List[Element]` to `Slice[Element]`, `String` to `StringSlice` | An argument passed to a parameter of the view type. This is DESIGN.md's only implicit conversion. |
-| A function value to a function type with more `uses` or weaker costs | Where a named function or lambda is passed, bound, or stored. A pure function can be passed as `(fn(Item) uses Clock)`. A `cost time O(1)` function can be passed as `cost time finite`, and the prover checks that the costs imply the expected ones. |
-| A built-in integer to `Integer`, and back | In specifications only (see [Specifications](#specifications)) |
+| `List[Element]` to `Slice[Element]`, `String` to `StringSlice` | An argument passed to a parameter of the view type, and the key of an index, which is the argument of `at`. This is DESIGN.md's only implicit conversion. |
+| A function value to a function type with more `uses` or weaker costs | Where a value is passed, bound, returned, assigned, or stored, and where a branch of an `if` or a `match` ends with it. A pure function can be passed as `(fn(Item) uses Clock)`, and a `cost time O(1)` function as `cost time finite`. |
+| A built-in integer to `Integer`, and back | An argument or an index's key, in specifications only (see [Specifications](#specifications)) |
 
 The function-value conversion happens only at the top of an expression, not
 inside a type argument, so `List[fn(Item)]` and
 `List[(fn(Item) uses Clock)]` stay different types, as in Rust.
 
+- **Every capability the function uses must be one the expected type
+  lists.** A function that `uses Clock` is never a `fn()`, in an argument,
+  a `let`, a `return`, a field, or an assignment. The one exception is a
+  capability parameter, described in
+  [What code may call](#what-code-may-call).
+- **Costs are weaker when the types' constants show it:** an exact count is
+  within any bound it does not exceed, a count is `O(...)`, and every bound
+  is `finite`. A named function's type has `time finite` exactly when the
+  function has a `time` clause. Costs that the constants do not show to be
+  weaker are the prover's to show. For a function passed to a call the
+  prover reads the argument, as PROVER.md's "Lambdas and function values"
+  describes. Anywhere else the checker records the obligation, with the
+  expression and both function types.
+
 ### Properties of types
 
-Three facts about a type decide what code may do with it. Each is worked out
+Four facts about a type decide what code may do with it. Each is worked out
 from the type's shape, as a condition on its type parameters: `Option[Value]`
 is `Plain` exactly when `Value` is.
 
@@ -465,6 +502,34 @@ is `Plain` exactly when `Value` is.
 - **Whether a type is a view is part of its shape.** Making a type hold a
   view changes how every user of it is checked, which reaches every reader
   of the shape like any other change of shape.
+
+The first three, and what a type holds in place (see
+[Recursive types](#recursive-types)), are *facts of the type's definition*,
+worked out once for each definition and kept as a result of their own:
+
+- **A fact is a list of conditions.** For `Copyable` and `Plain` it is what
+  must have the property for the type to have it, or that it never does. For
+  a view it is what makes the type one when any of it is, or that it always
+  is. `Option` is `Plain` on the condition `Value`, and a view on the
+  condition `Value`.
+- **A question about a type asks its definition's conditions of its
+  arguments.** Whether `Option[Option[List[Int64]]]` is `Plain` is `Option`'s
+  condition asked of `Option[List[Int64]]`, then of `List[Int64]`, which never
+  is. No question walks a type's fields, so none can take a type nested in
+  itself for a type that contains itself.
+- **Types that contain each other are worked out together.** Such a type is
+  `Copyable` and `Plain` when nothing in it says otherwise, and is a view, or
+  holds something in place, only when something in it does. So a group
+  starts with the facts of types that have no fields, and each member's
+  facts are worked out from the others' until nothing changes.
+- **An associated type is a condition too.** In
+  `type Kept[Source: Shown](part: Source.Part)` nothing is known of
+  `Source.Part`, so `Kept` is a view on the condition `Source.Part`. Where
+  `Kept[Numbers]` is asked about, the condition is `Numbers`'s `Part`, which
+  the `impl` of `Shown` for `Numbers` chooses. Inside generic code, an
+  associated type of a parameter has a property only when its trait bounds
+  it, as a parameter does. One that no `impl` answers is taken not to be
+  `Copyable` or `Plain`, and to be a view.
 
 ## Checking signatures and definitions
 
@@ -517,8 +582,9 @@ the definition's interface: the types of its parameters and result, its
   `self`, so `lends` takes no mode or `mut`, and `lends own` is an error.
   The body is checked against the form (see
   [Yielding and lending](#yielding-and-lending)).
-- **`main`** must have exactly the signature
-  `fn main(arguments: List[String]) -> ExitCode`, with any `uses`.
+- **`main`,** in a package's `main` module, must have exactly the signature
+  `fn main(arguments: List[String]) -> ExitCode`, with any `uses`. A
+  function named `main` in another module is an ordinary function.
 
 ### Types
 
@@ -538,6 +604,23 @@ the definition's interface: the types of its parameters and result, its
   copied and is not a view, until it is defined.
 
 ### Traits, `impl`s, and capabilities
+
+A trait, an `impl`, or a capability and the methods written inside it are
+checked apart, and neither waits on the other:
+
+- **Its header is its own.** Lowering it gives its generic parameters and
+  their bounds, what `Self` is, the associated types, and for an `impl` its
+  trait, its type, and its `uses`. This reads only its own tree.
+- **Each method is lowered with that header,** which is what `Self`, its
+  associated types, and the generic parameters around the method mean, and
+  gives a signature as any function's.
+- **Its interface is put together** from the header and the signature of
+  each method written inside it. A trait's method is provided when it has a
+  body, and one whose own signature is broken is listed as broken.
+- **Each method is checked against what it is inside as a definition of its
+  own:** an `impl`'s against the method its trait declares, and a trait's
+  against the traits it requires. The `impl` itself is checked for what it
+  must give and does not.
 
 - **A trait's members** are checked like functions, with `Self` standing for
   the implementing type and `Self.Name` for its associated types. A trait
@@ -570,15 +653,20 @@ the definition's interface: the types of its parameters and result, its
 
 A type that contains itself in place would be infinitely large. The checker
 finds every cycle of types that contain each other in place, through fields,
-variants, and type arguments held in place, and reports any cycle that does
-not pass through an `indirect` variant, with a fix that adds `indirect` to
-the variant where the cycle re-enters.
+variants, type arguments held in place, and associated types, and reports
+any cycle that does not pass through an `indirect` variant, with a fix that
+adds `indirect` to the variant where the cycle re-enters.
 
-Whether a type argument is held in place comes from the generic type's
-shape: `Option` holds its `Value` in place, while `List` holds its elements
-through a `Buffer`, which the intrinsic module declares as heap storage. This
-is a package check, over the type definitions of one package: packages do not
-depend on each other in a cycle, so neither can their types.
+Whether a type argument is held in place is a fact of the generic type's
+definition (see [Properties of types](#properties-of-types)): `Option` holds
+its `Value` in place, while `List` holds its elements through a `Buffer`,
+which the intrinsic module declares as heap storage. A type that holds an
+associated type of a parameter in place, as
+`type Kept[Source: Shown](part: Source.Part)` does, holds whatever the
+`impl` chooses for each argument, so `type Tree(kept: Kept[Marker])` contains
+itself when `Marker`'s `Part` is `Tree`. This is a package check, over the
+type definitions of one package: packages do not depend on each other in a
+cycle, so neither can their types.
 
 A generic type that contains itself with different arguments, as in
 `type Nested[Element] = Leaf(value: Element) | indirect Node(inner: Nested[List[Element]])`,
@@ -723,9 +811,24 @@ worked out from how the body uses it.
 
 **Generic arguments** are inference variables, solved from the arguments
 and from the expected type, so `let digest: Array[UInt8, 32] = Array.filled(0)`
-takes its length from the annotation. Bounds are checked once the
-statement's variables are solved. Explicit type arguments, as in
+takes its length from the annotation. Explicit type arguments, as in
 `parse[Int64](text)`, are unified first.
+
+**Bounds are held wherever generic parameters are filled in,** whether the
+arguments are written or worked out: at a call, where a function or a
+method is used as a value, where a `for` loop calls `each`, and where a
+generic type is named or a value of one is built, so `Holder(5)` is an
+error when `Holder[Value: Shape]` and `Int64` is no `Shape`. Each bound is
+checked once the statement has worked out the type it is on:
+
+- **The type must implement the trait.**
+- **Each associated type the bound fixes must equal the one the `impl`
+  gives.** The two are unified, so the bound can be what works a type out:
+  with `fn first_of[Input: Source[Item = Output], Output](input: Input) -> Output`,
+  the call `first_of(numbers)` takes `Output` from `Numbers`'s `Item`.
+- **A statement reports a bound once,** however many of its parts need it.
+  `Holder[Int64].area(Holder(5))` names `Holder[Int64]` twice and calls a
+  method that needs `Int64: Shape`, and is one error.
 
 **An `impl` is never chosen from the expected type.** A trait method's
 `impl` is chosen by `Self` and by the trait's type arguments, and those come
@@ -740,9 +843,9 @@ The keyword at a call site must agree with the parameter:
 
 | Parameter | Argument |
 |---|---|
-| read-only | a place, unmarked, which the callee views; or a temporary |
-| `mut` | `mut place`. A missing mark is an error with a fix that adds it. |
-| `own` | `own place`, which moves it; `place.copy()`; a temporary, unmarked; or a `Plain` place, unmarked, which is copied |
+| read-only | a place, unmarked, which the callee views; a part that is lent; or a temporary |
+| `mut` | `mut place`, or a part that is lent `mut`. A missing mark is an error with a fix that adds it. |
+| `own` | `own place`, which moves it; `place.copy()`; a temporary, unmarked; or a `Plain` place or lent part, unmarked, which is copied |
 
 - **Marks are never redundant.** An argument marked `own` that is a `Plain`
   place, or any mark on a temporary, is an error with a fix that removes the
@@ -755,6 +858,14 @@ The keyword at a call site must agree with the parameter:
   read-only version, and `mut` and `own` choose theirs. On a temporary, the
   `own` version is chosen if there is one, and the read-only one otherwise.
   A missing version is an error that names the versions there are.
+- **A part that is lent is neither a place nor a temporary.** What a call
+  of a lending method gives, and each field and element of it, is lent
+  read-only or `mut`, as the method's signature says. It takes no mark: the
+  mark that chose the method's `mut` version is the one before the place it
+  is lent from. A part lent `mut` goes to a `mut` parameter, has its
+  `mut self` methods chosen, and can be assigned to; one lent read-only
+  cannot. Neither is ever given up to an `own` parameter or an `own self`
+  method, unless it is `Plain` and so copied.
 
 ### Members
 
@@ -911,8 +1022,11 @@ body, and needs only the body and the interfaces of what it calls.
 ### Places
 
 A place is a local, a parameter, `self`, or a constant, followed by fields
-and indexes. An index whose value the checker cannot compare, such as
-`items[i]`, stands for *some element* of `items`.
+and by indexes of a `List`, a `Slice`, or an `Array`. An index whose value
+the checker cannot compare, such as `items[i]`, stands for *some element* of
+`items`. An index of any other collection is not a place: it is a call of
+the collection's `at`, a lending call (see
+[Yielding and lending](#yielding-and-lending)).
 
 Two places *overlap* when one is a prefix of the other. `config.servers` and
 `config.clients` do not overlap. `items[i]` and `items[j]` may, and so may
@@ -951,7 +1065,7 @@ A *loan* is a period during which a place is lent. Each is shared or `mut`:
 | A `mut` argument or receiver | `mut` | the call |
 | A `let` of a place | shared | the binding is live |
 | A value of a view type, such as a slice, a cursor, or a lambda that captures | shared | the value is live |
-| The part a `lends` method gives out | shared or `mut` | the rest of the statement |
+| What a lending call is called on | shared, or `mut` when the method takes `mut self` | the rest of the statement |
 | A `for` loop's variable | shared or `mut` | the iteration |
 | A `provide` of a place | shared or `mut` | the `provide` block |
 
@@ -966,28 +1080,47 @@ in SYNTAX.md's example.
 ### Views
 
 DESIGN.md's views are second class: they never outlive the function that
-made them. The checker keeps them so with two rules, which together need no
-annotations:
+made them. The checker keeps them so with rules that need no annotations,
+all read from one account of what a value views:
 
-- **A call's result views everything its arguments view.** A result of a
-  view type holds the loans of every read-only argument and every view-typed
-  argument of the call. A view-typed `mut` argument also takes on those
-  loans, since the callee may store a view in it. `found.unwrap_or(default:
-  backup[..])` therefore views `backup`, and `mut backup.push(9)` is rejected
-  while the result is in use. Plain-data arguments, such as an index, lend
-  nothing, so the rule rarely holds more than it must.
+- **A call's result views everything its arguments lend it.** A result of a
+  view type holds the loans of every argument lent to the call, read-only or
+  `mut`, that is not `Plain`, and of every view-typed argument.
+  `found.unwrap_or(default: backup[..])` therefore views `backup`, and
+  `mut backup.push(9)` is rejected while the result is in use. Plain-data
+  arguments, such as an index, lend nothing, so the rule rarely holds more
+  than it must.
+- **A place given `mut` that can hold views takes on the same loans,** since
+  the callee may keep a view in it. After `mut views.push(data[0..2])`,
+  `views` views `data`, and `mut data.push(4)` is rejected while `views` is
+  in use.
+- **A place assigned a view views what the value does.** After
+  `holder.view = data[0..2]`, `holder` views `data`. A variable assigned
+  again still views what it viewed before, since the checker follows no
+  path one at a time.
+- **A local that is a view stands for what it views.** A value read from
+  `part`, after `let part = items[0..2]`, views `items` and not `part`, so a
+  function may return it when `items` is a parameter.
 - **A function returns views only of what reached it through its
   parameters.** A returned view-typed value may hold loans only of its
-  parameters and of what they view, never of its own locals. A method
-  returning `self.items[1..4]` and `Option.unwrap_or` both meet this.
+  parameters and of what they view, never of what ends with the function:
+  its locals, and a parameter or `self` it takes `own`, unless that is
+  itself a view. A method returning `self.items[1..4]` and
+  `Option.unwrap_or` both meet this.
+- **What the caller keeps views only the same.** A `mut` parameter, and
+  `self` in a `mut self` method, outlive the function, so a view put in one,
+  by assignment or by a call that takes it `mut`, must not be of what ends
+  with the function. And since the caller goes on using it, nothing it views
+  may be changed in the rest of the function.
 
-- **A binding may not view a temporary.** A temporary lives until the end
+- **Nothing kept may view a temporary.** A temporary lives until the end
   of its statement, so a `let` or `var` whose view, or whose cursor, views
   an owned temporary passed read-only to the call that made it is an error
-  that asks to bind the temporary to a name first, as Rust's E0716 does. A
-  cursor views what its call's read-only arguments view, as a view would.
-  A string literal without interpolation is in static memory, so viewing
-  one is fine.
+  that asks to bind the temporary to a name first, as Rust's E0716 does. So
+  is a view of a temporary assigned to a place, or passed to a call beside
+  a place given `mut` that can hold views. A cursor views what its call's
+  read-only arguments view, as a view would. A string literal without
+  interpolation is in static memory, so viewing one is fine.
 
 A value of a view type may be bound by `let` or `var`, held in local records
 and collections, and passed as an argument. It cannot be returned except by
@@ -1014,10 +1147,22 @@ with `copy()`, unless it is `Plain`. Otherwise the error offers both fixes.
 
 - **A `lends` method yields exactly once on every path,** as Swift checks
   its `_read` and `_modify` accessors. The checker finds a path with no
-  `yield` or with two, and reports it. The part it yields is a place of
-  `self`, or a part reached through one, with the mode the signature states.
-  At the call, the part is lent for the rest of the caller's statement, and
-  a `lends` method cannot drive a `for` loop or be pulled.
+  `yield` or with two, and reports it. What it yields has the mode the
+  signature states, and may be a part of `self` or a value the method made.
+  A `lends` method cannot drive a `for` loop or be pulled.
+- **A lending call lends the whole place it is called on,** for the rest of
+  the caller's statement, read-only or `mut` as the method takes `self`. A
+  `while` loop's test is a statement of its own for this, so what the test
+  lends goes back before the body runs. Until then, a use of a place lent
+  `mut`, or a change of one lent read-only, is an error, and so is passing a
+  place to a call beside a part it lends when either is `mut`. An index of
+  a collection other than a `List`, a `Slice`, or an `Array` is such a call,
+  so two indexes of a user's collection are never lent `mut` in one
+  statement, and `grid[a] = grid[b]` needs the right side in a `let` first.
+- **A part that is lent goes back.** Returning it, storing it, or giving it
+  to an `own` parameter is an error unless it is `Plain`, and so is binding
+  it with `let`, since the name would outlast the statement. Matching one
+  binds views of its parts, or `mut` access to them when it is lent `mut`.
 - **A `yields` method may yield any number of times.** Calling it as a
   `for` loop's expression drives the loop. Calling it anywhere else makes a
   cursor, which is a view of the receiver when the method takes `self`, and
@@ -1070,9 +1215,18 @@ still needs the capability among the `impl`'s `uses`, from outside.
   type.
 - **A lambda's `uses` are inferred** from its body: the capabilities it
   calls. They must be within the `uses` of the function type it is checked
-  against. A capability parameter, such as `Granted` in `for_each`, is solved
-  as the union of what the lambdas passed for it use, and that set must then
-  be available at the call.
+  against.
+- **A capability parameter of the function a call calls is solved** as the
+  union of what is passed for it: what each lambda and each function that
+  meets a function type listing the parameter uses beyond what the type
+  lists, wherever in the call's arguments it is, in parentheses or at the
+  end of a branch as well. That set must then be available at the call. So
+  `for_each(3, visit: tick)` needs `Clock` when `tick` uses it and `visit`
+  is a `(fn(Int64) uses Granted)`.
+- **A function's own capability parameter stands for itself** throughout its
+  body. Inside `for_each`, a `(fn(Int64) uses Granted)` takes only functions
+  that use `Granted` or nothing, and a call of `for_each` by itself passes
+  `Granted` on as it is.
 - **Specifications and quantifiers' bodies** have no capabilities at all,
   not even `Panic`, since what they mean must be a value. **`parallel`
   branches and `parallel for` bodies** have only `Panic` available. A test
@@ -1096,20 +1250,57 @@ implements `Panic` is impossible, since nothing can.
 ### Dependency grants
 
 DESIGN.md says a dependency may use only the capabilities its manifest entry
-grants. The type checker enforces this where it can see a dependency's
-capabilities, which is at the signatures of its code, never its bodies:
+grants, and that a grant is checked wherever the dependency's code is named.
+The type checker enforces this where it can see a dependency's capabilities,
+which is at the signatures of its code, never its bodies. Every capability
+in those `uses` must be granted, except those that arrive through a
+capability parameter, which are the caller's own. A dependency's code is
+named by:
 
-- **A call to a function, a method, or a trait method of a dependency** is
-  checked against that dependency's grant: every capability in the callee's
-  `uses` must be granted, except those that arrive through a capability
-  parameter, which are the caller's own. So does a `provide` of a
-  dependency's type, for the capabilities its `impl`s use.
-- **Inside the dependency,** its own bodies are checked against its own
-  signatures, so nothing it does can exceed what its signatures declare.
+- **A call** to its function or method, or to a method of its trait, and to
+  the `impl`'s method that then runs, when the `impl` is known.
+- **Its function taken as a value,** since whoever is handed the value may
+  call it.
+- **Its `impl` meeting a bound,** which is checked in the one place a bound
+  is held: for a call's type arguments, for the arguments of a type that is
+  written, for `any value`, and for the bounds an `impl` must itself meet.
+  The `impl` found is checked, and so are the `impl`s that meet its own
+  bounds in turn, as the `impl` of `Source` for `List[Timer]` is met through
+  the one for `Timer`. An `impl`'s methods can use only what their trait
+  declares, so only a trait whose methods have `uses`, or an `impl` of a
+  capability, ever asks for a grant here.
+- **A `provide`** of its type, for the capabilities its `impl`s use.
 
-The error names the dependency's function and the capability that was not
-granted, as DESIGN.md asks. A dependency that offers both a client and a
-server needs only the grants for what the program calls.
+Inside the dependency, its own bodies are checked against its own
+signatures, so nothing it does can exceed what its signatures declare.
+
+- **A grant is one query,** by the package and the dependency: the
+  capabilities the manifest's entry names, each found as a definition. A
+  prelude capability is named by its name and any other by its full path,
+  so two capabilities that share a name are never taken for each other.
+- **A package the manifest does not list is granted nothing,** which is how
+  an `impl` in a package further away is caught.
+- **The error names the code and the capability,** and says what to add to
+  which entry. It has no fix: DESIGN.md has a grant always be a choice
+  someone made. A dependency that offers both a client and a server needs
+  only the grants for what the program names.
+
+### The manifest
+
+Each definition's result says which packages it uses, and the union over a
+package's definitions, its tests apart, is what `truss publish` publishes
+it with. Two rules about a package's manifest need its code too, so they
+are package checks, reported with the manifest's file and not in a module:
+
+- **A grant that names no capability** is an error, so a misspelled
+  capability is not silently one that is never granted.
+- **A dependency that nothing in the package uses** is an error, as an
+  unused `use` is. A package uses a dependency by naming it in a path, by
+  calling a method of one of its traits with a dot, or by an `impl` of it
+  answering a call or meeting a bound. Each definition's result says which
+  packages it uses, and the check is their union. It is made only of a
+  package whose code all checks, since a call in a body with an error may
+  not have been worked out, and the fix deletes the entry.
 
 ## Traits and `impl`s across a package
 
@@ -1142,6 +1333,13 @@ packages the location rule allows: the trait's, the type's, and those of the
 trait arguments' outermost types. Each lookup is one query, such as "the
 `impl`s of `Add` for `Instant` in the package of `Duration`", so adding an
 `impl` re-checks only the definitions that asked that question.
+
+An associated type is read from the `impl` that matches the type, whether or
+not the bounds on that `impl`'s parameters hold. `impl`s do not overlap, so
+no other `impl` could answer, and a bound that does not hold is reported
+where the trait is asked for. Reading the type therefore asks nothing of
+the type's arguments, which is what lets a type's properties turn on an
+associated type without a question coming back to itself.
 
 ### Method names
 
@@ -1207,8 +1405,26 @@ checks them like code, with these differences:
 A constant's type is written, and its value is checked against it as a
 constant expression: literals, arithmetic, other constants, and records,
 variants, lists, maps, arrays, sets, strings, and tagged templates without
-interpolation, built from constant parts. A call is an error. Defaults
-follow the same rules.
+interpolation, built from constant parts. A call is an error. A default of
+a parameter or of a field follows the same rules, and names no parameter.
+
+Whether an expression is constant is read from its checked form, not from
+how it is spelled:
+
+- **Arithmetic is an operator on built-in integers, floats, and `Bool`:**
+  the arithmetic, comparison, logical, and bitwise operators, and shifts. An
+  operator that a type's `impl` defines, such as `==` on a `String`, is a
+  call.
+- **A name is constant when it means a definition:** another constant, a
+  variant, or a function taken as a value. A field of a constant record is
+  constant.
+- **A call is constant only when it builds a record or a variant.** An
+  index is a call of `at`.
+- **Anything else is not:** a branch, a block, a lambda, a string with
+  interpolation.
+
+So a constant uses no capability and always ends, and every build works it
+out alike.
 
 The checker works out a constant's value only where it needs the value: a
 `USize` in a type argument, as in `Array[UInt8, digest_size]`, and a constant
@@ -1217,7 +1433,10 @@ to run: integers are Zarith's, and float operations are the exact IEEE ones,
 which OCaml computes bit for bit. A `Float32` is computed in 64 bits and
 rounded to 32, which gives the correctly rounded 32-bit result for `+`, `-`,
 `*`, `/`, and `sqrt`, because 53 bits is more than twice 24 plus 2. Overflow
-in a constant's arithmetic is an error. Constants that refer to each other
+in a constant's arithmetic is an error, and so is dividing by zero: each
+step of `+`, `-`, `*`, `/`, `%`, and negation on built-in integers must fit
+its type, so `let small: UInt8 = 200 + 100 - 100` is an error at
+`200 + 100`. Constants that refer to each other
 in a cycle are an error. Every other constant is built by code generation,
 which runs compiled code for one whose value cannot be folded, such as a
 `Map` or a `Set`, as CODEGEN.md describes. A result that used a constant's
@@ -1249,6 +1468,7 @@ needs to work anything out from the syntax tree again:
 - **each pattern's variants and fields,** and the order of arms
 - **every move,** whole and partial, which `Ownership`'s result for the
   definition holds beside the checked form, since it is found after it
+- **each call of a lending method,** with how the part it gives is lent
 - **the capability set** at each call, the capability parameters solved, and
   the evidence each `provide` builds, for each capability its
   implementations implement
@@ -1281,6 +1501,7 @@ pushes a change in any of these to the results that read it:
 | The resolved form of a definition, or a part of it | The body of `parse_config` |
 | The interface of a definition | The interface of `List.push` |
 | The shape of a type | The shape of `Point` |
+| The facts of a type's definition | What must be `Plain` for `Option` to be |
 | The value of a constant | `digest_size` |
 | The names a file defines with one name | The definitions named `count` in `report.truss` |
 | A module | Whether `standard::json` exists, and its visible names named `parse` |
@@ -1288,7 +1509,7 @@ pushes a change in any of these to the results that read it:
 | The `impl`s of a trait for a type constructor, in one package | `Add` for `Instant`, in the package of `Duration` |
 | The capability `impl`s of a type | The capabilities `MemoryFiles` implements |
 | A body fact | Whether `Tree.each` can be pulled |
-| A manifest entry | The capabilities granted to `http` |
+| A manifest entry | The capabilities granted to `http`, each as the definition its name means |
 
 What each kind of result depends on:
 
@@ -1311,7 +1532,7 @@ So the costs of everyday edits follow from what each result reads:
 | A method added to `List` | Definitions that looked up a member of `List` with that name |
 | An `impl` added | Definitions that looked up `impl`s of that trait for that type in that package |
 | A definition added to a file | Definitions in that file that looked up that name, including bindings checked for hiding |
-| A field added to a type | Definitions that used its shape |
+| A field added to a type | Definitions that used its shape, and those that asked a fact of it that came out different |
 | A definition moved to another module | Its users' names, which re-checks their types. Their test results are already done, because a test's key holds no names, as CODEGEN.md describes. |
 
 ## Diagnostics
@@ -1421,22 +1642,21 @@ the compiler. The prelude holds:
   is type-checked with the body, and the prover reads it from the callee's
   tree, so a change to a callee's body reaches its callers' proofs, which
   then find each query's answer kept by the query's text.
-- **Recording that a function value's costs imply the ones expected.** The
-  checked form has a case for the obligation, where a function is given a
-  type whose costs differ from its own, and nothing records it. The prover
-  shows a function's or a lambda's costs where it is passed to a call, as
-  PROVER.md's "Lambdas and function values" describes.
+- **The target of a `calls(...)` cost in a function type.** A function
+  type's cost keeps its resource by name, so `cost calls(FileRead) <= 1` and
+  `cost calls(Clock) <= 1` are one type.
+- **A capability parameter in a result.** A function type that a signature
+  returns may list the signature's capability parameter, and a call does not
+  replace it by what the call solved, so such a result can be called only
+  inside the function it came from. A generic type's capability arguments
+  are not worked out either: they are equal only as written.
 - **Checked forms stored in a specified encoding.** They are kept as OCaml's
   marshaled values, as DATABASE.md describes.
 - **A shape that ignores the order of fields.** DESIGN.md says reordering a
   type's fields rebuilds nothing. A shape keeps its fields in the order they
   are written, so reordering them re-checks what reads the shape. Code
   generation's layout already ignores the order.
-- **Checking that grants nest.** A dependency's manifest may grant its own
-  dependencies only what it was granted. Nothing loads a dependency's
-  manifest, since there is no package registry to find dependencies in.
 - **How `write_with` combines errors** is not decided. A writer's lambda may
   fail with its own error type as well as a `FileError`. The standard
   library needs a result type that holds either, and a name for it.
-- **Where `main` lives** is not decided. A package's program starts at a
-  `main`, but no document says which module holds it.
+

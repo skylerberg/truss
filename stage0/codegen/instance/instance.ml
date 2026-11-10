@@ -120,7 +120,7 @@ let rec encode ?(path = Ground.encode_path) key =
    exactly one way: mangling never gives two keys one symbol. *)
 
 let marker word = "_" ^ word ^ "_"
-let module_path (m : Path.module_) = String.concat "__" (m.package :: m.modules)
+let module_path (m : Path.module_) = String.concat "__" (Path.module_parts m)
 
 let text value =
   String.concat ""
@@ -194,7 +194,7 @@ let rec mangle = function
   | Copy ty -> marker "Copy" ^ mangle_ty ty
   | Debug ty -> marker "Debug" ^ mangle_ty ty
   | Encode ty -> marker "Encode" ^ mangle_ty ty
-  | Any_drop ty -> marker "Any_drop" ^ mangle_ty ty
+  | Any_drop ty -> marker "AnyDrop" ^ mangle_ty ty
   | Evaluator p -> marker "Evaluator" ^ path p
   | Template_check { from_template; texts } ->
       marker "Check" ^ path from_template

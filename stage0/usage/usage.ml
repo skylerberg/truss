@@ -43,25 +43,12 @@ let parameter_names (definition : definition) =
       parameters
   in
   (match definition.kind with
-  | Function { signature; _ } -> add signature.parameters
+  | Function { signature; _ } | Method_declaration signature -> add signature.parameters
   | Theorem { parameters; _ } -> add parameters
   | Trait { members; _ } ->
       List.iter
         (fun (line : trait_member line) ->
-          match line.kind with
-          | Trait_method { signature; _ } -> add signature.parameters
-          | Law law -> add law.parameters
-          | _ -> ())
-        members
-  | Impl { members; _ } ->
-      List.iter
-        (fun (line : impl_member line) ->
-          match line.kind with Impl_method { signature; _ } -> add signature.parameters | _ -> ())
-        members
-  | Capability { members; _ } ->
-      List.iter
-        (fun (line : capability_member line) ->
-          match line.kind with Capability_method signature -> add signature.parameters | _ -> ())
+          match line.kind with Law law -> add law.parameters | _ -> ())
         members
   | _ -> ());
   !names
@@ -204,15 +191,7 @@ let check_unreachable context (definition : definition) =
     | Trait { members; _ } ->
         List.filter_map
           (fun (line : trait_member line) ->
-            match line.kind with
-            | Trait_method { body; _ } -> body
-            | Law law -> Some law.body
-            | _ -> None)
-          members
-    | Impl { members; _ } ->
-        List.filter_map
-          (fun (line : impl_member line) ->
-            match line.kind with Impl_method { body; _ } -> Some body | _ -> None)
+            match line.kind with Law law -> Some law.body | _ -> None)
           members
     | _ -> []
   in

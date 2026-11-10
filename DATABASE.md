@@ -18,7 +18,7 @@ testing, and verifying, and that agents can see exactly what their changes
 affect and where their work overlaps with other agents'. The database is what
 makes both possible. It:
 
-- holds the inputs of every worktree being worked on: the packages, their
+- holds the inputs of every project being worked on: its packages, their
   manifests, and the text of every module
 - keeps the results that have been asked for current as inputs change, by
   pushing each change, one phase of the compiler at a time, to the results
@@ -309,13 +309,15 @@ A session's inputs are:
 |---|---|---|
 | A package | Its name | Its manifest: dependencies, grants, and `usize_bits`, and its modules |
 | A module's text | Its module path | The file's text |
-| The layout | The session | Each package's directory and name, and every manifest and module file |
+| The layout | The session | Each package's directory and name, every manifest, lock file, and module file, each module's file, the project's test time limit, and each registry package of the build with its version and hash |
 | A file's stamp | Its path in the worktree | Its size, modification time, and inode |
 | A manifest's text | Its package's directory | The file's text |
+| The lock file's text | The session | The text of `truss.lock` at the project's root |
 | The wanted keys | How instances are lowered | The tests and programs whose keys have been asked for |
 
-The layout, the stamps, and the manifests' texts are the database's own, so
-that a restart reads only the files whose stamps changed. The wanted keys
+The layout, the stamps, and the manifests' and the lock file's texts are the
+database's own, so that a restart reads only the files whose stamps
+changed. The wanted keys
 are code generation's, which says which tests' keys a driver is about to ask
 for (see CODEGEN.md's "Test results"). A module's text
 is set from the file system, or from git for a commit (see
@@ -529,6 +531,7 @@ the machine. It holds:
 | Results of expensive steps | The hash of their kind and of exactly the input that made them (see [Exact keys](#exact-keys)) | `segments/` |
 | A package's artifact | The key of its sources | `segments/` |
 | Object files | Their key, as CODEGEN.md describes | `objects/`, one file each, since a linker reads them by path |
+| A registry package's files | The hash of the files, as SYNTAX.md's "The lock file" defines it | `packages/`, one directory each |
 | A solver's answers | Their key, as PROVER.md describes | `proofs/`, one file each |
 | Pointers | A worktree's session | `pointers/` |
 | The compiler's identity, the list of worktrees, and the background process's lock and log | | the top, and `servers/` |
@@ -641,15 +644,68 @@ that input:
 
 ## Sessions
 
-A *session* is one worktree's state, with what a command needs around it: its
-engine, the pointer that names its state in the store, and the problems its
-manifests have. A worktree is a directory with one or more packages in it:
-the top of the git worktree a command's directory is in, or outside git, the
-nearest directory at or above it that holds a `truss.toml`, or else the
-directory itself. Its packages are the directories under it with a
-`truss.toml`, and each module file belongs to the nearest package above it.
-Directories whose names start with `.`, and `_build` and `node_modules`, are
-passed over.
+A *session* is one project's state, in one worktree, with what a command
+needs around it: its engine, the pointer that names its state in the store,
+and the problems its manifests have. A project is what SYNTAX.md's
+"Projects" says: the directory tree under a manifest with a `[project]`
+table, or a single package with no such manifest above it. A session is a
+project's, and not a worktree's, because a state names every definition by
+its path, and a path means one thing only within one project: two projects
+in one repository may each have a package called `tools`.
+
+- **The project's root is found from the files alone:** the nearest
+  directory at or above a command's whose manifest has a `[project]` table,
+  or with none, the nearest with a manifest. Git is asked nothing, so a
+  project builds the same from an archive.
+- **Its packages are the directories under the root with a manifest that
+  has a `[package]` table,** apart from another project's: under a root with
+  a `[project]` table, a directory whose manifest has one of its own, with
+  everything below it, and under a root without one, every other directory
+  with a manifest. Each module file belongs to the nearest package above
+  it. Directories whose names start with `.`, and `_build` and
+  `node_modules`, are passed over.
+- **A dependency is the project's package of that name.** What is wrong
+  between manifests, such as a dependency that names no package or a cycle
+  of packages, is a problem of the session, which CLI.md lists.
+- **The same project in two worktrees is two sessions,** which are compared
+  for overlaps (see [Parallel work](#parallel-work)). They are told to be
+  the same project by being at the same place under worktrees of one
+  repository.
+
+### Registry packages
+
+A session's build is its project's packages and the registry packages they
+use, at the versions SYNTAX.md's "The lock file" and DESIGN.md's "Choosing
+versions" give. The database works those out each time it reads the
+project's files, from the lock file and the records of the packages it
+names, and never chooses a version itself.
+
+- **A registry package's files are in the store,** in `packages/`, a
+  directory named by the hash of the files, as [The store](#the-store)
+  lists. One that is not there is fetched from the registry, and kept only
+  if it has that hash. What is read of a package is kept by its hash for as
+  long as the process lives, since it never changes, so a scan that finds
+  the build unchanged reads no file of one.
+- **A registry package is a package like any other to the stages:** the
+  package input, with the dependencies and grants of its manifest, and the
+  text of each of its modules. They are set when the package enters the
+  build or its version changes, and taken away when it leaves. Its results
+  are computed when something reads them, so a project pays for what it
+  uses of a package.
+- **A project's package of the same name takes its place,** as DESIGN.md's
+  "Projects" decides: the name is then the project's package, and no line
+  of the lock file is for it.
+- **What is wrong is a problem of the session:** a lock file that cannot be
+  read, a dependency no lock file or record gives a version, files that
+  cannot be had, and a lock file that is not the one the manifests give,
+  with that one, which `truss check --fix` writes.
+- **Other versions are tried in a trial** (see [Trials](#trials)): a
+  session that starts from the project's and has another lock file, which
+  `truss upgrade` compares with the project's before it writes the file.
+- **A published version can be had in an engine of its own,** over the
+  standard library, with the packages it was published with. A package and
+  the version before it have the same paths, so the two cannot be in one
+  state. `truss publish` compares a package with its last version this way.
 
 ### The background process
 
@@ -721,8 +777,8 @@ it exits after three hours without a request, the default of both.
 
 ### Sessions for commits
 
-A session can also be opened for a git commit, with its files read from git
-through `git ls-tree` and `git cat-file`. It starts from the nearest saved
+A session can also be opened for a git commit, with the files under the
+project's root read from git through `git ls-tree` and `git cat-file`. It starts from the nearest saved
 state, as a new worktree does, and is kept in memory and never pointed at.
 This is how the database gets the state of a base commit, compares a branch
 that has no worktree, and checks a merge.
@@ -732,8 +788,8 @@ that has no worktree, and checks a merge.
 `Database.trial` gives an engine that starts from a session's state and
 changes on its own: the session's state is written, and opened again. The
 trial holds what it changes and shares the rest with the session. A rename
-checks its plan in a trial before it writes a file, and a merge is checked
-in one.
+checks its plan in a trial before it writes a file, a merge is checked in
+one, and an upgrade is tried in one, as a session with another lock file.
 
 ## Questions
 
@@ -887,8 +943,10 @@ with the same inputs.
   a shared store would skip exactly the checks Truss exists to make, and an
   object file is code that will run. That is the supply-chain attack
   GOALS.md sets out to stop. So a result from another machine will be used
-  only when it is signed by a key the user has said to trust, as Nix accepts
-  substitutes only with `trusted-public-keys`. Every result is a function of
+  only when it is signed by a key the user trusts, as Nix accepts
+  substitutes only with `trusted-public-keys`. The registry's key is trusted
+  unless a project says otherwise, as DESIGN.md's "The registry" decides,
+  for the results it computed of the packages it holds. Every result is a function of
   its key, so a signed result can also be checked by computing it again.
 - **A specified encoding for values.** A fingerprint is the hash of
   marshaled bytes, which only the same compiler can make again. The compiler
@@ -912,9 +970,14 @@ with the same inputs.
 - **A package being worked on as an artifact of its own,** keyed by its
   sources and the interfaces it reads of others, so that an unchanged
   package is found in one lookup from any worktree.
-- **Dependency packages as artifacts,** each keyed by the package's content
-  and the keys of the packages it depends on. There is no package registry,
-  so the standard library's is the only one.
+- **Registry packages as artifacts,** each keyed by the hash of the
+  package's content and the keys of the packages it depends on, and each a
+  fixed base under every state that uses it, as the standard library is.
+  A registry package's files are inputs of each session that uses it. A
+  second project that uses one finds as facts what the first computed of
+  it, and still holds its own nodes for them.
+- **Collecting registry packages.** A package's files stay in the store
+  when no lock file names them any more.
 - **Artifacts read in part.** A whole state is one value, read whole to open
   the state, so the first command of a new process costs the state's size:
   every node is made before one is asked for. In the background process that

@@ -6,8 +6,7 @@ type stamp = { size : int; modified : float; inode : int }
 let stamp_of (stat : Unix.stats) =
   { size = stat.st_size; modified = stat.st_mtime; inode = stat.st_ino }
 
-(* Directories that never hold a package's modules. *)
-let skipped name = name = "" || name.[0] = '.' || name = "_build" || name = "node_modules"
+let skipped = Registry.Content.skipped
 
 (* Every manifest and module file under the root, by path relative to it,
    with its stamp, in order. *)
@@ -26,8 +25,10 @@ let files root =
             | exception Unix.Unix_error _ -> ()
             | { st_kind = S_DIR; _ } -> if not (skipped entry) then walk path
             | { st_kind = S_REG; _ } as stat ->
-                if entry = "truss.toml" || Filename.check_suffix entry ".truss" then
-                  found := (path, stamp_of stat) :: !found
+                if
+                  entry = "truss.toml" || entry = "truss.lock"
+                  || Filename.check_suffix entry ".truss"
+                then found := (path, stamp_of stat) :: !found
             | _ -> ())
           entries
   in
