@@ -307,6 +307,16 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
                              shown)
                     end
                   else begin
+                    (* A derived [Default] is each field's, which only a
+                       record has: no variant of a sum is its default. *)
+                    (if trait_named trait "Default" then
+                       match interface.shape with
+                       | Sum _ ->
+                           report state Cannot_derive written.span
+                             "`Default` is derived as each field's default, so only a record can \
+                              derive it: no variant of this type is its default. Write the `impl`, \
+                              which says which variant is."
+                       | Record _ | Todo_type | Builtin_type _ | Error_shape _ -> ());
                     if trait_named trait "Ordered" || trait_named trait "Hash" then
                       if
                         not

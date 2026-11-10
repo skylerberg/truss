@@ -604,8 +604,11 @@ the definition's interface: the types of its parameters and result, its
   implement the trait, under the same conditions on the type parameters as
   the derived `impl`'s, so `Option[Value]` derives `Equal` as
   `impl Equal for Option[Value: Equal]`. Deriving `Ordered` or `Hash` needs
-  `Equal` to be derived too. Each derived `impl` becomes a definition of its
-  own, as DESIGN.md says, named by the type and the trait.
+  `Equal` to be derived too. Only a record derives `Default`, which is each
+  field's: no variant of a sum type is its default, so that `impl` is
+  written, as Rust asks for a variant to be marked. Each derived `impl`
+  becomes a definition of its own, as DESIGN.md says, named by the type and
+  the trait.
 - **`= todo`** makes a type that can be named and passed but whose contents
   cannot be used. It has none of the properties above, so it cannot be
   copied and is not a view, until it is defined.
