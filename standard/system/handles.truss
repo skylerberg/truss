@@ -9,11 +9,67 @@ use standard::system::calls
 internal fn file_error(number: Int32) -> SystemError {
   if number == intrinsic::libc_enoent() {
     SystemError.NotFound
-  } else if number == intrinsic::libc_eacces() {
+  } else if number == intrinsic::libc_eacces() || number == intrinsic::libc_eperm() {
     SystemError.PermissionDenied
+  } else if number == intrinsic::libc_eexist() {
+    SystemError.AlreadyExists
+  } else if number == intrinsic::libc_enotdir() {
+    SystemError.NotADirectory
+  } else if number == intrinsic::libc_eisdir() {
+    SystemError.IsADirectory
+  } else if number == intrinsic::libc_enotempty() {
+    SystemError.DirectoryNotEmpty
+  } else if number == intrinsic::libc_einval() {
+    SystemError.InvalidInput
+  } else if number == intrinsic::libc_eintr() {
+    SystemError.Interrupted
+  } else if number == intrinsic::libc_etimedout() {
+    SystemError.TimedOut
+  } else if number == intrinsic::libc_epipe() {
+    SystemError.BrokenPipe
+  } else if number == intrinsic::libc_econnrefused() {
+    SystemError.ConnectionRefused
+  } else if number == intrinsic::libc_econnreset() {
+    SystemError.ConnectionReset
+  } else if number == intrinsic::libc_econnaborted() {
+    SystemError.ConnectionAborted
+  } else if number == intrinsic::libc_enotconn() {
+    SystemError.NotConnected
+  } else if number == intrinsic::libc_eaddrinuse() {
+    SystemError.AddressInUse
+  } else if number == intrinsic::libc_eaddrnotavail() {
+    SystemError.AddressNotAvailable
+  } else if number == intrinsic::libc_ehostunreach() || number == intrinsic::libc_enetunreach() {
+    SystemError.Unreachable
+  } else if number == intrinsic::libc_enospc() {
+    SystemError.OutOfStorage
+  } else if number == intrinsic::libc_emfile() || number == intrinsic::libc_enfile() {
+    SystemError.TooManyOpen
+  } else if number == intrinsic::libc_enosys() || number == intrinsic::libc_enotsup() {
+    SystemError.Unsupported
+  } else if number == intrinsic::libc_ebadf() {
+    SystemError.Closed
   } else {
     SystemError.Other(code: number)
   }
+}
+
+internal fn descriptor_of(handle: streams::Handle) -> Int32 {
+  intrinsic::handle_descriptor(handle.descriptor)
+}
+
+internal fn file_offset(position: UInt64) -> Result[Int64, SystemError] {
+  if position > 9223372036854775807 {
+    Err(SystemError.InvalidInput)
+  } else {
+    let offset: Int64 = intrinsic::convert(position)
+    Ok(offset)
+  }
+}
+
+internal fn open_with(file: Path, flags: Int32) -> Result[streams::Handle, SystemError] {
+  let descriptor = with_file_error(calls::open_file(file.text.slice().bytes, flags: flags))?
+  Ok(streams::Handle(descriptor: own descriptor, number: 0))
 }
 
 internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[Value, SystemError] {
@@ -54,11 +110,11 @@ internal type SystemHandles()
 
 impl Handles for SystemHandles {
   fn read(self, handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
-    todo
+    with_file_error(calls::read_onto_end(descriptor_of(handle), buffer: mut buffer.storage, count: limit))
   }
 
   fn write(self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
-    todo
+    with_file_error(calls::write_some(descriptor_of(handle), bytes: bytes.elements))
   }
 
   fn read_at(
@@ -68,23 +124,40 @@ impl Handles for SystemHandles {
     buffer: mut List[UInt8],
     limit: USize,
   ) -> Result[USize, SystemError] {
-    todo
+    let position = file_offset(offset)?
+    with_file_error(
+      calls::read_at_onto_end(descriptor_of(handle), buffer: mut buffer.storage, count: limit, offset: position),
+    )
   }
 
   fn write_at(self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
-    todo
+    let position = file_offset(offset)?
+    with_file_error(calls::write_some_at(descriptor_of(handle), bytes: bytes.elements, offset: position))
   }
 
   fn seek(self, handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError] {
-    todo
+    let descriptor = descriptor_of(handle)
+    let moved = match to {
+      FromStart(offset) => calls::seek(descriptor, offset: file_offset(offset)?, whence: intrinsic::libc_seek_set())
+      FromCurrent(offset) => calls::seek(descriptor, offset: offset, whence: intrinsic::libc_seek_cur())
+      FromEnd(offset) => calls::seek(descriptor, offset: offset, whence: intrinsic::libc_seek_end())
+    }
+    let position = with_file_error(moved)?
+    if position < 0 {
+      Err(SystemError.InvalidInput)
+    } else {
+      let from_start: UInt64 = intrinsic::convert(position)
+      Ok(from_start)
+    }
   }
 
   fn set_length(self, handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError] {
-    todo
+    let wanted = file_offset(length)?
+    with_file_error(calls::set_length(descriptor_of(handle), length: wanted))
   }
 
   fn synchronize(self, handle: streams::Handle) -> Result[Unit, SystemError] {
-    todo
+    with_file_error(calls::synchronize(descriptor_of(handle)))
   }
 
   fn metadata(self, handle: streams::Handle) -> Result[files::Metadata, SystemError] {
@@ -92,7 +165,7 @@ impl Handles for SystemHandles {
   }
 
   fn close(self, handle: own streams::Handle) -> Result[Unit, SystemError] {
-    todo
+    with_file_error(calls::close(own handle.descriptor))
   }
 
   fn shut_down(self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {

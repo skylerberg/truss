@@ -53,6 +53,92 @@ internal fn read_onto_end(
   }
 }
 
+internal fn read_at_onto_end(
+  descriptor: Int32,
+  buffer: mut intrinsic::Storage[UInt8],
+  count: USize,
+  offset: Int64,
+) -> Result[USize, Int32]
+  ensures intrinsic::storage_length(buffer) >= old(intrinsic::storage_length(buffer))
+{
+  growth::reserve(mut buffer, additional: count)
+  let length = intrinsic::storage_length(buffer)
+  var got = intrinsic::libc_pread(descriptor, buffer: mut buffer, count: count, offset: offset)
+  while got < 0 && interrupted_by_signal()
+    invariant intrinsic::storage_length(buffer) == length
+    invariant intrinsic::storage_capacity(buffer) >= length + count
+  {
+    got = intrinsic::libc_pread(descriptor, buffer: mut buffer, count: count, offset: offset)
+  }
+  if got < 0 {
+    return Err(intrinsic::libc_errno())
+  }
+  let read: USize = intrinsic::convert(got)
+  if read > count {
+    return Err(intrinsic::libc_eio())
+  }
+  intrinsic::storage_lengthen(mut buffer, by: read)
+  Ok(read)
+}
+
+internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[USize, Int32] {
+  let length = intrinsic::view_length(bytes)
+  var wrote = intrinsic::libc_write(descriptor, bytes: bytes, count: length)
+  while wrote < 0 && interrupted_by_signal() {
+    wrote = intrinsic::libc_write(descriptor, bytes: bytes, count: length)
+  }
+  if wrote < 0 {
+    Err(intrinsic::libc_errno())
+  } else {
+    let count: USize = intrinsic::convert(wrote)
+    Ok(count)
+  }
+}
+
+internal fn write_some_at(descriptor: Int32, bytes: intrinsic::View[UInt8], offset: Int64) -> Result[USize, Int32] {
+  let length = intrinsic::view_length(bytes)
+  var wrote = intrinsic::libc_pwrite(descriptor, bytes: bytes, count: length, offset: offset)
+  while wrote < 0 && interrupted_by_signal() {
+    wrote = intrinsic::libc_pwrite(descriptor, bytes: bytes, count: length, offset: offset)
+  }
+  if wrote < 0 {
+    Err(intrinsic::libc_errno())
+  } else {
+    let count: USize = intrinsic::convert(wrote)
+    Ok(count)
+  }
+}
+
+internal fn seek(descriptor: Int32, offset: Int64, whence: Int32) -> Result[Int64, Int32] {
+  let position = intrinsic::libc_lseek(descriptor, offset: offset, whence: whence)
+  if position < 0 { Err(intrinsic::libc_errno()) } else { Ok(position) }
+}
+
+internal fn set_length(descriptor: Int32, length: Int64) -> Result[Unit, Int32] {
+  var outcome = intrinsic::libc_ftruncate(descriptor, length: length)
+  while outcome < 0 && interrupted_by_signal() {
+    outcome = intrinsic::libc_ftruncate(descriptor, length: length)
+  }
+  if outcome < 0 { Err(intrinsic::libc_errno()) } else { Ok(Unit) }
+}
+
+internal fn synchronize(descriptor: Int32) -> Result[Unit, Int32] {
+  var outcome = intrinsic::libc_fsync(descriptor)
+  while outcome < 0 && interrupted_by_signal() {
+    outcome = intrinsic::libc_fsync(descriptor)
+  }
+  if outcome < 0 { Err(intrinsic::libc_errno()) } else { Ok(Unit) }
+}
+
+internal fn close(handle: own intrinsic::Handle) -> Result[Unit, Int32] {
+  let descriptor = intrinsic::handle_release(own handle)
+  if intrinsic::libc_close(descriptor) < 0 && !interrupted_by_signal() {
+    Err(intrinsic::libc_errno())
+  } else {
+    Ok(Unit)
+  }
+}
+
 internal fn ended_with_zero_byte(bytes: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32] {
   let length = intrinsic::view_length(bytes)
   var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length + 1)

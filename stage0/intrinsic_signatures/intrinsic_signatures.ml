@@ -137,6 +137,8 @@ let signature (operation : Intrinsic.operation) : T.signature =
       make ~output:(Returns (T.builtin Handle)) [ input "descriptor" (T.builtin Int32) ]
   | Handle_descriptor ->
       make ~output:(Returns (T.builtin Int32)) [ input "handle" (T.builtin Handle) ]
+  | Handle_release ->
+      make ~output:(Returns (T.builtin Int32)) [ input ~mode:Own "handle" (T.builtin Handle) ]
   | Run_test -> make [ input "index" (T.builtin UInt32) ]
   | Report_tests_to -> make [ input "descriptor" (T.builtin Int32) ]
   | Live_blocks -> make ~output:(Returns usize) []
@@ -185,7 +187,8 @@ let cost (operation : Intrinsic.operation) =
   | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
   | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
   | View_slice | View_address | Storage_model | View_model | Crash | Storage_lengthen | Storage_push
-  | Handle_from | Handle_descriptor | Report_tests_to | Live_blocks | Libc_number _ ->
+  | Handle_from | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks | Libc_number _
+    ->
       { time = Constant_time; allocations = No_allocations }
   | Compare_bytes | Storage_remove | Storage_insert ->
       { time = Linear_in 0; allocations = No_allocations }

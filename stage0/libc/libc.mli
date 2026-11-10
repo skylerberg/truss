@@ -72,6 +72,11 @@ type function_ =
   | Kill
   | Sysconf
   | Exit  (** [_exit], which ends the process at once *)
+  | Pread
+  | Pwrite
+  | Lseek
+  | Ftruncate
+  | Fsync
 
 val functions : function_ list
 
@@ -101,6 +106,33 @@ type number =
   | Pollin
   | Pollhup
   | Sigkill
+  | O_rdwr
+  | O_append
+  | O_excl
+  | Seek_set
+  | Seek_cur
+  | Seek_end
+  | Eperm
+  | Ebadf
+  | Eexist
+  | Enotdir
+  | Eisdir
+  | Enfile
+  | Emfile
+  | Enospc
+  | Epipe
+  | Enosys
+  | Enotempty
+  | Enotsup
+  | Eaddrinuse
+  | Eaddrnotavail
+  | Enetunreach
+  | Econnaborted
+  | Econnreset
+  | Enotconn
+  | Etimedout
+  | Econnrefused
+  | Ehostunreach
 
 val numbers : number list
 
