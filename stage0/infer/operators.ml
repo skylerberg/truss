@@ -345,10 +345,12 @@ and binary state env ?expected (value : expression) operator (left : expression)
       else begin
         if not (unify state left_type right_type) then
           ignore (mismatched_operands state value left right ~left_type ~right_type);
-        let trait, method_ =
+        (* An ordering is its [compare], whose [Ordering] the operator
+           tests. *)
+        let trait, method_, result =
           match operator with
-          | Equal | Not_equal -> (core "Equal", "equal")
-          | _ -> (core "Ordered", "compare")
+          | Equal | Not_equal -> (core "Equal", "equal", T.bool)
+          | _ -> (core "Ordered", "compare", T.named (core "Ordering") [])
         in
         state.tables.calls.(value.id) <-
           Some
@@ -371,7 +373,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
               defaults_left_out = [];
               uses = [];
               capability_arguments = [];
-              result = T.bool;
+              result;
             };
         resolve_evidence state value left_type (trait_reference trait);
         T.bool

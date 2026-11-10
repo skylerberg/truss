@@ -760,13 +760,14 @@ values between. A range pattern's type must be an integer type or
 ### Operators
 
 Each operator becomes a call, so the checked form needs no operator rules of
-its own:
+its own. The call recorded is the one made, and gives what its method gives,
+which for a comparison is not the operator's own `Bool`:
 
 | Operators | Checked as |
 |---|---|
 | `+ - * / %`, and `-` for negation | The trait method, such as `Add[Right].add`. The `impl` is chosen by the type of the left operand and the type of the right operand, once both are known, and the result is the `impl`'s `Output`. |
-| `==` `!=` | `Equal.equal`. Both sides have one type. |
-| `<` `<=` `>` `>=` | `Ordered.compare`. Both sides have one type. |
+| `==` `!=` | `Equal.equal`, whose `Bool` `!=` negates. Both sides have one type. |
+| `<` `<=` `>` `>=` | `Ordered.compare`, whose `Ordering` the operator tests. Both sides have one type. |
 | `&&` `\|\|` `!` | Built in, on `Bool` |
 | `& \| ^ ~` | Built in, on one built-in integer type |
 | `<< >>` | Built in. The left side is a built-in integer, and the amount any unsigned integer type. |

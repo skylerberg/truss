@@ -62,6 +62,9 @@ type call = {
   capability_arguments : (Types.parameter * Types.capability list) list;
       (** Each capability parameter, solved. *)
   result : Types.ty;
+      (** What the callee gives. For an operator that tests what its call gives, as [<] tests the
+          [Ordering] of [compare] and [!=] the [Bool] of [equal], it is not the operator's own type.
+      *)
 }
 
 (** What a name or member expression means. *)
