@@ -5,28 +5,28 @@ public fn Int8.count_ones(self) -> USize
   ensures result <= 8
   cost time O(1)
 {
-  todo
+  intrinsic::count_ones(self)
 }
 
 public fn Int8.count_zeros(self) -> USize
   ensures result <= 8
   cost time O(1)
 {
-  todo
+  8 - intrinsic::count_ones(self)
 }
 
 public fn Int8.leading_zeros(self) -> USize
   ensures result <= 8
   cost time O(1)
 {
-  todo
+  intrinsic::leading_zeros(self)
 }
 
 public fn Int8.trailing_zeros(self) -> USize
   ensures result <= 8
   cost time O(1)
 {
-  todo
+  intrinsic::trailing_zeros(self)
 }
 
 public fn Int8.rotate_left(self, amount: USize) -> Int8
@@ -120,28 +120,28 @@ public fn Int16.count_ones(self) -> USize
   ensures result <= 16
   cost time O(1)
 {
-  todo
+  intrinsic::count_ones(self)
 }
 
 public fn Int16.count_zeros(self) -> USize
   ensures result <= 16
   cost time O(1)
 {
-  todo
+  16 - intrinsic::count_ones(self)
 }
 
 public fn Int16.leading_zeros(self) -> USize
   ensures result <= 16
   cost time O(1)
 {
-  todo
+  intrinsic::leading_zeros(self)
 }
 
 public fn Int16.trailing_zeros(self) -> USize
   ensures result <= 16
   cost time O(1)
 {
-  todo
+  intrinsic::trailing_zeros(self)
 }
 
 public fn Int16.rotate_left(self, amount: USize) -> Int16
@@ -235,28 +235,28 @@ public fn Int32.count_ones(self) -> USize
   ensures result <= 32
   cost time O(1)
 {
-  todo
+  intrinsic::count_ones(self)
 }
 
 public fn Int32.count_zeros(self) -> USize
   ensures result <= 32
   cost time O(1)
 {
-  todo
+  32 - intrinsic::count_ones(self)
 }
 
 public fn Int32.leading_zeros(self) -> USize
   ensures result <= 32
   cost time O(1)
 {
-  todo
+  intrinsic::leading_zeros(self)
 }
 
 public fn Int32.trailing_zeros(self) -> USize
   ensures result <= 32
   cost time O(1)
 {
-  todo
+  intrinsic::trailing_zeros(self)
 }
 
 public fn Int32.rotate_left(self, amount: USize) -> Int32
@@ -350,28 +350,28 @@ public fn Int64.count_ones(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  intrinsic::count_ones(self)
 }
 
 public fn Int64.count_zeros(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  64 - intrinsic::count_ones(self)
 }
 
 public fn Int64.leading_zeros(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  intrinsic::leading_zeros(self)
 }
 
 public fn Int64.trailing_zeros(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  intrinsic::trailing_zeros(self)
 }
 
 public fn Int64.rotate_left(self, amount: USize) -> Int64
@@ -465,28 +465,28 @@ public fn ISize.count_ones(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  intrinsic::count_ones(self)
 }
 
 public fn ISize.count_zeros(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  64 - intrinsic::count_ones(self)
 }
 
 public fn ISize.leading_zeros(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  intrinsic::leading_zeros(self)
 }
 
 public fn ISize.trailing_zeros(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  intrinsic::trailing_zeros(self)
 }
 
 public fn ISize.rotate_left(self, amount: USize) -> ISize
@@ -556,28 +556,28 @@ public fn UInt8.count_ones(self) -> USize
   ensures result <= 8
   cost time O(1)
 {
-  todo
+  intrinsic::count_ones(self)
 }
 
 public fn UInt8.count_zeros(self) -> USize
   ensures result <= 8
   cost time O(1)
 {
-  todo
+  8 - intrinsic::count_ones(self)
 }
 
 public fn UInt8.leading_zeros(self) -> USize
   ensures result <= 8
   cost time O(1)
 {
-  todo
+  intrinsic::leading_zeros(self)
 }
 
 public fn UInt8.trailing_zeros(self) -> USize
   ensures result <= 8
   cost time O(1)
 {
-  todo
+  intrinsic::trailing_zeros(self)
 }
 
 public fn UInt8.rotate_left(self, amount: USize) -> UInt8
@@ -674,28 +674,28 @@ public fn UInt16.count_ones(self) -> USize
   ensures result <= 16
   cost time O(1)
 {
-  todo
+  intrinsic::count_ones(self)
 }
 
 public fn UInt16.count_zeros(self) -> USize
   ensures result <= 16
   cost time O(1)
 {
-  todo
+  16 - intrinsic::count_ones(self)
 }
 
 public fn UInt16.leading_zeros(self) -> USize
   ensures result <= 16
   cost time O(1)
 {
-  todo
+  intrinsic::leading_zeros(self)
 }
 
 public fn UInt16.trailing_zeros(self) -> USize
   ensures result <= 16
   cost time O(1)
 {
-  todo
+  intrinsic::trailing_zeros(self)
 }
 
 public fn UInt16.rotate_left(self, amount: USize) -> UInt16
@@ -792,28 +792,28 @@ public fn UInt32.count_ones(self) -> USize
   ensures result <= 32
   cost time O(1)
 {
-  todo
+  intrinsic::count_ones(self)
 }
 
 public fn UInt32.count_zeros(self) -> USize
   ensures result <= 32
   cost time O(1)
 {
-  todo
+  32 - intrinsic::count_ones(self)
 }
 
 public fn UInt32.leading_zeros(self) -> USize
   ensures result <= 32
   cost time O(1)
 {
-  todo
+  intrinsic::leading_zeros(self)
 }
 
 public fn UInt32.trailing_zeros(self) -> USize
   ensures result <= 32
   cost time O(1)
 {
-  todo
+  intrinsic::trailing_zeros(self)
 }
 
 public fn UInt32.rotate_left(self, amount: USize) -> UInt32
@@ -910,28 +910,28 @@ public fn UInt64.count_ones(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  intrinsic::count_ones(self)
 }
 
 public fn UInt64.count_zeros(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  64 - intrinsic::count_ones(self)
 }
 
 public fn UInt64.leading_zeros(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  intrinsic::leading_zeros(self)
 }
 
 public fn UInt64.trailing_zeros(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  intrinsic::trailing_zeros(self)
 }
 
 public fn UInt64.rotate_left(self, amount: USize) -> UInt64
@@ -1028,28 +1028,28 @@ public fn USize.count_ones(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  intrinsic::count_ones(self)
 }
 
 public fn USize.count_zeros(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  64 - intrinsic::count_ones(self)
 }
 
 public fn USize.leading_zeros(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  intrinsic::leading_zeros(self)
 }
 
 public fn USize.trailing_zeros(self) -> USize
   ensures result <= 64
   cost time O(1)
 {
-  todo
+  intrinsic::trailing_zeros(self)
 }
 
 public fn USize.rotate_left(self, amount: USize) -> USize
