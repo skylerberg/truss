@@ -391,7 +391,30 @@ let exactly (query : L.query) =
    same choice for all of them, since a recursive call assumes the bound
    with the constants it is shown with; the first choice that proves them
    all is taken, and if none does, the answers are the first choice's. *)
-let answers ?(evaluate = fun _ -> None) solver (obligations : Translate.obligation list) =
+(* Running compiled code, which the caller gives, since the prover does
+   not depend on code generation: a template's check, and a call whose
+   arguments are known, whose result is a [Bool] as 0 or 1. *)
+type running = {
+  template : Translate.evaluation -> evaluated option;
+  call : Translate.known_call -> Z.t option;
+}
+
+let not_running = { template = (fun _ -> None); call = (fun _ -> None) }
+
+let answers ?(running = not_running) solver (obligations : Translate.obligation list) =
+  (* What running code gives of the calls a query mentions, as facts, which
+     are only as true as the compiled code, which the prover trusts. *)
+  let given (obligation : Translate.obligation) =
+    List.filter_map
+      (fun (known : Translate.known_call) ->
+        Option.map
+          (fun value ->
+            L.equal known.term
+              (if known.result_is_bool then L.Boolean (not (Z.equal value Z.zero))
+               else L.Integer value))
+          (running.call known))
+      obligation.known_calls
+  in
   let solve (obligation : Translate.obligation) choice =
     let pins =
       List.map
@@ -399,11 +422,13 @@ let answers ?(evaluate = fun _ -> None) solver (obligations : Translate.obligati
           Costs.pin constants (List.assoc constants.factor choice))
         obligation.constants
     in
-    let query = { obligation.query with facts = obligation.query.facts @ pins } in
+    let query =
+      { obligation.query with facts = obligation.query.facts @ pins @ given obligation }
+    in
     let values = List.map fst obligation.values in
     (* A clause running code decides is decided so, and the solver never
        asked. *)
-    match Option.bind obligation.evaluation evaluate with
+    match Option.bind obligation.evaluation running.template with
     | Some Holds -> Solved Proven
     | Some Fails -> Ran_false
     | Some Too_long -> Ran_too_long
@@ -449,7 +474,7 @@ let answers ?(evaluate = fun _ -> None) solver (obligations : Translate.obligati
   in
   List.map (fun obligation -> (obligation, solve obligation chosen)) obligations
 
-let definition_diagnostics ?evaluate database solver (key : Names.key) =
+let definition_diagnostics ?running database solver (key : Names.key) =
   let source_span span = source_span (within database key span) in
   match Query.demand database proof key with
   | Not_proven_here -> []
@@ -485,7 +510,7 @@ let definition_diagnostics ?evaluate database solver (key : Names.key) =
                    (obligation.message
                   ^ " The solver ran out of steps, so it may hold but needs help: a `proof` block \
                      or a theorem.")))
-        (answers ?evaluate solver outcome.obligations)
+        (answers ?running solver outcome.obligations)
 
-let diagnostics ?evaluate database solver module_ =
-  Names.per_definition database module_ (definition_diagnostics ?evaluate database solver)
+let diagnostics ?running database solver module_ =
+  Names.per_definition database module_ (definition_diagnostics ?running database solver)

@@ -285,11 +285,31 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
         in
         match definition.kind with
         | Function { signature; _ } | Method_declaration signature ->
-            ( Function_interface
-                (T.inside ~generics:within.header_generics ~uses:within.header_uses
-                   (Lower.signature context ~owner:path ~head:[] ~self_type:within.self_type
-                      signature)),
-              context )
+            let lowered =
+              T.inside ~generics:within.header_generics ~uses:within.header_uses
+                (Lower.signature context ~owner:path ~head:[] ~self_type:within.self_type signature)
+            in
+            (* An [impl]'s method ends when its trait's does, since it keeps the
+               trait's [time] clause. *)
+            let terminates =
+              lowered.terminates
+              ||
+              match (path, within.self_trait) with
+              | Method { name; receiver; _ }, Some (implements : T.trait_reference) -> (
+                  match
+                    Summary.definition database
+                      (Method { owner = implements.trait; name; receiver })
+                  with
+                  | Some (_, { kind = Function { signature; _ } | Method_declaration signature; _ })
+                    ->
+                      List.exists
+                        (fun (clause : clause) ->
+                          match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
+                        signature.clauses
+                  | _ -> false)
+              | _ -> false
+            in
+            (Function_interface { lowered with terminates }, context)
         | _ -> (Error_interface (Resolve.Parts.error_node definition.span), context))
     | None, None -> (
         match definition.kind with

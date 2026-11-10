@@ -20,13 +20,15 @@ val proof : (Resolve.Names.key, proof) Query.query
     ran past its time limit. *)
 type evaluated = Holds | Fails | Too_long
 
-val diagnostics :
-  ?evaluate:(Translate.evaluation -> evaluated option) ->
-  Query.context ->
-  Solver.t ->
-  Path.module_ ->
-  Diagnostic.t list
+type running = {
+  template : Translate.evaluation -> evaluated option;
+  call : Translate.known_call -> Z.t option;
+}
+(** Running compiled code, which the caller gives through code generation: a template's check, and a
+    call whose arguments are known, whose result is a [Bool] as 0 or 1. *)
+
+val diagnostics : ?running:running -> Query.context -> Solver.t -> Path.module_ -> Diagnostic.t list
 (** Every obligation of a file's definitions that the solver could not prove, and every definition
-    the prover could not read, in the file's offsets and in order. [evaluate] decides a clause by
-    running compiled code, as code generation's [Compile.check_template] does, where it can; the
+    the prover could not read, in the file's offsets and in order. [running] runs compiled code, as
+    code generation's [Compile.check_template] and [Compile.evaluate_call] do, where it can; the
     prover does not depend on code generation, so the caller gives it. *)

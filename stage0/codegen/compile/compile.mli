@@ -152,3 +152,17 @@ val check_template :
   from_template:Path.t ->
   texts:string list ->
   (template_check, string) result
+
+(* Works out a call of a function that is not generic, whose arguments are
+   known integers, or [Bool]s as 0 or 1, by running it: its result as static
+   data, or that it ran past [time_limit], in milliseconds. With [results],
+   results are kept under the key of the code that ran. *)
+type evaluated_call = Returned of Lir.static_value | Call_ran_too_long
+
+val evaluate_call :
+  ?results:results ->
+  t ->
+  time_limit:int ->
+  function_:Path.t ->
+  arguments:Z.t list ->
+  (evaluated_call, string) result

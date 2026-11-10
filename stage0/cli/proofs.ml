@@ -9,27 +9,15 @@ let solver =
     | Ok solver -> solver
     | Error message -> Project.cannot_run "%s" message)
 
-(* Running a template's check, through the compiler that builds programs,
-   made only if a template asks for it, with results kept as test results
-   are. A check that cannot be built is left to the solver. *)
-let evaluate (project : Project.t) =
-  let compile = lazy (Compiler.create project Development) in
-  fun (evaluation : Prover.Translate.evaluation) : Prover.evaluated option ->
-    match
-      Compile.check_template ~results:(Database.test_results ()) (Lazy.force compile)
-        ~time_limit:10_000 ~from_template:evaluation.from_template ~texts:evaluation.texts
-    with
-    | Ok (Ran found) ->
-        Option.map
-          (fun holds -> if holds then Prover.Holds else Prover.Fails)
-          (List.assoc_opt evaluation.clause found)
-    | Ok Ran_too_long -> Some Too_long
-    | Error _ -> None
+(* Running compiled code, through the compiler that builds programs, made
+   only if a proof asks for it, with results kept as test results are. *)
+let running (project : Project.t) =
+  Running.through ~results:(Database.test_results ()) (lazy (Compiler.create project Development))
 
 (* The proofs' diagnostics of each file, by module. *)
 let diagnostics (project : Project.t) =
-  let solver = Lazy.force solver and evaluate = evaluate project in
-  fun module_ -> Prover.diagnostics ~evaluate project.context solver module_
+  let solver = Lazy.force solver and running = running project in
+  fun module_ -> Prover.diagnostics ~running project.context solver module_
 
 (* Each definition [main] can reach whose proofs have a hole, which a
    program cannot be built with. *)

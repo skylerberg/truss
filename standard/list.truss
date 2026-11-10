@@ -102,7 +102,9 @@ public fn List[Element].slice(self) -> Slice[Element]
 public fn List[Element].each(self) yields Element
   ensures identical(result, self[yielded.length()])
   ensures yielded.length() <= self.length()
+  ensures forall i in 0..yielded.length() => identical(yielded[i], self[i])
   ensures finished ==> yielded.length() == self.length()
+  ensures finished ==> identical(yielded, self.model())
   cost time O(self.length())
 {
   for index in 0..self.length() {
@@ -138,7 +140,9 @@ public fn Slice[Element].length(self) -> USize
 public fn Slice[Element].each(self) yields Element
   ensures identical(result, self[yielded.length()])
   ensures yielded.length() <= self.length()
+  ensures forall i in 0..yielded.length() => identical(yielded[i], self[i])
   ensures finished ==> yielded.length() == self.length()
+  ensures finished ==> identical(yielded, self.model())
   cost time O(self.length())
 {
   for index in 0..self.length() {

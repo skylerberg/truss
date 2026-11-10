@@ -124,16 +124,49 @@ let prune query =
   let reached = Hashtbl.create 64 in
   let reach symbols = List.iter (fun symbol -> Hashtbl.replace reached symbol ()) symbols in
   reach (declared_symbols declared query.goal);
+  (* A quantified fact can be used only where a term of the shape of one of
+     its triggers is: an application of a declared function that names
+     every bound variable. So it waits until each symbol of one of them is
+     kept. A fact under a path's condition is read through it. *)
+  let rec needs fact symbols =
+    match fact with
+    | Apply ("=>", [ _; (Forall _ as inner) ]) -> needs inner symbols
+    | Forall (variables, body) -> (
+        let names = List.map fst variables in
+        let triggers = ref [] in
+        let rec walk = function
+          | Apply (name, arguments) as term ->
+              if
+                Hashtbl.mem declared name
+                && List.for_all (fun bound -> mentions [ bound ] term) names
+              then triggers := declared_symbols declared term :: !triggers;
+              List.iter walk arguments
+          | Forall (_, inner) | Exists (_, inner) -> walk inner
+          | Symbol _ | Integer _ | Boolean _ | Bits _ -> ()
+        in
+        walk body;
+        match !triggers with
+        | [] -> fun () -> List.exists (Hashtbl.mem reached) symbols
+        | triggers ->
+            fun () ->
+              List.exists (fun trigger -> List.for_all (Hashtbl.mem reached) trigger) triggers)
+    | _ -> fun () -> List.exists (Hashtbl.mem reached) symbols
+  in
   let facts =
-    Array.of_list (List.map (fun fact -> (fact, declared_symbols declared fact)) query.facts)
+    Array.of_list
+      (List.map
+         (fun fact ->
+           let symbols = declared_symbols declared fact in
+           (symbols, needs fact symbols))
+         query.facts)
   in
   let kept = Array.make (Array.length facts) false in
   let changed = ref true in
   while !changed do
     changed := false;
     Array.iteri
-      (fun index (_, symbols) ->
-        if (not kept.(index)) && List.exists (Hashtbl.mem reached) symbols then begin
+      (fun index (symbols, ready) ->
+        if (not kept.(index)) && ready () then begin
           kept.(index) <- true;
           reach symbols;
           changed := true

@@ -905,6 +905,76 @@ let () =
          \  Item.empty().combine(value) == value\n\
           }\n"))
 
+let () =
+  test "an impl's method keeps its trait's time clause, so its body is its definition" (fun () ->
+      proven
+        (monoid
+       ^ "impl Monoid for Int64 {\n\
+         \  fn empty() -> Int64 {\n\
+         \    0\n\
+         \  }\n\n\
+         \  fn combine(self, other: Int64) -> Int64 {\n\
+         \    self.wrapping_add(other)\n\
+         \  }\n\
+          }\n"))
+
+(* The standard library's integer methods, by the intrinsic operations
+   they call *)
+
+let () =
+  test "wrapping arithmetic is a remainder" (fun () ->
+      proven
+        "fn f(first: Int64, second: Int64, third: Int64) -> Bool\n\
+        \  ensures result\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  first.wrapping_add(second).wrapping_add(third)\n\
+        \    == first.wrapping_add(second.wrapping_add(third))\n\
+         }\n");
+  test "wrapping subtraction wraps below zero" (fun () ->
+      proven
+        "fn f(value: UInt8) -> UInt8\n\
+        \  requires value == 1\n\
+        \  ensures result == 255\n\
+         {\n\
+        \  value.wrapping_subtract(2)\n\
+         }\n");
+  test "saturating addition stops at the bound" (fun () ->
+      proven
+        "fn f(value: Int8) -> Int8\n\
+        \  requires value >= 0\n\
+        \  ensures result == Int8.maximum\n\
+         {\n\
+        \  value.saturating_add(127)\n\
+         }\n");
+  test "saturating addition is exact where it fits" (fun () ->
+      proven
+        "fn f(first: Int8, second: Int8) -> Int8\n\
+        \  requires first + second <= Int8.maximum\n\
+        \  requires first + second >= Int8.minimum\n\
+        \  ensures result == first + second\n\
+         {\n\
+        \  first.saturating_add(second)\n\
+         }\n");
+  test "a checked addition is none exactly when it overflows" (fun () ->
+      proven
+        "fn f(value: UInt8) -> Bool\n\
+        \  ensures result == (value > 0)\n\
+         {\n\
+        \  value.checked_add(255).is_none()\n\
+         }\n");
+  test "a conversion succeeds exactly when the value fits" (fun () ->
+      proven
+        "fn f(value: Int64) -> Bool\n\
+        \  ensures result == (0 <= value && value <= 255)\n\
+         {\n\
+        \  UInt8.try_from(value).is_ok()\n\
+         }\n");
+  test "wrapping is not exact arithmetic" (fun () ->
+      not_proven
+        "fn f(value: UInt8) -> UInt8\n  ensures result > value\n{\n  value.wrapping_add(1)\n}\n"
+        "prover.ensures")
+
 let doubling =
   "trait Doubling {\n\
   \  fn value(self) -> Int64\n\
@@ -1382,6 +1452,17 @@ let () =
         \  }\n\
         \  if value < 255 { value + 1 } else { value }\n\
          }\n");
+  test "a quantifier's pattern takes each element apart" (fun () ->
+      proven
+        "type Span(low: Int64, high: Int64)\n\n\
+         fn f(spans: List[Span]) -> Bool\n\
+        \  requires forall (low, high) in spans => low <= high\n\
+        \  ensures result\n\
+         {\n\
+        \  spans.length() == 0 || spans[0].low <= spans[0].high\n\
+         }\n");
+  test "a quantifier over a range may ignore its index" (fun () ->
+      proven "fn f(count: Int64) -> Bool\n  ensures result\n{\n  forall _ in 0..count => true\n}\n");
   test "a quantifier over a list ranges over its elements" (fun () ->
       proven
         "fn f(items: List[Int64]) -> Bool\n\
@@ -2049,6 +2130,8 @@ let () =
             }\n")
       in
       if found <> [ "prover.cost" ] then fail "%s" (String.concat ", " found));
+  test "a list's potential is its elements', through its model" (fun () ->
+      proven (meter ^ "fn keep(meters: mut List[Meter])\n  cost amortized time O(1)\n{\n}\n"));
   test "a potential below zero" (fun () ->
       not_proven "type Debt(owed: Int64)\n  cost potential owed\n" "prover.cost");
   test "a potential its invariant keeps at or above zero" (fun () ->
@@ -2092,8 +2175,7 @@ let () =
 
 let () =
   test "a construct the prover cannot read yet" (fun () ->
-      not_proven "fn f(items: List[Int64]) -> Bool {\n  forall _ in items => true\n}\n"
-        "prover.unsupported");
+      not_proven "fn f() -> Range[Int64] {\n  0..3\n}\n" "prover.unsupported");
   test "alternatives bind each name to the part that matched" (fun () ->
       proven
         "type Side =\n\
@@ -2137,5 +2219,231 @@ let () =
       let first = key_of "fn f(count: UInt8) -> UInt8 {\n  count + 1\n}\n" in
       let second = key_of "fn g(total: UInt8) -> UInt8 {\n  total + 1\n}\n" in
       if first <> second || first = "none" then fail "%s and %s" first second)
+
+(* Function values in the logic *)
+
+let apply_function =
+  "fn apply(measure: (fn(Int64) -> Int64 cost time finite), value: Int64) -> Int64\n\
+  \  ensures result == measure(value)\n\
+  \  cost time finite\n\
+   {\n\
+  \  measure(value)\n\
+   }\n\n"
+
+let () =
+  test "a pure function value gives the same result for the same argument" (fun () ->
+      proven
+        "fn f(measure: (fn(Int64) -> Int64 cost time finite), value: Int64) -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  measure(value) == measure(value)\n\
+         }\n");
+  test "a function value that uses a capability may give different results" (fun () ->
+      not_proven
+        "fn f(read: (fn(Int64) -> Int64 uses Clock cost time finite), value: Int64) -> Bool\n\
+        \  uses Clock\n\
+        \  ensures result\n\
+         {\n\
+        \  read(value) == read(value)\n\
+         }\n"
+        "prover.ensures");
+  test "a function value without a time clause is a fresh result" (fun () ->
+      not_proven
+        "fn f(measure: fn(Int64) -> Int64, value: Int64) -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  measure(value) == measure(value)\n\
+         }\n"
+        "prover.ensures");
+  test "a lambda applied is its body" (fun () ->
+      proven
+        (apply_function
+       ^ "fn f(value: Int64) -> Int64\n\
+         \  ensures result == value / 2\n\
+          {\n\
+         \  apply(fn(each) { each / 2 }, value: value)\n\
+          }\n"));
+  test "a lambda applied knows what it captures" (fun () ->
+      proven
+        (apply_function
+       ^ "fn f(value: Int64, floor: Int64) -> Int64\n\
+         \  ensures result == (if value > floor { value } else { floor })\n\
+          {\n\
+         \  apply(fn(each) { if each > floor { each } else { floor } }, value: value)\n\
+          }\n"));
+  test "two lambdas with the same body are the same function" (fun () ->
+      proven
+        "fn tally(measure: (fn(Int64) -> Int64 cost time finite)) -> Int64\n\
+        \  cost time finite\n\
+         {\n\
+        \  var total = 0\n\
+        \  total = measure(1)\n\
+        \  total\n\
+         }\n\n\
+         fn f() -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  tally(fn(each) { each / 2 }) == tally(fn(other) { other / 2 })\n\
+         }\n");
+  test "lambdas with different bodies are not known to be the same function" (fun () ->
+      not_proven
+        "fn tally(measure: (fn(Int64) -> Int64 cost time finite)) -> Int64\n\
+        \  cost time finite\n\
+         {\n\
+        \  var total = 0\n\
+        \  total = measure(1)\n\
+        \  total\n\
+         }\n\n\
+         fn f() -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  tally(fn(each) { each / 2 }) == tally(fn(other) { other / 3 })\n\
+         }\n"
+        "prover.ensures");
+  test "a named pure function applied is the function" (fun () ->
+      proven
+        ("fn half(value: Int64) -> Int64\n  cost time O(1)\n{\n  value / 2\n}\n\n" ^ apply_function
+       ^ "fn f() -> Int64\n  ensures result == 3\n{\n  apply(half, value: 7)\n}\n"))
+
+(* Sums over sequences *)
+
+let () =
+  test "appending adds the new element's measure to a sum" (fun () ->
+      proven
+        "theorem appending(items: Sequence[List[Int64]], row: List[Int64])\n\
+        \  ensures items.append(row).sum(fn(each) { each.length() })\n\
+        \    == items.sum(fn(other) { other.length() }) + row.length()\n\
+         {\n\
+         }\n");
+  test "a sum is not known to be anything else" (fun () ->
+      not_proven
+        "theorem appending(items: Sequence[List[Int64]], row: List[Int64])\n\
+        \  ensures items.append(row).sum(fn(each) { each.length() })\n\
+        \    == items.sum(fn(other) { other.length() })\n\
+         {\n\
+         }\n"
+        "prover.ensures");
+  test "a loop whose iterations cost different amounts is bounded by a sum" (fun () ->
+      proven
+        "fn count_cells(rows: List[List[Int64]]) -> USize\n\
+        \  cost time O(rows.length() + rows.model().sum(fn(cells) { cells.length() }))\n\
+         {\n\
+        \  var count: USize = 0\n\
+        \  for row in rows\n\
+        \    cost time O(yielded.length() + yielded.sum(fn(cells) { cells.length() }))\n\
+        \  {\n\
+        \    for _ in row {\n\
+        \      count = count.saturating_add(1)\n\
+        \    }\n\
+        \  }\n\
+        \  count\n\
+         }\n");
+  test "a loop's bound that leaves out its iterations' sum does not hold" (fun () ->
+      not_proven
+        "fn count_cells(rows: List[List[Int64]]) -> USize\n\
+        \  cost time O(rows.length())\n\
+         {\n\
+        \  var count: USize = 0\n\
+        \  for row in rows {\n\
+        \    for _ in row {\n\
+        \      count = count.saturating_add(1)\n\
+        \    }\n\
+        \  }\n\
+        \  count\n\
+         }\n"
+        "prover.cost")
+
+(* Incremental work: after an edit, which definitions are proven again,
+   and how many queries reach the solver rather than its cache. Each test's
+   definitions are its own, so no other test has solved its queries. *)
+
+let again before after =
+  let solver =
+    match Solver.find () with Ok solver -> solver | Error message -> failwith message
+  in
+  let database = Support.setup [ ("app::main", before) ] in
+  let module_ = Support.module_of "app::main" in
+  let engine = Engine.of_context database in
+  let prove () =
+    match Type_checker.diagnostics database module_ with
+    | [] -> Prover.diagnostics database solver module_
+    | errors -> errors
+  in
+  (match prove () with
+  | [] -> ()
+  | found -> fail "before the edit: %s" (String.concat "; " (Support.codes found)));
+  Engine.set engine Workspace.file_text module_ after;
+  Engine.clear_log engine;
+  let solved = Solver.solved solver in
+  (match prove () with
+  | [] -> ()
+  | found -> fail "after the edit: %s" (String.concat "; " (Support.codes found)));
+  let prefix = "proof(app::main::" in
+  let proven =
+    List.filter_map
+      (fun name ->
+        let length = String.length prefix in
+        if String.length name > length && String.sub name 0 length = prefix then
+          Some (String.sub name length (String.length name - length - 1))
+        else None)
+      (Engine.executed engine)
+  in
+  (List.sort_uniq compare proven, Solver.solved solver - solved)
+
+let expect_again before after ~proven ~solved =
+  let found, count = again before after in
+  if found <> proven || count <> solved then
+    fail "proven again: [%s], with %d queries solved; expected [%s], with %d"
+      (String.concat ", " found) count (String.concat ", " proven) solved
+
+let () =
+  test "editing a body proves that definition again and no other" (fun () ->
+      let text index =
+        Printf.sprintf
+          "fn last_reading(readings: List[Int32]) -> Int32\n\
+          \  requires readings.length() > 2\n\
+           {\n\
+          \  readings[%s]\n\
+           }\n\n\
+           fn next_reading(reading: UInt16) -> UInt16\n\
+          \  requires reading < 900\n\
+           {\n\
+          \  reading + 7\n\
+           }\n"
+          index
+      in
+      expect_again (text "1") (text "2") ~proven:[ "last_reading" ] ~solved:1);
+  test "renaming a local solves nothing again" (fun () ->
+      let text name =
+        Printf.sprintf
+          "fn first_sample(samples: List[Int16]) -> Int16\n\
+          \  requires samples.length() > 0\n\
+           {\n\
+          \  let %s = samples[0]\n\
+          \  %s\n\
+           }\n"
+          name name
+      in
+      expect_again (text "first") (text "head") ~proven:[ "first_sample" ] ~solved:0);
+  test "editing a callee's ensures proves its callers again" (fun () ->
+      let text ensures =
+        Printf.sprintf
+          "fn halve(amount: UInt32) -> UInt32\n\
+          \  ensures %s\n\
+           {\n\
+          \  amount / 2\n\
+           }\n\n\
+           fn halve_and_add(amount: UInt32) -> UInt32 {\n\
+          \  halve(amount) + 1\n\
+           }\n\n\
+           fn unrelated(level: UInt32) -> UInt32\n\
+          \  requires level < 10\n\
+           {\n\
+          \  level + 1\n\
+           }\n"
+          ensures
+      in
+      expect_again (text "result < 4000000000") (text "result <= amount / 2")
+        ~proven:[ "halve"; "halve_and_add" ] ~solved:2)
 
 let () = finish ()

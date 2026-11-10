@@ -1211,6 +1211,11 @@ the test time limit, and its results are kept under the key of the code
 that ran, as test results are, so a check runs again only when its texts
 or its code change.
 
+A call the prover knows the arguments of has a `Call_evaluation` instance,
+of the function and its arguments, each an integer or a `Bool` as 0 or 1: it
+calls the function with them as constants and writes its result out, which
+is read back as a constant's value is. Its results are kept the same way.
+
 ## Tests
 
 ### The test program
