@@ -9,7 +9,8 @@
 
     Every node has an [id], its number within the definition, which later results are keyed by, and
     an [origin], the node of the syntax tree it came from, which is how a diagnostic about it finds
-    the text to quote. One syntax node can be the origin of several nodes. *)
+    the text to quote. One syntax node can be the origin of several nodes. No node holds a span: the
+    form of a definition that was only laid out again is the same form. *)
 
 type id = int
 type origin = Syntax.id
@@ -28,7 +29,6 @@ type evidence =
       (** A bound in scope, on a generic parameter or on an associated type of one, which the code's
           instantiation resolves. *)
   | Dynamic  (** Through an [any] value's table. *)
-  | Built_in  (** [Copyable] and [Plain], which the compiler implements. *)
 
 type callee =
   | Function of { path : Path.t; type_arguments : Types.argument list }
@@ -62,16 +62,18 @@ and call = {
       (** Each capability parameter of the callee, solved. *)
 }
 
-and argument = { mode : Types.mode;  (** The parameter's. *) value : operand }
+and argument =
+  | Passed of { mode : Types.mode;  (** The parameter's. *) value : operand }
+  | Default  (** The parameter's default, which the callee's own core form holds. *)
 
+(** What something is given: a place, used where it is, or a value. *)
 and operand =
   | Place of place
-      (** A place, lent to the callee for the call: read-only, or to change for a [mut] parameter.
-          An [own] parameter never takes a place; it takes the value there, as [Value (Use place)].
-      *)
+      (** A place, used in place. As an argument it is lent for the call, read-only or to change for
+          a [mut] parameter; an [own] parameter never takes a place, it takes the value there, as
+          [Value (Use place)]. Matched or bound, its parts are bound where they are. *)
   | Value of expression
       (** A value: an [own] parameter takes it, and a read-only one sees it for the call. *)
-  | Default  (** The parameter's default, which the callee's own core form holds. *)
 
 (** Where a value is. *)
 and place =
@@ -80,8 +82,9 @@ and place =
       (** A field of a record, or of the [variant] a pattern or an [is] showed the base to be;
           [type_] is the field's. *)
   | Lent of expression
-      (** The part a call of a lending method lends, for the rest of the statement: [items[index]],
-          which is [at], and [grid.cell(position)]. The expression is the [Call]. *)
+      (** The part a lending call lends, for the rest of the statement: [items[index]], which is
+          [at], and [grid.cell(position)]. The expression is the [Call], of a method or of an
+          intrinsic that lends. *)
   | Temporary of expression
       (** A value with no place of its own, held for the statement so that a part of it can be
           named: [origin().x]. *)
@@ -94,16 +97,20 @@ and kind =
   | Float of float  (** Already rounded to its type. *)
   | Boolean of bool
   | String of string  (** A string literal with nothing interpolated. *)
-  | Interpolated of piece list
-      (** A plain string with interpolations: the text its pieces make, in order. *)
-  | Template of {
-      from_template : callee;  (** The tag's [FromTemplate.from_template]. *)
-      literals : string list;  (** The texts between the parts: one more than there are parts. *)
-      parts : expression list;  (** Each already the tag's [Part], through [From] where needed. *)
+  | Interpolated of {
+      pieces : piece list;  (** The text they make, in order. *)
+      start : callee;  (** [TextBuilder.new] *)
+      write : callee;  (** [TextBuilder.write], for a [Text] piece. *)
+      finish : callee;  (** [TextBuilder.finish] *)
     }
+  | Template of { from_template : callee; template : expression }
+      (** A tagged string: the tag's [FromTemplate.from_template], and the template it is given, a
+          [Construct] with the texts and with the parts, each already the tag's [Part]. *)
   | Use of place  (** The value at a place. Whether it is copied or moved is ownership's to say. *)
+  | Copy of operand  (** [value.copy()] where the compiler implements [Copyable]. *)
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
-      (** A named function or method as a value. *)
+      (** A named function or method as a value. A variant used as a function is a [Lambda] that
+          builds it. *)
   | Constant of Path.t
   | Generic_value of Types.parameter  (** A [USize] generic parameter. *)
   | Lambda of {
@@ -112,14 +119,15 @@ and kind =
       body : block;
       result : Types.ty;
     }
-  | Construct of { variant : string option; fields : (string * operand) list }
+  | Construct of { variant : string option; fields : (string * expression option) list }
       (** A value of a record type or of a variant, of the node's type: every field, in the order
-          the type declares them. [Default] is the field's default, which the type's core form
-          holds. Never [Place]. *)
-  | Collection of expression list
+          the type declares them. A field with no expression takes its default, which the type's
+          core form holds. A range written as a value is one of these. *)
+  | Collection of { elements : expression list; built : collection }
       (** A list, array, or set literal, or a specification's sequence or set: the node's type says
           which. *)
-  | Entries of (expression * expression) list  (** A map literal. *)
+  | Entries of { entries : (expression * expression) list; built : collection }
+      (** A map literal. *)
   | Updated of { base : expression; updates : (string list * expression) list }
       (** [base with (...)]: the record with the field at each path replaced. *)
   | Slice of { base : place; start : expression option; stop : expression option }
@@ -138,15 +146,18 @@ and kind =
   | Both of expression * expression  (** [&&]: the right side only when the left holds. *)
   | Either of expression * expression  (** [||] *)
   | Implies of expression * expression  (** [==>], in specifications. *)
-  | Matches of { value : expression; pattern : pattern }
+  | Matches of { value : operand; pattern : pattern }
       (** [value is pattern], and what [<] asks of the [Ordering] its [compare] gives. *)
+  | Next of place
+      (** The next part of the cursor a call of a yielding method made, or none when it has ended.
+      *)
   | Convert of { conversion : conversion; value : expression }
   | Any of { value : expression; trait : Types.trait_reference; evidence : evidence }
       (** A value made an [any Trait]. *)
   (* Control *)
   | If of { condition : expression; then_ : block; else_ : block option }
   | Match of {
-      scrutinees : expression list;
+      scrutinees : operand list;
       arms : arm list;
       guards_cover : bool;
           (** Whether its last arm is [_ => unreachable] after guards, so that the prover shows the
@@ -157,14 +168,16 @@ and kind =
   | Return of expression option
   | Break
   | Continue
-  | Todo
+  | Todo  (** Its type is [Hole] where nothing decided it. *)
   | Unreachable
   | Echo of expression
   (* Specifications *)
   | Result  (** [result], in an [ensures]. *)
   | Old of expression
   | Updating
-      (** In the value of an [Update]: what its target holds before, handed over as owned. *)
+      (** What the target of an [Update] holds before. It appears once in the update's value, as an
+          argument of the [Call] or the [Operator] that the value is, and the argument's mode says
+          whether the target is given up to the call or lent to it. *)
   | Quantified of { quantifier : Syntax.quantifier; binder : binder; body : expression }
   | Yielded  (** The parts handed out so far, in order. *)
   | Finished
@@ -181,11 +194,18 @@ and piece =
   | Displayed of { value : expression; display : callee }
       (** A value written out by its [Display]. *)
 
+(** How a collection literal is built, where it is one that runs. *)
+and collection =
+  | Array  (** In place, at its size. *)
+  | From_storage of callee  (** A list: the storage its elements fill, handed to this. *)
+  | Inserted of { empty : callee; insert : callee }  (** A set or a map. *)
+  | Modelled  (** A specification's sequence, set, or map, which no code builds. *)
+
 (** The only conversions, each a node where it happens. *)
 and conversion =
-  | View
+  | View of callee
       (** A [List] seen as a [Slice], or a [String] as a [StringSlice], where the view type is
-          expected. *)
+          expected: the method that gives the view. *)
   | Widen
       (** A function value to a function type with more [uses] or weaker costs. The prover shows the
           costs imply: the value's type is what is given, and the node's what is expected. *)
@@ -199,7 +219,10 @@ and binder =
   | Over_collection of { pattern : pattern; collection : expression }
 
 and implementation = {
-  value : expression;
+  mode : Types.mode;
+  value : operand;
+      (** A place provided [mut] keeps what the implementation changes; a value is held for the
+          body. *)
   provides : provided list;  (** The capabilities its type provides, each with its [impl]. *)
 }
 
@@ -207,13 +230,14 @@ and provided = { capability : Path.t; impl : Path.t; arguments : Types.substitut
 
 and block = {
   statements : statement list;
-  value : expression option;  (** What the block gives; none when it gives [Unit] or never ends. *)
+  value : expression option;  (** What the block gives, when it gives more than [Unit]. *)
+  ends : bool;  (** Whether what follows the block can be reached from inside it. *)
 }
 
 and statement = { id : id; origin : origin; kind : statement_kind }
 
 and statement_kind =
-  | Let of { pattern : pattern; value : expression; otherwise : block option }
+  | Let of { pattern : pattern; value : operand; otherwise : block option }
       (** [otherwise] is the [else] of a [let] whose pattern can fail; it leaves the block. *)
   | Evaluate of expression
   | Assign of { target : place; value : expression }
@@ -230,7 +254,7 @@ and statement_kind =
   | While of { condition : expression; clauses : loop_clause list; body : block }
   | Parallel of statement list
   | Proof of block
-  | Assert of expression
+  | Assert of clause
   | Yield of { mode : Types.mode; part : operand }
       (** The part a lending or yielding method gives, a place or a value it made, lent as the
           method's signature says. *)
@@ -242,7 +266,9 @@ and drive =
   | Each of expression
       (** A [Call] of a yielding method, with the loop's mode: [each] where the loop names a value,
           or the call the loop wrote out. *)
-  | Pull of { cursor : expression; next : callee }  (** A cursor, pulled until it ends. *)
+  | Pull of { cursor : expression; next : callee option }
+      (** A cursor, pulled until it ends: by its [Cursor.next], or as [Next] does when it is the
+          cursor of a yielding method's call. *)
 
 and loop_clause =
   | Invariant of expression
@@ -251,6 +277,12 @@ and loop_clause =
 
 and cost = { amortized : bool; resource : Syntax.resource; bound : bound }
 and bound = Finite | Order_of of expression | At_most of expression | Exactly of expression
+
+and clause = { value : expression; runs : bool }
+(** A condition that is stated, and checked when the program runs if it [runs]: when nothing in it
+    is only for specifications. That is no quantifier, no [Integer], no [old] or [result], no
+    function for specifications only, and every comparison a call or of one built-in type. *)
+
 and arm = { patterns : pattern list; guard : expression option; body : block; origin : origin }
 and pattern = { id : id; origin : origin; type_ : Types.ty; kind : pattern_kind }
 
@@ -284,7 +316,7 @@ and accepts = { inputs : (local * string) list; requires : expression list }
     inputs: [transform: (fn(element: Element) -> Output requires ...)]. *)
 
 type contract = {
-  requires : expression list;
+  requires : clause list;
   ensures : expression list;
   decreases : expression list;
   costs : cost list;
