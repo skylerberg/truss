@@ -685,7 +685,12 @@ cycle can only be seen across definitions:
   argument is a part of the caller's argument, compared in the parameters'
   order.
 - **Parts are ordered.** Each field read is below the value it is read
-  from, in an order of ranks, as Dafny orders its datatypes.
+  from, in an order of ranks, as Dafny orders its datatypes. An element of
+  a sequence is below the sequence, and a value's model is no higher than
+  the value, so an element of a field's `List` is below the value too:
+  recursion over a tree whose children are a list ends without a
+  `decreases`. The order is stated only in a function that can call itself
+  again with no `decreases`, the one place it is used.
 - **Every call from a function with a `time` clause** must reach something
   with one, or the function may not end.
 - **An edge from using an `impl`, or from naming a function as a value,
@@ -1068,10 +1073,6 @@ sanitized runs, test the trusted base against real executions.
   function the solver knows nothing more about, so a contract such as
   `List.map`'s `ensures result[i] == transform(self[i])` gives the caller
   facts about its own lambda only when the lambda's body is functional.
-- **Ranks for a collection's elements.** An element of a standard
-  collection is to be smaller than the collection, as Dafny orders its
-  sequences, so that recursion over a tree whose children are a list ends
-  without a `decreases`. Only fields are ranked.
 - **The potential of a set's or a map's elements.** A value's potential is
   to include that of the elements of a `Set` or a `Map` it holds, through
   its model, as it does for a collection modeled by a sequence. The

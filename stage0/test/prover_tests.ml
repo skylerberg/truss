@@ -2314,6 +2314,25 @@ let () =
         \  first > second\n\
          }\n"
         "prover.ensures");
+  test "recursion on an element of a field's list ends" (fun () ->
+      proven
+        "type Tree(value: Int64, children: List[Tree])\n\n\
+         fn visit(tree: Tree)\n\
+        \  cost time finite\n\
+         {\n\
+        \  for child in tree.children {\n\
+        \    visit(child)\n\
+        \  }\n\
+         }\n");
+  test "recursion on what is not a part does not end" (fun () ->
+      not_proven
+        "type Tree(value: Int64, children: List[Tree])\n\n\
+         fn visit(tree: Tree)\n\
+        \  cost time finite\n\
+         {\n\
+        \  visit(Tree(value: 0, children: tree.children.copy()))\n\
+         }\n"
+        "prover.termination");
   test "a trait's provided body keeps the trait's clauses on its own" (fun () ->
       not_proven
         "trait Sized {\n\
