@@ -66,7 +66,9 @@ public fn String.graphemes(self) yields StringSlice
 public fn String.lines(self) yields StringSlice
   cost time O(self.length())
 {
-  todo
+  for line in self.slice().lines() {
+    yield line
+  }
 }
 
 public fn String.substring(self, from: USize, to: USize) -> StringSlice
@@ -208,13 +210,17 @@ public fn String.split_at_most(self, separator: StringSlice, parts: USize) yield
 public fn String.split_matching(self, matching: (fn(Character) -> Bool cost time finite)) yields StringSlice
   cost time O(self.length() * time(matching))
 {
-  todo
+  for part in self.slice().split_matching(matching) {
+    yield part
+  }
 }
 
 public fn String.split_whitespace(self) yields StringSlice
   cost time O(self.length())
 {
-  todo
+  for part in self.slice().split_whitespace() {
+    yield part
+  }
 }
 
 public fn String.split_once(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
