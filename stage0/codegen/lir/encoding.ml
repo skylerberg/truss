@@ -144,10 +144,7 @@ let intrinsic_tag = function
   | Float_bits -> 22
   | Float_from_bits -> 23
   | Grow -> 24
-  | System_write -> 25
   | System_read -> 26
-  | Clock_now -> 27
-  | Random_fill -> 28
   | Debug_begin -> 29
   | Debug_text -> 30
   | Debug_signed -> 31
@@ -165,7 +162,6 @@ let intrinsic_tag = function
   | Float_text -> 43
   | Evidence_fill -> 44
   | System_environment -> 45
-  | System_open -> 46
   | System_run -> 48
 
 let encode_rvalue instance rvalue =

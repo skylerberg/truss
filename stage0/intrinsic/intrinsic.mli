@@ -93,6 +93,9 @@ type operation =
   | Storage_length
   | Storage_capacity
   | Storage_reserve
+  | Storage_lengthen
+      (** [(storage, by)]: the [by] elements after the last, which a function of the C library wrote
+          into room the storage had, are the storage's *)
   | Storage_push
   | Storage_pop
   | Storage_insert
@@ -105,16 +108,11 @@ type operation =
   | View_at
   | View_slice
   | Crash
-  | Write_bytes
   | Read_bytes
   | Write_float  (** [(buffer, value)]: appends the shortest decimal that reads back as the float *)
-  | Open_file
-      (** [(path, flags, error) -> Handle]: opens a file to read (flags 0), to write from empty (1),
-          or to append to (2), creating it to write; [error] gets 0, or the system's error number,
-          with a handle that is not open *)
-  | Handle_read
-      (** [(handle, buffer, count) -> ISize]: appends up to [count] bytes, as [read_bytes] *)
-  | Handle_write  (** [(handle, bytes) -> ISize]: writes, as [write_bytes] *)
+  | Handle_from
+      (** [(descriptor) -> Handle]: owns a descriptor that is open, which dropping it closes *)
+  | Handle_descriptor  (** [(handle) -> Int32]: the descriptor a handle owns *)
   | Environment_variable
       (** [(name, buffer) -> Bool]: appends an environment variable's value; false when it is unset
       *)
@@ -122,8 +120,6 @@ type operation =
       (** [(program, arguments, error) -> Int32]: runs a program found as a shell finds it, with the
           arguments, each ending in a zero byte, and waits for it: its exit status, or [128 +] the
           signal that ended it; [error] gets 0, or the system's error number *)
-  | Clock_now
-  | Random_fill
   | Libc of Libc.function_
       (** A function of the system's C library, named [libc_] and its name: [libc_write] *)
   | Libc_number of Libc.number

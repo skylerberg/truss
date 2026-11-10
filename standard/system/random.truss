@@ -4,13 +4,9 @@ internal type SystemRandom()
 
 impl Random for SystemRandom {
   fn next(self) -> UInt64 {
-    var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(8)
-    intrinsic::random_fill(mut bytes, count: 8)
     var value: UInt64 = 0
-    let count: USize = 8
-    for index in 0..count {
-      let byte: UInt64 = intrinsic::convert(intrinsic::view_at(intrinsic::storage_view(bytes), index: index))
-      value = (value << 8) | byte
+    if intrinsic::libc_getentropy(mut value) != 0 {
+      intrinsic::crash("the system gave no random bytes".slice())
     }
     value
   }

@@ -983,7 +983,7 @@ until both handle it.
 | Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits`, `from_bits` |
 | Storage | empty, with a capacity, length, capacity, reserve, push, pop, insert, remove, swap, lend an element, view |
 | Views | length, lend an element, slice |
-| Operating system | write and read bytes, the clock, random bytes, crash; more come with the standard library's real implementations |
+| Operating system | the C library's functions and numbers, a handle from a descriptor and its descriptor, crash; and, until they are Truss, reading standard input, an environment variable, and running a program |
 
 `Intrinsics` writes every operation into the caller's LIR, never as a call:
 numbers as primitive operations, and storage and views as a few statements
@@ -1022,12 +1022,18 @@ reaches it:
 | A number | Its value, converted to the parameter's C type |
 | A `View` | The address of its elements, which the function only reads |
 | A `mut Storage` | The address after its last element, for a function that fills room the storage has beyond its length |
+| Several `mut` numbers of one type | The address of a structure of them, which the function writes; each number then goes to its argument |
 
-Truss has no pointer type, so memory crosses to C only as a view or as
-storage, and a structure a function fills is storage of the numbers it is
-made of: `clock_gettime` fills a `Storage[Int64]` with the two numbers of a
-`timespec`. A function's result is a number, or the number at the address
-it returns, which is how `errno` is reached.
+Truss has no pointer type, so memory crosses to C only as a view, as
+storage, or as numbers to write. A small structure a function fills is the
+numbers it is made of: `libc_clock_gettime(clock, seconds: mut seconds,
+nanoseconds: mut nanoseconds)` gives a `timespec`'s two, with nothing on
+the heap. `storage_lengthen` then makes what a function wrote into
+storage's room the storage's own. A row can also fix an argument, which
+the Truss call then does not have: `libc_getentropy(mut value)` always
+asks for the eight bytes of the `UInt64` it fills. A function's result is
+a number, or the number at the address it returns, which is how `errno` is
+reached.
 
 A call is written into the caller's LIR as a call of the C function
 itself, given each argument converted to its parameter's C type, and the C
@@ -1051,14 +1057,21 @@ therefore a failing test, not a program that misbehaves.
 ### Handles
 
 The intrinsic module also provides one handle type: `Handle`, a file
-descriptor in an `Int32`, which is neither `Copyable` nor `Plain`, with
-`open_file`, `handle_read`, and `handle_write`. Its drop function calls the
-operating system to release it, with `close`. The standard
-library's `SystemFileRead` and `SystemFileWrite`, and its `FileReader` and
-`FileWriter`, are written on them, as `SystemEnvironment` is on
-`environment_variable`, `SystemProcesses` on `run_process`, which spawns
-a program found on the `PATH` and waits for it, `SystemClock` on
-`clock_now`, and `SystemRandom` on `random_fill`. `SystemTasks.yield_now`
+descriptor in an `Int32`, which is neither `Copyable` nor `Plain`.
+`handle_from` makes one of a descriptor that is open, and
+`handle_descriptor` reads it. Its drop function calls the operating system
+to release it, with `close`.
+
+The standard library's real implementations are Truss on the C library's
+functions: opening a file, with its path given a zero byte at its end and
+refused if it holds one; reading into storage; writing every byte; going
+on after a signal interrupts a call; and turning an error number into a
+`FileError`. `SystemFileRead`, `SystemFileWrite`, `FileReader`, and
+`FileWriter` are written on those, `SystemConsole` writes with them,
+`SystemClock` reads `clock_gettime`, and `SystemRandom` reads
+`getentropy`. `SystemConsole` reads standard input, `SystemEnvironment` a
+variable, and `SystemProcesses` runs a program found on the `PATH` and
+waits for it, through functions of the runtime still. `SystemTasks.yield_now`
 does nothing, since tasks run one after another. `NetworkClient` and
 `NetworkServer` have no real implementation, and a `main` that uses one is
 refused with a message saying so. A handle's is the only drop that does more
@@ -1426,14 +1439,12 @@ a command line can hold.
 - **Checkers shipped compiled.** The standard library's are to ship already
   compiled with the toolchain, for each host and both widths of `USize`, and
   a dependency's to be compiled once per version.
-- **The standard library written on the C library.** Its real
-  implementations still reach the system through the runtime's functions
-  for writing, reading, opening a file, the clock, random bytes, the
-  environment, and running a program; of the C library's functions in the
-  table, only `close` is called, by a handle's drop. The logic of those
-  runtime functions is to be Truss in the standard library over the table,
-  with storage's growth, debug output, and the test runner, leaving the
-  runtime only startup, failing, and allocation.
+- **The rest of the runtime in Truss.** Reading standard input, whose
+  buffer is the runtime's, an environment variable, running a program, a
+  float's text, storage's growth, debug output, and the test runner are
+  functions of the C runtime. Each is to be Truss in the standard library
+  on the C library's functions, leaving the runtime only startup, failing,
+  and allocation.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.

@@ -1,4 +1,5 @@
 use standard::intrinsic
+use standard::system::calls
 use standard::system::handles
 
 public capability Console {
@@ -107,11 +108,15 @@ public fn FileReader.read_line(mut self) -> Result[String, FileError]
     } else if self.ended {
       found = true
     } else {
-      let got = intrinsic::handle_read(mut self.handle, buffer: mut self.pending, count: 65536)
-      if got < 0 {
-        failed = true
-      } else if got == 0 {
-        self.ended = true
+      match calls::read_onto_end(intrinsic::handle_descriptor(self.handle), buffer: mut self.pending, count: 65536) {
+        Ok(read) => {
+          if read == 0 {
+            self.ended = true
+          }
+        }
+        Err(_) => {
+          failed = true
+        }
       }
     }
   }

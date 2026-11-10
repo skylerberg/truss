@@ -4,6 +4,13 @@ internal type SystemClock()
 
 impl Clock for SystemClock {
   fn now(self) -> Instant {
-    Instant(nanoseconds: intrinsic::clock_now())
+    var seconds: Int64 = 0
+    var nanoseconds: Int64 = 0
+    let _ = intrinsic::libc_clock_gettime(
+      intrinsic::libc_clock_realtime(),
+      seconds: mut seconds,
+      nanoseconds: mut nanoseconds,
+    )
+    Instant(nanoseconds: seconds * 1000000000 + nanoseconds)
   }
 }

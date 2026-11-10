@@ -68,6 +68,7 @@ let shapes extra (ty : Ground.ty) : shape =
   match ty with
   | Named { path = Top { name = "Int64"; _ }; _ } -> Scalar (Integer Int64)
   | Named { path = Top { name = "UInt8"; _ }; _ } -> Scalar (Integer UInt8)
+  | Named { path = Top { name = "UInt64"; _ }; _ } -> Scalar (Integer UInt64)
   | Named { path = Top { name = "USize"; _ }; _ } -> Scalar (Integer USize)
   | Named { path = Top { name = "Float64"; _ }; _ } -> Scalar Float64
   | Named { path = Top { name = "Bool"; _ }; _ } -> Scalar Bool
