@@ -302,10 +302,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
                   with
                   | Some (_, { kind = Function { signature; _ } | Method_declaration signature; _ })
                     ->
-                      List.exists
-                        (fun (clause : clause) ->
-                          match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
-                        signature.clauses
+                      Lower.terminates signature.clauses
                   | _ -> false)
               | _ -> false
             in

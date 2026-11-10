@@ -20,9 +20,10 @@ let target () =
 
 (* A development build compiles the package at -O1, one C file an
    instance. A release build compiles at -O2 and optimizes across every
-   file as they are linked. Stage0's builds check at run time what the
-   prover will prove, so both keep those checks. *)
-let create ?(sanitize = false) (project : Project.t) build =
+   file as they are linked. A build checks at run time what the prover
+   proves unless [checks] is false, which only a build made once every
+   proof it reaches is done may be. *)
+let create ?(sanitize = false) ?(checks = true) (project : Project.t) build =
   let toolchain = toolchain () in
   let extra = if sanitize then sanitizers else [] in
   let settings : Build.settings =
@@ -45,7 +46,7 @@ let create ?(sanitize = false) (project : Project.t) build =
     | _ -> Workspace.file_path module_
   in
   let own = List.map snd (Database.packages project.session) in
-  Compile.create ~file_name ~want:(Database.want project.session)
+  Compile.create ~checks ~file_name ~want:(Database.want project.session)
     ~worked_on:(fun package -> List.mem package own)
     project.context (target ()) toolchain
     (Build.cache (Database.objects_directory ()))

@@ -196,6 +196,19 @@ and `reads` clauses):
   have a `time` clause, so `wrapping_add`, `saturating_add`,
   `checked_add`, `try_from`, and the rest are definitions their callers
   unfold.
+- **A storage and a view are sequences.** Each is known by its model, a
+  `Sequence` of its elements whose length fits a `USize`, which
+  `storage_model` and `view_model`, intrinsics for specifications only,
+  name, so `List`, `Slice`, `String`, and `StringSlice` define `model()`
+  over their buffers. Each operation reads or changes that sequence as the
+  compiler makes it do: `storage_push` appends, `storage_insert` shifts
+  what follows, `view_slice` is a run of its view, and reading bytes
+  appends what it says it read; `compare_bytes` is a total lexicographic
+  order on its views' bytes, zero exactly when they are the same. An
+  operation that stops the program on a
+  bad index says what holds when it returns. A part `storage_at_mut` lends
+  changes nothing until the lend ends, where the storage takes back what
+  the caller left in it.
 - **Bitwise operations get a second encoding.** On integers, `&`, `|`, `^`,
   `~`, and shifts are functions the solver knows only by a few facts, such
   as `0 <= a & b <= a` for unsigned values. That proves the bounds most bit
@@ -372,7 +385,10 @@ is a term, every fact is guarded by the condition of the path it holds on,
 and where paths join, each local that differs gets a fresh symbol that each
 path defines. So what a body gives its queries grows with the body, not
 with its number of paths. No step goes around a loop: each loop is cut at
-its head by its invariant, as below.
+its head by its invariant, as below. The right side of `&&`, `||`, or
+`==>` runs on only one path, so when it changes a local, as a call with a
+`mut` argument does, that path joins the one where it did not run, as the
+two arms of an `if` do.
 
 An `assert` makes one query: the facts gathered before it, and its fact as
 the goal, guarded by its path. Once made, it is a fact for the rest of the
@@ -439,10 +455,11 @@ call uses the capability method's contract.
 ### Lending and yielding methods
 
 - **In the method's own body,** each `yield` asserts the clauses that
-  mention `result`, with the part as `result`. For a `mut` part, the part's
-  place then takes a fresh value that meets the part's type invariant,
-  since the caller may have changed it, and the part is appended to
-  `yielded`. In a yielding method, each `yield` also asserts the clauses
+  mention `result`, with the part as `result`. For a `mut` part, the part
+  then takes a fresh value that meets its type invariant, since the caller
+  may have changed it, which is stored back into its place, through a
+  collection's `lends mut` index for an element, and the part is appended
+  to `yielded`. In a yielding method, each `yield` also asserts the clauses
   that hold where the method ends, with `finished` false, and the invariant
   of `self`, since a loop may stop there. At the end of the body, those
   clauses are asserted with `finished` true.
@@ -488,6 +505,11 @@ invariants and the validity of its fields.
 - **Functions in an invariant are definitions or contracts like any
   others,** so a type's validity may unfold `is_sorted` or rely on its
   contract.
+- **Another package's opaque type** has a validity that is a predicate the
+  prover never unfolds there: a value of the type comes from its own
+  package, which shows the invariant, so elsewhere validity is assumed
+  where a value arrives and shown where one leaves, which the facts it
+  arrived with already do.
 
 ### Specifications
 
@@ -657,6 +679,8 @@ The prover adds a ghost counter for each resource that has a cost clause:
 | `allocated_bytes` | The bytes of each allocation, and each callee's `allocated_bytes` |
 | `calls(target)` | Each call to the target, and each callee's count for it |
 
+- **A specification spends nothing.** A `requires`, an `ensures`, an
+  invariant, or a bound never runs, so what it calls is not counted.
 - **A counter is an `Integer` on each path,** increased at each call and
   each iteration, so costs are proven by the same verification conditions
   as everything else. Where paths join, a counter is what the path taken
@@ -673,11 +697,13 @@ The prover adds a ghost counter for each resource that has a cost clause:
 - **Allocations are counted where DESIGN.md says they happen:** building an
   `indirect` variant is one allocation, of a fixed size that is not known
   to the prover, and so is any callee's allocation.
-- **The intrinsic module's operations** each take a fixed number of steps
-  and allocate nothing, or are known by no bound, as the compiler declares
-  them: arithmetic and reading or swapping in place are the first kind,
-  growing storage, copying runs of bytes, and reaching the system the
-  second.
+- **The intrinsic module's operations** each take a fixed number of steps,
+  steps in proportion to a buffer's length, or are known by no bound, as
+  the compiler declares them: arithmetic and reading or swapping in place
+  are the first kind; inserting into or removing from a storage, and
+  comparing runs of bytes, the second; growing storage and reaching the
+  system the third. Only the first kind never allocates, with removing and
+  comparing.
 - **A `calls(target)` counter** counts each call through a function value
   or of a capability's method. A callee that is passed the function value,
   or uses the capability, counts what its own `calls` clause about it says;
@@ -782,9 +808,12 @@ plus what happens before and after:
   potentials of its parts, as DESIGN.md defines it. In the logic it is a
   function of the value, whose definition is unfolded once for each value
   it is asked of, so a recursive type's potential is never unfolded
-  forever. A collection whose model is a sequence, such as a `List`, holds
-  the sum of its elements' potentials over its model, as
-  `Sequence.sum` gives it.
+  forever. A growable buffer, a storage or a type whose model is the
+  sequence of the storage it holds, such as a `List` or a `String`, holds
+  what it saved for growing, which is between zero and its length, and the
+  sum of its elements' potentials over its model, as `Sequence.sum` gives
+  it. `storage_push` takes one step, amortized, paid out of that saving, so
+  pushing `count` times costs `O(count + items.length())`.
 - **Potential is counted in a unit of its type's own,** one unknown constant
   for each type with a potential, the same for every method of the type, so
   that potential saved by one method pays for another's work. Since every
@@ -937,8 +966,10 @@ A proof is as trustworthy as:
   are extensional, what `log` and `power` are, the few facts about bitwise
   operations, and what a derived `Equal` means
 - the contracts of `standard::specification`, which say what the
-  mathematical collections are
-- what the prover knows of the intrinsic module's integer operations
+  mathematical collections are, so its definitions are not proven
+- what the prover knows of the intrinsic module's integer operations, its
+  storage and views, and reading and writing bytes, and the costs the
+  compiler declares for each intrinsic
 - the standard library's contracts whose bodies end in any other
   intrinsic, which the prover knows only by its type, so they are relied
   on and not proven
@@ -961,15 +992,16 @@ sanitized runs, test the trusted base against real executions.
 
 ## Not built
 
-- **Contracts for the intrinsic module's other operations.** The compiler
-  is to declare a contract for each intrinsic, and the standard library is
-  to be proven against them, `List`'s `model()` as a definition over its
-  buffer, so that nothing above the intrinsic module is trusted. Only the
-  integer operations have meanings. A call of any other intrinsic gives a
-  value known only by its type, so the contracts of `List`, `Map`, `Set`,
-  and the strings are relied on without proof, and what the standard
-  library states no contract for, such as the `ieee_` comparisons, is
-  known only by its type.
+- **A trait's provided methods proven on their own.** A provided body is
+  proven only where an `impl` replaces it, which shows its result is the
+  body's. A body that every `impl` keeps is not proven against the trait's
+  clauses: it is to be proven once, with `Self` a type parameter bounded by
+  the trait.
+- **Contracts for the intrinsic module's floats and system calls.** Only
+  the integer operations, storage, views, and reading and writing bytes
+  have meanings. A call of any other intrinsic gives a value known only by
+  its type, and what the standard library states no contract for, such as
+  the `ieee_` comparisons, is known only by its type.
 - **Obligations and facts under a quantifier.** An obligation that names a
   quantifier's bound name, such as the bounds of an index on it, is not
   made, so nothing checks that a quantifier's body is well defined. A fact
@@ -1011,9 +1043,8 @@ sanitized runs, test the trusted base against real executions.
   specification module has no sum over a finite set or map, so a
   potential that needs one is reported as one the prover cannot read.
 - **Code the prover cannot read yet.** Among what is reported as
-  `prover.unsupported`: a loop over a cursor that is not in a local, a
-  local changed on the right of `&&`, `||`, or `==>`, and a string pattern
-  with a tag or interpolations.
+  `prover.unsupported`: a loop over a cursor that is not in a local, and a
+  string pattern with a tag or interpolations.
 - **More in a diagnostic.** A note at the clause an obligation comes from,
   the branches a counterexample's path takes, listed by position, the
   values of locals, and a fix that adds an obligation about parameters

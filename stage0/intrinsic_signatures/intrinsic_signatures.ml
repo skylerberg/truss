@@ -13,6 +13,14 @@ let storage element =
 let view element = T.Named { path = Intrinsic.builtin_path View; arguments = [ T.Type element ] }
 let libc_scalar scalar = T.builtin (Intrinsic.libc_builtin scalar)
 
+let sequence element =
+  T.Named
+    {
+      path =
+        Top { module_ = { package = "standard"; modules = [ "specification" ] }; name = "Sequence" };
+      arguments = [ T.Type element ];
+    }
+
 let signature (operation : Intrinsic.operation) : T.signature =
   let generic name = { T.generic = parameter operation name; kind = Type_generic [] } in
   let p name = T.Parameter (parameter operation name) in
@@ -97,6 +105,16 @@ let signature (operation : Intrinsic.operation) : T.signature =
       make ~generics:[ "Element" ]
         ~output:(Returns (view element))
         [ input "view" (view element); input "start" usize; input "stop" usize ]
+  | Storage_model ->
+      { (with_storage ~output:(Returns (sequence element)) []) with specification_only = true }
+  | View_model ->
+      {
+        (make ~generics:[ "Element" ]
+           ~output:(Returns (sequence element))
+           [ input "view" (view element) ])
+        with
+        specification_only = true;
+      }
   | View_address ->
       make ~generics:[ "Element" ] ~output:(Returns usize) [ input "view" (view element) ]
   | Crash ->
@@ -128,12 +146,14 @@ let signature (operation : Intrinsic.operation) : T.signature =
         @ found)
   | Libc_number number -> make ~output:(Returns (libc_scalar (Libc.number_type number))) []
 
-type cost = { constant_time : bool; allocation_free : bool }
+type time = Constant_time | Linear_in of int | Unbounded_time
+type cost = { time : time; allocation_free : bool }
 
 (* What each operation costs, as the prover trusts it: arithmetic and
    reading or swapping in place take a fixed number of steps and allocate
-   nothing; anything that grows storage, copies a run of bytes, or reaches
-   the system may do more, and is known by no bound. *)
+   nothing; moving or comparing the elements of a storage or a view takes
+   steps in proportion to its length; anything else that grows storage, or
+   reaches the system, may do more, and is known by no bound. *)
 let cost (operation : Intrinsic.operation) =
   match operation with
   | Add | Subtract | Multiply | Divide | Remainder | Negate | Wrapping_add | Wrapping_subtract
@@ -143,10 +163,10 @@ let cost (operation : Intrinsic.operation) =
   | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
   | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
   | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
-  | View_slice | View_address | Crash | Storage_lengthen | Storage_push | Handle_from
-  | Handle_descriptor | Libc_number _ ->
-      { constant_time = true; allocation_free = true }
+  | View_slice | View_address | Storage_model | View_model | Crash | Storage_lengthen | Storage_push
+  | Handle_from | Handle_descriptor | Libc_number _ ->
+      { time = Constant_time; allocation_free = true }
   | Compare_bytes | Storage_remove | Storage_insert ->
-      { constant_time = false; allocation_free = true }
-  | Storage_with_capacity | Storage_set_capacity | Libc _ ->
-      { constant_time = false; allocation_free = false }
+      { time = Linear_in 0; allocation_free = true }
+  | Storage_set_capacity -> { time = Linear_in 0; allocation_free = false }
+  | Storage_with_capacity | Libc _ -> { time = Unbounded_time; allocation_free = false }
