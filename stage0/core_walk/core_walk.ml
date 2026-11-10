@@ -157,7 +157,7 @@ let expression_children visit (node : expression) =
           visit.expression start;
           visit.expression stop;
           visit.pattern pattern
-      | Over_collection { pattern; collection } ->
+      | Over_collection { pattern; collection } | Over_each { pattern; call = collection } ->
           visit.expression collection;
           visit.pattern pattern);
       visit.expression body

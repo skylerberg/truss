@@ -399,6 +399,16 @@ let () =
             List[String] by standard::list::impl Index for List[Element](mut place self.books, \
             place index) lends mut); index = add(index, 1) } }"
       then fail "found:\n%s" found);
+  expect_definition "a quantifier over a collection calls `each` in code, and not in a contract"
+    "fn g(items: List[Int64]) -> Bool\n\
+    \  ensures result == (exists item in items => item < 0)\n\
+     {\n\
+    \  exists item in items => item < 0\n\
+     }\n"
+    "fn(items: List[Int64])\n\
+     ensures (result == exists item in items { (item < 0) })\n\
+     { exists item in yielding_call standard::list::impl Iterable for \
+     List[Element].each[Int64](place items) { (item < 0) } }";
   expect_body "patterns of constants, ranges, and strings"
     "let limit: Int64 = 10\n\n\
      fn g(count: Int64, name: String) -> Int64 {\n\

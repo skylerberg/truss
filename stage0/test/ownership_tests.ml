@@ -635,6 +635,23 @@ let () =
           }\n")
         "ownership.views_temporary")
 
+(* Quantifiers in code that runs *)
+
+let () =
+  let grow = "fn grow(items: mut List[Int64]) -> Bool {\n  mut items.push(1)\n  true\n}\n\n" in
+  test "the body of a quantifier in code cannot change what the quantifier goes over" (fun () ->
+      one_diagnostic
+        (grow
+       ^ "fn f(items: mut List[Int64]) -> Bool {\n\
+         \  exists item in items => grow(mut items) && item < 0\n\
+          }\n")
+        "ownership.changed_while_viewed");
+  test "a quantifier in code reads what it goes over" (fun () ->
+      fine
+        "fn f(items: List[Int64]) -> Bool {\n\
+        \  (forall i in 0..items.length() => items[i] > 0) && (exists item in items => item < 0)\n\
+         }\n")
+
 (* Constants *)
 
 let () =

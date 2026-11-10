@@ -1668,7 +1668,9 @@ checks them like code, with these differences:
   name over a type. Their bodies, and `==>`, are `Bool`. A quantifier over a
   range or a collection is an expression in code as well; one over a type,
   and `==>`, are errors in a body that is compiled, which the parser leaves
-  to this stage since only the signature's types say whether a body is.
+  to this stage since only the signature's types say whether a body is. In
+  code, a quantifier is a loop for the ownership check too: it lends the
+  collection for its body, so the body cannot change what it goes over.
 - **`log` and `power` are specification functions.** A call of `log(n)` or
   `power(base, exponent)` by bare name is the function on `Integer` that a
   `cost` bound uses. In a `cost` bound the names always mean these
@@ -1811,6 +1813,9 @@ The core form records these decisions:
     current value.
   - A `for` loop over a collection is a loop over a call of the
     collection's `each`.
+  - A quantifier over a collection, in code that runs, holds the same call
+    of `each`, read-only, so it runs as that loop does and stops at the
+    first answer. In a specification it holds the collection and no call.
   - A range expression used as a value is a `Range` record.
   - A variant constructor used as a function is a lambda that constructs
     the variant.

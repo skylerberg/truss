@@ -1679,6 +1679,52 @@ and quantified context frame (node : expression) (quantifier : Syntax.quantifier
   let symbol = Printf.sprintf "bound.%d" context.fresh in
   let inner = { frame with bound = symbol :: frame.bound } in
   let each = L.Symbol symbol in
+  (* Over a collection's elements: by index into its sequence, or each
+     value its set contains, each matched against the binding's pattern,
+     which names its parts and leaves out what it does not match. *)
+  let over_collection (pattern : pattern) (collection_type : T.ty) collected span =
+    let element = substituted context frame pattern.type_ in
+    let set_path : Path.t =
+      Top { module_ = { package = "standard"; modules = [ "set" ] }; name = "Set" }
+    in
+    match collection_type with
+    | Named { path; _ } when Path.equal path set_path || Path.equal path finite_set_path ->
+        let finite = T.Named { path = finite_set_path; arguments = [ T.Type element ] } in
+        let model =
+          if Path.equal path finite_set_path then Some collected
+          else model_as context collection_type collected ~model:finite
+        in
+        let model =
+          match model with
+          | Some model -> model
+          | None -> unsupported span "a quantifier over `%s`" (T.show collection_type)
+        in
+        let matched, inner = pattern_match context inner pattern each element in
+        make symbol (sort_of context element)
+          (L.( &&& )
+             (finite_function context finite "contains" L.Bool
+                [ (each, sort_of context element) ]
+                model)
+             matched)
+          inner
+    | _ -> (
+        let sequence =
+          match collection_type with
+          | Named { path; _ } when Path.equal path sequence_path -> Some collected
+          | _ -> model_of context collection_type collected ~element
+        in
+        match sequence with
+        | Some sequence -> (
+            match sequence_at context element sequence each with
+            | Some found ->
+                let length = sequence_length context element sequence in
+                let matched, inner = pattern_match context inner pattern found element in
+                make ~count:length symbol Int
+                  L.(Apply ("<=", [ int 0; each ]) &&& Apply ("<", [ each; length ]) &&& matched)
+                  inner
+            | None -> unsupported span "a quantifier over `%s`" (T.show collection_type))
+        | None -> unsupported span "a quantifier over `%s`" (T.show collection_type))
+  in
   match binder with
   | Over_type { local; type_; _ } ->
       (* Over every value of a type: each in its range, and meeting its
@@ -1702,54 +1748,22 @@ and quantified context frame (node : expression) (quantifier : Syntax.quantifier
         if inclusive then Costs.plus (Costs.minus high low) (L.int 1) else Costs.minus high low
       in
       make ~count symbol Int premise inner
-  | Over_collection { pattern; collection } -> (
-      (* Over a collection's elements: by index into its sequence, or each
-         value its set contains, each matched against the binding's pattern,
-         which names its parts and leaves out what it does not match. *)
-      let collection_type = type_of context frame collection in
-      let _, collected = value context frame collection in
-      let element = substituted context frame pattern.type_ in
-      let set_path : Path.t =
-        Top { module_ = { package = "standard"; modules = [ "set" ] }; name = "Set" }
-      in
-      let span = at frame collection in
-      match collection_type with
-      | Named { path; _ } when Path.equal path set_path || Path.equal path finite_set_path ->
-          let finite = T.Named { path = finite_set_path; arguments = [ T.Type element ] } in
-          let model =
-            if Path.equal path finite_set_path then Some collected
-            else model_as context collection_type collected ~model:finite
-          in
-          let model =
-            match model with
-            | Some model -> model
-            | None -> unsupported span "a quantifier over `%s`" (T.show collection_type)
-          in
-          let matched, inner = pattern_match context inner pattern each element in
-          make symbol (sort_of context element)
-            (L.( &&& )
-               (finite_function context finite "contains" L.Bool
-                  [ (each, sort_of context element) ]
-                  model)
-               matched)
-            inner
-      | _ -> (
-          let sequence =
-            match collection_type with
-            | Named { path; _ } when Path.equal path sequence_path -> Some collected
-            | _ -> model_of context collection_type collected ~element
-          in
-          match sequence with
-          | Some sequence -> (
-              match sequence_at context element sequence each with
-              | Some found ->
-                  let length = sequence_length context element sequence in
-                  let matched, inner = pattern_match context inner pattern found element in
-                  make ~count:length symbol Int
-                    L.(Apply ("<=", [ int 0; each ]) &&& Apply ("<", [ each; length ]) &&& matched)
-                    inner
-              | None -> unsupported span "a quantifier over `%s`" (T.show collection_type))
-          | None -> unsupported span "a quantifier over `%s`" (T.show collection_type)))
+  | Over_collection { pattern; collection } ->
+      over_collection pattern
+        (type_of context frame collection)
+        (snd (value context frame collection))
+        (at frame collection)
+  (* In code that runs, the collection is what the call of [each] is given. *)
+  | Over_each
+      {
+        pattern;
+        call = { kind = Call { arguments = [ Passed { value = given; _ } ]; _ }; _ } as call;
+      } ->
+      over_collection pattern
+        (operand_type context frame given)
+        (snd (operand_value context frame given))
+        (at frame call)
+  | Over_each { call; _ } -> unsupported (at frame call) "this quantifier's loop"
 
 (* A [USize] generic argument's value: a number, or what the parameter
    stands for here, or the parameter itself, a constant the solver knows

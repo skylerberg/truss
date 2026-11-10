@@ -354,8 +354,9 @@ let rec expression builder frontier (node : Core.expression) : int list =
   in
   match node.kind with
   | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Result
-  | Current_target | Yielded | Finished | Todo | Quantified _ | Method_time _ ->
+  | Current_target | Yielded | Finished | Todo | Method_time _ ->
       frontier
+  | Quantified { binder; body; _ } -> quantified builder frontier node binder body
   | Unreachable -> []
   | Break ->
       (match builder.loops with (breaks, _) :: _ -> breaks := frontier @ !breaks | [] -> ());
@@ -492,6 +493,38 @@ and binds builder frontier (bound : Core.local list) (scrutinees : Core.operand 
   in
   if bound = [] || views = [] then frontier
   else emit builder frontier (Hold { holders = bound; views }) origin
+
+(* A quantifier in code that runs is a loop that stops at the first answer:
+   it evaluates what it goes over, and then its body once for each value.
+   A quantifier over a collection lends the collection to the loop, as a
+   [for] loop does. A quantifier of a specification does not run. *)
+and quantified builder frontier (node : Core.expression) (binder : Core.binder)
+    (body : Core.expression) =
+  let run frontier (pattern : Core.pattern) ~views ~held =
+    loop builder frontier ~bound:(pattern_locals pattern) ~views ~held ~condition:None
+      { statements = []; value = Some body; diverges = false }
+      node.origin ~parallel:false
+  in
+  match binder with
+  | Over_type _ | Over_collection _ -> frontier
+  | Over_range { pattern; start; stop; _ } ->
+      run (expression builder (expression builder frontier start) stop) pattern ~views:[] ~held:None
+  | Over_each { pattern; call } ->
+      let held =
+        match call.kind with
+        | Call { arguments = Passed { value = Place found; _ } :: _; _ } ->
+            Option.map
+              (fun lent : loan -> { lent; mode = Read; lender = To_loop })
+              (Place.of_core found)
+        | _ -> None
+      in
+      let views =
+        List.map
+          (fun (view : view) ->
+            if builder.plain pattern.type_ then { view with taken = true } else view)
+          (viewed builder call)
+      in
+      run (expression builder frontier call) pattern ~views ~held
 
 (* The arms of a [match], after its scrutinees. [body] builds the body of
    an arm. *)
