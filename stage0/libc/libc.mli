@@ -18,15 +18,86 @@ val host : system option
 (** A number that Truss and C both have. *)
 type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize | Float64
 
+type number =
+  | O_rdonly
+  | O_wronly
+  | O_creat
+  | O_trunc
+  | O_cloexec
+  | Eintr
+  | Enoent
+  | Eacces
+  | Eio
+  | Einval
+  | Clock_realtime
+  | Clock_monotonic
+  | Sc_nprocessors_onln
+  | Pollin
+  | Pollhup
+  | Sigkill
+  | O_rdwr
+  | O_append
+  | O_excl
+  | Seek_set
+  | Seek_cur
+  | Seek_end
+  | Eperm
+  | Ebadf
+  | Eexist
+  | Enotdir
+  | Eisdir
+  | Enfile
+  | Emfile
+  | Enospc
+  | Epipe
+  | Enosys
+  | Enotempty
+  | Enotsup
+  | Eaddrinuse
+  | Eaddrnotavail
+  | Enetunreach
+  | Econnaborted
+  | Econnreset
+  | Enotconn
+  | Etimedout
+  | Econnrefused
+  | Ehostunreach
+  | Stat_size  (** How many bytes a [struct stat] takes *)
+  | Stat_mode_offset  (** Where in a [struct stat] the file's mode is, and next how many bytes *)
+  | Stat_mode_size
+  | Stat_length_offset
+  | Stat_accessed_offset
+  | Stat_modified_offset
+  | Stat_created_offset  (** 0 where the structure has no time of creation *)
+  | S_ifmt
+  | S_ifreg
+  | S_ifdir
+  | S_iflnk
+  | At_fdcwd
+  | Utime_omit
+  | Path_max
+
+(** How many elements a function reads or writes through an address it is given. The prover holds
+    every call to it: a view has that many elements, and storage has room for that many. *)
+type extent =
+  | Counted of { by : string; each : int }
+      (** [each] elements for each one of the number passed for the parameter [by] *)
+  | Exactly of int
+  | Number of number  (** As many as a number of the system, such as [PATH_MAX] *)
+  | Through_zero
+      (** Up to the first element that is zero. The view's last element is zero, so the function
+          reads no further than the view. *)
+
 (** How an argument reaches the function. There is no pointer type in Truss, so memory is passed as
     a view or as storage, and the function is given an address into it. *)
 type passes =
   | Value of scalar  (** A number, converted to the parameter's C type *)
-  | Elements of scalar  (** A view: the address of its elements, which the function only reads *)
-  | Room of scalar
+  | Elements of scalar * extent
+      (** A view: the address of its elements, which the function only reads *)
+  | Room of scalar * extent
       (** Storage: the address after its last element, for a function that fills room the storage
           has beyond its length *)
-  | Elements_to_change of scalar
+  | Elements_to_change of scalar * extent
       (** Storage: the address of its first element, for a function that reads the elements the
           storage has and writes some of them *)
   | Written of scalar * string list
@@ -45,7 +116,13 @@ type result =
           argument, [found], that says whether the function returned an address at all *)
   | Never  (** The function does not return *)
 
-type signature = { parameters : (string * passes) list; result : result }
+type signature = {
+  parameters : (string * passes) list;
+  result : result;
+  at_most : string option;
+      (** The parameter that bounds the result: a result that is not negative is at most the number
+          passed for it, as [read] returns no more than the count it was given *)
+}
 (** A function as Truss calls it: how each parameter of the C function is given. *)
 
 type declaration = {
@@ -106,65 +183,6 @@ val declaration : system -> function_ -> declaration
 
 val prototype : declaration -> string
 (** What a C file that includes no header writes before it calls the function. *)
-
-type number =
-  | O_rdonly
-  | O_wronly
-  | O_creat
-  | O_trunc
-  | O_cloexec
-  | Eintr
-  | Enoent
-  | Eacces
-  | Eio
-  | Einval
-  | Clock_realtime
-  | Clock_monotonic
-  | Sc_nprocessors_onln
-  | Pollin
-  | Pollhup
-  | Sigkill
-  | O_rdwr
-  | O_append
-  | O_excl
-  | Seek_set
-  | Seek_cur
-  | Seek_end
-  | Eperm
-  | Ebadf
-  | Eexist
-  | Enotdir
-  | Eisdir
-  | Enfile
-  | Emfile
-  | Enospc
-  | Epipe
-  | Enosys
-  | Enotempty
-  | Enotsup
-  | Eaddrinuse
-  | Eaddrnotavail
-  | Enetunreach
-  | Econnaborted
-  | Econnreset
-  | Enotconn
-  | Etimedout
-  | Econnrefused
-  | Ehostunreach
-  | Stat_size  (** How many bytes a [struct stat] takes *)
-  | Stat_mode_offset  (** Where in a [struct stat] the file's mode is, and next how many bytes *)
-  | Stat_mode_size
-  | Stat_length_offset
-  | Stat_accessed_offset
-  | Stat_modified_offset
-  | Stat_created_offset  (** 0 where the structure has no time of creation *)
-  | S_ifmt
-  | S_ifreg
-  | S_ifdir
-  | S_iflnk
-  | At_fdcwd
-  | Utime_omit
-  | Path_max
 
 val numbers : number list
 
