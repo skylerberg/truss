@@ -87,9 +87,24 @@ public fn Array[Element, count: USize].each(mut self) yields mut Element
 }
 
 public fn Array[Element, count: USize].each(own self) yields own Element
+  ensures identical(result, self.model()[yielded.length()])
+  ensures yielded.length() <= count
+  ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+  ensures finished ==> yielded.length() == count
+  ensures finished ==> identical(yielded, self.model())
   cost time O(count)
 {
-  todo
+  var remaining = own self.to_list()
+  mut remaining.reverse()
+  while remaining.length() > 0
+    invariant remaining.length() + yielded.length() == count
+    invariant forall i in 0..remaining.length() =>
+      identical(remaining.model()[i], self.model()[count - 1 - i])
+    invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+    decreases remaining.length()
+  {
+    yield intrinsic::storage_pop(mut remaining.storage)
+  }
 }
 
 public fn Array[Element, count: USize].map_each[Output, capability Granted](

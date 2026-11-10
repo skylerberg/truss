@@ -99,6 +99,41 @@ test "used up" {
   assert first == "a1"
 }
 |};
+  passes "a loop that uses up an array takes its elements in order"
+    {|fn join(names: own Array[String, 3]) -> String {
+  var text = ""
+  for name in own names {
+    text = "${text}${name}"
+  }
+  text
+}
+
+test "used up" {
+  assert join(["a${1}", "b${2}", "c${3}"]) == "a1b2c3"
+}
+|};
+  passes "a loop that uses up an array and is left early drops the elements it did not reach"
+    {|test "left early" {
+  let names: Array[String, 3] = ["a${1}", "b${2}", "c${3}"]
+  var first = ""
+  for name in own names {
+    first = own name
+    break
+  }
+  assert first == "a1"
+}
+|};
+  passes "an array given up as a list keeps its elements in order"
+    {|test "to list" {
+  let names: Array[String, 2] = ["a${1}", "b${2}"]
+  var list = own names.to_list()
+  mut list.push("c${3}")
+  assert list.length() == 3
+  assert list[0] == "a1"
+  assert list[1] == "b2"
+  assert list[2] == "c3"
+}
+|};
   passes "continue keeps a list a loop is over, when the list is a call's result"
     {|fn make() -> List[String] {
   ["a${1}", "bb${2}", "c${3}"]
