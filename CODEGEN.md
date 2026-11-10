@@ -826,14 +826,25 @@ loop the C compiler would make of the loop form, and needs no rewriting of
 the caller into continuation-passing style. The caller then reads the
 method's body, and depends on it.
 
-An inlined lending method runs to its end before the caller's statement
-uses the part, where DESIGN.md has it go on only after that statement. So
-stage0 lowers a lending method only when the two cannot be told apart, and
-refuses any other as one it cannot build yet:
-- each `yield` is the last thing its path does, so nothing of the method is
-  left to run
-- what it lends is none of the method's own values, which are dropped as its
-  body ends
+A lending method goes on after the caller's statement, as DESIGN.md has
+it, and its own values live until then, so it may lend one it made. The
+LIR is a graph of blocks, so this needs no function for the rest of the
+statement:
+
+- The method's body is written into the caller up to its `yield`, which
+  jumps to the rest of the caller's statement with the place it lends.
+- What is left of the method, its code after the `yield` and the drops of
+  what it owns, is written once, in blocks nothing reaches yet.
+- The scope the lending call is in owns the lend, as it owns a temporary.
+  As that scope ends, on each way out of it, the code sets a selector to
+  the way it was going and jumps to what is left of the method, which ends
+  by going on that way. So a `return` or a `?` in the statement finishes
+  the method first, as an ordinary end does, and lends in one statement
+  finish in reverse order.
+
+Where nothing is left, as for an index into a `List`, whose method ends at
+its `yield` owning nothing, the method simply ends there and the lend costs
+nothing.
 
 A loop over a yielding method that is already inlined around it, as a
 tree's `each` loops over its subtrees, would be inlined forever. Stage0
@@ -1364,10 +1375,8 @@ a command line can hold.
   through the same `each` a `for` loop calls, that stops at the first
   element that decides the answer: `forall` at the first false body,
   `exists` at the first true one.
-- **A lending method that goes on after the caller's statement.** One that
-  does more after its `yield`, or lends a value it made, or lends through a
-  call to itself, is refused (see
-  [Loops and lending calls](#loops-and-lending-calls)).
+- **A lending method with more than one `yield`,** one on each of several
+  paths, and one that lends through a call to itself.
 - **A lambda in a yielding method that is pulled,** and in a pulled method
   a default for a parameter that is passed by address or is a view.
 - **A range without both of its ends, as a value.**
