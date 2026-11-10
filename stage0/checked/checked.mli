@@ -144,6 +144,9 @@ type t = {
   own_operator : bool array;
       (** By the id of each compound assignment: whether [own self]'s version was chosen. *)
   provides : provide option array;  (** By the id of each [provide]. *)
+  lends : Types.mode option array;
+      (** By the id of each call of a lending method: how the part it gives is lent, read-only or
+          [mut]. The part lasts the rest of the caller's statement. *)
   obligations : obligation list;
 }
 

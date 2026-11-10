@@ -245,29 +245,6 @@ and literal_operands state ~left ~right =
       ignore (unify state left right)
   | _ -> ()
 
-(* A place that is assigned or lent [mut]: each index on its way is the
-   [mut] version of [at], which lends its element [mut]. *)
-and mutable_place state (value : expression) =
-  match value.kind with
-  | Member (base, _) | Parenthesized base -> mutable_place state base
-  | Bracket (base, _) ->
-      (match state.tables.calls.(value.id) with
-      | Some ({ callee = Trait_method ({ name = "at"; _ } as method_); arguments; _ } as call) ->
-          state.tables.calls.(value.id) <-
-            Some
-              {
-                call with
-                callee = Trait_method { method_ with receiver = Mut };
-                arguments =
-                  List.map
-                    (fun (argument : C.argument) ->
-                      if argument.parameter = 0 then { argument with mode = T.Mut } else argument)
-                    arguments;
-              }
-      | _ -> ());
-      mutable_place state base
-  | _ -> ()
-
 (* [&&], [||], [!], [~], the bitwise operators, and shifts, which are
    built in on built-in types. *)
 and built_in_operator state (value : expression) (operands : expression list) result =

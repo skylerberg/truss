@@ -300,7 +300,7 @@ and match_ state env ?expected (value : expression) scrutinees arms =
     match scrutinee.kind with
     | Mode (Own, _) -> T.Own
     | Mode (Mut, _) -> T.Mut
-    | _ -> if is_place state scrutinee then T.Read else T.Own
+    | _ -> if borrowed state scrutinee then T.Read else T.Own
   in
   let branch_types =
     List.map

@@ -170,6 +170,7 @@ module Code = struct
     | Lends_count
     | Not_pullable
     | Parallel_conflict
+    | Keeps_lent_part
 
   type capabilities =
     | Not_available
@@ -398,6 +399,7 @@ module Code = struct
     | Lends_count -> "lends_count"
     | Not_pullable -> "not_pullable"
     | Parallel_conflict -> "parallel_conflict"
+    | Keeps_lent_part -> "keeps_lent_part"
 
   let capabilities_name code =
     match code with
