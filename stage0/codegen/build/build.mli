@@ -29,9 +29,11 @@ val objects :
 
 (* A program: each list of what instances compile to is one C file, [sources] are
    further C files, such as the startup code and the anchors, and the
-   runtime for the target is always linked. *)
+   runtime for the target is always linked: a test program's with [tests],
+   which the test runner's startup code needs. *)
 val program :
   ?progress:(int -> int -> unit) ->
+  ?tests:bool ->
   Toolchain.t ->
   cache ->
   Memory_layout.env ->

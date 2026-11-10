@@ -185,7 +185,7 @@ let () =
         ]
       in
       match
-        Build.program (Lazy.force compiler) (Lazy.force cache) (shape_env ()) settings
+        Build.program ~tests:true (Lazy.force compiler) (Lazy.force cache) (shape_env ()) settings
           ~files:[ List.map (fun t -> Lir.Code t) tests ]
           ~sources ~output
       with

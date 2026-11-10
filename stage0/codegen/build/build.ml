@@ -108,7 +108,7 @@ let objects ?progress toolchain cache settings sources =
       | Error message, _ | _, Error message -> Error message)
     results (Ok [])
 
-let program ?progress toolchain cache env settings ~files ~sources ~output =
+let program ?progress ?(tests = false) toolchain cache env settings ~files ~sources ~output =
   let target = Memory_layout.target env in
   let emitted =
     List.mapi
@@ -123,7 +123,7 @@ let program ?progress toolchain cache env settings ~files ~sources ~output =
       files
   in
 
-  let runtime = ("the runtime", Startup.runtime target) in
+  let runtime = ("the runtime", Startup.runtime target ~tests) in
   match objects ?progress toolchain cache settings ((runtime :: emitted) @ sources) with
   | Error message -> Error message
   | Ok objects -> Toolchain.link toolchain ~extra:settings.extra ~objects ~output ()

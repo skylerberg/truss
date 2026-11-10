@@ -116,7 +116,9 @@ The runtime (see [Program startup and failure](#program-startup-and-failure))
 is the exception. It is one fixed file for each target, compiled once and
 cached, and it includes the system's headers, since its declarations of
 signals and alternate stacks differ between systems and parsing them costs
-nothing on an edit.
+nothing on an edit. A test program's runtime is a second such file: it adds
+the test runner and the count of blocks a test must free, which a program
+that ships has no use for.
 
 Generated code has no undefined behavior, even if the prover were wrong
 about an overflow or a shift:
@@ -1141,9 +1143,10 @@ the worker is also what lets an `assert` inside a lambda end its test, which
 an early return could not. The runner kills a worker whose test exceeds the
 project's time limit.
 
-A test must free every block it allocates. The runtime counts the blocks
-that are allocated and not yet freed, and a test that ends with more than it
-started with panics with a compiler-bug message saying how many it left.
+A test must free every block it allocates. A test program's runtime counts
+the blocks that are allocated and not yet freed, and a test that ends with
+more than it started with panics with a compiler-bug message saying how
+many it left.
 Truss has no garbage collector and no way to leak a value on purpose, so a
 leak is a bug in code generation, most likely in drop elaboration. Every
 test that compiles Truss is therefore also a check of its drops.
