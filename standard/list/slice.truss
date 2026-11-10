@@ -1,3 +1,4 @@
+use standard::intrinsic
 use standard::core
 use standard::list
 
@@ -250,7 +251,7 @@ public fn Slice[Element].swap(mut self, first: USize, second: USize)
     i == first || i == second || identical(self.model()[i], old(self.model())[i])
   cost time O(1)
 {
-  todo
+  intrinsic::view_swap(mut self.elements, first: first, second: second)
 }
 
 public fn Slice[Element].reverse(mut self)
