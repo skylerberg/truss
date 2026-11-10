@@ -715,6 +715,61 @@ let () =
           (-1., uint8, false);
           (0., uint8, true);
         ]);
+  test "a storage is shortened in place, keeping its room, and a static one stays static" (fun () ->
+      let open Lir_builder in
+      let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
+      let anchors =
+        [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
+      in
+      let checked b ?destination operation arguments =
+        Intrinsics.lower ~checks:true (shape_env ()) b intrinsic_types operation
+          ~type_arguments:[ uint8 ] arguments ~destination
+          ~site:{ definition = definition "entry"; line = 0; column = 1 }
+      in
+      let shortened ~capacity ~to_ =
+        [
+          built_entry (fun b ->
+              let storage = local b (value storage_ty) in
+              emit b
+                (Assign
+                   ( at storage,
+                     Build
+                       {
+                         ty = storage_ty;
+                         variant = None;
+                         fields =
+                           [
+                             ("buffer", Constant (Bytes "abcde"));
+                             ("length", usize 5);
+                             ("capacity", usize 0);
+                           ];
+                       } ));
+              if capacity > 0 then
+                ignore
+                  (checked b Storage_set_capacity [ Place (at storage); Value (usize capacity) ]);
+              ignore (checked b Storage_shorten [ Place (at storage); Value (usize to_) ]);
+              (* The length, the capacity, and the last element kept. *)
+              let status = local b (value int32) in
+              let part place =
+                let read = local b (value int32) in
+                emit b (Assign (at read, Convert (Copy place, Integer Int32)));
+                emit b (Assign (at status, Binary (Add, Copy (at status), Copy (at read))))
+              in
+              emit b (Assign (at status, Use (constant_int32 0)));
+              part (at storage / Field "length");
+              part (at storage / Field "capacity");
+              part (at storage / Field "buffer" / Index (usize (to_ - 1)));
+              status);
+        ]
+      in
+      expect_status ~anchors (2 + 8 + Char.code 'b') (shortened ~capacity:8 ~to_:2);
+      expect_status ~anchors (3 + 0 + Char.code 'c') (shortened ~capacity:0 ~to_:3);
+      (* More than its length stops a checked build. *)
+      expect_status ~anchors 101 (shortened ~capacity:8 ~to_:6);
+      (* Elements that own something cannot be forgotten. *)
+      match (Intrinsic_signatures.signature Storage_shorten).generics with
+      | [ { kind = Type_generic [ { trait = Top { name = "Plain"; _ }; _ } ]; _ } ] -> ()
+      | _ -> fail "storage_shorten takes elements that are not known to be Plain");
   test "static storage given room is copied to the heap, where it can be pushed onto" (fun () ->
       let open Lir_builder in
       let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in

@@ -101,6 +101,19 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Storage_length | Storage_capacity -> with_storage ~output:(Returns usize) []
   | Storage_set_capacity -> with_storage ~mode:Mut [ input "capacity" usize ]
   | Storage_lengthen -> with_storage ~mode:Mut [ input "by" usize ]
+  | Storage_shorten ->
+      (* Only elements with nothing to drop can be forgotten. *)
+      let plain : T.trait_reference =
+        {
+          trait = Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Plain" };
+          trait_arguments = [];
+          associated = [];
+        }
+      in
+      {
+        (with_storage ~mode:Mut [ input "length" usize ]) with
+        generics = [ { T.generic = parameter operation "Element"; kind = Type_generic [ plain ] } ];
+      }
   | Storage_push -> with_storage ~mode:Mut [ input ~mode:Own "value" element ]
   | Storage_pop -> with_storage ~mode:Mut ~output:(Returns element) []
   | Storage_insert ->
@@ -239,9 +252,9 @@ let cost (operation : Intrinsic.operation) =
   | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | Storage_view_mut
   | View_length | View_at | View_at_mut | View_swap | Storage_take_view | View_take_view
   | Array_take_view | View_slice | View_address | Array_view | Array_at_mut | Array_from_storage
-  | Storage_model | View_model | Array_model | Crash | Storage_lengthen | Storage_push | Handle_from
-  | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks | Libc_number _
-  | System_is_os _ | System_is_architecture _ ->
+  | Storage_model | View_model | Array_model | Crash | Storage_lengthen | Storage_shorten
+  | Storage_push | Handle_from | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks
+  | Libc_number _ | System_is_os _ | System_is_architecture _ ->
       { time = Constant_time; allocations = No_allocations }
   | Compare_bytes | Storage_remove | Storage_insert | Environment_entry ->
       { time = Linear_in 0; allocations = No_allocations }

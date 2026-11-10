@@ -361,6 +361,16 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
       | Storage_capacity -> set (Use (Copy (Storage.capacity (place (argument 0)))))
       | Storage_set_capacity -> set_capacity (place (argument 0)) (value 1)
       | Storage_lengthen -> add_to_length (place (argument 0)) (value 1)
+      | Storage_shorten ->
+          (* Static storage stays static: it is told apart by its capacity,
+             and nothing is written to its elements. *)
+          let storage = place (argument 0) in
+          if checks then begin
+            let longer = local b (Raw Bool) in
+            emit b (Assign (at longer, Binary (Greater, value 1, length storage)));
+            panic_when (Copy (at longer)) "a storage shortened to more than its length"
+          end;
+          emit b (Assign (Storage.length storage, Use (value 1)))
       | Storage_push ->
           let storage = place (argument 0) in
           emit b (Assign (element_at storage (length storage), Use (value 1)));

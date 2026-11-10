@@ -1097,7 +1097,7 @@ until both handle it.
 |---|---|
 | Numbers | arithmetic, wrapping arithmetic, overflow tests, lawful and IEEE comparisons, bit operations, conversions and whether a value fits a type |
 | Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits`, `from_bits` |
-| Storage | empty, with a capacity, from an array, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view, view to change the elements through, take a view back |
+| Storage | empty, with a capacity, from an array, length, capacity, set the capacity, lengthen, shorten, push, pop, insert, remove, swap, lend an element, view, view to change the elements through, take a view back |
 | Views | length, lend an element, lend an element to change, swap, slice, take a view back |
 | Arrays | from a storage, a view of the elements, lend an element to change, take a view back |
 | Operating system | the C library's functions and numbers, which system the program is built for, an entry of the environment, a handle from a descriptor and its descriptor, the address of a view, crash |
@@ -1154,6 +1154,12 @@ its own with room for exactly as many elements as it is told, and
 to make is the standard library's to say, in Truss: where a push finds no
 room, it at least doubles the capacity, so pushing is amortized O(1), and
 the prover reads that as it reads any code.
+
+`storage_shorten` forgets every element after the first `length`, in one
+step, and keeps the capacity. Its element type is `Plain`, which the type
+checker holds a call to, since forgetting an element that owns something
+would leak it; a `List` of any elements is cut short by popping. That is
+what makes `String.truncate` constant time.
 
 Storage with capacity 0 and a nonzero length is static, as a string
 literal's is: it owns no buffer, so dropping it frees nothing and copying

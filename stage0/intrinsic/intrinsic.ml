@@ -136,6 +136,7 @@ type operation =
   | Storage_capacity
   | Storage_set_capacity
   | Storage_lengthen
+  | Storage_shorten
   | Storage_push
   | Storage_pop
   | Storage_insert
@@ -223,6 +224,7 @@ let operations =
     Storage_capacity;
     Storage_set_capacity;
     Storage_lengthen;
+    Storage_shorten;
     Storage_push;
     Storage_pop;
     Storage_insert;
@@ -310,6 +312,7 @@ let operation_name = function
   | Storage_capacity -> "storage_capacity"
   | Storage_set_capacity -> "storage_set_capacity"
   | Storage_lengthen -> "storage_lengthen"
+  | Storage_shorten -> "storage_shorten"
   | Storage_push -> "storage_push"
   | Storage_pop -> "storage_pop"
   | Storage_insert -> "storage_insert"
