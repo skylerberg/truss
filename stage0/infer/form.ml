@@ -63,7 +63,6 @@ let call_of state ~lends ?through (call : C.call) : Core.call =
     arguments = arguments state call;
     lends;
     uses = call.uses;
-    capability_arguments = call.capability_arguments;
   }
 
 let call state (id : id) : Core.call =
@@ -271,9 +270,32 @@ let range state (value : expression) start stop ~inclusive : Core.kind =
         }
   | _ -> bug "a range with an end left out is a value only where it slices"
 
+(* The capabilities a type implements, each with the [impl] that provides
+   it, its generic arguments, and its interface. An [impl] lives with its
+   type or its capability, so it is in the type's package, this one, or the
+   standard library, where the capabilities a dependency could not see are
+   not. *)
+let capability_impls (state : state) (type_ : T.ty) =
+  match type_ with
+  | T.Named { path; _ } ->
+      List.filter_map
+        (fun (trait, _) ->
+          if Interface.Summary.kind_of state.database trait = Some Capability then
+            match implements state type_ (trait_reference trait) with
+            | Some (Interface.Impls.From_impl { impl; substitution }) ->
+                Option.map
+                  (fun interface ->
+                    ({ Core.capability = trait; impl; arguments = substitution }, interface))
+                  (Interface.Impls.impl_interface state.database impl)
+            | _ -> None
+          else None)
+        (List.concat_map
+           (fun package -> Interface.Impls.impls_for state.database path package)
+           (List.sort_uniq compare [ Path.package path; state.package; "standard" ]))
+  | _ -> []
+
 (* What a [provide] gives its body: each implementation, as the place it
-   is or the value it makes. What its type provides is the check of
-   capabilities' to say. *)
+   is or the value it makes, with what its type provides. *)
 let provide state (implementations : expression list) (body : block) : Core.kind =
   let implementations =
     List.map
@@ -285,7 +307,7 @@ let provide state (implementations : expression list) (body : block) : Core.kind
           mode;
           value = operand mode given;
           type_ = given.type_;
-          provides = [];
+          provides = List.map fst (capability_impls state given.type_);
         })
       implementations
   in
@@ -604,7 +626,6 @@ let update state (written : statement) (target : expression) (value : expression
                   ];
                 lends = None;
                 uses = recorded.uses;
-                capability_arguments = recorded.capability_arguments;
               })
     | Some _ -> bug "a compound assignment calls what is not an operator"
     | None -> Operator { operation = operation_of operator; arguments = [ updating; given ] }
@@ -642,7 +663,6 @@ let drive state (written : statement) (iterable : expression) : Core.drive =
                     arguments = [ Passed { mode; value = operand mode receiver } ];
                     lends = None;
                     uses = call.uses;
-                    capability_arguments = call.capability_arguments;
                   })))
   | Some (Pulled { cursor }), _ ->
       let next : Core.callee option =

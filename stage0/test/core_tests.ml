@@ -317,21 +317,28 @@ let () =
 (* Capabilities *)
 
 let () =
-  test "a call holds what each capability parameter of what it calls stands for" (fun () ->
+  let apply =
+    "fn apply[capability Granted](run: (fn() uses Granted))\n\
+    \  uses Granted\n\
+     {\n\
+    \  run()\n\
+     }\n\n\
+     fn shout()\n\
+    \  uses Console\n\
+     {\n\
+    \  Console.print_line(\"named\")\n\
+     }\n\n"
+  in
+  builds "a capability parameter is the set that what is passed for it uses"
+    (apply ^ "fn g()\n  uses Console\n{\n  apply(fn() { Console.print_line(\"inside\") })\n}\n")
+    "{ app::main::apply[{Console}](lambda() { standard::capabilities::Console.print_line(view \
+     through standard::text::String.slice(\"inside\")) }) }";
+  builds "a function passed for a capability parameter is passed as it is"
+    (apply ^ "fn g()\n  uses Console\n{\n  apply(shout)\n}\n")
+    "{ app::main::apply[{Console}](fn app::main::shout) }";
+  test "what a call needs and what a lambda is hold the set, not the parameter" (fun () ->
       let text =
-        "fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))\n\
-        \  uses Granted\n\
-         {\n\
-        \  visit(count)\n\
-         }\n\n\
-         fn g()\n\
-        \  uses Clock\n\
-         {\n\
-        \  for_each(3, visit: fn(step) {\n\
-        \    let _ = Clock.now()\n\
-        \    let _ = step\n\
-        \  })\n\
-         }\n"
+        apply ^ "fn g()\n  uses Console\n{\n  apply(fn() { Console.print_line(\"inside\") })\n}\n"
       in
       let database = setup [ ("app::main", text) ] in
       let found = ref [] in
@@ -347,20 +354,56 @@ let () =
                     expression =
                       (fun (node : Core.expression) ->
                         match node.kind with
-                        | Call { callee = Function { path; _ }; capability_arguments; uses; _ }
-                          when Path.show path = "app::main::for_each" ->
-                            found :=
-                              List.map
-                                (fun ((parameter : Types.parameter), solved) ->
-                                  Printf.sprintf "%s = %d, uses %d" parameter.name
-                                    (List.length solved) (List.length uses))
-                                capability_arguments
+                        | Call { callee = Function { path; _ }; uses; _ }
+                          when Path.show path = "app::main::apply" ->
+                            found := ("needs " ^ Types.show_argument (Capabilities uses)) :: !found
+                        | Lambda _ -> found := Types.show node.type_ :: !found
                         | _ -> ());
                   }
                   form.parts
             | None -> fail "no form")
         (Query.demand database Resolve.Names.declarations (module_of "app::main"));
-      if !found <> [ "Granted = 1, uses 1" ] then fail "found [%s]" (String.concat "; " !found))
+      if List.sort compare !found <> [ "(fn() uses Console)"; "needs {Console}" ] then
+        fail "found [%s]" (String.concat "; " !found));
+  test "a capability parameter in a result is the set of each call" (fun () ->
+      let text =
+        "fn later[capability Granted](run: (fn() uses Granted)) -> (fn() uses Granted) {\n\
+        \  run\n\
+         }\n\n\
+         fn g()\n\
+        \  uses Console, Clock\n\
+         {\n\
+        \  let first = later(fn() { Console.print_line(\"x\") })\n\
+        \  let second = later(fn() {\n\
+        \    let _ = Clock.now()\n\
+        \  })\n\
+        \  first()\n\
+        \  second()\n\
+         }\n"
+      in
+      let database = setup [ ("app::main", text) ] in
+      let found = ref [] in
+      List.iter
+        (fun (declaration : Resolve.Names.declaration) ->
+          let key = Resolve.Names.key_of declaration in
+          if Path.show key.path = "app::main::g" then
+            match Query.demand database Infer.core key with
+            | Some form ->
+                Core_walk.parts
+                  {
+                    Core_walk.nothing with
+                    pattern =
+                      (fun (node : Core.pattern) ->
+                        match node.kind with
+                        | Bind { name; _ } ->
+                            found := (name ^ ": " ^ Types.show node.type_) :: !found
+                        | _ -> ());
+                  }
+                  form.parts
+            | None -> fail "no form")
+        (Query.demand database Resolve.Names.declarations (module_of "app::main"));
+      if List.sort compare !found <> [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
+      then fail "found [%s]" (String.concat "; " !found))
 
 (* Where a node came from *)
 
@@ -430,9 +473,25 @@ let () =
                     if Hashtbl.mem seen id then wrong "the id %d is used twice" id;
                     Hashtbl.replace seen id ()
                   in
+                  let known what capabilities =
+                    if Types.unknown_capabilities capabilities then
+                      wrong "%s holds an unknown set of capabilities" what;
+                    capabilities
+                  in
                   let decided what (type_ : Types.ty) =
                     if Types.contains_unsolved type_ then
-                      wrong "%s has the type `%s`" what (Types.show type_)
+                      wrong "%s has the type `%s`" what (Types.show type_);
+                    ignore (Types.map_capabilities (known what) type_)
+                  in
+                  let called (callee : Core.callee) =
+                    match callee with
+                    | Function { type_arguments; _ } | Trait_method { type_arguments; _ } ->
+                        List.iter
+                          (fun argument ->
+                            ignore
+                              (Types.map_argument_capabilities (known "a type argument") argument))
+                          type_arguments
+                    | Capability_method _ | Intrinsic _ | Value _ -> ()
                   in
                   let rec place (found : Core.place) =
                     match found with
@@ -448,7 +507,9 @@ let () =
                           decided "an expression" node.type_;
                           match node.kind with
                           | Use found | Next found -> place found
-                          | Call { arguments; _ } ->
+                          | Call { callee; arguments; uses; _ } ->
+                              called callee;
+                              ignore (known "what a call needs" uses);
                               List.iter
                                 (function
                                   | Core.Passed { mode = Mut; value = Value { kind = Slice _; _ } }
