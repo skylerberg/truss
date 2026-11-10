@@ -225,7 +225,7 @@ and statement state env (written : statement) ~last : unit =
           in
           let found = expression state env ~expected:element inner in
           if inner != value then record state value found;
-          coerce state inner ~found ~expected:element
+          ignore (coerce state env inner ~found ~expected:element)
       | _ ->
           ignore (expression state env value);
           report state Wrong_yield written.span

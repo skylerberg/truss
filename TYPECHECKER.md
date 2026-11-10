@@ -424,20 +424,36 @@ without a report: it holds a value that only a report gives, as rustc's
 
 ### No subtyping
 
-Types are invariant, and there is no subtyping relation. Exactly four
-conversions happen, each at a known place, and each is recorded in the
-checked form:
+Types are invariant, and there is no subtyping relation. Two types are
+equal or they are not, and function types with other `uses` or other costs
+are other types. Exactly four conversions happen, all decided in the one
+place where a value meets the type expected of it. One made for an argument
+is recorded with the argument in the checked form:
 
 | Conversion | Where |
 |---|---|
 | `Never` to any type | Wherever an expression of type `Never` meets an expected type, such as `None => return Err(error)` in a `match` whose value is an `Int64` |
-| `List[Element]` to `Slice[Element]`, `String` to `StringSlice` | An argument passed to a parameter of the view type. This is DESIGN.md's only implicit conversion. |
-| A function value to a function type with more `uses` or weaker costs | Where a named function or lambda is passed, bound, or stored. A pure function can be passed as `(fn(Item) uses Clock)`. A `cost time O(1)` function can be passed as `cost time finite`, and the prover checks that the costs imply the expected ones. |
-| A built-in integer to `Integer`, and back | In specifications only (see [Specifications](#specifications)) |
+| `List[Element]` to `Slice[Element]`, `String` to `StringSlice` | An argument passed to a parameter of the view type, and the key of an index, which is the argument of `at`. This is DESIGN.md's only implicit conversion. |
+| A function value to a function type with more `uses` or weaker costs | Where a value is passed, bound, returned, assigned, or stored, and where a branch of an `if` or a `match` ends with it. A pure function can be passed as `(fn(Item) uses Clock)`, and a `cost time O(1)` function as `cost time finite`. |
+| A built-in integer to `Integer`, and back | An argument or an index's key, in specifications only (see [Specifications](#specifications)) |
 
 The function-value conversion happens only at the top of an expression, not
 inside a type argument, so `List[fn(Item)]` and
 `List[(fn(Item) uses Clock)]` stay different types, as in Rust.
+
+- **Every capability the function uses must be one the expected type
+  lists.** A function that `uses Clock` is never a `fn()`, in an argument,
+  a `let`, a `return`, a field, or an assignment. The one exception is a
+  capability parameter, described in
+  [What code may call](#what-code-may-call).
+- **Costs are weaker when the types' constants show it:** an exact count is
+  within any bound it does not exceed, a count is `O(...)`, and every bound
+  is `finite`. A named function's type has `time finite` exactly when the
+  function has a `time` clause. Costs that the constants do not show to be
+  weaker are the prover's to show. For a function passed to a call the
+  prover reads the argument, as PROVER.md's "Lambdas and function values"
+  describes. Anywhere else the checker records the obligation, with the
+  expression and both function types.
 
 ### Properties of types
 
@@ -1148,9 +1164,18 @@ still needs the capability among the `impl`'s `uses`, from outside.
   type.
 - **A lambda's `uses` are inferred** from its body: the capabilities it
   calls. They must be within the `uses` of the function type it is checked
-  against. A capability parameter, such as `Granted` in `for_each`, is solved
-  as the union of what the lambdas passed for it use, and that set must then
-  be available at the call.
+  against.
+- **A capability parameter of the function a call calls is solved** as the
+  union of what is passed for it: what each lambda and each function that
+  meets a function type listing the parameter uses beyond what the type
+  lists, wherever in the call's arguments it is, in parentheses or at the
+  end of a branch as well. That set must then be available at the call. So
+  `for_each(3, visit: tick)` needs `Clock` when `tick` uses it and `visit`
+  is a `(fn(Int64) uses Granted)`.
+- **A function's own capability parameter stands for itself** throughout its
+  body. Inside `for_each`, a `(fn(Int64) uses Granted)` takes only functions
+  that use `Granted` or nothing, and a call of `for_each` by itself passes
+  `Granted` on as it is.
 - **Specifications and quantifiers' bodies** have no capabilities at all,
   not even `Panic`, since what they mean must be a value. **`parallel`
   branches and `parallel for` bodies** have only `Panic` available. A test
@@ -1543,11 +1568,14 @@ the compiler. The prelude holds:
   is type-checked with the body, and the prover reads it from the callee's
   tree, so a change to a callee's body reaches its callers' proofs, which
   then find each query's answer kept by the query's text.
-- **Recording that a function value's costs imply the ones expected.** The
-  checked form has a case for the obligation, where a function is given a
-  type whose costs differ from its own, and nothing records it. The prover
-  shows a function's or a lambda's costs where it is passed to a call, as
-  PROVER.md's "Lambdas and function values" describes.
+- **The target of a `calls(...)` cost in a function type.** A function
+  type's cost keeps its resource by name, so `cost calls(FileRead) <= 1` and
+  `cost calls(Clock) <= 1` are one type.
+- **A capability parameter in a result.** A function type that a signature
+  returns may list the signature's capability parameter, and a call does not
+  replace it by what the call solved, so such a result can be called only
+  inside the function it came from. A generic type's capability arguments
+  are not worked out either: they are equal only as written.
 - **Checked forms stored in a specified encoding.** They are kept as OCaml's
   marshaled values, as DATABASE.md describes.
 - **A shape that ignores the order of fields.** DESIGN.md says reordering a

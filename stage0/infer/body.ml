@@ -21,7 +21,14 @@ type result = {
 }
 
 let no_output : env =
-  { output = None; specification = false; self = None; self_mode = T.Read; loop_element = None }
+  {
+    output = None;
+    specification = false;
+    self = None;
+    self_mode = T.Read;
+    loop_element = None;
+    own = [];
+  }
 
 (* A body: each statement settles its own types, and the last is checked
    against the result type. *)
@@ -153,6 +160,7 @@ let check_function state ~broken_body (written : signature) (body_block : block 
       self = Option.map snd signature.receiver;
       self_mode = self_mode signature;
       loop_element = None;
+      own = T.capability_parameters signature.generics;
     }
   in
   declare_parameters state written.parameters signature;
@@ -460,6 +468,7 @@ let check database (key : Names.key) =
           binding_spans;
           lambdas = [];
           unsolved = None;
+          widened = Hashtbl.create 4;
           evidence = [];
         }
       in

@@ -484,4 +484,212 @@ let () =
       in
       if problems database <> [] then fail "reported")
 
+(* Function values and the capabilities their types list *)
+
+let ticks =
+  "fn tick() -> Instant\n\
+  \  uses Clock\n\
+   {\n\
+  \  Clock.now()\n\
+   }\n\n\
+   fn still() -> Instant {\n\
+  \  todo\n\
+   }\n\n\
+   fn each_time[capability Granted](action: (fn() -> Instant uses Granted)) -> Instant\n\
+  \  uses Granted\n\
+   {\n\
+  \  action()\n\
+   }\n\n"
+
+let () =
+  test "a function that uses a capability is not passed as one that uses none" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn apply(action: fn() -> Instant) -> Instant {\n\
+         \  action()\n\
+          }\n\n\
+          fn f() -> Instant {\n\
+         \  apply(tick)\n\
+          }\n")
+        "types.mismatch");
+  test "a function that uses a capability is not bound as one that uses none" (fun () ->
+      one_diagnostic
+        (ticks ^ "fn f() -> Instant {\n  let action: fn() -> Instant = tick\n  action()\n}\n")
+        "types.mismatch");
+  test "a function that uses a capability is not returned as one that uses none" (fun () ->
+      one_diagnostic (ticks ^ "fn f() -> fn() -> Instant {\n  tick\n}\n") "types.mismatch");
+  test "a function that uses a capability is not stored as one that uses none" (fun () ->
+      one_diagnostic
+        (ticks ^ "type Job(action: fn() -> Instant)\n\nfn f() -> Job {\n  Job(tick)\n}\n")
+        "types.mismatch");
+  test "a function that uses a capability is not assigned as one that uses none" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn f() -> Instant {\n\
+         \  var action: fn() -> Instant = still\n\
+         \  action = tick\n\
+         \  action()\n\
+          }\n")
+        "types.mismatch");
+  test "function types inside a type must list the same capabilities" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn f() -> USize\n\
+         \  uses Clock\n\
+          {\n\
+         \  let actions: List[(fn() -> Instant uses Clock)] = [tick]\n\
+         \  let plain: List[fn() -> Instant] = actions\n\
+         \  plain.length()\n\
+          }\n")
+        "types.mismatch");
+  test "a function that uses nothing is passed as one that may use a capability" (fun () ->
+      fine
+        (ticks
+       ^ "fn f() -> Instant\n\
+         \  uses Clock\n\
+          {\n\
+         \  let action: (fn() -> Instant uses Clock) = still\n\
+         \  action()\n\
+          }\n"));
+  test "a branch's function meets the function type expected of the branches" (fun () ->
+      fine
+        (ticks
+       ^ "fn f(fast: Bool) -> Instant\n\
+         \  uses Clock\n\
+          {\n\
+         \  let action: (fn() -> Instant uses Clock) = if fast { still } else { tick }\n\
+         \  action()\n\
+          }\n"));
+  test "a branch's function that uses a capability is not bound as one that uses none" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn f(fast: Bool) -> Instant {\n\
+         \  let action: fn() -> Instant = if fast { still } else { tick }\n\
+         \  action()\n\
+          }\n")
+        "types.mismatch");
+  test "a capability parameter is what the functions passed for it use" (fun () ->
+      fine (ticks ^ "fn f() -> Instant\n  uses Clock\n{\n  each_time(tick)\n}\n"));
+  test "what a function passed for a capability parameter uses must be available" (fun () ->
+      one_diagnostic
+        (ticks ^ "fn f() -> Instant {\n  each_time(tick)\n}\n")
+        "capabilities.not_available");
+  test "what a lambda in parentheses uses is passed for a capability parameter" (fun () ->
+      one_diagnostic
+        (ticks ^ "fn f() -> Instant {\n  each_time((fn() { Clock.now() }))\n}\n")
+        "capabilities.not_available");
+  test "what a function in a branch uses is passed for a capability parameter" (fun () ->
+      one_diagnostic
+        (ticks ^ "fn f(fast: Bool) -> Instant {\n  each_time(if fast { still } else { tick })\n}\n")
+        "capabilities.not_available");
+  test "what a lambda in a branch uses is passed for a capability parameter" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn f(fast: Bool) -> Instant {\n\
+         \  each_time(if fast { still } else { fn() { Clock.now() } })\n\
+          }\n")
+        "capabilities.not_available");
+  test "a function passes its own capability parameter on" (fun () ->
+      fine
+        (ticks
+       ^ "fn passes_on[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant\n\
+         \  uses Mine\n\
+          {\n\
+         \  each_time(action)\n\
+          }\n"));
+  test "a function's own capability parameter stands for itself in a lambda's type" (fun () ->
+      one_diagnostic
+        "fn sneaky[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant\n\
+        \  uses Mine\n\
+         {\n\
+        \  let again: (fn() -> Instant uses Mine) = fn() { Clock.now() }\n\
+        \  again()\n\
+         }\n"
+        "capabilities.lambda_uses");
+  test "a function's own capability parameter stands for itself in a binding's type" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn sneaky[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant\n\
+         \  uses Mine\n\
+          {\n\
+         \  let again: (fn() -> Instant uses Mine) = tick\n\
+         \  again()\n\
+          }\n")
+        "types.mismatch");
+  test "a function calls itself with its own capability parameter" (fun () ->
+      fine
+        "fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant\n\
+        \  uses Mine\n\
+         {\n\
+        \  if again {\n\
+        \    repeat(action, again: false)\n\
+        \  } else {\n\
+        \    action()\n\
+        \  }\n\
+         }\n");
+  test "a function calling itself passes nothing more for its capability parameter" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant\n\
+         \  uses Mine\n\
+          {\n\
+         \  if again {\n\
+         \    repeat(tick, again: false)\n\
+         \  } else {\n\
+         \    action()\n\
+         \  }\n\
+          }\n")
+        "types.mismatch")
+
+(* Function values and the costs their types promise *)
+
+(* The obligations checking the first definition of a text leaves the
+   prover. *)
+let obligations text =
+  let database = setup [ ("app::main", text) ] in
+  let key =
+    Resolve.Names.key_of
+      (List.hd (Query.demand database Resolve.Names.declarations (module_of "app::main")))
+  in
+  match Query.demand database Infer.checked key with
+  | Some { checked; _ } -> checked.obligations
+  | None -> failwith "the definition was not checked"
+
+let () =
+  test "a function bound as a type that promises a cost leaves the cost to the prover" (fun () ->
+      match
+        obligations
+          "fn f() -> Int64 {\n\
+          \  let action: (fn() -> Int64 cost time finite) = forever\n\
+          \  action()\n\
+           }\n\n\
+           fn forever() -> Int64 {\n\
+          \  while true {}\n\
+           }\n"
+      with
+      | [ Costs_imply _ ] -> ()
+      | found -> fail "%d obligations" (List.length found));
+  test "a function that promises to end is bound as one that does with nothing to prove" (fun () ->
+      match
+        obligations
+          "fn f() -> Int64 {\n\
+          \  let action: (fn() -> Int64 cost time finite) = quick\n\
+          \  action()\n\
+           }\n\n\
+           fn quick() -> Int64\n\
+          \  cost time O(1)\n\
+           {\n\
+          \  1\n\
+           }\n"
+      with
+      | [] -> ()
+      | found -> fail "%d obligations" (List.length found));
+  test "function types inside a type must promise the same costs" (fun () ->
+      one_diagnostic
+        "fn f(actions: List[fn() -> Int64]) -> USize {\n\
+        \  let bounded: List[(fn() -> Int64 cost time finite)] = actions\n\
+        \  bounded.length()\n\
+         }\n"
+        "types.mismatch")
+
 let () = finish ()
