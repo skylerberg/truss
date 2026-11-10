@@ -1124,7 +1124,12 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
       | None -> unsupported written.span "`continue` outside a loop")
   | Quantified { quantifier; binder; body } ->
       quantified context frame written quantifier binder body
-  | Call (callee, arguments) -> call context frame written callee arguments
+  | Call (callee, arguments) -> (
+      match call context frame written callee arguments with
+      | Some _ when T.equal (type_of context frame written) T.Never ->
+          (* A call that gives [Never] does not return, so the path ends. *)
+          None
+      | found -> found)
   | Mode (_, inner) -> expression context frame inner
   | Member (base, _) -> member context frame written base
   | Bracket (base, [ Item ({ kind = Range _; _ } as range) ])
@@ -2018,29 +2023,8 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
           (function T.Type ty -> Some (substituted context frame ty) | _ -> None)
           type_arguments
       in
-      let result = intrinsic context frame operation types operands ~changed result_type in
-      let frame =
-        match (operation, in_order, changed) with
-        | ( Storage_push,
-            [ (storage, storage_expression, before); (item, item_expression, value) ],
-            after :: _ ) ->
-            (* Pushing takes one step, amortized: what growing costs is paid
-               out of what the storage saved. *)
-            let storage_type = argument_type context frame storage storage_expression in
-            let item_type = argument_type context frame item item_expression in
-            let change =
-              Costs.minus
-                (Costs.minus
-                   (potential context frame storage_type after)
-                   (potential context frame storage_type before))
-                (potential context frame item_type value)
-            in
-            spend context frame (fun (counter : Costs.counter) ->
-                match (counter.resource, counter.counting) with
-                | Time, Units -> Costs.minus (L.int 1) change
-                | _ -> step_amount context frame call_ values counter)
-        | _ -> spend context frame (step_amount context frame call_ values)
-      in
+      let result = intrinsic context frame ~written operation types operands ~changed result_type in
+      let frame = spend context frame (step_amount context frame call_ values) in
       Some (frame, result)
   | Built_in_operator ->
       let frame = havoc_mut frame in
@@ -2054,17 +2038,18 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
    result brought into range by a remainder; the overflow tests, the
    comparisons, and [fits] are exact; and [convert] keeps a value that
    fits. Anything else is known by its type alone. *)
-and intrinsic context frame (operation : Intrinsic.operation) types operands ~changed result_type =
+and intrinsic context frame ~written (operation : Intrinsic.operation) types operands ~changed
+    result_type =
   let known = arrive context frame "result" result_type in
   match (operation, types) with
   | ( ( Storage_model | View_model | Storage_empty | Storage_with_capacity | Storage_length
-      | Storage_capacity | Storage_reserve | Storage_push | Storage_pop | Storage_insert
-      | Storage_remove | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length
-      | View_at | View_slice ),
+      | Storage_capacity | Storage_set_capacity | Storage_lengthen | Storage_push | Storage_pop
+      | Storage_insert | Storage_remove | Storage_swap | Storage_at | Storage_at_mut | Storage_view
+      | View_length | View_at | View_slice ),
       element :: _ ) ->
-      buffer_operation context frame operation element operands ~changed known
-  | (Read_bytes | Handle_read | Write_bytes | Handle_write | Compare_bytes), _ ->
-      buffer_operation context frame operation (T.builtin UInt8) operands ~changed known
+      buffer_operation context frame ~written operation element operands ~changed known
+  | (Compare_bytes | Libc (Read | Write | Snprintf)), _ ->
+      buffer_operation context frame ~written operation (T.builtin UInt8) operands ~changed known
   | _ -> integer_intrinsic context frame operation types operands known
 
 and integer_intrinsic context frame (operation : Intrinsic.operation) types operands known =
@@ -4849,16 +4834,35 @@ and function_value_amount context frame (function_type : T.function_type) callee
    declares it: each is a sequence of its elements, its model, and each
    operation changes or reads that sequence. An operation that stops the
    program on a bad index says what holds when it returns. *)
-and buffer_operation context frame (operation : Intrinsic.operation) element operands ~changed known
-    =
+and buffer_operation context frame ~(written : expression) (operation : Intrinsic.operation) element
+    operands ~changed known =
   let length sequence = sequence_length context element sequence in
-  (* A buffer's length always fits a [USize]. *)
+  (* No buffer is larger than C lets an object be, half the address space,
+     so a buffer's length fits an [ISize] as well as a [USize]. *)
+  let fits value = L.(Apply ("<=", [ int 0; value ]) &&& in_range (T.builtin ISize) value) in
   let model builtin term =
     let sequence = buffer_model context builtin element term in
-    assume context frame (in_range (T.builtin USize) (length sequence));
+    assume context frame (fits (length sequence));
     sequence
   in
-  let storage = model Intrinsic.Storage and view = model Intrinsic.View in
+  let view = model Intrinsic.View in
+  (* A storage also has room for some elements, at least as many as it
+     holds. *)
+  let capacity term = buffer_capacity context element term in
+  let storage term =
+    let sequence = model Intrinsic.Storage term in
+    assume context frame
+      L.(Apply ("<=", [ length sequence; capacity term ]) &&& fits (capacity term));
+    sequence
+  in
+  let needs room =
+    oblige context frame Requires written.span
+      (Printf.sprintf "`%s` may not have the room it writes into." (quote frame.source written.span))
+      room
+  in
+  let keeps_capacity () =
+    assume context frame (L.equal (capacity (List.hd changed)) (capacity (List.hd operands)))
+  in
   let at sequence index =
     match sequence_at context element sequence index with
     | Some term -> term
@@ -4883,21 +4887,40 @@ and buffer_operation context frame (operation : Intrinsic.operation) element ope
           (fun value -> applied context (measure_type element) (L.Symbol measure) [ value ]) )
   in
   let changed_storage () = storage (List.hd changed) in
+  let changed_storage_at position = storage (List.nth changed position) in
   match (operation, operands) with
   | Storage_model, [ buffer ] -> storage buffer
   | View_model, [ buffer ] -> view buffer
-  | (Storage_empty | Storage_with_capacity), _ ->
+  | Storage_empty, _ ->
       assume context frame (L.equal (length (storage known)) (L.int 0));
+      known
+  | Storage_with_capacity, [ room ] ->
+      assume context frame
+        L.(equal (length (storage known)) (int 0) &&& equal (capacity known) room);
       known
   | Storage_length, [ buffer ] -> length (storage buffer)
   | View_length, [ buffer ] -> length (view buffer)
   | Storage_capacity, [ buffer ] ->
-      assume context frame (L.Apply (">=", [ known; length (storage buffer) ]));
-      known
-  | Storage_reserve, buffer :: _ ->
+      ignore (storage buffer);
+      capacity buffer
+  | Storage_set_capacity, [ buffer; room ] ->
+      needs (L.Apply (">=", [ room; length (storage buffer) ]));
       assume context frame (L.equal (changed_storage ()) (storage buffer));
+      assume context frame (L.equal (capacity (List.hd changed)) room);
+      known
+  | Storage_lengthen, [ buffer; by ] ->
+      (* What the C library wrote into its room is the storage's. *)
+      let before = storage buffer and after = changed_storage () in
+      needs (L.Apply ("<=", [ L.Apply ("+", [ length before; by ]); capacity buffer ]));
+      keeps_capacity ();
+      let k = bound () in
+      assume context frame (L.equal (length after) (L.Apply ("+", [ length before; by ])));
+      assume context frame
+        (all k (L.int 0) (length before) (L.equal (at after (L.Symbol k)) (at before (L.Symbol k))));
       known
   | Storage_push, [ buffer; value ] ->
+      needs (L.Apply ("<", [ length (storage buffer); capacity buffer ]));
+      keeps_capacity ();
       let longer = appended context frame element (storage buffer) value in
       assume context frame (L.equal (changed_storage ()) longer);
       known
@@ -4907,6 +4930,8 @@ and buffer_operation context frame (operation : Intrinsic.operation) element ope
       known
   | Storage_insert, [ buffer; index; value ] ->
       let before = storage buffer and after = changed_storage () in
+      needs (L.Apply ("<", [ length before; capacity buffer ]));
+      keeps_capacity ();
       let k = bound () in
       assume context frame
         (L.conjunction
@@ -4982,23 +5007,29 @@ and buffer_operation context frame (operation : Intrinsic.operation) element ope
       assume context frame (L.equal (view known) (storage buffer));
       known
   | Compare_bytes, [ left; right ] -> byte_order context (view left) (view right)
-  | (Write_bytes | Handle_write), [ _; bytes ] ->
-      (* It writes at most what it is given. *)
-      assume context frame (L.Apply ("<=", [ known; length (view bytes) ]));
+  | Libc Write, [ _; bytes; count ] ->
+      (* It reads at most [count] of the view's bytes, and writes at most
+         as many. *)
+      needs (L.Apply ("<=", [ count; length (view bytes) ]));
+      assume context frame (L.Apply ("<=", [ known; count ]));
       known
-  | (Read_bytes | Handle_read), [ _; buffer; count ] ->
-      (* It appends at most [count] bytes, as many as it says, or nothing
-         when it fails. *)
-      let before = storage buffer and after = storage (List.nth changed 1) in
-      let k = bound () in
-      assume context frame
-        L.(
-          Apply ("<=", [ known; count ])
-          &&& (Apply (">=", [ known; int 0 ])
-              ==> equal (length after) (Apply ("+", [ length before; known ])))
-          &&& (Apply ("<", [ known; int 0 ]) ==> equal after before));
-      assume context frame
-        (all k (L.int 0) (length before) (L.equal (at after (L.Symbol k)) (at before (L.Symbol k))));
+  | Libc Read, [ _; buffer; count ] ->
+      (* It fills at most [count] bytes of the room after the storage's
+         elements, which stay as they were until [storage_lengthen]. *)
+      let before = storage buffer in
+      needs (L.Apply ("<=", [ L.Apply ("+", [ length before; count ]); capacity buffer ]));
+      assume context frame (L.equal (changed_storage_at 1) before);
+      assume context frame (L.equal (capacity (List.nth changed 1)) (capacity buffer));
+      assume context frame (L.Apply ("<=", [ known; count ]));
+      known
+  | Libc Snprintf, buffer :: size :: _ ->
+      (* It fills at most [size] bytes of the room after the storage's
+         elements, which stay as they were until [storage_lengthen]. It
+         returns how many it would have written, which may be more. *)
+      let before = storage buffer in
+      needs (L.Apply ("<=", [ L.Apply ("+", [ length before; size ]); capacity buffer ]));
+      assume context frame (L.equal (changed_storage ()) before);
+      keeps_capacity ();
       known
   | View_slice, [ buffer; start; stop ] ->
       let whole = view buffer and part = view known in
@@ -5046,6 +5077,13 @@ and byte_order context left right =
       :: context.facts
   end;
   order left right
+
+(* How many elements a storage has room for, as a function of it. *)
+and buffer_capacity context element term =
+  let ty = T.Named { path = Intrinsic.builtin_path Storage; arguments = [ T.Type element ] } in
+  let symbol = "capacity." ^ type_key ty in
+  declare context (L.Function (symbol, [ sort_of context ty ], L.Int));
+  L.Apply (symbol, [ term ])
 
 (* The sequence a storage or a view holds, as a function of it. *)
 and buffer_model context (builtin : Intrinsic.builtin) element term =
@@ -5606,16 +5644,30 @@ and potential context frame (ty : T.ty) term =
         L.(validity context frame ~assuming:true ty term ==> Apply ("<=", [ int 0; held ]));
       match (potential_clause context ty, constructors context ty) with
       | None, _ when Option.is_some (buffer_elements context ty) -> (
-          (* A buffer's potential is what it saved for growing, at most one
-             unit for each element, and its elements' potentials. *)
+          (* A buffer's potential is what it saved for growing, as a
+             doubling array saves it: twice its length less its capacity,
+             and never below zero, so at most two units for each element;
+             and its elements' potentials. *)
           match buffer_elements context ty with
           | Some (element, model) -> (
               let sequence = model term in
               let slack = buffer_slack context ty term in
+              let length = sequence_length context element sequence in
               fact context frame
                 L.(
                   Apply ("<=", [ int 0; slack ])
-                  &&& Apply ("<=", [ slack; sequence_length context element sequence ]));
+                  &&& Apply ("<=", [ slack; Apply ("*", [ int 2; length ]) ]));
+              (match ty with
+              | Named { path; _ } when Intrinsic.builtin_of_path path = Some Storage ->
+                  let saved =
+                    L.Apply
+                      ( "-",
+                        [ L.Apply ("*", [ L.int 2; length ]); buffer_capacity context element term ]
+                      )
+                  in
+                  fact context frame
+                    (L.equal slack (L.ite (L.Apply (">=", [ saved; L.int 0 ])) saved (L.int 0)))
+              | _ -> ());
               let elements =
                 if has_potential context element then
                   sequence_sum context element sequence (potential_measure context element)
@@ -5921,7 +5973,12 @@ and storage_updated context frame element storage index part =
   context.fresh <- context.fresh + 1;
   let k = Printf.sprintf "index.%d" context.fresh in
   assume context frame
-    (L.conjunction [ L.equal (length after) (length before); L.equal (at after index) part ]);
+    (L.conjunction
+       [
+         L.equal (length after) (length before);
+         L.equal (at after index) part;
+         L.equal (buffer_capacity context element updated) (buffer_capacity context element storage);
+       ]);
   assume context frame
     (L.Forall
        ( [ (k, L.Int) ],

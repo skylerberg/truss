@@ -31,35 +31,12 @@ let rec block_value state env ?expected (written : block) =
   in
   go written.statements
 
-and statement_never state (written : statement) =
-  match written.kind with
-  | Expression value -> (
-      match state.tables.types.(value.id) with
-      | Some type_ -> resolve state type_ = T.Never
-      | None -> false)
-  | While { condition = { kind = True; _ }; body; _ } -> not (contains_break body)
-  | _ -> false
-
-and contains_break (written : block) =
-  let found = ref false in
-  let rec statement (written : statement) =
-    match written.kind with
-    | For _ | While _ -> ()
-    | _ -> Syntax_walk.statement_parts ~expression ~statement written
-  and expression (value : expression) =
-    match value.kind with
-    | Break -> found := true
-    | Lambda _ -> ()
-    | _ -> Syntax_walk.expression_parts ~expression ~statement value
-  in
-  List.iter statement written.statements;
-  !found
-
 (* A statement. A statement that is not the last of its block must have
    type [Unit] or [Never]: any other value is unused. *)
 and statement state env (written : statement) ~last : unit =
   match written.kind with
   | Expression value ->
+      draft_statement state written (fun () -> Evaluate (built state value));
       let type_ = expression state env value in
       if not last then
         defer state (fun () ->
@@ -97,13 +74,21 @@ and statement state env (written : statement) ~last : unit =
                  or `unreachable`.")
       | None -> ());
       let mode = if mutable_ then T.Own else if borrowed state value then T.Read else T.Own in
+      draft_statement state written (fun () ->
+          let value = Form.operand mode (built state value) in
+          let pattern = built_pattern state written_pattern in
+          Let { pattern; value; otherwise = Option.map (built_block state) else_ });
       binding_pattern state env written_pattern type_ ~mutable_ ~mode
   | Assignment { target = written_target; operator; value } -> (
       let target_type = expression state env written_target in
       check_assignable state env written_target;
       mutable_place state written_target;
       match operator with
-      | Assign -> check state env value target_type
+      | Assign ->
+          draft_statement state written (fun () ->
+              let target = place_of (built state written_target) in
+              Assign { target; value = built state value });
+          check state env value target_type
       | _ -> (
           let right_type = expression state env ~expected:target_type value in
           literal_operands state ~left:target_type ~right:right_type;
@@ -121,6 +106,8 @@ and statement state env (written : statement) ~last : unit =
             | Shift_right_assign -> Shift_right
             | Assign -> Add
           in
+          draft_statement state written (fun () ->
+              Form.update state written written_target value binary_operator);
           match binary_operator with
           | Add | Subtract | Multiply | Divide | Remainder ->
               let trait, method_ =
@@ -203,18 +190,42 @@ and statement state env (written : statement) ~last : unit =
       List.iter
         (loop_clause state { env with loop_element = Option.map (resolve state) !loop_element })
         clauses;
+      draft_statement state written (fun () ->
+          let drive = Form.drive state written inner in
+          let pattern = built_pattern state written_pattern in
+          let clauses = List.map (Form.loop_clause state) clauses in
+          For
+            {
+              pattern;
+              drive;
+              clauses;
+              body = built_block state body;
+              parallel = (match written.kind with For { parallel; _ } -> parallel | _ -> false);
+            });
       loop_body state env body
   | While { condition = test; clauses; body } ->
       in_statement state env test.span (fun () -> check state env test T.bool);
       List.iter (loop_clause state env) clauses;
+      draft_statement state written (fun () ->
+          let condition = built state test in
+          let clauses = List.map (Form.loop_clause state) clauses in
+          While { condition; clauses; body = built_block state body });
       loop_body state env body
   | Parallel body ->
+      draft_statement state written (fun () ->
+          Parallel (List.map (built_statement state) body.statements));
       List.iter
         (fun (branch : statement) ->
           in_statement state env branch.span (fun () -> statement state env branch ~last:false))
         body.statements
-  | Proof body -> loop_body state { env with specification = true } body
-  | Assert value -> check state env value T.bool
+  | Proof body ->
+      draft_statement state written (fun () -> Proof (built_block state body));
+      loop_body state { env with specification = true } body
+  | Assert value ->
+      draft_statement state written (fun () ->
+          let value = built state value in
+          Assert { value; runs = Form.runs state value });
+      check state env value T.bool
   | Yield value -> (
       match env.output with
       | Some (Yields (_, element) | Lends (_, element)) ->
@@ -225,6 +236,18 @@ and statement state env (written : statement) ~last : unit =
           in
           let found = expression state env ~expected:element inner in
           if inner != value then record state value found;
+          (* A part given out to change is reached through the [mut] version
+             of each index on the way to it. *)
+          (match env.output with
+          | Some (Yields (Mut, _) | Lends (Mut, _)) -> mutable_place state inner
+          | _ -> ());
+          draft_statement state written (fun () ->
+              let mode =
+                match env.output with
+                | Some (Yields (mode, _) | Lends (mode, _)) -> mode
+                | _ -> T.Read
+              in
+              Yield { mode; part = Form.operand mode (built state inner) });
           ignore (coerce state env inner ~found ~expected:element)
       | _ ->
           ignore (expression state env value);
@@ -300,10 +323,8 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
                        "`%s` has no `each` that takes %s, so a `for` loop cannot go over it this \
                         way."
                        (T.show type_)
-                       (match mode with
-                       | T.Read -> "`self`"
-                       | Mut -> "`mut self`"
-                       | Own -> "`own self`")))))
+                       (Path.show_receiver
+                          (match mode with T.Read -> Read | Mut -> Mut | Own -> Own))))))
 
 (* An assignment's left side must be a place that may change. *)
 and check_assignable state env (written : expression) =

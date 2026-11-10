@@ -49,15 +49,21 @@ val copy_signature : t -> Ground.ty -> Lir.signature
    pointer untyped and drops the value. *)
 val any_drop : t -> Ground.ty -> Lir.t
 
-(* The function that writes a value of a type in its binary form to the
-   debug buffer: [Instance.Encode ty], taking a read-only pointer to the
+(* What a debug or an encode function appends to: storage of bytes, which
+   its caller owns. Each takes the address of one to change, after the
    value. *)
+val output_ty : Ground.ty
+
+(* The function that appends a value of a type in its binary form:
+   [Instance.Encode ty], taking a read-only pointer to the value, and the
+   output. *)
 val encode : t -> Ground.ty -> Lir.t
 val encode_signature : t -> Ground.ty -> Lir.signature
 
 (* Writes, with the builder, a call to the encode function of the type on
-   the value at the place; nothing for a type of zero size. *)
-val encode_call : t -> Lir_builder.t -> Ground.ty -> Lir.place -> unit
+   the value at the place, to append to [output]; nothing for a type of
+   zero size. *)
+val encode_call : t -> Lir_builder.t -> output:Lir.operand -> Ground.ty -> Lir.place -> unit
 
 (* Writes, with the builder, a copy of the value at [source] to
    [destination], both of the type: a memory copy for a trivial type, and
@@ -65,7 +71,8 @@ val encode_call : t -> Lir_builder.t -> Ground.ty -> Lir.place -> unit
 val copy_into : t -> Lir_builder.t -> destination:Lir.place -> source:Lir.place -> Ground.ty -> unit
 
 (* The debug output function of a type: [Instance.Debug ty], which takes a
-   read-only pointer to the value, or nothing for a type of zero size, and
-   appends the value's text to the runtime's debug buffer. *)
+   read-only pointer to the value, unless the type has zero size, and the
+   output, and appends the value's text with the standard library's
+   functions that write numbers and quoted text. *)
 val debug : t -> Ground.ty -> Lir.t
 val debug_signature : t -> Ground.ty -> Lir.signature

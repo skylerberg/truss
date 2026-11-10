@@ -34,9 +34,6 @@ type key =
           method on its implementation with the evidence that implementation captured *)
   | Table of { impl : Path.t; type_arguments : Ground.argument list }
       (** A capability [impl]'s table of entries, one for each of the capability's methods *)
-  | Real_evidence of Path.t
-      (** The evidence for the real implementation of a standard capability, which a program's
-          [main] is given *)
   | Program_main of Path.t  (** The C [main]'s Truss side: it calls the program's [main] *)
   | Any_entry of key
       (** The entry for an [impl]'s method in an [any] table: takes a pointer to the value *)

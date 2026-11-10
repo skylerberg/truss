@@ -1,0 +1,101 @@
+use standard::growth
+use standard::intrinsic
+
+internal fn interrupted_by_signal() -> Bool {
+  intrinsic::libc_errno() == intrinsic::libc_eintr()
+}
+
+internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
+  let length = intrinsic::view_length(bytes)
+  var written: USize = 0
+  var error: Int32 = 0
+  while error == 0 && written < length {
+    let wrote = intrinsic::libc_write(
+      descriptor,
+      bytes: intrinsic::view_slice(bytes, start: written, stop: length),
+      count: length - written,
+    )
+    if wrote > 0 {
+      let count: USize = intrinsic::convert(wrote)
+      written += count
+    } else if wrote == 0 {
+      error = intrinsic::libc_eio()
+    } else if !interrupted_by_signal() {
+      error = intrinsic::libc_errno()
+    }
+  }
+  if error == 0 { Ok(Unit) } else { Err(error) }
+}
+
+internal fn read_onto_end(
+  descriptor: Int32,
+  buffer: mut intrinsic::Storage[UInt8],
+  count: USize,
+) -> Result[USize, Int32]
+  ensures intrinsic::storage_length(buffer) >= old(intrinsic::storage_length(buffer))
+{
+  growth::reserve(mut buffer, additional: count)
+  let length = intrinsic::storage_length(buffer)
+  var got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)
+  while got < 0 && interrupted_by_signal()
+    invariant intrinsic::storage_length(buffer) == length
+    invariant intrinsic::storage_capacity(buffer) >= length + count
+    invariant got <= count
+  {
+    got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)
+  }
+  if got < 0 {
+    Err(intrinsic::libc_errno())
+  } else {
+    let read: USize = intrinsic::convert(got)
+    intrinsic::storage_lengthen(mut buffer, by: read)
+    Ok(read)
+  }
+}
+
+internal fn ended_with_zero_byte(bytes: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32] {
+  let length = intrinsic::view_length(bytes)
+  var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length + 1)
+  for index in 0..length
+    invariant intrinsic::storage_length(copy) == yielded.length()
+    invariant intrinsic::storage_capacity(copy) == length + 1
+  {
+    let byte = intrinsic::view_at(bytes, index: index)
+    if byte == 0 {
+      return Err(intrinsic::libc_einval())
+    }
+    intrinsic::storage_push(mut copy, value: byte)
+  }
+  intrinsic::storage_push(mut copy, value: 0)
+  Ok(own copy)
+}
+
+internal fn open_file(path: intrinsic::View[UInt8], flags: Int32) -> Result[intrinsic::Handle, Int32] {
+  let name = ended_with_zero_byte(path)?
+  let closed_in_programs_it_runs = flags | intrinsic::libc_o_cloexec()
+  var descriptor = intrinsic::libc_open(intrinsic::storage_view(name), flags: closed_in_programs_it_runs, mode: 438)
+  while descriptor < 0 && interrupted_by_signal() {
+    descriptor = intrinsic::libc_open(intrinsic::storage_view(name), flags: closed_in_programs_it_runs, mode: 438)
+  }
+  if descriptor < 0 {
+    Err(intrinsic::libc_errno())
+  } else {
+    Ok(intrinsic::handle_from(descriptor))
+  }
+}
+
+internal fn copy_of(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
+  let length = intrinsic::view_length(bytes)
+  var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
+  for index in 0..length
+    invariant intrinsic::storage_length(copy) == yielded.length()
+    invariant intrinsic::storage_capacity(copy) == length
+  {
+    intrinsic::storage_push(mut copy, value: intrinsic::view_at(bytes, index: index))
+  }
+  copy
+}
+
+internal fn text_copied_from(bytes: intrinsic::View[UInt8]) -> String {
+  String.from_bytes(copy_of(bytes))
+}

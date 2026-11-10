@@ -105,6 +105,51 @@ let () =
          {\n\
          }\n"
         "capabilities.not_available");
+  test "a loop's invariant may not use what the function declares" (fun () ->
+      one_diagnostic
+        "fn stamp() -> Bool\n\
+        \  uses Clock\n\
+        \  cost time finite\n\
+         {\n\
+        \  todo\n\
+         }\n\n\
+         fn f()\n\
+        \  uses Clock\n\
+         {\n\
+        \  var count = 0\n\
+        \  while count < 3\n\
+        \    invariant stamp()\n\
+        \  {\n\
+        \    count += 1\n\
+        \  }\n\
+         }\n"
+        "capabilities.not_available");
+  test "a type's invariant may use no capability" (fun () ->
+      one_diagnostic
+        "fn stamp() -> Bool\n\
+        \  uses Clock\n\
+        \  cost time finite\n\
+         {\n\
+        \  todo\n\
+         }\n\n\
+         type Counted(count: Int64)\n\
+        \  invariant stamp()\n"
+        "capabilities.not_available");
+  test "a law may use no capability" (fun () ->
+      one_diagnostic
+        "fn stamp() -> Bool\n\
+        \  uses Clock\n\
+        \  cost time finite\n\
+         {\n\
+        \  todo\n\
+         }\n\n\
+         trait Steady {\n\
+        \  fn value(self) -> Int64\n\n\
+        \  law timeless(first: Self) {\n\
+        \    stamp()\n\
+        \  }\n\
+         }\n"
+        "capabilities.not_available");
   test "a parallel branch has only Panic" (fun () ->
       one_diagnostic
         "fn f() -> Instant\n\
@@ -128,6 +173,35 @@ let () =
         \  })\n\
          }\n"
         "capabilities.lambda_uses");
+  test "a loop over a value needs what its each uses" (fun () ->
+      one_diagnostic
+        "type Ticker()\n\n\
+         fn Ticker.each(self) yields Instant\n\
+        \  uses Clock\n\
+         {\n\
+        \  yield Clock.now()\n\
+         }\n\n\
+         fn f(ticker: Ticker) {\n\
+        \  for tick in ticker {\n\
+        \    let _ = tick\n\
+        \  }\n\
+         }\n"
+        "capabilities.not_available");
+  test "a loop over a value may use what the function declares" (fun () ->
+      fine
+        "type Ticker()\n\n\
+         fn Ticker.each(self) yields Instant\n\
+        \  uses Clock\n\
+         {\n\
+        \  yield Clock.now()\n\
+         }\n\n\
+         fn f(ticker: Ticker)\n\
+        \  uses Clock\n\
+         {\n\
+        \  for tick in ticker {\n\
+        \    let _ = tick\n\
+        \  }\n\
+         }\n");
   test "a capability parameter is what the lambdas passed for it use" (fun () ->
       fine
         "fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))\n\
@@ -143,6 +217,26 @@ let () =
         \    let _ = value\n\
         \  })\n\
          }\n");
+  test "a trait's method solves its capability parameter as a function does" (fun () ->
+      let visitor =
+        "trait Visitor {\n\
+        \  fn visit_all[capability Granted](self, visit: (fn(Int64) uses Granted))\n\
+        \    uses Granted\n\
+         }\n\n\
+         type Numbers(items: List[Int64])\n\n\
+         impl Visitor for Numbers {\n\
+        \  fn visit_all[capability Granted](self, visit: (fn(Int64) uses Granted))\n\
+        \    uses Granted\n\
+        \  {\n\
+        \    todo\n\
+        \  }\n\
+         }\n\n"
+      in
+      let call =
+        "{\n  numbers.visit_all(fn(value) {\n    let _ = Clock.now()\n    let _ = value\n  })\n}\n"
+      in
+      fine (visitor ^ "fn f(numbers: Numbers)\n  uses Clock\n" ^ call);
+      one_diagnostic (visitor ^ "fn f(numbers: Numbers)\n" ^ call) "capabilities.not_available");
   test "a capability parameter's set must be available at the call" (fun () ->
       one_diagnostic
         "fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))\n\

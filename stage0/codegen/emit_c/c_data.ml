@@ -130,34 +130,6 @@ let table_c context (table : Lir.table) =
     (max 1 (List.length entries))
     (if entries = [] then "0" else String.concat ", " entries)
 
-let evidence_c context (evidence : Lir.evidence) =
-  let declare key kind =
-    let symbol = Instance.symbol key in
-    declare_prototype context symbol
-      (Printf.sprintf "extern const %s %s%s;\n" kind symbol
-         (if kind = "void *const" then "[]" else ""));
-    symbol
-  in
-  let table = declare evidence.table "void *const" in
-  let table = "(const void *const *)" ^ table in
-  let outer =
-    match evidence.outer with
-    | [] -> "0"
-    | keys ->
-        let name = static_name context in
-        let symbols = List.map (fun key -> "&" ^ declare key "struct t_evidence") keys in
-        context.statics <-
-          Printf.sprintf "static const struct t_evidence *const %s[%d] = { %s };\n" name
-            (List.length keys) (String.concat ", " symbols)
-          :: context.statics;
-        name
-  in
-  (* A real implementation has zero size, so the evidence points at nothing
-     that is ever read. *)
-  Printf.sprintf "const struct t_evidence %s = { (void *)%s, %s, %s };\n"
-    (Instance.symbol evidence.evidence_key)
-    (bytes_name context "") table outer
-
 let data_c context (data : Lir.data) =
   let symbol = Instance.symbol data.data_key in
   match initializer_c context data.ty data.value with

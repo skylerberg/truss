@@ -1,0 +1,46 @@
+use standard::intrinsic
+use standard::system::calls
+
+internal fn file_error(number: Int32) -> FileError {
+  if number == intrinsic::libc_enoent() {
+    FileError.NotFound
+  } else if number == intrinsic::libc_eacces() {
+    FileError.PermissionDenied
+  } else {
+    FileError.Other(code: number)
+  }
+}
+
+internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[Value, FileError] {
+  match own outcome {
+    Ok(value) => Ok(own value)
+    Err(number) => Err(file_error(number))
+  }
+}
+
+internal fn open_to_read(file: Path) -> Result[intrinsic::Handle, FileError] {
+  with_file_error(calls::open_file(file.text.slice().bytes, flags: intrinsic::libc_o_rdonly()))
+}
+
+internal fn open_to_write_from_empty(file: Path) -> Result[intrinsic::Handle, FileError] {
+  let flags = intrinsic::libc_o_wronly() | intrinsic::libc_o_creat() | intrinsic::libc_o_trunc()
+  with_file_error(calls::open_file(file.text.slice().bytes, flags: flags))
+}
+
+internal fn read_all(handle: mut intrinsic::Handle) -> Result[intrinsic::Storage[UInt8], FileError] {
+  var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+  var reading = true
+  while reading {
+    let read = with_file_error(
+      calls::read_onto_end(intrinsic::handle_descriptor(handle), buffer: mut bytes, count: 65536),
+    )?
+    if read == 0 {
+      reading = false
+    }
+  }
+  Ok(own bytes)
+}
+
+internal fn write_all(handle: mut intrinsic::Handle, bytes: intrinsic::View[UInt8]) -> Result[Unit, FileError] {
+  with_file_error(calls::write_fully(intrinsic::handle_descriptor(handle), bytes: bytes))
+}

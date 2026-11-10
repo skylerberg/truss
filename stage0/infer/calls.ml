@@ -69,6 +69,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
             capability_arguments = [];
             result;
           };
+      Form.draft_call ~through:callee state value;
       result
   | T.Error _ | T.Hole -> arguments_alone state env arguments callee_type
   | _ ->
@@ -85,7 +86,10 @@ and argument_value state env (value : expression) (parameter : T.parameter_info)
     | _ -> value
   in
   let found = expression state env ~expected:parameter.type_ inner in
-  if inner != value then record state value found;
+  if inner != value then begin
+    record state value found;
+    same state value inner
+  end;
   let conversion = coerce state env ~argument:true value ~found ~expected:parameter.type_ in
   check_mode state value parameter found;
   conversion
@@ -379,4 +383,5 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
             capability_arguments = [];
             result = type_;
           };
+      Form.draft_call state value;
       type_

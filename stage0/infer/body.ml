@@ -16,6 +16,8 @@ open Expressions
 
 type result = {
   checked : C.t;
+  core : Core.t option;
+      (** The definition's core form, when it parsed whole and nothing in it is an error. *)
   diagnostics : Diagnostic.t list;
   evidence : string list;  (** The packages whose [impl]s met a bound in the definition *)
 }
@@ -149,6 +151,95 @@ let check_defaults state env (written : parameter list) (signature : T.signature
       | _ -> ())
     written
 
+(* The core form of a definition's parts *)
+
+let core_cost state ({ amortized; resource; bound } : cost) : Core.cost =
+  {
+    amortized;
+    resource;
+    bound =
+      (match bound with
+      | Finite -> Finite
+      | Big_o value -> Order_of (built state value)
+      | At_most value -> At_most (built state value)
+      | Exactly value -> Exactly (built state value));
+  }
+
+let core_contract state (clauses : clause list) : Core.contract =
+  let each choose = List.concat_map (fun (clause : clause) -> choose clause.kind) clauses in
+  let requires =
+    each (function
+      | Requires value ->
+          let value = built state value in
+          [ { Core.value; runs = Form.runs state value } ]
+      | _ -> [])
+  in
+  let ensures = each (function Ensures value -> [ built state value ] | _ -> []) in
+  let decreases =
+    each (function Decreases measures -> List.map (built state) measures | _ -> [])
+  in
+  {
+    requires;
+    ensures;
+    decreases;
+    costs = each (function Cost cost -> [ core_cost state cost ] | _ -> []);
+  }
+
+(* The parameters as the body names them: [self] first when there is one,
+   and each with the mode and the type its signature gives it. *)
+let core_parameters state (written : parameter list) (signature : T.signature) : Core.parameter list
+    =
+  List.filter_map
+    (fun (parameter : parameter) : Core.parameter option ->
+      match parameter.kind with
+      | Self_parameter _ ->
+          Option.map
+            (fun ((receiver : Path.receiver), type_) : Core.parameter ->
+              {
+                local = Self;
+                name = "self";
+                mode = (match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read);
+                type_;
+                default = None;
+                accepts = None;
+              })
+            signature.receiver
+      | Named_parameter { name; default; type_; _ } ->
+          Option.map
+            (fun (info : T.parameter_info) : Core.parameter ->
+              let default = Option.map (built state) default in
+              {
+                local = Bound name.id;
+                name = name.text;
+                mode = info.mode;
+                type_ = info.type_;
+                default;
+                accepts =
+                  (match type_.kind with
+                  | Function_type { input_names = _ :: _ as inputs; clauses; _ } ->
+                      Some
+                        {
+                          inputs =
+                            List.map
+                              (fun (input : name) : (Core.local * string) ->
+                                (Bound input.id, input.text))
+                              inputs;
+                          requires =
+                            List.filter_map
+                              (fun (clause : clause) ->
+                                match clause.kind with
+                                | Requires value -> Some (built state value)
+                                | _ -> None)
+                              clauses;
+                        }
+                  | _ -> None);
+              })
+            (List.find_opt
+               (fun (info : T.parameter_info) -> info.name = name.text)
+               signature.parameters)
+      | Parameter_error -> None)
+    written
+
 (* A function or method with its signature, as lowered. *)
 let check_function state ~broken_body (written : signature) (body_block : block option)
     (signature : T.signature) =
@@ -168,6 +259,12 @@ let check_function state ~broken_body (written : signature) (body_block : block 
   check_defaults state no_output written.parameters signature;
   check_function_type_requires state env written.parameters signature;
   check_clauses state env written.clauses;
+  state.form.parts <-
+    Some
+      (fun () ->
+        let parameters = core_parameters state written.parameters signature in
+        let contract = core_contract state written.clauses in
+        Function { parameters; contract; body = Option.map (built_block state) body_block });
   match body_block with Some block when not broken_body -> body state env block | _ -> ()
 
 let check_definition state (lowered : Environment.lowered) =
@@ -198,6 +295,46 @@ let check_definition state (lowered : Environment.lowered) =
                 in_statement state env value.span (fun () -> ignore (expression state env value))
             | Derives _ -> ())
           clauses;
+        let defaulted variant (fields : field list) =
+          List.filter_map
+            (fun (field : field) ->
+              match field.kind with
+              | Field_declaration { name; default = Some value; _ } ->
+                  Some (variant, name.text, value)
+              | _ -> None)
+            fields
+        in
+        state.form.parts <-
+          Some
+            (fun () ->
+              let defaults =
+                List.map
+                  (fun (variant, name, value) -> (variant, name, built state value))
+                  (match type_body with
+                  | Fields fields -> defaulted None fields
+                  | Variants variants ->
+                      List.concat_map
+                        (fun (variant : variant) ->
+                          defaulted (Some variant.name.text)
+                            (Option.value ~default:[] variant.fields))
+                        variants
+                  | Type_todo -> [])
+              in
+              let clause choose =
+                List.filter_map (fun (clause : type_clause) -> choose clause.kind) clauses
+              in
+              Type
+                {
+                  defaults;
+                  invariants =
+                    clause (function Type_invariant value -> Some (built state value) | _ -> None);
+                  potential =
+                    (match
+                       clause (function Potential value -> Some (built state value) | _ -> None)
+                     with
+                    | first :: _ -> Some first
+                    | [] -> None);
+                });
         let defaults (fields : field list) (lowered_fields : T.field list) =
           List.iter
             (fun (field : field) ->
@@ -234,6 +371,44 @@ let check_definition state (lowered : Environment.lowered) =
         | _ -> ())
     | Trait { members; _ }, Trait_interface _ ->
         let self = T.Parameter { owner = state.key.path; name = "Self" } in
+        state.form.parts <-
+          Some
+            (fun () ->
+              Trait
+                (List.concat
+                   (List.mapi
+                      (fun index (line : trait_member line) ->
+                        match line.kind with
+                        | Law law
+                          when not (broken (Member_header index) || broken (Member_body index)) ->
+                            let parameters =
+                              List.filter_map
+                                (fun (parameter : parameter) : Core.parameter option ->
+                                  match parameter.kind with
+                                  | Named_parameter { name; _ } ->
+                                      Some
+                                        {
+                                          local = Bound name.id;
+                                          name = name.text;
+                                          mode = Read;
+                                          type_ = Form.local_type state name.id;
+                                          default = None;
+                                          accepts = None;
+                                        }
+                                  | _ -> None)
+                                law.parameters
+                            in
+                            let requires = List.map (built state) law.requires in
+                            [
+                              {
+                                Core.name = law.name.text;
+                                parameters;
+                                requires;
+                                body = built_block state law.body;
+                              };
+                            ]
+                        | _ -> [])
+                      members)));
         List.iteri
           (fun index (line : trait_member line) ->
             if not (broken (Member_header index)) then
@@ -261,17 +436,26 @@ let check_definition state (lowered : Environment.lowered) =
         if not (broken Body) then begin
           in_statement state no_output value.span (fun () ->
               check state no_output value constant.constant_type);
+          state.form.parts <- Some (fun () -> Constant (built state value));
           Constant.check state ~default:false value
         end
     | Test { body = written; _ }, _ ->
+        state.form.parts <- Some (fun () -> Test (built_block state written));
         if not (broken Body) then
           body state { no_output with output = Some (Returns T.unit) } written
     | Theorem { parameters; clauses; body = written; _ }, Theorem_interface signature ->
         declare_parameters state parameters signature;
         let env : env = { no_output with specification = true; output = Some (Returns T.unit) } in
         check_clauses state env clauses;
+        state.form.parts <-
+          Some
+            (fun () ->
+              let parameters = core_parameters state parameters signature in
+              let contract = core_contract state clauses in
+              Function { parameters; contract; body = Some (built_block state written) });
         if not (broken Body) then body state env written
     | Law_proof { body = written; _ }, _ ->
+        state.form.parts <- Some (fun () -> Law_proof (built_block state written));
         if not (broken Body) then
           body state { no_output with specification = true; output = Some (Returns T.unit) } written
     | _ -> ()
@@ -282,36 +466,7 @@ let check_definition state (lowered : Environment.lowered) =
    statement was being checked, such as a call's type arguments, are
    final only once it settled. *)
 let finalize (state : state) =
-  (* What no statement settled is an error, under the report of the first
-     statement that could not work its types out, or one made here when
-     there is none: nothing unsolved is ever stored unreported. A hole stays
-     a hole, since a [todo] is not an error. *)
-  let unsolved () =
-    match state.unsolved with
-    | Some report -> T.Error report
-    | None ->
-        let report =
-          reported state Cannot_infer
-            (Span.make state.definition.span.start state.definition.span.start)
-            "A type in this definition cannot be worked out. Give the `let` a type, or the call \
-             type arguments."
-        in
-        state.unsolved <- Some report;
-        T.Error report
-  in
-  let final type_ =
-    T.map
-      (function T.Variable _ | T.Literal _ -> Some (unsolved ()) | _ -> None)
-      (Interface.Impls.normalize state.database ~bounds:(bounds state) (zonk state type_))
-  in
-  let argument = function
-    | T.Type type_ -> T.Type (final type_)
-    | T.Value value -> (
-        match Unify.resolve_value state.unifier value with
-        | T.Value_variable _ -> T.Type (unsolved ())
-        | value -> T.Value value)
-    | T.Capabilities _ as capabilities -> capabilities
-  in
+  let final = final state and argument = final_argument state in
   let trait (reference : T.trait_reference) =
     {
       reference with
@@ -407,6 +562,15 @@ let check database (key : Names.key) =
           context;
           text;
           tables = C.create (definition.id + 1);
+          form =
+            {
+              expressions = Array.make (definition.id + 1) None;
+              statements = Array.make (definition.id + 1) None;
+              patterns = Array.make (definition.id + 1) None;
+              parts = None;
+              next = 0;
+              made = 0;
+            };
           obligations = [];
           diagnostics = [];
           unifier = Unify.create ();
@@ -434,10 +598,49 @@ let check database (key : Names.key) =
           (since interface_named !(context.named))
         @ state.diagnostics;
       finalize state;
-      Capabilities.check state lowered;
+      (* A definition has a core form when it parsed whole, nothing in it is
+         an error, and every type in it is decided: an error elsewhere that
+         reaches it through a type, or a [todo] whose type nothing fixes,
+         leaves nothing to build on. *)
+      let decided table =
+        Array.for_all
+          (function
+            | Some type_ ->
+                let decided = ref true in
+                ignore
+                  (T.map
+                     (function
+                       | T.Error _ | T.Hole ->
+                           decided := false;
+                           None
+                       | _ -> None)
+                     type_);
+                !decided
+            | None -> true)
+          table
+      in
+      let whole =
+        state.diagnostics = [] && resolved.diagnostics = []
+        && (not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body))
+        && (match lowered.interface with Error_interface _ -> false | _ -> true)
+        && decided state.tables.types && decided state.tables.local_types
+        && decided state.tables.pattern_types
+      in
+      (* What code may call is checked on the form, where every call is a
+         node. A definition that fails it has no form to give out. *)
+      let core : Core.t option =
+        if whole then begin
+          let parts = match state.form.parts with Some build -> build () | None -> Core.Nothing in
+          let form : Core.t = { parts; nodes = state.form.next; made = state.form.made } in
+          Capabilities.check state lowered form;
+          if state.diagnostics = [] then Some form else None
+        end
+        else None
+      in
       Some
         {
           checked = { state.tables with obligations = List.rev state.obligations };
+          core;
           diagnostics =
             List.sort_uniq
               (fun (left : Diagnostic.t) (right : Diagnostic.t) ->

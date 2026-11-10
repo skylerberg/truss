@@ -133,39 +133,73 @@ let table context (key : Instance.key) : Lir.table =
   | _ -> bug "not a table: %s" (Instance.to_string key)
 
 (* The [impl] of a standard capability by its real implementation: the
-   standard library's [System] type for it, such as [SystemConsole]. *)
+   standard library's [System] type for it, such as [SystemConsole], in the
+   module of [standard::system] named for the capability, as [FileRead]'s is
+   in [standard::system::file_read]. *)
 let real_implementation (capability : Path.t) : Path.t =
   let name = Ground.path_name capability in
+  let module_name =
+    String.concat ""
+      (List.mapi
+         (fun index letter ->
+           let lower = String.make 1 (Char.lowercase_ascii letter) in
+           if index > 0 && Char.uppercase_ascii letter = letter then "_" ^ lower else lower)
+         (List.of_seq (String.to_seq name)))
+  in
   Impl
     {
-      module_ = { package = "standard"; modules = [ "capabilities" ] };
+      module_ = { package = "standard"; modules = [ "system"; module_name ] };
       name = Printf.sprintf "%s for System%s" name name;
     }
 
-(* The evidence of the real implementation of each capability, for code the
-   runtime runs with the world's: [main], and an external test. *)
-let real_evidence_of context ~user capabilities =
+(* The real implementation of each capability, for code the runtime runs
+   with the world's: [main], and an external test. Each is a value the code
+   owns, with evidence on the stack pointing at it. One that holds something,
+   as [SystemConsole] holds the input it has read and not yet given, is made
+   by its type's [new]. *)
+let real_implementations st ~user capabilities =
   List.map
     (fun capability ->
-      if Interface.Impls.impl_interface context.database (real_implementation capability) = None
-      then
-        Compiler_bug.unsupported "%s uses %s, which has no real implementation" user
-          (Ground.path_name capability);
-      (capability, Lir.Constant (Symbol_address (Real_evidence capability))))
+      let impl = real_implementation capability in
+      let ty =
+        match Interface.Impls.impl_interface st.context.database impl with
+        | Some interface -> Monomorphic.ground st.context.monomorphic [] interface.for_type
+        | None ->
+            Compiler_bug.unsupported "%s uses %s, which has no real implementation" user
+              (Ground.path_name capability)
+      in
+      let implementation =
+        if zero_size st ty then Lir.Constant Null
+        else begin
+          let value = binding st ty in
+          let made : Path.t =
+            match ty with
+            | Named { path; _ } -> Method { owner = path; name = "new"; receiver = Static }
+            | _ -> bug "%s implements %s" (Ground.to_string ty) (Path.show capability)
+          in
+          call_instance st
+            (Code { path = made; type_arguments = [] })
+            ~signature:(signature_of st.context made) ~substitution:[] ~arguments:[] ~mask:0
+            ~destination:value;
+          Address { place = value; writable = true }
+        end
+      in
+      (capability, implementation_evidence st ~impl ~type_arguments:[] ~implementation))
     capabilities
 
-let real_evidence _context (capability : Path.t) : Lir.evidence =
-  {
-    evidence_key = Real_evidence capability;
-    table = Table { impl = real_implementation capability; type_arguments = [] };
-    outer = [];
-  }
+(* The standard library's function that copies bytes into a [String],
+   replacing what is not UTF-8. *)
+let text_copied_from : Path.t =
+  Top
+    {
+      module_ = { package = "standard"; modules = [ "system"; "calls" ] };
+      name = "text_copied_from";
+    }
 
 (* The C [main]'s Truss side: the program's arguments as a [List] of
-   [String]s, whose bytes are the arguments' own, so they are never copied
-   unless bad UTF-8 in them has to be replaced; evidence for the real
-   implementation of each capability [main] uses; and [main]'s [ExitCode]
-   as the process's status. *)
+   [String]s, each made of an argument's bytes by the standard library; the
+   real implementation of each capability [main] uses; and [main]'s
+   [ExitCode] as the process's status. *)
 let program_main context (key : Instance.key) main_path : Lir.t =
   let st = generated_state context ~anchor:main_path ~substitution:[] in
   let b = st.b in
@@ -210,31 +244,27 @@ let program_main context (key : Instance.key) main_path : Lir.t =
   finish b (Switch { value = Copy (at going); cases = [ (Z.one, inside) ]; default = Some after });
   start b inside;
   let length = local b (Value context.types.usize) and bytes = local b (Raw (Pointer Opaque)) in
+  let call intrinsic arguments result =
+    emit b (Call { target = Intrinsic intrinsic; arguments; result = Returned (at result) })
+  in
+  call Program_argument [ Copy (at arguments_pointer); Copy (at index) ] bytes;
+  call Terminated_length [ Copy (at bytes) ] length;
+  let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
+  let view = temporary st view_ty in
   emit b
-    (Call
-       {
-         target = Intrinsic Program_argument;
-         arguments =
-           [
-             Copy (at arguments_pointer);
-             Copy (at index);
-             Address { place = at length; writable = true };
-           ];
-         result = Returned (at bytes);
-       });
+    (Assign (view, Storage.view view_ty ~elements:(Copy (at bytes)) ~length:(Copy (at length))));
   let text = temporary st string_ty in
-  (match Monomorphic.shape context.monomorphic string_ty with
-  | Record [ (field, Typed storage) ] ->
-      emit b
-        (Assign
-           ( text / Field field,
-             Storage.static storage ~elements:(Copy (at bytes)) ~length:(Copy (at length)) ))
-  | _ -> bug "a String that is not storage");
+  call_instance st
+    (Code { path = text_copied_from; type_arguments = [] })
+    ~signature:(signature_of context text_copied_from)
+    ~substitution:[]
+    ~arguments:[ (Read, view_ty, view) ]
+    ~mask:0 ~destination:text;
   lower Storage_push [ string_ty ] [ Place (list / Field storage_field); Value (Move text) ] None;
   emit b (Assign (at index, Binary (Add, Copy (at index), Constant (Integer (Int32, Z.one)))));
   finish b (Goto test);
   start b after;
-  st.evidence <- real_evidence_of context ~user:"main" (evidence_for [] signature.uses);
+  st.evidence <- real_implementations st ~user:"main" (evidence_for [] signature.uses);
   let exit_ty =
     match signature.output with
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty

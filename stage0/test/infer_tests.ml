@@ -141,6 +141,8 @@ let () =
           | Some _ -> fail "`%s` is another call" written
           | None -> fail "`%s` has no call" written)
         [ "first < second"; "second < third"; "first < third" ]);
+  test "an operand may be what an operator's method gives" (fun () ->
+      fine "fn f(left: Int64, right: Int64) -> Int64 {\n  left + right.multiply(2)\n}\n");
   test "a type without the operator's trait is an error" (fun () ->
       one_diagnostic "type Point(x: Int64)\n\nfn f(point: Point) -> Point {\n  point + point\n}\n"
         "types.no_impl")
@@ -602,6 +604,150 @@ let () =
       one_diagnostic "fn f() {\n  var text = \"a\"\n  text ^= \"b\"\n}\n" "types.no_impl");
   test "a method written in full takes its receiver's mark" (fun () ->
       one_diagnostic "fn f() {\n  var items: List[Int64] = []\n  List.push(items, item: 1)\n}\n"
+        "types.wrong_receiver");
+  test "a for loop takes each version from the type or from a trait" (fun () ->
+      fine
+        "type Bag(items: List[Int64])\n\n\
+         impl Iterable for Bag {\n\
+        \  type Element = Int64\n\
+        \  fn each(self) yields Int64 { todo }\n\
+         }\n\n\
+         fn Bag.each(mut self) yields mut Int64 { todo }\n\n\
+         fn f(bag: mut Bag) -> Int64 {\n\
+        \  for item in mut bag {\n\
+        \    item = 0\n\
+        \  }\n\
+        \  var last: Int64 = 0\n\
+        \  for item in bag {\n\
+        \    last = item\n\
+        \  }\n\
+        \  last\n\
+         }\n");
+  test "a call picks a version among a type's own and its family of traits'" (fun () ->
+      fine
+        "trait Shown {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         trait Cleared: Shown {\n\
+        \  fn label(mut self) -> Int64\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         impl Shown for Counter {\n\
+        \  fn label(self) -> Int64 { todo }\n\
+         }\n\n\
+         impl Cleared for Counter {\n\
+        \  fn label(mut self) -> Int64 { todo }\n\
+         }\n\n\
+         fn Counter.label(own self) -> Int64 { todo }\n\n\
+         fn f(counter: mut Counter) -> Int64 {\n\
+        \  let read = counter.label()\n\
+        \  let cleared = mut counter.label()\n\
+        \  let made = Counter(count: 3).label()\n\
+        \  let in_full = Counter.label(mut counter)\n\
+        \  let through_trait = Shown.label(counter)\n\
+        \  read.max(cleared).max(made).max(in_full).max(through_trait)\n\
+         }\n");
+  test "two traits that give one version of a name are ambiguous at the call" (fun () ->
+      one_diagnostic
+        "trait First {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         trait Second {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         impl First for Counter {\n\
+        \  fn label(self) -> Int64 { todo }\n\
+         }\n\n\
+         impl Second for Counter {\n\
+        \  fn label(self) -> Int64 { todo }\n\
+         }\n\n\
+         fn f(counter: Counter) -> Int64 {\n\
+        \  counter.label()\n\
+         }\n"
+        "types.ambiguous_method"
+        ~fixed:
+          "trait First {\n\
+          \  fn label(self) -> Int64\n\
+           }\n\n\
+           trait Second {\n\
+          \  fn label(self) -> Int64\n\
+           }\n\n\
+           type Counter(count: Int64)\n\n\
+           impl First for Counter {\n\
+          \  fn label(self) -> Int64 { todo }\n\
+           }\n\n\
+           impl Second for Counter {\n\
+          \  fn label(self) -> Int64 { todo }\n\
+           }\n\n\
+           fn f(counter: Counter) -> Int64 {\n\
+          \  First.label(counter)\n\
+           }\n");
+  test "two unrelated traits that share a name are ambiguous however each takes self" (fun () ->
+      one_diagnostic
+        "trait First {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         trait Second {\n\
+        \  fn label(own self) -> Int64\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         impl First for Counter {\n\
+        \  fn label(self) -> Int64 { todo }\n\
+         }\n\n\
+         impl Second for Counter {\n\
+        \  fn label(own self) -> Int64 { todo }\n\
+         }\n\n\
+         fn f() -> Int64 {\n\
+        \  Counter(count: 3).label()\n\
+         }\n"
+        "types.ambiguous_method");
+  test "two bounds that give one version of a name are ambiguous through the type" (fun () ->
+      one_diagnostic
+        "trait First {\n\
+        \  fn make() -> Self\n\
+         }\n\n\
+         trait Second {\n\
+        \  fn make() -> Self\n\
+         }\n\n\
+         fn f[Value: First + Second]() -> Value {\n\
+        \  Value.make()\n\
+         }\n"
+        "types.ambiguous_method");
+  test "two unrelated bounds that share a name are ambiguous however each takes self" (fun () ->
+      one_diagnostic
+        "trait First {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         trait Second {\n\
+        \  fn label(mut self) -> Int64\n\
+         }\n\n\
+         fn f[Value: First + Second](value: Value) -> Int64 {\n\
+        \  value.label()\n\
+         }\n"
+        "types.ambiguous_method");
+  test "a bound's method is picked from its family by how the call takes self" (fun () ->
+      fine
+        "trait Shown {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         trait Cleared: Shown {\n\
+        \  fn label(mut self) -> Int64\n\
+         }\n\n\
+         fn f[Value: Cleared](value: mut Value) -> Int64 {\n\
+        \  let read = value.label()\n\
+        \  let cleared = mut value.label()\n\
+        \  let in_full = Value.label(mut value)\n\
+        \  read.max(cleared).max(in_full)\n\
+         }\n");
+  test "a trait's method written in full has no version for a mark it lacks" (fun () ->
+      one_diagnostic
+        "trait Shown {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         fn f[Value: Shown](value: mut Value) -> Int64 {\n\
+        \  Shown.label(mut value)\n\
+         }\n"
         "types.wrong_receiver");
   test "an associated type of an argument is normalized" (fun () ->
       fine

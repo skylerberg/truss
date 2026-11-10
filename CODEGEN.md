@@ -259,7 +259,7 @@ parameter. The emitter only prints.
 | Statement | Meaning |
 |---|---|
 | `place = rvalue` | Write a value to a place. A drop flag is a `Bool` local written this way. |
-| `call(target, arguments, destination)` | A call. The target is an instance or nested function with its C signature, a function value, a capability's entry through its evidence, an entry of an `any` value's table, or an intrinsic. The destination is where the result goes: nowhere, returned into a place, or written by the callee into a place through a pointer, which the emitter passes before the arguments. A function value's environment, an evidence pointer, and an `any` value's pointer are part of the target, which the emitter passes first, before any result pointer |
+| `call(target, arguments, destination)` | A call. The target is an instance or nested function with its C signature, a function value, a capability's entry through its evidence, an entry of an `any` value's table, an intrinsic, or a function of the C library with the declaration its system gives it. The destination is where the result goes: nowhere, returned into a place, or written by the callee into a place through a pointer, which the emitter passes before the arguments. A function value's environment, an evidence pointer, and an `any` value's pointer are part of the target, which the emitter passes first, before any result pointer |
 | `drop(place)` | Run the type's drop code. Before drop elaboration: drop whatever the place still owns |
 | `free_block(place, variant)` | Free the block of an `indirect` variant whose fields have all been moved out or dropped |
 | `echo(text, length, site)` | Record a value's debug output, with its position |
@@ -608,8 +608,10 @@ so they are compiled once and shared:
 - **Debug output:** the built-in debug output every type has, used by
   `echo`, failed `assert`s, and the test runner, and to write out values
   computed while compiling. A debug function takes a read-only pointer to
-  the value and appends its text to the runtime's debug buffer, one for
-  each thread, so it needs nothing from the standard library. The text is
+  the value and the storage of bytes to append its text to, which its
+  caller owns, so there is no buffer of the program's. It writes a number
+  and quoted text by calling the standard library's functions that do. The
+  text is
   Truss as it would build the value: `Point(x: 1.0, y: 2.0)`, `Some(3)`,
   with a single field written bare, `None`, `[1, 2, 3]` for storage, views,
   and the standard library's lists and slices, and quoted text with escapes
@@ -690,10 +692,10 @@ and its siblings. Full-width multiplication, used by hashing and
   into one `TextBuilder`, and returns the `String`. It never builds a
   `Template` or its lists.
 - **Numbers display as their debug output does.** Integers are written in
-  decimal by the standard library. A float is written by the
-  `write_float` intrinsic, the shortest decimal that reads back as the same
-  value, which is the runtime's function behind debug output too, so
-  `"${x}"` and `echo x` agree.
+  decimal by the standard library. A float is the shortest decimal that
+  reads back as the same value: the standard library asks the C library's
+  `snprintf` for one more digit until `strtod` gives the float back. Debug
+  output calls the same functions, so `"${x}"` and `echo x` agree.
 - **Other tags build a `Template`** with the literal text as constant data,
   which costs nothing, and the parts in a list that the tag usually keeps,
   as `SqlQuery` does. Each part becomes the tag's `Part` through the `From`
@@ -734,8 +736,8 @@ and its siblings. Full-width multiplication, used by hashing and
 
 ### Code that does not ship
 
-- **`echo`** calls the runtime's echo function with the value's debug output
-  and its position. It writes to the test's report in a test, and to stderr
+- **`echo`** appends the value's debug output to storage of its own, and
+  calls the runtime's echo function with that and its position. It writes to the test's report in a test, and to stderr
   elsewhere. Builds refuse programs that can reach it, so it only exists in
   test and development runs.
 - **`todo`** reached in a test calls a function that tells the runner the
@@ -952,10 +954,15 @@ behind most capabilities.
 ### `main` and the real implementations
 
 The standard library implements each standard capability for real with an
-ordinary type, such as a system clock and the real file system. The
-generated startup code builds the evidence for exactly the capabilities in
-`main`'s `uses` clause and passes it in. An external test gets its declared
-capabilities the same way.
+ordinary type, such as a system clock and the real file system: the
+capability's `System` type, as `SystemConsole` is `Console`'s. The
+generated startup code makes a value of the type for exactly the
+capabilities in `main`'s `uses` clause, with evidence on the stack
+pointing at each, as a `provide mut` would. A type that holds something is
+made by its `new`: `SystemConsole` holds the input it has read and not yet
+given out. The values are `main`'s caller's, and are dropped when `main`
+returns. An external test gets its declared capabilities the same way, as
+values of its own.
 
 ### Tasks
 
@@ -982,23 +989,28 @@ until both handle it.
 |---|---|
 | Numbers | arithmetic, wrapping arithmetic, overflow tests, lawful and IEEE comparisons, bit operations, conversions and whether a value fits a type |
 | Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits`, `from_bits` |
-| Storage | empty, with a capacity, length, capacity, reserve, push, pop, insert, remove, swap, lend an element, view |
+| Storage | empty, with a capacity, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view |
 | Views | length, lend an element, slice |
-| Operating system | write and read bytes, the clock, random bytes, crash; more come with the standard library's real implementations |
+| Operating system | the C library's functions and numbers, a handle from a descriptor and its descriptor, the address of a view, crash |
 
 `Intrinsics` writes every operation into the caller's LIR, never as a call:
 numbers as primitive operations, and storage and views as a few statements
 over their fields, so the C compiler sees each whole. The operations that
 lend an element, such as `storage_at`, lend the place `buffer[index]`
-itself. The one exception is growing storage, which calls the runtime's
-grow function, since growing depends on the element type only through its
-size: it at least doubles the capacity, so pushing is amortized O(1).
+itself.
+
+Storage never grows by itself. `storage_set_capacity` gives it a buffer of
+its own with room for exactly as many elements as it is told, and
+`storage_push` and `storage_insert` write into room it has. How much room
+to make is the standard library's to say, in Truss: where a push finds no
+room, it at least doubles the capacity, so pushing is amortized O(1), and
+the prover reads that as it reads any code.
 
 Storage with capacity 0 and a nonzero length is static, as a string
 literal's is: it owns no buffer, so dropping it frees nothing and copying
 it shares it. Every operation that writes the buffer in place gives such
-storage a buffer of its own first, by growing it, which copies the static
-elements and never frees them. A `String` constant is static in the same
+storage a buffer of its own first, with room for the elements it has, which
+copies the static elements and never frees them. A `String` constant is static in the same
 way. A `List`, `Map`, or `Set` constant has its elements in static memory
 too, but records its capacity as its length, so `copy()` of one really
 copies; a constant is a read-only place, so nothing writes or drops it. The
@@ -1009,17 +1021,83 @@ The libc functions used are declared by the compiler for each target, so the
 generated C still includes no headers. Allocation failure ends the process
 with a message, as DESIGN.md allows for running out of memory.
 
+### The C library
+
+The intrinsic module also holds functions of the system's C library for
+the standard library to call, one operation each, named `libc_` and the
+function's name: `libc_write(descriptor, bytes: view, count: length)` is
+`write`. They come from one table in the compiler. A row gives the
+function's symbol and C types on each system, and how each argument
+reaches it:
+
+| An argument | Is passed as |
+|---|---|
+| A number | Its value, converted to the parameter's C type |
+| A `View` | The address of its elements, which the function only reads |
+| A `mut Storage` | The address after its last element, for a function that fills room the storage has beyond its length |
+| Several `mut` numbers of one type | The address of a structure of them, which the function writes; each number then goes to its argument |
+
+Truss has no pointer type, so memory crosses to C only as a view, as
+storage, or as numbers to write. A small structure a function fills is the
+numbers it is made of: `libc_clock_gettime(clock, seconds: mut seconds,
+nanoseconds: mut nanoseconds)` gives a `timespec`'s two, with nothing on
+the heap. `storage_lengthen` then makes what a function wrote into
+storage's room the storage's own. A row can also fix an argument, which
+the Truss call then does not have: `libc_getentropy(mut value)` always
+asks for the eight bytes of the `UInt64` it fills, and
+`libc_posix_spawnp` always gives the program it starts the environment
+this process was started with. A list of addresses, such as the arguments
+of a program to run, is a `View[USize]` that Truss fills with
+`view_address`, which gives the address of a view's elements as a number;
+nothing turns a number back into an address.
+
+A function's result is a number; the number at the address it returns,
+which is how `errno` is reached; or text, the bytes at the address it
+returns up to a zero byte, as a view, with a `mut Bool` that says whether
+it returned an address at all, which is how `getenv` says a variable is
+unset.
+
+A call is written into the caller's LIR as a call of the C function
+itself, given each argument converted to its parameter's C type, and the C
+declares the function with the prototype the system's headers give it. A
+function with arguments C passes through `...`, such as `open`, is
+declared so, since some systems pass those differently from named ones.
+
+The numbers the headers define, such as `O_CREAT` and `EINTR`, are in the
+same table with their value on each system, and are operations that take
+nothing: `libc_o_creat()`. Lowering writes the value. So the type checker
+and the prover see the same signatures on every system, and only code
+generation's results depend on the system, which is part of the target.
+Stage0 builds for the system it runs on.
+
+A test compiles the table against the system's own headers: every number
+must have the value the table gives, every prototype must be the one the
+headers declare, and every structure must be laid out as the storage
+passed for it. A row that is wrong for the system the tests run on is
+therefore a failing test, not a program that misbehaves.
+
 ### Handles
 
 The intrinsic module also provides one handle type: `Handle`, a file
-descriptor in an `Int32`, which is neither `Copyable` nor `Plain`, with
-`open_file`, `handle_read`, and `handle_write`. Its drop function calls the
-operating system to release it, with `close`. The standard
-library's `SystemFileRead` and `SystemFileWrite`, and its `FileReader` and
-`FileWriter`, are written on them, as `SystemEnvironment` is on
-`environment_variable`, `SystemProcesses` on `run_process`, which spawns
-a program found on the `PATH` and waits for it, `SystemClock` on
-`clock_now`, and `SystemRandom` on `random_fill`. `SystemTasks.yield_now`
+descriptor in an `Int32`, which is neither `Copyable` nor `Plain`.
+`handle_from` makes one of a descriptor that is open, and
+`handle_descriptor` reads it. Its drop function calls the operating system
+to release it, with `close`.
+
+The standard library's real implementations are Truss on the C library's
+functions: opening a file, with its path given a zero byte at its end and
+refused if it holds one; reading into storage; writing every byte; going
+on after a signal interrupts a call; and turning an error number into a
+`FileError`. `SystemFileRead`, `SystemFileWrite`, `FileReader`, and
+`FileWriter` are written on those, `SystemConsole` writes with them,
+`SystemClock` reads `clock_gettime`, and `SystemRandom` reads
+`getentropy`. `SystemConsole` and `FileReader` each hold a reader of
+lines, which reads a block at a time and keeps what it has not given out.
+`SystemEnvironment` reads `getenv`. `SystemProcesses` runs a program found
+on the `PATH` with `posix_spawnp` and waits for it with `waitpid`: it lays
+the program's name and its arguments end to end, each with its zero byte,
+refusing one that holds a zero byte, and reads the exit status, or 128 and
+the signal that ended the program, out of the status. `SystemTasks.yield_now`
 does nothing, since tasks run one after another. `NetworkClient` and
 `NetworkServer` have no real implementation, and a `main` that uses one is
 refused with a message saying so. A handle's is the only drop that does more
@@ -1035,13 +1113,10 @@ The C `main` of a program is generated:
    code has no unsafe operations, so a segmentation fault means the stack
    ran out.
 2. Turn `argc` and `argv` into `List[String]`, the program's path first, as
-   in C. Each `String`'s storage points at the argument itself, with
-   capacity 0, so it is never copied, unless it holds bad UTF-8, which a
-   copy replaces with U+FFFD.
-3. Build the evidence for `main`'s `uses` clause: static evidence for the
-   standard library's real implementation of each capability, its
-   `System` type, such as `SystemConsole`, whose table of entries is static
-   data too.
+   in C. Each `String` is made of an argument's bytes by the standard
+   library, which replaces bad UTF-8 with U+FFFD.
+3. Make the standard library's real implementation of each capability in
+   `main`'s `uses` clause, and evidence for each on the stack.
 4. Call Truss's `main` and return its `ExitCode` as the process's status.
 
 Failures end the process without running anything else:
@@ -1101,8 +1176,8 @@ value cannot be folded from its expression, and a tagged template's check.
 
 A constant whose value cannot be folded from its expression, such as one
 that calls a function or is a `Map` or a `Set`, has an `Evaluator`
-instance: it works the value out, writes its binary form with
-the generated `Encode` functions into the debug buffer, and writes that to
+instance: it works the value out, appends its binary form with
+the generated `Encode` functions to storage of its own, and writes that to
 standard output. The compiler builds it, with everything it reaches, into a
 program for the host, runs it, and reads the bytes back into static data by
 the type's shape. The binary form is:
@@ -1207,7 +1282,8 @@ the tests that can reach the edited code, and costs what can reach it:
   an earlier phase than the keys, so an edit that changes no group costs the
   keys nothing but the keys of what can reach the edit.
 - **The test's key** is the key of everything the test's own instance can
-  reach, with the version of code generation and the target. `USize` is a
+  reach, with the version of code generation and the target: its widths
+  and its system. `USize` is a
   `typedef` in the generated C, so code that differs between 32-bit and
   64-bit targets only in a `USize` has the same LIR for both, while results
   such as `USize.maximum` are not the same. An instance is lowered for one
@@ -1278,7 +1354,7 @@ Everything a build links is checked together before any C is emitted:
 - each call names its callee with the signature the callee has, as does
   each entry of a table and each named function used as a value
 - a drop reaches a drop function
-- each address of static evidence, of a table, or of a constant reaches one
+- each address of a table or of a constant reaches one
 - what an instance compiles to is the instance that was asked for
 
 ## Building
@@ -1289,8 +1365,8 @@ Code generation's lowering is a query, so a test run after an edit lowers
 only the instances the edit reached:
 
 - **An instance's LIR** is a query keyed by the instance and by how it is
-  lowered: the target's widths, and whether the program checks what the
-  prover would prove. A pulled method's version, whose locals make its
+  lowered: the target's widths and its system, and whether the program
+  checks what the prover would prove. A pulled method's version, whose locals make its
   cursor's fields, is a query of its own.
 - **Each computation lowers in a context of its own,** made from the
   query's reads. A layout or a piece of generated code worked out on the way
@@ -1385,6 +1461,12 @@ a command line can hold.
 - **Checkers shipped compiled.** The standard library's are to ship already
   compiled with the toolchain, for each host and both widths of `USize`, and
   a dependency's to be compiled once per version.
+- **The test runner in Truss.** It is the one part of the C runtime that
+  is to be Truss in the standard library, on the C library's functions,
+  leaving the runtime only startup, failing, and allocation.
+- **A float's text without the C library.** DESIGN.md has it written in
+  Truss so that it is the same on every system. The loop is Truss; the
+  digits are `snprintf`'s and the check `strtod`'s.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.

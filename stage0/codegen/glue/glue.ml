@@ -107,7 +107,7 @@ let drop t ty =
       emit b
         (Call
            {
-             target = Intrinsic System_close;
+             target = Foreign (Libc.declaration (Memory_layout.target t.env).os Close);
              arguments = [ Copy (value / Field "descriptor") ];
              result = Discarded;
            })
@@ -344,52 +344,94 @@ let copy t ty =
 
 let zero_size t ty = (Memory_layout.of_type t.env ty).size = 0
 
+(* What a debug or an encode function appends to: storage of bytes, which
+   its caller owns and passes to be changed. *)
+let builtin builtin : Ground.ty = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
+let output_ty = Storage.of_elements (builtin UInt8)
+let bytes_ty = Storage.view_of_elements (builtin UInt8)
+
+let output_parameter t =
+  match Convention.parameter t.env Mut output_ty with
+  | Some parameter -> parameter
+  | None -> bug "storage of no size"
+
 let debug_signature t ty : Lir.signature =
   {
     parameters =
-      (if zero_size t ty then [] else [ Pointer { target = Value ty; writable = false } ]);
+      (if zero_size t ty then [] else [ Lir.Pointer { target = Value ty; writable = false } ])
+      @ [ output_parameter t ];
     result = None;
     returns = true;
   }
 
-let text b value =
-  if value <> "" then
-    emit b
-      (Call
-         {
-           target = Intrinsic Debug_text;
-           arguments = [ Constant (Bytes value); usize (String.length value) ];
-           result = Discarded;
-         })
+(* A call of one of the standard library's functions that append to the
+   output, each in [standard::writing]: it takes the output, and a value of
+   [ty] to write, which is at [place]. *)
+let write t b ~output name ty (place : Lir.place) =
+  let key =
+    Instance.Code
+      {
+        path = Top { module_ = { package = "standard"; modules = [ "writing" ] }; name };
+        type_arguments = [];
+      }
+  in
+  let parameter, written =
+    match Convention.parameter t.env Read ty with
+    | Some (Pointer _ as parameter) -> (parameter, Lir.Address { place; writable = false })
+    | Some parameter -> (parameter, Copy place)
+    | None -> bug "%s is written, and has no size" (Ground.to_string ty)
+  in
+  emit b
+    (Call
+       {
+         target =
+           Direct
+             {
+               function_ = Instance key;
+               signature = Convention.signature [ output_parameter t; parameter ] Nothing;
+             };
+         arguments = [ output; written ];
+         result = Discarded;
+       })
 
-let debug_call t b ty (place : Lir.place) =
+(* A view of bytes, in a local. *)
+let bytes b ~elements ~length =
+  let view = local b (Value bytes_ty) in
+  emit b (Assign (at view, Storage.view bytes_ty ~elements ~length));
+  at view
+
+let text t b ~output value =
+  if value <> "" then
+    write t b ~output "append" bytes_ty
+      (bytes b ~elements:(Constant (Bytes value)) ~length:(usize (String.length value)))
+
+let debug_call t b ~output ty (place : Lir.place) =
   let arguments = if zero_size t ty then [] else [ Lir.Address { place; writable = false } ] in
   emit b
     (Call
        {
          target = Direct { function_ = Instance (Debug ty); signature = debug_signature t ty };
-         arguments;
+         arguments = arguments @ [ output ];
          result = Discarded;
        })
 
-let scalar_debug t b (scalar : Memory_layout.scalar) (place : Lir.place) =
-  let call intrinsic operand =
-    emit b (Call { target = Intrinsic intrinsic; arguments = [ operand ]; result = Discarded })
+let scalar_debug t b ~output (scalar : Memory_layout.scalar) (place : Lir.place) =
+  let widened name wide =
+    let value = local b (Value (builtin wide)) in
+    emit b
+      (Assign
+         ( at value,
+           Convert (Copy place, Integer (match wide with Intrinsic.Int64 -> Int64 | _ -> UInt64)) ));
+    write t b ~output name (builtin wide) (at value)
   in
   match scalar with
-  | Integer (Int8 | Int16 | Int32 | Int64 | ISize) ->
-      let wide = local b (Raw (Integer Int64)) in
-      emit b (Assign (at wide, Convert (Copy place, Integer Int64)));
-      call Debug_signed (Copy (at wide))
-  | Integer (UInt8 | UInt16 | UInt32 | UInt64 | USize) ->
-      let wide = local b (Raw (Integer UInt64)) in
-      emit b (Assign (at wide, Convert (Copy place, Integer UInt64)));
-      call Debug_unsigned (Copy (at wide))
-  | Float32 -> call Debug_float32 (Copy place)
-  | Float64 -> call Debug_float64 (Copy place)
-  | Bool -> call Debug_bool (Copy place)
-  | Character -> call Debug_character (Copy place)
-  | Pointer _ | Nullable_pointer _ -> text b "pointer"
+  | Integer (Int8 | Int16 | Int32 | Int64 | ISize) -> widened "signed" Int64
+  | Integer (UInt8 | UInt16 | UInt32 | UInt64 | USize) -> widened "unsigned" UInt64
+  | Float32 -> write t b ~output "float32" (builtin Float32) place
+  | Float64 -> write t b ~output "float64" (builtin Float64) place
+  | Bool -> write t b ~output "truth" (builtin Bool) place
+  | Character -> write t b ~output "quoted_character" (builtin Character) place
+  | Pointer _ | Nullable_pointer _ -> text t b ~output "pointer"
 
 let debug t ty =
   let b = create () in
@@ -400,15 +442,19 @@ let debug t ty =
   let value : Lir.place =
     match parameter with Some p -> { root = Local p; projections = [ Deref ] } | None -> at 0
   in
+  let out = local b ~name:"output" (output_parameter t) in
+  let output = Lir.Copy (at out) in
+  let text = text t b ~output in
+  let debug_call = debug_call t b ~output in
   start b (block b);
   let rec list_of element ~element_at ~count =
-    text b "[";
+    text "[";
     loop t b ~count (fun index ->
         let later = local b (Raw Bool) in
         emit b (Assign (at later, Binary (Not_equal, Copy (at index), usize 0)));
-        when_ b (Copy (at later)) (fun () -> text b ", ");
-        debug_call t b element (element_at (Lir.Copy (at index))));
-    text b "]"
+        when_ b (Copy (at later)) (fun () -> text ", ");
+        debug_call element (element_at (Lir.Copy (at index))));
+    text "]"
   and storage_or_view field_ty (place : Lir.place) ~as_text =
     let element, buffer, count =
       match (Storage.elements_of field_ty, Storage.viewed field_ty) with
@@ -417,49 +463,44 @@ let debug t ty =
       | None, None -> bug "%s is not storage or a view" (Ground.to_string field_ty)
     in
     if as_text then
-      emit b
-        (Call
-           {
-             target = Intrinsic Debug_string;
-             arguments = [ Copy buffer; Copy count ];
-             result = Discarded;
-           })
+      write t b ~output "quoted_text" bytes_ty
+        (bytes b ~elements:(Copy buffer) ~length:(Copy count))
     else list_of element ~element_at:(fun i -> buffer / Index i) ~count:(Copy count)
   and fields_debug name (fields : (string * Memory_layout.member) list) field_place =
-    text b name;
+    text name;
     match fields with
     | [] -> ()
     | [ (field, Typed field_ty) ] ->
-        text b "(";
-        debug_call t b field_ty (field_place field);
-        text b ")"
+        text "(";
+        debug_call field_ty (field_place field);
+        text ")"
     | fields ->
-        text b "(";
+        text "(";
         List.iteri
           (fun i (field, member) ->
             match member with
             | Memory_layout.Typed field_ty ->
-                text b ((if i > 0 then ", " else "") ^ field ^ ": ");
-                debug_call t b field_ty (field_place field)
+                text ((if i > 0 then ", " else "") ^ field ^ ": ");
+                debug_call field_ty (field_place field)
             | Raw _ -> ())
           fields;
-        text b ")"
+        text ")"
   in
   (match (t.debug_form ty, t.kind_of ty) with
   | (Text | Sequence), Shape (Record [ (field, Typed field_ty) ]) ->
       storage_or_view field_ty (value / Field field) ~as_text:(t.debug_form ty = Text)
-  | _, Handle -> text b "Handle"
+  | _, Handle -> text "Handle"
   | _, Storage element ->
       list_of element ~element_at:(Storage.at value) ~count:(Copy (Storage.length value))
   | _, Shape shape -> (
       match (ty, shape) with
       | Never, _ -> ()
-      | Function _, _ -> text b "fn"
-      | Any _, _ -> text b "any"
-      | Cursor _, _ -> text b "cursor"
-      | _, Scalar scalar -> scalar_debug t b scalar value
+      | Function _, _ -> text "fn"
+      | Any _, _ -> text "any"
+      | Cursor _, _ -> text "cursor"
+      | _, Scalar scalar -> scalar_debug t b ~output scalar value
       | Named { path; _ }, Record [] ->
-          text b (if Ground.path_name path = "Unit" then "Unit" else Ground.path_name path ^ "()")
+          text (if Ground.path_name path = "Unit" then "Unit" else Ground.path_name path ^ "()")
       | Named { path; _ }, Record fields ->
           fields_debug (Ground.path_name path) fields (fun field -> value / Field field)
       | _, Array (element, count) ->
@@ -480,7 +521,7 @@ let debug t ty =
           finish b (Switch_variant { place = value; cases; default = None });
           start b after));
   finish b (Return None);
-  instance (Debug ty) (build b ~parameters:(Option.to_list parameter) ~result:None)
+  instance (Debug ty) (build b ~parameters:(Option.to_list parameter @ [ out ]) ~result:None)
 
 (* Encoding *)
 
@@ -493,13 +534,13 @@ let debug t ty =
    needs nothing more. *)
 let encode_signature t ty = debug_signature t ty
 
-let encode_call t b ty (place : Lir.place) =
+let encode_call t b ~output ty (place : Lir.place) =
   if not (zero_size t ty) then
     emit b
       (Call
          {
            target = Direct { function_ = Instance (Encode ty); signature = encode_signature t ty };
-           arguments = [ Lir.Address { place; writable = false } ];
+           arguments = [ Lir.Address { place; writable = false }; output ];
            result = Discarded;
          })
 
@@ -512,22 +553,24 @@ let encode t ty =
   let value : Lir.place =
     match parameter with Some p -> { root = Local p; projections = [ Deref ] } | None -> at 0
   in
+  let out = local b ~name:"output" (output_parameter t) in
+  let output = Lir.Copy (at out) in
+  let encode_call = encode_call t b ~output in
   start b (block b);
+  (* The value's own bytes, read as bytes whatever it is. *)
   let bytes (place : Lir.place) size =
+    let first = local b (Raw (Pointer (Data (builtin UInt8)))) in
     emit b
-      (Call
-         {
-           target = Intrinsic Debug_text;
-           arguments = [ Address { place; writable = false }; usize size ];
-           result = Discarded;
-         })
+      (Assign
+         (at first, Convert (Address { place; writable = false }, Pointer (Data (builtin UInt8)))));
+    write t b ~output "append" bytes_ty (bytes b ~elements:(Copy (at first)) ~length:(usize size))
   in
   let fields place variant (fields : (string * Memory_layout.member) list) =
     List.iter
       (fun (name, member) ->
         match member with
         | Memory_layout.Typed field_ty ->
-            encode_call t b field_ty
+            encode_call field_ty
               (match variant with
               | None -> place / Field name
               | Some variant -> place / Variant_field { variant; field = name })
@@ -541,12 +584,12 @@ let encode t ty =
          bytes (Storage.length value) (Memory_layout.of_type t.env t.usize).size;
          loop t b
            ~count:(Copy (Storage.length value))
-           (fun index -> encode_call t b element (Storage.at value (Copy (at index))))
+           (fun index -> encode_call element (Storage.at value (Copy (at index))))
      | Shape (Scalar _) -> bytes value (Memory_layout.of_type t.env ty).size
      | Shape (Record members) -> fields value None members
      | Shape (Array (element, count)) ->
          loop t b ~count:(usize count) (fun index ->
-             encode_call t b element (value / Index (Copy (at index))))
+             encode_call element (value / Index (Copy (at index))))
      | Shape (Sum variants) ->
          let after = block b in
          let cases =
@@ -565,4 +608,4 @@ let encode t ty =
          finish b (Switch_variant { place = value; cases; default = None });
          start b after);
   finish b (Return None);
-  instance (Encode ty) (build b ~parameters:(Option.to_list parameter) ~result:None)
+  instance (Encode ty) (build b ~parameters:(Option.to_list parameter @ [ out ]) ~result:None)

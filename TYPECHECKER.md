@@ -121,6 +121,13 @@ binding, each pattern's variants, and so on.
   stored result is only what that stage decided. rustc names its nodes the
   same way, by the item that owns them and a number within it (`HirId`), so
   that a change to one item renumbers nothing in another.
+- **What the program means is one more tree, built once.** The syntax tree
+  is the program as written, which is what tools and diagnostics need. The
+  stages that run or prove the program need what it means: which method a
+  call calls, what a `?` does, where a value is. That is
+  [the core form](#the-core-form), which the type checker builds as it
+  decides, so that no later stage decides it again. Its nodes name the
+  syntax nodes they came from, and hold no positions.
 - **Ids are deterministic.** The same tokens give the same nodes with the
   same ids, so a definition that only moved keeps its ids, as it keeps its
   tree, and every table keyed by them stays valid.
@@ -597,8 +604,11 @@ the definition's interface: the types of its parameters and result, its
   implement the trait, under the same conditions on the type parameters as
   the derived `impl`'s, so `Option[Value]` derives `Equal` as
   `impl Equal for Option[Value: Equal]`. Deriving `Ordered` or `Hash` needs
-  `Equal` to be derived too. Each derived `impl` becomes a definition of its
-  own, as DESIGN.md says, named by the type and the trait.
+  `Equal` to be derived too. Only a record derives `Default`, which is each
+  field's: no variant of a sum type is its default, so that `impl` is
+  written, as Rust asks for a variant to be marked. Each derived `impl`
+  becomes a definition of its own, as DESIGN.md says, named by the type and
+  the trait.
 - **`= todo`** makes a type that can be named and passed but whose contents
   cannot be used. It has none of the properties above, so it cannot be
   copied and is not a view, until it is defined.
@@ -634,8 +644,9 @@ checked apart, and neither waits on the other:
 
 - **A trait's members** are checked like functions, with `Self` standing for
   the implementing type and `Self.Name` for its associated types. A trait
-  may not redeclare a method of a trait it requires, and traits may not
-  require each other in a cycle.
+  may not redeclare a method of a trait it requires, though it may add a
+  version that takes `self` another way, and traits may not require each
+  other in a cycle.
 - **An `impl` conforms to its trait.** Every method without a body and every
   associated type is given, and nothing else is. Each method has the trait's
   parameter names, modes, and types, with `Self` and the associated types
@@ -897,10 +908,16 @@ type:
   the traits they require.
 - **The prelude's `copy()`,** when the type is `Copyable`.
 
-A type's own method and a trait method with one name cannot both exist,
-which a package check reports at the `impl`. Two trait methods with one name
-are an error at the call, with fixes that write it in full, one for each
-trait. A name found nowhere is an error with a fix to the closest member.
+A name's versions are found together: the type's own methods with that
+name, and those of the traits that give the type the name, each by how it
+takes `self`. One function answers this for a call with a dot, a call
+written in full, a `for` loop's `each`, and a quantifier's, and the
+receiver's mode then chooses among them once. The traits must be one family,
+each reached from another through what it requires. Two unrelated traits
+with one name are an error at the call, however each takes `self`, with
+fixes that write it in full, one for each trait. A type's own method and a
+trait's that are the same one are reported by a package check, at the
+`impl`. A name found nowhere is an error with a fix to the closest member.
 
 `Type.name` is looked up the same way among the type's static members:
 variants, constants under the type, methods without `self` such as
@@ -1221,6 +1238,13 @@ the implementation's own evidence. A direct call of the capability would
 call the implementation itself, so it still needs the capability among the
 `impl`'s `uses`, from outside.
 
+The check runs on [the core form](#the-core-form), where every call the
+code makes is a node, however it was written. So a `for` loop over a value
+needs what the value's `each` uses, as the call written out would, and so
+does what a piece of a string is displayed by. A definition with an error
+has no form, and is not checked for what it may call until the error is
+gone.
+
 - **A capability call,** such as `Clock.now()`, needs its capability
   available.
 - **A call to a function with `uses`** needs every capability in it, after
@@ -1230,21 +1254,25 @@ call the implementation itself, so it still needs the capability among the
 - **A lambda's `uses` are inferred** from its body: the capabilities it
   calls. They must be within the `uses` of the function type it is checked
   against.
-- **A capability parameter of the function a call calls is solved** as the
-  union of what is passed for it: what each lambda and each function that
-  meets a function type listing the parameter uses beyond what the type
-  lists, wherever in the call's arguments it is, in parentheses or at the
-  end of a branch as well. That set must then be available at the call. So
+- **A capability parameter of what a call calls,** a function or a trait's
+  method, **is solved** as the union of what is passed for it: what each
+  lambda and each function that meets a function type listing the parameter
+  uses beyond what the type lists, wherever in the call's arguments it is,
+  in parentheses or at the end of a branch as well. That set must then be
+  available at the call. So
   `for_each(3, visit: tick)` needs `Clock` when `tick` uses it and `visit`
   is a `(fn(Int64) uses Granted)`.
 - **A function's own capability parameter stands for itself** throughout its
   body. Inside `for_each`, a `(fn(Int64) uses Granted)` takes only functions
   that use `Granted` or nothing, and a call of `for_each` by itself passes
   `Granted` on as it is.
-- **Specifications and quantifiers' bodies** have no capabilities at all,
-  not even `Panic`, since what they mean must be a value. **`parallel`
-  branches and `parallel for` bodies** have only `Panic` available. A test
-  without `uses` has only `Panic`, and whatever it provides.
+- **What states and does not run** has no capabilities at all, not even
+  `Panic`, since what it means must be a value: a contract's clauses, what
+  a function-typed parameter requires, a loop's clauses, a type's invariant
+  and potential, a law, a proof, and a quantifier's body, whatever the
+  function around it declares. **`parallel` branches and `parallel for`
+  bodies** have only `Panic` available. A test without `uses` has only
+  `Panic`, and whatever it provides.
 - **A `uses` clause that is never needed is not an error,** since a function
   may declare a capability its later versions will use, and callers already
   provide it.
@@ -1357,9 +1385,13 @@ associated type without a question coming back to itself.
 
 ### Method names
 
-A type's own method and a method of any trait the type implements cannot
-share a name. The error is reported at the `impl`, wherever it is, as
-DESIGN.md says.
+A method is its name and how it takes `self`. A type's own method and a
+method of a trait the type implements cannot be the same one. A trait's
+method may be another version of a type's own only when an `impl` in the
+type's package writes it: one left to the trait's provided body, or given
+by an `impl` in another package, cannot use a name the type's methods have
+at all, as DESIGN.md says. Neither can share a name with a constant of the
+type. The error is reported at the `impl`, wherever it is.
 
 ### `any`
 
@@ -1491,6 +1523,100 @@ needs to work anything out from the syntax tree again:
 It is canonical, so that two checks of the same definition give equal
 results, and the database saves it with the graph, as DATABASE.md
 describes.
+
+### The core form
+
+The core form of a definition is what checking decided, as a tree that
+leaves nothing about the program's meaning to work out. A definition has one
+when it parsed whole, nothing in it is an error, and every type in it is
+decided. One with an error, or with a `todo` whose type nothing fixes, has
+none, and nothing that runs or proves the program reaches it.
+
+- **A call names what it calls and lists an argument for every parameter,**
+  in the callee's order, a method's receiver first. A parameter nothing was
+  passed for is marked as taking its default, which is in the callee's own
+  form. The callee is a function or a type's method with its type
+  arguments, a trait's method with how its `impl` was found, a capability's
+  method, an operation of `standard::intrinsic`, or a function value.
+- **A place is told from a value.** A place is a local, a field of a place,
+  the part a lending call lends, which is what an index is, or a value held
+  for the statement so that a part of it can be named. Wherever a place can
+  be used where it is, the node says whether it is: an argument, what a
+  `match`, a `let`, or an `is` takes apart, what a `yield` gives, and an
+  implementation that is provided.
+- **An operator is what it means.** Arithmetic, a bitwise operator, or a
+  shift on built-in types is one node holding the operation, whether it was
+  written `left + right` or `left.add(right)`. A comparison of built-in
+  values is a comparison. On any other type `==` is the call of `equal`,
+  `!=` is its negation, and an ordering is a test of the `Ordering` that
+  `compare` gives. In a specification, where arithmetic and comparisons are
+  of `Integer`s, a built-in operand is first converted.
+- **Sugar is the construct it stands for:** `?` is a `match` that gives the
+  value or returns what there is in its place; a compound assignment is an
+  update of its target, worked out once, by the operator applied to what
+  the target held; a `for` over a value is a loop over the call of its
+  `each`; a range written as a value is the range type's record; a variant
+  used as a function is the lambda that builds it; and `with (port)` names
+  the field and the local.
+- **What is primitive stays one node, with every choice made.** An
+  interpolated string holds its pieces, each value with its `display`, and
+  the builder's methods. A collection literal says how it is built. A
+  tagged string holds its `from_template` and the template it is given. A
+  conversion is a node where it happens, and holds the method that gives a
+  view.
+- **Every node has its type,** solved and normalized.
+- **A condition says whether it runs:** each `requires` and each `assert`
+  is marked as one the program checks when nothing in it is only for
+  specifications. That is no quantifier, no `Integer`, no `old` or `result`,
+  and no function for specifications only.
+- **A block says whether it ends,** so that what follows a `return`, or a
+  loop with nothing to leave it, is known to be unreachable without looking
+  at types.
+- **A definition is its parts:** a function's parameters, with their
+  defaults and what a function-typed parameter requires of calls, its
+  contract, and its body; a type's defaults, invariants, and potential; a
+  trait's laws; a constant's value; a test; a law's proof.
+
+Each node has an id of its own, numbered within the definition as the form
+is built, which later results are keyed by, and the id of the syntax node
+it came from, which is how a diagnostic finds the text to quote. Several
+nodes can come from one syntax node, as the call and the update of
+`total += step` do. No node holds a span, so a definition that was only
+laid out again has the same form. Where each syntax node is, by its id, is
+a result of its own, which only what shows source asks for.
+
+The type checker says how each node is built where it decides what the
+expression, statement, or pattern is, and builds the form once the
+definition has checked: only then is every type final, and every choice a
+statement settles at its end, such as the `impl` an operator means.
+[What code may call](#what-code-may-call) is checked on the form before it
+is given out, which sets on each call what the call needs and what each
+capability parameter of what it calls stands for there, and on each
+`provide` what its implementations provide.
+
+A method a derived `impl` gives is written nowhere, so its form is made
+from the type's shape, as the body the method would have if it were
+written:
+
+- **`equal`** tests that the other value is the same variant, and then
+  that each field equals the other's, in order, with `&&`, so the first
+  difference ends it.
+- **`hash`** writes the variant's number, counted from 0 in the order the
+  variants are declared, and then hashes each field.
+- **`compare`** orders by variant, in the order they are declared, and
+  between two values of one variant by each field in turn: the first
+  field that is not equal decides.
+- **`default`** builds the record of each field's default.
+
+A sum's method matches on `self`, and on the other value inside each arm,
+with patterns that bind each variant's fields, as a person would write it:
+a part of a sum is reached only through a pattern, in a derived method as
+anywhere. Each field's method is a call of the trait's method on the
+field's type, with the `impl` the type has, or a bound where the type is a
+parameter. The form is made once for a method, whatever it is compiled
+for. A method the trait itself gives a body, such as `not_equal`, has the
+trait's form, as in any `impl` that leaves it to the trait, and a type
+that is still `todo` has none.
 
 ### Obligations the type checker creates
 
@@ -1669,6 +1795,9 @@ the compiler. The prelude holds:
 
 ## Not built
 
+- **Reading the core form.** Ownership, the prover, and code generation
+  read the checked form's tables and the syntax tree, and work out again
+  what the core form holds.
 - **A contract as a result of its own.** DESIGN.md has callers' proofs read a
   function's contract, apart from its interface and its body. The contract
   is type-checked with the body, and the prover reads it from the callee's

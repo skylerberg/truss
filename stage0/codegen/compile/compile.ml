@@ -15,8 +15,16 @@ module Names = Resolve.Names
 type lowering = { target : Memory_layout.target; checks : bool }
 
 let show_lowering lowering =
-  Printf.sprintf "%d-bit%s" (lowering.target.usize_bytes * 8)
+  Printf.sprintf "%d-bit %s%s" (lowering.target.usize_bytes * 8) (Libc.os_name lowering.target.os)
     (if lowering.checks then ", checked" else "")
+
+(* The target as part of a key: a result that depends on what the code was
+   built for is kept under all of it. *)
+let target_key (target : Memory_layout.target) =
+  Cbor.Array
+    [
+      Cbor.int target.pointer_bytes; Cbor.int target.usize_bytes; Cbor.Text (Libc.os_name target.os);
+    ]
 
 type lowered_outcome = Compiled of Lir.compiled | Evaluate of Path.t * Ground.ty
 
@@ -104,7 +112,6 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
       code (Lower.call_evaluation context key ~function_ ~arguments)
   | Any_table _ -> Compiled (Table (Lower.any_table context key))
   | Table _ -> Compiled (Table (Lower.table context key))
-  | Real_evidence capability -> Compiled (Evidence (Lower.real_evidence context capability))
 
 (* What an instance compiles to, or for a constant whose value does not
    fold, that its evaluator is to be run, which no query can do, since
@@ -214,8 +221,7 @@ let test_key_query =
               [
                 Text "truss test";
                 Cbor.int Lir.version;
-                Cbor.Array
-                  [ Cbor.int lowering.target.pointer_bytes; Cbor.int lowering.target.usize_bytes ];
+                target_key lowering.target;
                 Bytes (Query.demand database (Lazy.force reach) (lowering, Lower.test_key path));
               ])))
 
@@ -840,8 +846,7 @@ let run_key t root =
           [
             Text "truss code run while compiling";
             Cbor.int Lir.version;
-            Cbor.Array
-              [ Cbor.int t.lowering.target.pointer_bytes; Cbor.int t.lowering.target.usize_bytes ];
+            target_key t.lowering.target;
             Bytes (Query.demand t.database (Lazy.force reach) (t.lowering, root));
           ]))
 

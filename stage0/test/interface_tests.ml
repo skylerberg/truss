@@ -118,6 +118,9 @@ let () =
   test "deriving needs every field to implement the trait" (fun () ->
       one_diagnostic "type Opaque(x: Int64)\n\ntype Point(inner: Opaque)\n  derives Equal\n"
         "types.cannot_derive");
+  test "only a record derives Default" (fun () ->
+      one_diagnostic "type Light =\n  | Off\n  | On\n  derives Default\n" "types.cannot_derive";
+      no_diagnostics [ ("app::main", "type Point(x: Int64, y: Int64)\n  derives Default\n") ]);
   test "deriving Ordered needs Equal derived too" (fun () ->
       one_diagnostic "type Point(x: Int64)\n  derives Ordered\n" "types.cannot_derive");
   test "a generic type derives under conditions on its parameters" (fun () ->
@@ -251,7 +254,13 @@ let () =
       | found -> fail "found [%s]" (String.concat "; " found));
   test "a trait cannot redeclare a method of a trait it requires" (fun () ->
       one_diagnostic "trait Sorted: Ordered {\n  fn compare(self, other: Self) -> Ordering\n}\n"
-        "types.redeclared_method")
+        "types.redeclared_method");
+  test "a trait may add a version of a method of a trait it requires" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "trait Changeable: Iterable {\n  fn each(mut self) yields mut Self.Element\n}\n" );
+        ])
 
 (* Properties *)
 
@@ -523,6 +532,20 @@ let () =
       in
       let signature = at database (Types.named (app "FixedClock") []) clock "now" in
       match signature.uses with [ Capability _ ] -> () | uses -> fail "%d uses" (List.length uses))
+
+(* Real implementations *)
+
+let () =
+  test "a capability's real implementation is the one standard::system holds" (fun () ->
+      let database = setup [] in
+      match Interface.Impls.real_implementation database (standard [ "capabilities" ] "Clock") with
+      | Some (Impl { module_ = { package = "standard"; modules = "system" :: _ }; _ }) -> ()
+      | Some impl -> fail "found %s" (Path.show impl)
+      | None -> fail "none found");
+  test "a trait that is no capability has no real implementation" (fun () ->
+      let database = setup [] in
+      if Option.is_some (Interface.Impls.real_implementation database (standard [ "core" ] "Equal"))
+      then fail "found one")
 
 (* Incremental work *)
 

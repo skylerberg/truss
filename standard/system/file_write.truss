@@ -1,0 +1,26 @@
+use standard::capabilities
+use standard::system::handles
+
+internal type SystemFileWrite()
+
+impl FileWrite for SystemFileWrite {
+  fn write(self, file: Path, contents: Bytes) -> Result[Unit, FileError] {
+    var handle = handles::open_to_write_from_empty(file)?
+    handles::write_all(mut handle, bytes: contents.data.elements())
+  }
+
+  fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, FileError] {
+    var handle = handles::open_to_write_from_empty(file)?
+    handles::write_all(mut handle, bytes: contents.bytes)
+  }
+
+  fn write_with(
+    self,
+    file: Path,
+    write: (fn(mut capabilities::FileWriter) -> Result[Unit, FileError] uses FileWrite),
+  ) -> Result[Unit, FileError] {
+    let handle = handles::open_to_write_from_empty(file)?
+    var writer = capabilities::FileWriter(handle: own handle)
+    write(mut writer)
+  }
+}

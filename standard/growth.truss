@@ -1,0 +1,32 @@
+use standard::intrinsic
+
+internal fn reserve[Element](storage: mut intrinsic::Storage[Element], additional: USize)
+  ensures intrinsic::storage_capacity(storage) >= intrinsic::storage_length(storage) + additional
+  ensures identical(intrinsic::storage_model(storage), old(intrinsic::storage_model(storage)))
+  cost amortized time O(additional)
+{
+  let length = intrinsic::storage_length(storage)
+  let current = intrinsic::storage_capacity(storage)
+  if additional > USize.maximum / 2 - length {
+    intrinsic::crash("a storage cannot hold that many elements".slice())
+  }
+  let needed = length + additional
+  if needed > current {
+    var capacity = current * 2
+    if capacity < needed {
+      capacity = needed
+    }
+    if capacity < 4 {
+      capacity = 4
+    }
+    intrinsic::storage_set_capacity(mut storage, capacity: capacity)
+  }
+}
+
+internal fn push[Element](storage: mut intrinsic::Storage[Element], value: own Element)
+  ensures identical(intrinsic::storage_model(storage), old(intrinsic::storage_model(storage)).append(value))
+  cost amortized time O(1)
+{
+  reserve(mut storage, additional: 1)
+  intrinsic::storage_push(mut storage, value: own value)
+}

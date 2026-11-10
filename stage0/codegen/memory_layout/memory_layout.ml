@@ -1,9 +1,9 @@
 let bug format = Compiler_bug.bug ~stage:"Memory_layout" format
 
-type target = { pointer_bytes : int; usize_bytes : int }
+type target = { pointer_bytes : int; usize_bytes : int; os : Libc.os }
 
-let target_64 = { pointer_bytes = 8; usize_bytes = 8 }
-let target_32 = { pointer_bytes = 4; usize_bytes = 4 }
+let target_64 os = { pointer_bytes = 8; usize_bytes = 8; os }
+let target_32 os = { pointer_bytes = 4; usize_bytes = 4; os }
 
 type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
 

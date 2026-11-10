@@ -307,6 +307,16 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
                              shown)
                     end
                   else begin
+                    (* A derived [Default] is each field's, which only a
+                       record has: no variant of a sum is its default. *)
+                    (if trait_named trait "Default" then
+                       match interface.shape with
+                       | Sum _ ->
+                           report state Cannot_derive written.span
+                             "`Default` is derived as each field's default, so only a record can \
+                              derive it: no variant of this type is its default. Write the `impl`, \
+                              which says which variant is."
+                       | Record _ | Todo_type | Builtin_type _ | Error_shape _ -> ());
                     if trait_named trait "Ordered" || trait_named trait "Hash" then
                       if
                         not
@@ -360,7 +370,11 @@ let check_trait_cycle state (requires : path_type list) =
       | [] -> ())
   | _ -> ()
 
-let check_redeclared state (name : name) ~(trait_path : Path.t) (trait : T.trait_interface) =
+(* A method is its name and how it takes [self], so a trait may add a
+   version of a method that a trait it requires declares, and may not
+   declare the same version again. *)
+let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path : Path.t)
+    (trait : T.trait_interface) =
   let inherited =
     List.concat_map
       (fun (required : T.trait_reference) ->
@@ -369,7 +383,8 @@ let check_redeclared state (name : name) ~(trait_path : Path.t) (trait : T.trait
             match Query.demand state.database Environment.trait_interface bound.trait with
             | Some interface ->
                 List.map
-                  (fun (method_ : T.trait_method) -> (method_.method_name, bound.trait))
+                  (fun (method_ : T.trait_method) ->
+                    ((method_.method_name, method_.method_receiver), bound.trait))
                   interface.methods
             | None -> [])
           (Properties.bound_closure state.database
@@ -377,12 +392,13 @@ let check_redeclared state (name : name) ~(trait_path : Path.t) (trait : T.trait
              required))
       trait.requires
   in
-  match List.assoc_opt name.text inherited with
+  match List.assoc_opt (name.text, receiver) inherited with
   | Some from ->
       report state Redeclared_method name.span
         (Printf.sprintf
-           "`%s` already declares `%s`, so a trait that requires it cannot declare it again."
-           (Path.show from) name.text)
+           "`%s` already declares a `%s` that takes %s, so a trait that requires it cannot declare \
+            it again."
+           (Path.show from) name.text (Path.show_receiver receiver))
   | None -> ()
 
 (* [impl]s *)
@@ -757,7 +773,9 @@ let check state =
                   (Query.demand database Environment.lowered container) )
             with
             | Some { kind = Trait _; _ }, Some (Trait_interface trait) ->
-                check_redeclared state name ~trait_path:container.path trait
+                check_redeclared state name
+                  (Names.receiver signature.parameters)
+                  ~trait_path:container.path trait
             | Some { kind = Impl { trait_; _ }; _ }, Some (Impl_interface impl) ->
                 check_impl_method state name (Names.receiver signature.parameters) given impl trait_
             | _ -> ())

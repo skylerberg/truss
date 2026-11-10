@@ -1,0 +1,18 @@
+use standard::intrinsic
+
+internal type SystemClock()
+
+impl Clock for SystemClock {
+  fn now(self) -> Instant {
+    var seconds: Int64 = 0
+    var nanoseconds: Int64 = 0
+    let _ = intrinsic::libc_clock_gettime(
+      intrinsic::libc_clock_realtime(),
+      seconds: mut seconds,
+      nanoseconds: mut nanoseconds,
+    )
+    let whole = if seconds > 9223372035 { 9223372035 } else if seconds < -9223372035 { -9223372035 } else { seconds }
+    let part = if nanoseconds < 0 { 0 } else if nanoseconds > 999999999 { 999999999 } else { nanoseconds }
+    Instant(nanoseconds: whole * 1000000000 + part)
+  }
+}

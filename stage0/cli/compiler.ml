@@ -12,6 +12,12 @@ let toolchain () =
   | Ok toolchain -> toolchain
   | Error message -> Project.cannot_run "%s" message
 
+(* Stage0 builds programs for the system it runs on. *)
+let target () =
+  match Libc.host with
+  | Some os -> Memory_layout.target_64 os
+  | None -> Project.cannot_run "Stage0 builds programs only for Linux and macOS."
+
 (* A development build compiles the package at -O1, one C file an
    instance. A release build compiles at -O2 and optimizes across every
    file as they are linked. A build checks at run time what the prover
@@ -42,6 +48,6 @@ let create ?(sanitize = false) ?(checks = true) (project : Project.t) build =
   let own = List.map snd (Database.packages project.session) in
   Compile.create ~checks ~file_name ~want:(Database.want project.session)
     ~worked_on:(fun package -> List.mem package own)
-    project.context Memory_layout.target_64 toolchain
+    project.context (target ()) toolchain
     (Build.cache (Database.objects_directory ()))
     settings

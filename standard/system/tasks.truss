@@ -1,0 +1,5 @@
+internal type SystemTasks()
+
+impl Tasks for SystemTasks {
+  fn yield_now(self) {}
+}

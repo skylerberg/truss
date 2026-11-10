@@ -16,9 +16,6 @@ type key =
           method on its implementation with the evidence that implementation captured *)
   | Table of { impl : Path.t; type_arguments : Ground.argument list }
       (** A capability [impl]'s table of entries, one for each of the capability's methods *)
-  | Real_evidence of Path.t
-      (** The evidence for the real implementation of a standard capability, which a program's
-          [main] is given *)
   | Program_main of Path.t  (** The C [main]'s Truss side: it calls the program's [main] *)
   | Any_entry of key
       (** The entry for an [impl]'s method in an [any] table: takes a pointer to the value *)
@@ -36,7 +33,6 @@ let rank = function
   | Adapter _ -> 6
   | Entry _ -> 7
   | Table _ -> 8
-  | Real_evidence _ -> 9
   | Program_main _ -> 10
   | Any_entry _ -> 11
   | Any_table _ -> 12
@@ -67,8 +63,7 @@ let rec compare a b =
   | Table a, Table b ->
       Path.compare a.impl b.impl >>= fun () ->
       Ground.compare_arguments a.type_arguments b.type_arguments
-  | Real_evidence a, Real_evidence b | Program_main a, Program_main b | Evaluator a, Evaluator b ->
-      Path.compare a b
+  | Program_main a, Program_main b | Evaluator a, Evaluator b -> Path.compare a b
   | Template_check a, Template_check b ->
       Path.compare a.from_template b.from_template >>= fun () ->
       List.compare String.compare a.texts b.texts
@@ -104,7 +99,6 @@ let rec encode ?(path = Ground.encode_path) key =
   | Any_table { impl; type_arguments } -> tagged 12 [ path impl; arguments type_arguments ]
   | Entry key -> tagged 7 [ encode ~path key ]
   | Table { impl; type_arguments } -> tagged 8 [ path impl; arguments type_arguments ]
-  | Real_evidence capability -> tagged 9 [ path capability ]
   | Program_main main -> tagged 10 [ path main ]
 
 (* Mangling. A Truss name is either [UpperCamelCase], with no [_], or
@@ -211,7 +205,6 @@ let rec mangle = function
       marker "Vtable" ^ path impl ^ mangle_arguments type_arguments
   | Entry key -> marker "Entry" ^ mangle key
   | Table { impl; type_arguments } -> marker "Table" ^ path impl ^ mangle_arguments type_arguments
-  | Real_evidence capability -> marker "Evidence" ^ path capability
   | Program_main main -> marker "Program" ^ path main
 
 let limit = 200
@@ -250,7 +243,6 @@ let rec to_string = function
       "any table " ^ Path.show impl ^ arguments_to_string type_arguments
   | Entry key -> "entry " ^ to_string key
   | Table { impl; type_arguments } -> "table " ^ Path.show impl ^ arguments_to_string type_arguments
-  | Real_evidence capability -> "real evidence " ^ Path.show capability
   | Program_main main -> "program " ^ Path.show main
 
 and arguments_to_string = function

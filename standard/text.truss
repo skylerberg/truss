@@ -1,4 +1,6 @@
+use standard::growth
 use standard::intrinsic
+use standard::writing
 
 public opaque type String(storage: intrinsic::Storage[UInt8])
   derives Copyable
@@ -65,13 +67,14 @@ public fn String.is_empty(self) -> Bool
 public fn String.push(mut self, text: StringSlice)
   ensures identical(self.model(), old(self.model()).concatenate(text.model()))
 {
-  intrinsic::storage_reserve(mut self.storage, additional: text.length())
+  growth::reserve(mut self.storage, additional: text.length())
   for index in 0..text.length()
     invariant self.model().length() == old(self.model()).length() + yielded.length()
     invariant forall i in 0..old(self.model()).length() =>
       identical(self.model()[i], old(self.model())[i])
     invariant forall i in 0..yielded.length() =>
       identical(self.model()[old(self.model()).length() + i], text.model()[i])
+    invariant intrinsic::storage_capacity(self.storage) >= old(self.model()).length() + text.length()
   {
     intrinsic::storage_push(mut self.storage, value: intrinsic::view_at(text.bytes, index: index))
   }
@@ -125,13 +128,13 @@ fn replaced(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
   while at < intrinsic::view_length(bytes) {
     let step = utf8_sequence(bytes, at)
     if step == 0 {
-      intrinsic::storage_push(mut fixed, value: 239)
-      intrinsic::storage_push(mut fixed, value: 191)
-      intrinsic::storage_push(mut fixed, value: 189)
+      growth::push(mut fixed, value: 239)
+      growth::push(mut fixed, value: 191)
+      growth::push(mut fixed, value: 189)
       at += 1
     } else {
       for index in at..at + step {
-        intrinsic::storage_push(mut fixed, value: intrinsic::view_at(bytes, index: index))
+        growth::push(mut fixed, value: intrinsic::view_at(bytes, index: index))
       }
       at += step
     }
@@ -212,49 +215,27 @@ public fn TextBuilder.finish(own self) -> String {
 }
 
 internal fn TextBuilder.write_byte(mut self, byte: UInt8) {
-  intrinsic::storage_push(mut self.text.storage, value: byte)
+  writing::byte(mut self.text.storage, value: byte)
 }
 
-internal fn TextBuilder.write_float[Value](mut self, value: Value) {
-  intrinsic::write_float(mut self.text.storage, value: value)
+internal fn TextBuilder.write_float32(mut self, value: Float32) {
+  writing::float32(mut self.text.storage, value: value)
+}
+
+internal fn TextBuilder.write_float64(mut self, value: Float64) {
+  writing::float64(mut self.text.storage, value: value)
 }
 
 internal fn TextBuilder.write_character(mut self, character: Character) {
-  let code: UInt32 = intrinsic::convert(character)
-  if code < 128 {
-    mut self.write_byte(intrinsic::convert(code))
-  } else if code < 2048 {
-    mut self.write_byte(intrinsic::convert(192 | (code >> 6)))
-    mut self.write_byte(intrinsic::convert(128 | (code & 63)))
-  } else if code < 65536 {
-    mut self.write_byte(intrinsic::convert(224 | (code >> 12)))
-    mut self.write_byte(intrinsic::convert(128 | ((code >> 6) & 63)))
-    mut self.write_byte(intrinsic::convert(128 | (code & 63)))
-  } else {
-    mut self.write_byte(intrinsic::convert(240 | (code >> 18)))
-    mut self.write_byte(intrinsic::convert(128 | ((code >> 12) & 63)))
-    mut self.write_byte(intrinsic::convert(128 | ((code >> 6) & 63)))
-    mut self.write_byte(intrinsic::convert(128 | (code & 63)))
-  }
+  writing::character(mut self.text.storage, value: character)
 }
 
 internal fn TextBuilder.write_unsigned(mut self, value: UInt64) {
-  if value >= 10 {
-    mut self.write_unsigned(value / 10)
-  }
-  let digit: UInt8 = intrinsic::convert(value % 10)
-  mut self.write_byte(digit + 48)
+  writing::unsigned(mut self.text.storage, value: value)
 }
 
 internal fn TextBuilder.write_signed(mut self, value: Int64) {
-  if value < 0 {
-    mut self.write_byte(45)
-    let magnitude: UInt64 = intrinsic::convert(intrinsic::negate(value + 1))
-    mut self.write_unsigned(magnitude + 1)
-  } else {
-    let magnitude: UInt64 = intrinsic::convert(value)
-    mut self.write_unsigned(magnitude)
-  }
+  writing::signed(mut self.text.storage, value: value)
 }
 
 impl Equal for String {
