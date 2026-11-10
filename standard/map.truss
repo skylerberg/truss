@@ -37,3 +37,185 @@ public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: 
     mut self.entries.insert_at(position, item: Entry(key: own key, value: own value))
   }
 }
+
+internal fn Map[Key: Hash + Ordered, Value].empty() -> Map[Key, Value] {
+  Map(entries: [])
+}
+
+public fn Map[Key: Hash + Ordered, Value].seeded() -> Map[Key, Value]
+  uses Random
+  ensures result.length() == 0
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].collect[Source: Cursor[Element = Entry[Key, Value]]](
+  source: own Source,
+) -> Map[Key, Value] {
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
+  cost time O(1)
+{
+  self.length() == 0
+}
+
+public fn Map[Key: Hash + Ordered, Value].get(self, key: Key) lends Option[Value]
+  ensures (result is Some(_)) == self.contains(key)
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].replace(mut self, key: own Key, value: own Value) -> Option[Value]
+  ensures self.contains(key)
+  ensures (result is Some(_)) == old(self.contains(key))
+  cost amortized time O(log(self.length()))
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].get_or_insert(mut self, key: own Key, default: own Value) lends mut Value
+  cost amortized time O(log(self.length()))
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].update[capability Granted](
+  mut self,
+  key: own Key,
+  default: own Value,
+  change: (fn(mut Value) uses Granted cost time finite),
+)
+  uses Granted
+  ensures self.contains(key)
+  cost calls(change) == 1
+  cost amortized time O(log(self.length()) + time(change))
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].remove(mut self, key: Key)
+  ensures !self.contains(key)
+  cost time O(log(old(self.length())))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].take(mut self, key: Key) -> Option[Value]
+  ensures !self.contains(key)
+  ensures (result is Some(_)) == old(self.contains(key))
+  cost time O(log(old(self.length())))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].clear(mut self)
+  ensures self.length() == 0
+  cost time O(old(self.length()))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].reserve(mut self, additional: USize)
+  ensures self.length() == old(self.length())
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].retain(
+  mut self,
+  keep: (fn(Entry[Key, Value]) -> Bool cost time finite),
+)
+  ensures self.length() <= old(self.length())
+  cost time O(old(self.length()) * time(keep))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].extend[Source: Cursor[Element = Entry[Key, Value]]](
+  mut self,
+  entries: own Source,
+) {
+  todo
+}
+
+impl Index for Map[Key: Hash + Ordered, Value] {
+  type Key = Key
+  type Output = Value
+
+  fn at(self, key: Key) lends Value
+    requires self.contains(key)
+    cost time O(log(self.length()))
+  {
+    todo
+  }
+
+  fn at(mut self, key: Key) lends mut Value
+    requires self.contains(key)
+    cost time O(log(self.length()))
+  {
+    todo
+  }
+}
+
+impl Iterable for Map[Key: Hash + Ordered, Value] {
+  type Element = Entry[Key, Value]
+
+  fn each(self) yields Entry[Key, Value]
+    ensures finished ==> yielded.length() == self.length()
+    cost time O(self.length())
+  {
+    todo
+  }
+}
+
+public fn Map[Key: Hash + Ordered, Value].each(own self) yields own Entry[Key, Value]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].keys(self) yields Key
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].values(self) yields Value
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn Map[Key: Hash + Ordered, Value].values(mut self) yields mut Value
+  cost time O(self.length())
+{
+  todo
+}
+
+impl Equal for Map[Key: Hash + Ordered, Value: Equal] {
+  fn equal(self, other: Map[Key, Value]) -> Bool {
+    todo
+  }
+}
+
+impl Default for Map[Key: Hash + Ordered, Value] {
+  fn default() -> Map[Key, Value] {
+    [:]
+  }
+}
+
+impl From[List[Entry[Key, Value]]] for Map[Key: Hash + Ordered, Value] {
+  fn from(value: own List[Entry[Key, Value]]) -> Map[Key, Value] {
+    todo
+  }
+}
