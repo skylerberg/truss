@@ -1,144 +1,80 @@
 (* Moves, loans, and views, within each function.
 
-   Truss has only structured control flow, so the analysis follows the
-   tree in evaluation order: the places that may have been moved flow
-   forward, joined by union where branches meet, and loops run until
-   nothing changes. A loan is live while the value that holds it may still
-   be used: a later use reaches a point unless the two are in different
-   arms of one branch, and a loop's back edge reaches the uses before a
-   point in its body. *)
+   The check reads a definition's core form. [Graph] builds the control-flow
+   graph of the body. [Moves] and [Views] run their analyses on it, and
+   [Yield_rules] checks the rules on [yield]. *)
 
-open Syntax
-module T = Types
-module C = Checked
-open Context
-open Flow
-open Walk
-open Prepare
-open Yields
+type pulling = Yield_rules.pulling = Pullable | Yields_mut | Recursive | Yields_places
 
-type pulling = Yields.pulling = Pullable | Yields_mut | Recursive | Yields_places
+let pullable = Yield_rules.pullable
 
-let pullable = Yields.pullable
+type result = {
+  diagnostics : Diagnostic.t list;
+  moves : Core.id list;
+  obligations : Checked.obligation list;
+}
 
-type result = { diagnostics : Diagnostic.t list; moves : id list; obligations : C.obligation list }
-
-(* The receiver a written signature declares. *)
-let receiver_of (written : signature) : Path.receiver =
+(* [None] if the definition has no core form. *)
+let check database (key : Resolve.Names.key) : result option =
   match
-    List.find_map
-      (fun (parameter : parameter) ->
-        match parameter.kind with Self_parameter mode -> Some mode | _ -> None)
-      written.parameters
-  with
-  | None -> Static
-  | Some None -> Read
-  | Some (Some Mut) -> Mut
-  | Some (Some Own) -> Own
-
-let name_of (written : signature) =
-  match written.name with Plain_name name | Member_name (_, name) -> name
-
-(* Sets up the context for one body: its parameters' modes, which the
-   lowered signature gives, and [self]'s. *)
-let enter context (written : signature) (lowered : T.signature option) =
-  let named =
-    match lowered with
-    | Some lowered ->
-        List.filter_map
-          (fun (parameter : parameter) ->
-            match parameter.kind with
-            | Named_parameter { name; _ } ->
-                Option.map
-                  (fun (info : T.parameter_info) -> (name.id, info.mode))
-                  (List.find_opt
-                     (fun (info : T.parameter_info) -> info.name = name.text)
-                     lowered.parameters)
-            | _ -> None)
-          written.parameters
-    | None -> []
-  in
-  List.iter
-    (fun (id, mode) ->
-      Hashtbl.replace context.kinds id
-        (match mode with T.Own -> Owned | Mut -> Mut_access | Read -> Viewing))
-    named;
-  context.parameters <- List.map fst named;
-  context.mutable_parameters <-
-    List.filter_map (fun (id, mode) -> if mode = T.Mut then Some id else None) named;
-  context.self_kind <-
-    (match receiver_of written with
-    | Own -> Some Owned
-    | Mut -> Some Mut_access
-    | Read -> Some Viewing
-    | Static -> None);
-  context.self_type <- Option.bind lowered (fun lowered -> Option.map snd lowered.receiver)
-
-let check database (key : Resolve.Names.key) =
-  match
-    ( Query.demand database Resolve.Names.definition key,
-      Query.demand database Resolve.resolved key,
-      Query.demand database Infer.checked key,
+    ( Query.demand database Infer.core key,
+      Query.demand database Resolve.Names.spans key,
+      Query.demand database Resolve.Names.text key,
       Query.demand database Interface.Environment.lowered key )
   with
-  | Some definition, Some resolved, Some checked, Some lowered ->
-      let names = Hashtbl.create 32 in
-      List.iter
-        (fun (name : name) -> Hashtbl.replace names name.id name.text)
-        (Syntax_walk.names definition);
-      let nodes = Hashtbl.create 64 in
-      let rec visit (value : expression) =
-        Hashtbl.replace nodes value.id value;
-        Syntax_walk.children visit value
-      in
-      Syntax_walk.definition visit definition;
-      let context =
+  | Some form, Some spans, Some text, Some lowered ->
+      let context : Context.context =
         {
           database;
-          definition;
-          resolved;
-          checked = checked.checked;
           bounds =
             (fun parameter -> Option.value ~default:[] (List.assoc_opt parameter lowered.bounds));
+          spans;
+          text;
+          names = Hashtbl.create 32;
           kinds = Hashtbl.create 32;
-          names;
-          nodes;
+          types = Hashtbl.create 32;
           parameters = [];
-          mutable_parameters = [];
-          self_kind = None;
-          self_type = None;
-          paths = Hashtbl.create 64;
-          loops = Hashtbl.create 64;
-          uses = Hashtbl.create 32;
-          declared = Hashtbl.create 32;
+          mut_parameters = [];
           diagnostics = [];
-          reported = [];
           moves = [];
-          obligations = [];
-          marks = Hashtbl.create 8;
+          disjoint = [];
         }
       in
-      (* A function or a method with a body, with the signature its
-         parameters' modes come from. *)
-      let method_body (written : signature) lowered (body : block) =
-        enter context written lowered;
-        let state = new_state context in
-        let flow = function_body state body in
-        check_restored state flow body.span;
-        match written.result with
-        | Some (Lends _) -> lends_count context body ~report_span:(name_of written).span
-        | _ -> ()
+      Context.collect context form.definition;
+      (* A function for specifications only never runs, so it moves and
+         borrows nothing. *)
+      let runs =
+        match lowered.interface with
+        | Function_interface signature | Theorem_interface signature ->
+            not signature.specification_only
+        | _ -> true
       in
-      if Option.is_some (Infer.clean database key) then begin
-        prepare context;
-        (match (definition.kind, lowered.interface) with
-        | Function { body; signature = written }, Function_interface signature ->
-            method_body written (Some signature) body
-        | Function { body; signature = written }, _ -> method_body written None body
-        | (Test { body; _ } | Theorem { body; _ } | Law_proof { body; _ }), _ ->
-            ignore (block (new_state context) (Some []) body)
-        | _ -> ());
-        check_pulls context
+      (if runs then
+         match
+           Graph.of_definition ~plain:(Context.plain context) ~is_view:(Context.is_view context)
+             form.definition
+         with
+         | Some graph ->
+             Moves.check context graph;
+             Views.check context graph
+         | None -> ());
+      if runs then begin
+        Yield_rules.check_pulls context form.definition;
+        (* A lending method yields exactly once on every path. The report
+           is at the method's name. *)
+        match
+          (form.definition, lowered.interface, Query.demand database Resolve.Names.definition key)
+        with
+        | ( Function { body = Some body; _ },
+            Function_interface { output = Lends _; _ },
+            Some
+              {
+                kind =
+                  Function { signature = { name = Plain_name name | Member_name (_, name); _ }; _ };
+                _;
+              } ) ->
+            Yield_rules.check_lends context body ~name:name.span
+        | _ -> ()
       end;
       Some
         {
@@ -148,7 +84,10 @@ let check database (key : Resolve.Names.key) =
                 compare (left.span, left.message) (right.span, right.message))
               context.diagnostics;
           moves = List.sort_uniq compare context.moves;
-          obligations = List.rev context.obligations;
+          obligations =
+            List.rev_map
+              (fun (first, second) -> Checked.Disjoint { first; second })
+              context.disjoint;
         }
   | _ -> None
 
@@ -163,5 +102,3 @@ let diagnostics database module_ =
       match Query.demand database ownership key with
       | Some result -> result.diagnostics
       | None -> [])
-
-module On_core = Check

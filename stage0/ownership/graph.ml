@@ -56,6 +56,11 @@ type action =
       (** The places passed to one call, in argument order. [lent] lists the arguments that are
           parts lent by a call: the argument's position, the place that lends the part, and how. *)
 
+(* The points with an index from [first] up to, but not including, [limit].
+   Points are numbered in the order they are created, so the points of a
+   statement are a range. *)
+type range = { first : int; limit : int }
+
 type point = {
   action : action;
   origin : Core.origin;
@@ -66,6 +71,9 @@ type point = {
 type t = {
   points : point array;
   entries : int list;  (** The [Enter] points: the definition's body first, then each lambda. *)
+  parallel_blocks : range list list;  (** For each [parallel] block, the points of each branch. *)
+  parallel_loops : (range * Core.local list) list;
+      (** For each [parallel for], the points of its body and the locals that its pattern binds. *)
 }
 
 type builder = {
@@ -77,6 +85,8 @@ type builder = {
           that [continue] it. *)
   mutable captured : Core.local list;  (** The captures of the enclosing lambdas. *)
   mutable loans : loan list;
+  mutable parallel_blocks : range list list;
+  mutable parallel_loops : (range * Core.local list) list;
   plain : T.ty -> bool;
   is_view : T.ty -> bool;
 }
@@ -474,16 +484,45 @@ and use builder frontier (node : Core.expression) (found : Core.place) ~returned
         emit builder frontier (Take_lent node.type_) node.origin
       else frontier
 
-(* The value that a function returns. *)
+(* The value that a function returns. The value of a block, an [if], or a
+   [match] that is returned is returned too. *)
 and returned builder frontier (value : Core.expression) =
-  let frontier =
-    match value.kind with
-    | Use found -> use builder frontier value found ~returned:true
-    | _ -> expression builder frontier value
-  in
-  if builder.is_view value.type_ then
-    emit builder frontier (Return_view (viewed builder value)) value.origin
-  else frontier
+  match value.kind with
+  | Block body -> returned_block builder frontier body
+  | If { condition; then_; else_ = Some else_ } ->
+      let after = expression builder frontier condition in
+      returned_block builder after then_ @ returned_block builder after else_
+  | Match { scrutinees; arms; _ } ->
+      let after =
+        List.fold_left
+          (fun frontier scrutinee -> operand builder frontier Read scrutinee)
+          frontier scrutinees
+      in
+      List.concat_map
+        (fun (arm : Core.arm) ->
+          let frontier =
+            emit builder after (Bind (List.concat_map pattern_locals arm.patterns)) arm.origin
+          in
+          let frontier =
+            match arm.guard with
+            | Some guard -> expression builder frontier guard
+            | None -> frontier
+          in
+          returned_block builder frontier arm.body)
+        arms
+  | _ ->
+      let frontier =
+        match value.kind with
+        | Use found -> use builder frontier value found ~returned:true
+        | _ -> expression builder frontier value
+      in
+      if builder.is_view value.type_ then
+        emit builder frontier (Return_view (viewed builder value)) value.origin
+      else frontier
+
+and returned_block builder frontier (body : Core.block) =
+  let frontier = List.fold_left (statement builder) frontier body.statements in
+  match body.value with Some value -> returned builder frontier value | None -> frontier
 
 and block builder frontier (body : Core.block) =
   let frontier = List.fold_left (statement builder) frontier body.statements in
@@ -540,9 +579,21 @@ and statement_parts builder frontier (node : Core.statement) =
                 (Place.of_core cursor) )
       in
       loop builder frontier ~bound:(pattern_locals pattern) ~held ~condition:None body node.origin
+        ~parallel:(match node.kind with For { parallel; _ } -> parallel | _ -> false)
   | While { condition; body; _ } ->
       loop builder frontier ~bound:[] ~held:None ~condition:(Some condition) body node.origin
-  | Parallel branches -> List.fold_left (statement builder) frontier branches
+        ~parallel:false
+  | Parallel branches ->
+      let frontier, ranges =
+        List.fold_left
+          (fun (frontier, ranges) branch ->
+            let first = builder.count in
+            let frontier = statement builder frontier branch in
+            (frontier, { first; limit = builder.count } :: ranges))
+          (frontier, []) branches
+      in
+      builder.parallel_blocks <- List.rev ranges :: builder.parallel_blocks;
+      frontier
   | Proof _ -> frontier
   | Assert { value; _ } -> expression builder frontier value
   | Yield { mode; part } -> operand builder frontier mode part
@@ -595,7 +646,7 @@ and let_ builder frontier (node : Core.statement) (pattern : Core.pattern) (valu
    evaluates its condition after the head, as a statement of its own. The
    loop ends from the head or the condition, and from every [break]. A
    loop over a place lends the place for the body. *)
-and loop builder frontier ~bound ~held ~condition (body : Core.block) origin =
+and loop builder frontier ~bound ~held ~condition ~parallel (body : Core.block) origin =
   match frontier with
   | [] -> []
   | _ ->
@@ -613,7 +664,11 @@ and loop builder frontier ~bound ~held ~condition (body : Core.block) origin =
         | None -> [ head ]
       in
       builder.loans <- Option.to_list held @ loans;
+      let first = builder.count in
       let body_end = block builder tested body in
+      if parallel then
+        builder.parallel_loops <-
+          ({ first; limit = builder.count }, bound) :: builder.parallel_loops;
       builder.loans <- loans;
       builder.loops <- List.tl builder.loops;
       link builder (body_end @ !continues) head;
@@ -638,6 +693,8 @@ let of_definition ~plain ~is_view (definition : Core.definition) : t option =
           loops = [];
           captured = [];
           loans = [];
+          parallel_blocks = [];
+          parallel_loops = [];
           plain;
           is_view;
         }
@@ -654,5 +711,7 @@ let of_definition ~plain ~is_view (definition : Core.definition) : t option =
       {
         points = Array.init builder.count (Hashtbl.find builder.table);
         entries = entry :: List.rev builder.entries;
+        parallel_blocks = List.rev builder.parallel_blocks;
+        parallel_loops = List.rev builder.parallel_loops;
       })
     body
