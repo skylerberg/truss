@@ -129,13 +129,8 @@ impl Iterable for Array[Element, count: USize] {
 public fn Array[Element, count: USize].each(mut self) yields mut Element
   cost time O(count)
 {
-  var index: USize = 0
-  while index < count
-    invariant index <= count
-    decreases count - index
-  {
+  for index in 0..count {
     yield mut self[index]
-    index += 1
   }
 }
 

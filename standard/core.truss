@@ -149,6 +149,8 @@ public trait Copyable {
 
 public trait Plain: Copyable {}
 
+public trait Storable {}
+
 public trait Add[Right] {
   type Output
   fn add(self, right: Right) -> Self.Output
@@ -198,6 +200,10 @@ public trait Index {
 
   fn at(mut self, key: Self.Key) lends mut Self.Output
     requires self.contains_key(key)
+}
+
+public trait IndexAssign: Index {
+  fn assign(mut self, key: own Self.Key, value: own Self.Output)
 }
 
 public trait Iterable {

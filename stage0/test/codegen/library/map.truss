@@ -1,0 +1,165 @@
+use standard::map
+
+fn order(map: Map[String, Int64]) -> String {
+  var text = ""
+  for key in map.keys() {
+    mut text.push(key.slice())
+    mut text.push(" ")
+  }
+  text
+}
+
+fn total(map: Map[String, Int64]) -> Int64 {
+  var sum: Int64 = 0
+  for value in map.values() {
+    sum += value
+  }
+  sum
+}
+
+fn sample() -> Map[String, Int64] {
+  var made: Map[String, Int64] = [:]
+  mut made.insert("b", value: 2)
+  mut made.insert("a", value: 1)
+  mut made.insert("c", value: 3)
+  made
+}
+
+test "a map holds a value under each key that was inserted" {
+  var ages: Map[String, Int64] = [:]
+  assert ages.is_empty() && ages.length() == 0
+  mut ages.insert("ada", value: 36)
+  mut ages.insert("grace", value: 85)
+  assert ages.length() == 2 && !ages.is_empty()
+  assert ages.contains("ada") && ages.contains("grace") && !ages.contains("alan")
+  assert ages.get("ada") == Some(36)
+  assert ages.get("alan") is None
+  mut ages.insert("ada", value: 37)
+  assert ages.length() == 2 && ages.get("ada") == Some(37)
+}
+
+test "a map literal is indexed by its keys, and assigning to a key it holds replaces the value" {
+  var ports: Map[String, Int64] = ["http": 80, "https": 443]
+  assert ports.length() == 2 && ports["http"] == 80 && ports["https"] == 443
+  mut ports.insert("ftp", value: 21)
+  ports["http"] = 8080
+  assert ports.length() == 3 && ports["ftp"] == 21 && ports["http"] == 8080
+  let empty: Map[String, Int64] = [:]
+  assert empty.length() == 0
+}
+
+test "a map is walked in the order its keys were first inserted" {
+  var made = sample()
+  assert order(made) == "b a c "
+  mut made.insert("a", value: 10)
+  assert order(made) == "b a c "
+  mut made.remove("a")
+  assert order(made) == "b c "
+  mut made.insert("a", value: 1)
+  assert order(made) == "b c a "
+}
+
+test "replace gives back the value a key had" {
+  var made = sample()
+  assert mut made.replace("a", value: 5) == Some(1)
+  assert mut made.replace("d", value: 4) is None
+  assert made.length() == 4 && made.get("a") == Some(5) && made.get("d") == Some(4)
+}
+
+test "get_or_insert and update change the value under a key, inserting a default first" {
+  var counts: Map[String, Int64] = [:]
+  mut counts.get_or_insert("x", default: 0) += 1
+  mut counts.get_or_insert("x", default: 0) += 1
+  mut counts.get_or_insert("y", default: 7) += 1
+  assert counts.get("x") == Some(2) && counts.get("y") == Some(8)
+  mut counts.update("x", default: 0, change: fn(count) { count = count * 10 })
+  mut counts.update("z", default: 1, change: fn(count) { count = count * 10 })
+  assert counts.get("x") == Some(20) && counts.get("z") == Some(10) && counts.length() == 3
+}
+
+test "remove, take, clear, and retain take entries out of a map" {
+  var made = sample()
+  mut made.remove("missing")
+  assert made.length() == 3
+  mut made.remove("b")
+  assert made.length() == 2 && !made.contains("b")
+  assert mut made.take("a") == Some(1)
+  assert mut made.take("a") is None
+  assert made.length() == 1 && order(made) == "c "
+  var kept = sample()
+  mut kept.retain(fn(entry) { entry.value != 1 })
+  assert order(kept) == "b c "
+  mut kept.clear()
+  assert kept.is_empty() && !kept.contains("b")
+  mut kept.insert("again", value: 9)
+  assert kept.get("again") == Some(9)
+}
+
+test "a map's entries, keys, and values are walked, and its values changed in place" {
+  var made = sample()
+  var seen = ""
+  var sum: Int64 = 0
+  for entry in made {
+    mut seen.push(entry.key.slice())
+    sum += entry.value
+  }
+  assert seen == "bac" && sum == 6
+  for value in mut made.values() {
+    value = value * 2
+  }
+  assert total(made) == 12 && made.get("c") == Some(6)
+  var owned = ""
+  for entry in own made {
+    mut owned.push(entry.key.slice())
+  }
+  assert owned == "bac"
+}
+
+test "maps are equal when they hold equal values under equal keys, in any order" {
+  var first: Map[String, Int64] = ["a": 1, "b": 2]
+  var second: Map[String, Int64] = ["b": 2, "a": 1]
+  assert first == second
+  mut second.insert("b", value: 3)
+  assert first != second
+  mut second.insert("b", value: 2)
+  mut second.insert("c", value: 3)
+  assert first != second
+  mut first.insert("d", value: 3)
+  assert first != second
+}
+
+test "a map is made from a list or a cursor of entries, the last of a key winning" {
+  let entries: List[map::Entry[String, Int64]] = [
+    map::Entry(key: "a", value: 1),
+    map::Entry(key: "b", value: 2),
+    map::Entry(key: "a", value: 3),
+  ]
+  let made: Map[String, Int64] = Map.from(entries.copy())
+  assert made.length() == 2 && made.get("a") == Some(3) && order(made) == "a b "
+  var collected: Map[String, Int64] = Map.collect(entries.copy().each())
+  assert collected == made
+  let more: List[map::Entry[String, Int64]] = [map::Entry(key: "c", value: 4), map::Entry(key: "b", value: 5)]
+  mut collected.extend(more.copy().each())
+  assert order(collected) == "a b c " && collected.get("b") == Some(5)
+}
+
+test "a copy of a map changes on its own, and room is reserved without changing it" {
+  var made = sample()
+  var copied = made.copy()
+  mut copied.insert("d", value: 4)
+  mut made.reserve(100)
+  assert made.length() == 3 && copied.length() == 4 && order(made) == "b a c "
+  let roomy: Map[String, Int64] = Map.with_capacity(16)
+  let fresh: Map[String, Int64] = Map.default()
+  assert roomy.is_empty() && fresh.is_empty() && roomy == fresh
+}
+
+test "a map takes keys of other types" {
+  var squares: Map[Int64, Int64] = [:]
+  for number in 0..20 {
+    mut squares.insert(number, value: number * number)
+  }
+  assert squares.length() == 20 && squares[7] == 49 && squares.get(20) is None
+  mut squares.retain(fn(entry) { entry.key % 2 == 0 })
+  assert squares.length() == 10 && squares.contains(18) && !squares.contains(7)
+}

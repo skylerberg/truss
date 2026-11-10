@@ -38,24 +38,39 @@ public fn FixedEnvironment.new(platform: own Platform, current_directory: own Pa
 }
 
 public fn FixedEnvironment.with_variable(own self, name: StringSlice, value: StringSlice) -> FixedEnvironment {
-  todo
+  var changed = own self
+  mut changed.variables.insert(name.to_string(), value: value.to_string())
+  changed
 }
 
 public fn FixedEnvironment.with_location(own self, location: Location, path: own Path) -> FixedEnvironment {
-  todo
+  var changed = own self
+  mut changed.locations.insert(location, value: own path)
+  changed
 }
 
 public fn FixedEnvironment.with_zone(own self, name: StringSlice, rules: own List[UInt8], local: Bool = false) -> FixedEnvironment {
-  todo
+  var changed = own self
+  mut changed.zones.insert(name.to_string(), value: own rules)
+  if local {
+    changed.local_zone = Some(name.to_string())
+  }
+  changed
 }
 
 impl Environment for FixedEnvironment {
-  fn variable(self, name: StringSlice) -> Option[String] {
-    todo
+  fn variable(self, name: StringSlice) -> Option[String]
+  {
+    self.variables.get(name.to_string()).map(fn(found) { found.copy() })
   }
 
-  fn variables(self) -> List[Variable] {
-    todo
+  fn variables(self) -> List[Variable]
+  {
+    var listed: List[Variable] = List.with_capacity(self.variables.length())
+    for entry in self.variables {
+      mut listed.push(Variable(name: entry.key.copy(), value: entry.value.copy()))
+    }
+    listed
   }
 
   fn current_directory(self) -> Result[Path, SystemError] {
@@ -66,15 +81,17 @@ impl Environment for FixedEnvironment {
     self.platform.copy()
   }
 
-  fn location(self, location: Location) -> Option[Path] {
-    todo
+  fn location(self, location: Location) -> Option[Path]
+  {
+    self.locations.get(location).map(fn(found) { found.copy() })
   }
 
   fn local_zone(self) -> Option[String] {
     self.local_zone.copy()
   }
 
-  fn zone_rules(self, name: StringSlice) -> Option[List[UInt8]] {
-    todo
+  fn zone_rules(self, name: StringSlice) -> Option[List[UInt8]]
+  {
+    self.zones.get(name.to_string()).map(fn(found) { found.copy() })
   }
 }

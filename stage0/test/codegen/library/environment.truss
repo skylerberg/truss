@@ -1,0 +1,62 @@
+use standard::environment
+
+fn platform() -> environment::Platform {
+  environment::Platform(
+    operating_system: environment::OperatingSystem.Linux,
+    architecture: environment::Architecture.Arm64,
+    processor_count: 8,
+    host_name: "build-7",
+    process_identifier: 4242,
+  )
+}
+
+fn fixed() -> environment::FixedEnvironment {
+  environment::FixedEnvironment.new(platform(), current_directory: Path.new("/work"))
+    .with_variable("HOME", value: "/home/ada")
+    .with_variable("LANG", value: "C")
+    .with_variable("HOME", value: "/home/grace")
+    .with_location(environment::Location.Cache, path: Path.new("/var/cache"))
+    .with_zone("Europe/Paris", rules: [1, 2, 3], local: true)
+    .with_zone("UTC", rules: [])
+}
+
+test "a fixed environment answers with the variables it was given" {
+  provide fixed() {
+    assert Environment.variable("HOME") == Some("/home/grace")
+    assert Environment.variable("LANG") == Some("C")
+    assert Environment.variable("PATH") is None
+    let listed = Environment.variables()
+    assert listed.length() == 2
+      && listed[0].name == "HOME"
+      && listed[0].value == "/home/grace"
+      && listed[1].name == "LANG"
+      && listed[1].value == "C"
+  }
+}
+
+test "a fixed environment answers with its directory, platform, and locations" {
+  provide fixed() {
+    assert Environment.current_directory() is Ok(directory) && "${directory}" == "/work"
+    let found = Environment.platform()
+    assert found.operating_system == environment::OperatingSystem.Linux
+      && found.architecture == environment::Architecture.Arm64
+      && found.processor_count == 8
+      && found.host_name == "build-7"
+      && found.process_identifier == 4242
+    assert Environment.location(environment::Location.Cache) is Some(cache) && "${cache}" == "/var/cache"
+    assert Environment.location(environment::Location.Home) is None
+  }
+}
+
+test "a fixed environment answers with its time zones" {
+  provide fixed() {
+    assert Environment.local_zone() == Some("Europe/Paris")
+    assert Environment.zone_rules("Europe/Paris") is Some(rules) && rules.length() == 3 && rules[2] == 3
+    assert Environment.zone_rules("UTC") is Some(rules) && rules.length() == 0
+    assert Environment.zone_rules("Mars/Olympus") is None
+  }
+  provide environment::FixedEnvironment.new(platform(), current_directory: Path.new("/")) {
+    assert Environment.local_zone() is None
+    assert Environment.variables().length() == 0
+  }
+}
