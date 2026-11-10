@@ -2622,6 +2622,36 @@ let () =
         \  p.n = -5\n\
         \  yield p\n\
          }\n"
+        "prover.invariant");
+  test "a loop keeps the validity of each value it changes" (fun () ->
+      proven
+        "type Positive(n: Int64)\n\
+        \  invariant n > 0\n\n\
+         fn take(item: Positive) -> Int64 {\n\
+        \  item.n\n\
+         }\n\n\
+         fn f(count: USize) -> Int64 {\n\
+        \  var item = Positive(n: 1)\n\
+        \  for _ in 0..count {\n\
+        \    item.n = 0\n\
+        \    item.n = 5\n\
+        \  }\n\
+        \  take(item)\n\
+         }\n");
+  test "an iteration must keep the validity of each value the loop changes" (fun () ->
+      not_proven
+        "type Positive(n: Int64)\n\
+        \  invariant n > 0\n\n\
+         fn take(item: Positive) -> Int64 {\n\
+        \  item.n\n\
+         }\n\n\
+         fn f(count: USize) -> Int64 {\n\
+        \  var item = Positive(n: 2)\n\
+        \  for _ in 0..count {\n\
+        \    item.n = 0\n\
+        \  }\n\
+        \  1\n\
+         }\n"
         "prover.invariant")
 
 (* Concurrent code *)

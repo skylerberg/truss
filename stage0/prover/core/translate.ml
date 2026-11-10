@@ -7008,6 +7008,55 @@ and havoc context frame (changed : changed) =
   | true, Some ty -> { frame with self = Some (arrive context frame "loop" ty) }
   | _ -> frame
 
+(* Validity is an invariant of every loop: each value the loop changes
+   that is valid on entry is valid at the head of each iteration, so each
+   iteration must keep it valid. A value that is not valid on entry, as
+   [self] may not be in a private method that updates it, is not held to
+   it. *)
+and kept_validity context (entry : frame) (changed : changed) =
+  let kept name ty before read =
+    match validity context entry ~assuming:false ~deep:true ty before with
+    | L.Boolean true -> None
+    | valid -> Some (name, ty, valid, read)
+  in
+  List.filter_map
+    (fun local ->
+      match (local_type context entry local, Locals.find_opt local entry.locals) with
+      | Some ty, Some before ->
+          kept
+            (Option.value (Hashtbl.find_opt context.local_names local) ~default:"a local")
+            ty before
+            (fun (at : frame) -> Locals.find_opt local at.locals)
+      | _ -> None)
+    changed.changed_locals
+  @
+  match (changed.changes_self, entry.self, entry.self_type) with
+  | true, Some before, Some ty ->
+      Option.to_list (kept "self" ty before (fun (at : frame) -> at.self))
+  | _ -> []
+
+and assume_kept_validity context head kept =
+  List.iter
+    (fun (_, ty, valid_on_entry, read) ->
+      match read head with
+      | Some term ->
+          assume context head
+            (L.( ==> ) valid_on_entry (validity context head ~assuming:true ~deep:true ty term))
+      | None -> ())
+    kept
+
+and check_kept_validity context end_ span kept =
+  List.iter
+    (fun (name, ty, valid_on_entry, read) ->
+      match read end_ with
+      | Some term ->
+          oblige context end_ Invariant span
+            (Printf.sprintf "The invariant of `%s` may not hold for `%s` after an iteration."
+               (T.show ty) name)
+            (L.( ==> ) valid_on_entry (validity context end_ ~assuming:false ~deep:true ty term))
+      | None -> ())
+    kept
+
 and invariants (clauses : loop_clause list) =
   List.filter_map (function Invariant value -> Some value | _ -> None) clauses
 
@@ -7039,7 +7088,9 @@ and while_ context frame (node : statement) condition clauses body =
   let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
   loop_entry context frame costs;
   let mark = context.fresh and facts_mark = List.length context.facts in
+  let kept = kept_validity context frame changed in
   let head = havoc context frame changed in
+  assume_kept_validity context head kept;
   let head =
     if contains_yield body then { head with handed_out = havoc_parts context head } else head
   in
@@ -7112,6 +7163,7 @@ and while_ context frame (node : statement) condition clauses body =
     (fun (end_ : frame) ->
       let end_ = { end_ with loop = frame.loop } in
       check_invariants context end_ clauses ~when_:"after an iteration";
+      check_kept_validity context end_ span kept;
       match (start_measures, measure_terms end_) with
       | Some before, Some after ->
           oblige context end_ Termination span "This loop's measure may not decrease."
@@ -7168,7 +7220,9 @@ and for_ context frame (node : statement) (pattern : pattern) (iteration : itera
       let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
       loop_entry context frame costs;
       let mark = context.fresh and facts_mark = List.length context.facts in
+      let kept = kept_validity context frame changed in
       let head = havoc context frame changed in
+      assume_kept_validity context head kept;
       let head =
         if contains_yield body then { head with handed_out = havoc_parts context head } else head
       in
@@ -7221,7 +7275,8 @@ and for_ context frame (node : statement) (pattern : pattern) (iteration : itera
         ~breaks:(List.map with_through exits.breaks);
       List.iter
         (fun (end_ : frame) ->
-          check_invariants context (with_through end_) clauses ~when_:"after an iteration")
+          check_invariants context (with_through end_) clauses ~when_:"after an iteration";
+          check_kept_validity context end_ span kept)
         ends;
       let most = [ Costs.at_least_zero count ] in
       let exit_ =
@@ -7542,7 +7597,9 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
   let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
   loop_entry context entry costs;
   let mark = context.fresh and facts_mark = List.length context.facts in
+  let kept = kept_validity context frame changed in
   let head = havoc context frame changed in
+  assume_kept_validity context head kept;
   let head =
     if contains_yield body then { head with handed_out = havoc_parts context head } else head
   in
@@ -7573,7 +7630,8 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
     ~breaks:(List.map with_through exits.breaks);
   List.iter
     (fun (end_ : frame) ->
-      check_invariants context (with_through end_) clauses ~when_:"after an iteration")
+      check_invariants context (with_through end_) clauses ~when_:"after an iteration";
+      check_kept_validity context end_ (span_of frame.source node.origin) kept)
     ends;
   let ended = received.advance (restrict head (L.not_ received.another)) in
   let varies = made_since context mark in
