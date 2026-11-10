@@ -386,6 +386,41 @@ let () =
           if not dropped then fail "no drop of the console:\n%s" (Lir.to_string instance)
       | _ -> fail "expected code")
 
+let () =
+  test "a capability parameter stands for what the code it is given uses, wherever its type goes"
+    (fun () ->
+      let status, output, errors =
+        run_main
+          {|fn apply[capability Granted](run: (fn() uses Granted))
+  uses Granted
+{
+  run()
+}
+
+fn later[capability Granted](run: (fn() uses Granted)) -> (fn() uses Granted) {
+  run
+}
+
+fn shout()
+  uses Console
+{
+  Console.print_line("named")
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  apply(fn() { Console.print_line("inside") })
+  apply(shout)
+  let kept = later(fn() { Console.print_line("kept") })
+  kept()
+  ExitCode(0)
+}
+|}
+      in
+      if status <> 0 then fail "status %d: %s" status errors;
+      expect_string ~expected:"inside\nnamed\nkept\n" output)
+
 (* The documents' examples: in every block that checks cleanly, each
    function that is not generic, and not only for specifications, lowers, and each test passes or reaches a
    [todo]. Most blocks are excerpts, which do not check alone. *)
