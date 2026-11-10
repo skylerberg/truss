@@ -12,7 +12,8 @@
   evaluate_tests
   failure_tests
   owning_tests
-  libc_tests)
+  libc_tests
+  core_form_tests)
  (modules
   codegen_support
   layout_tests
@@ -27,7 +28,8 @@
   evaluate_tests
   failure_tests
   owning_tests
-  libc_tests)
+  libc_tests
+  core_form_tests)
  (libraries
   harness
   compiler_bug
