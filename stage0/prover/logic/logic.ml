@@ -218,6 +218,18 @@ let triggering_in declarations =
     declarations;
   Hashtbl.mem functions
 
+(* Whether a fact of a query is quantified with no trigger, so the solver
+   chooses its own way to use it, or none. A fact under a path's condition
+   is read through it. *)
+let untriggered query =
+  let triggering = triggering_in query.declarations in
+  let rec without = function
+    | Apply ("=>", [ _; inner ]) -> without inner
+    | Forall (variables, body) -> triggers ~triggering variables body = []
+    | _ -> false
+  in
+  List.exists without query.facts
+
 (* Pruning *)
 
 (* The declared symbols a term mentions. A datatype's constructors and

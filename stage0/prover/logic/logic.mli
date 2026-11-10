@@ -68,6 +68,10 @@ val replace : from:term -> into:term -> term -> term
 (** Each occurrence of [from] in a term replaced by [into], except under a quantifier that binds one
     of [from]'s symbols. *)
 
+val untriggered : query -> bool
+(** Whether a quantified fact of the query has no trigger, so that the solver may not use it where a
+    proof needs it. *)
+
 val prune : query -> query
 (** The query with only the facts its goal can depend on: starting from the goal's declared symbols,
     each fact that mentions one of them is kept, with its symbols, until no more are added. A
