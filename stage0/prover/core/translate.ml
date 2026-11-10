@@ -112,6 +112,9 @@ and frame = {
   condition : L.term;
   checking : bool;  (** Whether obligations are made here; not in a callee's clauses. *)
   bound : string list;  (** Symbols bound by quantifiers around this point. *)
+  binders : (string * L.sort * L.term) list;
+      (** The quantifiers around this point, innermost first: each bound symbol, its sort, and the
+          premise it ranges over. *)
   loop : loop_exits option;
   substitution : T.substitution;
       (** The type arguments of the callee whose clauses are read here, for its generic types. *)
@@ -257,13 +260,32 @@ let made_since context mark term =
   in
   walk term
 
-(* A fact of mathematics, true on every path. *)
+(* A statement made inside quantifiers, closed over them: true for every
+   value of each bound symbol that its premise admits. [None] when it names
+   a symbol bound by something other than a quantifier, such as a lambda's
+   parameter, where it has no meaning outside. *)
+let closed_over_binders frame term =
+  let names = List.map (fun (name, _, _) -> name) frame.binders in
+  if L.mentions (List.filter (fun name -> not (List.mem name names)) frame.bound) term then None
+  else if not (L.mentions names term) then Some term
+  else
+    let outermost_first = List.rev frame.binders in
+    Some
+      (L.Forall
+         ( List.map (fun (name, sort, _) -> (name, sort)) outermost_first,
+           L.( ==> )
+             (L.conjunction (List.map (fun (_, _, premise) -> premise) outermost_first))
+             term ))
+
+(* A fact of mathematics, true on every path. Inside a quantifier, one that
+   names a bound symbol is left out, which is always sound: closed over the
+   quantifier it would be true, but there are many such facts, and the
+   solver spends its steps on them. *)
 let fact context frame term =
   if not (L.mentions frame.bound term) then context.facts <- term :: context.facts
 
-(* A fact is guarded by its path's condition. Inside a quantifier, either
-   may mention a bound variable, and such a fact has no place outside the
-   quantifier, so it is left out, which is always sound. *)
+(* A fact is guarded by its path's condition, and left out where either
+   names a bound symbol, as [fact] says. *)
 let assume context frame fact =
   if not (L.mentions frame.bound fact || L.mentions frame.bound frame.condition) then
     match fact with
@@ -271,23 +293,30 @@ let assume context frame fact =
     | _ -> context.facts <- L.( ==> ) frame.condition fact :: context.facts
 
 (* An obligation is shown by its own query, and is a fact for what comes
-   after it. Inside a quantifier there is no path to state it on, so it is
-   left to the definition of the quantifier's body, which this stage does
-   not check yet. *)
+   after it. Inside a quantifier it is shown for each value the
+   quantifier's premise admits, which is how a quantifier's body is shown
+   to be well defined. *)
 let rec oblige ?evaluation context frame code span message goal =
-  if frame.checking && not (L.mentions frame.bound goal || L.mentions frame.bound frame.condition)
-  then begin
-    context.obligations <-
-      make_obligation ?evaluation context frame code span message goal :: context.obligations;
-    assume context frame goal
-  end
+  match obligation_at ?evaluation context frame code span message goal with
+  | Some obligation ->
+      context.obligations <- obligation :: context.obligations;
+      assume context frame goal
+  | None -> ()
 
 (* An obligation made but not yet added, for one that is needed only if
    what it shows is used. *)
-and obligation_at context frame code span message goal =
-  if frame.checking && not (L.mentions frame.bound goal || L.mentions frame.bound frame.condition)
-  then Some (make_obligation context frame code span message goal)
-  else None
+and obligation_at ?evaluation context frame code span message goal =
+  if not frame.checking then None
+  else if not (L.mentions frame.bound goal || L.mentions frame.bound frame.condition) then
+    Some (make_obligation ?evaluation context frame code span message goal)
+  else
+    match closed_over_binders frame (L.( ==> ) frame.condition goal) with
+    | Some closed ->
+        Some
+          (make_obligation ?evaluation context
+             { frame with condition = L.Boolean true }
+             code span message closed)
+    | None -> None
 
 and make_obligation ?evaluation context frame code span message goal =
   let query =
@@ -1584,7 +1613,10 @@ and if_ context frame (node : expression) condition (then_ : block) (else_ : blo
 and quantified context frame (node : expression) (quantifier : Syntax.quantifier) binder body =
   let make ?count bound_symbol sort premise body_frame =
     let mark = context.fresh in
-    let after, body_value = value context { body_frame with checking = false } body in
+    let body_frame =
+      { body_frame with binders = (bound_symbol, sort, premise) :: body_frame.binders }
+    in
+    let after, body_value = value context body_frame body in
     let bound = [ (bound_symbol, sort) ] in
     (* In code, a quantifier over a range runs its body once for each value
        in it, which costs that many times what the body spends, when that
@@ -6692,6 +6724,7 @@ let empty_frame source =
     condition = L.Boolean true;
     checking = true;
     bound = [];
+    binders = [];
     loop = None;
     substitution = [];
     self_type = None;

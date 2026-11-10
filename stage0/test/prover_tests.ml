@@ -2404,6 +2404,21 @@ let () =
         \    index += 1\n\
         \  }\n\
          }\n");
+  test "a quantifier's body must be well defined" (fun () ->
+      not_proven
+        "fn f(items: List[Int64]) -> Int64\n\
+        \  requires forall i in 0..items.length() + 1 => items[i] > 0\n\
+         {\n\
+        \  0\n\
+         }\n"
+        "prover.requires");
+  test "a quantifier's body within its range is well defined" (fun () ->
+      proven
+        "fn f(items: List[Int64]) -> Int64\n\
+        \  requires forall i in 0..items.length() => items[i] > 0\n\
+         {\n\
+        \  0\n\
+         }\n");
   test "alternatives bind each name to the part that matched" (fun () ->
       proven
         "type Side =\n\
