@@ -140,8 +140,11 @@ let kind_of_call ?lends ?function_value state (value : expression) : Core.kind =
       match recorded.arguments with
       | [ receiver ] -> Copy (operand Read (build_expression_by_id state receiver.expression))
       | _ -> bug "`copy` does not have exactly one argument")
-  | Trait_method { trait; evidence = Built_in; _ } when Path.equal trait.trait Impls.cursor_trait
-    -> (
+  (* The [next] of a yielding method's cursor is the method's own code. The
+     trait's other methods on such a cursor are calls like any other, of
+     the bodies that the trait gives them. *)
+  | Trait_method { name = "next"; evidence = Impl { impl; _ }; _ }
+    when Option.is_some (Impls.cursor_of_impl impl) -> (
       match recorded.arguments with
       | [ receiver ] -> Cursor_next (place_of (build_expression_by_id state receiver.expression))
       | _ -> bug "`next` does not have exactly one argument")

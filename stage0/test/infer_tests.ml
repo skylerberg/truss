@@ -198,7 +198,7 @@ let () =
       match checked.calls.(value.id) with
       | Some { arguments = [ { conversion = Some Owned_to_view; _ } ]; _ } -> ()
       | _ -> fail "no conversion recorded");
-  test "a cursor's next is the Cursor trait's, built in" (fun () ->
+  test "a cursor's next is the Cursor trait's, by the cursor's own impl" (fun () ->
       let text =
         "fn count_to(limit: Int64) yields Int64 {\n\
         \  yield limit\n\
@@ -222,17 +222,18 @@ let () =
                   name = "next";
                   receiver = Mut;
                   self_type = Cursor _;
-                  evidence = Built_in;
+                  evidence = Impl { impl; _ };
                   trait;
                   _;
                 };
             result;
             _;
           }
-        when Path.show trait.trait = "standard::core::Cursor" && Types.show result = "Option[Int64]"
-        ->
+        when Path.show trait.trait = "standard::core::Cursor"
+             && Types.show result = "Option[Int64]"
+             && Option.is_some (Interface.Impls.cursor_of_impl impl) ->
           ()
-      | _ -> fail "not the built-in Cursor's next");
+      | _ -> fail "not the `next` of the cursor's own impl");
   test "an unknown label is an error with a fix to the closest" (fun () ->
       one_diagnostic
         (functions ^ "fn f() {\n  copy_file(1, destinaton: 2)\n}\n")

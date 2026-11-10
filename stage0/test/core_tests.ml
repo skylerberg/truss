@@ -409,6 +409,18 @@ let () =
      ensures (result == exists item in items { (item < 0) })\n\
      { exists item in yielding_call standard::list::impl Iterable for \
      List[Element].each[Int64](place items) { (item < 0) } }";
+  expect_body "a method of `Cursor` on a yielding method's cursor is a call, and `next` is not"
+    "fn g(items: List[Int64]) -> USize {\n\
+    \  var cursor = items.each()\n\
+    \  let _ = mut cursor.next()\n\
+    \  items.each().skip(1).count()\n\
+     }\n"
+    "{ let var own cursor = standard::list::impl Iterable for List[Element].each[Int64](place \
+     items); let _ = cursor_next(cursor); Cursor.count for Skip[the cursor of standard::list::impl \
+     Iterable for List[Element].each] by standard::cursors::impl Cursor for Skip[Source](own \
+     Cursor.skip for the cursor of standard::list::impl Iterable for List[Element].each by derived \
+     standard::core::Cursor for standard::list::impl Iterable for List[Element].each(own \
+     standard::list::impl Iterable for List[Element].each[Int64](place items), 1)) }";
   expect_body "patterns of constants, ranges, and strings"
     "let limit: Int64 = 10\n\n\
      fn g(count: Int64, name: String) -> Int64 {\n\

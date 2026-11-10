@@ -148,55 +148,62 @@ let pullable =
       | Some (Yields (Read, _)) when yields_places () -> Yields_places
       | _ -> Pullable)
 
-(* A pull of a method that cannot be pulled. [element] is the type that a
-   pull hands out. *)
-let check_pull context (at : Syntax.span) method_ element =
+(* A cursor made from a method that cannot be pulled. Whatever holds a
+   cursor pulls it: a call of [next], a [for] loop over it, and generic
+   code that is given it. So the rule is checked once, where the cursor is
+   made. [element] is the type that a pull hands out. *)
+let check_cursor context (at : Syntax.span) method_ element =
   let refuse message = report context Not_pullable at message in
   match Query.demand context.database pullable method_ with
   | Pullable -> ()
   | Yields_mut ->
       refuse
-        "A method that yields `mut` access cannot be pulled, since a cursor would store that \
-         access."
+        "A method that yields `mut` access can drive a `for` loop, but cannot make a cursor, since \
+         the cursor would store that access."
   | Recursive ->
       refuse
         (Printf.sprintf
-           "`%s` yields through a recursive loop, so it can drive a `for` loop but cannot be \
-            pulled. A cursor over it is a type with its own stack."
+           "`%s` yields through a recursive loop, so it can drive a `for` loop but cannot make a \
+            cursor. A cursor over it is a type with its own stack."
            (Path.show method_))
   | Yields_places ->
       if not (plain context element) then
         refuse
           (Printf.sprintf
-             "`%s` yields views of its elements, and pulling one would copy a `%s` unasked. Loop \
-              over it with `for`, or pull from a method that yields owned values."
+             "`%s` yields views of its elements, and a cursor hands each one out as a value, which \
+              would copy a `%s` unasked. Loop over it with `for`, or make the cursor from a method \
+              that yields owned values."
              (Path.show method_) (T.show element))
 
-(* Every pull in a definition: a call of [next] on a cursor, and a [for]
-   loop over a cursor held in a variable. *)
+(* Every cursor that a definition makes: a call of a yielding method that
+   does not drive a [for] loop or a quantifier itself. *)
 let check_pulls context (definition : Core.definition) =
+  let driving = Hashtbl.create 8 in
+  Core_walk.definition
+    {
+      Core_walk.ignore_all with
+      expression =
+        (fun (node : Core.expression) ->
+          match node.kind with
+          | Quantified { binder = Over_each { call; _ }; _ } -> Hashtbl.replace driving call.id ()
+          | _ -> ());
+      statement =
+        (fun (node : Core.statement) ->
+          match node.kind with
+          | For { iteration = Yielding_call call; _ } -> Hashtbl.replace driving call.id ()
+          | _ -> ());
+    }
+    definition;
   Core_walk.definition
     {
       Core_walk.ignore_all with
       expression =
         (fun (node : Core.expression) ->
           match (node.kind, node.type_) with
-          | Cursor_next cursor, T.Named { arguments = [ T.Type element ]; _ } -> (
-              match Core_walk.place_type cursor with
-              | T.Cursor { method_; _ } ->
-                  check_pull context (span context node.origin) method_ element
-              | _ -> ())
-          | _ -> ());
-      statement =
-        (fun (node : Core.statement) ->
-          match node.kind with
-          | For { iteration = Cursor { cursor; _ }; pattern; _ } -> (
-              match Core_walk.place_type cursor with
-              | T.Cursor { method_; _ } ->
-                  check_pull context
-                    (with_mark context (span context (Core_walk.place_origin cursor)))
-                    method_ pattern.type_
-              | _ -> ())
+          | Call _, T.Cursor { method_; arguments } when not (Hashtbl.mem driving node.id) ->
+              Option.iter
+                (check_cursor context (span context node.origin) method_)
+                (Interface.Impls.cursor_element context.database method_ arguments)
           | _ -> ());
     }
     definition
