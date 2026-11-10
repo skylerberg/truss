@@ -207,6 +207,8 @@ type context = {
   local_names : (Core.local, string) Hashtbl.t;  (** Each local's name, as its pattern binds it. *)
   mutable returns : (frame * L.term option) list;
   mutable leaving : leaving list;  (** The early exits of the [concurrent] code being read. *)
+  mutable lent_back : (T.ty * L.term * L.term) list;
+      (** Each part a lending method lends [mut]: its type, as it was lent, and as it came back. *)
   mutable instantiating : Path.t list;  (** Contracts being assumed, to stop at recursion. *)
   disjoint : (int * int) list;
       (** The ownership check's pairs of indexes, by the origin of each, that must differ. *)
@@ -4801,7 +4803,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
           | `Lends ->
               (* The part as lent, and the parts handed out: the one part, as
                  the caller's statement left it. *)
-              let left = match lent_final with Some term -> term | None -> result in
+              let left = match lent_final with Some leave -> leave result | None -> result in
               let none = empty_parts context after result_type in
               {
                 ensures_frame with
@@ -4866,8 +4868,19 @@ and contract_call context frame (node : expression) (call_ : call) path contract
             | None -> total)
         | T.Own -> Costs.minus total (potential context frame ty passed.term)
         | T.Read -> total)
-      (if contract.result_kind = `Yields then Costs.zero
-       else potential context after result_type result)
+      (match contract.result_kind with
+      | `Yields -> Costs.zero
+      | `Lends -> (
+          (* A part lent stays where it was, so the call hands over none
+             of its potential; what the caller's statement did to it, the
+             method does not pay for, and the caller does. *)
+          match lent_final with
+          | Some leave ->
+              Costs.minus
+                (potential context after result_type result)
+                (potential context after result_type (leave result))
+          | None -> Costs.zero)
+      | `Returns -> potential context after result_type result)
       values
   in
   let after =
@@ -6444,9 +6457,11 @@ and handing_out context frame (node : statement) (mode : T.mode) (part : operand
       (* What the caller leaves in a part lent [mut] is stored back in each
          place it lends. *)
       let frame, part_after =
-        if mode = T.Mut && Core_walk.lent_places part <> [] then
+        if mode = T.Mut && Core_walk.lent_places part <> [] then (
           let part_after = arrive context frame "lent" part_type in
-          (written_back context frame part part_type part_after, part_after)
+          if kind = `Lends then
+            context.lent_back <- (part_type, handed, part_after) :: context.lent_back;
+          (written_back context frame part part_type part_after, part_after))
         else (frame, handed)
       in
       let after = appended context frame part_type before part_after in
@@ -6629,6 +6644,7 @@ and store context frame (place : place) new_value =
   | Local { local = Self; _ } -> { frame with self = Some new_value }
   | Local { local; _ } -> { frame with locals = Locals.add local new_value frame.locals }
   | Constant _ -> raise (Foreign_unsupported "assigning to a constant")
+  | Field _ when lent_root place -> store_lent context frame place (fun _ -> new_value)
   | Field { base; field; _ } -> (
       let base_type = place_type context frame base in
       match constructors context base_type with
@@ -6699,11 +6715,47 @@ and store context frame (place : place) new_value =
         ~after:(buffer_model context View element updated)
         index new_value;
       store context frame owner updated
-  | Lent ({ kind = Call ({ lends = Some T.Mut; _ } as call_); _ } as node) -> (
-      match resolved_call ~lent_final:new_value context frame node call_ with
+  | Lent { kind = Call { lends = Some T.Mut; _ }; _ } ->
+      store_lent context frame place (fun _ -> new_value)
+  | Lent _ | Temporary _ -> raise (Foreign_unsupported "assigning to this place")
+
+(* Whether a place is a part, through fields, of what a call lends to be
+   changed. *)
+and lent_root (place : place) =
+  match place with
+  | Lent { kind = Call { lends = Some T.Mut; callee; _ }; _ } -> (
+      match callee with
+      | Intrinsic { operation = Storage_at_mut | Array_at_mut | View_at_mut; _ } -> false
+      | _ -> true)
+  | Field { base; _ } -> lent_root base
+  | _ -> false
+
+(* Stores into a part of what a call lends to be changed: the call is made
+   once, and what the caller leaves in the part it lends is [leave] of that
+   part, so a field's new value is built into the part as lent. *)
+and store_lent context frame (place : place) leave =
+  match place with
+  | Lent ({ kind = Call call_; _ } as node) -> (
+      match resolved_call ~lent_final:leave context frame node call_ with
       | Some (after, _) -> after
       | None -> havoc_root context frame place)
-  | Lent _ | Temporary _ -> raise (Foreign_unsupported "assigning to this place")
+  | Field { base; field; _ } -> (
+      let base_type = place_type context frame base in
+      match constructors context base_type with
+      | Some [ (None, fields) ] ->
+          store_lent context frame base (fun base_value ->
+              L.Apply
+                ( constructor_name base_type None,
+                  List.map
+                    (fun (name_, _) ->
+                      let current = selected context base_type None name_ base_value in
+                      if name_ = field then leave current else current)
+                    fields ))
+      | _ ->
+          raise
+            (Foreign_unsupported (Printf.sprintf "assigning to a field of `%s`" (T.show base_type)))
+      )
+  | _ -> store context frame place (leave (snd (place_value context frame place)))
 
 (* What a loop's body may change, which is havocked at its head: the local
    or [self] that each place it assigns to, lends to change, or pulls is
@@ -7391,6 +7443,7 @@ let new_context database ~home ~current ~terminates ~measures =
     local_names = Hashtbl.create 16;
     returns = [];
     leaving = [];
+    lent_back = [];
     instantiating = [];
     hands_out = None;
     handing = None;
@@ -7820,6 +7873,16 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
                   Costs.plus total (Costs.minus kept (potential context frame ty entry))
               | _ -> total)
             Costs.zero parameters
+        in
+        (* What the caller does to a part lent to it [mut] is the caller's
+           to pay for, so the part's own change in potential is not the
+           method's. *)
+        let given =
+          List.fold_left
+            (fun total (ty, handed, back) ->
+              Costs.minus total
+                (Costs.minus (potential context frame ty back) (potential context frame ty handed)))
+            given context.lent_back
         in
         match (returned, output) with
         | Some term, Some output -> Costs.plus given (potential context frame output term)
