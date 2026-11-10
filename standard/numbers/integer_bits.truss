@@ -1,3 +1,5 @@
+use standard::intrinsic
+
 
 public fn Int8.count_ones(self) -> USize
   ensures result <= 8
@@ -30,81 +32,88 @@ public fn Int8.trailing_zeros(self) -> USize
 public fn Int8.rotate_left(self, amount: USize) -> Int8
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_left(self, amount: amount)
 }
 
 public fn Int8.rotate_right(self, amount: USize) -> Int8
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_right(self, amount: amount)
 }
 
 public fn Int8.reverse_bits(self) -> Int8
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().reverse_bits().to_signed_bits()
 }
 
 public fn Int8.swap_bytes(self) -> Int8
   cost time O(1)
 {
-  todo
+  intrinsic::swap_bytes(self)
 }
 
 public fn Int8.checked_shift_left(self, amount: USize) -> Option[Int8]
   ensures (result is None) == (amount >= 8)
   cost time O(1)
 {
-  todo
+  if amount >= 8 { None } else { Some(self << amount) }
 }
 
 public fn Int8.checked_shift_right(self, amount: USize) -> Option[Int8]
   ensures (result is None) == (amount >= 8)
   cost time O(1)
 {
-  todo
+  if amount >= 8 { None } else { Some(self >> amount) }
 }
 
 public fn Int8.wrapping_shift_left(self, amount: USize) -> Int8
   cost time O(1)
 {
-  todo
+  self << (amount % 8)
 }
 
 public fn Int8.wrapping_shift_right(self, amount: USize) -> Int8
   cost time O(1)
 {
-  todo
+  self >> (amount % 8)
 }
 
 public fn Int8.to_unsigned_bits(self) -> UInt8
+  ensures self >= 0 ==> result == self
+  ensures self < 0 ==> result == self + power(2, 8)
   cost time O(1)
 {
-  todo
+  if self >= 0 {
+    intrinsic::convert(self)
+  } else {
+    let below: UInt8 = intrinsic::convert(-(self + 1))
+    UInt8.maximum - below
+  }
 }
 
 public fn Int8.to_big_endian_bytes(self) -> Array[UInt8, 1]
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().to_big_endian_bytes()
 }
 
 public fn Int8.to_little_endian_bytes(self) -> Array[UInt8, 1]
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().to_little_endian_bytes()
 }
 
 public fn Int8.from_big_endian_bytes(bytes: Array[UInt8, 1]) -> Int8
   cost time O(1)
 {
-  todo
+  UInt8.from_big_endian_bytes(bytes).to_signed_bits()
 }
 
 public fn Int8.from_little_endian_bytes(bytes: Array[UInt8, 1]) -> Int8
   cost time O(1)
 {
-  todo
+  UInt8.from_little_endian_bytes(bytes).to_signed_bits()
 }
 
 public fn Int16.count_ones(self) -> USize
@@ -138,81 +147,88 @@ public fn Int16.trailing_zeros(self) -> USize
 public fn Int16.rotate_left(self, amount: USize) -> Int16
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_left(self, amount: amount)
 }
 
 public fn Int16.rotate_right(self, amount: USize) -> Int16
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_right(self, amount: amount)
 }
 
 public fn Int16.reverse_bits(self) -> Int16
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().reverse_bits().to_signed_bits()
 }
 
 public fn Int16.swap_bytes(self) -> Int16
   cost time O(1)
 {
-  todo
+  intrinsic::swap_bytes(self)
 }
 
 public fn Int16.checked_shift_left(self, amount: USize) -> Option[Int16]
   ensures (result is None) == (amount >= 16)
   cost time O(1)
 {
-  todo
+  if amount >= 16 { None } else { Some(self << amount) }
 }
 
 public fn Int16.checked_shift_right(self, amount: USize) -> Option[Int16]
   ensures (result is None) == (amount >= 16)
   cost time O(1)
 {
-  todo
+  if amount >= 16 { None } else { Some(self >> amount) }
 }
 
 public fn Int16.wrapping_shift_left(self, amount: USize) -> Int16
   cost time O(1)
 {
-  todo
+  self << (amount % 16)
 }
 
 public fn Int16.wrapping_shift_right(self, amount: USize) -> Int16
   cost time O(1)
 {
-  todo
+  self >> (amount % 16)
 }
 
 public fn Int16.to_unsigned_bits(self) -> UInt16
+  ensures self >= 0 ==> result == self
+  ensures self < 0 ==> result == self + power(2, 16)
   cost time O(1)
 {
-  todo
+  if self >= 0 {
+    intrinsic::convert(self)
+  } else {
+    let below: UInt16 = intrinsic::convert(-(self + 1))
+    UInt16.maximum - below
+  }
 }
 
 public fn Int16.to_big_endian_bytes(self) -> Array[UInt8, 2]
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().to_big_endian_bytes()
 }
 
 public fn Int16.to_little_endian_bytes(self) -> Array[UInt8, 2]
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().to_little_endian_bytes()
 }
 
 public fn Int16.from_big_endian_bytes(bytes: Array[UInt8, 2]) -> Int16
   cost time O(1)
 {
-  todo
+  UInt16.from_big_endian_bytes(bytes).to_signed_bits()
 }
 
 public fn Int16.from_little_endian_bytes(bytes: Array[UInt8, 2]) -> Int16
   cost time O(1)
 {
-  todo
+  UInt16.from_little_endian_bytes(bytes).to_signed_bits()
 }
 
 public fn Int32.count_ones(self) -> USize
@@ -246,81 +262,88 @@ public fn Int32.trailing_zeros(self) -> USize
 public fn Int32.rotate_left(self, amount: USize) -> Int32
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_left(self, amount: amount)
 }
 
 public fn Int32.rotate_right(self, amount: USize) -> Int32
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_right(self, amount: amount)
 }
 
 public fn Int32.reverse_bits(self) -> Int32
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().reverse_bits().to_signed_bits()
 }
 
 public fn Int32.swap_bytes(self) -> Int32
   cost time O(1)
 {
-  todo
+  intrinsic::swap_bytes(self)
 }
 
 public fn Int32.checked_shift_left(self, amount: USize) -> Option[Int32]
   ensures (result is None) == (amount >= 32)
   cost time O(1)
 {
-  todo
+  if amount >= 32 { None } else { Some(self << amount) }
 }
 
 public fn Int32.checked_shift_right(self, amount: USize) -> Option[Int32]
   ensures (result is None) == (amount >= 32)
   cost time O(1)
 {
-  todo
+  if amount >= 32 { None } else { Some(self >> amount) }
 }
 
 public fn Int32.wrapping_shift_left(self, amount: USize) -> Int32
   cost time O(1)
 {
-  todo
+  self << (amount % 32)
 }
 
 public fn Int32.wrapping_shift_right(self, amount: USize) -> Int32
   cost time O(1)
 {
-  todo
+  self >> (amount % 32)
 }
 
 public fn Int32.to_unsigned_bits(self) -> UInt32
+  ensures self >= 0 ==> result == self
+  ensures self < 0 ==> result == self + power(2, 32)
   cost time O(1)
 {
-  todo
+  if self >= 0 {
+    intrinsic::convert(self)
+  } else {
+    let below: UInt32 = intrinsic::convert(-(self + 1))
+    UInt32.maximum - below
+  }
 }
 
 public fn Int32.to_big_endian_bytes(self) -> Array[UInt8, 4]
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().to_big_endian_bytes()
 }
 
 public fn Int32.to_little_endian_bytes(self) -> Array[UInt8, 4]
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().to_little_endian_bytes()
 }
 
 public fn Int32.from_big_endian_bytes(bytes: Array[UInt8, 4]) -> Int32
   cost time O(1)
 {
-  todo
+  UInt32.from_big_endian_bytes(bytes).to_signed_bits()
 }
 
 public fn Int32.from_little_endian_bytes(bytes: Array[UInt8, 4]) -> Int32
   cost time O(1)
 {
-  todo
+  UInt32.from_little_endian_bytes(bytes).to_signed_bits()
 }
 
 public fn Int64.count_ones(self) -> USize
@@ -354,81 +377,88 @@ public fn Int64.trailing_zeros(self) -> USize
 public fn Int64.rotate_left(self, amount: USize) -> Int64
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_left(self, amount: amount)
 }
 
 public fn Int64.rotate_right(self, amount: USize) -> Int64
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_right(self, amount: amount)
 }
 
 public fn Int64.reverse_bits(self) -> Int64
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().reverse_bits().to_signed_bits()
 }
 
 public fn Int64.swap_bytes(self) -> Int64
   cost time O(1)
 {
-  todo
+  intrinsic::swap_bytes(self)
 }
 
 public fn Int64.checked_shift_left(self, amount: USize) -> Option[Int64]
   ensures (result is None) == (amount >= 64)
   cost time O(1)
 {
-  todo
+  if amount >= 64 { None } else { Some(self << amount) }
 }
 
 public fn Int64.checked_shift_right(self, amount: USize) -> Option[Int64]
   ensures (result is None) == (amount >= 64)
   cost time O(1)
 {
-  todo
+  if amount >= 64 { None } else { Some(self >> amount) }
 }
 
 public fn Int64.wrapping_shift_left(self, amount: USize) -> Int64
   cost time O(1)
 {
-  todo
+  self << (amount % 64)
 }
 
 public fn Int64.wrapping_shift_right(self, amount: USize) -> Int64
   cost time O(1)
 {
-  todo
+  self >> (amount % 64)
 }
 
 public fn Int64.to_unsigned_bits(self) -> UInt64
+  ensures self >= 0 ==> result == self
+  ensures self < 0 ==> result == self + power(2, 64)
   cost time O(1)
 {
-  todo
+  if self >= 0 {
+    intrinsic::convert(self)
+  } else {
+    let below: UInt64 = intrinsic::convert(-(self + 1))
+    UInt64.maximum - below
+  }
 }
 
 public fn Int64.to_big_endian_bytes(self) -> Array[UInt8, 8]
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().to_big_endian_bytes()
 }
 
 public fn Int64.to_little_endian_bytes(self) -> Array[UInt8, 8]
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().to_little_endian_bytes()
 }
 
 public fn Int64.from_big_endian_bytes(bytes: Array[UInt8, 8]) -> Int64
   cost time O(1)
 {
-  todo
+  UInt64.from_big_endian_bytes(bytes).to_signed_bits()
 }
 
 public fn Int64.from_little_endian_bytes(bytes: Array[UInt8, 8]) -> Int64
   cost time O(1)
 {
-  todo
+  UInt64.from_little_endian_bytes(bytes).to_signed_bits()
 }
 
 public fn ISize.count_ones(self) -> USize
@@ -462,57 +492,64 @@ public fn ISize.trailing_zeros(self) -> USize
 public fn ISize.rotate_left(self, amount: USize) -> ISize
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_left(self, amount: amount)
 }
 
 public fn ISize.rotate_right(self, amount: USize) -> ISize
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_right(self, amount: amount)
 }
 
 public fn ISize.reverse_bits(self) -> ISize
   cost time O(1)
 {
-  todo
+  self.to_unsigned_bits().reverse_bits().to_signed_bits()
 }
 
 public fn ISize.swap_bytes(self) -> ISize
   cost time O(1)
 {
-  todo
+  intrinsic::swap_bytes(self)
 }
 
 public fn ISize.checked_shift_left(self, amount: USize) -> Option[ISize]
   ensures (result is None) == (amount >= 64)
   cost time O(1)
 {
-  todo
+  if amount >= 64 { None } else { Some(self << amount) }
 }
 
 public fn ISize.checked_shift_right(self, amount: USize) -> Option[ISize]
   ensures (result is None) == (amount >= 64)
   cost time O(1)
 {
-  todo
+  if amount >= 64 { None } else { Some(self >> amount) }
 }
 
 public fn ISize.wrapping_shift_left(self, amount: USize) -> ISize
   cost time O(1)
 {
-  todo
+  self << (amount % 64)
 }
 
 public fn ISize.wrapping_shift_right(self, amount: USize) -> ISize
   cost time O(1)
 {
-  todo
+  self >> (amount % 64)
 }
 
 public fn ISize.to_unsigned_bits(self) -> USize
+  ensures self >= 0 ==> result == self
+  ensures self < 0 ==> result == self + power(2, 64)
   cost time O(1)
 {
-  todo
+  if self >= 0 {
+    intrinsic::convert(self)
+  } else {
+    let below: USize = intrinsic::convert(-(self + 1))
+    USize.maximum - below
+  }
 }
 
 public fn UInt8.count_ones(self) -> USize
@@ -546,81 +583,91 @@ public fn UInt8.trailing_zeros(self) -> USize
 public fn UInt8.rotate_left(self, amount: USize) -> UInt8
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_left(self, amount: amount)
 }
 
 public fn UInt8.rotate_right(self, amount: USize) -> UInt8
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_right(self, amount: amount)
 }
 
 public fn UInt8.reverse_bits(self) -> UInt8
   cost time O(1)
 {
-  todo
+  let halves = ((self & 0xF0) >> 4) | ((self & 0x0F) << 4)
+  let quarters = ((halves & 0xCC) >> 2) | ((halves & 0x33) << 2)
+  let pairs = ((quarters & 0xAA) >> 1) | ((quarters & 0x55) << 1)
+  pairs
 }
 
 public fn UInt8.swap_bytes(self) -> UInt8
   cost time O(1)
 {
-  todo
+  intrinsic::swap_bytes(self)
 }
 
 public fn UInt8.checked_shift_left(self, amount: USize) -> Option[UInt8]
   ensures (result is None) == (amount >= 8)
   cost time O(1)
 {
-  todo
+  if amount >= 8 { None } else { Some(self << amount) }
 }
 
 public fn UInt8.checked_shift_right(self, amount: USize) -> Option[UInt8]
   ensures (result is None) == (amount >= 8)
   cost time O(1)
 {
-  todo
+  if amount >= 8 { None } else { Some(self >> amount) }
 }
 
 public fn UInt8.wrapping_shift_left(self, amount: USize) -> UInt8
   cost time O(1)
 {
-  todo
+  self << (amount % 8)
 }
 
 public fn UInt8.wrapping_shift_right(self, amount: USize) -> UInt8
   cost time O(1)
 {
-  todo
+  self >> (amount % 8)
 }
 
 public fn UInt8.to_signed_bits(self) -> Int8
+  ensures self < 128 ==> result == self
+  ensures self >= 128 ==> result == self - power(2, 8)
   cost time O(1)
 {
-  todo
+  if self < 128 {
+    intrinsic::convert(self)
+  } else {
+    let below: Int8 = intrinsic::convert(UInt8.maximum - self)
+    -below - 1
+  }
 }
 
 public fn UInt8.to_big_endian_bytes(self) -> Array[UInt8, 1]
   cost time O(1)
 {
-  todo
+  [self]
 }
 
 public fn UInt8.to_little_endian_bytes(self) -> Array[UInt8, 1]
   cost time O(1)
 {
-  todo
+  [self]
 }
 
 public fn UInt8.from_big_endian_bytes(bytes: Array[UInt8, 1]) -> UInt8
   cost time O(1)
 {
-  todo
+  bytes[0]
 }
 
 public fn UInt8.from_little_endian_bytes(bytes: Array[UInt8, 1]) -> UInt8
   cost time O(1)
 {
-  todo
+  bytes[0]
 }
 
 public fn UInt16.count_ones(self) -> USize
@@ -654,81 +701,91 @@ public fn UInt16.trailing_zeros(self) -> USize
 public fn UInt16.rotate_left(self, amount: USize) -> UInt16
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_left(self, amount: amount)
 }
 
 public fn UInt16.rotate_right(self, amount: USize) -> UInt16
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_right(self, amount: amount)
 }
 
 public fn UInt16.reverse_bits(self) -> UInt16
   cost time O(1)
 {
-  todo
+  let halves = ((self & 0xF0F0) >> 4) | ((self & 0x0F0F) << 4)
+  let quarters = ((halves & 0xCCCC) >> 2) | ((halves & 0x3333) << 2)
+  let pairs = ((quarters & 0xAAAA) >> 1) | ((quarters & 0x5555) << 1)
+  intrinsic::swap_bytes(pairs)
 }
 
 public fn UInt16.swap_bytes(self) -> UInt16
   cost time O(1)
 {
-  todo
+  intrinsic::swap_bytes(self)
 }
 
 public fn UInt16.checked_shift_left(self, amount: USize) -> Option[UInt16]
   ensures (result is None) == (amount >= 16)
   cost time O(1)
 {
-  todo
+  if amount >= 16 { None } else { Some(self << amount) }
 }
 
 public fn UInt16.checked_shift_right(self, amount: USize) -> Option[UInt16]
   ensures (result is None) == (amount >= 16)
   cost time O(1)
 {
-  todo
+  if amount >= 16 { None } else { Some(self >> amount) }
 }
 
 public fn UInt16.wrapping_shift_left(self, amount: USize) -> UInt16
   cost time O(1)
 {
-  todo
+  self << (amount % 16)
 }
 
 public fn UInt16.wrapping_shift_right(self, amount: USize) -> UInt16
   cost time O(1)
 {
-  todo
+  self >> (amount % 16)
 }
 
 public fn UInt16.to_signed_bits(self) -> Int16
+  ensures self < 32768 ==> result == self
+  ensures self >= 32768 ==> result == self - power(2, 16)
   cost time O(1)
 {
-  todo
+  if self < 32768 {
+    intrinsic::convert(self)
+  } else {
+    let below: Int16 = intrinsic::convert(UInt16.maximum - self)
+    -below - 1
+  }
 }
 
 public fn UInt16.to_big_endian_bytes(self) -> Array[UInt8, 2]
   cost time O(1)
 {
-  todo
+  [intrinsic::convert((self >> 8) & 255), intrinsic::convert((self >> 0) & 255)]
 }
 
 public fn UInt16.to_little_endian_bytes(self) -> Array[UInt8, 2]
   cost time O(1)
 {
-  todo
+  [intrinsic::convert((self >> 0) & 255), intrinsic::convert((self >> 8) & 255)]
 }
 
 public fn UInt16.from_big_endian_bytes(bytes: Array[UInt8, 2]) -> UInt16
   cost time O(1)
 {
-  todo
+  (intrinsic::convert[UInt8, UInt16](bytes[0]) << 8) | intrinsic::convert[UInt8, UInt16](bytes[1])
 }
 
 public fn UInt16.from_little_endian_bytes(bytes: Array[UInt8, 2]) -> UInt16
   cost time O(1)
 {
-  todo
+  intrinsic::convert[UInt8, UInt16](bytes[0]) | (intrinsic::convert[UInt8, UInt16](bytes[1]) << 8)
 }
 
 public fn UInt32.count_ones(self) -> USize
@@ -762,81 +819,91 @@ public fn UInt32.trailing_zeros(self) -> USize
 public fn UInt32.rotate_left(self, amount: USize) -> UInt32
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_left(self, amount: amount)
 }
 
 public fn UInt32.rotate_right(self, amount: USize) -> UInt32
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_right(self, amount: amount)
 }
 
 public fn UInt32.reverse_bits(self) -> UInt32
   cost time O(1)
 {
-  todo
+  let halves = ((self & 0xF0F0F0F0) >> 4) | ((self & 0x0F0F0F0F) << 4)
+  let quarters = ((halves & 0xCCCCCCCC) >> 2) | ((halves & 0x33333333) << 2)
+  let pairs = ((quarters & 0xAAAAAAAA) >> 1) | ((quarters & 0x55555555) << 1)
+  intrinsic::swap_bytes(pairs)
 }
 
 public fn UInt32.swap_bytes(self) -> UInt32
   cost time O(1)
 {
-  todo
+  intrinsic::swap_bytes(self)
 }
 
 public fn UInt32.checked_shift_left(self, amount: USize) -> Option[UInt32]
   ensures (result is None) == (amount >= 32)
   cost time O(1)
 {
-  todo
+  if amount >= 32 { None } else { Some(self << amount) }
 }
 
 public fn UInt32.checked_shift_right(self, amount: USize) -> Option[UInt32]
   ensures (result is None) == (amount >= 32)
   cost time O(1)
 {
-  todo
+  if amount >= 32 { None } else { Some(self >> amount) }
 }
 
 public fn UInt32.wrapping_shift_left(self, amount: USize) -> UInt32
   cost time O(1)
 {
-  todo
+  self << (amount % 32)
 }
 
 public fn UInt32.wrapping_shift_right(self, amount: USize) -> UInt32
   cost time O(1)
 {
-  todo
+  self >> (amount % 32)
 }
 
 public fn UInt32.to_signed_bits(self) -> Int32
+  ensures self < 2147483648 ==> result == self
+  ensures self >= 2147483648 ==> result == self - power(2, 32)
   cost time O(1)
 {
-  todo
+  if self < 2147483648 {
+    intrinsic::convert(self)
+  } else {
+    let below: Int32 = intrinsic::convert(UInt32.maximum - self)
+    -below - 1
+  }
 }
 
 public fn UInt32.to_big_endian_bytes(self) -> Array[UInt8, 4]
   cost time O(1)
 {
-  todo
+  [intrinsic::convert((self >> 24) & 255), intrinsic::convert((self >> 16) & 255), intrinsic::convert((self >> 8) & 255), intrinsic::convert((self >> 0) & 255)]
 }
 
 public fn UInt32.to_little_endian_bytes(self) -> Array[UInt8, 4]
   cost time O(1)
 {
-  todo
+  [intrinsic::convert((self >> 0) & 255), intrinsic::convert((self >> 8) & 255), intrinsic::convert((self >> 16) & 255), intrinsic::convert((self >> 24) & 255)]
 }
 
 public fn UInt32.from_big_endian_bytes(bytes: Array[UInt8, 4]) -> UInt32
   cost time O(1)
 {
-  todo
+  (intrinsic::convert[UInt8, UInt32](bytes[0]) << 24) | (intrinsic::convert[UInt8, UInt32](bytes[1]) << 16) | (intrinsic::convert[UInt8, UInt32](bytes[2]) << 8) | intrinsic::convert[UInt8, UInt32](bytes[3])
 }
 
 public fn UInt32.from_little_endian_bytes(bytes: Array[UInt8, 4]) -> UInt32
   cost time O(1)
 {
-  todo
+  intrinsic::convert[UInt8, UInt32](bytes[0]) | (intrinsic::convert[UInt8, UInt32](bytes[1]) << 8) | (intrinsic::convert[UInt8, UInt32](bytes[2]) << 16) | (intrinsic::convert[UInt8, UInt32](bytes[3]) << 24)
 }
 
 public fn UInt64.count_ones(self) -> USize
@@ -870,81 +937,91 @@ public fn UInt64.trailing_zeros(self) -> USize
 public fn UInt64.rotate_left(self, amount: USize) -> UInt64
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_left(self, amount: amount)
 }
 
 public fn UInt64.rotate_right(self, amount: USize) -> UInt64
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_right(self, amount: amount)
 }
 
 public fn UInt64.reverse_bits(self) -> UInt64
   cost time O(1)
 {
-  todo
+  let halves = ((self & 0xF0F0F0F0F0F0F0F0) >> 4) | ((self & 0x0F0F0F0F0F0F0F0F) << 4)
+  let quarters = ((halves & 0xCCCCCCCCCCCCCCCC) >> 2) | ((halves & 0x3333333333333333) << 2)
+  let pairs = ((quarters & 0xAAAAAAAAAAAAAAAA) >> 1) | ((quarters & 0x5555555555555555) << 1)
+  intrinsic::swap_bytes(pairs)
 }
 
 public fn UInt64.swap_bytes(self) -> UInt64
   cost time O(1)
 {
-  todo
+  intrinsic::swap_bytes(self)
 }
 
 public fn UInt64.checked_shift_left(self, amount: USize) -> Option[UInt64]
   ensures (result is None) == (amount >= 64)
   cost time O(1)
 {
-  todo
+  if amount >= 64 { None } else { Some(self << amount) }
 }
 
 public fn UInt64.checked_shift_right(self, amount: USize) -> Option[UInt64]
   ensures (result is None) == (amount >= 64)
   cost time O(1)
 {
-  todo
+  if amount >= 64 { None } else { Some(self >> amount) }
 }
 
 public fn UInt64.wrapping_shift_left(self, amount: USize) -> UInt64
   cost time O(1)
 {
-  todo
+  self << (amount % 64)
 }
 
 public fn UInt64.wrapping_shift_right(self, amount: USize) -> UInt64
   cost time O(1)
 {
-  todo
+  self >> (amount % 64)
 }
 
 public fn UInt64.to_signed_bits(self) -> Int64
+  ensures self < 9223372036854775808 ==> result == self
+  ensures self >= 9223372036854775808 ==> result == self - power(2, 64)
   cost time O(1)
 {
-  todo
+  if self < 9223372036854775808 {
+    intrinsic::convert(self)
+  } else {
+    let below: Int64 = intrinsic::convert(UInt64.maximum - self)
+    -below - 1
+  }
 }
 
 public fn UInt64.to_big_endian_bytes(self) -> Array[UInt8, 8]
   cost time O(1)
 {
-  todo
+  [intrinsic::convert((self >> 56) & 255), intrinsic::convert((self >> 48) & 255), intrinsic::convert((self >> 40) & 255), intrinsic::convert((self >> 32) & 255), intrinsic::convert((self >> 24) & 255), intrinsic::convert((self >> 16) & 255), intrinsic::convert((self >> 8) & 255), intrinsic::convert((self >> 0) & 255)]
 }
 
 public fn UInt64.to_little_endian_bytes(self) -> Array[UInt8, 8]
   cost time O(1)
 {
-  todo
+  [intrinsic::convert((self >> 0) & 255), intrinsic::convert((self >> 8) & 255), intrinsic::convert((self >> 16) & 255), intrinsic::convert((self >> 24) & 255), intrinsic::convert((self >> 32) & 255), intrinsic::convert((self >> 40) & 255), intrinsic::convert((self >> 48) & 255), intrinsic::convert((self >> 56) & 255)]
 }
 
 public fn UInt64.from_big_endian_bytes(bytes: Array[UInt8, 8]) -> UInt64
   cost time O(1)
 {
-  todo
+  (intrinsic::convert[UInt8, UInt64](bytes[0]) << 56) | (intrinsic::convert[UInt8, UInt64](bytes[1]) << 48) | (intrinsic::convert[UInt8, UInt64](bytes[2]) << 40) | (intrinsic::convert[UInt8, UInt64](bytes[3]) << 32) | (intrinsic::convert[UInt8, UInt64](bytes[4]) << 24) | (intrinsic::convert[UInt8, UInt64](bytes[5]) << 16) | (intrinsic::convert[UInt8, UInt64](bytes[6]) << 8) | intrinsic::convert[UInt8, UInt64](bytes[7])
 }
 
 public fn UInt64.from_little_endian_bytes(bytes: Array[UInt8, 8]) -> UInt64
   cost time O(1)
 {
-  todo
+  intrinsic::convert[UInt8, UInt64](bytes[0]) | (intrinsic::convert[UInt8, UInt64](bytes[1]) << 8) | (intrinsic::convert[UInt8, UInt64](bytes[2]) << 16) | (intrinsic::convert[UInt8, UInt64](bytes[3]) << 24) | (intrinsic::convert[UInt8, UInt64](bytes[4]) << 32) | (intrinsic::convert[UInt8, UInt64](bytes[5]) << 40) | (intrinsic::convert[UInt8, UInt64](bytes[6]) << 48) | (intrinsic::convert[UInt8, UInt64](bytes[7]) << 56)
 }
 
 public fn USize.count_ones(self) -> USize
@@ -978,55 +1055,65 @@ public fn USize.trailing_zeros(self) -> USize
 public fn USize.rotate_left(self, amount: USize) -> USize
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_left(self, amount: amount)
 }
 
 public fn USize.rotate_right(self, amount: USize) -> USize
   cost time O(1)
 {
-  todo
+  intrinsic::rotate_right(self, amount: amount)
 }
 
 public fn USize.reverse_bits(self) -> USize
   cost time O(1)
 {
-  todo
+  let halves = ((self & 0xF0F0F0F0F0F0F0F0) >> 4) | ((self & 0x0F0F0F0F0F0F0F0F) << 4)
+  let quarters = ((halves & 0xCCCCCCCCCCCCCCCC) >> 2) | ((halves & 0x3333333333333333) << 2)
+  let pairs = ((quarters & 0xAAAAAAAAAAAAAAAA) >> 1) | ((quarters & 0x5555555555555555) << 1)
+  intrinsic::swap_bytes(pairs)
 }
 
 public fn USize.swap_bytes(self) -> USize
   cost time O(1)
 {
-  todo
+  intrinsic::swap_bytes(self)
 }
 
 public fn USize.checked_shift_left(self, amount: USize) -> Option[USize]
   ensures (result is None) == (amount >= 64)
   cost time O(1)
 {
-  todo
+  if amount >= 64 { None } else { Some(self << amount) }
 }
 
 public fn USize.checked_shift_right(self, amount: USize) -> Option[USize]
   ensures (result is None) == (amount >= 64)
   cost time O(1)
 {
-  todo
+  if amount >= 64 { None } else { Some(self >> amount) }
 }
 
 public fn USize.wrapping_shift_left(self, amount: USize) -> USize
   cost time O(1)
 {
-  todo
+  self << (amount % 64)
 }
 
 public fn USize.wrapping_shift_right(self, amount: USize) -> USize
   cost time O(1)
 {
-  todo
+  self >> (amount % 64)
 }
 
 public fn USize.to_signed_bits(self) -> ISize
+  ensures self < 9223372036854775808 ==> result == self
+  ensures self >= 9223372036854775808 ==> result == self - power(2, 64)
   cost time O(1)
 {
-  todo
+  if self < 9223372036854775808 {
+    intrinsic::convert(self)
+  } else {
+    let below: ISize = intrinsic::convert(USize.maximum - self)
+    -below - 1
+  }
 }

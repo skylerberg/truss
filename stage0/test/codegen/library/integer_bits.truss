@@ -1,0 +1,98 @@
+test "rotating moves bits round the ends" {
+  let byte: UInt8 = 0b1000_0001
+  assert byte.rotate_left(1) == 0b0000_0011
+  assert byte.rotate_right(1) == 0b1100_0000
+  assert byte.rotate_left(8) == byte
+  assert byte.rotate_left(9) == 0b0000_0011
+  let word: UInt32 = 0x12345678
+  assert word.rotate_left(8) == 0x34567812
+  assert word.rotate_right(8) == 0x78123456
+  let negative: Int8 = -128
+  assert negative.rotate_left(1) == 1
+}
+
+test "swap_bytes and reverse_bits reverse their units" {
+  let word: UInt32 = 0x12345678
+  assert word.swap_bytes() == 0x78563412
+  let pair: UInt16 = 0xABCD
+  assert pair.swap_bytes() == 0xCDAB
+  let byte: UInt8 = 0b0000_0110
+  assert byte.swap_bytes() == byte
+  assert byte.reverse_bits() == 0b0110_0000
+  let one: UInt8 = 1
+  assert one.reverse_bits() == 128
+  let low: UInt32 = 1
+  assert low.reverse_bits() == 0x80000000
+  let wide: UInt64 = 0x00000000000000FF
+  assert wide.reverse_bits() == 0xFF00000000000000
+  let mixed: UInt16 = 0x8001
+  assert mixed.reverse_bits() == 0x8001
+  let signed: Int16 = 1
+  assert signed.reverse_bits() == Int16.minimum
+}
+
+test "checked shifts refuse an amount of the width or more, and wrapping shifts reduce it" {
+  let one: UInt8 = 1
+  assert one.checked_shift_left(7) == Some(128)
+  assert one.checked_shift_left(8) is None
+  assert one.checked_shift_left(0) == Some(1)
+  let top: UInt8 = 128
+  assert top.checked_shift_right(7) == Some(1)
+  assert top.checked_shift_right(8) is None
+  assert one.wrapping_shift_left(9) == 2
+  assert top.wrapping_shift_right(15) == 1
+  let negative: Int8 = -128
+  assert negative.checked_shift_right(1) == Some(-64)
+  assert negative.checked_shift_right(7) == Some(-1)
+  let small: Int32 = 3
+  assert small.checked_shift_left(4) == Some(48)
+  assert small.checked_shift_left(32) is None
+}
+
+test "an integer's bits are read as the other signedness" {
+  let minus_one: Int8 = -1
+  assert minus_one.to_unsigned_bits() == 255
+  assert Int8.minimum.to_unsigned_bits() == 128
+  assert Int8.maximum.to_unsigned_bits() == 127
+  let zero: Int8 = 0
+  assert zero.to_unsigned_bits() == 0
+  let high: UInt8 = 255
+  assert high.to_signed_bits() == -1
+  let half: UInt8 = 128
+  assert half.to_signed_bits() == Int8.minimum
+  let below: UInt8 = 127
+  assert below.to_signed_bits() == 127
+  assert Int64.minimum.to_unsigned_bits() == 9223372036854775808
+  assert UInt64.maximum.to_signed_bits() == -1
+  let round: Int32 = -123456
+  assert round.to_unsigned_bits().to_signed_bits() == round
+}
+
+test "an integer converts to and from bytes in both orders" {
+  let word: UInt32 = 0x12345678
+  let big = word.to_big_endian_bytes()
+  assert big[0] == 0x12
+  assert big[1] == 0x34
+  assert big[2] == 0x56
+  assert big[3] == 0x78
+  let little = word.to_little_endian_bytes()
+  assert little[0] == 0x78
+  assert little[3] == 0x12
+  assert UInt32.from_big_endian_bytes(big) == word
+  assert UInt32.from_little_endian_bytes(little) == word
+  assert UInt32.from_little_endian_bytes(big) == 0x78563412
+  let negative: Int16 = -2
+  let bytes = negative.to_big_endian_bytes()
+  assert bytes[0] == 0xFF
+  assert bytes[1] == 0xFE
+  assert Int16.from_big_endian_bytes(bytes) == negative
+  let wide: UInt64 = 0x0102030405060708
+  let wide_bytes = wide.to_little_endian_bytes()
+  assert wide_bytes[0] == 8
+  assert wide_bytes[7] == 1
+  assert UInt64.from_little_endian_bytes(wide_bytes) == wide
+  let byte: UInt8 = 200
+  assert byte.to_big_endian_bytes()[0] == 200
+  assert UInt8.from_little_endian_bytes(byte.to_little_endian_bytes()) == 200
+  assert Int64.from_big_endian_bytes(Int64.minimum.to_big_endian_bytes()) == Int64.minimum
+}
