@@ -16,8 +16,7 @@ type found = { path : Path.t; change : change }
 (* A method written inside a trait or a capability is compared with that
    one, not on its own. *)
 let public (declaration : Names.declaration) =
-  declaration.ordinal = 0
-  && declaration.container = None
+  declaration.ordinal = 0 && declaration.container = None
   &&
   match declaration.visibility with
   | Public | Public_opaque -> true
