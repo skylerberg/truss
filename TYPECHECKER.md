@@ -1283,6 +1283,16 @@ all read from one account of what a value views:
 - **A value cannot keep a view of its own part.** `self.recent =
   self.items[0..1]` is an error, because the caller would not know that
   changing `items` ends `recent`.
+- **No view crosses into or out of a capability's implementation.** Code
+  that calls `Journal.write(line)` reaches the implementation through the
+  capability and cannot see it, so none of the rules above can follow a
+  view there. In a method of an `impl` of a capability, keeping in `self` a
+  view that the method is given is an error, and so is returning a view of
+  a part of `self`: the caller could drop what the first views, and the
+  next call could change what the second views. The implementation keeps a
+  copy and returns a copy. A view that the implementation was built with
+  can be returned as it is, because whoever built the implementation holds
+  what it views for as long as the implementation is provided.
 
 - **Writing through a slice needs `mut` access to what it views.** A `var`
   that holds a `Slice` or a `StringSlice` can be passed `mut`, or assigned

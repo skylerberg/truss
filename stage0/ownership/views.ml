@@ -378,7 +378,20 @@ let check context (graph : Graph.t) =
                    "This returns a view of `%s`, which is local to the function, so it would \
                     outlive it. A function returns views only of its parameters."
                    (show_root context local.place.root))
-          | None -> ())
+          | None ->
+              (* A capability's callers cannot see its implementation, so a
+                 method returns no view of the implementation's own parts:
+                 the next call could change them. *)
+              if
+                context.implements_capability
+                && List.exists
+                     (fun (view : view) -> view.place.root = Local Self && not view.taken)
+                     (resolve before.(index) views)
+              then
+                report context Returns_local_view at
+                  "This returns a view of a part of an implementation of a capability. Code that \
+                   calls the capability cannot see its implementation, and the next call could \
+                   change that part. Return a copy instead.")
       | Store { place; views } -> (
           if kept_by_caller context place then
             let resolved = resolve before.(index) views in
@@ -394,6 +407,15 @@ let check context (graph : Graph.t) =
                   | Some type_ -> not (is_view context type_)
                   | None -> false)
               | Local _ | Constant _ | Environment -> false
+            in
+            (* A capability's callers cannot see its implementation, so the
+               implementation keeps no view that a method is given. *)
+            let given_to_implementation (view : view) =
+              context.implements_capability && place.root = Local Self
+              &&
+              match view.place.root with
+              | Local local -> local <> Self && List.mem local context.parameters
+              | Constant _ | Environment -> false
             in
             match List.find_opt (ends_with_function context) resolved with
             | Some { place = { root = Environment; _ }; _ } ->
@@ -414,15 +436,26 @@ let check context (graph : Graph.t) =
                      (show_root context place.root)
                      (show_root context local.place.root))
             | None -> (
-                match (List.find_opt of_itself resolved, List.find_opt only_lent resolved) with
-                | Some _, _ ->
+                match
+                  ( List.find_opt given_to_implementation resolved,
+                    List.find_opt of_itself resolved,
+                    List.find_opt only_lent resolved )
+                with
+                | Some given, _, _ ->
+                    report context Stores_local_view at
+                      (Printf.sprintf
+                         "This keeps a view of `%s` in an implementation of a capability. Code \
+                          that calls the capability cannot see its implementation, so it could \
+                          change or drop what is viewed. Keep a copy instead."
+                         (show_root context given.place.root))
+                | None, Some _, _ ->
                     report context Stores_local_view at
                       (Printf.sprintf
                          "This puts a view of a part of `%s` in `%s` itself. A value cannot hold a \
                           view of its own parts: the caller would not know that changing the part \
                           ends the view."
                          (show_root context place.root) (show_root context place.root))
-                | None, Some lent ->
+                | None, None, Some lent ->
                     let lent = show_root context lent.place.root in
                     report context Stores_local_view at
                       (Printf.sprintf
@@ -431,7 +464,7 @@ let check context (graph : Graph.t) =
                           given. Take `%s` as a view type, such as a `Slice`, to keep a view of \
                           it."
                          lent (show_root context place.root) lent lent)
-                | None, None -> ()))
+                | None, None, None -> ()))
       | Write_through slice -> (
           (* Writing through a slice changes what the slice views, so every
              place it views must be mutable. A slice held in a field is

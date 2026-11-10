@@ -698,6 +698,58 @@ let () =
   test "a cursor over `Plain` elements can be given to generic code" (fun () ->
       fine "fn f(items: List[Int64]) -> List[Int64] {\n  List.collect(items.each())\n}\n")
 
+(* Views and a capability's implementation *)
+
+let () =
+  let journal =
+    "capability Journal {\n  fn write(text: StringSlice)\n  fn last() -> StringSlice\n}\n\n"
+  in
+  let rejected name body code = test name (fun () -> one_diagnostic (journal ^ body) code) in
+  rejected "a capability's implementation cannot keep a view that a method is given"
+    "type Keeper(kept: StringSlice)\n\n\
+     impl Journal for Keeper {\n\
+    \  fn write(mut self, text: StringSlice) {\n\
+    \    self.kept = text\n\
+    \  }\n\n\
+    \  fn last(self) -> StringSlice {\n\
+    \    self.kept\n\
+    \  }\n\
+     }\n"
+    "ownership.stores_local_view";
+  rejected "a capability's method cannot return a view of the implementation's own parts"
+    "type Lines(text: String)\n\n\
+     impl Journal for Lines {\n\
+    \  fn write(mut self, text: StringSlice) {\n\
+    \    self.text = text.to_string()\n\
+    \  }\n\n\
+    \  fn last(self) -> StringSlice {\n\
+    \    self.text.slice()\n\
+    \  }\n\
+     }\n"
+    "ownership.returns_local_view";
+  test "an implementation can keep a copy and return a view that it was built with" (fun () ->
+      fine
+        (journal
+       ^ "type Labelled(text: String, label: StringSlice)\n\n\
+          impl Journal for Labelled {\n\
+         \  fn write(mut self, text: StringSlice) {\n\
+         \    self.text = text.to_string()\n\
+         \  }\n\n\
+         \  fn last(self) -> StringSlice {\n\
+         \    self.label\n\
+         \  }\n\
+          }\n"));
+  test "a method that is not a capability's can keep a view and return a view of its parts"
+    (fun () ->
+      fine
+        "type Keeper(kept: StringSlice, text: String)\n\n\
+         fn Keeper.keep(mut self, text: StringSlice) {\n\
+        \  self.kept = text\n\
+         }\n\n\
+         fn Keeper.all(self) -> StringSlice {\n\
+        \  self.text.slice()\n\
+         }\n")
+
 (* Constants *)
 
 let () =
