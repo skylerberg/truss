@@ -2356,6 +2356,91 @@ let () =
         \    self.size() / 2\n\
         \  }\n\
          }\n");
+  test "a call of a bound's method spends the time of that method" (fun () ->
+      proven
+        "fn contains[Element: Equal](items: List[Element], item: Element) -> Bool\n\
+        \  cost time O(items.length() * time(Element.equal))\n\
+         {\n\
+        \  var index: USize = 0\n\
+        \  while index < items.length()\n\
+        \    invariant index <= items.length()\n\
+        \    decreases items.length() - index\n\
+        \  {\n\
+        \    if items[index] == item {\n\
+        \      return true\n\
+        \    }\n\
+        \    index += 1\n\
+        \  }\n\
+        \  false\n\
+         }\n");
+  test "the time of a bound's method is not free" (fun () ->
+      let found =
+        codes
+          "fn contains[Element: Equal](items: List[Element], item: Element) -> Bool\n\
+          \  cost time O(items.length())\n\
+           {\n\
+          \  var index: USize = 0\n\
+          \  while index < items.length()\n\
+          \    invariant index <= items.length()\n\
+          \    decreases items.length() - index\n\
+          \  {\n\
+          \    if items[index] == item {\n\
+          \      return true\n\
+          \    }\n\
+          \    index += 1\n\
+          \  }\n\
+          \  false\n\
+           }\n"
+      in
+      if not (List.mem "prover.cost" found) then fail "found [%s]" (String.concat "; " found));
+  test "log of a number is its bit length" (fun () ->
+      proven
+        "fn integer_square_root(value: UInt64) -> UInt64\n\
+        \  cost time O(64)\n\
+         {\n\
+        \  var result: UInt64 = 0\n\
+        \  var width: UInt64 = 4294967296\n\
+        \  while width > 1\n\
+        \    invariant width >= 1\n\
+        \    invariant result + width <= 4294967296\n\
+        \    decreases width\n\
+        \    cost time O(log(4294967295) - log(width - 1))\n\
+        \  {\n\
+        \    let half = width / 2\n\
+        \    let candidate = result + half\n\
+        \    if candidate <= value / candidate {\n\
+        \      result = candidate\n\
+        \      width = width - half\n\
+        \    } else {\n\
+        \      width = half\n\
+        \    }\n\
+        \  }\n\
+        \  result\n\
+         }\n");
+  test "log of a bounded integer is at most its width" (fun () ->
+      proven
+        "fn digits(value: UInt64) -> USize\n\
+        \  cost time O(log(value))\n\
+         {\n\
+        \  todo\n\
+         }\n\n\
+         fn f(value: UInt64) -> USize\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  digits(value)\n\
+         }\n");
+  test "power of two numbers is their power" (fun () ->
+      proven
+        "fn table() -> USize\n\
+        \  cost time O(power(2, 10))\n\
+         {\n\
+        \  todo\n\
+         }\n\n\
+         fn f() -> USize\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  table()\n\
+         }\n");
   test "a slice changed through a call changes its run of the list" (fun () ->
       proven
         (""
