@@ -23,34 +23,16 @@ every operator is resolved to an intrinsic operation or a call, and every
 type is fully inferred. Lowering from it needs no name resolution and no
 type inference.
 
-The move to the core form is in progress. Lowering uses the core form for a
-body when every node in the body is of a supported kind:
+Every kind of node that runs lowers from the core form. A function's
+parameter defaults and `requires` checks are lowered from the core form
+with its body, and so are the lending and yielding methods inlined into it
+and the pulled version of a yielding method.
 
-- calls to functions, trait methods, capability methods, and intrinsics
-- indexing and other calls of lending methods, and `yield`
-- a yielding call outside a loop, which makes a cursor, and a loop over a
-  recursive yielding method, which pulls one
-- a named function used as a value
-- `provide`, and `any` conversions
-- operators, comparisons, `&&`, `||`, and `!`
-- `if`, `match`, `while`, `for` over an integer range or a yielding call,
-  `break`, `continue`, and `return`
-- `let`, with or without a pattern and an `else`, assignment, and compound
-  assignment
-- `is` tests and every kind of pattern
-- `assert`, `todo`, `unreachable`, `echo`, `proof` blocks, and `parallel`
-  blocks
-- literals, constants, and generic value parameters
-- plain, interpolated, and tagged strings
-- array, set, and map literals
-- constructor calls, `with` updates, and `copy`
-
-A body with any other node falls back to the older lowering, which walks the
-syntax tree and the checked form's tables. A function's parameter defaults
-and `requires` checks are lowered from the same source as its body, and so
-is every lending or yielding method inlined into it. An unsupported node in
-any of those also falls back. The pulled version of a yielding method is
-lowered the same way, from its core form first.
+The older lowering, which walks the syntax tree and the checked form's
+tables, is still in the compiler. A body falls back to it when lowering
+from the core form raises `Unhandled_node`, which no body in the tests
+does. Constant folding and the checks of tagged templates still read the
+syntax tree.
 
 Code generation:
 
@@ -1546,11 +1528,13 @@ a command line can hold.
 - **A float's text without the C library.** DESIGN.md has it written in
   Truss so that it is the same on every system. The loop is Truss; the
   digits are `snprintf`'s and the check `strtod`'s.
-- **Core-form lowering for every body.** These still fall back to the
-  syntax-tree lowering: calls through a function value or an `any` value,
-  lambdas, `next` on a cursor, and `for` over a cursor. Each needs the
-  type of a place, which the core form does not give yet. Once all of them
-  are supported, the syntax-tree lowering is deleted.
+- **Deleting the syntax-tree lowering.** Constant folding and the checks of
+  tagged templates still read the syntax tree. Once they read the core
+  form, the syntax-tree lowering of bodies is deleted with them.
+- **A slice of a range of elements,** `items[1..3]`. The type checker
+  accepts it, and lowering reports it as unsupported.
+- **`for` over a value of a type that implements `Cursor`.** Only the
+  cursor of a yielding method's call can be looped over.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.
