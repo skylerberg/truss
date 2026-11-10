@@ -212,7 +212,7 @@ fn text_length(shape: Shape) -> USize {
 }
 
 fn take_text(shape: own Shape) -> String {
-  match shape {
+  match own shape {
     Labelled(label: text, ..) | Named(name: text, ..) => text
     _ => "none"
   }
