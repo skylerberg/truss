@@ -187,11 +187,19 @@ let real_implementations st ~user capabilities =
       (capability, implementation_evidence st ~impl ~type_arguments:[] ~implementation))
     capabilities
 
+(* The standard library's function that copies bytes into a [String],
+   replacing what is not UTF-8. *)
+let text_copied_from : Path.t =
+  Top
+    {
+      module_ = { package = "standard"; modules = [ "system"; "calls" ] };
+      name = "text_copied_from";
+    }
+
 (* The C [main]'s Truss side: the program's arguments as a [List] of
-   [String]s, whose bytes are the arguments' own, so they are never copied
-   unless bad UTF-8 in them has to be replaced; evidence for the real
-   implementation of each capability [main] uses; and [main]'s [ExitCode]
-   as the process's status. *)
+   [String]s, each made of an argument's bytes by the standard library; the
+   real implementation of each capability [main] uses; and [main]'s
+   [ExitCode] as the process's status. *)
 let program_main context (key : Instance.key) main_path : Lir.t =
   let st = generated_state context ~anchor:main_path ~substitution:[] in
   let b = st.b in
@@ -236,26 +244,22 @@ let program_main context (key : Instance.key) main_path : Lir.t =
   finish b (Switch { value = Copy (at going); cases = [ (Z.one, inside) ]; default = Some after });
   start b inside;
   let length = local b (Value context.types.usize) and bytes = local b (Raw (Pointer Opaque)) in
+  let call intrinsic arguments result =
+    emit b (Call { target = Intrinsic intrinsic; arguments; result = Returned (at result) })
+  in
+  call Program_argument [ Copy (at arguments_pointer); Copy (at index) ] bytes;
+  call Terminated_length [ Copy (at bytes) ] length;
+  let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
+  let view = temporary st view_ty in
   emit b
-    (Call
-       {
-         target = Intrinsic Program_argument;
-         arguments =
-           [
-             Copy (at arguments_pointer);
-             Copy (at index);
-             Address { place = at length; writable = true };
-           ];
-         result = Returned (at bytes);
-       });
+    (Assign (view, Storage.view view_ty ~elements:(Copy (at bytes)) ~length:(Copy (at length))));
   let text = temporary st string_ty in
-  (match Monomorphic.shape context.monomorphic string_ty with
-  | Record [ (field, Typed storage) ] ->
-      emit b
-        (Assign
-           ( text / Field field,
-             Storage.static storage ~elements:(Copy (at bytes)) ~length:(Copy (at length)) ))
-  | _ -> bug "a String that is not storage");
+  call_instance st
+    (Code { path = text_copied_from; type_arguments = [] })
+    ~signature:(signature_of context text_copied_from)
+    ~substitution:[]
+    ~arguments:[ (Read, view_ty, view) ]
+    ~mask:0 ~destination:text;
   lower Storage_push [ string_ty ] [ Place (list / Field storage_field); Value (Move text) ] None;
   emit b (Assign (at index, Binary (Add, Copy (at index), Constant (Integer (Int32, Z.one)))));
   finish b (Goto test);

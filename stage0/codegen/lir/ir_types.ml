@@ -114,11 +114,8 @@ type intrinsic =
       (** [(buffer pointer's address, length, capacity's address, element size, alignment, minimum)]:
           gives storage room for at least [minimum] elements. Storage with capacity 0 and a nonzero
           length is static, and is copied to the heap, never freed. *)
-  | System_environment
-      (** [(name, name length, value length's address) -> bytes]: an environment variable's value,
-          null when it is unset *)
-  | System_run
-      (** [(program, length, arguments, length, error's address) -> Int32]: as [run_process] *)
+  | Environment  (** [() -> pointer] to the environment the process was started with *)
+  | Terminated_length  (** [(bytes) -> USize]: how many bytes come before the first zero byte *)
   | Float_text
       (** [(value, bytes) -> USize]: writes the shortest decimal that reads back as the float, at
           most [float_text_limit] bytes, as [Display] shows it *)
@@ -136,8 +133,7 @@ type intrinsic =
   | Evidence_implementation  (** [(evidence) -> pointer] to the value that implements it *)
   | Evidence_outer  (** [(evidence, index) -> evidence] the implementation captured *)
   | Program_argument
-      (** [(arguments, index, length pointer) -> bytes]: a program argument as UTF-8, with bad
-          sequences replaced by U+FFFD *)
+      (** [(arguments, index) -> bytes]: a program argument, ending in a zero byte *)
   | Evidence_fill
       (** [(evidence's address, implementation, table, captured evidence...)]: fills evidence a
           [provide] builds *)

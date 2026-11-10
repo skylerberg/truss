@@ -45,8 +45,7 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
      operations, which take none. *)
   let element () =
     match operation with
-    | Intrinsic.Write_float | Environment_variable ->
-        Ground.Named { path = Intrinsic.builtin_path UInt8; arguments = [] }
+    | Intrinsic.Write_float -> Ground.Named { path = Intrinsic.builtin_path UInt8; arguments = [] }
     | _ -> type_argument 0
   in
   let element_layout () = Memory_layout.of_type env (element ()) in
@@ -345,6 +344,8 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                ~elements:(Copy (Storage.buffer storage))
                ~length:(length storage))
       | View_length -> set (Use (view_length (place (argument 0))))
+      | View_address ->
+          set (Convert (Copy (Storage.view_elements (place (argument 0))), Integer USize))
       | View_slice ->
           let view = place (argument 0) in
           let count = usize_local "count" in
@@ -390,43 +391,6 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                  fields = [ ("descriptor", value 0) ];
                })
       | Handle_descriptor -> set (Use (Copy (read (argument 0) / Field "descriptor")))
-      | Run_process ->
-          let program = place (argument 0) and packed = place (argument 1) in
-          call ?result:destination System_run
-            [
-              Copy (Storage.view_elements program);
-              Copy (Storage.view_length program);
-              Copy (Storage.view_elements packed);
-              Copy (Storage.view_length packed);
-              Address { place = place (argument 2); writable = true };
-            ]
-      | Environment_variable ->
-          let name = place (argument 0) in
-          let storage = place (argument 1) in
-          let found = local b ~name:"found" (Raw (Nullable_pointer Opaque)) in
-          let count = usize_local "count" in
-          call ~result:(at found) System_environment
-            [
-              Copy (Storage.view_elements name);
-              Copy (Storage.view_length name);
-              Address { place = at count; writable = true };
-            ];
-          let present = local b ~name:"present" (Raw Bool) in
-          emit b (Assign (at present, Binary (Not_equal, Copy (at found), Constant Null)));
-          when_ b
-            (Copy (at present))
-            (fun () ->
-              let wanted = usize_local "wanted" in
-              emit b (Assign (at wanted, Binary (Add, length storage, Copy (at count))));
-              grow_when Greater storage (Copy (at wanted));
-              call Copy_bytes
-                [
-                  Address { place = element_at storage (length storage); writable = true };
-                  Copy (at found);
-                  Copy (at count);
-                ];
-              add_to_length storage (Copy (at count)));
-          set (Use (Copy (at present)))
       | Libc function_ -> (
           let ground scalar =
             Ground.Named
@@ -472,7 +436,17 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                           :: !after)
                       names;
                     Address { place = at structure; writable = true }
-                | Always number -> usize number)
+                | Always number -> usize number
+                | Environment ->
+                    let environment = local b (Raw (Pointer Opaque)) in
+                    emit b
+                      (Call
+                         {
+                           target = Intrinsic Environment;
+                           arguments = [];
+                           result = Returned (at environment);
+                         });
+                    Copy (at environment))
               parameters
           in
           let target = Lir.Foreign (Libc.declaration (Memory_layout.target env).os function_) in
@@ -486,7 +460,32 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
           | Points_at scalar ->
               let address = local b (Raw (Pointer (Data (ground scalar)))) in
               call (Returned (at address));
-              set (Use (Copy (at address / Deref))))
+              set (Use (Copy (at address / Deref)))
+          | Text ->
+              let bytes = ground UInt8 in
+              let address = local b (Raw (Nullable_pointer (Data bytes))) in
+              call (Returned (at address));
+              let found = place (argument (taken ())) in
+              emit b (Assign (found, Binary (Not_equal, Copy (at address), Constant Null)));
+              (* A view's address is never null, so text that is not there
+                 is an empty view of static bytes. *)
+              let elements = local b (Raw (Pointer (Data bytes))) in
+              let count = usize_local "length" in
+              emit b (Assign (at elements, Use (Constant (Bytes ""))));
+              emit b (Assign (at count, Use (usize 0)));
+              when_ b (Copy found) (fun () ->
+                  emit b (Assign (at elements, Use (Copy (at address))));
+                  emit b
+                    (Call
+                       {
+                         target = Intrinsic Terminated_length;
+                         arguments = [ Copy (at address) ];
+                         result = Returned (at count);
+                       }));
+              set
+                (Storage.view (Storage.view_of_elements bytes)
+                   ~elements:(Copy (at elements))
+                   ~length:(Copy (at count))))
       | Libc_number number ->
           let integer =
             match
