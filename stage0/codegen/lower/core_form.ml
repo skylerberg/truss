@@ -618,6 +618,29 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
      leave. *)
   let chunked = (parallel && at_once st) || st.chunk_next_range in
   st.chunk_next_range <- false;
+  (* What a range of a type counts in. A range of [Character] goes from
+     U+D7FF to U+E000, since the surrogates between them are no
+     characters. *)
+  let counting element =
+    let scalar = scalar_of st element in
+    let constant value : Lir.operand =
+      match scalar with
+      | Integer integer -> constant_int integer (Z.of_int value)
+      | Character -> Constant (Character value)
+      | _ -> bug "a range of %s" (Ground.to_string element)
+    in
+    (scalar, constant, scalar = Character)
+  in
+  let both first second =
+    let answer = local st.b (Raw Bool) in
+    emit st.b (Assign (at answer, Binary (Bit_and, first, second)));
+    Lir.Copy (at answer)
+  in
+  let compare op left right =
+    let answer = local st.b (Raw Bool) in
+    emit st.b (Assign (at answer, Binary (op, left, right)));
+    Lir.Copy (at answer)
+  in
   match iteration with
   | Integer_range { start = low; stop = high; inclusive } when chunked ->
       (* The loop is a region that covers a part of the range's indexes,
@@ -625,7 +648,7 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
          has as many indexes as fit. As it is written here it covers them
          all; outlining has it run for parts of them at the same time. *)
       let element = ground st low.type_ in
-      let integer = integer_of st element in
+      let scalar, constant, characters = counting element in
       let wide = Lir.Raw (Integer UInt64) in
       let one = constant_int UInt64 Z.one in
       let first_value = binding st ~name:"start" element in
@@ -649,6 +672,15 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
       emit st.b (Assign (at high_wide, Convert (Copy last_value, Integer UInt64)));
       emit st.b (Assign (at last, Binary (Subtract, Copy (at high_wide), Copy (at low_wide))));
       if not inclusive then emit st.b (Assign (at last, Binary (Subtract, Copy (at last), one)));
+      if characters then
+        when_ st.b
+          (both
+             (compare Less (Copy first_value) (constant 0xD800))
+             (compare Greater (Copy last_value) (constant 0xDFFF)))
+          (fun () ->
+            emit st.b
+              (Assign
+                 (at last, Binary (Subtract, Copy (at last), constant_int UInt64 (Z.of_int 0x800)))));
       let fork = fresh_fork st in
       emit st.b (Region { fork; region = Chunk { first; last } });
       let index = local st.b ~name:"index" wide in
@@ -659,8 +691,14 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
       in_scope st (fun () ->
           let offset = binding st element in
           let bound = binding st element in
-          emit st.b (Assign (offset, Convert (Copy (at index), Integer integer)));
+          emit st.b (Assign (offset, Convert (Copy (at index), scalar)));
           emit st.b (Assign (bound, Binary (Add, Copy first_value, Copy offset)));
+          if characters then
+            when_ st.b
+              (both
+                 (compare Less (Copy first_value) (constant 0xD800))
+                 (compare Greater_equal (Copy bound) (constant 0xD800)))
+              (fun () -> emit st.b (Assign (bound, Binary (Add, Copy bound, constant 0x800))));
           match_patterns st [ (pattern, bound) ] ~failed:(block st.b);
           looping st ~continue_:step ~break_:done_ ~depth body);
       finish st.b (Goto step);
@@ -679,6 +717,7 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
       start st.b after
   | Integer_range { start = low; stop = high; inclusive } ->
       let element = ground st low.type_ in
+      let _, constant, characters = counting element in
       let index = binding st ~name:"index" element in
       let stop = binding st element in
       emit st.b (Assign (index, Use (operand st low)));
@@ -710,8 +749,11 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
           (Switch { value = Copy (at last); cases = [ (Z.one, after) ]; default = Some next });
         start st.b next
       end;
-      emit st.b
-        (Assign (index, Binary (Add, Copy index, constant_int (integer_of st element) Z.one)));
+      emit st.b (Assign (index, Binary (Add, Copy index, constant 1)));
+      if characters then
+        when_ st.b
+          (compare Equal (Copy index) (constant 0xD800))
+          (fun () -> emit st.b (Assign (index, Use (constant 0xE000))));
       finish st.b (Goto test);
       start st.b after
   | Yielding_call ({ kind = Call call; _ } as iterated) -> (

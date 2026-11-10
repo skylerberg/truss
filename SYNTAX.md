@@ -1668,6 +1668,10 @@ A range whose start is at or past its end is empty, not an error. The inclusive
 form exists because some ranges cannot be written otherwise: `0..256` would
 overflow a `UInt8`.
 
+A range of characters, such as `Character"a"..=Character"z"`, holds the
+characters between its ends in the order of their code points. The
+surrogates are not characters, so U+E000 follows U+D7FF, as in Rust.
+
 ### Collections
 
 | Literal | Meaning |

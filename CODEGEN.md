@@ -724,6 +724,10 @@ and its siblings. Full-width multiplication, used by hashing and
   matches runs.
 - **`?`** is a tag test and an early return, with the drops elaboration
   inserted.
+- **A `for` over a range** counts in the range's own type, and an
+  inclusive range stops after its last value without adding one to it,
+  which could overflow. A range of characters goes from U+D7FF to U+E000,
+  since the surrogates between them are not characters.
 - **Conditions are lowered as jumps.** `if`, `while`, a guard, and a
   boolean built with `&&`, `||`, `!`, and `is` all go through one lowering
   that branches to a true block and a false one. `&&` and `||` short-circuit

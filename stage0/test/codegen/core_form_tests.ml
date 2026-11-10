@@ -1468,6 +1468,44 @@ test "a match on a call's result takes the payload in one arm and leaves the res
 }
 |}
 
+let () =
+  passes "a loop over a range of characters, which has no surrogates in it"
+    {|fn count(low: Character, high: Character) -> Int64 {
+  var seen: Int64 = 0
+  for _ in low..=high {
+    seen += 1
+  }
+  seen
+}
+
+fn count_before(low: Character, high: Character) -> Int64 {
+  var seen: Int64 = 0
+  for _ in low..high {
+    seen += 1
+  }
+  seen
+}
+
+fn last_of(low: Character, high: Character) -> Character {
+  var last = low
+  for letter in low..=high {
+    last = letter
+  }
+  last
+}
+
+test "a range of characters counts letters, and steps over the surrogates" {
+  assert count(Character"a", high: Character"c") == 3
+  assert count_before(Character"a", high: Character"c") == 2
+  assert count(Character"c", high: Character"a") == 0
+  assert last_of(Character"a", high: Character"z") == Character"z"
+  assert count(Character"\u{D7FE}", high: Character"\u{E001}") == 4
+  assert count_before(Character"\u{D7FE}", high: Character"\u{E000}") == 2
+  assert last_of(Character"\u{D7FF}", high: Character"\u{E000}") == Character"\u{E000}"
+  assert count(Character"\u{E000}", high: Character"\u{E002}") == 3
+}
+|}
+
 (* Checks which of a module's constants fold and which are worked out by
    running their evaluators, and that the module's test passes. *)
 let folds what ~folded ~run source =
