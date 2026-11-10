@@ -387,7 +387,13 @@ let () =
       has_type "fn f(a: Int64, b: Int64) -> Int64\n  ensures result == a + b\n{\n  todo\n}\n"
         "a + b" "Integer");
   test "comparisons in a specification may mix integer types" (fun () ->
-      fine "fn f(count: UInt32, items: List[Int64])\n  requires count <= items.length()\n{\n}\n")
+      fine "fn f(count: UInt32, items: List[Int64])\n  requires count <= items.length()\n{\n}\n");
+  test "a lambda in a specification may give a built-in integer for an Integer" (fun () ->
+      fine
+        "fn f(rows: List[List[Int64]])\n\
+        \  requires rows.model().sum(fn(cells) { cells.length() }) > 0\n\
+         {\n\
+         }\n")
 
 (* Loops *)
 

@@ -504,6 +504,41 @@ let in_range ty term =
       L.(Apply ("<=", [ Integer low; term ]) &&& Apply ("<=", [ term; Integer high ]))
   | None -> L.Boolean true
 
+(* A sort's name, as part of a symbol's. *)
+let sort_label (sort : L.sort) =
+  match sort with
+  | Int -> "Int"
+  | Bool -> "Bool"
+  | Float (exponent, significand) -> Printf.sprintf "Float%d_%d" exponent significand
+  | Uninterpreted name -> name
+
+(* A term with its quantifiers' bound names numbered in the order they
+   appear, so two terms that differ only in those names are the same. *)
+let canonical_binders term =
+  let count = ref 0 in
+  let rec walk renamed = function
+    | L.Symbol name -> (
+        match List.assoc_opt name renamed with
+        | Some other -> L.Symbol other
+        | None -> L.Symbol name)
+    | (L.Integer _ | L.Boolean _ | L.Bits _) as term -> term
+    | L.Apply (name, arguments) -> L.Apply (name, List.map (walk renamed) arguments)
+    | L.Forall (bound, body) ->
+        let bound, renamed = rename renamed bound in
+        L.Forall (bound, walk renamed body)
+    | L.Exists (bound, body) ->
+        let bound, renamed = rename renamed bound in
+        L.Exists (bound, walk renamed body)
+  and rename renamed bound =
+    List.fold_right
+      (fun (name, sort) (bound, renamed) ->
+        incr count;
+        let other = Printf.sprintf "binder.%d" !count in
+        ((other, sort) :: bound, (name, other) :: renamed))
+      bound ([], renamed)
+  in
+  walk [] term
+
 (* A value of a type that arrives from outside what is known: a parameter,
    a call's result, a loop's havocked local. *)
 let arrive context frame prefix ty =
@@ -1880,17 +1915,34 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
   | Function_value ->
       check_callback_requires context frame written values;
       let frame = havoc_mut frame in
-      let frame =
+      let callee =
         match written.kind with
-        | Call (callee, _) when context.counters <> [] -> (
-            let _, callee_term = value context frame callee in
-            match type_of frame callee with
-            | T.Function function_type ->
-                spend context frame (function_value_amount context frame function_type callee_term)
-            | _ -> spend context frame (unknown_amount context frame))
-        | _ -> frame
+        | Call (callee, _) -> Some (type_of frame callee, snd (value context frame callee))
+        | _ -> None
       in
-      Some (frame, arrive context frame "result" result_type)
+      let frame =
+        match callee with
+        | _ when context.counters = [] -> frame
+        | Some (T.Function function_type, callee_term) ->
+            spend context frame (function_value_amount context frame function_type callee_term)
+        | _ -> spend context frame (unknown_amount context frame)
+      in
+      let result =
+        match callee with
+        | Some (T.Function function_type, callee_term) when in_the_logic function_type ->
+            let operands =
+              List.sort
+                (fun ((a : C.argument), _, _) ((b : C.argument), _, _) ->
+                  compare a.parameter b.parameter)
+                values
+              |> List.map (fun (_, _, term) -> term)
+            in
+            let term = applied context function_type callee_term operands in
+            assume context frame (in_range result_type term);
+            term
+        | _ -> arrive context frame "result" result_type
+      in
+      Some (frame, result)
   | Capability_method { capability; name } ->
       with_contract
         (Path.Method { owner = capability; name; receiver = Static })
@@ -2124,7 +2176,11 @@ and lambda context frame (written : expression) (parameters : pattern list) body
           | None -> None
         else None)
   in
-  let term = arrive context frame "lambda" ty in
+  let term =
+    match lambda_definition context frame function_type parameters body with
+    | Some term -> term
+    | None -> arrive context frame "lambda" ty
+  in
   (match frame.source.checked.captures.(written.id) with
   | Some captured -> context.lambda_captures <- (term, captured) :: context.lambda_captures
   | None -> ());
@@ -2132,6 +2188,76 @@ and lambda context frame (written : expression) (parameters : pattern list) body
   | Some found -> context.lambda_times <- (term, found) :: context.lambda_times
   | None -> ());
   (frame, term)
+
+(* A lambda whose body is functional, as a function in the logic: applied,
+   it is its body. Lambdas with the same body over the same captured values
+   are the same function, so a bound and a loop's bound that both write
+   [(row) => row.length()] mean the same sum. A body whose value needs a
+   fresh symbol, or that the prover cannot read, gives no definition. *)
+and lambda_definition context frame (function_type : T.function_type) parameters body =
+  if not (in_the_logic function_type && functional_block body) then None
+  else
+    let bound = parameters_of context frame function_type in
+    let defined =
+      body_over context frame bound body (fun inside ->
+          List.fold_left2
+            (fun inside (pattern : pattern) ((name, _), (_, input)) ->
+              snd (pattern_match context inside pattern (L.Symbol name) (substituted frame input)))
+            inside parameters
+            (List.combine bound function_type.inputs))
+    in
+    match defined with
+    | Some defined ->
+        let defined = canonical_binders defined in
+        let symbol =
+          "lambda."
+          ^ Logic.hash
+              (String.concat " " (List.map (fun (_, sort) -> sort_label sort) bound)
+              ^ " " ^ L.show_term defined)
+        in
+        declare context (L.Constant (symbol, sort_of context (T.Function function_type)));
+        let term = L.Symbol symbol in
+        let application =
+          applied context function_type term (List.map (fun (name, _) -> L.Symbol name) bound)
+        in
+        fact context frame (L.Forall (bound, L.equal application defined));
+        (* Its body's value is in the range of the body's type, which may be
+           narrower than the function type's [Integer]. *)
+        (match List.rev body.statements with
+        | { kind = Expression last; _ } :: _ -> (
+            match in_range (type_of frame last) application with
+            | L.Boolean true -> ()
+            | range -> fact context frame (L.Forall (bound, range)))
+        | _ -> ());
+        Some term
+    | _ -> None
+
+(* A functional body's value over bound names, as a definition states it:
+   [bind] binds them in the frame the body reads. Nothing is counted or
+   obliged, and a body that the prover cannot read, or whose value needs a
+   fresh symbol, gives none. *)
+and body_over context frame bound body bind =
+  let mark = context.fresh in
+  let saved_counters = context.counters in
+  context.counters <- [];
+  Fun.protect
+    ~finally:(fun () -> context.counters <- saved_counters)
+    (fun () ->
+      try
+        let inside =
+          bind
+            {
+              frame with
+              bound = List.map fst bound @ frame.bound;
+              checking = false;
+              result = None;
+              loop = None;
+            }
+        in
+        match block_value context inside body with
+        | Some (_, defined) when not (made_since context mark defined) -> Some defined
+        | _ -> None
+      with Unsupported _ | Foreign_unsupported _ -> None)
 
 (* The [requires] on the type of a function-typed parameter, with the
    names of its inputs, in the definition that declares it. *)
@@ -2406,6 +2532,30 @@ and sequence_length context element term =
   let symbol = "function." ^ Path.show path ^ "[" ^ type_key element ^ "]" in
   declare context (L.Function (symbol, [ sort_of context (sequence_type element) ], L.Int));
   L.Apply (symbol, [ term ])
+
+(* A sequence's sum, by [standard::specification]'s [Sequence.sum], over a
+   measure of its elements. *)
+and sequence_sum context element term measure =
+  let path = Path.Method { owner = sequence_path; name = "sum"; receiver = Read } in
+  let symbol = "function." ^ Path.show path ^ "[" ^ type_key element ^ "]" in
+  declare context
+    (L.Function
+       ( symbol,
+         [
+           sort_of context (sequence_type element);
+           sort_of context (T.Function (measure_type element));
+         ],
+         L.Int ));
+  L.Apply (symbol, [ term; measure ])
+
+(* The type of a sum's measure: [fn(Element) -> Integer cost time finite]. *)
+and measure_type element : T.function_type =
+  {
+    inputs = [ (T.Read, element) ];
+    output = Returns T.Integer;
+    uses = [];
+    costs = [ { amortized = false; resource = "time"; bound = Finite_cost } ];
+  }
 
 and sequence_at context element term index =
   let sequence = sequence_type element in
@@ -3104,6 +3254,21 @@ and appended context frame element parts part =
                &&& Apply ("<", [ Symbol index; length ])
                ==> equal after before) ))
   | _ -> ());
+  (* Each sum over the longer sequence adds the new part's measure, as
+     [Sequence.append]'s contract says. *)
+  context.fresh <- context.fresh + 1;
+  let measure = Printf.sprintf "measure.%d" context.fresh in
+  assume context frame
+    (L.Forall
+       ( [ (measure, sort_of context (T.Function (measure_type element))) ],
+         L.equal
+           (sequence_sum context element longer (L.Symbol measure))
+           (L.Apply
+              ( "+",
+                [
+                  sequence_sum context element parts (L.Symbol measure);
+                  applied context (measure_type element) (L.Symbol measure) [ part ];
+                ] )) ));
   longer
 
 (* Whether a clause mentions [result], so that it holds at each [yield]
@@ -3210,6 +3375,41 @@ and named_function context frame (written : expression) path type_arguments cont
   let symbol = "named." ^ Path.show path ^ instance in
   declare context (L.Constant (symbol, sort_of context ty));
   let term = L.Symbol symbol in
+  (* Applied, a pure function named as a value is the function: its body,
+     where it has a definition that holds for every argument, and
+     otherwise the function in the logic. *)
+  (match ty with
+  | T.Function function_type when in_the_logic function_type && contract.pure ->
+      let parameters = parameters_of context frame function_type in
+      let inputs = List.map (fun (name, _) -> L.Symbol name) parameters in
+      let defined =
+        match contract.definition with
+        | Some (part, body)
+          when part.requires = [] && instance = ""
+               && not (List.exists (Path.equal path) context.instantiating) ->
+            context.instantiating <- path :: context.instantiating;
+            Fun.protect
+              ~finally:(fun () -> context.instantiating <- List.tl context.instantiating)
+              (fun () ->
+                body_over context frame parameters body (fun inside ->
+                    part_frame inside part
+                      ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
+                      ~substitution:[]))
+        | _ -> None
+      in
+      let value =
+        match defined with
+        | Some defined -> defined
+        | None ->
+            let output = match function_type.output with Returns output -> output | _ -> T.unit in
+            let function_symbol = "function." ^ Path.show path ^ instance in
+            declare context
+              (L.Function (function_symbol, List.map snd parameters, sort_of context output));
+            L.Apply (function_symbol, inputs)
+      in
+      fact context frame
+        (L.Forall (parameters, L.equal (applied context function_type term inputs) value))
+  | _ -> ());
   let constant_time =
     List.exists
       (fun (part : part) ->
@@ -4478,6 +4678,37 @@ and function_value_amount context frame (function_type : T.function_type) callee
 (* [time(f)], the time one call through a function value takes: one unit
    when its type has an [O(...)] bound, at least one otherwise, and for a
    lambda whose calls the prover could bound, that bound. *)
+(* Whether a call through a value of a function type is a function in the
+   logic: it ends, uses no capabilities, changes none of its arguments, and
+   returns its result. *)
+and in_the_logic (function_type : T.function_type) =
+  T.terminates function_type && function_type.uses = []
+  && List.for_all (fun (mode, _) -> mode <> T.Mut) function_type.inputs
+  && match function_type.output with Returns _ -> true | _ -> false
+
+(* A function value applied to its arguments, through the [apply] of its
+   type's sorts. *)
+and applied context (function_type : T.function_type) callee arguments =
+  let inputs = List.map (fun (_, input) -> sort_of context input) function_type.inputs in
+  let output =
+    sort_of context (match function_type.output with Returns output -> output | _ -> T.unit)
+  in
+  let value_sort = sort_of context (T.Function function_type) in
+  let symbol =
+    String.concat "." ("apply" :: List.map sort_label ((value_sort :: inputs) @ [ output ]))
+  in
+  declare context (L.Function (symbol, value_sort :: inputs, output));
+  L.Apply (symbol, callee :: arguments)
+
+(* Bound names for each input of a function type, at this depth of
+   quantifiers. *)
+and parameters_of context frame (function_type : T.function_type) =
+  let depth = List.length frame.bound in
+  List.mapi
+    (fun index (_, input) ->
+      (Printf.sprintf "parameter.%d.%d" depth index, sort_of context (substituted frame input)))
+    function_type.inputs
+
 and time_of context frame (ty : T.ty) term =
   let sort = sort_of context ty in
   let symbol = "time." ^ match sort with L.Uninterpreted name -> name | _ -> "value" in
@@ -4917,14 +5148,15 @@ and potential_clause context (ty : T.ty) =
   | _ -> None
 
 (* Whether a value of a type can hold potential: its type declares one, or
-   a part of it can, whether or not this package sees its fields. A type
-   parameter may stand for such a type. The elements of a built-in
-   collection holding potential is not read yet. *)
+   a part of it can, whether or not this package sees its fields, or its
+   model is a sequence of elements that can. A type parameter may stand for
+   such a type. *)
 and has_potential context ?(seen = []) (ty : T.ty) =
   if List.exists (T.equal ty) seen then false
   else
     match ty with
     | Parameter _ -> true
+    | Named _ when Option.is_some (elements_with_potential context ~seen ty) -> true
     | Named { path; arguments } when builtin ty = None -> (
         potential_clause context ty <> None
         ||
@@ -4975,6 +5207,17 @@ and potential context frame (ty : T.ty) term =
       fact context frame
         L.(validity context frame ~assuming:true ty term ==> Apply ("<=", [ int 0; held ]));
       match (potential_clause context ty, constructors context ty) with
+      | None, _ when Option.is_some (elements_with_potential context ty) -> (
+          (* A collection's potential is its elements', through its model. *)
+          match elements_with_potential context ty with
+          | Some element -> (
+              match model_of context ty term ~element with
+              | Some model ->
+                  fact context frame
+                    (L.equal held
+                       (sequence_sum context element model (potential_measure context element)))
+              | None -> ())
+          | None -> ())
       | Some (source, written), Some shape -> (
           let substitution = match visible_type context ty with Some (_, s) -> s | None -> [] in
           let inner =
@@ -5024,6 +5267,61 @@ and potential context frame (ty : T.ty) term =
     end;
     held
   end
+
+(* The element type of a type whose model is a sequence, when its elements
+   can hold potential. *)
+and elements_with_potential context ?(seen = []) (ty : T.ty) =
+  match sequence_element context ty with
+  | Some element when has_potential context ~seen:(ty :: seen) element -> Some element
+  | _ -> None
+
+(* The element type of a type whose [Model] is a sequence, by the standard
+   library's [impl] of [Model] for it. *)
+and sequence_element context (ty : T.ty) =
+  let model_trait : Path.t =
+    Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Model" }
+  in
+  match
+    Call_graph.impls_for
+      (Query.demand context.database Call_graph.package_impls "standard")
+      [ model_trait ] ty
+  with
+  | impl :: _ -> (
+      match Query.demand context.database Interface.Environment.interface impl with
+      | Some (Interface.Environment.Impl_interface interface) -> (
+          let variables =
+            List.map (fun (generic : T.generic) -> generic.generic) interface.impl_generics
+          in
+          match
+            ( Interface.Impls.match_type ~variables [] interface.for_type ty,
+              List.assoc_opt "Value" interface.implements.associated )
+          with
+          | Some substitution, Some (T.Named { path; arguments = [ T.Type element ] })
+            when Path.equal path sequence_path ->
+              Some (T.substitute substitution element)
+          | _ -> None)
+      | _ -> None)
+  | [] -> None
+
+(* A value's potential as a measure, for a sum over a collection of such
+   values: applied, it is the potential. *)
+and potential_measure context element =
+  let symbol = "potential.measure." ^ type_key element in
+  let measure = measure_type element in
+  declare context (L.Constant (symbol, sort_of context (T.Function measure)));
+  let term = L.Symbol symbol in
+  if not (List.mem term context.potentials) then begin
+    context.potentials <- term :: context.potentials;
+    let each = "potential.element" in
+    context.facts <-
+      L.Forall
+        ( [ (each, sort_of context element) ],
+          L.equal
+            (applied context measure term [ L.Symbol each ])
+            (held_symbol context element (L.Symbol each)) )
+      :: context.facts
+  end;
+  term
 
 and held_symbol context ty term =
   let symbol = "potential." ^ type_key ty in

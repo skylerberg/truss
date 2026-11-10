@@ -205,6 +205,10 @@ and lambda state env ?expected (value : expression) parameters body =
         let body_type = block_value state lambda_env ~expected:output body in
         (match resolve state body_type with
         | T.Never -> ()
+        | found
+          when env.specification && T.is_integer_type found && resolve state output = T.Integer ->
+            (* A built-in integer is an [Integer] in a specification. *)
+            ()
         | _ ->
             if not (unify state output body_type) then
               mismatch state body.span ~expected:output ~found:body_type);

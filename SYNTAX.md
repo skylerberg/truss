@@ -1637,16 +1637,12 @@ iterations cost different amounts, as when each one handles a row of its own
 length:
 
 ```truss
-fn total_cells(rows: Sequence[List[Int64]]) -> Integer {
-  todo
-}
-
 fn sum_all(rows: List[List[Int64]]) -> Int64
-  cost time O(rows.length() + total_cells(rows.model()))
+  cost time O(rows.length() + rows.model().sum(fn(cells) { cells.length() }))
 {
   var total = 0
   for row in rows
-    cost time O(yielded.length() + total_cells(yielded))
+    cost time O(yielded.length() + yielded.sum(fn(cells) { cells.length() }))
   {
     for cell in row {
       total = total.saturating_add(cell)
@@ -1660,6 +1656,9 @@ fn sum_all(rows: List[List[Int64]]) -> Int64
   repeat, but is never `amortized` or `finite`.
 - Its bound can use the variables in scope at the loop and, in a `for`
   loop, `yielded`.
+- `sum` adds up a measure of each element of a `Sequence`, here each row's
+  length. The measure is a lambda or a named function that ends and uses no
+  capabilities, and two lambdas with the same body are the same measure.
 
 ### Operators
 

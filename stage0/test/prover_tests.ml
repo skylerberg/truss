@@ -2130,6 +2130,8 @@ let () =
             }\n")
       in
       if found <> [ "prover.cost" ] then fail "%s" (String.concat ", " found));
+  test "a list's potential is its elements', through its model" (fun () ->
+      proven (meter ^ "fn keep(meters: mut List[Meter])\n  cost amortized time O(1)\n{\n}\n"));
   test "a potential below zero" (fun () ->
       not_proven "type Debt(owed: Int64)\n  cost potential owed\n" "prover.cost");
   test "a potential its invariant keeps at or above zero" (fun () ->
@@ -2217,6 +2219,139 @@ let () =
       let first = key_of "fn f(count: UInt8) -> UInt8 {\n  count + 1\n}\n" in
       let second = key_of "fn g(total: UInt8) -> UInt8 {\n  total + 1\n}\n" in
       if first <> second || first = "none" then fail "%s and %s" first second)
+
+(* Function values in the logic *)
+
+let apply_function =
+  "fn apply(measure: (fn(Int64) -> Int64 cost time finite), value: Int64) -> Int64\n\
+  \  ensures result == measure(value)\n\
+  \  cost time finite\n\
+   {\n\
+  \  measure(value)\n\
+   }\n\n"
+
+let () =
+  test "a pure function value gives the same result for the same argument" (fun () ->
+      proven
+        "fn f(measure: (fn(Int64) -> Int64 cost time finite), value: Int64) -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  measure(value) == measure(value)\n\
+         }\n");
+  test "a function value that uses a capability may give different results" (fun () ->
+      not_proven
+        "fn f(read: (fn(Int64) -> Int64 uses Clock cost time finite), value: Int64) -> Bool\n\
+        \  uses Clock\n\
+        \  ensures result\n\
+         {\n\
+        \  read(value) == read(value)\n\
+         }\n"
+        "prover.ensures");
+  test "a function value without a time clause is a fresh result" (fun () ->
+      not_proven
+        "fn f(measure: fn(Int64) -> Int64, value: Int64) -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  measure(value) == measure(value)\n\
+         }\n"
+        "prover.ensures");
+  test "a lambda applied is its body" (fun () ->
+      proven
+        (apply_function
+       ^ "fn f(value: Int64) -> Int64\n\
+         \  ensures result == value / 2\n\
+          {\n\
+         \  apply(fn(each) { each / 2 }, value: value)\n\
+          }\n"));
+  test "a lambda applied knows what it captures" (fun () ->
+      proven
+        (apply_function
+       ^ "fn f(value: Int64, floor: Int64) -> Int64\n\
+         \  ensures result == (if value > floor { value } else { floor })\n\
+          {\n\
+         \  apply(fn(each) { if each > floor { each } else { floor } }, value: value)\n\
+          }\n"));
+  test "two lambdas with the same body are the same function" (fun () ->
+      proven
+        "fn tally(measure: (fn(Int64) -> Int64 cost time finite)) -> Int64\n\
+        \  cost time finite\n\
+         {\n\
+        \  var total = 0\n\
+        \  total = measure(1)\n\
+        \  total\n\
+         }\n\n\
+         fn f() -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  tally(fn(each) { each / 2 }) == tally(fn(other) { other / 2 })\n\
+         }\n");
+  test "lambdas with different bodies are not known to be the same function" (fun () ->
+      not_proven
+        "fn tally(measure: (fn(Int64) -> Int64 cost time finite)) -> Int64\n\
+        \  cost time finite\n\
+         {\n\
+        \  var total = 0\n\
+        \  total = measure(1)\n\
+        \  total\n\
+         }\n\n\
+         fn f() -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  tally(fn(each) { each / 2 }) == tally(fn(other) { other / 3 })\n\
+         }\n"
+        "prover.ensures");
+  test "a named pure function applied is the function" (fun () ->
+      proven
+        ("fn half(value: Int64) -> Int64\n  cost time O(1)\n{\n  value / 2\n}\n\n" ^ apply_function
+       ^ "fn f() -> Int64\n  ensures result == 3\n{\n  apply(half, value: 7)\n}\n"))
+
+(* Sums over sequences *)
+
+let () =
+  test "appending adds the new element's measure to a sum" (fun () ->
+      proven
+        "theorem appending(items: Sequence[List[Int64]], row: List[Int64])\n\
+        \  ensures items.append(row).sum(fn(each) { each.length() })\n\
+        \    == items.sum(fn(other) { other.length() }) + row.length()\n\
+         {\n\
+         }\n");
+  test "a sum is not known to be anything else" (fun () ->
+      not_proven
+        "theorem appending(items: Sequence[List[Int64]], row: List[Int64])\n\
+        \  ensures items.append(row).sum(fn(each) { each.length() })\n\
+        \    == items.sum(fn(other) { other.length() })\n\
+         {\n\
+         }\n"
+        "prover.ensures");
+  test "a loop whose iterations cost different amounts is bounded by a sum" (fun () ->
+      proven
+        "fn count_cells(rows: List[List[Int64]]) -> USize\n\
+        \  cost time O(rows.length() + rows.model().sum(fn(cells) { cells.length() }))\n\
+         {\n\
+        \  var count: USize = 0\n\
+        \  for row in rows\n\
+        \    cost time O(yielded.length() + yielded.sum(fn(cells) { cells.length() }))\n\
+        \  {\n\
+        \    for _ in row {\n\
+        \      count = count.saturating_add(1)\n\
+        \    }\n\
+        \  }\n\
+        \  count\n\
+         }\n");
+  test "a loop's bound that leaves out its iterations' sum does not hold" (fun () ->
+      not_proven
+        "fn count_cells(rows: List[List[Int64]]) -> USize\n\
+        \  cost time O(rows.length())\n\
+         {\n\
+        \  var count: USize = 0\n\
+        \  for row in rows {\n\
+        \    for _ in row {\n\
+        \      count = count.saturating_add(1)\n\
+        \    }\n\
+        \  }\n\
+        \  count\n\
+         }\n"
+        "prover.cost")
 
 (* Incremental work: after an edit, which definitions are proven again,
    and how many queries reach the solver rather than its cache. Each test's
