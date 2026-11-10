@@ -369,9 +369,18 @@ impl Equal for List[Element: Equal] {
 
 public fn List[Element: Copyable].filled(value: Element, count: USize) -> List[Element]
   ensures result.length() == count
-  cost time O(count)
+  ensures forall i in 0..count => identical(result.model()[i], value)
+  cost time O(count * time(Element.copy))
 {
-  todo
+  var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
+  for _ in 0..count
+    invariant intrinsic::storage_length(elements) == yielded.length()
+    invariant intrinsic::storage_capacity(elements) == count
+    invariant forall i in 0..yielded.length() => identical(intrinsic::storage_model(elements)[i], value)
+  {
+    intrinsic::storage_push(mut elements, value: value.copy())
+  }
+  List(storage: own elements)
 }
 
 public fn List[Element].generate(
@@ -379,10 +388,19 @@ public fn List[Element].generate(
   make: (fn(index: USize) -> Element requires index < count cost time finite),
 ) -> List[Element]
   ensures result.length() == count
+  ensures forall i in 0..count => identical(result.model()[i], make(i))
   cost calls(make) == count
   cost time O(count * time(make))
 {
-  todo
+  var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
+  for index in 0..count
+    invariant intrinsic::storage_length(elements) == yielded.length()
+    invariant intrinsic::storage_capacity(elements) == count
+    invariant forall i in 0..yielded.length() => identical(intrinsic::storage_model(elements)[i], make(i))
+  {
+    intrinsic::storage_push(mut elements, value: make(index))
+  }
+  List(storage: own elements)
 }
 
 public fn List[Element].collect[Source: Cursor[Element = Element]](source: own Source) -> List[Element] {
@@ -408,7 +426,7 @@ public fn List[Element].reserve(mut self, additional: USize)
 public fn List[Element].shrink_to_fit(mut self)
   ensures identical(self.model(), old(self.model()))
 {
-  todo
+  intrinsic::storage_set_capacity(mut self.storage, capacity: self.length())
 }
 
 public fn List[Element].clear(mut self)
@@ -416,7 +434,12 @@ public fn List[Element].clear(mut self)
   cost time O(old(self.length()))
   cost allocations == 0
 {
-  todo
+  while self.length() > 0
+    decreases self.length()
+    cost allocations == 0
+  {
+    let _ = intrinsic::storage_pop(mut self.storage)
+  }
 }
 
 public fn List[Element].truncate(mut self, length: USize)
@@ -424,7 +447,14 @@ public fn List[Element].truncate(mut self, length: USize)
   cost time O(old(self.length()))
   cost allocations == 0
 {
-  todo
+  while self.length() > length
+    invariant self.length() == old(self.length()) || self.length() >= length
+    invariant self.length() <= old(self.length())
+    decreases self.length()
+    cost allocations == 0
+  {
+    let _ = intrinsic::storage_pop(mut self.storage)
+  }
 }
 
 public fn List[Element].remove_at(mut self, index: USize) -> Element
@@ -444,7 +474,8 @@ public fn List[Element].swap_remove(mut self, index: USize) -> Element
   cost time O(1)
   cost allocations == 0
 {
-  todo
+  intrinsic::storage_swap(mut self.storage, first: index, second: self.length() - 1)
+  intrinsic::storage_pop(mut self.storage)
 }
 
 public fn List[Element].remove_range(mut self, range: Range[USize])
@@ -455,7 +486,31 @@ public fn List[Element].remove_range(mut self, range: Range[USize])
   cost time O(old(self.length()))
   cost allocations == 0
 {
-  todo
+  let width = range.stop - range.start
+  if width == 0 {
+    return
+  }
+  var index = range.stop
+  while index < self.length()
+    invariant self.length() == old(self.length())
+    invariant range.stop <= index
+    invariant index <= self.length()
+    decreases self.length() - index
+    cost allocations == 0
+  {
+    intrinsic::storage_swap(mut self.storage, first: index - width, second: index)
+    index += 1
+  }
+  var removed: USize = 0
+  while removed < width
+    invariant self.length() == old(self.length()) - removed
+    invariant removed <= width
+    decreases width - removed
+    cost allocations == 0
+  {
+    let _ = intrinsic::storage_pop(mut self.storage)
+    removed += 1
+  }
 }
 
 public fn List[Element].split_off(mut self, at: USize) -> List[Element]
@@ -464,7 +519,18 @@ public fn List[Element].split_off(mut self, at: USize) -> List[Element]
   ensures result.length() == old(self.length()) - at
   cost time O(result.length())
 {
-  todo
+  let count = self.length() - at
+  var tail: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
+  for _ in 0..count
+    invariant intrinsic::storage_length(tail) == yielded.length()
+    invariant intrinsic::storage_capacity(tail) == count
+    invariant self.length() == old(self.length()) - yielded.length()
+  {
+    intrinsic::storage_push(mut tail, value: intrinsic::storage_pop(mut self.storage))
+  }
+  var moved = List(storage: own tail)
+  mut moved.reverse()
+  moved
 }
 
 public fn List[Element].append(mut self, other: own List[Element])
@@ -488,25 +554,50 @@ public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, item
 public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time finite))
   ensures self.length() <= old(self.length())
   cost time O(old(self.length()) * time(keep))
-  cost allocations == 0
 {
-  todo
+  let count = self.length()
+  var kept: USize = 0
+  for index in 0..count
+    invariant self.length() == count
+    invariant kept <= yielded.length()
+  {
+    if keep(self[index]) {
+      intrinsic::storage_swap(mut self.storage, first: kept, second: index)
+      kept += 1
+    }
+  }
+  mut self.truncate(kept)
 }
 
 public fn List[Element].filter(own self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
   ensures result.length() <= self.length()
   cost time O(self.length() * time(keep))
-  cost allocations == 0
 {
-  todo
+  var kept = own self
+  mut kept.retain(keep)
+  kept
 }
 
 public fn List[Element: Equal].deduplicate(mut self)
   ensures self.length() <= old(self.length())
-  cost time O(old(self.length()))
-  cost allocations == 0
+  cost time O(old(self.length()) * time(Element.equal))
 {
-  todo
+  let count = self.length()
+  if count == 0 {
+    return
+  }
+  var kept: USize = 1
+  for index in 1..count
+    invariant self.length() == count
+    invariant 1 <= kept
+    invariant kept <= yielded.length() + 1
+  {
+    if !(self[index] == self[kept - 1]) {
+      intrinsic::storage_swap(mut self.storage, first: kept, second: index)
+      kept += 1
+    }
+  }
+  mut self.truncate(kept)
 }
 
 impl Default for List[Element] {

@@ -359,3 +359,123 @@ test "reversed lends elements to change, from the last to the first" {
   }
   assert same_items(items, expected: [102, 101, 100])
 }
+
+test "a list is made of copies of a value, or of what a function gives for each index" {
+  let zeros: List[Int64] = List.filled(0, count: 3)
+  assert same_items(zeros, expected: [0, 0, 0])
+  let words: List[String] = List.filled("ab${1}", count: 2)
+  assert words.length() == 2
+  assert words[1] == "ab1"
+  let none: List[Int64] = List.filled(7, count: 0)
+  assert none.length() == 0
+  let doubles: List[USize] = List.generate(4, make: fn(index) { index * 2 })
+  assert doubles.length() == 4
+  assert doubles[0] == 0
+  assert doubles[3] == 6
+}
+
+test "clear and truncate drop elements from the end and keep the room" {
+  var items: List[Int64] = [1, 2, 3, 4, 5]
+  let room = items.capacity()
+  mut items.truncate(3)
+  assert same_items(items, expected: [1, 2, 3])
+  mut items.truncate(10)
+  assert same_items(items, expected: [1, 2, 3])
+  mut items.clear()
+  assert items.length() == 0
+  assert items.capacity() == room
+  var words: List[String] = ["a${1}", "b${2}", "c${3}"]
+  mut words.truncate(1)
+  assert words.length() == 1
+  assert words[0] == "a1"
+  mut words.shrink_to_fit()
+  assert words.capacity() == 1
+  assert words[0] == "a1"
+}
+
+test "swap_remove, remove_range, and split_off take elements out" {
+  var items: List[Int64] = [1, 2, 3, 4, 5, 6, 7]
+  assert mut items.swap_remove(1) == 2
+  assert same_items(items, expected: [1, 7, 3, 4, 5, 6])
+  assert mut items.swap_remove(5) == 6
+  assert same_items(items, expected: [1, 7, 3, 4, 5])
+  mut items.remove_range(1..3)
+  assert same_items(items, expected: [1, 4, 5])
+  mut items.remove_range(1..1)
+  assert same_items(items, expected: [1, 4, 5])
+  mut items.remove_range(0..3)
+  assert items.length() == 0
+  var letters: List[Int64] = [10, 20, 30, 40, 50]
+  mut letters.remove_range(0..2)
+  assert same_items(letters, expected: [30, 40, 50])
+  let tail = mut letters.split_off(1)
+  assert same_items(letters, expected: [30])
+  assert same_items(tail, expected: [40, 50])
+  let everything = mut letters.split_off(0)
+  assert letters.length() == 0
+  assert same_items(everything, expected: [30])
+}
+
+test "retain, filter, and deduplicate keep elements in their order" {
+  var items: List[Int64] = [1, 2, 3, 4, 5, 6]
+  mut items.retain(fn(item) { item % 2 == 0 })
+  assert same_items(items, expected: [2, 4, 6])
+  mut items.retain(fn(item) { item > 100 })
+  assert items.length() == 0
+  let odd: List[Int64] = [1, 2, 3, 4, 5]
+  let kept = own odd.filter(fn(item) { item % 2 == 1 })
+  assert same_items(kept, expected: [1, 3, 5])
+  var runs: List[Int64] = [1, 1, 2, 2, 2, 3, 1, 1]
+  mut runs.deduplicate()
+  assert same_items(runs, expected: [1, 2, 3, 1])
+  var single: List[Int64] = [9]
+  mut single.deduplicate()
+  assert same_items(single, expected: [9])
+  var empty: List[Int64] = []
+  mut empty.deduplicate()
+  assert empty.length() == 0
+}
+
+test "the smallest and the largest element are lent, the first of equals" {
+  let items: List[Int64] = [3, 1, 4, 1, 5, 9, 2, 6]
+  assert items.minimum() is Some(least) && least == 1
+  assert items.maximum() is Some(greatest) && greatest == 9
+  let part = items[4..]
+  assert part.minimum() is Some(least) && least == 2
+  let none: List[Int64] = []
+  assert none.minimum() is None
+  assert none.maximum() is None
+  let fixed: Array[Int64, 3] = [7, -2, 7]
+  assert fixed.minimum() is Some(least) && least == -2
+  assert fixed.maximum() is Some(greatest) && greatest == 7
+}
+
+test "a slice is repeated, and split where an element is" {
+  let items: List[Int64] = [1, 2]
+  assert same_items(items.repeated(3), expected: [1, 2, 1, 2, 1, 2])
+  assert items.repeated(0).length() == 0
+  let fixed: Array[Int64, 1] = [5]
+  assert same_items(fixed.repeated(2), expected: [5, 5])
+  let fields: List[Int64] = [1, 0, 2, 3, 0, 0, 4]
+  var lengths: List[USize] = []
+  var total = 0
+  for part in fields.split(0) {
+    mut lengths.push(part.length())
+    for item in part {
+      total += item
+    }
+  }
+  assert lengths.length() == 4
+  assert lengths[0] == 1
+  assert lengths[1] == 2
+  assert lengths[2] == 0
+  assert lengths[3] == 1
+  assert total == 10
+  let none: List[Int64] = []
+  var parts = 0
+  for part in none.split(0) {
+    parts += 1
+    assert part.length() == 0
+  }
+  assert parts == 1
+}
