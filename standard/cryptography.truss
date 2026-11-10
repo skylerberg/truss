@@ -34,35 +34,35 @@ let sha512_constants: Array[UInt64, 80] = [
   0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817,
 ]
 
-internal fn add_32(first: UInt32, second: UInt32) -> UInt32
+internal fn wrapping_add_32(first: UInt32, second: UInt32) -> UInt32
   cost time O(1)
   cost allocations == 0
 {
   intrinsic::wrapping_add(first, right: second)
 }
 
-internal fn add_64(first: UInt64, second: UInt64) -> UInt64
+internal fn wrapping_add_64(first: UInt64, second: UInt64) -> UInt64
   cost time O(1)
   cost allocations == 0
 {
   intrinsic::wrapping_add(first, right: second)
 }
 
-internal fn turn_32(value: UInt32, right: USize) -> UInt32
+internal fn rotate_right_32(value: UInt32, right: USize) -> UInt32
   cost time O(1)
   cost allocations == 0
 {
   intrinsic::rotate_right(value, amount: right)
 }
 
-internal fn turn_64(value: UInt64, right: USize) -> UInt64
+internal fn rotate_right_64(value: UInt64, right: USize) -> UInt64
   cost time O(1)
   cost allocations == 0
 {
   intrinsic::rotate_right(value, amount: right)
 }
 
-internal fn compress_256(state: mut Array[UInt32, 8], block: Array[UInt8, 64])
+internal fn sha256_compress(state: mut Array[UInt32, 8], block: Array[UInt8, 64])
   cost time O(1)
   cost allocations == 0
 {
@@ -85,35 +85,35 @@ internal fn compress_256(state: mut Array[UInt32, 8], block: Array[UInt8, 64])
     } else {
       let early = words[(round + 1) % 16]
       let late = words[(round + 14) % 16]
-      let small_0 = turn_32(early, right: 7) ^ turn_32(early, right: 18) ^ (early >> 3)
-      let small_1 = turn_32(late, right: 17) ^ turn_32(late, right: 19) ^ (late >> 10)
-      words[slot] = add_32(add_32(add_32(words[slot], second: small_0), second: words[(round + 9) % 16]), second: small_1)
+      let small_0 = rotate_right_32(early, right: 7) ^ rotate_right_32(early, right: 18) ^ (early >> 3)
+      let small_1 = rotate_right_32(late, right: 17) ^ rotate_right_32(late, right: 19) ^ (late >> 10)
+      words[slot] = wrapping_add_32(wrapping_add_32(wrapping_add_32(words[slot], second: small_0), second: words[(round + 9) % 16]), second: small_1)
     }
-    let big_1 = turn_32(e, right: 6) ^ turn_32(e, right: 11) ^ turn_32(e, right: 25)
+    let big_1 = rotate_right_32(e, right: 6) ^ rotate_right_32(e, right: 11) ^ rotate_right_32(e, right: 25)
     let choice = (e & f) ^ (~e & g)
-    let first = add_32(add_32(add_32(add_32(h, second: big_1), second: choice), second: sha256_constants[round]), second: words[slot])
-    let big_0 = turn_32(a, right: 2) ^ turn_32(a, right: 13) ^ turn_32(a, right: 22)
+    let first = wrapping_add_32(wrapping_add_32(wrapping_add_32(wrapping_add_32(h, second: big_1), second: choice), second: sha256_constants[round]), second: words[slot])
+    let big_0 = rotate_right_32(a, right: 2) ^ rotate_right_32(a, right: 13) ^ rotate_right_32(a, right: 22)
     let majority = (a & b) ^ (a & c) ^ (b & c)
     h = g
     g = f
     f = e
-    e = add_32(d, second: first)
+    e = wrapping_add_32(d, second: first)
     d = c
     c = b
     b = a
-    a = add_32(first, second: add_32(big_0, second: majority))
+    a = wrapping_add_32(first, second: wrapping_add_32(big_0, second: majority))
   }
-  state[0] = add_32(state[0], second: a)
-  state[1] = add_32(state[1], second: b)
-  state[2] = add_32(state[2], second: c)
-  state[3] = add_32(state[3], second: d)
-  state[4] = add_32(state[4], second: e)
-  state[5] = add_32(state[5], second: f)
-  state[6] = add_32(state[6], second: g)
-  state[7] = add_32(state[7], second: h)
+  state[0] = wrapping_add_32(state[0], second: a)
+  state[1] = wrapping_add_32(state[1], second: b)
+  state[2] = wrapping_add_32(state[2], second: c)
+  state[3] = wrapping_add_32(state[3], second: d)
+  state[4] = wrapping_add_32(state[4], second: e)
+  state[5] = wrapping_add_32(state[5], second: f)
+  state[6] = wrapping_add_32(state[6], second: g)
+  state[7] = wrapping_add_32(state[7], second: h)
 }
 
-internal fn compress_512(state: mut Array[UInt64, 8], block: Array[UInt8, 128])
+internal fn sha512_compress(state: mut Array[UInt64, 8], block: Array[UInt8, 128])
   cost time O(1)
   cost allocations == 0
 {
@@ -136,35 +136,35 @@ internal fn compress_512(state: mut Array[UInt64, 8], block: Array[UInt8, 128])
     } else {
       let early = words[(round + 1) % 16]
       let late = words[(round + 14) % 16]
-      let small_0 = turn_64(early, right: 1) ^ turn_64(early, right: 8) ^ (early >> 7)
-      let small_1 = turn_64(late, right: 19) ^ turn_64(late, right: 61) ^ (late >> 6)
-      words[slot] = add_64(add_64(add_64(words[slot], second: small_0), second: words[(round + 9) % 16]), second: small_1)
+      let small_0 = rotate_right_64(early, right: 1) ^ rotate_right_64(early, right: 8) ^ (early >> 7)
+      let small_1 = rotate_right_64(late, right: 19) ^ rotate_right_64(late, right: 61) ^ (late >> 6)
+      words[slot] = wrapping_add_64(wrapping_add_64(wrapping_add_64(words[slot], second: small_0), second: words[(round + 9) % 16]), second: small_1)
     }
-    let big_1 = turn_64(e, right: 14) ^ turn_64(e, right: 18) ^ turn_64(e, right: 41)
+    let big_1 = rotate_right_64(e, right: 14) ^ rotate_right_64(e, right: 18) ^ rotate_right_64(e, right: 41)
     let choice = (e & f) ^ (~e & g)
-    let first = add_64(add_64(add_64(add_64(h, second: big_1), second: choice), second: sha512_constants[round]), second: words[slot])
-    let big_0 = turn_64(a, right: 28) ^ turn_64(a, right: 34) ^ turn_64(a, right: 39)
+    let first = wrapping_add_64(wrapping_add_64(wrapping_add_64(wrapping_add_64(h, second: big_1), second: choice), second: sha512_constants[round]), second: words[slot])
+    let big_0 = rotate_right_64(a, right: 28) ^ rotate_right_64(a, right: 34) ^ rotate_right_64(a, right: 39)
     let majority = (a & b) ^ (a & c) ^ (b & c)
     h = g
     g = f
     f = e
-    e = add_64(d, second: first)
+    e = wrapping_add_64(d, second: first)
     d = c
     c = b
     b = a
-    a = add_64(first, second: add_64(big_0, second: majority))
+    a = wrapping_add_64(first, second: wrapping_add_64(big_0, second: majority))
   }
-  state[0] = add_64(state[0], second: a)
-  state[1] = add_64(state[1], second: b)
-  state[2] = add_64(state[2], second: c)
-  state[3] = add_64(state[3], second: d)
-  state[4] = add_64(state[4], second: e)
-  state[5] = add_64(state[5], second: f)
-  state[6] = add_64(state[6], second: g)
-  state[7] = add_64(state[7], second: h)
+  state[0] = wrapping_add_64(state[0], second: a)
+  state[1] = wrapping_add_64(state[1], second: b)
+  state[2] = wrapping_add_64(state[2], second: c)
+  state[3] = wrapping_add_64(state[3], second: d)
+  state[4] = wrapping_add_64(state[4], second: e)
+  state[5] = wrapping_add_64(state[5], second: f)
+  state[6] = wrapping_add_64(state[6], second: g)
+  state[7] = wrapping_add_64(state[7], second: h)
 }
 
-internal fn compress_1(state: mut Array[UInt32, 5], block: Array[UInt8, 64])
+internal fn sha1_compress(state: mut Array[UInt32, 5], block: Array[UInt8, 64])
   cost time O(1)
   cost allocations == 0
 {
@@ -183,7 +183,7 @@ internal fn compress_1(state: mut Array[UInt32, 5], block: Array[UInt8, 64])
       words[slot] = (intrinsic::convert[UInt8, UInt32](block[4 * round]) << 24) | (intrinsic::convert[UInt8, UInt32](block[4 * round + 1]) << 16) | (intrinsic::convert[UInt8, UInt32](block[4 * round + 2]) << 8) | intrinsic::convert[UInt8, UInt32](block[4 * round + 3])
     } else {
       let mixed = words[(round + 13) % 16] ^ words[(round + 8) % 16] ^ words[(round + 2) % 16] ^ words[slot]
-      words[slot] = turn_32(mixed, right: 31)
+      words[slot] = rotate_right_32(mixed, right: 31)
     }
     var mix = b ^ c ^ d
     var constant: UInt32 = 0x6ed9eba1
@@ -196,18 +196,18 @@ internal fn compress_1(state: mut Array[UInt32, 5], block: Array[UInt8, 64])
     } else if round >= 60 {
       constant = 0xca62c1d6
     }
-    let next = add_32(add_32(add_32(add_32(turn_32(a, right: 27), second: mix), second: e), second: constant), second: words[slot])
+    let next = wrapping_add_32(wrapping_add_32(wrapping_add_32(wrapping_add_32(rotate_right_32(a, right: 27), second: mix), second: e), second: constant), second: words[slot])
     e = d
     d = c
-    c = turn_32(b, right: 2)
+    c = rotate_right_32(b, right: 2)
     b = a
     a = next
   }
-  state[0] = add_32(state[0], second: a)
-  state[1] = add_32(state[1], second: b)
-  state[2] = add_32(state[2], second: c)
-  state[3] = add_32(state[3], second: d)
-  state[4] = add_32(state[4], second: e)
+  state[0] = wrapping_add_32(state[0], second: a)
+  state[1] = wrapping_add_32(state[1], second: b)
+  state[2] = wrapping_add_32(state[2], second: c)
+  state[3] = wrapping_add_32(state[3], second: d)
+  state[4] = wrapping_add_32(state[4], second: e)
 }
 
 internal type Sha1(state: Array[UInt32, 5], pending: Array[UInt8, 64], pending_length: USize, total: UInt64)
@@ -220,7 +220,7 @@ internal fn Sha1.push_byte(mut self, byte: UInt8)
   self.pending[self.pending_length] = byte
   self.pending_length += 1
   if self.pending_length == 64 {
-    compress_1(mut self.state, block: self.pending)
+    sha1_compress(mut self.state, block: self.pending)
     self.pending_length = 0
   }
 }
@@ -332,7 +332,7 @@ internal fn Sha256.push_byte(mut self, byte: UInt8)
   self.pending[self.pending_length] = byte
   self.pending_length += 1
   if self.pending_length == 64 {
-    compress_256(mut self.state, block: self.pending)
+    sha256_compress(mut self.state, block: self.pending)
     self.pending_length = 0
   }
 }
@@ -416,7 +416,7 @@ internal fn Sha512.push_byte(mut self, byte: UInt8)
   self.pending[self.pending_length] = byte
   self.pending_length += 1
   if self.pending_length == 128 {
-    compress_512(mut self.state, block: self.pending)
+    sha512_compress(mut self.state, block: self.pending)
     self.pending_length = 0
   }
 }
@@ -696,7 +696,7 @@ internal fn hkdf_block(
   own code.finish()
 }
 
-internal fn push_up_to(output: mut intrinsic::Storage[UInt8], block: Array[UInt8, 32], limit: USize)
+internal fn append_prefix(output: mut intrinsic::Storage[UInt8], block: Array[UInt8, 32], limit: USize)
   requires intrinsic::storage_length(output) <= limit
   requires intrinsic::storage_capacity(output) == limit
   ensures old(intrinsic::storage_length(output)) + 32 <= limit ==>
@@ -742,7 +742,7 @@ public fn hkdf_sha256(
   {
     if intrinsic::storage_length(output) < length {
       previous = hkdf_block(key, previous: previous, index: index, information: information)
-      push_up_to(mut output, block: previous, limit: length)
+      append_prefix(mut output, block: previous, limit: length)
     }
   }
   List(storage: own output)
