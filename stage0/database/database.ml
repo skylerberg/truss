@@ -27,14 +27,19 @@ let standard_base () =
   Engine.freeze ~fixed:true engine;
   engine
 
-(* The database's own inputs: how a worktree's files map to packages, and
+(* The database's own inputs: how a project's files map to packages, and
    each file's stamp, so that a restart reads only the files that changed. *)
 
 type layout = {
   packages : (string * string) list;
       (** Each package's directory, relative to the root, and name *)
-  files : string list;  (** Each manifest and module file, relative to the root *)
+  files : string list;  (** Each manifest and module file under the root, relative to it *)
+  modules : (string * Path.module_) list;  (** Each module's file *)
+  time_limit : int;  (** Each test's, in seconds *)
 }
+
+let no_layout =
+  { packages = []; files = []; modules = []; time_limit = Type_checker.Manifest.default_time_limit }
 
 let layout : (unit, layout) Query.input =
   Query.input ~name:"worktree_layout" ~show:(fun () -> "") ()
@@ -136,9 +141,7 @@ let remember_worktree state root name =
     with Sys_error _ -> ()
 
 let read context input key = Query.find context input key
-
-let current_layout engine =
-  Option.value (read (Engine.context engine) layout ()) ~default:{ packages = []; files = [] }
+let current_layout engine = Option.value (read (Engine.context engine) layout ()) ~default:no_layout
 
 (* A file's fingerprint, for telling which saved state a set of files is
    nearest to. *)
@@ -148,107 +151,200 @@ let text_fingerprint text = Blake3.hash text
 
 type file_contents = Text of string | Unchanged
 
+let manifest_file directory = if directory = "" then "truss.toml" else directory ^ "/truss.toml"
+
+(* A package that is in a cycle of the project's packages that depend on
+   each other, with the cycle. *)
+let dependency_cycle (packages : (string * Type_checker.Manifest.package) list) =
+  let dependencies name =
+    match
+      List.find_opt (fun (_, (p : Type_checker.Manifest.package)) -> p.name = name) packages
+    with
+    | Some (_, package) ->
+        List.map
+          (fun (dependency : Workspace.dependency) -> dependency.package)
+          package.dependencies
+    | None -> []
+  in
+  let rec reaches target seen name =
+    if List.mem name seen then None
+    else
+      List.find_map
+        (fun next ->
+          if next = target then Some [ name; target ]
+          else Option.map (fun way -> name :: way) (reaches target (name :: seen) next))
+        (dependencies name)
+  in
+  List.find_map
+    (fun (directory, (package : Type_checker.Manifest.package)) ->
+      Option.map (fun way -> (directory, way)) (reaches package.name [] package.name))
+    packages
+
 (* Brings the inputs in line with a set of files, each with its contents, or
-   [Unchanged] when its stamp shows it is the same as before. *)
+   [Unchanged] when its stamp shows it is the same as before. The files are
+   every manifest and module file under the project's root. Those of another
+   project are left out: under a root with a [[project]] table, a directory
+   whose manifest has one of its own and everything below it, and under a
+   root without one, which is a project of one package, every other
+   directory with a manifest. *)
 let apply session (files : (string * file_contents) list) =
+  let module Manifest = Type_checker.Manifest in
   let engine = session.engine in
   let old = current_layout engine in
+  let problems = ref [] in
+  let problem directory format =
+    Printf.ksprintf
+      (fun message ->
+        problems := Printf.sprintf "%s: %s" (manifest_file directory) message :: !problems)
+      format
+  in
   let manifests =
     List.filter_map
       (fun (path, contents) ->
-        if Filename.basename path = "truss.toml" then Some (Worktree.parent path, contents)
-        else None)
+        if Filename.basename path <> "truss.toml" then None
+        else
+          let directory = Worktree.parent path in
+          let text =
+            match contents with
+            | Text text -> Some text
+            | Unchanged -> read (Engine.context engine) manifest_texts directory
+          in
+          Option.map (fun text -> (directory, text)) text)
       files
   in
-  let manifest_text directory contents =
-    match contents with
-    | Text text -> Some text
-    | Unchanged ->
-        (* An unchanged manifest's text is kept as the input it was set as. *)
-        read (Engine.context engine) manifest_texts directory
+  List.iter (fun (directory, text) -> Engine.set engine manifest_texts directory text) manifests;
+  let directories = List.map fst manifests in
+  let is_project directory =
+    match List.assoc_opt directory manifests with
+    | Some text -> Manifest.has_project_table text
+    | None -> false
   in
-  let problems = ref [] in
+  let root_is_project = is_project "" in
+  let rec in_another_project directory =
+    directory <> ""
+    && ((List.mem directory directories && ((not root_is_project) || is_project directory))
+       || in_another_project (Worktree.parent directory))
+  in
   let parsed =
     List.filter_map
-      (fun (directory, contents) ->
-        match manifest_text directory contents with
-        | None -> None
-        | Some text -> (
-            Engine.set engine manifest_texts directory text;
-            let shown = if directory = "" then "truss.toml" else directory ^ "/truss.toml" in
-            match Type_checker.Manifest.parse text with
-            | manifest -> Some (directory, manifest)
-            | exception Type_checker.Manifest.Malformed (line, message) ->
-                problems := Printf.sprintf "%s:%d: %s" shown line message :: !problems;
-                None))
+      (fun (directory, text) ->
+        if in_another_project directory then None
+        else
+          match Manifest.parse text with
+          | manifest -> Some (directory, manifest)
+          | exception Manifest.Malformed (line, message) ->
+              problems :=
+                Printf.sprintf "%s:%d: %s" (manifest_file directory) line message :: !problems;
+              None)
       manifests
+  in
+  let time_limit =
+    List.fold_left
+      (fun limit (directory, (manifest : Manifest.t)) ->
+        match manifest.time_limit with
+        | Some seconds when directory = "" -> seconds
+        | Some _ ->
+            problem directory
+              "A test's time limit is its project's. Write `[test]` in the project's manifest, \
+               `truss.toml` at its root.";
+            limit
+        | None -> limit)
+      Manifest.default_time_limit parsed
   in
   let seen = Hashtbl.create 8 in
   let packages =
-    List.filter
-      (fun (directory, (manifest : Type_checker.Manifest.t)) ->
-        if manifest.name = Standard_library.package then begin
-          problems :=
-            Printf.sprintf "%s: the package name standard is the standard library's."
-              (if directory = "" then "truss.toml" else directory ^ "/truss.toml")
-            :: !problems;
-          false
-        end
-        else
-          match Hashtbl.find_opt seen manifest.name with
-          | Some other ->
-              problems :=
-                Printf.sprintf
-                  "%s/truss.toml: the package name %s is already used by %s/truss.toml." directory
-                  manifest.name other
-                :: !problems;
-              false
-          | None ->
-              Hashtbl.replace seen manifest.name directory;
-              true)
+    List.filter_map
+      (fun (directory, (manifest : Manifest.t)) ->
+        match manifest.package with
+        | None -> None
+        | Some package when package.name = Standard_library.package ->
+            problem directory "The package name `standard` is the standard library's.";
+            None
+        | Some package -> (
+            match Hashtbl.find_opt seen package.name with
+            | Some other ->
+                problem directory "The package name `%s` is already used by %s." package.name
+                  (manifest_file other);
+                None
+            | None ->
+                Hashtbl.replace seen package.name directory;
+                Some (directory, package)))
       parsed
   in
-  (* A package that claims to run on every target cannot rely on one that
-     runs only on 64-bit targets. *)
+  let named name = List.find_opt (fun (_, (p : Manifest.package)) -> p.name = name) packages in
   List.iter
-    (fun (directory, (manifest : Type_checker.Manifest.t)) ->
-      if manifest.usize_bits = 32 then
-        List.iter
-          (fun (dependency : Workspace.dependency) ->
-            match
-              List.find_opt
-                (fun (_, (other : Type_checker.Manifest.t)) -> other.name = dependency.package)
-                packages
-            with
-            | Some (_, other) when other.usize_bits = 64 ->
-                problems :=
-                  Printf.sprintf
-                    "%s: %s runs only on 64-bit targets, so %s must say usize_bits = 64 to depend \
-                     on it."
-                    (if directory = "" then "truss.toml" else directory ^ "/truss.toml")
-                    other.name manifest.name
-                  :: !problems
-            | _ -> ())
-          manifest.dependencies)
+    (fun (directory, (package : Manifest.package)) ->
+      (match package.truss with
+      | None ->
+          problem directory
+            "`[package]` needs `truss = \"%s\"`, the version of Truss the package is written for."
+            Manifest.truss_version
+      | Some version when not (Manifest.toolchain_builds version) ->
+          problem directory "`%s` is written for Truss %s, and this toolchain is Truss %s."
+            package.name version Manifest.truss_version
+      | Some _ -> ());
+      (* Every path must read one way: [acme::geometry::vector] cannot be
+         both a module of [acme::geometry] and one of a package [acme]. *)
+      (match Path.package_parts package.name with
+      | [ name ] ->
+          List.iter
+            (fun other ->
+              match Path.package_parts other with
+              | [ owner; _ ] when owner = name ->
+                  problem directory
+                    "The package name `%s` is the owner in `%s`, so a path that starts with it \
+                     could be read two ways. Give one of them another name."
+                    name other
+              | _ -> ())
+            (List.sort_uniq compare
+               (List.map (fun (_, (p : Manifest.package)) -> p.name) packages
+               @ List.concat_map
+                   (fun (_, (p : Manifest.package)) ->
+                     List.map (fun (d : Workspace.dependency) -> d.package) p.dependencies)
+                   packages))
+      | _ -> ());
+      List.iter
+        (fun (dependency : Workspace.dependency) ->
+          if dependency.package = package.name then
+            problem directory "`%s` cannot depend on itself." package.name
+          else
+            match named dependency.package with
+            | None -> problem directory "`%s` is not a package of this project." dependency.package
+            | Some (_, other) ->
+                (* A package that claims to run on every target cannot rely
+                   on one that runs only on 64-bit targets. *)
+                if package.usize_bits = 32 && other.usize_bits = 64 then
+                  problem directory
+                    "`%s` runs only on 64-bit targets, so `%s` must say `usize_bits = 64` to \
+                     depend on it."
+                    other.name package.name)
+        package.dependencies)
     packages;
-  let directories = List.map fst packages in
+  (match dependency_cycle packages with
+  | Some (directory, way) ->
+      problem directory "Packages cannot depend on each other in a cycle: %s."
+        (String.concat " -> " (List.map (Printf.sprintf "`%s`") way))
+  | None -> ());
+  let package_at directory = List.assoc_opt directory packages in
   let modules =
     List.filter_map
       (fun (path, contents) ->
-        if Filename.check_suffix path ".truss" then
-          match Worktree.owner directories path with
-          | Some directory ->
-              let manifest = List.assoc directory packages in
+        if not (Filename.check_suffix path ".truss") then None
+        else
+          match
+            Option.bind (Worktree.owner directories path) (fun directory ->
+                Option.map (fun package -> (directory, package)) (package_at directory))
+          with
+          | Some (directory, (package : Manifest.package)) ->
               Some
                 ( path,
                   ({
-                     package = manifest.Type_checker.Manifest.name;
+                     package = package.name;
                      modules = Worktree.module_names ~package_directory:directory path;
                    }
                     : Path.module_),
                   contents )
-          | None -> None
-        else None)
+          | None -> None)
       files
   in
   List.iter
@@ -277,53 +373,37 @@ let apply session (files : (string * file_contents) list) =
         session.pointed <- false
       end)
     old.files;
-  (* Modules and packages that are gone *)
-  let module_of_old path =
-    match Worktree.owner (List.map fst old.packages) path with
-    | Some directory ->
-        Some
-          ({
-             package = List.assoc directory old.packages;
-             modules = Worktree.module_names ~package_directory:directory path;
-           }
-            : Path.module_)
-    | None -> None
-  in
   let present = Hashtbl.create (List.length modules) in
   List.iter (fun (_, module_, _) -> Hashtbl.replace present module_ ()) modules;
   List.iter
-    (fun path ->
-      if Filename.check_suffix path ".truss" then
-        match module_of_old path with
-        | Some module_ when not (Hashtbl.mem present module_) ->
-            Engine.remove engine Workspace.file_text module_
-        | _ -> ())
-    old.files;
+    (fun (_, module_) ->
+      if not (Hashtbl.mem present module_) then Engine.remove engine Workspace.file_text module_)
+    old.modules;
   List.iter
-    (fun (_, name) ->
-      if not (List.exists (fun (_, (m : Type_checker.Manifest.t)) -> m.name = name) packages) then
-        Engine.remove engine Workspace.packages name)
+    (fun (_, name) -> if named name = None then Engine.remove engine Workspace.packages name)
     old.packages;
   List.iter
-    (fun (directory, (manifest : Type_checker.Manifest.t)) ->
+    (fun (directory, (package : Manifest.package)) ->
       let own =
         List.filter_map
           (fun (path, module_, _) ->
             if Worktree.owner directories path = Some directory then Some module_ else None)
           modules
       in
-      Engine.set engine Workspace.packages manifest.name
+      Engine.set engine Workspace.packages package.name
         {
-          Workspace.name = manifest.name;
-          dependencies = manifest.dependencies;
+          Workspace.name = package.name;
+          dependencies = package.dependencies;
           modules = own;
-          usize_bits = manifest.usize_bits;
+          usize_bits = package.usize_bits;
         })
     packages;
   Engine.set engine layout ()
     {
-      packages = List.map (fun (d, (m : Type_checker.Manifest.t)) -> (d, m.name)) packages;
+      packages = List.map (fun (d, (p : Manifest.package)) -> (d, p.name)) packages;
       files = List.map fst files;
+      modules = List.map (fun (path, module_, _) -> (path, module_)) modules;
+      time_limit;
     };
   session.problems <- List.rev !problems
 
@@ -539,23 +619,28 @@ let open_commit state ~repository commit =
           Hashtbl.replace state.sessions name session;
           Ok session)
 
-(* The worktree a directory is in: the top of its git worktree, or outside
-   git, the nearest directory holding a manifest, or the directory
+(* The root of the project a directory is in: the nearest directory at or
+   above it whose manifest has a [[project]] table, or with none, the
+   nearest with a manifest, which is a package that is a project by
    itself. *)
 let root_of directory =
   let directory = try Unix.realpath directory with Unix.Unix_error _ -> directory in
-  match Git.toplevel directory with
-  | Some top -> ( try Unix.realpath top with Unix.Unix_error _ -> top)
-  | None ->
-      (* Outside git, the nearest directory at or above that holds a
-         manifest, so a package's subdirectory is about the package. *)
-      let rec up path =
-        if Sys.file_exists (Filename.concat path "truss.toml") then Some path
-        else
-          let parent = Filename.dirname path in
-          if parent = path then None else up parent
-      in
-      Option.value (up directory) ~default:directory
+  let has_project_table manifest =
+    try
+      Type_checker.Manifest.has_project_table
+        (In_channel.with_open_bin manifest In_channel.input_all)
+    with Sys_error _ -> false
+  in
+  let rec up path nearest =
+    let manifest = Filename.concat path "truss.toml" in
+    let here = Sys.file_exists manifest in
+    if here && has_project_table manifest then Some path
+    else
+      let nearest = if here && nearest = None then Some path else nearest in
+      let parent = Filename.dirname path in
+      if parent = path then nearest else up parent nearest
+  in
+  up directory None
 
 let relative_to root directory =
   let directory = try Unix.realpath directory with Unix.Unix_error _ -> directory in
@@ -598,6 +683,19 @@ let root = root_of_session
 let engine session = session.engine
 let context session = Engine.context session.engine
 let problems session = session.problems
+
+(* What only a package's code shows to be wrong with its manifest, which
+   checks the package. *)
+let manifest_problems session names =
+  List.concat_map
+    (fun (directory, name) ->
+      if not (List.mem name names) then []
+      else
+        List.map
+          (fun problem -> (manifest_file directory, name, problem))
+          (try Engine.get session.engine Type_checker.manifest_problems name with Not_found -> []))
+    (current_layout session.engine).packages
+
 let packages session = (current_layout session.engine).packages
 
 let module_file session (module_ : Path.module_) =
@@ -605,6 +703,8 @@ let module_file session (module_ : Path.module_) =
   match List.find_opt (fun (_, name) -> name = module_.package) lay.packages with
   | Some (directory, _) -> Worktree.module_file ~package_directory:directory module_
   | None -> Workspace.file_path module_
+
+let time_limit session = (current_layout session.engine).time_limit
 
 let diagnostics session module_ =
   try Engine.get session.engine Type_checker.file_diagnostics module_ with Not_found -> []
@@ -619,21 +719,26 @@ let diagnostics_of session packages =
     packages
 
 let open_session directory =
-  let state = current () in
-  let root = root_of directory in
-  if not (Sys.file_exists root) then Error (directory ^ ": no such directory.")
+  if not (Sys.file_exists directory) then Error (directory ^ ": no such directory.")
   else
-    match open_directory state root with
-    | Error message -> Error message
-    | Ok session ->
-        session.used <- Unix.time ();
-        (* Before any command holds the session's engine. *)
-        fold ~waited_for:true state session;
-        scan session root;
-        (* The state is written when the command is done, with what the
-           command computed, so that a first write holds a whole state. *)
-        ignore (Engine.stabilize session.engine);
-        Ok (session, target_packages session (relative_to root directory))
+    match root_of directory with
+    | None ->
+        Error
+          (Printf.sprintf "No `truss.toml` in %s or any directory above it, so it is in no project."
+             directory)
+    | Some root -> (
+        let state = current () in
+        match open_directory state root with
+        | Error message -> Error message
+        | Ok session ->
+            session.used <- Unix.time ();
+            (* Before any command holds the session's engine. *)
+            fold ~waited_for:true state session;
+            scan session root;
+            (* The state is written when the command is done, with what the
+               command computed, so that a first write holds a whole state. *)
+            ignore (Engine.stabilize session.engine);
+            Ok (session, target_packages session (relative_to root directory)))
 
 let refresh session =
   match session.source with
@@ -883,15 +988,19 @@ let overlaps ~base mine theirs =
 (* A commit of a worktree's files as they are, for merging. *)
 let commit_of_worktree root = Git.snapshot ~directory:root
 
+(* The same project in another worktree is at the same place under its
+   worktree's top. *)
 let other_worktrees session =
   let state = current () in
   let root = root_of_session session in
-  let common = Git.common_directory root in
+  let common = Git.common_directory root and prefix = Git.prefix root in
   Hashtbl.fold
     (fun _ other acc ->
       match other.source with
       | Directory other_root
-        when other_root <> root && common <> None && Git.common_directory other_root = common ->
+        when other_root <> root && common <> None
+             && Git.common_directory other_root = common
+             && Git.prefix other_root = prefix ->
           other :: acc
       | _ -> acc)
     state.sessions []
@@ -994,7 +1103,8 @@ let session_engine directory =
   match !state with
   | None -> None
   | Some s ->
-      Option.map (fun session -> session.engine) (Hashtbl.find_opt s.sessions (root_of directory))
+      Option.bind (root_of directory) (fun root ->
+          Option.map (fun session -> session.engine) (Hashtbl.find_opt s.sessions root))
 
 (* The background process *)
 

@@ -72,6 +72,7 @@ type state = {
           lists: that type's [uses], which have a capability parameter of what an enclosing call
           calls, and the capabilities they do not list, which the call's check takes as passed for
           the parameter. *)
+  mutable evidence : string list;  (** The packages whose [impl]s met a bound here. *)
 }
 
 let reported state ?(fixes = []) code (span : span) message =
@@ -131,6 +132,18 @@ let unify state left right =
 let implements state type_ trait =
   Impls.implements state.database ~bounds:(bounds state) (zonk state type_)
     (Unify.zonk_trait state.unifier trait)
+
+(* A bound that is met by an [impl] names the [impl]'s code, so what the
+   [impl] uses must be granted to its package. *)
+let check_evidence_grants state (span : span) evidence =
+  let impls = Interface.Grants.evidence_uses state.database ~bounds:(bounds state) evidence in
+  state.evidence <- List.map (fun (impl, _, _) -> Path.package impl) impls @ state.evidence;
+  List.iter
+    (fun message ->
+      state.diagnostics <-
+        Diagnostic.make ~code:(Capabilities Not_granted) (Source.span span.start span.stop) message
+        :: state.diagnostics)
+    (Interface.Grants.messages state.database ~package:state.package impls)
 
 let copyable state type_ = Impls.copyable state.database ~bounds:(bounds state) (zonk state type_)
 let plain state type_ = Impls.plain state.database ~bounds:(bounds state) (zonk state type_)
@@ -486,8 +499,9 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
    must equal the one the [impl] gives, which can be what works out the
    rest of the statement. [unmet] reports the type with [None] when it does
    not implement the trait, and with an associated type's name and what
-   the [impl] gives when that is another type. *)
-let require state type_ (bound : T.trait_reference) ~unmet =
+   the [impl] gives when that is another type. What the [impl] uses and its
+   package is not granted is reported at [at]. *)
+let require state ~(at : span) type_ (bound : T.trait_reference) ~unmet =
   let trait = { bound with associated = [] } in
   defer state (fun () ->
       let type_ = normalize state type_ in
@@ -495,7 +509,8 @@ let require state type_ (bound : T.trait_reference) ~unmet =
       else begin
         (match implements state type_ trait with
         | None -> unmet type_ None
-        | Some _ ->
+        | Some evidence ->
+            check_evidence_grants state at evidence;
             List.iter
               (fun (name, wanted) ->
                 match
@@ -513,7 +528,7 @@ let require state type_ (bound : T.trait_reference) ~unmet =
 let require_bounds state (span : span) ?of_type generics substitution =
   List.iter
     (fun (argument, bound) ->
-      require state argument bound ~unmet:(fun argument other ->
+      require state ~at:span argument bound ~unmet:(fun argument other ->
           let bound = Unify.zonk_trait state.unifier bound in
           let reported =
             match current_frame state with

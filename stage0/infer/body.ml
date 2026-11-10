@@ -14,7 +14,11 @@ open State
 open Statements
 open Expressions
 
-type result = { checked : C.t; diagnostics : Diagnostic.t list }
+type result = {
+  checked : C.t;
+  diagnostics : Diagnostic.t list;
+  evidence : string list;  (** The packages whose [impl]s met a bound in the definition *)
+}
 
 let no_output : env =
   {
@@ -465,6 +469,7 @@ let check database (key : Names.key) =
           lambdas = [];
           unsolved = None;
           widened = Hashtbl.create 4;
+          evidence = [];
         }
       in
       (* What lowering reported for the interface is the interface's to
@@ -475,10 +480,10 @@ let check database (key : Names.key) =
       check_definition state lowered;
       let since count list = List.filteri (fun index _ -> index < List.length list - count) list in
       state.diagnostics <- since interface_diagnostics !(context.diagnostics) @ state.diagnostics;
-      List.iter
-        (fun (span, message) -> report state Unsatisfied_bound span message)
-        (Interface.Check.unmet_bounds database ~bounds:(bounds state)
-           (since interface_named !(context.named)));
+      state.diagnostics <-
+        Interface.Check.bound_diagnostics database ~package:state.package ~bounds:(bounds state)
+          (since interface_named !(context.named))
+        @ state.diagnostics;
       finalize state;
       Capabilities.check state lowered;
       Some
@@ -489,6 +494,7 @@ let check database (key : Names.key) =
               (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
                 compare (left.span, left.code, left.message) (right.span, right.code, right.message))
               state.diagnostics;
+          evidence = List.sort_uniq compare state.evidence;
         }
   | _ -> None
 

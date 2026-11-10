@@ -13,14 +13,14 @@
      [test]
      time_limit = 10 *)
 
-type t = {
+type package = {
   name : string;
   truss : string option;
   dependencies : Workspace.dependency list;
   usize_bits : int;
-  time_limit : int;
-  project : bool;
 }
+
+type t = { package : package option; project : bool; time_limit : int option }
 
 let default_time_limit = 10
 
@@ -114,7 +114,7 @@ let tokens text =
   List.rev !found
 
 type value = Text of string | Number of int | List of string list | Inline_table
-type entry = { key : string; quoted : bool; value : value; line : int }
+type entry = { key : string; quoted : bool; value : value; line : int; last_line : int }
 type table = { name : string; line : int; entries : entry list }
 
 let value_expected = "a string in quotes, a whole number, or a list in brackets"
@@ -165,10 +165,15 @@ let tables text =
     | (((Bare key | Quoted key) as token), line) :: (Equals, _) :: rest -> (
         let found, rest = value line rest in
         let quoted = match token with Quoted _ -> true | _ -> false in
+        let last_line = match rest with (_, last) :: _ -> last | [] -> max_int in
         match current with
         | Some table ->
             statements tables
-              (Some { table with entries = { key; quoted; value = found; line } :: table.entries })
+              (Some
+                 {
+                   table with
+                   entries = { key; quoted; value = found; line; last_line } :: table.entries;
+                 })
               (end_of_line line rest)
         | None ->
             malformed line
@@ -195,13 +200,18 @@ let number_of (entry : entry) =
   | Number number -> number
   | _ -> malformed entry.line "`%s` is a whole number." entry.key
 
-let is_version text =
-  match String.split_on_char '.' text with
-  | [ major; minor ] ->
-      let digits part =
-        part <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) part
-      in
-      digits major && digits minor
+let version_of text =
+  match List.map int_of_string_opt (String.split_on_char '.' text) with
+  | [ Some major; Some minor ]
+    when String.for_all (function '0' .. '9' | '.' -> true | _ -> false) text ->
+      Some (major, minor)
+  | _ -> None
+
+let truss_version = "0.1"
+
+let toolchain_builds version =
+  match (version_of version, version_of truss_version) with
+  | Some wanted, Some toolchain -> compare wanted toolchain <= 0
   | _ -> false
 
 let dependency (entry : entry) : Workspace.dependency =
@@ -260,10 +270,11 @@ let parse text =
           name := Some text
       | "truss" ->
           let text = text_of entry in
-          if not (is_version text) then
+          if version_of text = None then
             malformed entry.line
               "`truss` is the version of Truss the package is written for, as two numbers, such as \
-               `\"0.1\"`.";
+               `\"%s\"`."
+              truss_version;
           truss := Some text
       | "usize_bits" -> (
           match entry.value with
@@ -277,7 +288,7 @@ let parse text =
           malformed entry.line
             "`[package]` has no key `%s`. Its keys are `name`, `truss`, and `usize_bits`." key)
     (entries "package");
-  let time_limit = ref default_time_limit in
+  let time_limit = ref None in
   List.iter
     (fun (entry : entry) ->
       match entry.key with
@@ -285,23 +296,57 @@ let parse text =
           let seconds = number_of entry in
           if seconds <= 0 then
             malformed entry.line "`time_limit` is a whole number of seconds, more than 0.";
-          time_limit := seconds
+          time_limit := Some seconds
       | key -> malformed entry.line "`[test]` has no key `%s`. Its key is `time_limit`." key)
     (entries "test");
   List.iter
     (fun (entry : entry) -> malformed entry.line "`[project]` has no key `%s`." entry.key)
     (entries "project");
-  match !name with
-  | Some name ->
-      {
-        name;
-        truss = !truss;
-        dependencies = List.map dependency (entries "dependencies");
-        usize_bits = !usize_bits;
-        time_limit = !time_limit;
-        project = table "project" <> None;
-      }
-  | None ->
-      malformed
-        (match table "package" with Some table -> table.line | None -> 1)
-        "A manifest names its package: `[package]`, with `name = \"...\"` under it."
+  let package =
+    match (table "package", !name) with
+    | Some _, Some name ->
+        Some
+          {
+            name;
+            truss = !truss;
+            dependencies = List.map dependency (entries "dependencies");
+            usize_bits = !usize_bits;
+          }
+    | Some table, None ->
+        malformed table.line "`[package]` names its package, with `name = \"...\"` under it."
+    | None, _ -> (
+        match table "dependencies" with
+        | Some table ->
+            malformed table.line
+              "`[dependencies]` are a package's, and this manifest has no `[package]`."
+        | None -> None)
+  in
+  let project = table "project" <> None in
+  if package = None && not project then
+    malformed 1 "A manifest has a `[package]` table, a `[project]` table, or both.";
+  { package; project; time_limit = !time_limit }
+
+(* Whether a manifest's text has a [[project]] table, told without reading
+   the rest, so that a manifest with a mistake elsewhere still says where
+   its project's root is. *)
+let has_project_table text =
+  List.exists
+    (fun line ->
+      let line =
+        match String.index_opt line '#' with Some index -> String.sub line 0 index | None -> line
+      in
+      String.trim line = "[project]")
+    (String.split_on_char '\n' text)
+
+let without_dependency text name =
+  let entry =
+    Option.bind
+      (List.find_opt (fun (table : table) -> table.name = "dependencies") (tables text))
+      (fun table -> List.find_opt (fun (entry : entry) -> entry.key = name) table.entries)
+  in
+  match entry with
+  | None -> text
+  | Some entry ->
+      String.split_on_char '\n' text
+      |> List.filteri (fun index _ -> index + 1 < entry.line || index + 1 > entry.last_line)
+      |> String.concat "\n"

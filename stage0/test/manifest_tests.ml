@@ -19,29 +19,51 @@ let () =
   test "SYNTAX.md's manifest gives the name and each dependency's capabilities" (fun () ->
       match Manifest.parse (manifest_block ()) with
       | {
-       name = "weather";
-       truss = Some "0.1";
-       dependencies =
-         [
-           { package = "forecast"; capabilities = [] };
-           { package = "truss::json"; capabilities = [] };
-           { package = "truss::http"; capabilities = [ "NetworkClient"; "Clock" ] };
-         ];
-       usize_bits = 32;
-       time_limit = 10;
+       package =
+         Some
+           {
+             name = "weather";
+             truss = Some "0.1";
+             dependencies =
+               [
+                 { package = "forecast"; capabilities = [] };
+                 { package = "truss::json"; capabilities = [] };
+                 { package = "truss::http"; capabilities = [ "NetworkClient"; "Clock" ] };
+               ];
+             usize_bits = 32;
+           };
        project = false;
+       time_limit = None;
       } ->
           ()
       | _ -> fail "read differently");
-  test "SYNTAX.md's project manifest has a [project] table and a time limit" (fun () ->
+  test "SYNTAX.md's project manifest is a project with a time limit, and no package" (fun () ->
       let text = Documents.read "../../SYNTAX.md" in
-      let block = String.concat "\n" (Documents.block_after text "### Projects") in
-      match Manifest.parse ("[package]\nname = \"a\"\n" ^ block) with
-      | { project = true; time_limit = 10; _ } -> ()
+      match Manifest.parse (String.concat "\n" (Documents.block_after text "### Projects")) with
+      | { package = None; project = true; time_limit = Some 10 } -> ()
       | _ -> fail "read differently");
+  test "a manifest has a package, a project, or both" (fun () ->
+      (match Manifest.parse "[project]\n[package]\nname = \"a\"\n" with
+      | { package = Some { name = "a"; _ }; project = true; _ } -> ()
+      | _ -> fail "read differently");
+      malformed_at 1 "# nothing\n";
+      malformed_at 2 "[project]\n[dependencies]\njson = []\n");
+  test "a manifest's text says whether it has a [project] table, whatever else it holds" (fun () ->
+      if not (Manifest.has_project_table "[package]\nname = \n[project] # the root\n") then
+        fail "not found";
+      if Manifest.has_project_table "[package]\nname = \"project\"\n# [project]\n" then
+        fail "found one");
+  test "the toolchain builds a package written for its own Truss or an older one" (fun () ->
+      if not (Manifest.toolchain_builds Manifest.truss_version) then fail "refuses its own";
+      if not (Manifest.toolchain_builds "0.0") then fail "refuses an older one";
+      if Manifest.toolchain_builds "99.0" then fail "builds a newer one");
+  test "truss is two numbers" (fun () ->
+      malformed_at 3 "[package]\nname = \"a\"\ntruss = \"1\"\n";
+      malformed_at 3 "[package]\nname = \"a\"\ntruss = \"1.2.3\"\n";
+      malformed_at 3 "[package]\nname = \"a\"\ntruss = 1\n");
   test "a package says it runs only on 64-bit targets with usize_bits" (fun () ->
       match Manifest.parse "[package]\nname = \"a\"\nusize_bits = 64\n" with
-      | { usize_bits = 64; _ } -> ()
+      | { package = Some { usize_bits = 64; _ }; _ } -> ()
       | _ -> fail "read differently");
   test "usize_bits other than 32 or 64 is malformed, at its line" (fun () ->
       malformed_at 3 "[package]\nname = \"a\"\nusize_bits = 16\n");
@@ -91,8 +113,15 @@ let () =
           \  \"Clock\",\n\
            ]\n"
       with
-      | { dependencies = [ { package = "http"; capabilities = [ "NetworkClient"; "Clock" ] } ]; _ }
-        ->
+      | {
+       package =
+         Some
+           {
+             dependencies = [ { package = "http"; capabilities = [ "NetworkClient"; "Clock" ] } ];
+             _;
+           };
+       _;
+      } ->
           ()
       | _ -> fail "read differently");
   test "comments are read past, but not a # in quotes" (fun () ->
@@ -100,9 +129,35 @@ let () =
         Manifest.parse
           "# The app\n[package]\nname = \"a\" # its name\n[dependencies]\nb = [\"c#d\"] # one\n"
       with
-      | { name = "a"; dependencies = [ { package = "b"; capabilities = [ "c#d" ] } ]; _ } -> ()
+      | {
+       package =
+         Some { name = "a"; dependencies = [ { package = "b"; capabilities = [ "c#d" ] } ]; _ };
+       _;
+      } ->
+          ()
       | _ -> fail "read differently");
   test "a string that is not closed on its line is malformed" (fun () ->
       malformed_at 2 "[package]\nname = \"a\n")
+
+let () =
+  let text =
+    "[package]\n\
+     name = \"a\"\n\n\
+     [dependencies]\n\
+     json = []\n\
+     http = [\n\
+    \  \"NetworkClient\",\n\
+     ]\n\
+     \"truss::toml\" = []\n"
+  in
+  test "a manifest without a dependency loses that entry's lines and no others" (fun () ->
+      let without = Manifest.without_dependency text "http" in
+      if without <> "[package]\nname = \"a\"\n\n[dependencies]\njson = []\n\"truss::toml\" = []\n"
+      then fail "wrote %S" without;
+      let without = Manifest.without_dependency text "truss::toml" in
+      if contains without "toml" || not (contains without "NetworkClient") then
+        fail "wrote %S" without);
+  test "a manifest without a dependency it does not list is unchanged" (fun () ->
+      if Manifest.without_dependency text "yaml" <> text then fail "changed")
 
 let () = finish ()

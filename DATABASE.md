@@ -18,7 +18,7 @@ testing, and verifying, and that agents can see exactly what their changes
 affect and where their work overlaps with other agents'. The database is what
 makes both possible. It:
 
-- holds the inputs of every worktree being worked on: the packages, their
+- holds the inputs of every project being worked on: its packages, their
   manifests, and the text of every module
 - keeps the results that have been asked for current as inputs change, by
   pushing each change, one phase of the compiler at a time, to the results
@@ -309,7 +309,7 @@ A session's inputs are:
 |---|---|---|
 | A package | Its name | Its manifest: dependencies, grants, and `usize_bits`, and its modules |
 | A module's text | Its module path | The file's text |
-| The layout | The session | Each package's directory and name, and every manifest and module file |
+| The layout | The session | Each package's directory and name, every manifest and module file, each module's file, and the project's test time limit |
 | A file's stamp | Its path in the worktree | Its size, modification time, and inode |
 | A manifest's text | Its package's directory | The file's text |
 | The wanted keys | How instances are lowered | The tests and programs whose keys have been asked for |
@@ -641,15 +641,33 @@ that input:
 
 ## Sessions
 
-A *session* is one worktree's state, with what a command needs around it: its
-engine, the pointer that names its state in the store, and the problems its
-manifests have. A worktree is a directory with one or more packages in it:
-the top of the git worktree a command's directory is in, or outside git, the
-nearest directory at or above it that holds a `truss.toml`, or else the
-directory itself. Its packages are the directories under it with a
-`truss.toml`, and each module file belongs to the nearest package above it.
-Directories whose names start with `.`, and `_build` and `node_modules`, are
-passed over.
+A *session* is one project's state, in one worktree, with what a command
+needs around it: its engine, the pointer that names its state in the store,
+and the problems its manifests have. A project is what SYNTAX.md's
+"Projects" says: the directory tree under a manifest with a `[project]`
+table, or a single package with no such manifest above it. A session is a
+project's, and not a worktree's, because a state names every definition by
+its path, and a path means one thing only within one project: two projects
+in one repository may each have a package called `tools`.
+
+- **The project's root is found from the files alone:** the nearest
+  directory at or above a command's whose manifest has a `[project]` table,
+  or with none, the nearest with a manifest. Git is asked nothing, so a
+  project builds the same from an archive.
+- **Its packages are the directories under the root with a manifest that
+  has a `[package]` table,** apart from another project's: under a root with
+  a `[project]` table, a directory whose manifest has one of its own, with
+  everything below it, and under a root without one, every other directory
+  with a manifest. Each module file belongs to the nearest package above
+  it. Directories whose names start with `.`, and `_build` and
+  `node_modules`, are passed over.
+- **A dependency is the project's package of that name.** What is wrong
+  between manifests, such as a dependency that names no package or a cycle
+  of packages, is a problem of the session, which CLI.md lists.
+- **The same project in two worktrees is two sessions,** which are compared
+  for overlaps (see [Parallel work](#parallel-work)). They are told to be
+  the same project by being at the same place under worktrees of one
+  repository.
 
 ### The background process
 
@@ -721,8 +739,8 @@ it exits after three hours without a request, the default of both.
 
 ### Sessions for commits
 
-A session can also be opened for a git commit, with its files read from git
-through `git ls-tree` and `git cat-file`. It starts from the nearest saved
+A session can also be opened for a git commit, with the files under the
+project's root read from git through `git ls-tree` and `git cat-file`. It starts from the nearest saved
 state, as a new worktree does, and is kept in memory and never pointed at.
 This is how the database gets the state of a base commit, compares a branch
 that has no worktree, and checks a merge.
@@ -918,9 +936,6 @@ with the same inputs.
   package's content and the keys of the packages it depends on, and each a
   fixed base under every state that uses it, as the standard library is.
   Stage0 fetches no package, so the standard library's is the only one.
-- **A session for a project.** A session is a git worktree's, with every
-  package under it, where DESIGN.md's "Projects" has a build be one
-  project's: its packages and the registry packages its lock file names.
 - **Artifacts read in part.** A whole state is one value, read whole to open
   the state, so the first command of a new process costs the state's size:
   every node is made before one is asked for. In the background process that

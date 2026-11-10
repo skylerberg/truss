@@ -254,8 +254,7 @@ let rename =
   let to_ = Arg.(required & pos 1 (some string) None & info [] ~docv:"TO") in
   command "rename"
     ~doc:
-      "Rename a definition, method, or module, and every reference to it in the worktree's \
-       packages."
+      "Rename a definition, method, or module, and every reference to it in the project's packages."
     Term.(
       const (fun directory from_ to_ json ->
           exit_with (fun () -> Rename_command.run ~directory ~from_ ~to_ ~json))
@@ -270,7 +269,7 @@ let new_ =
 
 let sync =
   command "sync"
-    ~doc:"Bring the worktree's session up to date with its files, and do nothing else."
+    ~doc:"Bring the project's session up to date with its files, and do nothing else."
     Term.(
       const (fun directory ->
           exit_with (fun () ->
@@ -302,7 +301,9 @@ let clean =
   command "clean" ~doc:"Stop the background process and delete the store, which costs only time."
     Term.(const (fun () -> Outcome.Exit 0) $ const ())
 
-let version = Printf.sprintf "stage0 (code generation %d, Unicode %s)" Lir.version Unicode.version
+let version =
+  Printf.sprintf "stage0 (Truss %s, code generation %d, Unicode %s)"
+    Type_checker.Manifest.truss_version Lir.version Unicode.version
 
 let truss =
   Cmd.group

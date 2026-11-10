@@ -1,11 +1,11 @@
 (* The packages a command acts on, from the code database's session for the
-   worktree it is run in.
+   project it is run in.
 
    A command is about the packages at or under the directory it is run
    from, or else the one that directory is in: a package's directory and
    everything below it, apart from directories that hold their own
    [truss.toml], which are other packages, and those whose names start with
-   [.]. The session reads the worktree's files and keeps what was computed
+   [.]. The session reads the project's files and keeps what was computed
    about them, so a command after a small edit does little work. *)
 
 exception Cannot_run of string
@@ -45,11 +45,7 @@ let relative ~from path =
 let real path = try Unix.realpath path with Unix.Unix_error _ -> normalize path
 let shown path = relative ~from:(real (Sys.getcwd ())) (normalize path)
 
-type package = {
-  name : string;
-  directory : string;  (** Absolute *)
-  manifest : Type_checker.Manifest.t;
-}
+type package = { name : string; directory : string  (** Absolute *) }
 
 type t = {
   session : Database.session;
@@ -62,10 +58,6 @@ type t = {
 (* The sessions commands opened, which the command line saves once the
    command is done. *)
 let opened : Database.session list ref = ref []
-
-let read_text path =
-  try In_channel.with_open_bin path In_channel.input_all
-  with Sys_error message -> cannot_run "Cannot read %s: %s" (shown path) message
 
 let module_files session packages =
   let root = Database.root session in
@@ -86,20 +78,11 @@ let load directory =
       let packages =
         List.map
           (fun (relative, name) ->
-            let directory = if relative = "" then root else Filename.concat root relative in
-            let manifest =
-              try Type_checker.Manifest.parse (read_text (Filename.concat directory manifest_name))
-              with Type_checker.Manifest.Malformed (line, message) ->
-                cannot_run "%s:%d: %s"
-                  (shown (Filename.concat directory manifest_name))
-                  line message
-            in
-            { name; directory; manifest })
+            { name; directory = (if relative = "" then root else Filename.concat root relative) })
           targets
       in
       if packages = [] && Database.problems session = [] then
-        cannot_run "No %s in %s or any directory above it, within its worktree." manifest_name
-          (shown directory);
+        cannot_run "No package in %s or any directory below it." (shown directory);
       {
         session;
         context = Database.context session;
@@ -118,6 +101,16 @@ let package t =
         (String.concat ", " (List.map (fun p -> p.name) several))
 
 let is_own t (module_ : Path.module_) = List.exists (fun p -> p.name = module_.package) t.packages
+
+(* What only the code of the command's packages shows to be wrong with
+   their manifests. *)
+let manifest_problems t =
+  Database.manifest_problems t.session
+    (List.map (fun (package : package) -> package.name) t.packages)
+
+(* A package as the session holds it: its dependencies, and the targets it
+   runs on. *)
+let manifest t (package : package) = Query.find t.context Workspace.packages package.name
 
 (* Reads the files again after a command changed some, so only what
    changed is checked again. *)

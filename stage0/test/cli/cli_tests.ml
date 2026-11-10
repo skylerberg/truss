@@ -45,7 +45,8 @@ let directory files =
     files;
   Project.normalize root
 
-let manifest = ("truss.toml", "[package]\nname = \"demo\"\n")
+let manifest_of name = Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"0.1\"\n" name
+let manifest = ("truss.toml", manifest_of "demo")
 let package files = directory (manifest :: files)
 let read root path = In_channel.with_open_bin (Filename.concat root path) In_channel.input_all
 
@@ -101,27 +102,87 @@ let () =
       match Project.load root with
       | exception Project.Cannot_run _ -> ()
       | _ -> fail "found a package");
-  test "a directory above several packages is about all of them" (fun () ->
+  test "a project's root is about every package under it" (fun () ->
       let root =
         directory
           [
-            ("one/truss.toml", "[package]\nname = \"one\"\n");
-            ("two/truss.toml", "[package]\nname = \"two\"\n");
+            ("truss.toml", "[project]\n");
+            ("one/truss.toml", manifest_of "one");
+            ("libraries/two/truss.toml", manifest_of "two");
           ]
       in
-      expect_strings ~expected:[ "one"; "two" ] (names (Project.load root)));
+      expect_strings ~expected:[ "one"; "two" ] (names (Project.load root));
+      expect_strings ~expected:[ "two" ] (names (Project.load (Filename.concat root "libraries"))));
+  test "a package under a project's root is in the project, whichever directory a command is in"
+    (fun () ->
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n");
+            ("one/truss.toml", manifest_of "one" ^ "[dependencies]\ntwo = []\n");
+            ("one/main.truss", "use two::numbers\n\nfn four() -> Int64 {\n  numbers::two() * 2\n}\n");
+            ("two/truss.toml", manifest_of "two");
+            ("two/numbers.truss", "public fn two() -> Int64 {\n  2\n}\n");
+          ]
+      in
+      let project = Project.load (Filename.concat root "one") in
+      expect_strings ~expected:[ "one" ] (names project);
+      if not (Report.clean (Report.gather project)) then fail "has diagnostics");
+  test "a package with no [project] above it is a project by itself" (fun () ->
+      let root =
+        directory
+          [
+            ("one/truss.toml", manifest_of "one" ^ "[dependencies]\ntwo = []\n");
+            ("one/main.truss", "");
+            ("two/truss.toml", manifest_of "two");
+          ]
+      in
+      let project = Project.load (Filename.concat root "one") in
+      if
+        not
+          (List.exists
+             (fun problem -> contains problem "`two` is not a package of this project")
+             (Database.problems project.session))
+      then fail "problems: %s" (String.concat "; " (Database.problems project.session));
+      match Project.load root with
+      | exception Project.Cannot_run _ -> ()
+      | _ -> fail "found a project above the two");
   test "a directory with its own manifest is another package's, not modules of this one" (fun () ->
       let root =
-        package
+        directory
           [
+            ("truss.toml", "[project]\n" ^ manifest_of "demo");
             ("main.truss", "");
-            ("vendor/truss.toml", "[package]\nname = \"other\"\n");
+            ("vendor/truss.toml", manifest_of "other");
             ("vendor/x.truss", "");
           ]
       in
       let project = Project.load root in
       expect_strings ~expected:[ "demo::main"; "other::x" ]
         (List.sort compare (List.map Path.show_module (Project.modules project))));
+  test "a directory with its own [project] is another project's, and so is all under it" (fun () ->
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n" ^ manifest_of "demo");
+            ("main.truss", "");
+            ("examples/truss.toml", "[project]\n");
+            ("examples/hello/truss.toml", manifest_of "hello");
+            ("examples/hello/main.truss", "");
+          ]
+      in
+      expect_strings ~expected:[ "demo::main" ]
+        (List.map Path.show_module (Project.modules (Project.load root)));
+      expect_strings ~expected:[ "hello" ] (names (Project.load (Filename.concat root "examples"))));
+  test "under a package that is a project by itself, a directory with a manifest is no part of it"
+    (fun () ->
+      let root =
+        package
+          [ ("main.truss", ""); ("vendor/truss.toml", manifest_of "other"); ("vendor/x.truss", "") ]
+      in
+      expect_strings ~expected:[ "demo::main" ]
+        (List.map Path.show_module (Project.modules (Project.load root)));
+      expect_strings ~expected:[ "other" ] (names (Project.load (Filename.concat root "vendor"))));
   test "a directory whose name starts with a dot is not read" (fun () ->
       let root = package [ ("main.truss", ""); (".hidden/x.truss", "") ] in
       expect_strings ~expected:[ "demo::main" ]
@@ -130,17 +191,164 @@ let () =
       expect_string ~expected:"../weather/forecast.truss"
         (Project.relative ~from:"/code/app" "/code/weather/forecast.truss"))
 
-(* The manifest's time limit *)
+(* What is wrong between manifests *)
+
+let problems files =
+  let project = Project.load (directory files) in
+  Database.problems project.session
+
+let expect_problem files part =
+  let found = problems files in
+  if not (List.exists (fun problem -> contains problem part) found) then
+    fail "problems: [%s]" (String.concat "; " found)
 
 let () =
-  test "a manifest's [test] time_limit gives each test's limit in seconds" (fun () ->
-      let manifest =
-        Type_checker.Manifest.parse "[package]\nname = \"a\"\n[test]\ntime_limit = 3\n"
+  test "a package that does not say which Truss it is written for has a problem" (fun () ->
+      expect_problem
+        [ ("truss.toml", "[package]\nname = \"demo\"\n") ]
+        "truss.toml: `[package]` needs `truss = \"0.1\"`");
+  test "a package written for a newer Truss than the toolchain's has a problem" (fun () ->
+      expect_problem
+        [ ("truss.toml", "[package]\nname = \"demo\"\ntruss = \"99.0\"\n") ]
+        "`demo` is written for Truss 99.0, and this toolchain is Truss 0.1");
+  test "a package cannot depend on itself" (fun () ->
+      expect_problem
+        [ ("truss.toml", manifest_of "demo" ^ "[dependencies]\ndemo = []\n") ]
+        "`demo` cannot depend on itself");
+  test "packages cannot depend on each other in a cycle" (fun () ->
+      expect_problem
+        [
+          ("truss.toml", "[project]\n");
+          ("one/truss.toml", manifest_of "one" ^ "[dependencies]\ntwo = []\n");
+          ("two/truss.toml", manifest_of "two" ^ "[dependencies]\nthree = []\n");
+          ("three/truss.toml", manifest_of "three" ^ "[dependencies]\none = []\n");
+        ]
+        "Packages cannot depend on each other in a cycle: `one` -> `two` -> `three` -> `one`");
+  test "a package's name cannot be the owner in another's" (fun () ->
+      expect_problem
+        [
+          ("truss.toml", "[project]\n");
+          ("acme/truss.toml", manifest_of "acme");
+          ("geometry/truss.toml", manifest_of "acme::geometry");
+        ]
+        "The package name `acme` is the owner in `acme::geometry`");
+  test "two packages of a project cannot have one name" (fun () ->
+      expect_problem
+        [
+          ("truss.toml", "[project]\n");
+          ("one/truss.toml", manifest_of "same");
+          ("two/truss.toml", manifest_of "same");
+        ]
+        "two/truss.toml: The package name `same` is already used by one/truss.toml")
+
+(* A dependency that nothing uses *)
+
+let () =
+  test "a dependency nothing uses is a problem, which check --fix fixes by deleting its entry"
+    (fun () ->
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n");
+            ( "app/truss.toml",
+              manifest_of "app" ^ "[dependencies]\nlibrary = []\nother = [\n  \"Clock\",\n]\n" );
+            ("app/main.truss", "use library::numbers\n\nfn one() -> Int64 {\n  numbers::one()\n}\n");
+            ("library/truss.toml", manifest_of "library");
+            ("library/numbers.truss", "public fn one() -> Int64 {\n  1\n}\n");
+            ("other/truss.toml", manifest_of "other");
+            ("other/nothing.truss", "public fn nothing() -> Int64 {\n  0\n}\n");
+          ]
       in
-      if manifest.time_limit <> 3 then fail "got %d" manifest.time_limit);
-  test "a manifest without a time limit gives tests 10 seconds" (fun () ->
-      let manifest = Type_checker.Manifest.parse "[package]\nname = \"a\"\n" in
-      if manifest.time_limit <> 10 then fail "got %d" manifest.time_limit);
+      let app = Filename.concat root "app" in
+      let report = Report.gather (Project.load app) in
+      if
+        not
+          (List.exists
+             (fun problem -> contains problem "app/truss.toml: Nothing in `app` uses `other`")
+             report.problems)
+      then fail "problems: [%s]" (String.concat "; " report.problems);
+      if quietly (fun () -> Check_command.run ~directory:app ~fix:true ~json:false) <> 0 then
+        fail "still has errors";
+      let manifest = read root "app/truss.toml" in
+      if
+        contains manifest "other" || contains manifest "Clock"
+        || not (contains manifest "library = []")
+      then fail "wrote %s" manifest)
+
+(* A package with an owner in its name *)
+
+let owned =
+  [
+    ("truss.toml", "[project]\n");
+    ("geometry/truss.toml", manifest_of "acme::geometry");
+    ( "geometry/vector.truss",
+      "public type Vector(x: Int64)\n\n\
+       public fn Vector.length(self) -> Int64 {\n\
+      \  self.x\n\
+       }\n\n\
+       public fn double(value: Int64) -> Int64\n\
+      \  requires value < 1000 && value > -1000\n\
+       {\n\
+      \  value * 2\n\
+       }\n" );
+    ("app/truss.toml", manifest_of "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
+    ( "app/main.truss",
+      "use acme::geometry::vector\n\n\
+       fn four() -> Int64 {\n\
+      \  let _ = vector::double(1)\n\
+      \  acme::geometry::vector::double(2)\n\
+       }\n" );
+  ]
+
+let () =
+  test "a project's package with an owner in its name is named by both in a path" (fun () ->
+      let root = directory owned in
+      let project = Project.load root in
+      expect_strings ~expected:[ "acme::geometry"; "app" ] (names project);
+      if not (Report.clean (Report.gather ~proofs:true project)) then fail "has diagnostics");
+  test "show finds a definition of a package with an owner by its full path" (fun () ->
+      let project = Project.load (directory owned) in
+      match Show_command.find project ~body:false "acme::geometry::vector::double" with
+      | [ found ] ->
+          if not (contains found.text "public fn double(value: Int64) -> Int64") then
+            fail "showed %s" found.text
+      | found -> fail "found %d" (List.length found));
+  test "show lists what a package with an owner makes public" (fun () ->
+      let project = Project.load (directory owned) in
+      if List.length (Show_command.find project ~body:false "acme::geometry") < 3 then
+        fail "found too few")
+
+let () =
+  test "the project's [test] time_limit gives each test's limit in seconds" (fun () ->
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n[test]\ntime_limit = 3\n");
+            ("one/truss.toml", manifest_of "one");
+          ]
+      in
+      let project = Project.load (Filename.concat root "one") in
+      let limit = Database.time_limit project.session in
+      if limit <> 3 then fail "got %d" limit);
+  test "a project without a time limit gives tests 10 seconds" (fun () ->
+      let limit = Database.time_limit (Project.load (package [])).session in
+      if limit <> 10 then fail "got %d" limit);
+  test "a time limit in a package's manifest that is not its project's is a problem" (fun () ->
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n");
+            ("one/truss.toml", manifest_of "one" ^ "[test]\ntime_limit = 3\n");
+          ]
+      in
+      let project = Project.load root in
+      if
+        not
+          (List.exists
+             (fun problem ->
+               contains problem "one/truss.toml: A test's time limit is its project's")
+             (Database.problems project.session))
+      then fail "problems: %s" (String.concat "; " (Database.problems project.session)));
   test "a time limit of 0 is malformed, at its line" (fun () ->
       match Type_checker.Manifest.parse "[package]\nname = \"a\"\n[test]\ntime_limit = 0\n" with
       | exception Type_checker.Manifest.Malformed (4, _) -> ()
@@ -391,6 +599,19 @@ let () =
             (List.map Path.show way)
       | Ok found -> fail "found %d" (List.length found)
       | Error message -> fail "%s" message);
+  test "a package's program is the main of its main module, and of no other" (fun () ->
+      let main_text = "fn main(arguments: List[String]) -> ExitCode {\n  ExitCode.success\n}\n" in
+      let with_main = Project.load (package [ ("main.truss", main_text) ]) in
+      expect_strings ~expected:[ "demo::main::main" ]
+        (List.map Path.show (Program_command.mains with_main));
+      let elsewhere = Project.load (package [ ("start.truss", main_text) ]) in
+      if Program_command.mains elsewhere <> [] then fail "took a main from another module");
+  test "a function named main outside the main module is an ordinary function" (fun () ->
+      let project =
+        Project.load
+          (package [ ("menu.truss", "fn main(course: Int64) -> Int64 {\n  course\n}\n") ])
+      in
+      if not (Report.clean (Report.gather project)) then fail "has diagnostics");
   test "an echo is refused only by a build that ships" (fun () ->
       let project =
         Project.load
@@ -453,6 +674,27 @@ let () =
         not
           (contains main "use demo::outlook"
           && contains main "outlook::total([1]) + demo::outlook::total([2])")
+      then fail "wrote %s" main);
+  test "renaming in a package with an owner rewrites a full path into it" (fun () ->
+      let root = directory owned in
+      if rename root "acme::geometry::vector::double" "twice" <> 0 then fail "refused";
+      let main = read root "app/main.truss" in
+      if
+        not
+          (contains main "let _ = vector::twice(1)"
+          && contains main "  acme::geometry::vector::twice(2)")
+      then fail "wrote %s" main);
+  test "renaming a module of a package with an owner rewrites its uses and full paths" (fun () ->
+      let root = directory owned in
+      if rename root "acme::geometry::vector" "acme::geometry::arrow" <> 0 then fail "refused";
+      if not (Sys.file_exists (Filename.concat root "geometry/arrow.truss")) then
+        fail "did not move the file";
+      let main = read root "app/main.truss" in
+      if
+        not
+          (contains main "use acme::geometry::arrow"
+          && contains main "let _ = arrow::double(1)"
+          && contains main "  acme::geometry::arrow::double(2)")
       then fail "wrote %s" main);
   test "renaming a method rewrites its calls" (fun () ->
       let root =
@@ -535,7 +777,34 @@ let impact root =
           fail "%s" message;
           [])
 
+(* A repository whose one commit holds the package in a directory below
+   its top, with another project beside it. *)
+let nested_repository text =
+  let top =
+    directory
+      [
+        ("services/demo/truss.toml", manifest_of "demo");
+        ("services/demo/main.truss", text);
+        ("tools/truss.toml", manifest_of "tools");
+        ("tools/main.truss", "fn broken() -> Int64 {\n  true\n}\n");
+      ]
+  in
+  git top [ "init"; "-q"; "-b"; "main" ];
+  git top [ "add"; "-A" ];
+  git top [ "commit"; "-q"; "-m"; "base" ];
+  top
+
 let () =
+  test "a project below the top of its repository is compared with its own files at a commit"
+    (fun () ->
+      let top = nested_repository doubling in
+      let root = Filename.concat top "services/demo" in
+      rewrite root "main.truss" (replace doubling "value * 2" "value + value");
+      match impact root with
+      | [ { path; status = `Changed parts; _ } ] ->
+          expect_string ~expected:"demo::main::double" (Path.show path);
+          if not (List.mem "body" parts) then fail "parts [%s]" (String.concat "; " parts)
+      | changes -> fail "found %d changes" (List.length changes));
   test "a change to a body alone is a change of the body, which nothing reads" (fun () ->
       let root = repository doubling in
       rewrite root "main.truss" (replace doubling "value * 2" "value + value");
@@ -636,12 +905,21 @@ let () =
 (* Making a package *)
 
 let () =
-  test "a package's name must be a lower_snake_case name" (fun () ->
-      if
-        List.map New_command.valid_name
-          [ "weather"; "weather_report"; "Weather"; "weather__x"; "1st"; "" ]
-        <> [ true; true; false; false; false; false ]
-      then fail "judged differently");
+  test "a name that is not a package's makes nothing" (fun () ->
+      let root = directory [] in
+      List.iter
+        (fun name ->
+          match New_command.run ~directory:root ~name with
+          | exception Project.Cannot_run _ -> ()
+          | _ -> fail "made %s" name)
+        [ "Weather"; "weather__x"; "1st"; ""; "a::b::c" ]);
+  test "a new package with an owner is made in a directory named without it" (fun () ->
+      let root = directory [] in
+      if quietly (fun () -> New_command.run ~directory:root ~name:"acme::weather") <> 0 then
+        fail "not made";
+      let project = Project.load (Filename.concat root "weather") in
+      expect_strings ~expected:[ "acme::weather" ] (names project);
+      if not (Report.clean (Report.gather ~proofs:true project)) then fail "has diagnostics");
   test "a new package checks cleanly" (fun () ->
       let root = directory [] in
       if quietly (fun () -> New_command.run ~directory:root ~name:"weather") <> 0 then

@@ -112,7 +112,7 @@ let rec encode ?(path = Ground.encode_path) key =
    exactly one way: mangling never gives two keys one symbol. *)
 
 let marker word = "_" ^ word ^ "_"
-let module_path (m : Path.module_) = String.concat "__" (m.package :: m.modules)
+let module_path (m : Path.module_) = String.concat "__" (Path.module_parts m)
 
 let text value =
   String.concat ""

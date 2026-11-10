@@ -168,7 +168,7 @@ let file_diagnostics =
         (List.fold_left
            (fun seen (item : Syntax.path Syntax.item) ->
              let span = Source.span item.base (item.base + String.length item.text) in
-             let used_module = Names.used_module item.value in
+             let used_module = Names.used_module database ~from:module_ item.value in
              let last = Names.last_name used_module in
              if used_module = Intrinsic.module_ && module_.package <> Prelude.standard then
                report Intrinsic_import span

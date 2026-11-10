@@ -314,6 +314,176 @@ let () =
         \  }\n\
          }\n")
 
+(* A grant wherever a dependency's code is named *)
+
+(* The codes of [app::main], whose manifest lists the dependencies given,
+   each with what it is granted. *)
+let codes_with_grants files grants =
+  let database = setup files in
+  Engine.set (Engine.of_context database) Workspace.packages "app"
+    {
+      name = "app";
+      dependencies =
+        List.map (fun (package, capabilities) -> { Workspace.package; capabilities }) grants;
+      modules = [ module_of "app::main" ];
+      usize_bits = 32;
+    };
+  (database, codes (check database (module_of "app::main")))
+
+let expect_codes ~expected (_, found) =
+  if found <> expected then
+    fail "found [%s], expected [%s]" (String.concat "; " found) (String.concat "; " expected)
+
+let time =
+  ("clock_library::time", "public fn stamp() -> Instant\n  uses Clock\n{\n  Clock.now()\n}\n")
+
+let sources =
+  ("framework::sources", "public trait Source {\n  fn read(self) -> Instant\n    uses Clock\n}\n")
+
+let timers =
+  ( "plugins::timers",
+    "use framework::sources\n\n\
+     public type Timer()\n\n\
+     impl sources::Source for Timer {\n\
+    \  fn read(self) -> Instant\n\
+    \    uses Clock\n\
+    \  {\n\
+    \    Clock.now()\n\
+    \  }\n\
+     }\n" )
+
+let () =
+  let value =
+    ( "app::main",
+      "use clock_library::time\n\n\
+       fn f() -> Instant\n\
+      \  uses Clock\n\
+       {\n\
+      \  let stamp = time::stamp\n\
+      \  stamp()\n\
+       }\n" )
+  in
+  test "a dependency's function taken as a value may use only what it is granted" (fun () ->
+      expect_codes ~expected:[ "capabilities.not_granted" ]
+        (codes_with_grants [ value; time ] [ ("clock_library", []) ]));
+  test "a dependency's function taken as a value may use what it is granted" (fun () ->
+      expect_codes ~expected:[]
+        (codes_with_grants [ value; time ] [ ("clock_library", [ "Clock" ]) ]));
+  let bound =
+    ( "app::main",
+      "use framework::sources\n\
+       use plugins::timers\n\n\
+       fn first[Reader: sources::Source](reader: Reader) -> Instant\n\
+      \  uses Clock\n\
+       {\n\
+      \  reader.read()\n\
+       }\n\n\
+       fn f() -> Instant\n\
+      \  uses Clock\n\
+       {\n\
+      \  first(timers::Timer())\n\
+       }\n" )
+  in
+  test "an impl of a dependency that meets a bound may use only what the dependency is granted"
+    (fun () ->
+      expect_codes ~expected:[ "capabilities.not_granted" ]
+        (codes_with_grants [ bound; sources; timers ]
+           [ ("framework", [ "Clock" ]); ("plugins", []) ]));
+  test "an impl of a dependency that meets a bound may use what the dependency is granted"
+    (fun () ->
+      expect_codes ~expected:[]
+        (codes_with_grants [ bound; sources; timers ]
+           [ ("framework", [ "Clock" ]); ("plugins", [ "Clock" ]) ]));
+  test "an impl of a dependency made into an any value may use only what the dependency is granted"
+    (fun () ->
+      expect_codes ~expected:[ "capabilities.not_granted" ]
+        (codes_with_grants
+           [
+             ( "app::main",
+               "use framework::sources\n\
+                use plugins::timers\n\n\
+                fn f() -> any sources::Source {\n\
+               \  any timers::Timer()\n\
+                }\n" );
+             sources;
+             timers;
+           ]
+           [ ("framework", [ "Clock" ]); ("plugins", []) ]))
+
+(* What a grant names *)
+
+let ledger =
+  ( "store::ledger",
+    "public capability Ledger {\n\
+    \  fn record(amount: Int64)\n\
+     }\n\n\
+     public fn pay(amount: Int64)\n\
+    \  uses Ledger\n\
+     {\n\
+    \  Ledger.record(amount)\n\
+     }\n" )
+
+let pays =
+  ("app::main", "use store::ledger\n\nfn f()\n  uses ledger::Ledger\n{\n  ledger::pay(1)\n}\n")
+
+let problems database = Query.demand database Package_checks.manifest_problems "app"
+
+let () =
+  test "a grant names a capability outside the prelude by its full path" (fun () ->
+      expect_codes ~expected:[]
+        (codes_with_grants [ pays; ledger ] [ ("store", [ "store::ledger::Ledger" ]) ]));
+  test "a capability's name alone grants only one of the prelude" (fun () ->
+      let database, found = codes_with_grants [ pays; ledger ] [ ("store", [ "Ledger" ]) ] in
+      expect_codes ~expected:[ "capabilities.not_granted" ] (database, found);
+      match problems database with
+      | [ Not_a_capability { dependency = "store"; name = "Ledger" } ] -> ()
+      | _ -> fail "the grant is not reported");
+  test "a grant covers only the capabilities it names" (fun () ->
+      expect_codes ~expected:[ "capabilities.not_granted" ]
+        (codes_with_grants [ pays; ledger ] [ ("store", [ "Clock" ]) ]))
+
+(* A dependency that nothing uses *)
+
+let () =
+  test "a dependency that nothing in the package names is reported" (fun () ->
+      let database, _ =
+        codes_with_grants
+          [ ("app::main", "fn f() -> Int64 {\n  1\n}\n"); time ]
+          [ ("clock_library", []) ]
+      in
+      match problems database with [ Unused "clock_library" ] -> () | _ -> fail "not reported");
+  test "a dependency named in a path is used" (fun () ->
+      let database, _ =
+        codes_with_grants [ pays; ledger ] [ ("store", [ "store::ledger::Ledger" ]) ]
+      in
+      if problems database <> [] then fail "reported");
+  test "a dependency whose trait's method is called with a dot is used" (fun () ->
+      let database, found =
+        codes_with_grants
+          [
+            ("app::main", "fn f(side: Int64) -> Int64 {\n  side.doubled()\n}\n");
+            ( "shapes::sizes",
+              "public trait Doubled {\n\
+              \  fn doubled(self) -> Int64\n\
+               }\n\n\
+               impl Doubled for Int64 {\n\
+              \  fn doubled(self) -> Int64 {\n\
+              \    self\n\
+              \  }\n\
+               }\n" );
+          ]
+          [ ("shapes", []) ]
+      in
+      expect_codes ~expected:[] (database, found);
+      if problems database <> [] then fail "reported");
+  test "a package with an error is not told that a dependency is unused" (fun () ->
+      let database, _ =
+        codes_with_grants
+          [ ("app::main", "fn f() -> Int64 {\n  true\n}\n"); time ]
+          [ ("clock_library", []) ]
+      in
+      if problems database <> [] then fail "reported")
+
 (* Function values and the capabilities their types list *)
 
 let ticks =

@@ -154,6 +154,11 @@ Names live in separate namespaces, which the case rules keep apart:
   prelude. Exactly one can match, because no name may hide another.
 - **A qualified name** `module::name` is looked up in that module. Its
   module is either imported by a `use` or written in full from its package.
+  A full path starts with the name of a package the file may name, its own,
+  `standard`, or one its manifest lists, and that name is two of the path's
+  names when the package has an owner: `acme::geometry::vector` is the
+  module `vector` of `acme::geometry` where the manifest lists that package,
+  and otherwise names a module of a package `acme`.
 - **A member,** after `.`, is not resolved here. Its meaning depends on the
   type before the dot, which only type checking knows. The one exception is
   a name before the dot that resolution already knows is a type, as in
@@ -562,8 +567,9 @@ the definition's interface: the types of its parameters and result, its
   `self`, so `lends` takes no mode or `mut`, and `lends own` is an error.
   The body is checked against the form (see
   [Yielding and lending](#yielding-and-lending)).
-- **`main`** must have exactly the signature
-  `fn main(arguments: List[String]) -> ExitCode`, with any `uses`.
+- **`main`,** in a package's `main` module, must have exactly the signature
+  `fn main(arguments: List[String]) -> ExitCode`, with any `uses`. A
+  function named `main` in another module is an ordinary function.
 
 ### Types
 
@@ -1193,20 +1199,55 @@ implements `Panic` is impossible, since nothing can.
 ### Dependency grants
 
 DESIGN.md says a dependency may use only the capabilities its manifest entry
-grants. The type checker enforces this where it can see a dependency's
-capabilities, which is at the signatures of its code, never its bodies:
+grants, and that a grant is checked wherever the dependency's code is named.
+The type checker enforces this where it can see a dependency's capabilities,
+which is at the signatures of its code, never its bodies. Every capability
+in those `uses` must be granted, except those that arrive through a
+capability parameter, which are the caller's own. A dependency's code is
+named by:
 
-- **A call to a function, a method, or a trait method of a dependency** is
-  checked against that dependency's grant: every capability in the callee's
-  `uses` must be granted, except those that arrive through a capability
-  parameter, which are the caller's own. So does a `provide` of a
-  dependency's type, for the capabilities its `impl`s use.
-- **Inside the dependency,** its own bodies are checked against its own
-  signatures, so nothing it does can exceed what its signatures declare.
+- **A call** to its function or method, or to a method of its trait, and to
+  the `impl`'s method that then runs, when the `impl` is known.
+- **Its function taken as a value,** since whoever is handed the value may
+  call it.
+- **Its `impl` meeting a bound,** which is checked in the one place a bound
+  is held: for a call's type arguments, for the arguments of a type that is
+  written, for `any value`, and for the bounds an `impl` must itself meet.
+  The `impl` found is checked, and so are the `impl`s that meet its own
+  bounds in turn, as the `impl` of `Source` for `List[Timer]` is met through
+  the one for `Timer`. An `impl`'s methods can use only what their trait
+  declares, so only a trait whose methods have `uses`, or an `impl` of a
+  capability, ever asks for a grant here.
+- **A `provide`** of its type, for the capabilities its `impl`s use.
 
-The error names the dependency's function and the capability that was not
-granted, as DESIGN.md asks. A dependency that offers both a client and a
-server needs only the grants for what the program calls.
+Inside the dependency, its own bodies are checked against its own
+signatures, so nothing it does can exceed what its signatures declare.
+
+- **A grant is one query,** by the package and the dependency: the
+  capabilities the manifest's entry names, each found as a definition. A
+  prelude capability is named by its name and any other by its full path,
+  so two capabilities that share a name are never taken for each other.
+- **A package the manifest does not list is granted nothing,** which is how
+  an `impl` in a package further away is caught.
+- **The error names the code and the capability,** and says what to add to
+  which entry. It has no fix: DESIGN.md has a grant always be a choice
+  someone made. A dependency that offers both a client and a server needs
+  only the grants for what the program names.
+
+### The manifest
+
+Two rules about a package's manifest need its code, so they are package
+checks, reported with the manifest's file and not in a module:
+
+- **A grant that names no capability** is an error, so a misspelled
+  capability is not silently one that is never granted.
+- **A dependency that nothing in the package uses** is an error, as an
+  unused `use` is. A package uses a dependency by naming it in a path, by
+  calling a method of one of its traits with a dot, or by an `impl` of it
+  answering a call or meeting a bound. Each definition's result says which
+  packages it uses, and the check is their union. It is made only of a
+  package whose code all checks, since a call in a body with an error may
+  not have been worked out, and the fix deletes the entry.
 
 ## Traits and `impl`s across a package
 
@@ -1394,7 +1435,7 @@ pushes a change in any of these to the results that read it:
 | The `impl`s of a trait for a type constructor, in one package | `Add` for `Instant`, in the package of `Duration` |
 | The capability `impl`s of a type | The capabilities `MemoryFiles` implements |
 | A body fact | Whether `Tree.each` can be pulled |
-| A manifest entry | The capabilities granted to `http` |
+| A manifest entry | The capabilities granted to `http`, each as the definition its name means |
 
 What each kind of result depends on:
 
@@ -1541,17 +1582,7 @@ the compiler. The prelude holds:
   type's fields rebuilds nothing. A shape keeps its fields in the order they
   are written, so reordering them re-checks what reads the shape. Code
   generation's layout already ignores the order.
-- **A grant checked wherever a dependency's code is named.** DESIGN.md has
-  a grant checked at every such place. The checker checks one at a call and
-  at a `provide`, and not where a dependency's function is taken as a value,
-  or its `impl` is used for a bound or made into an `any`.
-- **A grant that names a capability by its path.** A grant is compared with
-  the capability's name as it is shown.
-- **A package name of two parts,** an owner and a name, at the start of a
-  path, which a registry package has.
 - **How `write_with` combines errors** is not decided. A writer's lambda may
   fail with its own error type as well as a `FileError`. The standard
   library needs a result type that holds either, and a name for it.
-- **`main` in the `main` module only.** DESIGN.md has a package's program
-  start at the `main` of its `main` module. The checker takes a function
-  named `main` in any module for one.
+

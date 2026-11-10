@@ -38,6 +38,28 @@ let apply text (edits : Diagnostic.edit list) =
 (* Rounds are bounded, so fixes that undo each other cannot run forever. *)
 let rounds = 32
 
+(* Deletes each entry of a dependency that nothing in its package uses, which
+   is that problem's only fix, and returns each as JSON. A grant is never
+   added: that is a choice, which a reviewer is to see someone made. *)
+let unused_dependencies (project : Project.t) =
+  let root = Database.root project.session in
+  List.filter_map
+    (fun (file, package, (problem : Type_checker.manifest_problem)) ->
+      match problem with
+      | Unused dependency ->
+          let path = Filename.concat root file in
+          let text = In_channel.with_open_bin path In_channel.input_all in
+          Project.write_file path (Type_checker.Manifest.without_dependency text dependency);
+          Some
+            (Json.to_string
+               (Json.Object
+                  [
+                    ("file", Json.String (Project.shown path));
+                    ("message", Json.String (Type_checker.manifest_sentence ~package problem));
+                  ]))
+      | Not_a_capability _ -> None)
+    (Project.manifest_problems project)
+
 (* Applies fixes until none is left to apply, and returns the diagnostics
    they fixed, each as JSON in the file it was in when it was fixed. *)
 let fix (project : Project.t) =
@@ -59,6 +81,7 @@ let fix (project : Project.t) =
               Project.write_file (Project.file project module_) (apply (Source.text source) edits);
               List.map (fun diagnostic -> Diagnostic.to_json_object source diagnostic) chosen)
         (Project.modules project)
+      @ unused_dependencies project
     in
     if applied = [] || number = rounds then List.rev fixed
     else begin

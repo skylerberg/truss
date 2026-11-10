@@ -83,36 +83,14 @@ let capability_impls (state : state) (type_ : T.ty) =
            (List.sort_uniq compare [ Path.package path; state.package; "standard" ]))
   | _ -> []
 
-let dependency_grant (state : state) package =
-  match Workspace.package state.database state.package with
-  | Some manifest ->
-      Option.map
-        (fun (dependency : Workspace.dependency) -> dependency.capabilities)
-        (List.find_opt
-           (fun (dependency : Workspace.dependency) -> dependency.package = package)
-           manifest.dependencies)
-  | None -> None
-
 (* A dependency may use only what its manifest entry grants: [what] of the
    [package] uses [uses], except what reaches it through a capability
    parameter, which is the caller's own. *)
 let check_grant (state : state) (span : span) ~what package (uses : T.capability list) =
-  if package <> state.package && package <> "standard" then
-    match dependency_grant state package with
-    | Some granted ->
-        List.iter
-          (function
-            | T.Capability capability_path ->
-                let name = show_capability (T.Capability capability_path) in
-                if not (List.mem name granted) then
-                  report state Not_granted span
-                    (Printf.sprintf
-                       "%s uses `%s`, which the manifest does not grant `%s`. Grant it in the \
-                        manifest's entry for `%s`."
-                       what name package package)
-            | T.Capability_parameter _ -> ())
-          uses
-    | None -> ()
+  List.iter
+    (fun capability ->
+      report state Not_granted span (Interface.Grants.message ~what ~of_:package capability))
+    (Interface.Grants.missing state.database ~package:state.package ~of_:package uses)
 
 (* A function value that uses more than the function type it meets lists.
    What the type does not list is passed for the type's capability
@@ -165,6 +143,17 @@ let rec expression state scope (value : expression) : T.capability list =
   | Provide { implementations; body } -> provide state scope value implementations body
   | Quantified _ -> quantifier state scope value
   | _ -> (
+      (* A function taken as a value is named as surely as one that is
+         called, and whoever is handed the value may call it. *)
+      (match state.tables.meanings.(value.id) with
+      | Some (Global { path; _ }) ->
+          Option.iter
+            (fun (signature : T.signature) ->
+              check_grant state value.span
+                ~what:(Printf.sprintf "`%s`" (Path.show path))
+                (Path.package path) signature.uses)
+            (Query.demand state.database Environment.signature path)
+      | _ -> ());
       match state.tables.calls.(value.id) with
       | Some call ->
           (* What the arguments pass for each capability parameter of what

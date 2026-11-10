@@ -519,6 +519,84 @@ let check =
           @ check_instantiation database package
           @ check_tests database package)
 
+(* The manifest *)
+
+(* The packages a definition uses: those it names in a path, those with a
+   trait whose method it calls with a dot, and those with an [impl] that
+   answers a call or meets a bound in it. *)
+let used_packages =
+  Query.query ~name:"used_packages" ~phase:Bodies ~saved:true ~show:Names.show_key
+    (fun database (key : Names.key) ->
+      let named =
+        match Query.demand database Resolve.resolved key with
+        | Some resolved ->
+            List.filter_map
+              (function
+                | Some (Resolve.Definition (_, path) | Variant (path, _)) ->
+                    Some (Path.package path)
+                | Some (Module module_) -> Some module_.package
+                | _ -> None)
+              (Array.to_list resolved.names)
+        | None -> []
+      in
+      let checked =
+        match Query.demand database Infer.checked key with
+        | Some { checked; evidence; _ } ->
+            evidence
+            @ List.concat_map
+                (function
+                  | Some ({ callee = Trait_method { trait; evidence; _ }; _ } : Checked.call) ->
+                      Path.package trait.trait
+                      :: (match evidence with Impl { impl; _ } -> [ Path.package impl ] | _ -> [])
+                  | _ -> [])
+                (Array.to_list checked.calls)
+        | None -> []
+      in
+      List.sort_uniq compare (named @ checked))
+
+(* What only a package's code shows to be wrong with its manifest. *)
+type manifest_problem =
+  | Not_a_capability of { dependency : string; name : string }
+      (** A grant's entry that names no capability *)
+  | Unused of string  (** A dependency that nothing in the package uses *)
+
+let manifest_sentence ~package = function
+  | Not_a_capability { dependency; name } ->
+      Printf.sprintf
+        "`%s`, in the entry for `%s`, names no capability. A grant names a capability of the \
+         prelude by its name, such as `Clock`, and any other by its full path."
+        name dependency
+  | Unused dependency ->
+      Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." package dependency
+
+(* Which dependencies a package uses is known only once all of its code
+   checks: a call in a body with an error may not have been worked out. So a
+   package with an error elsewhere is not told that a dependency is unused,
+   which a fix would then delete. *)
+let manifest_problems =
+  Query.query ~name:"manifest_problems" ~phase:Checks ~saved:true ~show:Fun.id
+    (fun database package_name ->
+      match Workspace.package database package_name with
+      | None -> []
+      | Some package ->
+          let keys = List.map Names.key_of (declarations database package) in
+          let checks = List.for_all (fun key -> Infer.clean database key <> None) keys in
+          let used = List.concat_map (Query.demand database used_packages) keys in
+          List.concat_map
+            (fun (dependency : Workspace.dependency) ->
+              (match
+                 Query.demand database Interface.Grants.granted (package_name, dependency.package)
+               with
+                | Some grant ->
+                    List.map
+                      (fun name -> Not_a_capability { dependency = dependency.package; name })
+                      grant.unknown
+                | None -> [])
+              @
+              if checks && not (List.mem dependency.package used) then [ Unused dependency.package ]
+              else [])
+            package.dependencies)
+
 let diagnostics database (module_ : Path.module_) =
   List.filter_map
     (fun placed -> if placed.module_ = module_ then Some placed.diagnostic else None)

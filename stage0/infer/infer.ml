@@ -2,7 +2,11 @@
 
 module Members = Members
 
-type result = Body.result = { checked : Checked.t; diagnostics : Diagnostic.t list }
+type result = Body.result = {
+  checked : Checked.t;
+  diagnostics : Diagnostic.t list;
+  evidence : string list;
+}
 
 let checked = Body.checked
 let diagnostics = Body.diagnostics
@@ -18,7 +22,7 @@ let clean database key =
       Query.demand database Resolve.resolved key,
       Query.demand database checked key )
   with
-  | Some definition, Some resolved, Some { checked; diagnostics = [] }
+  | Some definition, Some resolved, Some { checked; diagnostics = []; _ }
     when resolved.diagnostics = []
          && not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body) ->
       Some checked

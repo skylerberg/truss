@@ -124,31 +124,6 @@ let receiver (parameters : parameter list) : Path.receiver =
 
 (* Imports *)
 
-(* The module a [use] line names: [use standard::file_system] is the
-   package [standard] and the module [file_system]. *)
-let used_module (path : path) : Path.module_ =
-  match path.modules with
-  | [] -> { package = path.last.text; modules = [] }
-  | package :: rest ->
-      {
-        package = package.text;
-        modules = List.map (fun (name : name) -> name.text) rest @ [ path.last.text ];
-      }
-
-let last_name (module_ : Path.module_) =
-  match List.rev module_.modules with last :: _ -> last | [] -> module_.package
-
-(* The modules a file imports, by the name code writes them with. *)
-let imports =
-  Query.query ~name:"imports" ~phase:Syntax ~saved:true ~show:Path.show_module
-    (fun database module_ ->
-      let file = Query.demand database Workspace.file module_ in
-      List.map
-        (fun (item : path Syntax.item) ->
-          let used = used_module item.value in
-          (last_name used, used))
-        file.uses)
-
 (* The packages a file can name at the start of a path: its own, the
    standard library, and its dependencies. *)
 let packages database (module_ : Path.module_) =
@@ -161,6 +136,37 @@ let packages database (module_ : Path.module_) =
     | None -> []
   in
   List.sort_uniq compare (module_.package :: Prelude.standard :: dependencies)
+
+(* The module a full path's names give, written in a file of [from]: a
+   package's name, which is two of them when it has an owner, and then the
+   modules'. [standard::file_system] is the package [standard] and the
+   module [file_system], and [acme::geometry::vector] is the package
+   [acme::geometry] and the module [vector]. *)
+let full_module database ~(from : Path.module_) (names : string list) : Path.module_ =
+  match names with
+  | owner :: name :: rest when List.mem (owner ^ "::" ^ name) (packages database from) ->
+      { package = owner ^ "::" ^ name; modules = rest }
+  | package :: rest -> { package; modules = rest }
+  | [] -> { package = ""; modules = [] }
+
+(* The module a [use] line names. *)
+let used_module database ~from (path : path) =
+  full_module database ~from
+    (List.map (fun (name : name) -> name.text) path.modules @ [ path.last.text ])
+
+let last_name (module_ : Path.module_) =
+  match List.rev (Path.module_parts module_) with last :: _ -> last | [] -> ""
+
+(* The modules a file imports, by the name code writes them with. *)
+let imports =
+  Query.query ~name:"imports" ~phase:Syntax ~saved:true ~show:Path.show_module
+    (fun database module_ ->
+      let file = Query.demand database Workspace.file module_ in
+      List.map
+        (fun (item : path Syntax.item) ->
+          let used = used_module database ~from:module_ item.value in
+          (last_name used, used))
+        file.uses)
 
 let module_exists database (module_ : Path.module_) =
   module_ = Intrinsic.module_ || Query.demand database Workspace.module_exists module_
@@ -288,9 +294,8 @@ let lookup_module database ~(from : Path.module_) (names : string list) =
           (List.assoc_opt first (Query.demand database imports from))
       in
       let package =
-        if List.mem first (packages database from) then
-          Some ({ package = first; modules = rest } : Path.module_)
-        else None
+        let module_ = full_module database ~from names in
+        if List.mem module_.package (packages database from) then Some module_ else None
       in
       let exists module_ = module_exists database module_ in
       match (imported, package) with

@@ -6,6 +6,7 @@ module Constants = Constants
 module Environment = Environment
 module Properties = Properties
 module Impls = Impls
+module Grants = Grants
 module Check = Check
 
 (* Every interface error of a file, in its offsets and in order. *)
