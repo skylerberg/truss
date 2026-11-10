@@ -1141,6 +1141,7 @@ A *loan* is a period during which a place is lent. Each is shared or `mut`:
 | What a lending call is called on | shared, or `mut` when the method takes `mut self` | the rest of the statement |
 | A `for` loop's variable | shared or `mut` | the iteration |
 | A `provide` of a place | shared or `mut` | the `provide` block |
+| An operand that has been evaluated | shared | until its operation runs |
 
 A loan is live while any value that holds it may still be used, which a
 liveness analysis decides, as in Rust's non-lexical lifetimes. While a shared
@@ -1148,7 +1149,25 @@ loan of a place is live, nothing may change, move, or lend `mut` an
 overlapping place. While a `mut` loan is live, nothing else may use an
 overlapping place at all. So `swap(mut first, second: mut first)` is an
 error, and `mut items.push(9)` is allowed once `middle` is no longer used, as
-in SYNTAX.md's example.
+in SYNTAX.md's example. A loan of a view is also a loan of what the view
+views.
+
+The operands of one operation are evaluated in order, and an operand stays
+as it was evaluated until the operation runs. The operands are the arguments
+of a call, the fields of a constructor, the elements of a literal, the
+scrutinees of a `match`, the collection and then the keys of an index, and
+the value of an assignment and then the keys of its target.
+
+- **An evaluated operand is lent until its operation runs.** An operand
+  that is a place lends the place, and an operand of a view type lends what
+  it views. A later operand may read what is lent, but may not change it,
+  move it, or lend it `mut`. So `show(items[0], count: grow(mut items))` is
+  an error, as in Rust: the call would be given an element of a list that
+  `grow` has since changed. An operand that is a copy lends nothing.
+- **A `mut` borrow for an argument begins at the call,** after every
+  argument is evaluated. So `mut items.push(items.length())` is allowed, as
+  Rust's two-phase borrows allow it. At the call, two places that the call
+  borrows may not overlap if one of them is borrowed `mut`.
 
 ### Views
 
@@ -1195,6 +1214,12 @@ all read from one account of what a value views:
   its mode is `mut`. The rule is for the two slice types only: a `var` of
   another view type, such as a cursor, can be passed `mut` over a read-only
   source.
+
+- **A view cannot be passed with a `mut` borrow of what it views.** A call
+  that is given a view and that borrows `mut`, as another argument, a place
+  that the view views is an error in either order: the callee would hold
+  the view and change what it views. The intrinsic operations that give a
+  view back to its owner are the exception.
 
 - **Nothing kept may view a temporary.** A temporary lives until the end
   of its statement, so a `let` or `var` whose view, or whose cursor, views

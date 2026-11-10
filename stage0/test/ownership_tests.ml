@@ -69,6 +69,72 @@ let () =
          \  items.length()\n\
           }\n"))
 
+(* The operands of one operation *)
+
+let () =
+  let functions =
+    "fn take(items: mut List[Int64], view: Slice[Int64]) {}\n\n\
+     fn give(view: Slice[Int64], items: mut List[Int64]) {}\n\n\
+     fn measure(items: mut List[Int64], count: USize) {}\n\n\
+     fn show(item: Int64, count: USize) {}\n\n\
+     fn change(item: mut Int64, count: USize) {}\n\n\
+     fn count_of(view: Slice[Int64], count: USize) {}\n\n\
+     fn grow(items: mut List[Int64]) -> USize {\n\
+    \  mut items.push(1)\n\
+    \  items.length()\n\
+     }\n\n"
+  in
+  let rejected name body code =
+    test name (fun () ->
+        one_diagnostic (functions ^ "fn f(items: mut List[Int64]) {\n" ^ body ^ "}\n") code)
+  in
+  rejected "a view cannot be passed after a `mut` borrow of what it views"
+    "  var part = items.slice()\n  take(mut items, view: part)\n" "ownership.conflicting_loan";
+  rejected "a view cannot be passed before a `mut` borrow of what it views"
+    "  var part = items.slice()\n  give(part, items: mut items)\n" "ownership.conflicting_loan";
+  rejected "a slice of a place cannot be passed with a `mut` borrow of the place"
+    "  take(mut items, view: items[..1])\n" "ownership.conflicting_loan";
+  test "a view of another place, and a value read from the place, can be passed with it" (fun () ->
+      fine
+        (functions
+       ^ "fn f(items: mut List[Int64], others: List[Int64]) {\n\
+         \  var part = others.slice()\n\
+         \  take(mut items, view: part)\n\
+         \  measure(mut items, count: items.length())\n\
+          }\n"));
+  rejected "a later argument cannot change a place that an earlier argument borrows"
+    "  show(items[0], count: grow(mut items))\n" "ownership.changed_while_viewed";
+  rejected "a later argument cannot change a place that an earlier argument borrows `mut`"
+    "  change(mut items[0], count: grow(mut items))\n" "ownership.changed_while_viewed";
+  rejected "a later argument cannot change what an earlier argument views"
+    "  count_of(items[..1], count: grow(mut items))\n" "ownership.changed_while_viewed";
+  rejected "a later argument cannot change what a view passed earlier views"
+    "  var part = items.slice()\n  count_of(part, count: grow(mut items))\n"
+    "ownership.changed_while_viewed";
+  rejected "an index key cannot change the collection that is indexed"
+    "  let _ = items[grow(mut items)]\n" "ownership.changed_while_viewed";
+  rejected "a bound of a slice cannot change the collection that is sliced"
+    "  let _ = items[..grow(mut items)]\n" "ownership.changed_while_viewed";
+  test "a later field cannot change what an earlier field views" (fun () ->
+      one_diagnostic
+        (functions
+       ^ "type Counted(view: Slice[Int64], count: USize)\n\n\
+          fn f(items: mut List[Int64]) {\n\
+         \  let _ = Counted(view: items[..1], count: grow(mut items))\n\
+          }\n")
+        "ownership.changed_while_viewed");
+  test "an operand that is a copy does not lend its place" (fun () ->
+      fine
+        (functions
+       ^ "fn sum(first: own USize, second: USize) {}\n\n\
+          fn bump(count: mut USize) -> USize {\n\
+         \  count = 1\n\
+         \  count\n\
+          }\n\n\
+          fn f(count: mut USize) {\n\
+         \  sum(count, second: bump(mut count))\n\
+          }\n"))
+
 (* Constants *)
 
 let () =
@@ -442,7 +508,7 @@ let () =
          fn f(items: own List[Int64]) {\n\
         \  both(items, second: own items)\n\
          }\n"
-        "ownership.conflicting_loan");
+        "ownership.changed_while_viewed");
   test "a Plain place passed own is copied, so the call may use it twice" (fun () ->
       fine
         "fn both(first: Int64, second: own Int64) {}\n\n\
@@ -813,7 +879,7 @@ let () =
           fn f(grid: mut Grid) {\n\
          \  both(grid, cell: mut grid.cell(0))\n\
           }\n")
-        "ownership.conflicting_loan");
+        "ownership.changed_while_viewed");
   test "a place lent read-only is not changed in the same statement" (fun () ->
       one_diagnostic
         (tally ^ "fn f(tally: mut Tally) {\n  tally[0] = tally[1]\n}\n")
