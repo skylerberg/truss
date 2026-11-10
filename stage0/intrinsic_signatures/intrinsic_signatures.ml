@@ -183,7 +183,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Report_tests_to -> make [ input "descriptor" (T.builtin Int32) ]
   | Live_blocks -> make ~output:(Returns usize) []
   | Libc function_ ->
-      let { Libc.parameters; result } = Libc.signature function_ in
+      let { Libc.parameters; result; _ } = Libc.signature function_ in
       let found = match result with Text -> [ input ~mode:Mut "found" bool ] | _ -> [] in
       make
         ~output:
@@ -196,8 +196,8 @@ let signature (operation : Intrinsic.operation) : T.signature =
            (fun (name, (passes : Libc.passes)) ->
              match passes with
              | Value scalar -> [ input name (libc_scalar scalar) ]
-             | Elements scalar -> [ input name (view (libc_scalar scalar)) ]
-             | Room scalar | Elements_to_change scalar ->
+             | Elements (scalar, _) -> [ input name (view (libc_scalar scalar)) ]
+             | Room (scalar, _) | Elements_to_change (scalar, _) ->
                  [ input ~mode:Mut name (storage (libc_scalar scalar)) ]
              | Written (scalar, names) ->
                  List.map (fun name -> input ~mode:Mut name (libc_scalar scalar)) names

@@ -23,7 +23,16 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # The history is for the step below, which reads the last merges.
       - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 40
+
+      # A branch squashed onto a main that moved takes merged work out with
+      # no conflict, so it is caught here, before anything is built.
+      - name: Check that no recent merge is taken out
+        if: github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'Revert')
+        run: .github/scripts/reverts.sh
 
       - id: opam
         uses: ./.github/actions/opam

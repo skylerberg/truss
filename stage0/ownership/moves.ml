@@ -72,7 +72,7 @@ let transfer verdicts (index : int) (point : point) (before : moved list) : move
           match moved.root with Local local -> not (List.mem local locals) | Constant _ -> true)
         before
   | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Exit | Hold _ | Store _ | Return_view _
-  | Views_temporary _ | Keeps_lent_part _ | Arguments _ ->
+  | Views_temporary _ | Keeps_lent_part _ | Write_through _ | Arguments _ ->
       before
 
 (* The places that may have been moved before each point. *)
@@ -182,6 +182,6 @@ let check context (graph : Graph.t) =
               | _ -> ())
             before.(index)
       | Enter | Bind _ | Hold _ | Store _ | Return_view _ | Views_temporary _ | Keeps_lent_part _
-      | Arguments _ ->
+      | Write_through _ | Arguments _ ->
           ())
     points

@@ -220,9 +220,18 @@ and `reads` clauses):
   every storage it is lent keeps its length and its capacity; one passed
   as its room keeps its elements too, and one passed as its elements, to
   change, has elements nothing more is known of. An operation that stops
-  the program on a bad index says what holds when it returns. A part `storage_at_mut` lends
-  changes nothing until the lend ends, where the storage takes back what
-  the caller left in it.
+  the program on a bad index says what holds when it returns. A part
+  `storage_at_mut` lends changes nothing until the lend ends, where the
+  storage takes back what the caller left in it, and so for `view_at_mut`
+  and a view. `storage_view_mut` is a view of the storage's elements to
+  change them through, and `storage_take_view`, `view_take_view`, and
+  `array_take_view` say the owner's elements from `start` are now the
+  view's: the run must lie within the owner, which keeps its length (and a
+  storage its capacity) and is otherwise as it was.
+- **A slice passed to change** changes only its run of its owner: after
+  the call, the owner is as long as it was and the same outside the run,
+  and the slice read again is a view of the new run, which the callee's
+  postconditions are about.
 - **Bitwise operations get a second encoding.** On integers, `&`, `|`, `^`,
   `~`, and shifts are functions the solver knows only by a few facts, such
   as `0 <= a & b <= a` for unsigned values. That proves the bounds most bit

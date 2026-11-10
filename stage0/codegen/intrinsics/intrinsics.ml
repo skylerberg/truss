@@ -516,7 +516,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
             Ground.Named
               { path = Intrinsic.builtin_path (Intrinsic.libc_builtin scalar); arguments = [] }
           in
-          let { Libc.parameters; result } = Libc.signature function_ in
+          let { Libc.parameters; result; _ } = Libc.signature function_ in
           (* What goes on after the call: a structure's numbers to the
              arguments they were written for. *)
           let after = ref [] in
@@ -535,7 +535,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                 | Room _ ->
                     let storage = place (argument (taken ())) in
                     Address { place = element_at storage (length storage); writable = true }
-                | Elements_to_change scalar ->
+                | Elements_to_change (scalar, _) ->
                     let storage = argument (taken ()) in
                     own ~element:(ground scalar) storage;
                     Copy (Storage.buffer (place storage))

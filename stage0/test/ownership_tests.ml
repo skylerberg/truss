@@ -15,6 +15,60 @@ let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 let keep = "fn keep(items: own List[Int64]) {}\n\nfn look(items: List[Int64]) {}\n\n"
 
+(* Writing through a slice *)
+
+let () =
+  let bump =
+    "fn bump(items: mut Slice[Int64])\n  requires items.length() > 0\n{\n  items[0] = 9\n}\n\n"
+  in
+  List.iter
+    (fun (what, text) ->
+      test (what ^ " cannot be changed through a slice") (fun () ->
+          one_diagnostic (bump ^ text) "ownership.read_only_view"))
+    [
+      ( "a read-only parameter",
+        "fn f(items: List[Int64]) -> USize {\n\
+        \  var part = items.slice()\n\
+        \  bump(mut part)\n\
+        \  items.length()\n\
+         }\n" );
+      ( "a constant",
+        "let primes: List[Int64] = [2, 3, 5]\n\n\
+         fn f() -> USize {\n\
+        \  var part = primes.slice()\n\
+        \  bump(mut part)\n\
+        \  primes.length()\n\
+         }\n" );
+      ( "a `let`",
+        "fn f() -> USize {\n\
+        \  let items: List[Int64] = [3, 1, 2]\n\
+        \  var part = items.slice()\n\
+        \  part[0] = 7\n\
+        \  items.length()\n\
+         }\n" );
+      ( "what a slice in a field views",
+        "type Window(rest: Slice[Int64])\n\n\
+         fn f(window: mut Window) {\n\
+        \  bump(mut window.rest)\n\
+         }\n" );
+    ];
+  test "a `var` and a `mut` parameter can be changed through a slice" (fun () ->
+      fine
+        (bump
+       ^ "type Window(rest: Slice[Int64])\n\n\
+          fn narrow(window: mut Window, count: USize) {\n\
+         \  window.rest = window.rest[..count]\n\
+          }\n\n\
+          fn f(given: mut List[Int64]) -> USize {\n\
+         \  var items: List[Int64] = [3, 1, 2]\n\
+         \  var part = items.slice()\n\
+         \  bump(mut part)\n\
+         \  part[1] = 4\n\
+         \  var other = given.slice()\n\
+         \  bump(mut other)\n\
+         \  items.length()\n\
+          }\n"))
+
 (* Constants *)
 
 let () =
