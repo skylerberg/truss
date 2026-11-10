@@ -2548,9 +2548,29 @@ public fn UInt64.least_common_multiple(self, other: UInt64) -> Option[UInt64]
 
 public fn UInt64.integer_square_root(self) -> UInt64
   ensures result * result <= self
+  ensures self < (result + 1) * (result + 1)
   cost time O(64)
 {
-  todo
+  var result: UInt64 = 0
+  var width: UInt64 = 4294967296
+  while width > 1
+    invariant width >= 1
+    invariant result + width <= 4294967296
+    invariant result * result <= self
+    invariant self < (result + width) * (result + width)
+    decreases width
+    cost time O(log(4294967295) - log(width - 1))
+  {
+    let half = width / 2
+    let candidate = result + half
+    if candidate * candidate <= self {
+      result = candidate
+      width = width - half
+    } else {
+      width = half
+    }
+  }
+  result
 }
 
 impl core::Countable for UInt64 {
@@ -2814,9 +2834,29 @@ public fn USize.least_common_multiple(self, other: USize) -> Option[USize]
 
 public fn USize.integer_square_root(self) -> USize
   ensures result * result <= self
+  ensures self < (result + 1) * (result + 1)
   cost time O(64)
 {
-  todo
+  var result: USize = 0
+  var width: USize = 4294967296
+  while width > 1
+    invariant width >= 1
+    invariant result + width <= 4294967296
+    invariant result * result <= self
+    invariant self < (result + width) * (result + width)
+    decreases width
+    cost time O(log(4294967295) - log(width - 1))
+  {
+    let half = width / 2
+    let candidate = result + half
+    if candidate * candidate <= self {
+      result = candidate
+      width = width - half
+    } else {
+      width = half
+    }
+  }
+  result
 }
 
 impl core::Countable for USize {
