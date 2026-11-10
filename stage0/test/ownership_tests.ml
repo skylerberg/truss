@@ -652,6 +652,29 @@ let () =
         \  (forall i in 0..items.length() => items[i] > 0) && (exists item in items => item < 0)\n\
          }\n")
 
+(* What a place given [mut] is taken to keep *)
+
+let () =
+  let reader =
+    "type Reader(bytes: Slice[UInt8], position: USize)\n\n\
+     fn Reader.read(mut self, buffer: mut List[UInt8], limit: USize) -> USize {\n\
+    \  mut buffer.push(self.bytes[self.position])\n\
+    \  self.position = self.position + limit\n\
+    \  limit\n\
+     }\n\n"
+  in
+  test "a view given `mut` beside a place that is only lent does not come to view the place"
+    (fun () ->
+      fine
+        (reader
+       ^ "fn f(bytes: List[UInt8]) -> USize {\n\
+         \  var reader = Reader(bytes: bytes[..], position: 0)\n\
+         \  var buffer: List[UInt8] = []\n\
+         \  let first = mut reader.read(mut buffer, limit: 1)\n\
+         \  let second = mut reader.read(mut buffer, limit: 1)\n\
+         \  first + second + buffer.length()\n\
+          }\n"))
+
 (* Constants *)
 
 let () =
@@ -1604,16 +1627,22 @@ let () =
         \  mut kept.push(local[0..2])\n\
          }\n"
         "ownership.stores_local_view");
-  test "a mut parameter can be given a view of another parameter" (fun () ->
+  test "a mut parameter can be given a view that the function was given" (fun () ->
       fine
-        "fn f(kept: mut List[Slice[Int64]], source: List[Int64]) {\n\
+        "fn f(kept: mut List[Slice[Int64]], source: Slice[Int64]) {\n\
         \  mut kept.push(source[0..2])\n\
          }\n");
+  test "a mut parameter cannot be given a view of a parameter that is only lent" (fun () ->
+      one_diagnostic
+        "fn f(kept: mut List[Slice[Int64]], source: List[Int64]) {\n\
+        \  mut kept.push(source[0..2])\n\
+         }\n"
+        "ownership.stores_local_view");
   test "what a mut parameter views cannot be changed in the rest of the function" (fun () ->
       one_diagnostic
-        "fn f(kept: mut List[Slice[Int64]], source: mut List[Int64]) {\n\
+        "fn f(kept: mut List[Slice[Int64]], source: mut Slice[Int64]) {\n\
         \  mut kept.push(source[0..2])\n\
-        \  mut source.push(4)\n\
+        \  source = source[1..]\n\
          }\n"
         "ownership.changed_while_viewed");
   test "a mut self method cannot put a view of a local in self" (fun () ->
@@ -1624,12 +1653,24 @@ let () =
          \  self.view = local[0..1]\n\
           }\n")
         "ownership.stores_local_view");
-  test "a mut self method can put a view of a parameter in self" (fun () ->
-      fine (window ^ "fn Window.widen(mut self, data: List[Int64]) {\n  self.view = data[0..2]\n}\n"));
-  test "what a mut self method was lent is viewed by what it was called on" (fun () ->
+  test "a mut self method can put a view that it was given in self" (fun () ->
+      fine
+        (window ^ "fn Window.widen(mut self, data: Slice[Int64]) {\n  self.view = data[0..2]\n}\n"));
+  test "a mut self method cannot put a view of a parameter that is only lent in self" (fun () ->
+      one_diagnostic
+        (window ^ "fn Window.widen(mut self, data: List[Int64]) {\n  self.view = data[0..2]\n}\n")
+        "ownership.stores_local_view");
+  test "a mut self method cannot put a view of a part of self in self" (fun () ->
+      one_diagnostic
+        "type Cached(items: List[Int64], recent: Slice[Int64])\n\n\
+         fn Cached.refresh(mut self) {\n\
+        \  self.recent = self.items[0..1]\n\
+         }\n"
+        "ownership.stores_local_view");
+  test "a view that a mut self method was given is viewed by what it was called on" (fun () ->
       one_diagnostic
         (window
-       ^ "fn Window.widen(mut self, data: List[Int64]) {\n\
+       ^ "fn Window.widen(mut self, data: Slice[Int64]) {\n\
          \  self.view = data[0..2]\n\
           }\n\n\
           fn f() -> USize {\n\
