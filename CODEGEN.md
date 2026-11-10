@@ -653,10 +653,10 @@ and its siblings. Full-width multiplication, used by hashing and
 
 ### Control flow and patterns
 
-- **`match`** compiles to a decision tree that tests each part of the value
-  once, in the order the patterns need, and switches on tags and integers.
-  Maranget's "Compiling Pattern Matching to Good Decision Trees" (2008) is
-  the method. The tree is built deterministically from the arms in order.
+- **`match`** tests its arms in order: each arm tests its patterns against
+  the values, part by part, and jumps to the next arm at the first part
+  that does not match. The value is evaluated once, and the first arm that
+  matches runs.
 - **`?`** is a tag test and an early return, with the drops elaboration
   inserted.
 - **Conditions are lowered as jumps.** `if`, `while`, a guard, and a
@@ -681,10 +681,9 @@ and its siblings. Full-width multiplication, used by hashing and
 ### Strings and templates
 
 - **String interpolation builds into one buffer.** `"${count} items in
-  ${name}"` adds up the literal lengths, calls each part's `display` into a
-  `TextBuilder` with that much room reserved, and returns the `String`. It
-  never builds a `Template` or its lists. A `TextBuilder` grows only if a
-  part writes more than its first estimate.
+  ${name}"` writes each piece of literal text and each part's `display`
+  into one `TextBuilder`, and returns the `String`. It never builds a
+  `Template` or its lists.
 - **Numbers display as their debug output does.** Integers are written in
   decimal by the standard library. A float is written by the
   `write_float` intrinsic, the shortest decimal that reads back as the same
@@ -1197,8 +1196,11 @@ the tests that can reach the edited code, and costs what can reach it:
   keys nothing but the keys of what can reach the edit.
 - **The test's key** is the key of everything the test's own instance can
   reach, with the version of code generation and the target. `USize` is a
-  `typedef` in the generated C, so the LIR is the same for 32-bit and 64-bit
-  targets, but results such as `USize.maximum` are not.
+  `typedef` in the generated C, so code that differs between 32-bit and
+  64-bit targets only in a `USize` has the same LIR for both, while results
+  such as `USize.maximum` are not the same. An instance is lowered for one
+  target all the same, since whether a value is passed by address depends
+  on its size.
 
 Two programs that differ only in names give the same key, and any change to
 what the test can run changes it. A layout change appears in the LIR of
@@ -1314,17 +1316,14 @@ so upgrading clang recompiles objects but invalidates no test result.
   name and renamed into place, so a build that stops partway leaves no
   broken object. Files that need compiling are compiled in parallel, across
   the machine's cores.
-- **Development builds compile one C file per instance.** The C compiler
-  runs once for each instance whose LIR changed, in parallel across cores.
-  Small standard-library and dependency instances that the instance calls
-  are emitted into the same file as `static` functions, so the C compiler
-  can inline them, as DESIGN.md allows for development builds. They are
-  chosen by size, and every yielding method is chosen. Each one is recorded
-  as a body the instance reads.
-- **A package's own code compiles at `-O1`** in development builds, which is
-  fast to compile and avoids the stack traffic of `-O0`.
-- **The standard library and dependencies compile at `-O2`** and are cached,
-  so development builds of a project run them at full speed.
+- **Every build compiles one C file per instance.** The C compiler runs
+  once for each instance whose C changed, in parallel across cores. Each
+  instance is an external function of its own file, so in a development
+  build the C compiler inlines nothing from one instance into another.
+  Lowering does write lending and yielding methods and primitive
+  operations into their callers itself.
+- **Development builds compile at `-O1`,** which is fast to compile and
+  avoids the stack traffic of `-O0`.
 - **Release builds** compile at `-O2` and optimize across every file as
   they are linked, with ThinLTO where the C compiler is clang and LTO
   otherwise, so the C compiler can inline across every definition. They
@@ -1371,6 +1370,23 @@ a command line can hold.
 - **Checkers shipped compiled.** The standard library's are to ship already
   compiled with the toolchain, for each host and both widths of `USize`, and
   a dependency's to be compiled once per version.
+- **`match` as a decision tree.** A tree would test each part of the value
+  once, in the order the patterns need, and switch on tags and integers,
+  where arms tested in order may test one part again for each arm.
+  Maranget's "Compiling Pattern Matching to Good Decision Trees" (2008) is
+  the method.
+- **Room reserved for an interpolation.** The literal lengths are known, so
+  the `TextBuilder` can start with that much room and grow only if a part
+  writes more than its estimate.
+- **Small callees in the caller's C file.** In a development build, small
+  standard-library and dependency instances that an instance calls can be
+  emitted into its file as `static` functions, chosen by size, so the C
+  compiler can inline them, as DESIGN.md allows; each is then a body the
+  instance reads. Until then a development or test build makes a call for
+  every small method, such as a list's length.
+- **The standard library and dependencies at `-O2` in development
+  builds,** cached, so a project's development builds run them at full
+  speed.
 - **A quantifier in code.** It is to be a loop over its range or collection,
   through the same `each` a `for` loop calls, that stops at the first
   element that decides the answer: `forall` at the first false body,
