@@ -404,7 +404,9 @@ public fn List[Element].generate(
 }
 
 public fn List[Element].collect[Source: Cursor[Element = Element]](source: own Source) -> List[Element] {
-  todo
+  var items: List[Element] = []
+  mut items.extend(own source)
+  items
 }
 
 public fn List[Element].capacity(self) -> USize
@@ -548,7 +550,10 @@ public fn List[Element: Copyable].append_slice(mut self, items: Slice[Element])
 }
 
 public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, items: own Source) {
-  todo
+  var cursor = own items
+  while mut cursor.next() is Some(item) {
+    mut self.push(own item)
+  }
 }
 
 public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time finite))

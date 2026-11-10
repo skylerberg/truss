@@ -311,53 +311,78 @@ public trait Cursor {
   fn next(mut self) -> Option[Self.Element]
 
   fn to_list(own self) -> List[Self.Element] {
-    todo
+    var cursor = own self
+    var items: List[Self.Element] = []
+    while mut cursor.next() is Some(item) {
+      mut items.push(own item)
+    }
+    items
   }
 
   fn count(own self) -> USize {
-    todo
+    var cursor = own self
+    var count: USize = 0
+    while mut cursor.next() is Some(_) {
+      count = count.saturating_add(1)
+    }
+    count
   }
 
   fn last(own self) -> Option[Self.Element] {
-    todo
+    var cursor = own self
+    var last: Option[Self.Element] = None
+    while mut cursor.next() is Some(item) {
+      last = Some(own item)
+    }
+    last
   }
 
   fn fold[Total](own self, initial: own Total, combine: fn(own Total, own Self.Element) -> Total) -> Total {
-    todo
+    var cursor = own self
+    var total = own initial
+    while mut cursor.next() is Some(item) {
+      total = combine(own total, own item)
+    }
+    total
   }
 
   fn find(mut self, matching: fn(Self.Element) -> Bool) -> Option[Self.Element] {
-    todo
+    while mut self.next() is Some(item) {
+      if matching(item) {
+        return Some(own item)
+      }
+    }
+    None
   }
 
   fn skip(own self, count: USize) -> cursors::Skip[Self] {
-    todo
+    cursors::Skip(source: own self, left: count)
   }
 
   fn take(own self, count: USize) -> cursors::Take[Self] {
-    todo
+    cursors::Take(source: own self, left: count)
   }
 
   fn step_by(own self, step: USize) -> cursors::StepBy[Self]
     requires step > 0
   {
-    todo
+    cursors::StepBy(source: own self, step: step, started: false)
   }
 
   fn chain[Other: Cursor[Element = Self.Element]](own self, other: own Other) -> cursors::Chain[Self, Other] {
-    todo
+    cursors::Chain(first: own self, second: own other, first_ended: false)
   }
 
   fn zip[Other: Cursor](own self, other: own Other) -> cursors::Zip[Self, Other] {
-    todo
+    cursors::Zip(first: own self, second: own other)
   }
 
   fn enumerate(own self) -> cursors::Enumerate[Self] {
-    todo
+    cursors::Enumerate(source: own self, index: 0)
   }
 
   fn peekable(own self) -> cursors::Peekable[Self] {
-    todo
+    cursors::Peekable(source: own self, peeked: None)
   }
 }
 
