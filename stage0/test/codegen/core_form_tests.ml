@@ -1304,6 +1304,28 @@ test "quantifiers over collections run as loops that stop at the first answer" {
 }
 |}
 
+let () =
+  passes "constants that are infinite or not a number, which C has no literal for"
+    {|let missing: Float64 = Float64.not_a_number
+let endless: Float64 = Float64.infinity
+let bottomless: Float64 = Float64.negative_infinity
+let narrow: Float32 = Float32.infinity
+
+test "floats that are not finite, as constants" {
+  assert Float64.not_a_number.is_nan()
+  assert missing.is_nan()
+  assert Float64.not_a_number.to_bits() == 0x7ff8000000000000
+  assert endless > 1.0e308
+  assert bottomless < -1.0e308
+  assert Float64.infinity.to_bits() == 0x7ff0000000000000
+  assert Float64.negative_infinity.to_bits() == 0xfff0000000000000
+  assert Float32.infinity.to_bits() == 0x7f800000
+  assert Float32.negative_infinity.to_bits() == 0xff800000
+  assert Float32.not_a_number.to_bits() == 0x7fc00000
+  assert narrow.to_bits() == 0x7f800000
+}
+|}
+
 (* Checks which of a module's constants fold and which are worked out by
    running their evaluators, and that the module's test passes. *)
 let folds what ~folded ~run source =

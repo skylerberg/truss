@@ -31,15 +31,19 @@ let integer_literal integer value =
     Printf.sprintf "((%s)(-9223372036854775807LL - 1))" c
   else Printf.sprintf "((%s)%sLL)" c (Z.to_string value)
 
-let float64_literal context bits =
-  let value = Int64.float_of_bits bits in
-  if Float.is_finite value then Printf.sprintf "%h" value
-  else Printf.sprintf "%s(0x%LxULL)" (helper context "t_float64_from_bits") bits
+(* A float as an expression that C takes for a constant, since a static
+   value is initialized with one. A float that is not finite has no literal;
+   the C compiler's own names for an infinity and for a float that is not a
+   number are constants. Every float that is not a number is the same one in
+   Truss, so which one this is does not show. *)
+let float_literal ~suffix value =
+  if Float.is_finite value then Printf.sprintf "%h%s" value suffix
+  else if Float.is_nan value then Printf.sprintf "__builtin_nan%s(\"\")" suffix
+  else if value > 0. then Printf.sprintf "__builtin_inf%s()" suffix
+  else Printf.sprintf "(-__builtin_inf%s())" suffix
 
-let float32_literal context bits =
-  let value = Int32.float_of_bits bits in
-  if Float.is_finite value then Printf.sprintf "%hf" value
-  else Printf.sprintf "%s(0x%lxU)" (helper context "t_float32_from_bits") bits
+let float64_literal bits = float_literal ~suffix:"" (Int64.float_of_bits bits)
+let float32_literal bits = float_literal ~suffix:"f" (Int32.float_of_bits bits)
 
 let bytes_name context text =
   match List.assoc_opt text context.bytes with
@@ -132,8 +136,8 @@ and operand_c_exn context fc operand =
 
 and constant_c context : Lir.constant -> string * Lir.ty = function
   | Integer (integer, value) -> (integer_literal integer value, Raw (Integer integer))
-  | Float32 bits -> (float32_literal context bits, Raw Float32)
-  | Float64 bits -> (float64_literal context bits, Raw Float64)
+  | Float32 bits -> (float32_literal bits, Raw Float32)
+  | Float64 bits -> (float64_literal bits, Raw Float64)
   | Bool value -> ((if value then "((uint8_t)1)" else "((uint8_t)0)"), Raw Bool)
   | Character code -> (Printf.sprintf "((uint32_t)0x%xU)" code, Raw Character)
   | Bytes text -> ("((void *)" ^ bytes_name context text ^ ")", Raw (Pointer Opaque))

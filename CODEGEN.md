@@ -680,6 +680,21 @@ Float comparisons follow DESIGN.md's lawful rules:
 | `a.ieee_equal(b)`, `a.ieee_less(b)` | `a == b`, `a < b` |
 | `x.to_bits()` | the bits, with every NaN replaced by one canonical NaN |
 
+A float is written as a hexadecimal literal, which is exact. One that is
+infinite or not a number has no literal, and is written with the C
+compiler's `__builtin_inf` and `__builtin_nan`, which are constants, since
+a constant's static value is initialized with one. Every float that is not
+a number is the same one in Truss, so which one is written does not show.
+
+Whether a float fits an integer type is whether it is a number and the
+whole number it is cut down to is in the type's range: it is above the
+least value less one and below the greatest plus one, with IEEE
+comparisons, which a float that is not a number fails. The upper bound is
+a power of two, which every float type holds exactly. Where the lower one
+is not held exactly, as the least `Int64` less one is not, no float lies
+between it and the least value, and the test is against that. A
+conversion of a float that fits cuts it down toward zero.
+
 Checked, wrapping, and saturating arithmetic use `__builtin_add_overflow`
 and its siblings. Full-width multiplication, used by hashing and
 `checked_mul`, uses `unsigned __int128` on 64-bit targets.

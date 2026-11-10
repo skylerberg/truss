@@ -303,7 +303,39 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                 | [ only ] -> Use only
                 | [ first; second ] -> Binary (Bit_and, first, second)
                 | _ -> bug "more than two bounds")
-          | _ -> bug "fits between types that are not integers")
+          | ((Float32 | Float64) as source), Integer target_integer ->
+              (* A float fits an integer type where it is a number and the
+                 whole number it is cut down to is in the type's range: it
+                 is above the least value less one, and below the greatest
+                 plus one. The second is a power of two, which every float
+                 type holds exactly. Where the first is not held exactly,
+                 no float lies between it and the least value. A float
+                 that is not a number passes neither test. *)
+              let low, high =
+                integer_range target_integer (Memory_layout.integer_size target target_integer)
+              in
+              let held bound =
+                match source with
+                | Float32 ->
+                    Int32.float_of_bits (Int32.bits_of_float (Z.to_float bound)) = Z.to_float bound
+                    && Z.equal (Z.of_float (Z.to_float bound)) bound
+                | _ -> Z.equal (Z.of_float (Z.to_float bound)) bound
+              in
+              let constant bound : Lir.operand =
+                match source with
+                | Float32 -> Constant (Float32 (Int32.bits_of_float (Z.to_float bound)))
+                | _ -> Constant (Float64 (Int64.bits_of_float (Z.to_float bound)))
+              in
+              let above = local b (Raw Bool) and below = local b (Raw Bool) in
+              let under = Z.pred low in
+              emit b
+                (Assign
+                   ( at above,
+                     if held under then Binary (Ieee_less, constant under, value 0)
+                     else Binary (Ieee_less_equal, constant low, value 0) ));
+              emit b (Assign (at below, Binary (Ieee_less, value 0, constant (Z.succ high))));
+              set (Binary (Bit_and, Copy (at above), Copy (at below)))
+          | _ -> bug "fits between these types")
       | Square_root -> into Square_root
       | Fused_multiply_add -> into Fused_multiply_add
       | Floor -> into Floor
