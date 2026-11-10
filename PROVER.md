@@ -593,6 +593,10 @@ the invariants before it.
   capability's method takes no `self`, so the `impl`'s `self` is left out
   when their parameters are paired. The method's own `ensures` and cost
   clauses are shown as a function's are.
+- **A trait's provided body** is proven once, against the trait's clauses,
+  with `Self` a type parameter bounded by the trait, so every `impl` that
+  keeps it keeps them. A loop over `Self`'s own yielding method reads the
+  method's contract and `time` clause through the bound.
 - **A method that replaces a provided one** proves that its result equals
   the provided body, which is a definition, with the trait's `requires`
   assumed.
@@ -1039,11 +1043,6 @@ sanitized runs, test the trusted base against real executions.
 
 ## Not built
 
-- **A trait's provided methods proven on their own.** A provided body is
-  proven only where an `impl` replaces it, which shows its result is the
-  body's. A body that every `impl` keeps is not proven against the trait's
-  clauses: it is to be proven once, with `Self` a type parameter bounded by
-  the trait.
 - **Contracts for the intrinsic module's floats and system calls.** Only
   the integer operations, storage, views, and what a C function keeps of
   the storages it is lent have meanings. A call of any other intrinsic, and

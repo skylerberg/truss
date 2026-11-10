@@ -2303,6 +2303,29 @@ let () =
         \  first > second\n\
          }\n"
         "prover.ensures");
+  test "a trait's provided body keeps the trait's clauses on its own" (fun () ->
+      not_proven
+        "trait Sized {\n\
+        \  fn size(self) -> Int64\n\
+        \    ensures result >= 0\n\n\
+        \  fn last_index(self) -> Int64\n\
+        \    ensures result >= 0\n\
+        \  {\n\
+        \    self.size() - 1\n\
+        \  }\n\
+         }\n"
+        "prover.ensures");
+  test "a trait's provided body that keeps its clauses proves" (fun () ->
+      proven
+        "trait Sized {\n\
+        \  fn size(self) -> Int64\n\
+        \    ensures result >= 0\n\n\
+        \  fn halved(self) -> Int64\n\
+        \    ensures result >= 0\n\
+        \  {\n\
+        \    self.size() / 2\n\
+        \  }\n\
+         }\n");
   test "alternatives bind each name to the part that matched" (fun () ->
       proven
         "type Side =\n\

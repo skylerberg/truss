@@ -6055,6 +6055,28 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
         | Some signature ->
             (Some path, signature.terminates, function_contract context.database path, substitution)
         | None -> (Some path, false, None, substitution))
+    | Trait_method { trait; name; receiver; evidence; self_type; _ } ->
+        (* A trait's yielding method, read by its [impl]'s contract where the
+           call reaches one and otherwise by the trait's, with [Self] the
+           type it is called on. *)
+        let self_type = substituted context frame self_type in
+        let evidence : evidence =
+          match evidence with
+          | Bound -> (
+              match concrete_impl context trait.trait self_type with
+              | Some (impl, arguments) -> Impl { impl; arguments }
+              | None -> evidence)
+          | _ -> evidence
+        in
+        let path =
+          match evidence with
+          | Impl { impl; _ } -> Path.Method { owner = impl; name; receiver }
+          | Bound | Dynamic -> Path.Method { owner = trait.trait; name; receiver }
+        in
+        ( Some path,
+          signature_terminates context path,
+          method_contract context.database trait name receiver evidence,
+          [ ({ T.owner = trait.trait; name = "Self" }, T.Type self_type) ] )
     | _ -> (None, false, None, [])
   in
   if context.terminates && not terminates then

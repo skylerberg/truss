@@ -108,10 +108,11 @@ let prove database (key : Names.key) =
   | Some declaration, Some source -> (
       try
         match (declaration.kind, source.core.definition) with
-        (* A trait's provided body is not proven on its own: an [impl] that
-           replaces it shows its result is the body's, and one that keeps it
-           is not proven yet. *)
-        | (Function | Method), Function _ when Call_graph.in_trait database key -> Not_proven_here
+        (* A trait's method without a body is only declared, and an [impl]
+           shows it. A provided body is proven once, here, with [Self] the
+           trait's type parameter, so it keeps the trait's clauses for every
+           [impl] that keeps it. *)
+        | (Function | Method), Function { body = None; _ } -> Not_proven_here
         | Theorem, Function _ -> Obligations (Translate.theorem database source ~path:key.path)
         | (Function | Method), Function { body = Some _; _ } ->
             Obligations
