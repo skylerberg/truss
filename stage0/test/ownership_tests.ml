@@ -456,6 +456,73 @@ let () =
     \  }\n\
      }\n"
 
+(* Views that a method yields *)
+
+let () =
+  let reader = "type Reader(buffer: List[Int64])\n\n" in
+  let rejected name body code = test name (fun () -> one_diagnostic (reader ^ body) code) in
+  let accepted name body = test name (fun () -> fine (reader ^ body)) in
+  rejected "a yielding method cannot yield a view of its local"
+    "fn Reader.chunks(self) yields Slice[Int64] {\n\
+    \  let scratch: List[Int64] = [1, 2, 3]\n\
+    \  yield scratch[..]\n\
+     }\n"
+    "ownership.returns_local_view";
+  rejected "a lending method cannot lend a view of its local"
+    "fn Reader.window(self) lends Slice[Int64] {\n\
+    \  let scratch: List[Int64] = [1, 2, 3]\n\
+    \  yield scratch[..]\n\
+     }\n"
+    "ownership.returns_local_view";
+  accepted "a method can yield a view of `self`, and lend a local itself"
+    "fn Reader.windows(self) yields Slice[Int64] {\n\
+    \  yield self.buffer[..1]\n\
+    \  yield self.buffer[1..]\n\
+     }\n\n\
+     fn Reader.scratch(self) lends List[Int64] {\n\
+    \  let scratch: List[Int64] = [1, 2, 3]\n\
+    \  yield scratch\n\
+     }\n";
+  (let chunks =
+     "fn Reader.chunks(mut self) yields Slice[Int64] {\n\
+     \  yield self.buffer[..]\n\
+     \  mut self.buffer.push(4)\n\
+     \  yield self.buffer[..]\n\
+      }\n\n"
+   in
+   rejected "a view from one step of a loop that is lent `mut` is not used in a later step"
+     (chunks
+    ^ "fn f(reader: mut Reader, other: List[Int64]) -> USize {\n\
+      \  var kept: Slice[Int64] = other[..]\n\
+      \  for chunk in mut reader.chunks() {\n\
+      \    kept = chunk\n\
+      \  }\n\
+      \  kept.length()\n\
+       }\n")
+     "ownership.changed_while_viewed";
+   accepted "a view from a step of a loop that is lent `mut` can be used in that step"
+     (chunks
+    ^ "fn f(reader: mut Reader) -> USize {\n\
+      \  var total: USize = 0\n\
+      \  for chunk in mut reader.chunks() {\n\
+      \    let current = chunk\n\
+      \    total = total + current.length()\n\
+      \  }\n\
+      \  total\n\
+       }\n"));
+  accepted "a view from a loop over a read-only source can be kept after the loop"
+    "fn Reader.windows(self) yields Slice[Int64] {\n\
+    \  yield self.buffer[..1]\n\
+    \  yield self.buffer[1..]\n\
+     }\n\n\
+     fn f(reader: Reader, other: List[Int64]) -> USize {\n\
+    \  var kept: Slice[Int64] = other[..]\n\
+    \  for window in reader.windows() {\n\
+    \    kept = window\n\
+    \  }\n\
+    \  kept.length()\n\
+     }\n"
+
 (* Constants *)
 
 let () =

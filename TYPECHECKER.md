@@ -1392,6 +1392,16 @@ unless it is `Plain`. Otherwise the error offers both fixes.
   to an `own` parameter is an error unless it is `Plain`, and so is binding
   it with `let`, since the name would outlast the statement. Matching one
   binds views of its parts, or `mut` access to them when it is lent `mut`.
+- **A method yields views only of what reached it through its
+  parameters,** as a function returns them. A yielded value of a view type
+  is a copy in the caller's hands, and the caller may keep it after the
+  loop or the statement. So `yield buffer[..]`, where `buffer` is a local
+  of the method, is an error. The method can yield `buffer` itself, which
+  the caller cannot keep, or a slice of `self`.
+- **Each step of a loop that is lent a place `mut` may change the place.**
+  In `for chunk in mut reader.chunks()`, the method may change `reader`
+  between two yields. So a view of `reader` that the body copied out of
+  `chunk` cannot be used in a later step or after the loop.
 - **A `yields` method may yield any number of times.** Calling it as a
   `for` loop's expression drives the loop. Calling it anywhere else makes a
   cursor, which is a view of the receiver when the method takes `self`, and

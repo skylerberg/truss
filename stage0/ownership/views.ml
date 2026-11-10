@@ -73,7 +73,7 @@ let transfer context (point : point) (before : holdings) : holdings =
         before holders
   | Store { place; views } -> (
       match resolve before views with [] -> before | viewed -> hold before place.root viewed)
-  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Assign _ | Ends _ | Suspend | Exit
+  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Assign _ | Ends _ | Suspend _ | Exit
   | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Gives_function _ | Write_through _
   | Arguments _ ->
       before
@@ -426,7 +426,25 @@ let check context (graph : Graph.t) =
                         through `%s`."
                        (show context slice) (show context viewed.place) (show context slice))
               | None -> ()))
-      | Enter | Take_lent _ | Bind _ | Ends _ | Suspend | Exit | Hold _ -> ())
+      | Suspend views -> (
+          (* The caller may keep a view that it is given, so a method gives
+             views only of what reached it through its parameters. *)
+          match List.find_opt (ends_with_function context) (resolve before.(index) views) with
+          | Some { place = { root = Environment; _ }; _ } ->
+              report context Returns_local_view at
+                "This yields a lambda that captures. What a lambda captures is kept in the method \
+                 that the lambda is written in, and the caller may keep what it is given. Only a \
+                 function that captures nothing can be yielded."
+          | Some local ->
+              report context Returns_local_view at
+                (Printf.sprintf
+                   "This yields a view of `%s`, which is local to the method. The caller may keep \
+                    a view that it is given, so a method yields views only of what reached it \
+                    through its parameters. Yield `%s` itself, or a copy of what is viewed."
+                   (show_root context local.place.root)
+                   (show_root context local.place.root))
+          | None -> ())
+      | Enter | Take_lent _ | Bind _ | Ends _ | Exit | Hold _ -> ())
     graph.points;
   (* What a stretch of code changes and uses, for [parallel]. *)
   let effects (range : range) =

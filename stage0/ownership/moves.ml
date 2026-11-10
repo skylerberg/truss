@@ -68,7 +68,7 @@ let transfer verdicts (index : int) (point : point) (before : moved list) : move
           | Local local -> not (List.mem local locals)
           | Constant _ | Environment -> true)
         before
-  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Exit | Suspend | Hold _ | Store _
+  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Exit | Suspend _ | Hold _ | Store _
   | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Gives_function _ | Write_through _
   | Arguments _ ->
       before
@@ -198,7 +198,7 @@ let check context (graph : Graph.t) =
                 "`%s` belongs to the caller, so it must be given a value again before the function \
                  returns."
                 moved)
-      | Suspend ->
+      | Suspend _ ->
           if context.yields then
             restored index
               ~roots:(fun _ -> true)
