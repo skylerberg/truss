@@ -39,7 +39,13 @@ and capability =
   | Capability_parameter of parameter
   | Capability_variable of int
 
-and cost = { amortized : bool; resource : string; bound : cost_bound }
+and cost = { amortized : bool; resource : resource; bound : cost_bound }
+
+and resource =
+  | Time
+  | Allocations
+  | Allocated_bytes
+  | Calls of { capability : Path.t; method_ : string option }
 
 (* A function type's parameters have no names, so its bounds are
    constants: the number, when it is written as one. *)
@@ -243,7 +249,7 @@ and trait_unsolved trait =
   || List.exists (fun (_, type_) -> contains_unsolved type_) trait.associated
 
 let terminates (function_type : function_type) =
-  List.exists (fun (cost : cost) -> cost.resource = "time") function_type.costs
+  List.exists (fun (cost : cost) -> cost.resource = Time) function_type.costs
 
 let same_clauses (left : function_type) (right : function_type) =
   List.sort_uniq compare left.uses = List.sort_uniq compare right.uses
@@ -272,6 +278,14 @@ let costs_imply ~(given : cost list) ~(wanted : cost list) =
 (* Showing *)
 
 let path_name = function Path.Top { name; _ } -> name | path -> Path.show path
+
+let show_resource = function
+  | Time -> "time"
+  | Allocations -> "allocations"
+  | Allocated_bytes -> "allocated_bytes"
+  | Calls { capability; method_ } ->
+      Printf.sprintf "calls(%s%s)" (path_name capability)
+        (match method_ with Some method_ -> "." ^ method_ | None -> "")
 
 let rec show = function
   | Named { path; arguments = [] } -> path_name path
@@ -348,7 +362,7 @@ and show_function (function_type : function_type) =
           | Exactly_cost (Some value) -> "== " ^ Z.to_string value
           | Exactly_cost None -> "== ..."
         in
-        "cost " ^ cost.resource ^ " " ^ bound)
+        "cost " ^ show_resource cost.resource ^ " " ^ bound)
       function_type.costs
   in
   match (uses, costs) with
@@ -441,8 +455,7 @@ let function_type_of (signature : signature) =
     output = signature.output;
     uses = signature.uses;
     costs =
-      (if signature.terminates then
-         [ { amortized = false; resource = "time"; bound = Finite_cost } ]
+      (if signature.terminates then [ { amortized = false; resource = Time; bound = Finite_cost } ]
        else []);
   }
 

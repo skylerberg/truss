@@ -354,7 +354,8 @@ same there and goes no further:
 | `impl` | Its *interface*: generic parameters, the trait, the type, `uses`, and each method's signature | Nothing |
 | A method written inside a trait, an `impl`, or a capability | Its signature, as a function's, read with what the one it is inside says of `Self`, its associated types, and its generic parameters | Its body, if it has one, and its clauses |
 | Constant | Its type, and its value where the checker needs one | Its expression |
-| Test, theorem, law proof | Nothing | Its body |
+| Test, theorem | Nothing | Its body |
+| Law proof | What it is of: the trait, the law, and the type | Its body |
 
 - **Type checking a caller reads only the callee's signature.** Changing a
   body, a default, or an `ensures` type-checks that definition again and no
@@ -401,9 +402,13 @@ and function_type = {
   exists only in specifications.
 - **Types are nominal.** Two `Named` types are equal when they name the same
   definition with equal arguments. Function types are compared by
-  structure. Value arguments are compared by value, after constants are
-  worked out, so `Array[UInt8, digest_size]` equals `Array[UInt8, 32]` when
-  `digest_size` is 32.
+  structure, what each cost clause counts included: a `calls` clause of a
+  function type counts the calls of a capability or of one of its methods,
+  which is part of the type, so `(fn() cost calls(FileRead) <= 1)` is not a
+  `(fn() cost calls(Clock) <= 1)`. A type cannot name a parameter, whose
+  calls a function's own clauses count. Value arguments are compared by
+  value, after constants are worked out, so `Array[UInt8, digest_size]`
+  equals `Array[UInt8, 32]` when `digest_size` is 32.
 - **Associated types are normalized** whenever their base is known. With no
   blanket `impl`s, `Projection { base = Named ...; ... }` has at most one
   `impl` to look in. A projection on a generic parameter stays a projection,
@@ -582,9 +587,9 @@ the definition's interface: the types of its parameters and result, its
   before it in scope, as SYNTAX.md describes. `requires`, `ensures`, and
   `decreases` are specifications (see [Specifications](#specifications)).
   `uses` names capabilities or capability parameters. Each `cost` clause's
-  bound is an `Integer` expression; `calls(target)` names a function
-  parameter, a capability method, or a capability; and `time(visit)` names a
-  function parameter.
+  bound is an `Integer` expression; `calls(target)` names a parameter that
+  is a function, a capability, or a method the capability has, and anything
+  else is an error; and `time(visit)` names a function parameter.
 - **`lends` and `yields`** state how the method gives out parts of `self`:
   `lends` exactly once, `yields` any number of times. A lent part stays with
   `self`, so `lends` takes no mode or `mut`, and `lends own` is an error.
@@ -667,6 +672,8 @@ checked apart, and neither waits on the other:
   calls a capability holds the capability alone, so a method there has no
   `uses` of its own to add. A trait `impl`'s methods can use only what the
   trait's methods declare. Implementing `Panic` is an error.
+- **A law's proof** names a law its trait has and a type that implements
+  the trait.
 - **Methods that replace a provided method** must have its exact signature,
   and the provided method must be pure, have a `time` clause, and change
   none of its arguments, which is what lets its body be its definition.
@@ -1825,9 +1832,6 @@ the compiler. The prelude holds:
   is type-checked with the body, and the prover reads it from the callee's
   tree, so a change to a callee's body reaches its callers' proofs, which
   then find each query's answer kept by the query's text.
-- **The target of a `calls(...)` cost in a function type.** A function
-  type's cost keeps its resource by name, so `cost calls(FileRead) <= 1` and
-  `cost calls(Clock) <= 1` are one type.
 - **Checked forms stored in a specified encoding.** They are kept as OCaml's
   marshaled values, as DATABASE.md describes.
 - **A shape that ignores the order of fields.** DESIGN.md says reordering a

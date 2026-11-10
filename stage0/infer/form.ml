@@ -687,22 +687,42 @@ let drive state (written : statement) (iterable : expression) : Core.drive =
       Pull { cursor = built state iterable; next }
   | _ -> bug "a `for` loop has no record of what it goes over"
 
+(* What a cost clause counts, with what its [calls] names resolved. *)
+let resource state (written : Syntax.resource) : Core.resource =
+  let capability (path : path_type) =
+    match State.target state path.path.last with
+    | Some (Definition (Capability, capability)) -> capability
+    | _ -> bug "`calls` names what is not a capability"
+  in
+  match written with
+  | Time -> Time
+  | Allocations -> Allocations
+  | Allocated_bytes -> Allocated_bytes
+  | Calls (Call_parameter name) -> (
+      match State.target state name with
+      | Some (Local id) -> Calls (Through (Bound id))
+      | _ -> bug "`calls(%s)` names no parameter" name.text)
+  | Calls (Call_capability path) -> Calls (Capability (capability path))
+  | Calls (Call_method (path, method_)) -> Calls (Capability_method (capability path, method_.text))
+
+let cost state ~origin ({ amortized; resource = written; bound } : Syntax.cost) : Core.cost =
+  {
+    origin;
+    amortized;
+    resource = resource state written;
+    bound =
+      (match bound with
+      | Finite -> Finite
+      | Big_o value -> Order_of (built state value)
+      | At_most value -> At_most (built state value)
+      | Exactly value -> Exactly (built state value));
+  }
+
 let loop_clause state (clause : loop_clause) : Core.loop_clause =
   match clause.kind with
   | Invariant value -> Invariant (built state value)
   | Loop_decreases measures -> Decreases (List.map (built state) measures)
-  | Loop_cost { amortized; resource; bound } ->
-      Cost
-        {
-          amortized;
-          resource;
-          bound =
-            (match bound with
-            | Finite -> Finite
-            | Big_o value -> Order_of (built state value)
-            | At_most value -> At_most (built state value)
-            | Exactly value -> Exactly (built state value));
-        }
+  | Loop_cost written -> Cost (cost state ~origin:clause.id written)
 
 (* [?]: the value when there is one, and otherwise the function returns
    what there is in its place. Which variant holds the value is the first
