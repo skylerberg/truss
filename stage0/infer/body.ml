@@ -598,7 +598,6 @@ let check database (key : Names.key) =
           (since interface_named !(context.named))
         @ state.diagnostics;
       finalize state;
-      Capabilities.check state lowered;
       (* A definition has a core form when it parsed whole, nothing in it is
          an error, and every type in it is decided: an error elsewhere that
          reaches it through a type, or a [todo] whose type nothing fixes,
@@ -627,10 +626,15 @@ let check database (key : Names.key) =
         && decided state.tables.types && decided state.tables.local_types
         && decided state.tables.pattern_types
       in
+      (* What code may call is checked on the form, where every call is a
+         node. A definition that fails it has no form to give out. *)
       let core : Core.t option =
-        if whole then
+        if whole then begin
           let parts = match state.form.parts with Some build -> build () | None -> Core.Nothing in
-          Some { parts; nodes = state.form.next; made = state.form.made }
+          let form : Core.t = { parts; nodes = state.form.next; made = state.form.made } in
+          Capabilities.check state lowered form;
+          if state.diagnostics = [] then Some form else None
+        end
         else None
       in
       Some

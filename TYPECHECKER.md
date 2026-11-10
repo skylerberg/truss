@@ -1235,6 +1235,13 @@ the implementation's own evidence. A direct call of the capability would
 call the implementation itself, so it still needs the capability among the
 `impl`'s `uses`, from outside.
 
+The check runs on [the core form](#the-core-form), where every call the
+code makes is a node, however it was written. So a `for` loop over a value
+needs what the value's `each` uses, as the call written out would, and so
+does what a piece of a string is displayed by. A definition with an error
+has no form, and is not checked for what it may call until the error is
+gone.
+
 - **A capability call,** such as `Clock.now()`, needs its capability
   available.
 - **A call to a function with `uses`** needs every capability in it, after
@@ -1255,10 +1262,13 @@ call the implementation itself, so it still needs the capability among the
   body. Inside `for_each`, a `(fn(Int64) uses Granted)` takes only functions
   that use `Granted` or nothing, and a call of `for_each` by itself passes
   `Granted` on as it is.
-- **Specifications and quantifiers' bodies** have no capabilities at all,
-  not even `Panic`, since what they mean must be a value. **`parallel`
-  branches and `parallel for` bodies** have only `Panic` available. A test
-  without `uses` has only `Panic`, and whatever it provides.
+- **What states and does not run** has no capabilities at all, not even
+  `Panic`, since what it means must be a value: a contract's clauses, what
+  a function-typed parameter requires, a loop's clauses, a type's invariant
+  and potential, a law, a proof, and a quantifier's body, whatever the
+  function around it declares. **`parallel` branches and `parallel for`
+  bodies** have only `Panic` available. A test without `uses` has only
+  `Panic`, and whatever it provides.
 - **A `uses` clause that is never needed is not an error,** since a function
   may declare a capability its later versions will use, and callers already
   provide it.
@@ -1575,6 +1585,10 @@ The type checker says how each node is built where it decides what the
 expression, statement, or pattern is, and builds the form once the
 definition has checked: only then is every type final, and every choice a
 statement settles at its end, such as the `impl` an operator means.
+[What code may call](#what-code-may-call) is checked on the form before it
+is given out, which sets on each call what the call needs and what each
+capability parameter of what it calls stands for there, and on each
+`provide` what its implementations provide.
 
 ### Obligations the type checker creates
 

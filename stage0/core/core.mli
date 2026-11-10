@@ -56,10 +56,12 @@ and call = {
       (** One for each parameter, in the callee's order, a method's receiver first. *)
   lends : Types.mode option;
       (** For a lending method, how the part it gives is lent. The part is a place: see [Lent]. *)
-  uses : Types.capability list;
+  mutable uses : Types.capability list;
       (** The capabilities the call needs, with capability parameters replaced. *)
-  capability_arguments : (Types.parameter * Types.capability list) list;
-      (** Each capability parameter of the callee, solved. *)
+  mutable capability_arguments : (Types.parameter * Types.capability list) list;
+      (** Each capability parameter of the callee, solved. The check of capabilities, which runs on
+          the form before it is given out, sets this and [uses]: only it knows what the lambdas
+          around a call use. *)
 }
 
 and argument =
@@ -219,11 +221,15 @@ and binder =
   | Over_collection of { pattern : pattern; collection : expression }
 
 and implementation = {
+  origin : origin;
   mode : Types.mode;
   value : operand;
       (** A place provided [mut] keeps what the implementation changes; a value is held for the
           body. *)
-  provides : provided list;  (** The capabilities its type provides, each with its [impl]. *)
+  type_ : Types.ty;
+  mutable provides : provided list;
+      (** The capabilities its type provides, each with its [impl], which the check of capabilities
+          sets. *)
 }
 
 and provided = { capability : Path.t; impl : Path.t; arguments : Types.substitution }
