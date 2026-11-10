@@ -1,5 +1,20 @@
 let by_value_limit = 16
 
+(* Whether a value holds an array's elements in its own bytes, so that a
+   view of them is a view into the value. A variant kept in a block of its
+   own holds only the block's address. *)
+let rec holds_elements (layout : Memory_layout.t) =
+  layout.size > 0
+  &&
+  match layout.form with
+  | Array _ -> true
+  | Struct fields ->
+      List.exists (fun (field : Memory_layout.field) -> holds_elements field.layout) fields
+  | Tagged { variants; _ } ->
+      List.exists (fun (variant : Memory_layout.variant) -> holds_elements variant.payload) variants
+  | Niche_encoded { dataful; _ } -> holds_elements dataful.payload
+  | Zero_size | Scalar _ | Tag_only _ -> false
+
 let parameter env (mode : Ground.mode) ty =
   let layout = Memory_layout.of_type env ty in
   if layout.size = 0 then None
@@ -7,7 +22,11 @@ let parameter env (mode : Ground.mode) ty =
     let small = layout.size <= by_value_limit in
     Some
       (match mode with
-      | Read -> if small then Lir.Value ty else Pointer { target = Value ty; writable = false }
+      | Read ->
+          (* A view of a read-only parameter is a view of the caller's
+             value, which a copy of the value's bytes would not be. *)
+          if small && not (holds_elements layout) then Lir.Value ty
+          else Pointer { target = Value ty; writable = false }
       | Mut -> Pointer { target = Value ty; writable = true }
       | Own -> if small then Value ty else Pointer { target = Value ty; writable = true })
 

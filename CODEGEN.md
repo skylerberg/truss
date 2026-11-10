@@ -451,7 +451,7 @@ generation only decides how each Truss parameter becomes C parameters.
 
 | Parameter | 16 bytes or less | Larger |
 |---|---|---|
-| read-only, including `self` | by value | `const T *restrict` |
+| read-only, including `self` | by value, or `const T *restrict` if it holds an array's elements | `const T *restrict` |
 | `mut` | `T *restrict` | `T *restrict` |
 | `own` | by value | `T *restrict` to the caller's memory, which the callee now owns and drops |
 | result | returned | written through a `T *restrict` first parameter |
@@ -464,6 +464,14 @@ generation only decides how each Truss parameter becomes C parameters.
   facts through `noalias`.
 - **Read-only parameters are never copied to be safe.** The original is
   frozen while a view is in use, so passing a pointer is always correct.
+- **A read-only value that holds an array's elements is passed by
+  address, whatever its size.** A view of an array's elements is a view
+  into the array's own bytes, and a function may return a view of what a
+  read-only parameter views. Passed by value, the parameter would be a
+  copy in the callee's frame, and the view would outlive it. A small array
+  and a small record with an array in it are the values this changes; one
+  whose elements are in a block of their own, as a `List`'s are, is still
+  passed by value.
 - **Hidden parameters follow the written ones,** in this order: the
   default-presence mask, if any parameter has a default; one evidence
   pointer for each capability in `uses`, ordered by the capability's path;
