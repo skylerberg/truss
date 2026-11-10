@@ -270,7 +270,7 @@ let check context (graph : Graph.t) =
           match verdict context place ~type_ ~returned ~captured with
           | Moves -> changed index point place ~what:"be moved"
           | Reads | Refused _ -> ())
-      | Arguments { places; views } ->
+      | Arguments { places; views; yielded } ->
           (* Two places that one call borrows may not overlap if one of
              them is borrowed [mut]. *)
           List.iteri
@@ -286,7 +286,12 @@ let check context (graph : Graph.t) =
                         report context Conflicting_loan
                           (with_mark context (span context second.at))
                           (Printf.sprintf
-                             "`%s` is lent `mut` to this call, so the call cannot use `%s` too."
+                             (if yielded then
+                                format_of_string
+                                  "`%s` is lent `mut` to the value that is yielded, so the value \
+                                   cannot be lent `%s` too."
+                              else
+                                "`%s` is lent `mut` to this call, so the call cannot use `%s` too.")
                              (show context exclusive.place) (show context also.place))
                     | Maybe_apart (first_element, second_element) ->
                         context.disjoint <- (first_element, second_element) :: context.disjoint

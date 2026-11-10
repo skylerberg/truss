@@ -79,31 +79,47 @@ public fn Command.argument(own self, argument: StringSlice) -> Command {
 }
 
 public fn Command.arguments(own self, arguments: Slice[String]) -> Command {
-  todo
+  var command = own self
+  for argument in arguments {
+    mut command.arguments.push(argument.copy())
+  }
+  command
 }
 
 public fn Command.variable(own self, name: StringSlice, value: StringSlice) -> Command {
-  todo
+  var command = own self
+  mut command.variables.push(Variable(name: name.to_string(), value: value.to_string()))
+  command
 }
 
 public fn Command.without_inherited_variables(own self) -> Command {
-  todo
+  var command = own self
+  command.clear_variables = true
+  command
 }
 
 public fn Command.directory(own self, directory: own Path) -> Command {
-  todo
+  var command = own self
+  command.directory = Some(own directory)
+  command
 }
 
 public fn Command.input(own self, input: Redirect) -> Command {
-  todo
+  var command = own self
+  command.input = input
+  command
 }
 
 public fn Command.output(own self, output: Redirect) -> Command {
-  todo
+  var command = own self
+  command.output = output
+  command
 }
 
 public fn Command.error_output(own self, error_output: Redirect) -> Command {
-  todo
+  var command = own self
+  command.error_output = error_output
+  command
 }
 
 public fn Command.program(self) -> StringSlice
@@ -201,13 +217,13 @@ public fn Child.take_error_output(mut self) -> Option[ChildOutput]
 public fn Child.wait(mut self) -> Result[ExitStatus, SystemError]
   uses Handles
 {
-  todo
+  Handles.wait(self.handle)
 }
 
 public fn Child.signal(mut self, signal: Signal) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Handles.signal(self.handle, signal: signal)
 }
 
 public opaque type ChildInput(handle: streams::Handle)
@@ -216,7 +232,7 @@ impl streams::Writer for ChildInput {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
     uses Handles
   {
-    todo
+    Handles.write(self.handle, bytes: bytes)
   }
 
   fn flush(mut self) -> Result[Unit, SystemError]
@@ -229,7 +245,7 @@ impl streams::Writer for ChildInput {
 public fn ChildInput.close(own self) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Handles.close(own self.handle)
 }
 
 public opaque type ChildOutput(handle: streams::Handle)
@@ -238,6 +254,6 @@ impl streams::Reader for ChildOutput {
   fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
     uses Handles
   {
-    todo
+    Handles.read(self.handle, buffer: mut buffer, limit: limit)
   }
 }

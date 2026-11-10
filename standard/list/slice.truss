@@ -52,52 +52,144 @@ public fn Slice[Element].split_at(self, index: USize) -> core::Pair[Slice[Elemen
 }
 
 public fn Slice[Element: Equal].contains(self, item: Element) -> Bool
-  ensures result == (exists i in 0..self.length() => self[i] == item)
-  cost time O(self.length())
+
+  ensures result == (exists i in 0..self.length() => self.model()[i] == item)
+  cost time O(self.length() * time(Element.equal))
 {
-  todo
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant forall i in 0..index => !(self.model()[i] == item)
+    decreases self.length() - index
+    cost time O(index * time(Element.equal))
+  {
+    if self[index] == item {
+      return true
+    }
+    index += 1
+  }
+  false
 }
 
 public fn Slice[Element: Equal].index_of(self, item: Element) -> Option[USize]
+
   ensures match result {
-    Some(index) => index < self.length() && self[index] == item
+    Some(index) => index < self.length() && self.model()[index] == item
+      && (forall i in 0..index => !(self.model()[i] == item))
     None => !self.contains(item)
   }
-  cost time O(self.length())
+  cost time O(self.length() * time(Element.equal))
 {
-  todo
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant forall i in 0..index => !(self.model()[i] == item)
+    decreases self.length() - index
+    cost time O(index * time(Element.equal))
+  {
+    if self[index] == item {
+      return Some(index)
+    }
+    index += 1
+  }
+  None
 }
 
 public fn Slice[Element: Equal].last_index_of(self, item: Element) -> Option[USize]
+
   ensures match result {
-    Some(index) => index < self.length() && self[index] == item
+    Some(index) => index < self.length() && self.model()[index] == item
+      && (forall i: USize => index < i && i < self.length() ==> !(self.model()[i] == item))
     None => !self.contains(item)
   }
-  cost time O(self.length())
+  cost time O(self.length() * time(Element.equal))
 {
-  todo
+  var index = self.length()
+  while index > 0
+    invariant index <= self.length()
+    invariant forall i in index..self.length() => !(self.model()[i] == item)
+    decreases index
+    cost time O((self.length() - index) * time(Element.equal))
+  {
+    index -= 1
+    if self[index] == item {
+      return Some(index)
+    }
+  }
+  None
 }
 
 public fn Slice[Element].find_index(self, matching: (fn(Element) -> Bool cost time finite)) -> Option[USize]
+
   ensures match result {
-    Some(index) => index < self.length()
-    None => true
+    Some(index) => index < self.length() && matching(self.model()[index])
+      && (forall i in 0..index => !matching(self.model()[i]))
+    None => forall i in 0..self.length() => !matching(self.model()[i])
   }
   cost time O(self.length() * time(matching))
 {
-  todo
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant forall i in 0..index => !matching(self.model()[i])
+    decreases self.length() - index
+    cost time O(index * time(matching))
+  {
+    if matching(self[index]) {
+      return Some(index)
+    }
+    index += 1
+  }
+  None
 }
 
 public fn Slice[Element: Equal].starts_with(self, prefix: Slice[Element]) -> Bool
-  cost time O(prefix.length())
+
+  ensures result == (prefix.length() <= self.length()
+    && forall i in 0..prefix.length() => self.model()[i] == prefix.model()[i])
+  cost time O(prefix.length() * time(Element.equal))
 {
-  todo
+  if prefix.length() > self.length() {
+    return false
+  }
+  var index: USize = 0
+  while index < prefix.length()
+    invariant index <= prefix.length()
+    invariant forall i in 0..index => self.model()[i] == prefix.model()[i]
+    decreases prefix.length() - index
+    cost time O(index * time(Element.equal))
+  {
+    if self[index] != prefix[index] {
+      return false
+    }
+    index += 1
+  }
+  true
 }
 
 public fn Slice[Element: Equal].ends_with(self, suffix: Slice[Element]) -> Bool
-  cost time O(suffix.length())
+
+  ensures result == (suffix.length() <= self.length()
+    && forall i in 0..suffix.length() => self.model()[self.length() - suffix.length() + i] == suffix.model()[i])
+  cost time O(suffix.length() * time(Element.equal))
 {
-  todo
+  if suffix.length() > self.length() {
+    return false
+  }
+  let start = self.length() - suffix.length()
+  var index: USize = 0
+  while index < suffix.length()
+    invariant index <= suffix.length()
+    invariant forall i in 0..index => self.model()[start + i] == suffix.model()[i]
+    decreases suffix.length() - index
+    cost time O(index * time(Element.equal))
+  {
+    if self[start + index] != suffix[index] {
+      return false
+    }
+    index += 1
+  }
+  true
 }
 
 public fn Slice[Element: Equal].find_slice(self, needle: Slice[Element]) -> Option[USize]
@@ -212,7 +304,15 @@ public fn Slice[Element].reversed(self) yields Element
 public fn Slice[Element].reversed(mut self) yields mut Element
   cost time O(self.length())
 {
-  todo
+  var index = self.length()
+  while index > 0
+    invariant self.length() == old(self.length())
+    invariant index <= self.length()
+    decreases index
+  {
+    index -= 1
+    yield mut self[index]
+  }
 }
 
 public fn Slice[Element].windows(self, size: USize) yields Slice[Element]
@@ -281,44 +381,96 @@ public fn Slice[Element].swap(mut self, first: USize, second: USize)
   intrinsic::view_swap(mut self.elements, first: first, second: second)
 }
 
+internal fn Slice[Element].reverse_between(mut self, start: USize, stop: USize)
+  requires start <= stop
+  requires stop <= self.length()
+  ensures self.length() == old(self.length())
+  ensures forall i in start..stop => identical(self.model()[i], old(self.model())[start + stop - 1 - i])
+  ensures forall i in 0..start => identical(self.model()[i], old(self.model())[i])
+  ensures forall i in stop..self.length() => identical(self.model()[i], old(self.model())[i])
+  cost time O(stop - start)
+{
+  var low = start
+  var high = stop
+  while low + 1 < high
+    invariant self.length() == old(self.length())
+    invariant start <= low
+    invariant high <= stop
+    invariant low <= high
+    invariant low + high == start + stop
+    invariant forall i in start..low => identical(self.model()[i], old(self.model())[start + stop - 1 - i])
+    invariant forall i in high..stop => identical(self.model()[i], old(self.model())[start + stop - 1 - i])
+    invariant forall i in low..high => identical(self.model()[i], old(self.model())[i])
+    invariant forall i in 0..start => identical(self.model()[i], old(self.model())[i])
+    invariant forall i in stop..self.length() => identical(self.model()[i], old(self.model())[i])
+    decreases high - low
+    cost time O(low - start)
+  {
+    high -= 1
+    mut self.swap(low, second: high)
+    low += 1
+  }
+}
+
 public fn Slice[Element].reverse(mut self)
   ensures self.length() == old(self.length())
   ensures forall i in 0..self.length() =>
     identical(self.model()[i], old(self.model())[self.length() - 1 - i])
   cost time O(self.length())
 {
-  todo
+  mut self.reverse_between(0, stop: self.length())
 }
 
 public fn Slice[Element].rotate_left(mut self, by: USize)
   requires by <= self.length()
   ensures self.length() == old(self.length())
+  ensures forall i: Integer =>
+    0 <= i && i < self.length() - by ==> identical(self.model()[i], old(self.model())[i + by])
+  ensures forall i: Integer =>
+    self.length() - by <= i && i < self.length() ==>
+      identical(self.model()[i], old(self.model())[i + by - self.length()])
   cost time O(self.length())
 {
-  todo
+  mut self.reverse_between(0, stop: by)
+  mut self.reverse_between(by, stop: self.length())
+  mut self.reverse_between(0, stop: self.length())
 }
 
 public fn Slice[Element].rotate_right(mut self, by: USize)
   requires by <= self.length()
   ensures self.length() == old(self.length())
+  ensures forall i in by..self.length() => identical(self.model()[i], old(self.model())[i - by])
+  ensures forall i in 0..by => identical(self.model()[i], old(self.model())[i + self.length() - by])
   cost time O(self.length())
 {
-  todo
+  mut self.rotate_left(self.length() - by)
 }
 
 public fn Slice[Element: Copyable].fill(mut self, value: Element)
   ensures self.length() == old(self.length())
+  ensures forall i in 0..self.length() => identical(self.model()[i], value)
   cost time O(self.length())
 {
-  todo
+  for index in 0..self.length()
+    invariant self.length() == old(self.length())
+    invariant forall i in 0..yielded.length() => identical(self.model()[i], value)
+  {
+    self[index] = value.copy()
+  }
 }
 
 public fn Slice[Element: Copyable].copy_from(mut self, source: Slice[Element])
   requires source.length() == self.length()
   ensures self.length() == old(self.length())
+  ensures forall i in 0..self.length() => identical(self.model()[i], source.model()[i])
   cost time O(self.length())
 {
-  todo
+  for index in 0..self.length()
+    invariant self.length() == old(self.length())
+    invariant forall i in 0..yielded.length() => identical(self.model()[i], source.model()[i])
+  {
+    self[index] = source[index].copy()
+  }
 }
 
 public fn Slice[Element].update_each[capability Granted](
@@ -330,7 +482,11 @@ public fn Slice[Element].update_each[capability Granted](
   cost calls(change) == self.length()
   cost time O(self.length() * time(change))
 {
-  todo
+  for index in 0..self.length()
+    invariant self.length() == old(self.length())
+  {
+    change(mut self[index])
+  }
 }
 
 public fn Slice[Element: Ordered].sort(mut self)

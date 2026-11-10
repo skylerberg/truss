@@ -158,7 +158,7 @@ let () =
                         fail "%s: `%s` is counted by %s, which is no USize" name parameter
                           (Libc.number_name number)
                   | Through_zero -> ())
-              | Value _ | Written _ | Always _ | Environment -> ())
+              | Value _ | Written _ | Always _ | Fixed _ | Environment -> ())
             parameters)
         Libc.functions;
       let { Libc.parameters; at_most; _ } = Libc.signature Read in
@@ -185,6 +185,32 @@ let () =
       in
       expect_int ~expected:8 status;
       expect_string ~expected:"written\n" output);
+  test "a request that a row fixes is passed, and is no argument of the Truss call" (fun () ->
+      let open Lir_builder in
+      let names =
+        List.map
+          (fun (parameter : Types.parameter_info) -> parameter.name)
+          (Intrinsic_signatures.signature (Libc Fcntl_dupfd_cloexec)).parameters
+      in
+      if names <> [ "descriptor"; "least" ] then
+        fail "fcntl_dupfd_cloexec takes %s" (String.concat ", " names);
+      let status, output, _ =
+        run_program ~extra
+          [
+            built_entry (fun b ->
+                let copy = local b (value int32) in
+                operate b ~destination:(at copy) (Libc Fcntl_dupfd_cloexec)
+                  [ Value (constant_int32 1); Value (constant_int32 10) ];
+                let view = view_of b "through the copy\n" in
+                let wrote = local b (value isize) in
+                operate b ~destination:(at wrote) (Libc Write)
+                  [ Value (Copy (at copy)); Place (at view); Value (usize 17) ];
+                copy);
+          ]
+      in
+      if status < 10 then
+        fail "the new descriptor is %d, which is less than the least asked for" status;
+      expect_string ~expected:"through the copy\n" output);
   test "open is given its mode as C passes an argument through ..." (fun () ->
       let open Lir_builder in
       let path = Filename.concat (Lazy.force scratch) "opened" in

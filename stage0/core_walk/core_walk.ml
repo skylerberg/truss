@@ -37,6 +37,15 @@ let place_origin : place -> origin = function
   | Local { origin; _ } | Constant { origin; _ } | Field { origin; _ } -> origin
   | Lent value | Temporary value -> value.origin
 
+(* The places that a yielded operand lends: the operand itself if it is a
+   place, and the fields of a yielded construct that are places, to any
+   depth. *)
+let rec lent_places : operand -> place list = function
+  | Place found -> [ found ]
+  | Value { kind = Construct { fields; _ }; _ } ->
+      List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:lent_places field) fields
+  | Value _ -> []
+
 let rec place visit = function
   | Local _ | Constant _ -> ()
   | Field { base; _ } -> place visit base
@@ -87,7 +96,7 @@ let expression_children visit (node : expression) =
       List.iter visit.pattern parameters;
       block visit body
   | Construct { fields; _ } ->
-      List.iter (fun (_, value) -> Option.iter visit.expression value) fields
+      List.iter (fun (_, value) -> Option.iter (operand visit) value) fields
   | Collection_literal { elements; _ } -> List.iter visit.expression elements
   | Map_literal { entries } ->
       List.iter

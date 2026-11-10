@@ -102,3 +102,105 @@ test "chunks yields runs of a size, with a shorter last one" {
   }
   assert empty == 0
 }
+
+fn same_items(found: Slice[Int64], expected: Slice[Int64]) -> Bool {
+  if found.length() != expected.length() {
+    return false
+  }
+  for index in 0..found.length() {
+    if found[index] != expected[index] {
+      return false
+    }
+  }
+  true
+}
+
+fn reverse_part(part: mut Slice[Int64]) {
+  mut part.reverse()
+}
+
+fn double_each(part: mut Slice[Int64]) {
+  for item in mut part {
+    item = item * 2
+  }
+}
+
+test "a list and a part of a list are reversed in place" {
+  var items: List[Int64] = [1, 2, 3, 4, 5]
+  mut items.reverse()
+  assert same_items(items, expected: [5, 4, 3, 2, 1])
+  reverse_part(mut items[1..4])
+  assert same_items(items, expected: [5, 2, 3, 4, 1])
+  var one: List[Int64] = [7]
+  mut one.reverse()
+  assert same_items(one, expected: [7])
+  var none: List[Int64] = []
+  mut none.reverse()
+  assert none.length() == 0
+}
+
+test "rotating moves elements round, left and right" {
+  var items: List[Int64] = [1, 2, 3, 4, 5]
+  mut items.rotate_left(2)
+  assert same_items(items, expected: [3, 4, 5, 1, 2])
+  mut items.rotate_right(2)
+  assert same_items(items, expected: [1, 2, 3, 4, 5])
+  mut items.rotate_right(1)
+  assert same_items(items, expected: [5, 1, 2, 3, 4])
+  mut items.rotate_left(0)
+  assert same_items(items, expected: [5, 1, 2, 3, 4])
+  mut items.rotate_left(5)
+  assert same_items(items, expected: [5, 1, 2, 3, 4])
+}
+
+test "fill and copy_from replace every element" {
+  var items: List[Int64] = [1, 2, 3]
+  mut items.fill(9)
+  assert same_items(items, expected: [9, 9, 9])
+  let source: List[Int64] = [4, 5, 6]
+  mut items.copy_from(source)
+  assert same_items(items, expected: [4, 5, 6])
+}
+
+test "update_each and a mut loop change elements where they are" {
+  var items: List[Int64] = [1, 2, 3, 4]
+  mut items.update_each(fn(item) { item = item + 10 })
+  assert same_items(items, expected: [11, 12, 13, 14])
+  double_each(mut items[2..])
+  assert same_items(items, expected: [11, 12, 26, 28])
+}
+
+test "contains and the index searches compare elements" {
+  let items: List[Int64] = [3, 1, 4, 1, 5]
+  assert items.contains(4)
+  assert !items.contains(9)
+  assert items.index_of(1) == Some(1)
+  assert items.last_index_of(1) == Some(3)
+  assert items.index_of(9) is None
+  assert items.last_index_of(9) is None
+  assert items.find_index(fn(item) { item > 3 }) == Some(2)
+  assert items.find_index(fn(item) { item > 9 }) is None
+  let none: List[Int64] = []
+  assert !none.contains(1)
+  assert none.index_of(1) is None
+  let fixed: Array[Int64, 3] = [7, 8, 7]
+  assert fixed.contains(8)
+  assert fixed.index_of(7) == Some(0)
+  assert fixed.last_index_of(7) == Some(2)
+  let words: List[String] = ["a${1}", "b${2}"]
+  assert words.contains("b2")
+  assert words.index_of("a1") == Some(0)
+  assert !words.contains("c3")
+}
+
+test "starts_with and ends_with compare a run of elements" {
+  let items: List[Int64] = [1, 2, 3, 4]
+  assert items.starts_with([1, 2])
+  assert items.starts_with([])
+  assert !items.starts_with([2])
+  assert !items.starts_with([1, 2, 3, 4, 5])
+  assert items.ends_with([3, 4])
+  assert items.ends_with([])
+  assert !items.ends_with([3])
+  assert items.ends_with([1, 2, 3, 4])
+}

@@ -53,7 +53,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
             let parameter : T.parameter_info =
               { name = "the function value"; mode; type_ = input; has_default = false }
             in
-            let conversion = argument_value state env argument.value parameter in
+            let conversion, mode = argument_value state env argument.value parameter in
             { C.expression = argument.value.id; parameter = index; mode; conversion })
           pairs
       in
@@ -77,7 +77,10 @@ let rec function_value_call state env (value : expression) (callee : expression)
            (Printf.sprintf "`%s` is not a function, so it cannot be called."
               (show state callee_type)))
 
-(* Checks one argument against its parameter's type and mode. *)
+(* Checks one argument against its parameter's type and mode. Returns the
+   argument's conversion and the mode it is passed with, which is the
+   parameter's mode except for a field of a yielded constructor that lends
+   a place. *)
 and argument_value state env (value : expression) (parameter : T.parameter_info) =
   let inner =
     match value.kind with
@@ -89,9 +92,14 @@ and argument_value state env (value : expression) (parameter : T.parameter_info)
     record state value found;
     alias_expression state value inner
   end;
+  let parameter =
+    match lent_field state value found with
+    | Some mode -> { parameter with mode }
+    | None -> parameter
+  in
   let conversion = coerce state env ~argument:true value ~found ~expected:parameter.type_ in
   check_mode state env value parameter found;
-  conversion
+  (conversion, parameter.mode)
 
 (* Matches arguments to parameters. An argument goes to the parameter named
    by its label, or to the parameter with the same name if the argument is a
@@ -279,13 +287,8 @@ and check_arguments state env (parameters : T.parameter_info list) matched ~offs
   in
   let check ((argument : argument), index) =
     let parameter = List.nth parameters index in
-    let conversion = argument_value state env argument.value parameter in
-    {
-      C.expression = argument.value.id;
-      parameter = index + offset;
-      mode = parameter.mode;
-      conversion;
-    }
+    let conversion, mode = argument_value state env argument.value parameter in
+    { C.expression = argument.value.id; parameter = index + offset; mode; conversion }
   in
   let first = List.map check (List.filter (fun pair -> not (is_lambda pair)) matched) in
   let lambdas = List.map check (List.filter is_lambda matched) in
@@ -376,6 +379,14 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
           fields
       in
       let matched, left_out = match_arguments state value parameters arguments ~record:true in
+      (* The fields of a yielded constructor may lend places, and so may the
+         fields of a constructor that is one of them. *)
+      Option.iter
+        (fun mode ->
+          List.iter
+            (fun (argument : argument) -> Hashtbl.replace state.yielded argument.value.id mode)
+            arguments)
+        (Hashtbl.find_opt state.yielded value.id);
       let checked = check_arguments state env parameters matched ~offset:0 in
       state.tables.calls.(value.id) <-
         Some

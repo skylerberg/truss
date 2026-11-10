@@ -594,6 +594,7 @@ let check database (key : Names.key) =
           frames = [];
           references = [];
           receiver_modes = [];
+          yielded = Hashtbl.create 4;
           binding_spans;
           lambdas = [];
           unsolved = None;

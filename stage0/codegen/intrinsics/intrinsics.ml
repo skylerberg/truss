@@ -161,6 +161,23 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
         | _ -> binary op
       in
       let byte : Ground.ty = Named { path = Intrinsic.builtin_path UInt8; arguments = [] } in
+      (* A number of the C library's headers, with the value this system
+         gives it. *)
+      let number_constant number : Lir.operand =
+        let integer =
+          match
+            scalar env
+              (Named
+                 {
+                   path = Intrinsic.builtin_path (Intrinsic.libc_builtin (Libc.number_type number));
+                   arguments = [];
+                 })
+          with
+          | Integer integer -> integer
+          | _ -> bug "a number of the C library that is not an integer"
+        in
+        Constant (Integer (integer, Z.of_int (Libc.value (Memory_layout.target env).system number)))
+      in
       (* The text at an address that may be null: the bytes up to a zero
          byte, as a view, with [found] saying whether the address was
          there. A view's address is never null, so text that is not there
@@ -623,6 +640,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                       names;
                     Address { place = at structure; writable = true }
                 | Always number -> usize number
+                | Fixed number -> number_constant number
                 | Environment ->
                     let environment = local b (Raw (Pointer Opaque)) in
                     emit b
@@ -655,20 +673,5 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
               let address = local b (Raw (Nullable_pointer (Data byte))) in
               call (Returned (at address));
               text_at address ~found:(place (argument (taken ()))))
-      | Libc_number number ->
-          let integer =
-            match
-              scalar env
-                (Named
-                   {
-                     path =
-                       Intrinsic.builtin_path (Intrinsic.libc_builtin (Libc.number_type number));
-                     arguments = [];
-                   })
-            with
-            | Integer integer -> integer
-            | _ -> bug "a number of the C library that is not an integer"
-          in
-          let system = (Memory_layout.target env).system in
-          set (Use (Constant (Integer (integer, Z.of_int (Libc.value system number))))));
+      | Libc_number number -> set (Use (number_constant number)));
       None

@@ -186,6 +186,42 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
     | Lent { kind = Call { lends = Some Mut; _ }; _ } -> ()
     | Lent _ -> wrong "%s mutates a place that is lent read-only" what
   in
+  (* The constructs that a [yield] yields: its operand, and each construct
+     that is a field of one. Only they may have a field that is a place. A
+     yielded construct that lends a place owns nothing, so every value that
+     it takes has a [Plain] type. *)
+  let yielded = Hashtbl.create 8 in
+  let plain =
+    let bounds parameter =
+      match Query.demand database Interface.Environment.lowered key with
+      | Some lowered -> Option.value ~default:[] (List.assoc_opt parameter lowered.bounds)
+      | None -> []
+    in
+    Interface.Impls.plain database ~bounds
+  in
+  let rec yielded_operand ~lends (mode : T.mode) (part : Core.operand) =
+    match part with
+    | Place found -> if mode = Mut then mutable_place "a `yield mut`" found else place found
+    | Value ({ kind = Construct { fields; _ }; _ } as node) ->
+        Hashtbl.replace yielded node.id ();
+        List.iter (fun (_, field) -> Option.iter (yielded_operand ~lends mode) field) fields
+    | Value value ->
+        if lends && not (plain value.type_) then
+          wrong "a yielded construct that lends a place takes a value of the type `%s`"
+            (T.show value.type_)
+  in
+  Core_walk.definition
+    {
+      Core_walk.ignore_all with
+      statement =
+        (fun (node : Core.statement) ->
+          match node.kind with
+          | Yield { mode; part = Value { kind = Construct _; _ } as part } ->
+              yielded_operand ~lends:(Core_walk.lent_places part <> []) mode part
+          | Yield { mode; part } -> yielded_operand ~lends:false mode part
+          | _ -> ());
+    }
+    form.definition;
   let rec bindings (pattern : Core.pattern) : (Core.local * T.ty * T.mode) list =
     match pattern.kind with
     | Bind { local; mode; _ } -> [ (local, pattern.type_, mode) ]
@@ -210,6 +246,14 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           type_ "an expression" node.type_;
           match node.kind with
           | Use found -> place found
+          | Construct { fields; _ } ->
+              List.iter
+                (fun (_, (field : Core.operand option)) ->
+                  match field with
+                  | Some (Place _) when not (Hashtbl.mem yielded node.id) ->
+                      wrong "a construct that no `yield` yields has a field that is a place"
+                  | _ -> ())
+                fields
           | Cursor_next cursor -> mutable_place "a `Cursor_next`" cursor
           | Slice { base; call } -> (
               place base;
@@ -274,8 +318,6 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
               | Bind { mutable_ = true; _ }, Place _ ->
                   wrong "a `let` that binds a mutable local receives a place"
               | _ -> ())
-          | Yield { mode = Mut; part = Place found } -> mutable_place "a `yield mut`" found
-          | Yield { part; _ } -> operand part
           | For { iteration = Cursor { cursor; _ }; _ } -> mutable_place "a `for` loop" cursor
           | For { iteration = Yielding_call { kind = Call { callee; _ }; _ }; _ } -> (
               let output =

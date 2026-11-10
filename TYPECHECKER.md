@@ -1276,6 +1276,9 @@ unless it is `Plain`. Otherwise the error offers both fixes.
 - **A tagged string takes its parts,** because each part goes into the
   template that its tag receives. A plain string only reads the values it
   interpolates.
+- **A yielded constructor lends its places instead.** In
+  `yield Some(self[index])` the field is lent, not taken, so it needs no
+  mark (see [Yielding and lending](#yielding-and-lending)).
 
 ### Yielding and lending
 
@@ -1293,6 +1296,32 @@ unless it is `Plain`. Otherwise the error offers both fixes.
   a collection other than a `List`, a `Slice`, or an `Array` is such a call,
   so two indexes of a user's collection are never lent `mut` in one
   statement, and `grid[a] = grid[b]` needs the right side in a `let` first.
+- **A yielded constructor lends the places among its fields.** A lookup that
+  can miss lends an `Option`, as in `yield Some(self[index])`, and the
+  element stays in the collection. So in the constructor written directly
+  after `yield`, and in a constructor that is a field of it, a field that is
+  a place is lent to the value that is built, and needs no `own` and no
+  copy. The place is anything the method could yield by itself: a part of
+  `self`, a parameter, or a local.
+  - A method that yields or lends read-only lends every place read-only. A
+    `Plain` place is copied instead, as in any constructor.
+  - A method that yields or lends `mut` lends the places that are marked
+    `mut`, as in `yield Indexed(index: index, value: mut self[index])`.
+    When the lend ends, such a place has the value of its field as the
+    caller left it. A field without the mark takes a value, as in any
+    constructor, so `index` is a copy, and a place there that is not
+    `Plain` is an error whose fix is the mark. Two places lent `mut` to
+    one value may not overlap: the same place twice is an error, and two
+    indexes are an obligation for the prover, as for two `mut` arguments.
+  - A yielded value that lends a place owns nothing. Each of its other
+    fields is a constructor or a `Plain` value, such as an index or a
+    slice. An owned value there is an error
+    (`ownership.owned_beside_lent`) that says to bind it to a name first:
+    the name is a place, and is lent like the rest. A yielded constructor
+    that lends no place is an ordinary owned value.
+  - A slice is a value, so `rest: self[1..]` is taken, not lent.
+  - A method that yields such a value yields places, so it can be pulled
+    only where the element is `Plain`.
 - **A part that is lent goes back.** Returning it, storing it, or giving it
   to an `own` parameter is an error unless it is `Plain`, and so is binding
   it with `let`, since the name would outlast the statement. Matching one
@@ -1672,11 +1701,19 @@ The core form records these decisions:
   expression is a lending call of `Index.at`. Every place carries its type.
 - **An operand is a borrowed place or a value.** The operands are: an
   argument, the scrutinee of a `match`, a `let`, or an `is`, the operand of
-  a `yield`, an implementation in a `provide`, an indirect callee, an
-  interpolated value, and the cursor of a loop. Reading a value out of a
-  place is a node of its own. It copies the value if the type is `Plain`
-  and moves it otherwise. Code that only borrows a place never has that
-  node.
+  a `yield`, a field of a constructor, an implementation in a `provide`, an
+  indirect callee, an interpolated value, and the cursor of a loop. Reading
+  a value out of a place is a node of its own. It copies the value if the
+  type is `Plain` and moves it otherwise. Code that only borrows a place
+  never has that node.
+- **A field of a constructor is a place only in a yielded constructor.** A
+  field that is a value is moved into the constructed value. A field that
+  is a place is lent to it, with the mode of the `yield`: the constructed
+  value holds the place's value and does not own it. Only the constructor
+  that is the operand of a `yield`, and a constructor that is a field of
+  one, has such a field. If it has one at any depth, each of its other
+  fields is a place, a constructor, or a value of a `Plain` type, so the
+  yielded value owns nothing and nothing drops it.
 - **Operators are resolved.** An arithmetic, bitwise, or shift operator on
   built-in types is one node that holds the operation, whether it was
   written `left + right` or `left.add(right)`. A comparison of built-in
