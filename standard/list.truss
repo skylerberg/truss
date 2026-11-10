@@ -33,6 +33,7 @@ impl Model for Slice[Element] {
 
 public fn List[Element].with_capacity(capacity: USize) -> List[Element]
   ensures result.model().length() == 0
+  cost time O(1)
 {
   List(storage: intrinsic::storage_with_capacity(capacity))
 }
