@@ -1396,26 +1396,39 @@ and binary context frame (written : expression) operator left right =
            answer, which is what their laws state. *)
           let frame, left_value = value context frame left in
           let frame, right_value = value context frame right in
-          (* The function is the method's result, which the method's
-             contract and definition then tell about. *)
-          let link term =
-            Option.iter
-              (fun result -> assume context frame (L.equal term result))
-              (method_result context frame written call_)
+          (match call_.callee with
+          | Trait_method { trait; _ } -> assume_laws context frame trait.trait operand_type
+          | _ -> ());
+          (* The operator is its method's result, the same term a call of
+             [equal] or [compare] gives, which the method's contract and
+             definition then tell about. *)
+          let called =
+            match call_.callee with
+            | Trait_method { evidence = Impl { impl = Derived _; _ }; _ } ->
+                (* A derived [impl] is defined by the rule that derived it. *)
+                None
+            | _ -> method_result context frame written call_
           in
           if operator = Equal || operator = Not_equal then begin
-            let equal = equal_of context frame operand_type left_value right_value in
-            link equal;
+            let equal =
+              match called with
+              | Some term -> term
+              | None -> equal_of context frame operand_type left_value right_value
+            in
             Some (frame, if operator = Equal then equal else L.not_ equal)
           end
           else begin
-            let sort = sort_of context operand_type in
             let ordering = substituted context frame call_.result in
             ignore (sort_of context ordering);
-            let symbol = "compare." ^ type_key operand_type in
-            declare context (L.Function (symbol, [ sort; sort ], sort_of context ordering));
-            let compared = L.Apply (symbol, [ left_value; right_value ]) in
-            link compared;
+            let compared =
+              match called with
+              | Some term -> term
+              | None ->
+                  let sort = sort_of context operand_type in
+                  let symbol = "compare." ^ type_key operand_type in
+                  declare context (L.Function (symbol, [ sort; sort ], sort_of context ordering));
+                  L.Apply (symbol, [ left_value; right_value ])
+            in
             let is variant =
               L.Apply (L.tester (constructor_name ordering (Some variant)), [ compared ])
             in
@@ -2542,7 +2555,7 @@ and assume_laws context frame trait (ty : T.ty) =
         List.iter
           (fun (source, (law : law)) ->
             match law_fact context frame source trait ty law with
-            | Some fact -> assume context frame fact
+            | Some law -> fact context frame law
             | None -> ())
           (laws_of context trait))
       (Call_graph.traits_with_required context.database trait)
