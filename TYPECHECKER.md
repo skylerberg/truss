@@ -14,11 +14,11 @@ code database, which [DATABASE.md](DATABASE.md) describes.
 The type checker takes the syntax tree of each definition, the package's
 manifest, and the manifests of its dependencies. For each definition it
 produces a *resolved form*; an *interface*, which is what other definitions
-may depend on; a *core form*, which is what ownership checking, the prover,
-and code generation read; and a *checked form*, a set of tables that the
-pattern and usage checks and the tools read. The database records what each
-result read, and keeps each result under what it read, as DATABASE.md
-describes.
+may depend on; a *core form*, which is what the pattern check, ownership
+checking, the package checks, the prover, and code generation read; and a
+*checked form*, a set of tables that the usage check and the tools read. The
+database records what each result read, and keeps each result under what it
+read, as DATABASE.md describes.
 
 The type checker:
 
@@ -1686,8 +1686,10 @@ name in one package are an error.
 ## The checked form
 
 The checked form of a definition is a set of tables keyed by the tree's
-node ids (see [Node identity](#node-identity)). The pattern check, the usage
-check, the package checks, and the tools read it. Ownership checking, the
+node ids (see [Node identity](#node-identity)). The tools read it, because
+they answer questions about the source as it is written, broken code
+included: the type at a position, what a name means, the holes. The usage
+check reads it for which statements never finish. Every other check, the
 prover, and code generation read [the core form](#the-core-form) instead.
 The tables record:
 
