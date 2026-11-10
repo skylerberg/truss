@@ -136,6 +136,23 @@ internal fn StringSlice.matches_at(self, pattern: StringSlice, offset: USize) ->
   intrinsic::compare_bytes(self.part(offset, to: offset + pattern.length()).bytes, right: pattern.bytes) == 0
 }
 
+internal fn StringSlice.copy_onto(self, output: mut intrinsic::Storage[UInt8])
+  requires intrinsic::storage_length(output) + self.length() <= intrinsic::storage_capacity(output)
+  ensures intrinsic::storage_length(output) == old(intrinsic::storage_length(output)) + self.length()
+  ensures intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
+  cost time O(self.length())
+  cost allocations == 0
+{
+  let start = intrinsic::storage_length(output)
+  for index in 0..self.length()
+    invariant intrinsic::storage_length(output) == start + yielded.length()
+    invariant intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
+    cost allocations == 0
+  {
+    intrinsic::storage_push(mut output, value: self.byte(index))
+  }
+}
+
 public fn StringSlice.is_ascii(self) -> Bool
   cost time O(self.length())
 {

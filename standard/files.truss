@@ -17,7 +17,10 @@ public fn Path.new(text: StringSlice) -> Path {
 public fn Path.from_bytes(bytes: own List[UInt8]) -> Option[Path]
   cost time O(bytes.length())
 {
-  todo
+  match String.from_utf8(own bytes) {
+    Ok(text) => Some(Path(text: own text))
+    Err(_) => None
+  }
 }
 
 public fn Path.text(self) -> Option[StringSlice]
@@ -32,22 +35,145 @@ public fn Path.bytes(self) -> Slice[UInt8]
   self.text.bytes()
 }
 
+internal type Span(start: USize, end: USize)
+
+internal fn Span.is_empty(self) -> Bool
+  cost time O(1)
+  cost allocations == 0
+{
+  self.start == self.end
+}
+
+internal fn component_after(text: StringSlice, from: USize) -> Span
+  requires from <= text.length()
+  ensures from <= result.start
+  ensures result.start <= result.end
+  ensures result.end <= text.length()
+  cost time O(result.end - from)
+  cost allocations == 0
+{
+  var start = from
+  while start < text.length() && text.byte(start) == 47
+    invariant from <= start
+    invariant start <= text.length()
+    decreases text.length() - start
+    cost time O(start - from)
+    cost allocations == 0
+  {
+    start += 1
+  }
+  var end = start
+  while end < text.length() && text.byte(end) != 47
+    invariant start <= end
+    invariant end <= text.length()
+    decreases text.length() - end
+    cost time O(end - start)
+    cost allocations == 0
+  {
+    end += 1
+  }
+  Span(start: start, end: end)
+}
+
+internal fn last_component(text: StringSlice) -> Span
+  ensures result.start <= result.end
+  ensures result.end <= text.length()
+  cost time O(text.length())
+  cost allocations == 0
+{
+  var end = text.length()
+  while end > 0 && text.byte(end - 1) == 47
+    invariant end <= text.length()
+    decreases end
+    cost time O(text.length() - end)
+    cost allocations == 0
+  {
+    end -= 1
+  }
+  var start = end
+  while start > 0 && text.byte(start - 1) != 47
+    invariant start <= end
+    decreases start
+    cost time O(end - start)
+    cost allocations == 0
+  {
+    start -= 1
+  }
+  Span(start: start, end: end)
+}
+
+internal fn is_dots(text: StringSlice, span: Span) -> Bool
+  requires span.start <= span.end
+  requires span.end <= text.length()
+  cost time O(1)
+  cost allocations == 0
+{
+  let length = span.end - span.start
+  (length == 1 && text.byte(span.start) == 46)
+    || (length == 2 && text.byte(span.start) == 46 && text.byte(span.start + 1) == 46)
+}
+
+internal fn extension_start(text: StringSlice, name: Span) -> USize
+  requires name.start <= name.end
+  requires name.end <= text.length()
+  ensures name.start <= result
+  ensures result <= name.end
+  cost time O(text.length())
+  cost allocations == 0
+{
+  var index = name.end
+  while index > name.start + 1
+    invariant name.start <= index
+    invariant index <= name.end
+    decreases index
+    cost time O(name.end - index)
+    cost allocations == 0
+  {
+    index -= 1
+    if text.byte(index) == 46 {
+      return index
+    }
+  }
+  name.end
+}
+
+internal fn join_texts(first: StringSlice, second: StringSlice) -> Path
+  cost time O(first.length() + second.length())
+{
+  if second.length() > 0 && second.byte(0) == 47 {
+    return Path(text: second.to_string())
+  }
+  if first.length() == 0 {
+    return Path(text: second.to_string())
+  }
+  if first.length() > USize.maximum / 4 || second.length() > USize.maximum / 4 {
+    intrinsic::crash("a path cannot hold that many bytes".slice())
+  }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(first.length() + 1 + second.length())
+  first.copy_onto(mut output)
+  if first.byte(first.length() - 1) != 47 {
+    intrinsic::storage_push(mut output, value: 47)
+  }
+  second.copy_onto(mut output)
+  Path(text: String(storage: own output))
+}
+
 public fn Path.is_absolute(self) -> Bool
   cost time O(1)
 {
-  todo
+  self.text.length() > 0 && self.text.slice().byte(0) == 47
 }
 
 public fn Path.join(self, part: StringSlice) -> Path
   cost time O(self.text.length() + part.length())
 {
-  todo
+  join_texts(self.text.slice(), second: part)
 }
 
 public fn Path.join_path(self, other: Path) -> Path
   cost time O(self.text.length() + other.text.length())
 {
-  todo
+  join_texts(self.text.slice(), second: other.text.slice())
 }
 
 public fn Path.join_within(self, part: Path) -> Result[Path, SystemError]
@@ -63,43 +189,116 @@ public fn Path.join_within(self, part: Path) -> Result[Path, SystemError]
 public fn Path.parent(self) -> Option[Path]
   cost time O(self.text.length())
 {
-  todo
+  let text = self.text.slice()
+  let name = last_component(text)
+  if name.is_empty() {
+    return None
+  }
+  var end = name.start
+  while end > 1 && text.byte(end - 1) == 47
+    invariant end <= name.start
+    decreases end
+    cost time O(name.start - end)
+  {
+    end -= 1
+  }
+  Some(Path(text: text.part(0, to: end).to_string()))
 }
 
 public fn Path.file_name(self) -> Option[StringSlice]
   cost time O(self.text.length())
 {
-  todo
+  let text = self.text.slice()
+  let name = last_component(text)
+  if name.is_empty() || is_dots(text, span: name) {
+    None
+  } else {
+    Some(text.part(name.start, to: name.end))
+  }
 }
 
 public fn Path.stem(self) -> Option[StringSlice]
   cost time O(self.text.length())
 {
-  todo
+  let text = self.text.slice()
+  let name = last_component(text)
+  if name.is_empty() || is_dots(text, span: name) {
+    None
+  } else {
+    Some(text.part(name.start, to: extension_start(text, name: name)))
+  }
 }
 
 public fn Path.extension(self) -> Option[StringSlice]
   cost time O(self.text.length())
 {
-  todo
+  let text = self.text.slice()
+  let name = last_component(text)
+  if name.is_empty() || is_dots(text, span: name) {
+    return None
+  }
+  let dot = extension_start(text, name: name)
+  if dot == name.end { None } else { Some(text.part(dot + 1, to: name.end)) }
 }
 
 public fn Path.with_extension(self, extension: StringSlice) -> Path
   cost time O(self.text.length() + extension.length())
 {
-  todo
+  let text = self.text.slice()
+  let name = last_component(text)
+  if name.is_empty() || is_dots(text, span: name) {
+    return Path(text: text.to_string())
+  }
+  let stem = text.part(0, to: extension_start(text, name: name))
+  if stem.length() > USize.maximum / 4 || extension.length() > USize.maximum / 4 {
+    intrinsic::crash("a path cannot hold that many bytes".slice())
+  }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(stem.length() + 1 + extension.length())
+  stem.copy_onto(mut output)
+  if extension.length() > 0 {
+    intrinsic::storage_push(mut output, value: 46)
+    extension.copy_onto(mut output)
+  }
+  Path(text: String(storage: own output))
 }
 
 public fn Path.with_file_name(self, name: StringSlice) -> Path
   cost time O(self.text.length() + name.length())
 {
-  todo
+  let text = self.text.slice()
+  let last = last_component(text)
+  if last.is_empty() || is_dots(text, span: last) {
+    return join_texts(text, second: name)
+  }
+  let before = text.part(0, to: last.start)
+  if before.length() > USize.maximum / 4 || name.length() > USize.maximum / 4 {
+    intrinsic::crash("a path cannot hold that many bytes".slice())
+  }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(before.length() + name.length())
+  before.copy_onto(mut output)
+  name.copy_onto(mut output)
+  Path(text: String(storage: own output))
 }
 
 public fn Path.components(self) yields StringSlice
+  ensures yielded.length() <= self.text.length()
   cost time O(self.text.length())
 {
-  todo
+  let text = self.text.slice()
+  var from: USize = 0
+  while from < text.length()
+    invariant from <= text.length()
+    invariant yielded.length() <= from
+    decreases text.length() - from
+    cost time O(from)
+  {
+    let span = component_after(text, from: from)
+    if span.is_empty() {
+      return
+    }
+    yield text.part(span.start, to: span.end)
+    from = span.end
+  }
 }
 
 public fn Path.normalized(self) -> Path
@@ -111,13 +310,69 @@ public fn Path.normalized(self) -> Path
 public fn Path.starts_with(self, base: Path) -> Bool
   cost time O(self.text.length() + base.text.length())
 {
-  todo
+  if self.is_absolute() != base.is_absolute() {
+    return false
+  }
+  let text = self.text.slice()
+  let prefix = base.text.slice()
+  var mine: USize = 0
+  var theirs: USize = 0
+  while theirs < prefix.length()
+    invariant mine <= text.length()
+    invariant theirs <= prefix.length()
+    decreases prefix.length() - theirs
+    cost time O(mine + theirs)
+  {
+    let wanted = component_after(prefix, from: theirs)
+    if wanted.is_empty() {
+      return true
+    }
+    let found = component_after(text, from: mine)
+    if found.end - found.start != wanted.end - wanted.start {
+      return false
+    }
+    if !text.part(found.start, to: found.end).matches_at(prefix.part(wanted.start, to: wanted.end), offset: 0) {
+      return false
+    }
+    mine = found.end
+    theirs = wanted.end
+  }
+  true
 }
 
 public fn Path.relative_to(self, base: Path) -> Option[Path]
   cost time O(self.text.length() + base.text.length())
 {
-  todo
+  if self.is_absolute() != base.is_absolute() {
+    return None
+  }
+  let text = self.text.slice()
+  let prefix = base.text.slice()
+  var mine: USize = 0
+  var theirs: USize = 0
+  while theirs < prefix.length()
+    invariant mine <= text.length()
+    invariant theirs <= prefix.length()
+    decreases prefix.length() - theirs
+    cost time O(mine + theirs)
+  {
+    let wanted = component_after(prefix, from: theirs)
+    if wanted.is_empty() {
+      theirs = prefix.length()
+    } else {
+      let found = component_after(text, from: mine)
+      if found.end - found.start != wanted.end - wanted.start {
+        return None
+      }
+      if !text.part(found.start, to: found.end).matches_at(prefix.part(wanted.start, to: wanted.end), offset: 0) {
+        return None
+      }
+      mine = found.end
+      theirs = wanted.end
+    }
+  }
+  let rest = component_after(text, from: mine)
+  Some(Path(text: text.part(rest.start, to: text.length()).to_string()))
 }
 
 impl Equal for Path {
