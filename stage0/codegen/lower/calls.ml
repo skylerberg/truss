@@ -295,14 +295,7 @@ and call st (e : S.expression) ~callee ~arguments destination =
   match st.frame.code.checked.calls.(e.id) with
   | Some { callee = Function_value; _ } -> call_function_value st ~callee ~arguments destination
   | Some call_ ->
-      let expressions = List.map (fun (a : S.argument) -> a.value) arguments in
-      let expressions =
-        match (call_.callee, callee.kind) with
-        | Trait_method { receiver = Read | Mut | Own; _ }, Member (receiver, _)
-        | Function { path = Method { receiver = Read | Mut | Own; _ }; _ }, Member (receiver, _) ->
-            receiver :: expressions
-        | _ -> expressions
-      in
+      let expressions = call_expressions call_ callee arguments in
       call_with st call_ ~expressions
         ~arguments:(with_receiver st call_ ~expressions call_.arguments)
         destination ~span:e.span
@@ -562,6 +555,10 @@ and call_next st (yielding : Ground.yielding) cursor destination =
 
 and default_mask (signature : T.signature) (call_ : C.call) =
   let defaulted = List.filter (fun (p : T.parameter_info) -> p.has_default) signature.parameters in
+  (* The mask is 64 bits in the code, and worked out here in an OCaml
+     integer, which has one bit fewer for a sign. *)
+  if List.length defaulted > 62 then
+    Compiler_bug.unsupported "a function with more than 62 parameters that have defaults";
   let bits =
     List.mapi
       (fun i (p : T.parameter_info) ->
