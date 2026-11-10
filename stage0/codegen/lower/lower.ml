@@ -97,10 +97,9 @@ let bind_parameters ?how st =
 (* The start every function from source shares, after its result's slot:
    its parameters, the mask of defaults passed, and the evidence it is
    given, with its defaults filled in and its [requires] clauses checked.
-   [defaults] and [requirements] give those, read from the syntax tree
-   unless the caller reads them from the core form. Returns the parameters
-   bound, the mask, and every parameter's local in order. *)
-let begin_body ?how ?(defaults = syntax_defaults) ?(requirements = syntax_requirements) st =
+   The defaults and the clauses are read from [source]. Returns the
+   parameters bound, the mask, and every parameter's local in order. *)
+let begin_body ?how ~(source : function_source) st =
   let code = st.frame.code in
   let bound = bind_parameters ?how st in
   let mask =
@@ -110,8 +109,8 @@ let begin_body ?how ?(defaults = syntax_defaults) ?(requirements = syntax_requir
   start st.b (block st.b);
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
-  Option.iter (fun mask -> fill_defaults st mask (defaults st)) mask;
-  check_requires st (requirements st);
+  Option.iter (fun mask -> fill_defaults st mask (source.defaults st)) mask;
+  check_requires st (source.requirements st);
   ( bound,
     mask,
     List.filter_map (fun (arrives, _, _, _) -> arrives) bound @ Option.to_list mask @ evidence )
@@ -126,7 +125,9 @@ let pulled context (yielding : Ground.yielding) :
     Lir.function_ * (Lir.local * (Lir.local * int) option) list =
   let code = code_of context yielding.method_ yielding.type_arguments in
   let st = enter context ~pulling:true (frame_of code ~inlined:[ yielding.method_ ]) in
-  let bound, mask, parameters = begin_body st ~how:(Convention.held context.env) in
+  let bound, mask, parameters =
+    begin_body st ~how:(Convention.held context.env) ~source:syntax_tree
+  in
   let owned =
     List.filter_map
       (fun (arrives, mode, ty, bit) ->
@@ -234,35 +235,24 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
    fallback to the syntax tree, if there was one. *)
 let source_code context key ~path ~type_arguments : Lir.t * string option =
   let code = code_of context path type_arguments in
-  (* Lowers the function, reading its defaults, its [requires] clauses, and
-     its body through the three functions. *)
-  let lowered ~defaults ~requirements ~body : Lir.t =
+  let lowered (source : function_source) : Lir.t =
     let st = enter context (frame_of code ~inlined:[ path ]) in
     let convention, returns = result_of context code.substitution code.result in
     result_slot st convention;
-    let _, _, parameters = begin_body st ~defaults ~requirements in
-    body st;
+    let _, _, parameters = begin_body st ~source in
+    source.body st (result_place st);
     {
       key;
       main = finish_function st ~returns ~first:[] ~rest:parameters ();
       nested = nested_functions st;
     }
   in
-  let from_syntax_tree () =
-    lowered ~defaults:syntax_defaults ~requirements:syntax_requirements ~body:(fun st ->
-        block_into st code.body (result_place st))
-  in
   match demand context Infer.core_of_path path with
-  | None -> (from_syntax_tree (), Some "a definition with no core form")
+  | None -> (lowered syntax_tree, Some "a definition with no core form")
   | Some (form, _) -> (
-      match
-        lowered
-          ~defaults:(fun st -> Core_form.defaults st form)
-          ~requirements:(fun st -> Core_form.requirements st form)
-          ~body:(fun st -> Core_form.body st form)
-      with
+      match lowered (Core_form.core_form form) with
       | instance -> (instance, None)
-      | exception Core_form.Unhandled_node reason -> (from_syntax_tree (), Some reason))
+      | exception Core_form.Unhandled_node reason -> (lowered syntax_tree, Some reason))
 
 let core_fallback_reason context (key : Instance.key) =
   match key with

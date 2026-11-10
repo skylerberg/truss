@@ -17,6 +17,84 @@ let operator st = !Forward.operator st
 let place_expression st = !Forward.place_expression st
 let statement st = !Forward.statement st
 
+(* Whether a clause can run: none of it is the mathematical [Integer] of
+   specifications, a quantifier, or a conversion to or from one. *)
+let executable st (e : S.expression) =
+  let runs = ref true in
+  let rec visit (e : S.expression) =
+    (match e.kind with Quantified _ -> runs := false | _ -> ());
+    (match raw_type_of st e.id with Some T.Integer -> runs := false | _ -> ());
+    (match e.kind with
+    | Binary { left; right; _ } when st.frame.code.checked.calls.(e.id) = None ->
+        (* A comparison of the values of two integers runs only when they are
+           of one type. *)
+        let built_in = function Some (T.Named _ as ty) -> T.is_integer_type ty | _ -> false in
+        if
+          not (built_in (raw_type_of st left.id) && raw_type_of st left.id = raw_type_of st right.id)
+        then runs := false
+    | _ -> ());
+    (match st.frame.code.checked.calls.(e.id) with
+    | Some call_ ->
+        if
+          List.exists
+            (fun (a : C.argument) ->
+              match a.conversion with Some (To_integer | From_integer) -> true | _ -> false)
+            call_.arguments
+        then runs := false
+    | None -> ());
+    if !runs then Syntax_walk.children visit e
+  in
+  visit e;
+  !runs
+
+(* The [requires] clauses of the current code that can run, read from the
+   syntax tree. *)
+let syntax_requirements st : requirement list =
+  List.filter_map
+    (fun (clause : S.expression) ->
+      if executable st clause then
+        Some
+          {
+            test = (fun ~yes ~no -> branch st clause ~yes ~no);
+            text = source st clause.span;
+            site = site st clause.span;
+          }
+      else None)
+    st.frame.code.requires
+
+(* The defaults of the current code's parameters, in parameter order, read
+   from the syntax tree. *)
+let syntax_defaults st : default list =
+  List.filter_map
+    (fun (mode, ty, (parameter : S.parameter)) ->
+      match parameter.kind with
+      | Named_parameter { name; default = Some default; _ } ->
+          Some
+            {
+              mode;
+              ty = ground st ty;
+              binding = name.id;
+              name = name.text;
+              evaluate = (fun place -> into st default place);
+              span = default.span;
+            }
+      | _ -> None)
+    st.frame.code.parameter_types
+
+(* A function read from the syntax tree. *)
+let syntax_tree : function_source =
+  {
+    defaults = syntax_defaults;
+    requirements = syntax_requirements;
+    body = (fun st destination -> block_into st st.frame.code.body destination);
+  }
+
+(* The body of a method in its core form. *)
+let core_body st path : Core.block =
+  match demand st.context Infer.core_of_path path with
+  | Some ({ definition = Function { body = Some body; _ }; _ }, _) -> body
+  | _ -> bug "%s has no body in its core form" (Path.show path)
+
 (* The instance a call to a function or a trait method reaches. *)
 let rec resolve_callee st (call_ : C.call) =
   match call_.callee with
@@ -140,11 +218,11 @@ and evaluate_arguments ?(evaluated = []) st ~(expressions : S.expression list)
   in
   List.map evaluate arguments |> List.sort (fun (a, _, _, _) (b, _, _, _) -> Int.compare a b)
 
-(* Inlines a lending or yielding method's body with its parameters bound to
-   [arguments], each by its parameter's index, handing each [yield] to
-   [on_yield]. A parameter left out is given its default, worked out where
-   the method writes it. *)
-and inline st path type_arguments ~arguments ~call_site ~on_yield =
+(* Inlines a lending or yielding method, read from [source], with its
+   parameters bound to [arguments], each by its parameter's index. Each
+   [yield] in the method calls [on_yield]. A parameter with no argument
+   takes its default, evaluated here. *)
+and inline st path type_arguments ~(source : function_source) ~arguments ~call_site ~on_yield =
   if List.exists (Path.equal path) st.frame.inlined then
     Compiler_bug.unsupported ~at:(at_site call_site) "%s, which lends through a call to itself"
       (Path.show path);
@@ -164,29 +242,33 @@ and inline st path type_arguments ~arguments ~call_site ~on_yield =
   in
   st.frame <- frame;
   in_scope st (fun () ->
+      let defaults = source.defaults st in
       List.iteri
-        (fun index (_, written_ty, (parameter : S.parameter)) ->
+        (fun index (_, _, (parameter : S.parameter)) ->
+          let default () =
+            match parameter.kind with
+            | Named_parameter { name; _ } ->
+                List.find_opt (fun (default : default) -> default.binding = name.id) defaults
+            | _ -> None
+          in
           let place =
-            match List.find_opt (fun (i, _, _, _) -> i = index) arguments with
-            | Some (_, _, _, place) -> place
-            | None -> (
-                let ty = Monomorphic.ground st.context.monomorphic code.substitution written_ty in
-                match parameter.kind with
-                | Named_parameter { default = Some default; _ } ->
-                    (* A default is the method's own to drop, whatever the
-                       mode. *)
-                    let place = binding st ty in
-                    in_statement st (fun () -> into st default place);
-                    place
-                | _ -> bug "%s is given no argument for parameter %d" (Path.show path) index)
+            match (List.find_opt (fun (i, _, _, _) -> i = index) arguments, default ()) with
+            | Some (_, _, _, place), _ -> place
+            | None, Some default ->
+                (* The method owns a default's value and drops it, whatever
+                   the parameter's mode. *)
+                let place = binding st default.ty in
+                in_statement st (fun () -> default.evaluate place);
+                place
+            | None, None -> bug "%s is given no argument for parameter %d" (Path.show path) index
           in
           match parameter.kind with
           | Self_parameter _ -> frame.self_place <- Some place
           | Named_parameter { name; _ } -> Hashtbl.replace frame.bindings name.id place
           | Parameter_error -> ())
         code.parameter_types;
-      check_requires st ~call_site (syntax_requirements st);
-      block_into st code.body None);
+      check_requires st ~call_site (source.requirements st);
+      source.body st None);
   finish st.b (Goto exit);
   start st.b exit;
   st.frame <- caller
@@ -199,98 +281,49 @@ and inline st path type_arguments ~arguments ~call_site ~on_yield =
    as for an index into a [List], the method simply ends at its [yield]. *)
 and lend ?evaluated st call_ ~expressions ~arguments ~span =
   match resolve_callee st call_ with
-  | Some (path, type_arguments) -> (
-      let call_site = site st span in
+  | Some (path, type_arguments) ->
       let arguments = evaluate_arguments ?evaluated st ~expressions ~arguments in
-      let body = (code_of st.context path type_arguments).body in
-      if yields_in body > 1 then
-        unsupported st span "%s, a lending method with more than one yield" (Path.show path);
-      let depth = List.length st.scopes in
-      let goes_on = block st.b in
-      let lent = ref None and waits = ref None in
-      inline st path type_arguments ~arguments ~call_site ~on_yield:(fun place ~resume ~stop:_ ->
-          lent := Some place;
-          let owns_nothing =
-            List.for_all
-              (fun (scope : scope) -> scope.owned = [])
-              (List.filteri (fun i _ -> List.length st.scopes - i > depth) st.scopes)
-          in
-          if yields_last body && owns_nothing then finish st.b (Goto resume)
-          else begin
-            waits := Some resume;
-            finish st.b (Goto goes_on)
-          end);
-      (match !waits with
-      | Some resume ->
-          let scope = innermost_scope st in
-          scope.owned <-
-            Finish_lend
-              {
-                resume;
-                finished = current st.b;
-                selector = local st.b (Raw (Integer UInt32));
-                ways = [];
-              }
-            :: scope.owned;
-          start st.b goes_on
-      | None -> ());
-      match !lent with Some place -> place | None -> bug "a lending method that lends nothing")
+      inline_lending st path type_arguments ~source:syntax_tree ~arguments ~call_site:(site st span)
   | None -> bug "a lending call that is not to a method"
 
-(* How many [yield]s a body has. *)
-and yields_in (body : S.block) =
-  let count = ref 0 in
-  let rec statement (s : S.statement) =
-    (match s.kind with Yield _ -> incr count | _ -> ());
-    Syntax_walk.statement_parts ~expression ~statement s
-  and expression (e : S.expression) = Syntax_walk.expression_parts ~expression ~statement e in
-  List.iter statement body.statements;
-  !count
-
-(* Whether each [yield] in a body is the last thing its path does. *)
-and yields_last (body : S.block) =
-  let rec statement_yields (s : S.statement) =
-    match s.kind with
-    | Yield _ -> true
-    | _ ->
-        let found = ref false in
-        Syntax_walk.statement_parts
-          ~expression:(fun e -> if expression_yields e then found := true)
-          ~statement:(fun s -> if statement_yields s then found := true)
-          s;
-        !found
-  and expression_yields (e : S.expression) =
-    let found = ref false in
-    Syntax_walk.expression_parts
-      ~expression:(fun e -> if expression_yields e then found := true)
-      ~statement:(fun s -> if statement_yields s then found := true)
-      e;
-    !found
-  in
-  let rec last_of_block (block : S.block) =
-    match List.rev block.statements with
-    | [] -> true
-    | last :: before -> (not (List.exists statement_yields before)) && last_statement last
-  and last_statement (s : S.statement) =
-    match s.kind with
-    | Yield _ -> true
-    | Expression e -> last_expression e
-    | _ -> not (statement_yields s)
-  and last_expression (e : S.expression) =
-    match e.kind with
-    | Parenthesized inner -> last_expression inner
-    | Block block -> last_of_block block
-    | If { then_; else_; _ } -> (
-        last_of_block then_
-        &&
-        match else_ with
-        | None -> true
-        | Some (Else block) -> last_of_block block
-        | Some (Else_if e) -> last_expression e)
-    | Match { arms; _ } -> List.for_all (fun (arm : S.arm) -> last_statement arm.body) arms
-    | _ -> not (expression_yields e)
-  in
-  last_of_block body
+(* Inlines a lending method up to its [yield] and returns the place it
+   lends. *)
+and inline_lending st path type_arguments ~source ~arguments ~call_site : Lir.place =
+  let body = core_body st path in
+  if Method_yields.count body > 1 then
+    Compiler_bug.unsupported ~at:(at_site call_site) "%s, a lending method with more than one yield"
+      (Path.show path);
+  let depth = List.length st.scopes in
+  let goes_on = block st.b in
+  let lent = ref None and waits = ref None in
+  inline st path type_arguments ~source ~arguments ~call_site
+    ~on_yield:(fun place ~resume ~stop:_ ->
+      lent := Some place;
+      let owns_nothing =
+        List.for_all
+          (fun (scope : scope) -> scope.owned = [])
+          (List.filteri (fun i _ -> List.length st.scopes - i > depth) st.scopes)
+      in
+      if Method_yields.each_is_last body && owns_nothing then finish st.b (Goto resume)
+      else begin
+        waits := Some resume;
+        finish st.b (Goto goes_on)
+      end);
+  (match !waits with
+  | Some resume ->
+      let scope = innermost_scope st in
+      scope.owned <-
+        Finish_lend
+          {
+            resume;
+            finished = current st.b;
+            selector = local st.b (Raw (Integer UInt32));
+            ways = [];
+          }
+        :: scope.owned;
+      start st.b goes_on
+  | None -> ());
+  match !lent with Some place -> place | None -> bug "a lending method that lends nothing"
 
 and call st (e : S.expression) ~callee ~arguments destination =
   match st.frame.code.checked.calls.(e.id) with
@@ -685,70 +718,6 @@ and call_function_value st ~(callee : S.expression) ~(arguments : S.argument lis
            });
       if ty = Never then unreachable_block st
   | Yields _ | Lends _ -> bug "a function value that yields"
-
-(* Whether a clause can run: none of it is the mathematical [Integer] of
-   specifications, a quantifier, or a conversion to or from one. *)
-and executable st (e : S.expression) =
-  let runs = ref true in
-  let rec visit (e : S.expression) =
-    (match e.kind with Quantified _ -> runs := false | _ -> ());
-    (match raw_type_of st e.id with Some T.Integer -> runs := false | _ -> ());
-    (match e.kind with
-    | Binary { left; right; _ } when st.frame.code.checked.calls.(e.id) = None ->
-        (* A comparison of the values of two integers runs only when they are
-           of one type. *)
-        let built_in = function Some (T.Named _ as ty) -> T.is_integer_type ty | _ -> false in
-        if
-          not (built_in (raw_type_of st left.id) && raw_type_of st left.id = raw_type_of st right.id)
-        then runs := false
-    | _ -> ());
-    (match st.frame.code.checked.calls.(e.id) with
-    | Some call_ ->
-        if
-          List.exists
-            (fun (a : C.argument) ->
-              match a.conversion with Some (To_integer | From_integer) -> true | _ -> false)
-            call_.arguments
-        then runs := false
-    | None -> ());
-    if !runs then Syntax_walk.children visit e
-  in
-  visit e;
-  !runs
-
-(* The [requires] clauses of the current code that can run, read from the
-   syntax tree. *)
-and syntax_requirements st : requirement list =
-  List.filter_map
-    (fun (clause : S.expression) ->
-      if executable st clause then
-        Some
-          {
-            test = (fun ~yes ~no -> branch st clause ~yes ~no);
-            text = source st clause.span;
-            site = site st clause.span;
-          }
-      else None)
-    st.frame.code.requires
-
-(* The defaults of the current code's parameters, in parameter order, read
-   from the syntax tree. *)
-and syntax_defaults st : default list =
-  List.filter_map
-    (fun (mode, ty, (parameter : S.parameter)) ->
-      match parameter.kind with
-      | Named_parameter { name; default = Some default; _ } ->
-          Some
-            {
-              mode;
-              ty = ground st ty;
-              binding = name.id;
-              name = name.text;
-              evaluate = (fun place -> into st default place);
-              span = default.span;
-            }
-      | _ -> None)
-    st.frame.code.parameter_types
 
 (* In a checked build, tests each [requires] clause on entry to the code,
    with its parameters bound, and panics with the clause's text when one

@@ -80,6 +80,15 @@ type requirement = {
   site : Lir.site;  (** The clause's position *)
 }
 
+(* Where lowering reads a function from: the syntax tree or the core form.
+   Each function is called with the function's frame current. *)
+type function_source = {
+  defaults : state -> default list;  (** The parameters' defaults, in parameter order *)
+  requirements : state -> requirement list;  (** The [requires] clauses that can run *)
+  body : state -> Lir.place option -> unit;
+      (** Lowers the body, writing its value to the place if there is one *)
+}
+
 (* The code a function starts lowering: its own, with nothing bound yet. *)
 let frame_of code ~inlined =
   {

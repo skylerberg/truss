@@ -27,6 +27,7 @@ The move to the core form is in progress. Lowering uses the core form for a
 body when every node in the body is of a supported kind:
 
 - calls to functions, trait methods, and intrinsics
+- indexing and other calls of lending methods, and `yield`
 - operators, comparisons, `&&`, `||`, and `!`
 - `if`, `match`, `while`, `for` over an integer range or a yielding call,
   `break`, `continue`, and `return`
@@ -39,8 +40,9 @@ body when every node in the body is of a supported kind:
 
 A body with any other node falls back to the older lowering, which walks the
 syntax tree and the checked form's tables. A function's parameter defaults
-and `requires` checks are lowered from the same source as its body, so an
-unsupported node in either one also falls back.
+and `requires` checks are lowered from the same source as its body, and so
+is every lending or yielding method inlined into it. An unsupported node in
+any of those also falls back.
 
 Code generation:
 
@@ -1530,11 +1532,13 @@ a command line can hold.
   Truss so that it is the same on every system. The loop is Truss; the
   digits are `snprintf`'s and the check `strtod`'s.
 - **Core-form lowering for every body.** These still fall back to the
-  syntax-tree lowering: lending calls, calls through a function value,
-  capability method calls, lambdas, array, set, and map literals,
-  interpolated and tagged strings, `with` updates, slices, constructor
-  calls that rely on a field default, and `for` over a cursor. Once all of
-  them are supported, the syntax-tree lowering is deleted.
+  syntax-tree lowering: calls through a function value, capability method
+  calls, lambdas, array, set, and map literals, interpolated and tagged
+  strings, `with` updates, slices, constructor calls that rely on a field
+  default, cursors (a yielding call outside a loop, `for` over a cursor,
+  and a loop over a recursive yielding method), and the pulled version of
+  a yielding method. Once all of them are supported, the syntax-tree
+  lowering is deleted.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.

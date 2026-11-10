@@ -57,8 +57,8 @@ let expression_kind : Core.kind -> string = function
 
 let statement_kind : Core.statement_kind -> string = function
   | Parallel _ -> "a parallel block"
-  | Yield _ -> "a yield"
-  | Evaluate _ | Let _ | Assign _ | Compound_assign _ | Assert _ | For _ | While _ | Proof _ ->
+  | Evaluate _ | Let _ | Assign _ | Compound_assign _ | Assert _ | For _ | While _ | Proof _
+  | Yield _ ->
       "a statement"
 
 let binary : Core.comparison -> Lir.binary = function
@@ -159,7 +159,8 @@ let rec place st (source : Core.place) : Lir.place =
   | Local local -> local_place st local
   | Field { base; field; _ } -> place st base / Field field
   | Temporary value -> value_place st value
-  | Lent _ -> unhandled "a place that a call lends"
+  | Lent { kind = Call call; origin; _ } -> lend st call ~call_site:(site_of st origin)
+  | Lent _ -> bug "a lent place that is not a call"
 
 and operand_place st (operand : Core.operand) : Lir.place =
   match operand with Place source -> place st source | Value value -> value_place st value
@@ -321,7 +322,7 @@ and resolve_callee st (callee : Core.callee) : (Path.t * Ground.argument list) o
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
 
 and call_into st (value : Core.expression) (call : Core.call) destination =
-  if call.lends <> None then unhandled "a call that lends";
+  if call.lends <> None then bug "a lending call that is not a lent place";
   match (resolve_callee st call.callee, call.callee) with
   | Some (path, type_arguments), _ ->
       let signature = signature_of st.context path in
@@ -334,52 +335,95 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
         (Code { path; type_arguments })
         ~signature ~substitution ~arguments ~mask ~destination
   | None, Intrinsic { operation; type_arguments } -> (
-      let type_arguments =
-        List.filter_map
-          (fun argument ->
-            match
-              Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution argument
-            with
-            | Type ty -> Some ty
-            | _ -> None)
-          type_arguments
-      in
-      let arguments =
-        List.map
-          (fun (argument : Core.argument) ->
-            match argument with
-            | Passed { value = Place source; _ } -> Intrinsics.Place (place st source)
-            | Passed { mode; value = Value value } ->
-                let ty = ground st value.type_ in
-                let evaluated = value_place st value in
-                (* An intrinsic takes storage and views by place. *)
-                if Storage.elements_of ty <> None || Storage.viewed ty <> None then
-                  Intrinsics.Place evaluated
-                else
-                  Intrinsics.Value (if mode = T.Own then owned st evaluated ty else Copy evaluated)
-            | Default -> bug "an intrinsic called with an omitted argument")
-          call.arguments
-      in
       match
-        Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types operation
-          ~type_arguments arguments ~destination:(Some destination) ~site:(site_of st value.origin)
+        intrinsic st operation ~type_arguments call.arguments ~destination:(Some destination)
+          ~site:(site_of st value.origin)
       with
-      | Some _ -> unhandled "an intrinsic that lends"
+      | Some _ -> bug "a lending intrinsic that is not a lent place"
       | None -> ())
   | None, Capability_method _ -> unhandled "a call of a capability method"
   | None, _ -> unhandled "a call through a function value"
 
+(* Lowers a call of an intrinsic. Returns the place it lends, for one that
+   lends. *)
+and intrinsic st operation ~type_arguments (arguments : Core.argument list) ~destination ~site =
+  let type_arguments =
+    List.filter_map
+      (fun argument ->
+        match
+          Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution argument
+        with
+        | Type ty -> Some ty
+        | _ -> None)
+      type_arguments
+  in
+  let arguments =
+    List.map
+      (fun (argument : Core.argument) ->
+        match argument with
+        | Passed { value = Place source; _ } -> Intrinsics.Place (place st source)
+        | Passed { mode; value = Value value } ->
+            let ty = ground st value.type_ in
+            let evaluated = value_place st value in
+            (* An intrinsic takes storage and views by place. *)
+            if Storage.elements_of ty <> None || Storage.viewed ty <> None then
+              Intrinsics.Place evaluated
+            else Intrinsics.Value (if mode = T.Own then owned st evaluated ty else Copy evaluated)
+        | Default -> bug "an intrinsic called with an omitted argument")
+      arguments
+  in
+  Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types operation
+    ~type_arguments arguments ~destination ~site
+
+(* The place that a lending call lends. A lending method is inlined up to
+   its [yield]; a lending intrinsic gives the place directly. *)
+and lend st (call : Core.call) ~call_site : Lir.place =
+  match call.callee with
+  | Intrinsic { operation; type_arguments } -> (
+      match
+        intrinsic st operation ~type_arguments call.arguments ~destination:None ~site:call_site
+      with
+      | Some place -> place
+      | None -> bug "a lent place from an intrinsic that does not lend")
+  | callee -> (
+      match resolve_callee st callee with
+      | Some (path, type_arguments) ->
+          let arguments = arguments_to_inline st path type_arguments call.arguments in
+          Calls.inline_lending st path type_arguments ~source:(method_source st path) ~arguments
+            ~call_site
+      | None -> unhandled "a lending call through an any value")
+
+(* Evaluates the arguments of a call that is inlined: each with its
+   parameter's index, without the omitted ones, which the inlined method
+   fills from its defaults. *)
+and arguments_to_inline st path type_arguments (arguments : Core.argument list) =
+  let signature = signature_of st.context path in
+  let substitution = bind signature.generics type_arguments in
+  let evaluated, _ = evaluate_arguments st signature substitution arguments in
+  List.filter_map Fun.id
+    (List.mapi
+       (fun index ((mode, ty, place), (argument : Core.argument)) ->
+         match argument with Default -> None | Passed _ -> Some (index, mode, ty, place))
+       (List.combine evaluated arguments))
+
 and return_ st (returned : Core.expression option) =
-  (match st.frame.exit with Some _ -> unhandled "a return in an inlined method" | None -> ());
-  (match (returned, result_place st) with
-  | Some returned, Some result ->
-      clear_result st;
-      into st returned result
-  | Some returned, None -> ignore (value_place st returned)
-  | None, _ -> ());
-  leave_to st 0;
-  finish st.b (return_result st);
-  start st.b (block st.b)
+  match st.frame.exit with
+  | Some (exit, depth) ->
+      (* A [return] in an inlined method ends the method. *)
+      Option.iter (fun returned -> ignore (value_place st returned)) returned;
+      leave_to st depth;
+      finish st.b (Goto exit);
+      start st.b (block st.b)
+  | None ->
+      (match (returned, result_place st) with
+      | Some returned, Some result ->
+          clear_result st;
+          into st returned result
+      | Some returned, None -> ignore (value_place st returned)
+      | None, _ -> ());
+      leave_to st 0;
+      finish st.b (return_result st);
+      start st.b (block st.b)
 
 and if_ st ~(condition : Core.expression) ~(then_ : Core.block) ~(else_ : Core.block option)
     destination =
@@ -582,26 +626,15 @@ and statement st (node : Core.statement) =
           | Some (path, _) when List.exists (Path.equal path) st.frame.inlined ->
               unhandled "a loop over a recursive yielding method"
           | Some (path, type_arguments) ->
-              let signature = signature_of st.context path in
-              (match signature.output with
+              (match (signature_of st.context path).output with
               | Yields _ -> ()
               | Returns _ | Lends _ -> bug "a loop over %s, which does not yield" (Path.show path));
-              let substitution = bind signature.generics type_arguments in
-              let evaluated, _ = evaluate_arguments st signature substitution call.arguments in
-              let arguments =
-                List.filter_map Fun.id
-                  (List.mapi
-                     (fun index ((mode, ty, place), (argument : Core.argument)) ->
-                       match argument with
-                       | Default -> None
-                       | Passed _ -> Some (index, mode, ty, place))
-                     (List.combine evaluated call.arguments))
-              in
+              let arguments = arguments_to_inline st path type_arguments call.arguments in
               let caller = st.frame in
               let depth = List.length st.scopes in
               let after = block st.b in
-              Calls.inline st path type_arguments ~arguments ~call_site:(site_of st node.origin)
-                ~on_yield:(fun yielded ~resume ~stop ->
+              Calls.inline st path type_arguments ~source:(method_source st path) ~arguments
+                ~call_site:(site_of st node.origin) ~on_yield:(fun yielded ~resume ~stop ->
                   let inner = st.frame in
                   st.frame <- caller;
                   let around = List.length st.scopes in
@@ -624,6 +657,22 @@ and statement st (node : Core.statement) =
               start st.b after)
       | For { iteration = Yielding_call _; _ } -> bug "a loop over what is not a call"
       | For { iteration = Cursor _; _ } -> unhandled "a loop over a cursor"
+      | Yield { part; _ } -> (
+          match st.frame.on_yield with
+          | Some on_yield ->
+              let place = operand_place st part in
+              let resume = block st.b and stop = block st.b in
+              on_yield place ~resume ~stop;
+              (* On the [stop] path the loop is leaving, so the method drops
+                 what it owns and ends. *)
+              start st.b stop;
+              (match st.frame.exit with
+              | Some (exit, depth) ->
+                  leave_to st depth;
+                  finish st.b (Goto exit)
+              | None -> finish st.b Unreachable);
+              start st.b resume
+          | None -> unhandled "a yield in a method that is not inlined")
       | kind -> unhandled (statement_kind kind))
 
 (* Falls through where the value at a place matches a pattern, and goes to
@@ -779,47 +828,51 @@ and match_ st ~(scrutinees : Core.operand list) ~(arms : Core.arm list) destinat
   finish st.b Unreachable;
   start st.b after
 
-(* The defaults of a function's parameters, in parameter order. *)
-let defaults st (form : Core.t) : default list =
-  match form.definition with
-  | Function { parameters; _ } ->
-      List.filter_map
-        (fun (parameter : Core.parameter) ->
-          match (parameter.default, parameter.local) with
-          | Some value, Named binding ->
+(* A function or a test, read from its core form. *)
+and core_form (form : Core.t) : function_source =
+  let parameters, requires, body =
+    match form.definition with
+    | Function { parameters; contract; body = Some body } -> (parameters, contract.requires, body)
+    | Test body -> ([], [], body)
+    | _ -> unhandled "a definition that has no body"
+  in
+  {
+    defaults =
+      (fun st ->
+        List.filter_map
+          (fun (parameter : Core.parameter) ->
+            match (parameter.default, parameter.local) with
+            | Some value, Named binding ->
+                Some
+                  {
+                    mode = parameter.mode;
+                    ty = ground st parameter.type_;
+                    binding;
+                    name = parameter.name;
+                    evaluate = (fun place -> into st value place);
+                    span = (spans st).(value.origin);
+                  }
+            | Some _, (Self | Synthetic _) -> bug "a default for a parameter with no name"
+            | None, _ -> None)
+          parameters);
+    requirements =
+      (fun st ->
+        List.filter_map
+          (fun (clause : Core.condition) ->
+            if clause.executable then
               Some
                 {
-                  mode = parameter.mode;
-                  ty = ground st parameter.type_;
-                  binding;
-                  name = parameter.name;
-                  evaluate = (fun place -> into st value place);
-                  span = (spans st).(value.origin);
+                  test = (fun ~yes ~no -> branch st clause.value ~yes ~no);
+                  text = source st (spans st).(clause.value.origin);
+                  site = site_of st clause.value.origin;
                 }
-          | Some _, (Self | Synthetic _) -> bug "a default for a parameter with no name"
-          | None, _ -> None)
-        parameters
-  | _ -> []
+            else None)
+          requires);
+    body = (fun st destination -> block_into st body destination);
+  }
 
-(* A function's [requires] clauses that can run. *)
-let requirements st (form : Core.t) : requirement list =
-  match form.definition with
-  | Function { contract; _ } ->
-      List.filter_map
-        (fun (clause : Core.condition) ->
-          if clause.executable then
-            Some
-              {
-                test = (fun ~yes ~no -> branch st clause.value ~yes ~no);
-                text = source st (spans st).(clause.value.origin);
-                site = site_of st clause.value.origin;
-              }
-          else None)
-        contract.requires
-  | _ -> []
-
-(* Lowers the body of the current function into its result slot. *)
-let body st (form : Core.t) =
-  match form.definition with
-  | Function { body = Some inner; _ } | Test inner -> block_into st inner (result_place st)
-  | _ -> unhandled "a definition that has no body"
+(* The method at a path, read from its core form, to inline. *)
+and method_source st path : function_source =
+  match demand st.context Infer.core_of_path path with
+  | Some (form, _) -> core_form form
+  | None -> unhandled "a method with no core form"
