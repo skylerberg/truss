@@ -504,6 +504,51 @@ let () =
         \    tick()\n\
         \  }\n\
          }\n");
+  (let sessions =
+     "capability Sessions {\n\
+     \  fn touch(session: USize)\n\
+     \  fn each(visit: (fn(USize) uses Clock))\n\
+      }\n\n\
+      type Table(sessions: List[USize])\n\n\
+      impl Sessions for Table {\n\
+     \  fn touch(mut self, session: USize) {\n\
+     \    mut self.sessions.push(session)\n\
+     \  }\n\n\
+     \  fn each(mut self, visit: (fn(USize) uses Clock)) {\n\
+     \  }\n\
+      }\n\n\
+      fn serve(session: USize)\n\
+     \  uses Sessions\n\
+      {\n\
+     \  Sessions.touch(session)\n\
+      }\n\n"
+   in
+   test "a capability whose calls take turns has no method that takes a function that uses one"
+     (fun () ->
+       one_diagnostic
+         (sessions
+        ^ "fn f()\n\
+          \  uses Tasks\n\
+           {\n\
+          \  var table = Table(sessions: [])\n\
+          \  provide mut table {\n\
+          \    concurrent {\n\
+          \      serve(1)\n\
+          \      serve(2)\n\
+          \    }\n\
+          \  }\n\
+           }\n")
+         "capabilities.function_in_turn");
+   test "calls take no turns where the code inside the `provide` cannot use `Tasks`" (fun () ->
+       fine
+         (sessions
+        ^ "fn f() {\n\
+          \  var table = Table(sessions: [])\n\
+          \  provide mut table {\n\
+          \    serve(1)\n\
+          \    serve(2)\n\
+          \  }\n\
+           }\n")));
   test "the body of a concurrent block gets its types" (fun () ->
       has_type
         "fn g(count: UInt16) {}\n\n\

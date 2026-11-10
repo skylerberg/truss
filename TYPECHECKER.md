@@ -1584,6 +1584,24 @@ takes `mut self`, with a fix that adds or removes the mark. The capabilities
 each `impl` uses must be available at the `provide`. Providing anything that
 implements `Panic` is impossible, since nothing can.
 
+Where the code inside a `provide` can use `Tasks`, the calls of an
+implementation that is provided `mut` take turns, as DESIGN.md describes:
+each call runs from start to end before the next begins.
+
+- **The body can use `Tasks`** when it has `concurrent` code, or a call in
+  it uses `Tasks` or a capability parameter, which may stand for `Tasks`.
+  This is read from the core form once the capability sets are solved, by
+  one function that code generation also calls, so the two agree on which
+  implementations take turns.
+- **A capability whose calls take turns has no method that is given
+  something that can call code with a `uses` clause.** A parameter's type
+  counts when it is a function type with a `uses` clause, an `any` type or
+  a bounded type parameter whose trait has a method with one, or a type
+  that holds one of these at any depth. Such code could call an
+  implementation that is provided further in, and two tasks could then
+  wait for each other's turn. The error is at the implementation in the
+  `provide`.
+
 ### Dependency grants
 
 DESIGN.md says a dependency may use only the capabilities its manifest entry
@@ -2246,19 +2264,12 @@ list's `each`, which only the `impl`'s method has.
 
 ## Not built
 
-- **Two rules for `concurrent` code.** The checker builds `concurrent`
+- **One rule for `concurrent` code.** The checker builds `concurrent`
   blocks and loops, and the ownership check applies its rules to them. The
   prover and code generation report them as not built. Still to be built
-  here:
-  - The type argument of `Channel` is never a view type, which leaves out
-    every function type and every `any` type. The standard library has no
-    `Channel` yet.
-  - At a `provide mut` whose body can use `Tasks`, the implementation's
-    calls take turns, so its capability may have no method with a
-    parameter whose type can hold, at any depth, a function or an `any`
-    value that uses a capability. A body that uses a capability parameter
-    of the enclosing function counts as able to use `Tasks`. The core form
-    will say whether a `provide`'s calls take turns.
+  here: the type argument of `Channel` is never a view type, which leaves
+  out every function type and every `any` type. The standard library has
+  no `Channel` yet.
 - **An interpolated string as calls.** It is still a node that names the
   text builder's methods and each value's `display`. It will be desugared
   to those calls once they have `time` clauses.
