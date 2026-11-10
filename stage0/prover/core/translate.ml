@@ -194,10 +194,10 @@ type context = {
       (** In a theorem, a [proof] block, or a law's proof, where a [todo] is a hole. *)
   mutable holes : (Names.key * span) list;  (** Reversed. *)
   mutable validating : T.ty list;
-      (** The types whose invariants are being read. An invariant that calls a function reads the
-          validity of what the call takes and gives, and for a type that contains itself through a
-          type with such an invariant, as a tree whose children are a [Map], that would go on for
-          ever. *)
+      (** The types whose validity is being computed. Computing validity evaluates the type's
+          invariant, and a call in the invariant assumes the validity of its arguments and result.
+          For a type that contains itself through a type with such an invariant, such as a tree
+          whose children are a [Map], that recursion would not terminate. *)
   mutable call_targets : (L.term * C.local) list;
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
 }
@@ -1108,9 +1108,9 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
         (L.Boolean false);
       None
   | Todo ->
-      (* What follows a [todo] on its path is not shown, in code as in a
-         proof, and a build refuses what can reach either. In a proof it is
-         a hole, which the tools list; in code the [todo] itself is. *)
+      (* A [todo] ends its path: obligations after it are not checked. This
+         is sound because a program that can reach a [todo] is never built.
+         A [todo] in a proof is also recorded as a hole. *)
       if context.proving then context.holes <- (source.key, written.span) :: context.holes;
       Some
         ( { frame with condition = L.Boolean false },

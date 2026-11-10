@@ -1396,21 +1396,24 @@ whoever runs the function chooses the implementation with `provide`.
   files is separate from writing them, and opening connections is separate
   from accepting them. A config loader with only `FileRead` cannot destroy
   anything. They are in the prelude because signatures are written with them.
-- **Opening is one capability, and using what is open is another.**
+- **Opening a handle and using a handle are separate capabilities.**
   `FileRead.open`, `NetworkClient.connect`, `NetworkServer.listen`, and
-  `Processes.spawn` each give a handle, and everything done with a handle,
-  reading, writing, accepting, waiting, closing, is `Handles`. A function
-  that is handed a connection declares `uses Handles` and can serve it, and
-  can open nothing. Putting a handle's methods under the capability that
-  opened it would give a connection's `read` two answers, one for a
-  connection the program made and one for a connection it accepted, and a
-  request handler would then hold the right to open connections of its own.
-  One capability for every handle is also what lets one `Reader` and one
-  `Writer` trait cover files, connections, and pipes, since an `impl`'s
-  methods can use only what their trait declares. A handle is a token, and
-  what happens when it is read is its provider's, so a test's provider
-  simulates a file or a network between tasks with no change to the code
-  under test.
+  `Processes.spawn` each return a handle. Every operation on a handle
+  (read, write, accept, wait, close) requires `Handles`. A function that is
+  passed a connection declares `uses Handles`. It can serve that
+  connection, and it cannot open another one.
+  - **The alternative fails for connections.** If a handle's methods
+    required the capability that opened the handle, `Connection.read` would
+    need `NetworkClient` for a connection the program opened and
+    `NetworkServer` for one it accepted. A request handler would then hold
+    the capability to open connections of its own.
+  - **It allows one `Reader` trait and one `Writer` trait.** An `impl`'s
+    methods can use only the capabilities their trait declares. With one
+    capability for every handle, files, connections, and pipes all
+    implement the same two traits.
+  - **A handle is a token.** The provider of `Handles` decides what a read
+    returns. A test's provider can simulate a file, or a network between
+    two tasks, and the code under test does not change.
 - **Narrowing is ordinary code.** An implementation's methods can use
   capabilities, and a call to the capability being implemented goes to the
   next provider out. So an implementation can check each call and pass it on,
@@ -2091,22 +2094,26 @@ attack.
 - **The standard library never breaks within a language version.** It
   follows the rule every published package follows (see
   [Versions](#versions)), and has no second name to move to.
-- **It holds what can be promised never to change.** Three kinds of thing
-  are in it. What needs the compiler or the operating system: the prelude,
-  the built-in types and collections, the capabilities with their real
-  implementations, and the code that differs between platforms. The words
-  packages have to share to work together: readers and writers, paths,
-  instants, addresses, a JSON value. And what a published standard has
-  already fixed: JSON, CSV, Base64, URLs, UUIDs, Unicode's rules, SHA-2,
-  and the like. The third kind is what makes the library generous without
-  repeating Python's mistake, since a module can only go stale if what it
-  implements moves. The cryptographic primitives are here for a second
-  reason: they need processor instructions, which only the standard library
-  reaches (see [No foreign code](#no-foreign-code)). It is the only package
-  that needs no grant (see [Dependencies](#dependencies)).
-- **What is still moving is an approved package's.** HTTP, TLS, compression
-  formats, databases, and markup languages change with practice, and a
-  library for one has choices to revisit.
+- **It holds only what will not need a breaking change.** That is three
+  kinds of code:
+  - **Code that needs the compiler or the operating system:** the prelude,
+    the built-in types and collections, the capabilities and their real
+    implementations, and platform-specific code.
+  - **Types that packages must share to interoperate:** `Reader` and
+    `Writer`, `Path`, `Instant`, network addresses, `json::Value`.
+  - **Implementations of published standards:** JSON, CSV, Base64, URLs,
+    UUIDs, Unicode, SHA-2. A standard that is frozen cannot make its
+    implementation stale, which is how Python's standard library modules
+    went stale. This is what lets the library be large.
+
+  The cryptographic primitives are in it for a second reason. They need
+  processor instructions, and only the standard library can reach those
+  (see [No foreign code](#no-foreign-code)). The standard library is also
+  the only package that needs no grant (see
+  [Dependencies](#dependencies)).
+- **Anything still evolving is an approved package.** HTTP, TLS,
+  compression formats, database clients, and markup languages change with
+  practice, so a library for one of them will need breaking changes.
 - **The approved packages are the registry's packages owned by `truss`,**
   such as `truss::http` and `truss::toml`. They are plain Truss, written on
   the standard library's capabilities and granted them like any dependency,
@@ -2124,78 +2131,81 @@ capabilities) is in scope
 in every file. The prelude is the same everywhere: projects cannot define their
 own, and code cannot hide a prelude name with its own definition. A reader or
 an LLM can therefore rely on `List` or `Result` meaning the same thing in every
-file of every project. Since no package can use a prelude name for a type of
-its own, the prelude holds a name only when signatures everywhere are written
-with it: `Path` and `SystemError` are in it, and `Pair`, `Indexed`, and
-`Literal`, which a package may well want for itself, are `core::Pair`,
+file of every project.
+
+A package cannot define a type with a prelude name. So a name is in the
+prelude only if signatures in most programs use it. `Path` and `SystemError`
+are in the prelude. `Pair`, `Indexed`, and `Literal` are not, because a
+package may want those names for its own types. They are `core::Pair`,
 `core::Indexed`, and `text::Literal`.
 
-### How the standard library is laid out
+### Standard library conventions
 
-- **A module is a subject, and every module is one level down:**
-  `standard::json`, `standard::files`, `standard::time`. A name is always
-  written with its module in front, so the module is the first word a
-  reader sees, and a type is named for what it is within the subject:
-  `collections::Deque`, `time::Date`, `json::Value`. Go files JSON under
-  `encoding` and SHA-256 under `crypto`, which is one more thing to
-  remember and adds nothing at the place of use, where both write only the
-  last name. An LLM that wants JSON writes `use standard::json` and is
-  right.
-- **Directories hold what nobody imports:** the methods and `impl`s of types
-  that a module one level up declares, and the real implementations of the
-  capabilities, in `standard::system`.
-- **What a view can do, its owner can do.** Every method that reads
-  elements or changes them in place is `Slice`'s or `StringSlice`'s, and
-  `List`, `Array`, and `String` have each of them too, so `mut names.sort()`
-  needs no `names[..]`. Rust gets this from dereferencing at a call, which
-  Truss does not have, since its one implicit conversion is at a parameter.
-  Only what changes a length, such as `push` and `truncate`, is the owner's
-  alone.
-- **What every collection can do is on `Iterable`.** `fold`, `map`,
-  `filter_map`, `count`, `find`, and the like have bodies written on `each`
-  alone, so a user's collection gets them by implementing one method. What
-  needs positions is `Slice`'s.
-- **A function passed to a collection is pure, and one passed to an
-  `Option` or a `Result` may use capabilities.** `map`, `filter`, and
-  `sort_by` call their function many times and may come to call it in
-  parallel, so it takes no capability, as DESIGN.md has callbacks be by
-  default. `Option.map`, `Result.and_then`, and `unwrap_or_else` call theirs
-  at most once, where an `if` would stand, so they pass their caller's
-  capabilities through. A loop is how a collection's elements are visited
-  for effect.
-- **A method that may have nothing to give lends an `Option`.**
-  `items.first()`, `ports.get(name)`, and `heap.peek()` lend what they
-  found for the caller's statement, so nothing is copied and nothing is
-  kept, whatever the element is. A method that gives the element up, such
-  as `pop` and `take`, returns an `Option` that owns it.
-- **A capability's methods are the least an implementation must give.**
-  `FileWrite` has `open`, and `files::write_with`, `files::copy`, and
-  `files::write_atomically` are ordinary functions written on it. So a
-  narrowed implementation or a test's has little to write, and everything
-  built on a capability works with every implementation of it.
-- **The operating system fails with one type,** `SystemError`, whichever
-  capability the call was made through, so code that reads a file and then
-  sends it has one error to name. Every format has an error of its own that
-  says where in the input it failed.
-- **Text in another language is a tagged template.** `Regex`, `json::Value`,
-  `url::Url`, `files::Glob`, `time::Layout`, and `processes::Command` are
-  tags, so a pattern is checked when the code is compiled and an
-  interpolated value can never be read as syntax. A command is a program
-  and its arguments, never a line handed to a shell.
-- **Text is read with `Type.parse(text)`,** the `Parse` trait, which every
-  type that has a written form implements. `From` and `TryFrom` convert
-  between types, and `Display` writes a value for people.
-- **Each capability comes with what tests provide for it,** in its own
-  module: `time::ManualClock`, `random::SeededRandom`, `files::MemoryFiles`,
-  `console::CapturedConsole`, `log::CapturedLog`, and the implementations
-  that narrow, such as `files::FilesWithin` and `network::HostsAllowed`.
-  `simulation::World` is one machine in memory that implements every
-  capability together: its files, a network between its own hosts, a clock
-  that moves only when told, programs that answer as the test says, and
-  tasks run in an order a seed chooses, with faults injected where the test
-  asks. FoundationDB tests its database this way. One provider answers for
-  every handle, as the operating system does for a program, so a test that
-  opens both files and connections provides a `World`.
+- **Each module is one subject, one level below `standard`:**
+  `standard::json`, `standard::files`, `standard::time`. Code always
+  writes a name with its module, so a type's name does not repeat the
+  module's: `collections::Deque`, `time::Date`, `json::Value`. Go nests
+  modules by category, as in `encoding/json` and `crypto/sha256`. The
+  category is not written at the use site, so it only adds something to
+  remember. An LLM that wants JSON writes `use standard::json` without
+  knowing a category.
+- **Subdirectories hold files that no one imports:** the methods and
+  `impl`s of types declared in the parent module, and the real capability
+  implementations in `standard::system`.
+- **Every method of a view also exists on its owner.** `Slice` and
+  `StringSlice` define the methods that read elements or change them in
+  place. `List`, `Array`, and `String` define the same methods and forward
+  to the view, so `mut names.sort()` works without writing `names[..]`.
+  Rust gets this from auto-dereferencing at method calls. Truss converts an
+  owner to its view only at a parameter, so the standard library declares
+  the methods. Methods that change the length, such as `push` and
+  `truncate`, exist only on the owner.
+- **Methods that work on any collection are provided methods of
+  `Iterable`.** `fold`, `map`, `filter_map`, `count`, and `find` are
+  written in terms of `each`. A user's collection gets all of them by
+  implementing `each`. Methods that need an index are `Slice`'s.
+- **A collection method takes a pure callback. An `Option` or `Result`
+  method takes a callback that may use capabilities.** `map`, `filter`,
+  and `sort_by` call the callback once per element and may later run it in
+  parallel, so the callback is pure. `Option.map`, `Result.and_then`, and
+  `unwrap_or_else` call the callback at most once, in place of an `if`, so
+  they take a capability parameter. To run an effect for each element,
+  write a `for` loop.
+- **A lookup that can miss lends an `Option`.** `items.first()`,
+  `ports.get(name)`, and `heap.peek()` have the result `lends
+  Option[Element]`. The caller reads the element for one statement and
+  nothing is copied, whatever the element type. A method that removes the
+  element, such as `pop` or `take`, returns an owned `Option`.
+- **A capability declares only primitive operations.** `FileWrite` has
+  `open`. `files::write_with`, `files::copy`, and
+  `files::write_atomically` are ordinary functions that call it. A
+  narrowing implementation or a test fake then has few methods to write,
+  and every helper works with every implementation.
+- **Every operating-system failure is a `SystemError`,** whichever
+  capability made the call. Code that reads a file and sends it over a
+  connection handles one error type. Each parser has its own error type,
+  which carries the position of the error in the input.
+- **Text in an embedded language is a tagged template.** `Regex`,
+  `json::Value`, `url::Url`, `files::Glob`, `time::Layout`, and
+  `processes::Command` are tags. The compiler validates the literal text,
+  and an interpolated value cannot be parsed as syntax. A
+  `processes::Command` is a program and an argument list. It is never a
+  string passed to a shell.
+- **`Type.parse(text)` parses text,** through the `Parse` trait. `From`
+  and `TryFrom` convert between types. `Display` formats a value for
+  people.
+- **Each capability ships with its test fakes,** in the capability's
+  module: `time::ManualClock`, `random::SeededRandom`,
+  `files::MemoryFiles`, `console::CapturedConsole`, `log::CapturedLog`.
+  The narrowing implementations are there too, such as
+  `files::FilesWithin` and `network::HostsAllowed`.
+- **`simulation::World` fakes every capability at once.** It is an
+  in-memory machine: a file system, a network between its own hosts, a
+  clock that advances only when the test says, programs that return what
+  the test scripted, tasks scheduled by a seed, and fault injection.
+  FoundationDB tests its database this way. A test that opens both files
+  and connections provides a `World`, because one provider must implement
+  `Handles` for every handle, as the operating system does.
 
 ## Visibility
 

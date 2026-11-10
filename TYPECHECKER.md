@@ -1829,10 +1829,11 @@ the compiler. The prelude holds:
 The standard library names them through `standard::intrinsic`, so another
 package may have a type called `View`.
 
-A trait's yielding method, called on a type whose `impl` is known and
-writes the method, is recorded as a call of the `impl`'s own method. A
-`List` gets `each(self)` from its `impl` of `Iterable`, and the cursor of
-that call and the contract a loop over it has are then the list's own.
+When a call to a trait's yielding method resolves to a known `impl` that
+defines the method, the checker records the callee as the `impl`'s method,
+not the trait's. `List` gets `each(self)` from `impl Iterable`. The type of
+the cursor and the contract of a loop over a list must then come from the
+list's `each`, which only the `impl`'s method has.
 
 ## Not built
 

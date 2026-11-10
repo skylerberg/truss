@@ -444,8 +444,7 @@ let () =
   |> List.iter (fun name ->
       List.iteri
         (fun index text ->
-          let database = Engine.context (Engine.create ()) in
-          Database.load_standard (Engine.of_context database);
+          let database = Engine.context (Engine.create ~bases:[ Lazy.force checked_standard ] ()) in
           Database.load_package (Engine.of_context database) ~name:"example" ~dependencies:[]
             [ (example, text) ];
           if Type_checker.diagnostics database example = [] then

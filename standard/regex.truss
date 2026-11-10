@@ -3,7 +3,7 @@ use standard::text
 public opaque type Regex(pattern: String, program: List[UInt32], group_names: List[String])
   derives Copyable
 
-public type PatternProblem =
+public type PatternErrorKind =
   | UnbalancedParenthesis
   | UnbalancedBracket
   | InvalidEscape
@@ -13,7 +13,7 @@ public type PatternProblem =
   | TooLarge
   derives Equal
 
-public type PatternError(problem: PatternProblem, offset: USize)
+public type PatternError(kind: PatternErrorKind, offset: USize)
   derives Equal
 
 impl Display for PatternError {
@@ -141,7 +141,7 @@ public fn Regex.is_match(self, text: StringSlice) -> Bool
   todo
 }
 
-public fn Regex.matches_fully(self, text: StringSlice) -> Bool
+public fn Regex.is_full_match(self, text: StringSlice) -> Bool
   cost time O(text.length() * self.size())
 {
   todo

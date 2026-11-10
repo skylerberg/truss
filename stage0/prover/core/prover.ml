@@ -73,9 +73,8 @@ let law_proofs database package trait (for_type : Types.ty) =
         (Query.demand database Names.declarations module_))
     modules
 
-(* Whether a method an [impl] writes is not finished: its body holds a
-   [todo]. *)
-let unfinished database (impl : Path.t) (interface : Types.impl_interface) =
+(* Whether any method the [impl] defines contains a [todo]. *)
+let has_todo_method database (impl : Path.t) (interface : Types.impl_interface) =
   List.exists
     (fun (name, receiver, (_ : Types.signature)) ->
       match Interface.Summary.definition database (Method { owner = impl; name; receiver }) with
@@ -89,14 +88,13 @@ let unfinished database (impl : Path.t) (interface : Types.impl_interface) =
       | _ -> false)
     interface.impl_methods
 
-(* An [impl]'s obligation to keep each law of its trait. The laws of an
-   [impl] with a method that is not written wait for the method, as every
-   contract after a [todo] waits for it: a law is about what the methods
-   return, and one that is not written returns nothing yet. *)
+(* The obligations that an [impl] satisfies each law of its trait. An
+   [impl] with a [todo] method has none: a law constrains what the methods
+   return, so it cannot be checked until they are written. *)
 let impl_laws database (key : Names.key) source (definition : definition) =
   match (Query.demand database Interface.Environment.interface key.path, definition.kind) with
   | Some (Interface.Environment.Impl_interface interface), Impl _
-    when unfinished database key.path interface ->
+    when has_todo_method database key.path interface ->
       []
   | Some (Interface.Environment.Impl_interface interface), Impl { trait_; _ } ->
       [

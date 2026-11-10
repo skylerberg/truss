@@ -6,7 +6,7 @@ use standard::processes
 
 public opaque type Handle(descriptor: intrinsic::Handle, number: UInt64)
 
-public fn Handle.numbered(number: UInt64) -> Handle
+public fn Handle.simulated(number: UInt64) -> Handle
   ensures result.number() == number
 {
   Handle(descriptor: intrinsic::handle_from(-1), number: number)

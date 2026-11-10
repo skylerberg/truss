@@ -1,6 +1,6 @@
 use standard::text
 
-type Kind = Switch | Valued | Positional | Rest
+type Kind = Flag | Option | Positional | Rest
   derives Equal
 
 type Parameter(
@@ -108,7 +108,7 @@ public fn Parsed.values(self, name: StringSlice) -> Slice[String]
   todo
 }
 
-public fn Parsed.parsed_value[Target: text::Parse](self, name: StringSlice) -> Result[Option[Target], Error] {
+public fn Parsed.value_as[Target: text::Parse](self, name: StringSlice) -> Result[Option[Target], Error] {
   todo
 }
 

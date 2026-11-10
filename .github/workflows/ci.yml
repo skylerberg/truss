@@ -42,11 +42,31 @@ jobs:
 
       - uses: ./.github/actions/z3
 
+      # The solver's answers to the standard library's proofs, each kept by
+      # the text of its query, the solver's version, and its limit. A run
+      # starts from main's and solves only the queries main did not.
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/truss-solver
+          key: solver-${{ github.sha }}
+          restore-keys: solver-
+
       - name: Build, check formatting and truss.opam, and test
-        run: opam exec -- dune build @default @install @fmt @runtest
+        run: TRUSS_SOLVER_CACHE="$HOME/.cache/truss-solver" opam exec -- dune build @default @install @fmt @runtest
 
       - name: Check that truss.opam matches dune-project
         run: git diff --exit-code truss.opam
+
+      # An answer no run has written for two weeks is dropped, so the cache
+      # holds the queries that are still asked and not every one that was.
+      - if: github.event_name == 'push'
+        run: mkdir -p ~/.cache/truss-solver && find ~/.cache/truss-solver -type f -mtime +14 -delete
+
+      - if: github.event_name == 'push'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.cache/truss-solver
+          key: solver-${{ github.sha }}
 
       # Each save starts from the last one, so the cache is trimmed to keep it
       # quick to restore.

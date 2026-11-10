@@ -50,10 +50,35 @@ test "doubling" {
 }
 |}
 
-(* Every test starts as a new process would, with a store of its own. *)
-let fresh_store () =
+(* A store that holds the standard library's checked state and nothing
+   else, as any store does once Truss has run. Checking the standard
+   library and writing its state is most of what a new store costs, and it
+   comes out the same for each, so it is done once. *)
+let store_with_standard =
+  lazy
+    (let directory = fresh "standard" in
+     Database.reset ();
+     Unix.putenv "TRUSS_CACHE" directory;
+     Database.flush_store ();
+     Database.reset ();
+     directory)
+
+(* Every test starts as a new process would, with a store of its own. With
+   [~empty:true] the store holds nothing, as on a machine where Truss has
+   never run, and the process checks the standard library itself. *)
+let fresh_store ?(empty = false) () =
+  let standard = if empty then None else Some (Lazy.force store_with_standard) in
   Database.reset ();
-  Unix.putenv "TRUSS_CACHE" (fresh "cache");
+  let directory = fresh "cache" in
+  Option.iter
+    (fun standard ->
+      if
+        Sys.command
+          (Printf.sprintf "cp -R %s/. %s" (Filename.quote standard) (Filename.quote directory))
+        <> 0
+      then failwith "could not copy the store")
+    standard;
+  Unix.putenv "TRUSS_CACHE" directory;
   Database.logging := true
 
 let package () =
@@ -251,7 +276,7 @@ let () =
       if List.mem "checked(app::main::double)" again then fail "checked double again";
       if not (List.mem "checked(app::main::extra)" again) then fail "did not check extra");
   test "a new worktree's state is a difference over the state it started from" (fun () ->
-      fresh_store ();
+      fresh_store ~empty:true ();
       (* Eight modules, of which the second worktree changes one. *)
       let module_text index =
         Printf.sprintf

@@ -56,7 +56,7 @@ impl Display for Number {
   }
 }
 
-public type ParseProblem =
+public type ParseErrorKind =
   | UnexpectedEnd
   | UnexpectedCharacter
   | InvalidNumber
@@ -66,7 +66,7 @@ public type ParseProblem =
   | TrailingCharacters
   derives Equal
 
-public type ParseError(problem: ParseProblem, offset: USize, line: USize, column: USize)
+public type ParseError(kind: ParseErrorKind, offset: USize, line: USize, column: USize)
   derives Equal
 
 impl Display for ParseError {
@@ -250,7 +250,7 @@ impl From[Map[String, Value]] for Value {
   }
 }
 
-public type DecodeError(path: String, problem: String)
+public type DecodeError(path: String, message: String)
   derives Equal
 
 impl Display for DecodeError {
@@ -260,8 +260,8 @@ impl Display for DecodeError {
 }
 
 public type Error =
-  | Malformed(error: ParseError)
-  | Mismatched(error: DecodeError)
+  | Parse(error: ParseError)
+  | Decode(error: DecodeError)
   derives Equal
 
 impl Display for Error {
@@ -271,8 +271,8 @@ impl Display for Error {
 }
 
 public type ReadError =
-  | Unreadable(error: SystemError)
-  | Unparsed(error: ParseError)
+  | System(error: SystemError)
+  | Parse(error: ParseError)
   derives Equal
 
 impl Display for ReadError {

@@ -488,7 +488,8 @@ and method_call state env ?expected (value : expression) (base : expression) (me
       | Ok found -> (
           match
             Option.map
-              (fun (chosen, version) -> (chosen, written_version state receiver_type version))
+              (fun (chosen, version) ->
+                (chosen, impl_method_if_resolved state receiver_type version))
               (choose_temporary found)
           with
           | None -> missing_receiver_mark found

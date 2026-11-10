@@ -2,10 +2,10 @@ use standard::streams
 
 public type Options(delimiter: Character = Character",", quote: Character = Character"\"", trim: Bool = false)
 
-public type ParseProblem = UnterminatedQuote | UnexpectedQuote
+public type ParseErrorKind = UnterminatedQuote | UnexpectedQuote
   derives Equal
 
-public type ParseError(problem: ParseProblem, line: USize, column: USize)
+public type ParseError(kind: ParseErrorKind, line: USize, column: USize)
   derives Equal
 
 impl Display for ParseError {
@@ -15,8 +15,8 @@ impl Display for ParseError {
 }
 
 public type ReadError =
-  | Unreadable(error: SystemError)
-  | Unparsed(error: ParseError)
+  | System(error: SystemError)
+  | Parse(error: ParseError)
   derives Equal
 
 impl Display for ReadError {
