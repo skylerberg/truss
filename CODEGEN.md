@@ -35,9 +35,12 @@ body when every node in the body is of a supported kind:
 - `let`, with or without a pattern and an `else`, assignment, and compound
   assignment
 - `is` tests and every kind of pattern
-- `assert`, `todo`, `unreachable`, `echo`, and `proof` blocks
-- literals, strings, and constants
-- constructor calls that pass every field
+- `assert`, `todo`, `unreachable`, `echo`, `proof` blocks, and `parallel`
+  blocks
+- literals, constants, and generic value parameters
+- plain, interpolated, and tagged strings
+- array, set, and map literals
+- constructor calls, `with` updates, and `copy`
 
 A body with any other node falls back to the older lowering, which walks the
 syntax tree and the checked form's tables. A function's parameter defaults
@@ -904,6 +907,10 @@ Where nothing is left, as for an index into a `List`, whose method ends at
 its `yield` owning nothing, the method simply ends there and the lend costs
 nothing.
 
+A lending method with no `yield`, such as one whose body is `todo`, never
+returns. Its body is inlined as usual, and the caller's code after the call
+is unreachable.
+
 A loop over a yielding method that is already inlined around it, as a
 tree's `each` loops over its subtrees, would be inlined forever. Stage0
 pulls a cursor over the inner call instead, in a heap block the loop frees
@@ -1534,9 +1541,7 @@ a command line can hold.
   digits are `snprintf`'s and the check `strtod`'s.
 - **Core-form lowering for every body.** These still fall back to the
   syntax-tree lowering: calls through a function value or an `any` value,
-  lambdas, array, set, and map literals, interpolated and tagged strings,
-  `with` updates, slices, constructor calls that rely on a field
-  default, cursors (a yielding call outside a loop, `for` over a cursor,
+  lambdas, cursors (a yielding call outside a loop, `for` over a cursor,
   and a loop over a recursive yielding method), and the pulled version of
   a yielding method. Once all of them are supported, the syntax-tree
   lowering is deleted.

@@ -563,4 +563,141 @@ test "boxes" {
 }
 |}
 
+let () =
+  lowers "an interpolated string, a tagged string, and a copy" ~tests:true
+    [ ("describe", []); ("sum", []); ("twice", []) ]
+    {|type Sum(pieces: USize, total: Int64)
+
+impl FromTemplate for Sum {
+  type Part = Int64
+
+  fn from_template(template: Template[Int64]) -> Sum {
+    var total = 0
+    for part in template.parts {
+      total += part
+    }
+    Sum(pieces: template.literals.length(), total: total)
+  }
+}
+
+fn describe(count: Int64, label: String) -> String {
+  "${count} ${label}s, ${count > 1}"
+}
+
+fn sum(first: Int64, second: Int64) -> Sum {
+  Sum"a ${first} b ${second} c"
+}
+
+fn twice(text: String) -> String {
+  let again = text.copy()
+  "${text}${again}"
+}
+
+test "strings" {
+  assert describe(2, label: "box") == "2 boxs, true"
+  let total = sum(2, second: 40)
+  assert total.pieces == 3
+  assert total.total == 42
+  assert twice("ab") == "abab"
+}
+|};
+  lowers "a set, a map, a record update, a field default, and a parallel block" ~tests:true
+    [
+      ("colors", []); ("ages", []); ("renamed", []); ("defaults", []); ("circle", []); ("both", []);
+    ]
+    {|type Settings(name: String = "default", retries: Int64 = 2 + 1, verbose: Bool = false)
+
+type Shape =
+  | Circle(radius: Int64 = 7)
+  | Square(side: Int64)
+
+fn colors() -> Set[String] {
+  ["red", "green", "red"]
+}
+
+fn ages() -> Map[String, Int64] {
+  ["ada": 36, "alan": 41]
+}
+
+fn renamed(settings: own Settings) -> Settings {
+  settings with (name: "renamed", retries: 9)
+}
+
+fn defaults() -> Settings {
+  Settings(verbose: true)
+}
+
+fn circle() -> Shape {
+  Shape.Circle()
+}
+
+fn both(first: Int64, second: Int64) -> Int64 {
+  var left = 0
+  var right = 0
+  parallel {
+    left = first * 2
+    right = second * 3
+  }
+  left + right
+}
+
+test "values" {
+  assert colors().length() == 2
+  assert ages().length() == 2
+  let settings = defaults()
+  assert settings.name == "default"
+  assert settings.retries == 3
+  assert settings.verbose
+  let changed = renamed(own settings)
+  assert changed.name == "renamed"
+  assert changed.retries == 9
+  assert changed.verbose
+  assert circle() is Circle(radius: 7)
+  assert both(1, second: 2) == 8
+}
+|}
+
+let () =
+  lowers "an array literal and a generic value parameter used as a value" ~tests:true
+    [ ("squares", []); ("capacity", [ Ground.Value (Z.of_int 3) ]) ]
+    {|fn squares() -> Array[Int64, 3] {
+  [1, 4, 9]
+}
+
+fn capacity[count: USize](items: Array[Int64, count]) -> USize {
+  count
+}
+
+test "arrays" {
+  assert capacity(squares()) == 3
+  let four: Array[Int64, 4] = [0, 0, 0, 0]
+  assert capacity(four) == 4
+}
+|}
+
+let () =
+  test "a call of a lending method that never yields compiles, and stops where the method does"
+    (fun () ->
+      expect_output
+        {|type Grid(cells: List[Int64])
+
+fn Grid.broken(self) lends Int64
+  uses Panic
+{
+  Panic.crash("no cell")
+}
+
+fn read(grid: Grid) -> Int64
+  uses Panic
+{
+  grid.broken() + 1
+}
+
+test "reads" {
+  let grid = Grid(cells: [1])
+  assert read(grid) == 2
+}
+|}
+        "test 0 panicked\nmessage 35\nno cell\n  at example/main.truss:6:3\n")
+
 let () = Harness.finish ()

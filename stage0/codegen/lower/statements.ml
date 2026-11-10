@@ -373,14 +373,6 @@ and recursive_loop st (s : S.statement) call_ ~expressions ~arguments ~path ~typ
       own_in_scope st cursor;
       pull_loop st yielding cursor ~pattern ~body)
 
-(* The type a yielding method yields, in this instance. *)
-and yielded_type st path type_arguments =
-  let signature = signature_of st.context path in
-  match signature.output with
-  | Yields (_, ty) | Lends (_, ty) ->
-      Monomorphic.ground st.context.monomorphic (bind signature.generics type_arguments) ty
-  | Returns _ -> bug "%s does not yield" (Path.show path)
-
 and if_ st ~condition ~then_ ~else_ destination =
   let yes = block st.b and no = block st.b and after = block st.b in
   (* The names the condition binds are in the [then] block, not the
