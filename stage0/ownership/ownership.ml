@@ -79,6 +79,7 @@ let check database (key : Resolve.Names.key) : result option =
          | None -> ());
       if executable then begin
         Yield_rules.check_cursors context form.definition;
+        Yield_rules.check_concurrent_loops context form.definition;
         (* A lending method yields exactly once on every path. The report
            is at the method's name. *)
         match
