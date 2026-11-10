@@ -4,6 +4,7 @@
   storage
   compiler_bug
   intrinsic
+  libc
   ground
   memory_layout
   lir

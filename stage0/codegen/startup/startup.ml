@@ -320,10 +320,6 @@ int32_t t_runtime_open(const uint8_t *path, t_usize length, int32_t flags, int32
   return descriptor;
 }
 
-void t_runtime_close(int32_t descriptor) {
-  if (descriptor >= 0) close(descriptor);
-}
-
 /* Runs a program, found on the PATH as a shell finds it, with the
    arguments, each ending in a zero byte, and waits for it. It returns the
    exit status, or 128 and the signal that ended it; on failure to start it,

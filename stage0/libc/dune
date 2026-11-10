@@ -1,0 +1,7 @@
+(library
+ (name libc))
+
+(rule
+ (with-stdout-to
+  built_for.ml
+  (echo "let system = \"%{system}\"\n")))

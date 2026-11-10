@@ -11,7 +11,8 @@
   program_tests
   evaluate_tests
   failure_tests
-  owning_tests)
+  owning_tests
+  libc_tests)
  (modules
   codegen_support
   layout_tests
@@ -25,7 +26,8 @@
   program_tests
   evaluate_tests
   failure_tests
-  owning_tests)
+  owning_tests
+  libc_tests)
  (libraries
   harness
   compiler_bug
@@ -54,6 +56,10 @@
   interface
   types
   intrinsic
+  intrinsic_signatures
+  libc
+  storage
+  unix
   monomorphic
   lir_builder
   intrinsics

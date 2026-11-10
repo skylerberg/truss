@@ -123,7 +123,6 @@ let intrinsic_name = function
   | Evidence_fill -> "evidence_fill"
   | System_environment -> "system_environment"
   | System_open -> "system_open"
-  | System_close -> "system_close"
   | System_run -> "system_run"
   | Clock_now -> "clock_now"
   | Random_fill -> "random_fill"
@@ -163,6 +162,7 @@ let target_to_string = function
   | Direct { function_; _ } -> function_ref_to_string function_
   | Indirect { value; _ } -> "(" ^ operand_to_string value ^ ")"
   | Intrinsic intrinsic -> "intrinsic " ^ intrinsic_name intrinsic
+  | Foreign declaration -> "foreign " ^ declaration.symbol
   | Evidence_call { evidence; slot; _ } ->
       Printf.sprintf "(%s table %d)" (operand_to_string evidence) slot
   | Table_call { table; value; slot; _ } ->

@@ -574,7 +574,7 @@ let () =
 
 (* Lowers code and compiles nothing, so it needs no C compiler. *)
 let lowering (project : Project.t) =
-  Compile.create project.context Memory_layout.target_64
+  Compile.create project.context (Compiler.target ())
     { compiler = "cc"; identity = "lowering only" }
     (Build.cache (Database.objects_directory ()))
     { build = Development; optimization = O1; extra = [] }

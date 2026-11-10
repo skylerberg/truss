@@ -12,6 +12,7 @@
   ground
   instance
   memory_layout
+  libc
   lir
   glue
   drops

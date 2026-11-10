@@ -107,7 +107,7 @@ let changes (project : Project.t) base =
 let tests_changed (project : Project.t) base =
   let keys context session =
     let compile =
-      Compile.create context Memory_layout.target_64
+      Compile.create context (Compiler.target ())
         { compiler = "cc"; identity = "lowering only" }
         (Build.cache (Database.objects_directory ()))
         { build = Development; optimization = O1; extra = [] }

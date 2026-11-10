@@ -38,6 +38,9 @@ val builtin_name : builtin -> string
 val builtin_path : builtin -> Path.t
 val builtin_of_path : Path.t -> builtin option
 
+val libc_builtin : Libc.scalar -> builtin
+(** The built-in type of a number the C library takes or gives. *)
+
 (** The operations of [standard::intrinsic], which the standard library is written on. The type
     checker gives each its signature, and code generation lowers each directly; both match on this
     type exhaustively, so a new operation cannot compile until both handle it. Arithmetic and
@@ -121,6 +124,11 @@ type operation =
           signal that ended it; [error] gets 0, or the system's error number *)
   | Clock_now
   | Random_fill
+  | Libc of Libc.function_
+      (** A function of the system's C library, named [libc_] and its name: [libc_write] *)
+  | Libc_number of Libc.number
+      (** A number the C library's headers define, which differs between systems, as an operation
+          that takes nothing: [libc_o_creat()] *)
 
 val operations : operation list
 val operation_name : operation -> string

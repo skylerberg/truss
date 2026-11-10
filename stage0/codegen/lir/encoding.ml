@@ -2,7 +2,7 @@
 
 open Ir
 
-let version = 11
+let version = 12
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -166,7 +166,6 @@ let intrinsic_tag = function
   | Evidence_fill -> 44
   | System_environment -> 45
   | System_open -> 46
-  | System_close -> 47
   | System_run -> 48
 
 let encode_rvalue instance rvalue =
@@ -187,12 +186,22 @@ let encode_rvalue instance rvalue =
   | Function_value { code; environment } ->
       tagged 6 [ encode_function_ref instance code; option operand environment ]
 
+let encode_foreign (declaration : Libc.declaration) =
+  Cbor.Array
+    [
+      Text declaration.symbol;
+      Text declaration.returns;
+      list (fun c -> Cbor.Text c) declaration.takes;
+      option Cbor.int declaration.variadic_from;
+    ]
+
 let encode_target instance = function
   | Direct { function_; signature } ->
       tagged 0 [ encode_function_ref instance function_; encode_signature instance signature ]
   | Indirect { value; signature } ->
       tagged 1 [ encode_operand instance value; encode_signature instance signature ]
   | Intrinsic intrinsic -> tagged 2 [ Cbor.int (intrinsic_tag intrinsic) ]
+  | Foreign declaration -> tagged 5 [ encode_foreign declaration ]
   | Evidence_call { evidence; slot; signature } ->
       tagged 3
         [ encode_operand instance evidence; Cbor.int slot; encode_signature instance signature ]
