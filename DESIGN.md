@@ -2016,12 +2016,20 @@ effect: code that does it declares `uses Tasks`.
   waits for each to end, and then leaves. The first branch to leave decides
   where control goes and with what value; a later one's is dropped. Kotlin,
   Swift, Trio, and Java's scopes cancel sibling tasks the same way.
-- **Cancellation is an error value.** In a cancelled task, a capability
-  call that would wait returns at once with the value that says it did not
-  finish: `SystemError.Cancelled` where it returns a `Result`, and `None`
-  where it returns an `Option`. `?` carries that out like any other error,
-  so a cancelled task ends by returning, along a path that is written in
-  its code. `Tasks.cancelled()` tells a loop that calls nothing that waits.
+- **Cancellation is an error value.** In a cancelled task, the standard
+  library's implementation of a call that would wait returns at once with
+  the value that says it did not finish: `SystemError.Cancelled` where the
+  method returns a `Result`, and `None` where it returns an `Option`. A
+  method that returns nothing, such as `Clock.sleep`, returns early. `?`
+  carries the error out like any other, so a cancelled task ends by
+  returning, along a path that is written in its code. `Tasks.cancelled()`
+  tells a loop that calls nothing that waits.
+- **Cancellation breaks no contract.** The cancelled value is returned by
+  an implementation, which is proven against its method's `ensures` like
+  any other result, so a caller's proof holds whether or not the task was
+  cancelled. An implementation written on calls that wait passes their
+  error on. A task that waits for its turn in a `mut` implementation keeps
+  waiting, since nothing else could answer for the method.
   This is Go's `Context` without the parameter, since whatever provides
   `Tasks` knows which task is calling. Trio and Kotlin raise an exception
   at the call instead, and Rust drops a future at whichever `await` it had

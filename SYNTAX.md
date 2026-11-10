@@ -2198,10 +2198,10 @@ fn profile(id: UserId) -> Result[Profile, DatabaseError]
 - A `?`, `return`, or `break` that leaves the block cancels the other
   branches, waits for them to end, and then leaves. Above, a query that
   fails cancels the other query, and `profile` returns the error.
-- In a cancelled task, a capability call that would wait returns at once:
-  `Err(SystemError.Cancelled)` where it returns a `Result`, and `None`
-  where it returns an `Option`. `Tasks.cancelled()` tells whether the task
-  has been cancelled.
+- In a cancelled task, a call of the standard capabilities that would wait
+  returns at once: `Err(SystemError.Cancelled)` where it returns a
+  `Result`, and `None` where it returns an `Option`. `Tasks.cancelled()`
+  tells whether the task has been cancelled.
 
 `concurrent for` runs each iteration of a loop as a task:
 
