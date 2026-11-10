@@ -12,6 +12,14 @@ module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
 
+(* One version of a method: a type's own, or a trait's. *)
+type version = Own_version of Path.t | Trait_version of T.trait_reference * T.trait_method
+
+(* The version a call's receiver asks for: the one its mark names, and the
+   read-only one when it has none. *)
+let marked_receiver (receiver : expression) : Path.receiver =
+  match receiver.kind with Mode (Mut, _) -> Mut | Mode (Own, _) -> Own | _ -> Read
+
 (* An expression's value where a type is expected of it. *)
 let rec coerce state env ?argument (value : expression) ~found ~expected =
   convert state env ?argument ~expression:value.id value.span ~found ~expected
@@ -296,16 +304,12 @@ and could_implement state type_ trait =
   in
   Option.is_some (implements state type_ (trait_reference ~arguments trait))
 
-and trait_static_method state path name =
+and trait_static_method state path name receiver =
   List.concat_map
     (fun package ->
       List.filter_map
         (fun trait ->
-          match
-            List.find_opt
-              (fun (method_ : T.trait_method) -> method_.method_name = name)
-              (Members.trait_methods state.database trait name)
-          with
+          match Members.trait_method state.database trait name receiver with
           | Some method_ ->
               let reference = trait_reference trait in
               if
@@ -400,93 +404,128 @@ and trait_candidates state receiver_type name =
                (Query.demand state.database Names.traits_declaring (package, name)))
            (Members.visible_packages state.database state.package))
 
+(* Whether the traits that give a type one name are one family: each is
+   reached from another through what it requires. Only then are their
+   methods versions of one method. Two unrelated traits that share a name
+   stay apart whatever way each takes [self], since otherwise a trait added
+   later could take over a call on a temporary without an error. *)
+and one_family state (traits : T.trait_reference list) =
+  let requires (first : T.trait_reference) (second : T.trait_reference) =
+    List.exists
+      (fun (bound : T.trait_reference) -> Path.equal bound.trait second.trait)
+      (Properties.bound_closure state.database
+         ~self:(T.Parameter { owner = first.trait; name = "Self" })
+         first)
+  in
+  let related first second = requires first second || requires second first in
+  let rec grow reached left =
+    match List.partition (fun trait -> List.exists (related trait) reached) left with
+    | [], [] -> true
+    | [], _ -> false
+    | more, left -> grow (more @ reached) left
+  in
+  match traits with [] -> true | first :: rest -> grow [ first ] rest
+
+(* The versions of a name on a type, by how each takes [self]: the type's
+   own methods and those of the one family of traits that gives it the
+   name, together. The traits themselves, when they are not one family. A
+   type's own version stands where a trait gives the same one, since that
+   clash is reported where the [impl] is. *)
+and versions state receiver_type name :
+    ((Path.receiver * version) list, T.trait_reference list) Result.t =
+  let candidates = trait_candidates state receiver_type name in
+  if not (one_family state (List.map fst candidates)) then Error (List.map fst candidates)
+  else
+    let own =
+      match receiver_type with
+      | T.Named { path; _ } ->
+          List.filter_map
+            (fun (receiver, method_path) ->
+              if receiver = Path.Static then None else Some (receiver, Own_version method_path))
+            (Members.own_methods state.database path name)
+      | _ -> []
+    in
+    let from_traits =
+      List.concat_map
+        (fun ((trait : T.trait_reference), methods) ->
+          List.map
+            (fun (method_ : T.trait_method) ->
+              (method_.method_receiver, Trait_version (trait, method_)))
+            methods)
+        candidates
+    in
+    Ok
+      (List.filter_map
+         (fun (receiver : Path.receiver) ->
+           Option.map
+             (fun version -> (receiver, version))
+             (List.assoc_opt receiver (own @ from_traits)))
+         [ Read; Mut; Own ])
+
 and each_call state (span : span) type_ mode =
   let receiver : Path.receiver = match mode with T.Read -> Read | Mut -> Mut | Own -> Own in
-  match type_ with
-  | T.Named { path; _ } -> (
-      match List.assoc_opt receiver (Members.own_methods state.database path "each") with
-      | Some method_path -> (
-          match function_signature state method_path with
-          | Some (Ok signature) -> (
-              let instance = instantiate state span signature in
-              (match instance.signature.receiver with
-              | Some (_, self_type) -> ignore (unify state self_type type_)
-              | None -> ());
-              match instance.signature.output with
-              | Yields (_, element) ->
-                  Some
-                    ( {
-                        C.callee =
-                          Function { path = method_path; type_arguments = instance.type_arguments };
-                        arguments = [];
-                        defaults_left_out = [];
-                        uses = instance.signature.uses;
-                        capability_arguments = [];
-                        result = element;
-                      },
-                      element )
-              | _ -> None)
-          | Some (Error _) | None -> None)
-      | None -> None)
-  | T.Parameter _ | T.Any _ -> (
-      match trait_candidates state type_ "each" with
-      | [ (trait, methods) ] -> (
-          match
-            List.find_opt
-              (fun (method_ : T.trait_method) -> method_.method_receiver = receiver)
-              methods
-          with
-          | Some method_ -> (
-              let instance =
-                instantiate state span
-                  ~extra:[ ({ owner = trait.trait; name = "Self" }, T.Type type_) ]
-                  method_.method_signature
-              in
-              match instance.signature.output with
-              | Yields (_, element) ->
-                  let element = normalize state element in
-                  Some
-                    ( {
-                        C.callee =
-                          Trait_method
-                            {
-                              trait;
-                              name = "each";
-                              receiver;
-                              self_type = type_;
-                              type_arguments = [];
-                              evidence =
-                                (match type_ with
-                                | T.Any _ -> Dynamic
-                                | T.Parameter _ -> Bound
-                                | _ -> Built_in);
-                            };
-                        arguments = [];
-                        defaults_left_out = [];
-                        uses = [];
-                        capability_arguments = [];
-                        result = element;
-                      },
-                      element )
-              | _ -> None)
-          | None -> None)
+  let found = match versions state type_ "each" with Ok found -> found | Error _ -> [] in
+  match List.assoc_opt receiver found with
+  | Some (Own_version method_path) -> (
+      match function_signature state method_path with
+      | Some (Ok signature) -> (
+          let instance = instantiate state span signature in
+          (match instance.signature.receiver with
+          | Some (_, self_type) -> ignore (unify state self_type type_)
+          | None -> ());
+          match instance.signature.output with
+          | Yields (_, element) ->
+              Some
+                ( {
+                    C.callee =
+                      Function { path = method_path; type_arguments = instance.type_arguments };
+                    arguments = [];
+                    defaults_left_out = [];
+                    uses = instance.signature.uses;
+                    capability_arguments = [];
+                    result = element;
+                  },
+                  element )
+          | _ -> None)
+      | Some (Error _) | None -> None)
+  | Some (Trait_version (trait, method_)) -> (
+      let instance =
+        instantiate state span
+          ~extra:[ ({ owner = trait.trait; name = "Self" }, T.Type type_) ]
+          method_.method_signature
+      in
+      match instance.signature.output with
+      | Yields (_, element) ->
+          let element = normalize state element in
+          Some
+            ( {
+                C.callee =
+                  Trait_method
+                    {
+                      trait;
+                      name = "each";
+                      receiver;
+                      self_type = type_;
+                      type_arguments = [];
+                      evidence =
+                        (match type_ with
+                        | T.Any _ -> Dynamic
+                        | T.Parameter _ -> Bound
+                        | _ -> (
+                            match implements state type_ trait with
+                            | Some evidence -> evidence_of evidence
+                            | None -> Built_in));
+                    };
+                arguments = [];
+                defaults_left_out = [];
+                uses = instance.signature.uses;
+                capability_arguments = [];
+                result = element;
+              },
+              element )
       | _ -> None)
-  | _ -> None
+  | None -> None
 
 (* What a value's [each] yields for a loop's mode. *)
 and yielded state (span : span) type_ mode =
-  let receiver : Path.receiver = match mode with T.Read -> Read | Mut -> Mut | Own -> Own in
-  match type_ with
-  | T.Named { path; _ } -> (
-      match List.assoc_opt receiver (Members.own_methods state.database path "each") with
-      | Some method_path -> (
-          match function_signature state method_path with
-          | Some (Ok signature) -> (
-              let instance = instantiate state span signature in
-              (match instance.signature.receiver with
-              | Some (_, self_type) -> ignore (unify state self_type type_)
-              | None -> ());
-              match instance.signature.output with Yields (_, element) -> Some element | _ -> None)
-          | Some (Error _) | None -> None)
-      | None -> None)
-  | _ -> None
+  Option.map (fun ((_ : C.call), element) -> element) (each_call state span type_ mode)
