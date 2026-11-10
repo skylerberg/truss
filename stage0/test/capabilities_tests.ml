@@ -128,6 +128,35 @@ let () =
         \  })\n\
          }\n"
         "capabilities.lambda_uses");
+  test "a loop over a value needs what its each uses" (fun () ->
+      one_diagnostic
+        "type Ticker()\n\n\
+         fn Ticker.each(self) yields Instant\n\
+        \  uses Clock\n\
+         {\n\
+        \  yield Clock.now()\n\
+         }\n\n\
+         fn f(ticker: Ticker) {\n\
+        \  for tick in ticker {\n\
+        \    let _ = tick\n\
+        \  }\n\
+         }\n"
+        "capabilities.not_available");
+  test "a loop over a value may use what the function declares" (fun () ->
+      fine
+        "type Ticker()\n\n\
+         fn Ticker.each(self) yields Instant\n\
+        \  uses Clock\n\
+         {\n\
+        \  yield Clock.now()\n\
+         }\n\n\
+         fn f(ticker: Ticker)\n\
+        \  uses Clock\n\
+         {\n\
+        \  for tick in ticker {\n\
+        \    let _ = tick\n\
+        \  }\n\
+         }\n");
   test "a capability parameter is what the lambdas passed for it use" (fun () ->
       fine
         "fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))\n\

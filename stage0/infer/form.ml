@@ -272,27 +272,20 @@ let range state (value : expression) start stop ~inclusive : Core.kind =
   | _ -> bug "a range with an end left out is a value only where it slices"
 
 (* What a [provide] gives its body: each implementation, as the place it
-   is or the value it makes, with what the check of capabilities found its
-   type provides. *)
-let provide state (value : expression) (implementations : expression list) (body : block) :
-    Core.kind =
-  let recorded =
-    match state.tables.provides.(value.id) with
-    | Some recorded -> recorded.implementations
-    | None -> bug "a `provide` has no record of what it provides"
-  in
+   is or the value it makes. What its type provides is the check of
+   capabilities' to say. *)
+let provide state (implementations : expression list) (body : block) : Core.kind =
   let implementations =
     List.map
       (fun (implementation : expression) : Core.implementation ->
         let mode : T.mode = match implementation.kind with Mode (Mut, _) -> Mut | _ -> Read in
+        let given = built state implementation in
         {
+          origin = implementation.id;
           mode;
-          value = operand mode (built state implementation);
-          provides =
-            List.map
-              (fun ({ capability; impl; arguments } : C.provided) : Core.provided ->
-                { capability; impl; arguments })
-              (Option.value ~default:[] (List.assoc_opt implementation.id recorded));
+          value = operand mode given;
+          type_ = given.type_;
+          provides = [];
         })
       implementations
   in
