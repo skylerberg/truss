@@ -100,4 +100,28 @@ fn f() -> Count {
       | found ->
           fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found)))
 
+(* The same tag at the same path with the same text, checked by code that
+   differs: a check is kept under the code that ran, not under its name. *)
+let () =
+  test "a template's check is done again when the code it runs has changed" (fun () ->
+      let use = "\nfn f() -> Shout {\n  Shout\"HEY\"\n}\n" in
+      let accepts_all =
+        let refuses = "        quiet = false" in
+        let at = ref 0 in
+        while String.sub shout !at (String.length refuses) <> refuses do
+          incr at
+        done;
+        String.sub shout 0 !at ^ "        quiet = true"
+        ^ String.sub shout
+            (!at + String.length refuses)
+            (String.length shout - !at - String.length refuses)
+      in
+      (match proven_with_running (shout ^ use) with
+      | [ _ ] -> ()
+      | found -> fail "expected the first check to fail, got %d diagnostics" (List.length found));
+      match proven_with_running (accepts_all ^ use) with
+      | [] -> ()
+      | found ->
+          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found)))
+
 let () = Harness.finish ()
