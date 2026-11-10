@@ -200,6 +200,17 @@ and owned_value state flow (value : expression) =
   match (value.kind, place_of context value) with
   | Mode (Own, _), _ -> expression state flow value
   | _, None -> expression state flow ~position:Owned_position value
+  | _, Some ({ root = Constant_root _; _ } as place)
+    when not (plain context (type_of context value)) ->
+      report context Needs_owned value.span
+        ~fixes:
+          (if copyable context (type_of context value) then
+             [ Diagnostic.fix "Copy it." [ Diagnostic.insert value.span.stop ".copy()" ] ]
+           else [])
+        (Printf.sprintf "An owned value is needed here, and `%s` is %s. Copy it."
+           (show_place context.names place)
+           (if place.steps = [] then "a constant" else "part of a constant"));
+      expression state flow value
   | _, Some place when not (plain context (type_of context value)) ->
       let shown = show_place context.names place in
       report context Needs_owned value.span
@@ -548,7 +559,7 @@ and block state flow (written : block) =
    in a holder from before it stays. *)
 and leave state views_before (written : block) =
   let from_before = function
-    | Self_root -> true
+    | Self_root | Constant_root _ -> true
     | Local id ->
         Option.value ~default:0 (Hashtbl.find_opt state.context.declared id) < written.span.start
   in

@@ -15,6 +15,62 @@ let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 let keep = "fn keep(items: own List[Int64]) {}\n\nfn look(items: List[Int64]) {}\n\n"
 
+(* Constants *)
+
+let () =
+  let names = "let names: List[Int64] = [1, 2]\n\n" in
+  let config =
+    "type Config(items: List[Int64])\n\n\
+     let config: Config = Config(items: [1])\n\n\
+     let Config.ports: List[Int64] = [1]\n\n"
+  in
+  List.iter
+    (fun (what, text, code) -> test (what ^ " is an error") (fun () -> one_diagnostic text code))
+    [
+      ( "giving up a constant with `own`",
+        keep ^ names ^ "fn f() {\n  keep(own names)\n}\n",
+        "ownership.not_owned" );
+      ( "giving up a field of a constant with `own`",
+        keep ^ config ^ "fn f() {\n  keep(own config.items)\n}\n",
+        "ownership.not_owned" );
+      ( "passing a constant to an `own` parameter",
+        keep ^ names ^ "fn f() {\n  keep(names)\n}\n",
+        "types.missing_mark" );
+      ( "passing a type's constant to an `own` parameter",
+        keep ^ config ^ "fn f() {\n  keep(Config.ports)\n}\n",
+        "types.missing_mark" );
+      ( "binding a constant with `var`",
+        names ^ "fn f() {\n  var mine = names\n  mut mine.push(1)\n}\n",
+        "ownership.needs_owned" );
+      ( "binding a type's constant with `var`",
+        config ^ "fn f() {\n  var mine = Config.ports\n  mut mine.push(1)\n}\n",
+        "ownership.needs_owned" );
+      ( "returning a constant",
+        names ^ "fn f() -> List[Int64] {\n  names\n}\n",
+        "ownership.needs_owned" );
+    ];
+  test "an owned value from a constant is a copy, with a fix" (fun () ->
+      one_diagnostic
+        (names ^ "fn f() -> List[Int64] {\n  names\n}\n")
+        "ownership.needs_owned"
+        ~fixed:(names ^ "fn f() -> List[Int64] {\n  names.copy()\n}\n"));
+  test "a constant can be read, viewed, copied, and returned as a view" (fun () ->
+      fine
+        (keep ^ names
+       ^ "let limit: Int64 = 10\n\n\
+          fn first() -> Slice[Int64] {\n\
+         \  names[0..1]\n\
+          }\n\n\
+          fn f() -> Int64 {\n\
+         \  look(names)\n\
+         \  keep(names.copy())\n\
+         \  let view = names\n\
+         \  look(view)\n\
+         \  var count = limit\n\
+         \  count += 1\n\
+         \  count\n\
+          }\n"))
+
 let () =
   test "a moved place cannot be used, with a fix that copies at the move" (fun () ->
       one_diagnostic

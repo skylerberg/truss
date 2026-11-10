@@ -6,7 +6,10 @@ open Syntax
 module T = Types
 module C = Checked
 
-type root = Local of id | Self_root
+type root =
+  | Local of id
+  | Self_root
+  | Constant_root of Path.t  (** A constant's static data, which is never owned or changed. *)
 
 (* An index or a range whose value the checker cannot compare stands for
    some elements. *)
@@ -16,6 +19,8 @@ type place = { root : root; steps : step list }
 let show_root names = function
   | Local id -> Option.value ~default:"this" (Hashtbl.find_opt names id)
   | Self_root -> "self"
+  | Constant_root (Top { name; _ } | Member_constant { name; _ }) -> name
+  | Constant_root path -> Path.show path
 
 let show_place names place =
   show_root names place.root
@@ -121,10 +126,13 @@ let rec place_in (resolved : Resolve.resolved) (checked : C.t) (value : expressi
   | Name path -> (
       match resolved.names.(path.last.id) with
       | Some (Local id) -> Some { root = Local id; steps = [] }
+      | Some (Definition (Constant, path)) -> Some { root = Constant_root path; steps = [] }
       | _ -> None)
   | Self_value -> Some { root = Self_root; steps = [] }
   | Member (base, member) -> (
       match checked.meanings.(value.id) with
+      | Some (Global { path = Member_constant _ as path; _ }) ->
+          Some { root = Constant_root path; steps = [] }
       | Some (Field_read _) ->
           Option.map
             (fun place -> { place with steps = place.steps @ [ Field member.text ] })
@@ -182,6 +190,7 @@ let lender context (call : expression) =
 let kind_of context = function
   | Local id -> Option.value ~default:Owned (Hashtbl.find_opt context.kinds id)
   | Self_root -> Option.value ~default:Viewing context.self_kind
+  | Constant_root _ -> Viewing
 
 (* Whether a place is gone once the function returns, so that nothing the
    caller keeps may view it: a local, and a parameter or [self] that the
@@ -195,12 +204,17 @@ let ends_with_function context (place : place) =
   match place.root with
   | Self_root -> owned context.self_type
   | Local id -> (not (List.mem id context.parameters)) || owned context.checked.local_types.(id)
+  | Constant_root _ -> false
 
 (* Whether the caller keeps what a place is part of once the function
    returns: a [mut] parameter, or [self] in a [mut self] method. *)
 let kept_by_caller context (place : place) =
   kind_of context place.root = Mut_access
-  && match place.root with Self_root -> true | Local id -> List.mem id context.parameters
+  &&
+  match place.root with
+  | Self_root -> true
+  | Local id -> List.mem id context.parameters
+  | Constant_root _ -> false
 
 (* Reachability, for liveness *)
 

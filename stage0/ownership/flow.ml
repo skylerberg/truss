@@ -119,7 +119,7 @@ let changed state (place : place) (span : span) ~what =
     (fun (start, own) ->
       let outside =
         match place.root with
-        | Self_root -> true
+        | Self_root | Constant_root _ -> true
         | Local id ->
             (not (List.mem id own))
             && Option.value ~default:0 (Hashtbl.find_opt context.declared id) < start
@@ -136,7 +136,7 @@ let changed state (place : place) (span : span) ~what =
         match holder with
         | Local id when not (kept_by_caller context { root = holder; steps = [] }) ->
             live context id ~at:span.start
-        | Local _ | Self_root -> true
+        | Local _ | Self_root | Constant_root _ -> true
       in
       if List.exists (fun lent_place -> overlap lent_place place <> No_overlap) lent && in_use then
         report context Changed_while_viewed span
@@ -164,19 +164,24 @@ let moved_out state (flow : flow) (place : place) (value : expression) =
     flow
   end
   else
-    match kind_of context place.root with
-    | Viewing ->
+    match (kind_of context place.root, place.root) with
+    | Viewing, Constant_root _ ->
+        report context Not_owned value.span ~fixes:copy_fix
+          (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
+             (if place.steps = [] then "a constant" else "part of a constant"));
+        flow
+    | Viewing, _ ->
         report context Not_owned value.span ~fixes:copy_fix
           (Printf.sprintf "`%s` is a view, not owned here, so it cannot be moved. Copy it instead."
              shown);
         flow
-    | Mut_access when place.steps = [] ->
+    | Mut_access, _ when place.steps = [] ->
         report context Not_owned value.span ~fixes:copy_fix
           (Printf.sprintf
              "`%s` is lent `mut`, so it cannot be moved away; a field of it can, if it is put back."
              shown);
         flow
-    | Owned | Mut_access ->
+    | (Owned | Mut_access), _ ->
         changed state place value.span ~what:"be moved";
         context.moves <- value.id :: context.moves;
         Option.map (fun moved -> (place, value.span) :: moved) flow
@@ -186,7 +191,9 @@ let moved_out state (flow : flow) (place : place) (value : expression) =
 let rebound (flow : flow) ids =
   Option.map
     (List.filter (fun ((moved : place), _) ->
-         match moved.root with Local id -> not (List.mem id ids) | Self_root -> true))
+         match moved.root with
+         | Local id -> not (List.mem id ids)
+         | Self_root | Constant_root _ -> true))
     flow
 
 let assigned state (flow : flow) (place : place) (span : span) =
@@ -238,7 +245,7 @@ let rec viewed state (value : expression) : place list =
           let known = held state place.root in
           let its_own =
             match place.root with
-            | Self_root -> true
+            | Self_root | Constant_root _ -> true
             | Local id ->
                 List.mem id context.parameters
                 || kind_of context place.root = Owned
