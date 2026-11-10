@@ -2006,16 +2006,20 @@ effect: code that does it declares `uses Tasks`.
   implementations are the enclosing code's variables. A task started with
   Go's `go` can outlive everything it was given, so in Truss it could be
   given neither.
-- **A task owns what a loop gives it, or borrows its own element.** An
-  iteration of a `concurrent for` outlives the `yield` that started it. So
-  over a method that yields, a task takes what a cursor's `next()`
-  returns: an owned value, or a copy of a `Plain` one. A method that lends
-  its elements can drive a `concurrent for` only if its body is one loop
-  over a range that yields at each index. Each task then runs one
-  iteration of that loop and borrows one element. Any other method could
-  change or free an element while a task uses it, which is a use after
-  free. Rust draws the same line between an iterator, whose items outlive
-  the step that produced them, and a lending iterator, whose items do not.
+- **A task borrows only what outlives the loop.** An iteration of a
+  `concurrent for` outlives the `yield` that started it. A place inside a
+  parameter that the method takes read-only cannot change or be freed
+  while the method runs, so a task may borrow it: `concurrent for item in
+  items` lends each element for the whole loop. A value that the method
+  yields `own`, or computes for the `yield`, goes to the task, and a
+  `Plain` value is copied. A place in a local of the method or in a `mut`
+  parameter could change or be freed when the method resumes, so yielding
+  it to a task is rejected: it would be a use after free. A method that
+  yields `mut` access can drive a `concurrent for` only if its body is one
+  loop over a range that yields at each index. Each task then runs one
+  iteration of that loop and changes its own element. Rust draws the same
+  line between an iterator, whose items outlive the step that produced
+  them, and a lending iterator, whose items do not.
 - **`yield` is not allowed in concurrent code.** It would run the caller's
   loop body as a task, at the same time as the method's other tasks, and
   the caller's loop body is checked as sequential code.
