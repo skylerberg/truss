@@ -56,8 +56,13 @@ let choose ~lock ~roots ~local ~load =
             | Ok ((manifest : Type_checker.Manifest.package), record) ->
                 found := { name; version; hash; manifest; record } :: !found;
                 List.iter (record_of ~recorded_by:name) record;
+                (* A dependency that a package's record does not name is one
+                   only its tests use, which a build that uses the package
+                   does not take on. *)
                 List.iter
-                  (fun (dependency : Workspace.dependency) -> visit name dependency.package)
+                  (fun (dependency : Workspace.dependency) ->
+                    if Lock.find record dependency.package <> None then
+                      visit name dependency.package)
                   manifest.dependencies)
       end
     in

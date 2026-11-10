@@ -554,6 +554,23 @@ let used_packages =
       in
       List.sort_uniq compare (named @ checked))
 
+(* The packages a package's code uses, its tests apart. A dependency that is
+   not among them is one only its tests use, which a project that uses the
+   package once it is published does not take on. *)
+let code_packages =
+  Query.query ~name:"code_packages" ~phase:Checks ~saved:true ~show:Fun.id
+    (fun database package_name ->
+      match Workspace.package database package_name with
+      | None -> []
+      | Some package ->
+          List.sort_uniq compare
+            (List.concat_map
+               (fun (declaration : Names.declaration) ->
+                 match declaration.path with
+                 | Test _ -> []
+                 | _ -> Query.demand database used_packages (Names.key_of declaration))
+               (declarations database package)))
+
 (* What only a package's code shows to be wrong with its manifest. *)
 type manifest_problem =
   | Not_a_capability of { dependency : string; name : string }

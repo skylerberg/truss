@@ -1153,6 +1153,241 @@ let () =
       if not (contains output "`acme::units` would hold Clock, which it did not") then
         fail "said %s" output)
 
+(* Publishing *)
+
+let publish_from root = captured (fun () -> Publish_command.run ~directory:root ~json:false)
+
+(* A package of its own project, named [acme::angles], with one module. *)
+let angles text = directory [ ("truss.toml", manifest_of "acme::angles"); ("degrees.truss", text) ]
+let turn = "public fn turn() -> Int64 {\n  360\n}\n"
+
+let published registry name =
+  List.map
+    (fun (version, _) -> Registry.Version.show version)
+    (Registry.Index.versions registry name)
+
+let expect_published registry name expected = expect_strings ~expected (published registry name)
+
+(* Publishes a package and expects it to be refused, with the reason. *)
+let expect_refused root part =
+  let status, output = publish_from root in
+  if status <> 1 then fail "status %d: %s" status output;
+  if not (contains output part) then fail "said %s" output
+
+let () =
+  test "a package's first version is 1.0.0, and holds its files" (fun () ->
+      let registry = registry () in
+      let root = angles turn in
+      let status, output = publish_from root in
+      if status <> 0 then fail "status %d: %s" status output;
+      if not (contains output "Published `acme::angles` 1.0.0") then fail "said %s" output;
+      expect_published registry "acme::angles" [ "1.0.0" ];
+      let files =
+        Registry.Content.files ~all:true
+          (Registry.Index.version_directory registry "acme::angles" (1, 0, 0))
+      in
+      expect_strings ~expected:[ "degrees.truss"; "truss.toml" ] (List.map fst files));
+  test "a package whose name ends in _v2 starts at 2.0.0" (fun () ->
+      let registry = registry () in
+      let root =
+        directory [ ("truss.toml", manifest_of "acme::angles_v2"); ("degrees.truss", turn) ]
+      in
+      ignore (publish_from root);
+      expect_published registry "acme::angles_v2" [ "2.0.0" ]);
+  test "a release that changes only a body gets the next patch number" (fun () ->
+      let registry = registry () in
+      let root = angles turn in
+      ignore (publish_from root);
+      rewrite root "degrees.truss" "public fn turn() -> Int64 {\n  180 + 180\n}\n";
+      let status, output = publish_from root in
+      if status <> 0 then fail "status %d: %s" status output;
+      expect_published registry "acme::angles" [ "1.0.0"; "1.0.1" ]);
+  test "a release that adds a public definition gets the next minor number, and says what is new"
+    (fun () ->
+      let registry = registry () in
+      let root = angles turn in
+      ignore (publish_from root);
+      rewrite root "degrees.truss" (turn ^ "\npublic fn half() -> Int64 {\n  180\n}\n");
+      let status, output = publish_from root in
+      if status <> 0 then fail "status %d: %s" status output;
+      if not (contains output "acme::angles::degrees::half is new") then fail "said %s" output;
+      expect_published registry "acme::angles" [ "1.0.0"; "1.1.0" ]);
+  test "files that are a version already are not published again" (fun () ->
+      let registry = registry () in
+      let root = angles turn in
+      ignore (publish_from root);
+      let status, output = publish_from root in
+      if status <> 0 || not (contains output "`acme::angles` 1.0.0 is these files already") then
+        fail "status %d: %s" status output;
+      expect_published registry "acme::angles" [ "1.0.0" ]);
+  test "a release that changes a public signature is refused, with the signature as it was and is"
+    (fun () ->
+      let registry = registry () in
+      let root = angles turn in
+      ignore (publish_from root);
+      rewrite root "degrees.truss" "public fn turn(times: Int64) -> Int64 {\n  times\n}\n";
+      expect_refused root "acme::angles::degrees::turn has other parameters or another result";
+      let _, output = publish_from root in
+      List.iter
+        (fun part -> if not (contains output part) then fail "%s is not in: %s" part output)
+        [
+          "was: public fn turn() -> Int64";
+          "now: public fn turn(times: Int64) -> Int64";
+          "Publish it under a new name, such as `acme::angles_v2`";
+        ];
+      expect_published registry "acme::angles" [ "1.0.0" ]);
+  test "a release that takes a public definition away is refused" (fun () ->
+      let _ = registry () in
+      let root = angles (turn ^ "\npublic fn half() -> Int64 {\n  180\n}\n") in
+      ignore (publish_from root);
+      rewrite root "degrees.truss" turn;
+      expect_refused root "acme::angles::degrees::half is gone, or is no longer public");
+  test "a private definition can change freely" (fun () ->
+      let registry = registry () in
+      let root = angles (turn ^ "\nfn half() -> Int64 {\n  180\n}\n") in
+      ignore (publish_from root);
+      rewrite root "degrees.truss" (turn ^ "\nfn third(of: Int64) -> Int64 {\n  of\n}\n");
+      let status, output = publish_from root in
+      if status <> 0 then fail "status %d: %s" status output;
+      expect_published registry "acme::angles" [ "1.0.0"; "1.0.1" ]);
+  test "a package with no owner in its name is not published" (fun () ->
+      let _ = registry () in
+      match publish_from (package [ ("degrees.truss", turn) ]) with
+      | exception Project.Cannot_run message ->
+          if not (contains message "has no owner in its name") then fail "said %s" message
+      | _ -> fail "published");
+  test "a package with an error is not published" (fun () ->
+      let _ = registry () in
+      expect_refused
+        (angles "public fn turn() -> Int64 {\n  true\n}\n")
+        "A package is published only when it has no errors");
+  test "a package with a todo or an echo is not published, and each is listed" (fun () ->
+      let registry = registry () in
+      let root =
+        angles
+          "public fn turn() -> Int64 {\n  todo\n}\n\npublic fn half() -> Int64 {\n  echo 180\n}\n"
+      in
+      expect_refused root "degrees.truss:2:3: `todo` is not finished code";
+      expect_refused root "degrees.truss:6:3: `echo` is not finished code";
+      expect_published registry "acme::angles" []);
+  test "a package whose test fails is not published" (fun () ->
+      let registry = registry () in
+      let root =
+        angles (turn ^ "\ntest \"a turn is a right angle\" {\n  assert turn() == 90\n}\n")
+      in
+      expect_refused root "A package is published only when its tests pass";
+      expect_published registry "acme::angles" []);
+  test "a package whose tests pass is published" (fun () ->
+      let registry = registry () in
+      let root = angles (turn ^ "\ntest \"a turn is whole\" {\n  assert turn() == 360\n}\n") in
+      let status, output = publish_from root in
+      if status <> 0 then fail "status %d: %s" status output;
+      expect_published registry "acme::angles" [ "1.0.0" ])
+
+(* What a package is published with *)
+
+let () =
+  test "a package is published with the versions of the packages its code uses" (fun () ->
+      let registry = stocked () in
+      let root =
+        directory
+          [
+            ("truss.toml", manifest_of "acme::walls");
+            ( "height.truss",
+              "use acme::geometry::vector\n\npublic fn height() -> Int64 {\n  vector::length()\n}\n"
+            );
+          ]
+      in
+      ignore (add root [ "acme::geometry" ]);
+      let status, output = publish_from root in
+      if status <> 0 then fail "status %d: %s" status output;
+      let record =
+        Registry.Lock.parse
+          (In_channel.with_open_bin
+             (Filename.concat
+                (Registry.Index.version_directory registry "acme::walls" (1, 0, 0))
+                "truss.lock")
+             In_channel.input_all)
+      in
+      match record with
+      | [
+       { name = "acme::geometry"; version = 1, 0, 0; holds = []; _ };
+       { name = "acme::units"; version = 1, 0, 0; holds = []; _ };
+      ] ->
+          ()
+      | _ -> fail "published with other versions");
+  test "a published package is used by another project, with what it was published with" (fun () ->
+      let _ = stocked () in
+      let walls =
+        directory
+          [
+            ("truss.toml", manifest_of "acme::walls");
+            ( "height.truss",
+              "use acme::geometry::vector\n\npublic fn height() -> Int64 {\n  vector::length()\n}\n"
+            );
+          ]
+      in
+      ignore (add walls [ "acme::geometry" ]);
+      ignore (publish_from walls);
+      let root =
+        package [ ("main.truss", "fn tall() -> Int64 {\n  acme::walls::height::height()\n}\n") ]
+      in
+      if add root [ "acme::walls" ] <> 0 then fail "not added";
+      expect_versions root
+        [ ("acme::geometry", "1.0.0"); ("acme::units", "1.0.0"); ("acme::walls", "1.0.0") ];
+      if not (clean root) then fail "has diagnostics");
+  test "a dependency that only a package's tests use is not one of what it is published with"
+    (fun () ->
+      let registry = stocked () in
+      let root =
+        directory
+          [
+            ("truss.toml", manifest_of "acme::walls");
+            ( "height.truss",
+              "public fn height() -> Int64 {\n\
+              \  3\n\
+               }\n\n\
+               test \"a wall is taller than a meter\" {\n\
+              \  assert height() > acme::units::lengths::meter()\n\
+               }\n" );
+          ]
+      in
+      ignore (add root [ "acme::units@1.0.0" ]);
+      let status, output = publish_from root in
+      if status <> 0 then fail "status %d: %s" status output;
+      if
+        Sys.file_exists
+          (Filename.concat
+             (Registry.Index.version_directory registry "acme::walls" (1, 0, 0))
+             "truss.lock")
+      then fail "published with a package only its test uses";
+      let user =
+        package [ ("main.truss", "fn tall() -> Int64 {\n  acme::walls::height::height()\n}\n") ]
+      in
+      ignore (add user [ "acme::walls" ]);
+      expect_versions user [ ("acme::walls", "1.0.0") ];
+      if not (clean user) then fail "has diagnostics");
+  test "a package that depends on one of its project's that is not published is refused" (fun () ->
+      let _ = registry () in
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n");
+            ("angles/truss.toml", manifest_of "acme::angles");
+            ("angles/degrees.truss", turn);
+            ( "walls/truss.toml",
+              manifest_of "acme::walls" ^ "[dependencies]\n\"acme::angles\" = []\n" );
+            ( "walls/corner.truss",
+              "public fn corner() -> Int64 {\n  acme::angles::degrees::turn()\n}\n" );
+          ]
+      in
+      let walls = Filename.concat root "walls" in
+      expect_refused walls "publish `acme::angles` first";
+      (* Once it is published, the project's copy is that version. *)
+      ignore (publish_from (Filename.concat root "angles"));
+      let status, output = publish_from walls in
+      if status <> 0 then fail "status %d: %s" status output)
+
 (* The command line as a whole *)
 
 let () =

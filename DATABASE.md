@@ -702,6 +702,10 @@ names, and never chooses a version itself.
 - **Other versions are tried in a trial** (see [Trials](#trials)): a
   session that starts from the project's and has another lock file, which
   `truss upgrade` compares with the project's before it writes the file.
+- **A published version can be had in an engine of its own,** over the
+  standard library, with the packages it was published with. A package and
+  the version before it have the same paths, so the two cannot be in one
+  state. `truss publish` compares a package with its last version this way.
 
 ### The background process
 

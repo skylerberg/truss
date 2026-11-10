@@ -340,6 +340,12 @@ let signature (signature : signature) =
 
 let function_ written body = form "fn" (signature written @ [ optional block body ])
 
+let law ({ name; parameters; requires; body } : law) =
+  form "law"
+    ([ name.text; form "" (list parameter parameters) ]
+    @ list (fun value -> form "requires" [ expression value ]) requires
+    @ [ block body ])
+
 let function_definition (definition : function_definition) =
   function_ definition.signature (Some definition.body)
 
@@ -401,11 +407,7 @@ let definition (definition : definition) =
                 | Associated_type (name, bounds) ->
                     form "type"
                       [ name.text ^ ": " ^ String.concat " + " (list path_type_text bounds) ]
-                | Law { name; parameters; requires; body } ->
-                    form "law"
-                      ([ name.text; form "" (list parameter parameters) ]
-                      @ list (fun value -> form "requires" [ expression value ]) requires
-                      @ [ block body ])
+                | Law written -> law written
                 | Trait_member_error -> "error")
               trait_members)
     | Impl { trait_; type_; uses; members = impl_members } ->

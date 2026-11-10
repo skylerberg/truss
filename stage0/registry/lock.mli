@@ -1,6 +1,6 @@
 (** A lock file, [truss.lock]: the version and content of each registry package a project's packages
-    use, as SYNTAX.md's "The lock file" writes it. A published package's lock file is the record of
-    what it was published with, and has no [holds]. *)
+    use. A published package's lock file is the record of what it was published with, and has no
+    [holds]. *)
 
 type entry = {
   name : string;

@@ -1260,8 +1260,10 @@ signatures, so nothing it does can exceed what its signatures declare.
 
 ### The manifest
 
-Two rules about a package's manifest need its code, so they are package
-checks, reported with the manifest's file and not in a module:
+Each definition's result says which packages it uses, and the union over a
+package's definitions, its tests apart, is what `truss publish` publishes
+it with. Two rules about a package's manifest need its code too, so they
+are package checks, reported with the manifest's file and not in a module:
 
 - **A grant that names no capability** is an error, so a misspelled
   capability is not silently one that is never granted.

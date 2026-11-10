@@ -3026,9 +3026,10 @@ truss::json 1.9.4 a3b1c5d7e9f20416283a4c6e8f0b2d4f6a8c0e2f4b6d8a0c2e4f6b8d0a2c4e
   line that is not used and corrects a `holds`, and `truss add` adds a
   line.
 
-A published package holds its `truss.toml`, its modules, the documentation
-files beside them, and a `truss.lock` with a line for each registry package
-it was published with, without `holds`. Only the lock file at a project's
+A published package holds its `truss.toml`, its modules, the Markdown files
+beside them, and a `truss.lock` with a line for each registry package it
+was published with, without `holds`: those its code uses, its tests apart,
+and those that they use in turn. Only the lock file at a project's
 root decides a build's versions directly. The others are what
 [DESIGN.md](DESIGN.md#choosing-versions) calls a package's record: a build
 uses the highest version that the project's lock file or any of its

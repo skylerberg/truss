@@ -1,6 +1,5 @@
-(** Choosing the versions of a build, as DESIGN.md's "Choosing versions" decides: for each registry
-    package, the highest version that the project's lock file or the record of any package of the
-    build names. *)
+(** Choosing the versions of a build: for each registry package, the highest version that the
+    project's lock file or the record of any package of the build names. *)
 
 type package = {
   name : string;
@@ -30,7 +29,9 @@ val choose :
 (** The registry packages of a build, in order of name. [roots] are the dependencies of the
     project's packages, each with the package that names it, [local] says whether a name is a
     package of the project, which is then used whatever the registry has by that name, and [load]
-    gives a published package's manifest and record. *)
+    gives a published package's manifest and record. A build takes on the dependencies of a
+    published package that its record names, and not one that only its tests use, which the record
+    leaves out. *)
 
 val holds : project:Workspace.dependency list -> package list -> (string * string list) list
 (** The capabilities each package of a build holds: those its users in the build grant it, of the
