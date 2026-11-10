@@ -85,6 +85,7 @@ let libc_builtin : Libc.scalar -> builtin = function
   | UInt64 -> UInt64
   | USize -> USize
   | ISize -> ISize
+  | Float64 -> Float64
 
 type operation =
   | Add
@@ -147,7 +148,6 @@ type operation =
   | View_slice
   | View_address
   | Crash
-  | Write_float
   | Handle_from
   | Handle_descriptor
   | Libc of Libc.function_
@@ -215,7 +215,6 @@ let operations =
     View_slice;
     View_address;
     Crash;
-    Write_float;
     Handle_from;
     Handle_descriptor;
   ]
@@ -283,7 +282,6 @@ let operation_name = function
   | View_slice -> "view_slice"
   | View_address -> "view_address"
   | Crash -> "crash"
-  | Write_float -> "write_float"
   | Handle_from -> "handle_from"
   | Handle_descriptor -> "handle_descriptor"
   | Libc function_ -> "libc_" ^ Libc.function_name function_

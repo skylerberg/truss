@@ -8,7 +8,7 @@ let host =
   else if String.starts_with ~prefix:"linux" system then Some Linux
   else None
 
-type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize
+type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize | Float64
 
 type passes =
   | Value of scalar
@@ -39,9 +39,24 @@ type function_ =
   | Getenv
   | Posix_spawnp
   | Waitpid
+  | Snprintf
+  | Strtod
 
 let functions =
-  [ Write; Read; Open; Close; Errno; Clock_gettime; Getentropy; Getenv; Posix_spawnp; Waitpid ]
+  [
+    Write;
+    Read;
+    Open;
+    Close;
+    Errno;
+    Clock_gettime;
+    Getentropy;
+    Getenv;
+    Posix_spawnp;
+    Waitpid;
+    Snprintf;
+    Strtod;
+  ]
 
 let function_name = function
   | Write -> "write"
@@ -54,6 +69,8 @@ let function_name = function
   | Getenv -> "getenv"
   | Posix_spawnp -> "posix_spawnp"
   | Waitpid -> "waitpid"
+  | Snprintf -> "snprintf"
+  | Strtod -> "strtod"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -167,6 +184,25 @@ let describe function_ =
           ("options", Value Int32, everywhere "int");
         ]
         ~headers:[ "sys/wait.h" ]
+  | Snprintf ->
+      (* The one use: a float written with a number of digits, by a format
+         that takes the two. *)
+      row "int" (Returns Int32) ~variadic_from:3
+        [
+          ("buffer", Room UInt8, everywhere "char *");
+          ("size", Value USize, size);
+          ("format", Elements UInt8, everywhere "const char *");
+          ("precision", Value Int32, everywhere "int");
+          ("value", Value Float64, everywhere "double");
+        ]
+        ~headers:[ "stdio.h" ]
+  | Strtod ->
+      row "double" (Returns Float64)
+        [
+          ("text", Elements UInt8, everywhere "const char *");
+          ("end", Always 0, everywhere "char **");
+        ]
+        ~headers:[ "stdlib.h" ]
 
 let signature function_ =
   let row = describe function_ in
@@ -295,7 +331,7 @@ let value os number =
 let bytes = function
   | UInt8 -> 1
   | Int32 -> 4
-  | Int64 | UInt64 -> 8
+  | Int64 | UInt64 | Float64 -> 8
   | USize | ISize -> invalid_arg "a USize the C library reaches through an address"
 
 let check os =
@@ -316,7 +352,11 @@ let check os =
     String.starts_with ~prefix:"void" c || String.starts_with ~prefix:"const void" c
   in
   String.concat ""
-    ([ "#define _DEFAULT_SOURCE\n" ]
+    ([
+       (* The headers are to declare each function plainly, not as a macro
+          that checks its arguments. *)
+       "#undef _FORTIFY_SOURCE\n#define _FORTIFY_SOURCE 0\n#define _DEFAULT_SOURCE\n";
+     ]
     @ List.map (fun header -> Printf.sprintf "#include <%s>\n" header) headers
     @ List.map
         (fun number ->
