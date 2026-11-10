@@ -3,15 +3,65 @@
 open Harness
 open Support
 
+(* The check of moves on the core form must report what the current check
+   reports about moves, for every definition that both run on. *)
+let compare_moves database module_ =
+  let about_moves (diagnostic : Diagnostic.t) =
+    match diagnostic.code with
+    | Ownership (Use_after_move | Not_owned | Field_not_restored | Needs_owned) -> true
+    | _ -> false
+  in
+  let shown (diagnostic : Diagnostic.t) =
+    match diagnostic.code with
+    | Ownership Field_not_restored -> Diagnostic.Code.name diagnostic.code
+    | _ ->
+        Printf.sprintf "%s at %d..%d"
+          (Diagnostic.Code.name diagnostic.code)
+          diagnostic.span.start diagnostic.span.stop
+  in
+  List.iter
+    (fun (declaration : Resolve.Names.declaration) ->
+      let key = Resolve.Names.key_of declaration in
+      match
+        ( Infer.clean database key,
+          Query.demand database Ownership.ownership key,
+          Ownership.Moves.moves database key )
+      with
+      | Some _, Some current, Some on_core ->
+          let expected =
+            List.sort compare (List.map shown (List.filter about_moves current.diagnostics))
+          in
+          let found = List.sort compare (List.map shown on_core.diagnostics) in
+          if expected <> found then
+            fail "%s: moves on the core form report [%s], and the current check [%s]"
+              (Resolve.Names.show_key key) (String.concat "; " found) (String.concat "; " expected)
+      | _ -> ())
+    (Query.demand database Resolve.Names.declarations module_)
+
 let check database module_ =
-  Resolve.diagnostics database module_
-  @ Interface.diagnostics database module_
-  @ Infer.diagnostics database module_
-  @ Patterns.diagnostics database module_
-  @ Usage.diagnostics database module_
-  @ Ownership.diagnostics database module_
+  let found =
+    Resolve.diagnostics database module_
+    @ Interface.diagnostics database module_
+    @ Infer.diagnostics database module_
+    @ Patterns.diagnostics database module_
+    @ Usage.diagnostics database module_
+    @ Ownership.diagnostics database module_
+  in
+  compare_moves database module_;
+  found
 
 let one_diagnostic = one_diagnostic ~check
+
+let () =
+  let database = setup [] in
+  List.iter
+    (fun ((module_ : Path.module_), _) ->
+      test
+        (Printf.sprintf "%s: moves on the core form agree with the current check"
+           (Path.show_module module_))
+        (fun () -> compare_moves database module_))
+    Standard_library.modules
+
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 let keep = "fn keep(items: own List[Int64]) {}\n\nfn look(items: List[Int64]) {}\n\n"
 

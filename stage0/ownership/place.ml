@@ -1,0 +1,110 @@
+(* The places of a core form that the ownership check tracks. *)
+
+module T = Types
+
+type root = Local of Core.local | Constant of Path.t
+
+(* [Element] holds the id of the index call or of the slice that selects
+   the elements. The check does not compare indexes, so an [Element] step
+   stands for some elements of the collection. *)
+type step = Field of string | Element of Core.id
+type t = { root : root; steps : step list }
+
+type overlap =
+  | Apart
+  | Overlap
+  | Maybe_apart of Core.id * Core.id
+      (** The places are different elements of one collection if the two index calls or slices,
+          named by their ids, select different elements. The prover decides. *)
+
+(* Two places overlap if one is a prefix of the other. *)
+let overlap left right =
+  if left.root <> right.root then Apart
+  else
+    let rec go left right =
+      match (left, right) with
+      | [], _ | _, [] -> Overlap
+      | Field first :: left, Field second :: right ->
+          if first = second then go left right else Apart
+      | Element first :: left, Element second :: right -> (
+          if first = second then go left right
+          else match go left right with Apart -> Apart | _ -> Maybe_apart (first, second))
+      | _ :: left, _ :: right -> go left right
+    in
+    go left.steps right.steps
+
+let is_prefix prefix place =
+  prefix.root = place.root
+  &&
+  let rec go = function
+    | [], _ -> true
+    | Field first :: prefix, Field second :: place -> first = second && go (prefix, place)
+    | Element _ :: prefix, Element _ :: place -> go (prefix, place)
+    | _ -> false
+  in
+  go (prefix.steps, place.steps)
+
+(* A [List], a [Slice], or an [Array]. An element of one of these is a
+   place. An index of any other collection is a call of the collection's
+   [at], which lends the element. *)
+let is_storage (type_ : T.ty) =
+  match type_ with
+  | T.Named
+      {
+        path =
+          Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" | "Slice" };
+        _;
+      } ->
+      true
+  | _ -> T.is_builtin Array type_
+
+let index_trait : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Index" }
+
+(* If the expression is an index of a [List], a [Slice], or an [Array],
+   the collection that is indexed. *)
+let storage_index (value : Core.expression) : Core.place option =
+  match value.kind with
+  | Call
+      {
+        callee = Trait_method { trait; name = "at"; self_type; _ };
+        arguments = Passed { value = Place collection; _ } :: _;
+        _;
+      }
+    when Path.equal trait.trait index_trait && is_storage self_type ->
+      Some collection
+  | _ -> None
+
+(* The tracked place that a core place denotes. [None] for a temporary and
+   for a part that a call lends, other than an element of a [List], a
+   [Slice], or an [Array]. *)
+let rec of_core (place : Core.place) : t option =
+  let with_step base step =
+    Option.map (fun base -> { base with steps = base.steps @ [ step ] }) (of_core base)
+  in
+  match place with
+  | Local { local; _ } -> Some { root = Local local; steps = [] }
+  | Constant { path; _ } -> Some { root = Constant path; steps = [] }
+  | Field { base; field; _ } -> with_step base (Field field)
+  | Lent index -> (
+      match storage_index index with
+      | Some collection -> with_step collection (Element index.id)
+      | None -> None)
+  | Temporary _ -> None
+
+(* The place that a slice views: some elements of its base. *)
+let of_slice (slice : Core.expression) : t option =
+  match slice.kind with
+  | Slice { base; _ } ->
+      Option.map
+        (fun base -> { base with steps = base.steps @ [ Element slice.id ] })
+        (of_core base)
+  | _ -> None
+
+(* Whether a core place is part of what a call lends, and is not a tracked
+   place. *)
+let rec is_lent_part (place : Core.place) =
+  match place with
+  | Lent index -> Option.is_none (storage_index index)
+  | Field { base; _ } -> is_lent_part base
+  | Local _ | Constant _ | Temporary _ -> false

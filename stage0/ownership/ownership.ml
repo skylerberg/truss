@@ -163,3 +163,5 @@ let diagnostics database module_ =
       match Query.demand database ownership key with
       | Some result -> result.diagnostics
       | None -> [])
+
+module Moves = Moves
