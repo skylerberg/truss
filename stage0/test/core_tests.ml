@@ -596,6 +596,35 @@ let () =
      {  }"
 
 let () =
+  expect_definition "the time of a method of a type parameter's bound names the trait method"
+    "fn g[Element: Equal](items: List[Element], item: Element) -> Bool\n\
+    \  cost time O(items.length() * time(Element.equal))\n\
+     {\n\
+    \  todo\n\
+     }\n"
+    "fn(items: List[Element], item: Element)\n\
+     cost time O(multiply(to_integer(standard::list::List.length[Element](place items)), \
+     time(Equal.equal for Element by a bound)))\n\
+     { todo }";
+  test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
+      no_diagnostics
+        ~check:(fun database module_ ->
+          Resolve.diagnostics database module_
+          @ Interface.diagnostics database module_
+          @ Infer.diagnostics database module_)
+        [
+          ( "app::main",
+            "trait Sized {\n\
+            \  fn size(self) -> USize\n\n\
+            \  fn double(self) -> USize\n\
+            \    cost time O(time(Self.size))\n\
+            \  {\n\
+            \    self.size() + self.size()\n\
+            \  }\n\
+             }\n" );
+        ])
+
+let () =
   test "the origin of a cost is its cost clause" (fun () ->
       let text =
         "fn g(items: List[Int64]) -> USize\n  cost time O(items.length())\n{\n  items.length()\n}\n"

@@ -55,7 +55,10 @@ let loop_clause visit = function
 let expression_children visit (node : expression) =
   match node.kind with
   | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Break
-  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Finished ->
+  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Finished
+  (* The callee of a [Method_time] is not called, so it is not reported to
+     the visitor. *)
+  | Method_time _ ->
       ()
   | Interpolated { pieces; builder_new; builder_write; builder_finish } ->
       visit.callee builder_new;

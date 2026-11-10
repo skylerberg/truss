@@ -226,7 +226,7 @@ let rec expression builder frontier (node : Core.expression) : int list =
   let all frontier nodes = List.fold_left (expression builder) frontier nodes in
   match node.kind with
   | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Result
-  | Current_target | Yielded | Finished | Todo | Quantified _ ->
+  | Current_target | Yielded | Finished | Todo | Quantified _ | Method_time _ ->
       frontier
   | Unreachable -> []
   | Break ->
