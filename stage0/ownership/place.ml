@@ -143,15 +143,3 @@ let rec is_lent_part (place : Core.place) =
   | Lent index -> Option.is_none (storage_index index)
   | Field { base; _ } -> is_lent_part base
   | Local _ | Constant _ | Temporary _ -> false
-
-(* The place that lends a part, and how: the receiver of the lending call
-   that the part comes from. [None] if the place is not a lent part, or if
-   the receiver is not a tracked place. *)
-let rec lender (place : Core.place) : (t * T.mode) option =
-  match place with
-  | Field { base; _ } -> lender base
-  | Lent
-      ({ kind = Call { arguments = Passed { mode; value = Place receiver } :: _; _ }; _ } as call)
-    when Option.is_none (storage_index call) ->
-      Option.map (fun lent -> (lent, if mode = T.Mut then T.Mut else T.Read)) (of_core receiver)
-  | Lent _ | Local _ | Constant _ | Temporary _ -> None
