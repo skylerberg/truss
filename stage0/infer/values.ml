@@ -3,7 +3,7 @@
 
 open Syntax
 module T = Types
-module C = Checked
+module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
@@ -263,7 +263,6 @@ and lambda state env ?expected (value : expression) parameters body =
       (fun acc id -> if outer id && not (List.mem id acc) then acc @ [ id ] else acc)
       [] read
   in
-  state.tables.captures.(value.id) <- Some captures;
   register_expression state value (fun () ->
       let parameters = List.map (build_pattern state) parameters in
       Lambda
@@ -364,8 +363,6 @@ and match_ state env ?expected (value : expression) scrutinees arms =
         && List.exists (fun (arm : arm) -> Option.is_some arm.guard) earlier
     | _ -> false
   in
-  if guards_exhaustive then
-    state.obligations <- Guards_cover { match_ = value.id } :: state.obligations;
   (* The types of the scrutinees are inferred before the arms are checked. *)
   let types =
     List.map

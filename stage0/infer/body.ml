@@ -6,7 +6,7 @@
 
 open Syntax
 module T = Types
-module C = Checked
+module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Lower = Interface.Lower
@@ -15,7 +15,7 @@ open Statements
 open Expressions
 
 type result = {
-  checked : C.t;
+  checked : Checked.t;
   core : Core.t option;
       (** The definition's core form, when it parsed whole and nothing in it is an error. *)
   diagnostics : Diagnostic.t list;
@@ -589,7 +589,6 @@ let check database (key : Names.key) =
               synthetic_local_count = 0;
               tables_with_holes = None;
             };
-          obligations = [];
           diagnostics = [];
           unifier = Unify.create ();
           locals = Hashtbl.create 32;
@@ -708,36 +707,12 @@ let check database (key : Names.key) =
       let core : Core.t option =
         match form with
         | Some form when state.diagnostics = [] ->
-            let form = if has_capability_variables then build () else form in
-            Core_walk.definition
-              {
-                Core_walk.ignore_all with
-                expression =
-                  (fun (node : Core.expression) ->
-                    match node.kind with
-                    | Provide { implementations; _ } ->
-                        state.tables.provides.(node.origin) <-
-                          Some
-                            {
-                              implementations =
-                                List.map
-                                  (fun (implementation : Core.implementation) ->
-                                    ( implementation.origin,
-                                      List.map
-                                        (fun ({ capability; impl; arguments } : Core.provided) :
-                                             C.provided -> { capability; impl; arguments })
-                                        implementation.provides ))
-                                  implementations;
-                            }
-                    | _ -> ());
-              }
-              form.definition;
-            Some form
+            Some (if has_capability_variables then build () else form)
         | _ -> None
       in
       Some
         {
-          checked = { state.tables with obligations = List.rev state.obligations };
+          checked = Tables.published state.tables;
           core;
           diagnostics =
             List.sort_uniq

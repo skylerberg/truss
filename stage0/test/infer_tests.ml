@@ -56,6 +56,14 @@ let expression_at text written occurrence =
   | Some found -> found
   | None -> failwith (Printf.sprintf "no expression at %S" written)
 
+(* Whether the core form of the first definition has an integer literal
+   with this value. *)
+let has_integer text value =
+  List.exists
+    (fun (node : Core.expression) ->
+      match node.kind with Integer found -> Z.equal found (Z.of_int value) | _ -> false)
+    (first_core_nodes text).expressions
+
 let has_type text written ?(occurrence = 1) expected =
   let value, checked = expression_at text written occurrence in
   match checked.types.(value.id) with
@@ -638,11 +646,15 @@ let () =
         \  items.map(fn(item) { item + step })\n\
          }\n"
       in
-      let value, checked = expression_at text "fn(item)" 1 in
-      match checked.captures.(value.id) with
-      | Some [ _ ] -> ()
-      | Some found -> fail "%d captures" (List.length found)
-      | None -> fail "none recorded")
+      match
+        List.filter_map
+          (fun (node : Core.expression) ->
+            match node.kind with Lambda { captures; _ } -> Some captures | _ -> None)
+          (first_core_nodes text).expressions
+      with
+      | [ [ _ ] ] -> ()
+      | [ found ] -> fail "%d captures" (List.length found)
+      | found -> fail "%d lambdas" (List.length found))
 
 (* Strings and collections *)
 
@@ -675,20 +687,13 @@ let () =
 let () =
   test "a for loop over a range of integers is a counted loop" (fun () ->
       let text = "fn f(count: USize) {\n  for i in 0..count {\n    let _ = i\n  }\n}\n" in
-      let database = setup [ ("app::main", text) ] in
-      let key =
-        Resolve.Names.key_of
-          (List.hd (Query.demand database Resolve.Names.declarations (module_of "app::main")))
-      in
-      match Query.demand database Infer.checked key with
-      | Some result ->
-          if
-            not
-              (Array.exists
-                 (function Some (Checked.Integer_range _) -> true | _ -> false)
-                 result.checked.loops)
-          then fail "no counted loop"
-      | None -> fail "not checked");
+      if
+        not
+          (List.exists
+             (fun (node : Core.statement) ->
+               match node.kind with For { iteration = Integer_range _; _ } -> true | _ -> false)
+             (first_core_nodes text).statements)
+      then fail "no counted loop");
   test "a for loop over a list drives its each" (fun () ->
       fine
         "fn f(items: List[Int64]) -> Int64 {\n\
@@ -1031,33 +1036,30 @@ let () =
   test "a Float32 literal too large is an error" (fun () ->
       one_diagnostic "fn f() {\n  let large: Float32 = 3.5e38\n}\n" "types.literal_out_of_range");
   test "a Float32 literal is rounded once, from its decimal" (fun () ->
-      let value, checked =
-        expression_at "fn f() {\n  let value: Float32 = 1.0000000596046447754\n}\n"
-          "1.0000000596046447754" 1
-      in
-      match checked.literals.(value.id) with
-      | Some (Float_value rounded) ->
+      match
+        List.filter_map
+          (fun (node : Core.expression) ->
+            match node.kind with Float rounded -> Some rounded | _ -> None)
+          (first_core_nodes "fn f() {\n  let value: Float32 = 1.0000000596046447754\n}\n")
+            .expressions
+      with
+      | [ rounded ] ->
           if rounded <> Float.of_string "0x1.000002p+0" then fail "rounded to %h" rounded
       | _ -> fail "no value");
-  test "each end of a range pattern records its own value" (fun () ->
-      let value, checked =
-        expression_at "fn f(n: Int64) -> Int64 {\n  match n {\n    1..=5 => 1\n    _ => 2\n  }\n}\n"
-          "match" 1
-      in
-      match value.kind with
-      | Match
-          {
-            arms = { patterns = [ { kind = Pattern_range { start; stop; _ }; id; _ } ]; _ } :: _;
-            _;
-          } -> (
-          match
-            (checked.literals.(start.id), checked.literals.(stop.id), checked.literals.(id))
-          with
-          | Some (Integer_value low), Some (Integer_value high), None
-            when Z.equal low (Z.of_int 1) && Z.equal high (Z.of_int 5) ->
-              ()
-          | _ -> fail "the ends are not recorded each by its own id")
-      | _ -> fail "not a match on a range");
+  test "a range pattern has the values of its two bounds" (fun () ->
+      match
+        List.filter_map
+          (fun (node : Core.pattern) ->
+            match node.kind with
+            | Range { start = { kind = Integer low; _ }; stop = { kind = Integer high; _ }; _ } ->
+                Some (Z.to_int low, Z.to_int high)
+            | _ -> None)
+          (first_core_nodes
+             "fn f(n: Int64) -> Int64 {\n  match n {\n    1..=5 => 1\n    _ => 2\n  }\n}\n")
+            .patterns
+      with
+      | [ (1, 5) ] -> ()
+      | _ -> fail "the range pattern does not have the bounds 1 and 5");
   test "a range pattern on a type that is not an integer or Character is an error" (fun () ->
       one_diagnostic
         "fn f(ready: Bool) -> Int64 {\n  match ready {\n    true..=false => 1\n    _ => 2\n  }\n}\n"
@@ -1076,17 +1078,9 @@ let () =
          }\n");
   test "a Character literal is a tagged string holding its scalar value" (fun () ->
       has_type "fn f() -> Character {\n  Character\"é\"\n}\n" "Character\"é\"" "Character";
-      let value, checked =
-        expression_at "fn f() -> Character {\n  Character\"é\"\n}\n" "Character\"é\"" 1
-      in
-      match checked.literals.(value.id) with
-      | Some (Integer_value scalar) when Z.equal scalar (Z.of_int 0xE9) -> ()
-      | _ -> fail "no value");
+      if not (has_integer "fn f() -> Character {\n  Character\"é\"\n}\n" 0xE9) then fail "no value");
   test "a UInt8 literal holds its ASCII character's value" (fun () ->
-      let value, checked = expression_at "fn f() -> UInt8 {\n  UInt8\"\\n\"\n}\n" "UInt8" 2 in
-      match checked.literals.(value.id) with
-      | Some (Integer_value byte) when Z.equal byte (Z.of_int 10) -> ()
-      | _ -> fail "no value");
+      if not (has_integer "fn f() -> UInt8 {\n  UInt8\"\\n\"\n}\n" 10) then fail "no value");
   test "a Character literal of two scalar values is an error" (fun () ->
       one_diagnostic "fn f() -> Character {\n  Character\"ab\"\n}\n" "types.bad_character");
   test "a UInt8 literal of a character that is not ASCII is an error" (fun () ->
