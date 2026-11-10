@@ -616,6 +616,25 @@ let () =
         \  first + second\n\
          }\n")
 
+(* Views of a temporary through a copy and a record update *)
+
+let () =
+  let make = "fn make() -> List[Int64] {\n  [1, 2, 3]\n}\n\n" in
+  test "a copy of a view of a temporary cannot be kept" (fun () ->
+      one_diagnostic
+        (make ^ "fn f() -> USize {\n  let part = make().slice().copy()\n  part.length()\n}\n")
+        "ownership.views_temporary");
+  test "a record made by `with` cannot keep a view of a temporary" (fun () ->
+      one_diagnostic
+        (make
+       ^ "type Sized(view: Slice[Int64], count: USize)\n\n\
+          fn f(other: List[Int64]) -> USize {\n\
+         \  let sized = Sized(view: other[..], count: 0)\n\
+         \  let changed = sized with (view: make().slice())\n\
+         \  changed.view.length()\n\
+          }\n")
+        "ownership.views_temporary")
+
 (* Constants *)
 
 let () =

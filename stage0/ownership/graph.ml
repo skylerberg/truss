@@ -250,8 +250,11 @@ and lent_arguments builder (call : Core.call) : Core.operand list =
    an owned value with no name, passed read-only to the call that made the
    view. A string literal is in static memory, so it is never dropped. *)
 let rec viewed_temporaries builder (value : Core.expression) : Core.expression list =
+  let held (part : Core.expression) =
+    if builder.is_view part.type_ then viewed_temporaries builder part else []
+  in
   match value.kind with
-  | Echo inner | To_any { value = inner; _ } | Convert { value = inner; _ } ->
+  | Echo inner | To_any { value = inner; _ } | Convert { value = inner; _ } | Copy (Value inner) ->
       viewed_temporaries builder inner
   | If _ | Match _ | Block _ | Provide _ ->
       List.concat_map (viewed_temporaries builder) (ending_values value)
@@ -261,18 +264,29 @@ let rec viewed_temporaries builder (value : Core.expression) : Core.expression l
         (fun (argument : Core.argument) ->
           match argument with
           | Passed { mode = Read; value } -> owned_temporary builder value
-          | Passed { value = Value value; _ } when builder.is_view value.type_ ->
-              viewed_temporaries builder value
+          | Passed { value = Value value; _ } -> held value
           | _ -> [])
         call.arguments
+  | Template { call; _ } -> viewed_temporaries builder call
   | Construct { fields; _ } ->
       List.concat_map
         (fun (_, (field : Core.operand option)) ->
-          match field with
-          | Some (Value field) when builder.is_view field.type_ -> viewed_temporaries builder field
-          | _ -> [])
+          match field with Some (Value field) -> held field | Some (Place _) | None -> [])
         fields
-  | _ -> []
+  | Collection_literal { elements; _ } -> List.concat_map held elements
+  | Record_update { base; updates } ->
+      viewed_temporaries builder base @ List.concat_map (fun (_, update) -> held update) updates
+  (* A value read out of a place views what the place's root views, which
+     is no temporary. A lambda views locals. The rest hold no view. Every
+     kind is listed, so that a new kind is decided here. *)
+  | Use _
+  | Copy (Place _)
+  | Cursor_next _ | Lambda _ | Integer _ | Float _ | Boolean _ | String _ | Interpolated _
+  | Function_value _ | Value_parameter _ | Map_literal _ | Operator _ | Compare _ | Not _ | And _
+  | Or _ | Implies _ | Matches _ | Return _ | Break | Continue | Todo | Unreachable | Result | Old _
+  | Current_target | Quantified _ | Yielded | Finished | Identical _ | Specification_function _
+  | Method_time _ ->
+      []
 
 and owned_temporary builder (found : Core.operand) : Core.expression list =
   match found with
