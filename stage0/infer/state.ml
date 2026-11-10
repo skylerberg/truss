@@ -36,6 +36,9 @@ type frame = {
   mutable pending : (unit -> bool) list;
       (** Checks that wait for types the statement has not decided yet; each says whether it is
           done. *)
+  mutable unmet : (T.ty * T.trait_reference) list;
+      (** The bounds reported as not holding, each with its type, so that a statement reports one
+          once however many of its parts need it. *)
   frame_specification : bool;
   span : span;
 }
@@ -282,6 +285,7 @@ let in_statement state env (span : span) body =
       bindings = [];
       patterns = [];
       pending = [];
+      unmet = [];
       frame_specification = env.specification;
       span;
     }
@@ -396,6 +400,67 @@ type static_ =
       (** With the trait's arguments, when they are written. *)
   | Static_capability of Path.t
 
+(* Bounds *)
+
+(* Holds a type to a bound, once the statement has worked the type out. The
+   type must implement the trait, and each associated type the bound fixes
+   must equal the one the [impl] gives, which can be what works out the
+   rest of the statement. [unmet] reports the type with [None] when it does
+   not implement the trait, and with an associated type's name and what
+   the [impl] gives when that is another type. *)
+let require state type_ (bound : T.trait_reference) ~unmet =
+  let trait = { bound with associated = [] } in
+  defer state (fun () ->
+      let type_ = normalize state type_ in
+      if Unify.unknowns state.unifier type_ <> [] then false
+      else begin
+        (match implements state type_ trait with
+        | None -> unmet type_ None
+        | Some _ ->
+            List.iter
+              (fun (name, wanted) ->
+                match
+                  Impls.associated_type state.database ~bounds:(bounds state) type_ trait name
+                with
+                | Some given when not (unify state given wanted) -> unmet type_ (Some (name, given))
+                | _ -> ())
+              bound.associated);
+        true
+      end)
+
+(* Holds what stands for a definition's generic parameters to their
+   bounds. [of_type] is the type whose parameters they are, and without it
+   they are those of what a call calls. *)
+let require_bounds state (span : span) ?of_type generics substitution =
+  List.iter
+    (fun (argument, bound) ->
+      require state argument bound ~unmet:(fun argument other ->
+          let bound = Unify.zonk_trait state.unifier bound in
+          let reported =
+            match current_frame state with
+            | Some frame ->
+                let reported = List.mem (argument, bound) frame.unmet in
+                frame.unmet <- (argument, bound) :: frame.unmet;
+                reported
+            | None -> false
+          in
+          if not reported then
+            let needs =
+              Printf.sprintf "%s needs `%s: %s`"
+                (match of_type with
+                | Some type_ -> Printf.sprintf "`%s`" (show state type_)
+                | None -> "This")
+                (T.show argument) (T.show_trait bound)
+            in
+            report state Unsatisfied_bound span
+              (match other with
+              | None -> needs ^ ", which does not hold."
+              | Some (name, given) ->
+                  Printf.sprintf "%s, and its `%s` is `%s`." needs name (show state given))))
+    (Impls.required generics substitution)
+
+(* Instantiating types *)
+
 let fresh_arguments state (path : Path.t) =
   match Query.demand state.database Environment.type_interface path with
   | Some interface ->
@@ -407,6 +472,21 @@ let fresh_arguments state (path : Path.t) =
           | Capability_generic -> T.Capabilities [])
         interface.type_generics
   | None -> []
+
+let require_type_bounds state span path arguments =
+  match Query.demand state.database Environment.type_interface path with
+  | Some interface ->
+      Option.iter
+        (require_bounds state span ~of_type:(T.Named { path; arguments }) interface.type_generics)
+        (T.substitution_of interface.type_generics arguments)
+  | None -> ()
+
+(* Unknown arguments for a type, which the statement works out, each held to
+   the bounds of its parameter. *)
+let instantiate_type state span path =
+  let arguments = fresh_arguments state path in
+  require_type_bounds state span path arguments;
+  arguments
 
 let rec static_ state (value : expression) : static_ option =
   match (value.kind, head state value) with
@@ -434,7 +514,7 @@ and named_type state (value : expression) path type_arguments =
     | _ -> T.Named { path; arguments }
   in
   match type_arguments with
-  | None -> type_ (fresh_arguments state path)
+  | None -> type_ (instantiate_type state value.span path)
   | Some items ->
       let arguments = written_arguments state items in
       (match Query.demand state.database Interface.Summary.generics_of path with
@@ -446,7 +526,7 @@ and named_type state (value : expression) path type_arguments =
                (if List.length expected = 1 then "argument" else "arguments")
                (List.length arguments)
                (if List.length arguments = 1 then "is" else "are"))
-      | _ -> ());
+      | _ -> require_type_bounds state value.span path arguments);
       type_ arguments
 
 (* Type arguments written in an expression, as in [List[String].new()]. *)
@@ -490,7 +570,9 @@ type instance = {
   type_arguments : T.argument list;
 }
 
-let instantiate state ?span ?(extra = []) (signature : T.signature) =
+(* What a signature is where it is used: unknowns for its generic
+   parameters, which the statement works out, each held to its bounds. *)
+let instantiate state (span : span) ?(extra = []) (signature : T.signature) =
   let substitution =
     List.map
       (fun (generic : T.generic) ->
@@ -503,32 +585,7 @@ let instantiate state ?span ?(extra = []) (signature : T.signature) =
       signature.generics
     @ extra
   in
-  (* Each type argument must meet its parameter's bounds, once the
-     statement has worked it out. *)
-  (match span with
-  | Some (span : span) ->
-      List.iter
-        (fun (generic : T.generic) ->
-          match (generic.kind, List.assoc_opt generic.generic substitution) with
-          | Type_generic generic_bounds, Some (T.Type argument) ->
-              List.iter
-                (fun bound ->
-                  defer state (fun () ->
-                      let argument = normalize state argument in
-                      let bound = T.substitute_trait substitution bound in
-                      if Unify.unknowns state.unifier argument <> [] then false
-                      else begin
-                        if Option.is_none (implements state argument bound) then
-                          report state Unsatisfied_bound span
-                            (Printf.sprintf "This call needs `%s: %s`, which does not hold."
-                               (T.show argument)
-                               (T.show_trait (Unify.zonk_trait state.unifier bound)));
-                        true
-                      end))
-                generic_bounds
-          | _ -> ())
-        signature.generics
-  | None -> ());
+  require_bounds state span signature.generics substitution;
   let substitute = T.substitute substitution in
   let output =
     match signature.output with

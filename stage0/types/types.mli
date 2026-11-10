@@ -124,6 +124,11 @@ type generic_kind =
   | Capability_generic
 
 type generic = { generic : parameter; kind : generic_kind }
+
+val substitution_of : generic list -> argument list -> substitution option
+(** What stands for each of a definition's generic parameters, given its arguments in order, or
+    [None] when there is not one argument for each parameter. *)
+
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
 type signature = {

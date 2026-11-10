@@ -323,7 +323,7 @@ and check_arguments state env (parameters : T.parameter_info list) matched ~offs
 
 and named_call state env ?expected (value : expression) path (signature : T.signature)
     ~type_arguments arguments =
-  let instance = instantiate state ~span:value.span signature in
+  let instance = instantiate state value.span signature in
   explicit_type_arguments state value instance type_arguments;
   (match (expected, instance.signature.output) with
   | Some expected, Returns output -> ignore (unify state output expected)
@@ -343,7 +343,9 @@ and named_call state env ?expected (value : expression) path (signature : T.sign
 (* Building a record or a variant: fields by name, in any order. *)
 and construct state env ?expected ?type_arguments (value : expression) type_path variant arguments =
   let type_arguments =
-    match type_arguments with Some given -> given | None -> fresh_arguments state type_path
+    match type_arguments with
+    | Some given -> given
+    | None -> instantiate_type state value.span type_path
   in
   let type_ = T.Named { path = type_path; arguments = type_arguments } in
   (match expected with Some expected -> ignore (unify state type_ expected) | None -> ());

@@ -844,4 +844,128 @@ let () =
   test "a `todo` that nothing decides keeps the hole type in the checked form" (fun () ->
       has_type "fn f() {\n  let later = todo\n  let _ = later\n}\n" "todo" "an undecided type")
 
+(* Bounds wherever generic parameters are filled in *)
+
+let shape =
+  "trait Shape {\n\
+  \  fn area(self) -> Int64\n\
+   }\n\n\
+   type Square(side: Int64)\n\n\
+   impl Shape for Square {\n\
+  \  fn area(self) -> Int64 {\n\
+  \    self.side\n\
+  \  }\n\
+   }\n\n\
+   type Holder[Value: Shape](value: Value)\n\n\
+   fn Holder[Value: Shape].area(self) -> Int64 {\n\
+  \  self.value.area()\n\
+   }\n\n"
+
+let source =
+  "trait Source {\n\
+  \  type Item\n\
+  \  fn first(self) -> Self.Item\n\
+   }\n\n\
+   type Numbers(items: List[Int64])\n\n\
+   impl Source for Numbers {\n\
+  \  type Item = Int64\n\n\
+  \  fn first(self) -> Int64 {\n\
+  \    self.items[0]\n\
+  \  }\n\
+   }\n\n"
+
+let () =
+  test "a value built of a generic type must meet the type's bounds" (fun () ->
+      one_diagnostic (shape ^ "fn f() {\n  let _ = Holder(5)\n}\n") "types.unsatisfied_bound");
+  test "a value built of a generic type that meets its bounds is fine" (fun () ->
+      fine (shape ^ "fn f() {\n  let _ = Holder(Square(2))\n}\n"));
+  test "a value built inside another must meet its type's bounds" (fun () ->
+      one_diagnostic (shape ^ "fn f() {\n  let _ = Some(Holder(5))\n}\n") "types.unsatisfied_bound");
+  test "a variant built of a generic type must meet the type's bounds" (fun () ->
+      one_diagnostic
+        (shape
+       ^ "type Slot[Value: Shape] =\n\
+         \  | Empty\n\
+         \  | Full(value: Value)\n\n\
+          fn f() {\n\
+         \  let _ = Slot.Full(5)\n\
+          }\n")
+        "types.unsatisfied_bound");
+  test "a generic type named in an expression must meet its bounds" (fun () ->
+      one_diagnostic
+        (shape
+       ^ "type Slot[Value: Shape] =\n\
+         \  | Empty\n\
+         \  | Full(value: Value)\n\n\
+          fn f() {\n\
+         \  let _ = Slot[Int64].Empty\n\
+          }\n")
+        "types.unsatisfied_bound");
+  test "a statement reports a bound once, however many of its parts need it" (fun () ->
+      one_diagnostic
+        (shape ^ "fn f() -> Int64 {\n  Holder[Int64].area(Holder(5))\n}\n")
+        "types.unsatisfied_bound");
+  test "a method used as a value must meet its bounds" (fun () ->
+      one_diagnostic
+        (shape
+       ^ "fn Square.fits[Other: Shape](self, other: Other) -> Bool {\n\
+         \  true\n\
+          }\n\n\
+          fn f() {\n\
+         \  let fits: fn(Square, Int64) -> Bool = Square.fits\n\
+         \  let _ = fits\n\
+          }\n")
+        "types.unsatisfied_bound");
+  test "`any value` must give the associated types its type fixes" (fun () ->
+      one_diagnostic
+        (source
+       ^ "fn f(numbers: own Numbers) -> String {\n\
+         \  let source: any Source[Item = String] = any numbers\n\
+         \  source.first()\n\
+          }\n")
+        "types.no_impl");
+  test "`any value` that gives the associated types its type fixes is fine" (fun () ->
+      fine
+        (source
+       ^ "fn f(numbers: own Numbers) -> Int64 {\n\
+         \  let source: any Source[Item = Int64] = any numbers\n\
+         \  source.first()\n\
+          }\n"));
+  test "`any value` of a generic parameter needs a bound that fixes the associated types" (fun () ->
+      one_diagnostic
+        (source
+       ^ "fn f[Input: Source](input: own Input) -> Int64 {\n\
+         \  let source: any Source[Item = Int64] = any input\n\
+         \  source.first()\n\
+          }\n")
+        "types.no_impl");
+  test "`any value` of a generic parameter whose bound fixes the associated types is fine"
+    (fun () ->
+      fine
+        (source
+       ^ "fn f[Input: Source[Item = Int64]](input: own Input) -> Int64 {\n\
+         \  let source: any Source[Item = Int64] = any input\n\
+         \  source.first()\n\
+          }\n"));
+  test "an associated type a bound fixes works out a type argument" (fun () ->
+      fine
+        (source
+       ^ "fn first_of[Input: Source[Item = Output], Output](input: Input) -> Output {\n\
+         \  input.first()\n\
+          }\n\n\
+          fn f(numbers: Numbers) -> Int64 {\n\
+         \  let first = first_of(numbers)\n\
+         \  first\n\
+          }\n"));
+  test "an associated type a bound fixes must be the one the impl gives" (fun () ->
+      one_diagnostic
+        (source
+       ^ "fn text_of[Input: Source[Item = String]](input: Input) -> String {\n\
+         \  input.first()\n\
+          }\n\n\
+          fn f(numbers: Numbers) -> String {\n\
+         \  text_of(numbers)\n\
+          }\n")
+        "types.unsatisfied_bound")
+
 let () = finish ()

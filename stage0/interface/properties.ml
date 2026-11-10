@@ -20,12 +20,7 @@ let plain_trait = core "Plain"
 let trait_substitution (interface : T.trait_interface) ~self (reference : T.trait_reference) :
     T.substitution =
   (({ owner = reference.trait; name = "Self" } : T.parameter), T.Type self)
-  ::
-  (if List.length interface.trait_generics = List.length reference.trait_arguments then
-     List.combine
-       (List.map (fun (generic : T.generic) -> generic.generic) interface.trait_generics)
-       reference.trait_arguments
-   else [])
+  :: Option.value ~default:[] (T.substitution_of interface.trait_generics reference.trait_arguments)
 
 (* Every trait a bound gives a type, with the traits each requires, and
    [Self] in what they require replaced by the type. *)
@@ -109,11 +104,7 @@ let type_arguments arguments =
    out by [resolve]. *)
 let instantiate ~resolve (interface : T.type_interface) arguments conditions =
   let substitution =
-    if List.length interface.type_generics = List.length arguments then
-      List.combine
-        (List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics)
-        arguments
-    else []
+    Option.value ~default:[] (T.substitution_of interface.type_generics arguments)
   in
   List.map (fun condition -> resolve (T.substitute substitution condition)) conditions
 
