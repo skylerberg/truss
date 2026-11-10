@@ -8,3 +8,16 @@ val check : (string, placed list) Query.query
 
 val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
 (** The package's errors in one file, in order. *)
+
+(** What only a package's code shows to be wrong with its manifest. *)
+type manifest_problem =
+  | Not_a_capability of { dependency : string; name : string }
+      (** A grant's entry that names no capability *)
+  | Unused of string
+      (** A dependency that nothing in the package uses, which is told only of a package whose code
+          all checks *)
+
+val manifest_problems : (string, manifest_problem list) Query.query
+(** A package's, by its name. *)
+
+val manifest_sentence : package:string -> manifest_problem -> string

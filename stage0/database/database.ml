@@ -683,6 +683,19 @@ let root = root_of_session
 let engine session = session.engine
 let context session = Engine.context session.engine
 let problems session = session.problems
+
+(* What only a package's code shows to be wrong with its manifest, which
+   checks the package. *)
+let manifest_problems session names =
+  List.concat_map
+    (fun (directory, name) ->
+      if not (List.mem name names) then []
+      else
+        List.map
+          (fun problem -> (manifest_file directory, name, problem))
+          (try Engine.get session.engine Type_checker.manifest_problems name with Not_found -> []))
+    (current_layout session.engine).packages
+
 let packages session = (current_layout session.engine).packages
 
 let module_file session (module_ : Path.module_) =

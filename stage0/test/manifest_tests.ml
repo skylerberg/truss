@@ -139,4 +139,25 @@ let () =
   test "a string that is not closed on its line is malformed" (fun () ->
       malformed_at 2 "[package]\nname = \"a\n")
 
+let () =
+  let text =
+    "[package]\n\
+     name = \"a\"\n\n\
+     [dependencies]\n\
+     json = []\n\
+     http = [\n\
+    \  \"NetworkClient\",\n\
+     ]\n\
+     \"truss::toml\" = []\n"
+  in
+  test "a manifest without a dependency loses that entry's lines and no others" (fun () ->
+      let without = Manifest.without_dependency text "http" in
+      if without <> "[package]\nname = \"a\"\n\n[dependencies]\njson = []\n\"truss::toml\" = []\n"
+      then fail "wrote %S" without;
+      let without = Manifest.without_dependency text "truss::toml" in
+      if contains without "toml" || not (contains without "NetworkClient") then
+        fail "wrote %S" without);
+  test "a manifest without a dependency it does not list is unchanged" (fun () ->
+      if Manifest.without_dependency text "yaml" <> text then fail "changed")
+
 let () = finish ()

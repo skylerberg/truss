@@ -112,6 +112,11 @@ diagnostics, and the exit status is 1:
 - a package name of one part that is the owner in another package's name,
   since a path that starts with it could then be read two ways
 - a `[test]` table in a manifest that is not the project's
+- a grant that names no capability
+- a dependency that nothing in its package uses
+
+The last two need the package's code, as TYPECHECKER.md's "The manifest"
+describes, and are reported for the packages the command is about.
 
 ### Common options
 
@@ -192,7 +197,10 @@ same round, since applying both could give what neither meant; the second
 waits for the next round, after the file is checked again. Rounds stop
 after 32, so fixes that undo each other cannot run forever. A diagnostic with several fixes, such as an addition
 that may overflow, which offers four, is a choice for the person or agent,
-so it is reported and left alone. An agent that has chosen applies the
+so it is reported and left alone. A dependency that nothing uses has one
+fix, which deletes its entry from the manifest, and `--fix` applies it. A
+capability that is not granted has none: `--fix` never widens a grant, as
+DESIGN.md's "Dependencies" decides. An agent that has chosen applies the
 fix's edits from the JSON itself. This follows `ruff check --fix` and
 `eslint --fix`, which put fixing on the checking command, rather than
 Cargo's separate `cargo fix`; a separate command would load and check the
@@ -601,7 +609,6 @@ It is left out of each command's help.
   is read.
 - **A package read as the Truss it names.** There is one version of Truss,
   so `truss` only says whether the toolchain is new enough.
-- **An unused dependency as an error.**
 - **`truss fmt [--check] [FILE...]`,** which waits for the formatter. It is
   to rewrite the package's files, or the named ones, into the one layout
   SYNTAX.md describes, and print the names of the files it changed, with no

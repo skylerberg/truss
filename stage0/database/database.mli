@@ -33,8 +33,14 @@ val engine : session -> Engine.t
 val context : session -> Query.context
 
 val problems : session -> string list
-(** What is wrong with the project's manifests, each as its file and sentences: one that could not
-    be read, a package name used twice, a dependency that is no package of the project. *)
+(** What reading the project's manifests shows to be wrong, each as its file and sentences: one that
+    could not be read, a package name used twice, a dependency that is no package of the project. *)
+
+val manifest_problems :
+  session -> string list -> (string * string * Type_checker.manifest_problem) list
+(** What only the code of the named packages shows to be wrong with their manifests: each one's
+    file, relative to the project's root, its package, and the problem. Asking checks those
+    packages. *)
 
 val packages : session -> (string * string) list
 (** Every package of the project: its directory relative to the root, and its name. *)

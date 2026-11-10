@@ -114,7 +114,7 @@ let tokens text =
   List.rev !found
 
 type value = Text of string | Number of int | List of string list | Inline_table
-type entry = { key : string; quoted : bool; value : value; line : int }
+type entry = { key : string; quoted : bool; value : value; line : int; last_line : int }
 type table = { name : string; line : int; entries : entry list }
 
 let value_expected = "a string in quotes, a whole number, or a list in brackets"
@@ -165,10 +165,15 @@ let tables text =
     | (((Bare key | Quoted key) as token), line) :: (Equals, _) :: rest -> (
         let found, rest = value line rest in
         let quoted = match token with Quoted _ -> true | _ -> false in
+        let last_line = match rest with (_, last) :: _ -> last | [] -> max_int in
         match current with
         | Some table ->
             statements tables
-              (Some { table with entries = { key; quoted; value = found; line } :: table.entries })
+              (Some
+                 {
+                   table with
+                   entries = { key; quoted; value = found; line; last_line } :: table.entries;
+                 })
               (end_of_line line rest)
         | None ->
             malformed line
@@ -332,3 +337,16 @@ let has_project_table text =
       in
       String.trim line = "[project]")
     (String.split_on_char '\n' text)
+
+let without_dependency text name =
+  let entry =
+    Option.bind
+      (List.find_opt (fun (table : table) -> table.name = "dependencies") (tables text))
+      (fun table -> List.find_opt (fun (entry : entry) -> entry.key = name) table.entries)
+  in
+  match entry with
+  | None -> text
+  | Some entry ->
+      String.split_on_char '\n' text
+      |> List.filteri (fun index _ -> index + 1 < entry.line || index + 1 > entry.last_line)
+      |> String.concat "\n"

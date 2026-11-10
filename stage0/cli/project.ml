@@ -102,6 +102,12 @@ let package t =
 
 let is_own t (module_ : Path.module_) = List.exists (fun p -> p.name = module_.package) t.packages
 
+(* What only the code of the command's packages shows to be wrong with
+   their manifests. *)
+let manifest_problems t =
+  Database.manifest_problems t.session
+    (List.map (fun (package : package) -> package.name) t.packages)
+
 (* A package as the session holds it: its dependencies, and the targets it
    runs on. *)
 let manifest t (package : package) = Query.find t.context Workspace.packages package.name
