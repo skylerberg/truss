@@ -209,7 +209,7 @@ let links env ~find (compiled : Lir.compiled) =
                   | Local _ -> ());
               operand =
                 (function
-                | Constant (Symbol_address ((Table _ | Any_table _) as key)) ->
+                | Constant (Symbol_address ((Table _ | Any_table _ | Locked_table _) as key)) ->
                     reaches key ~is:is_table "a table"
                 | Constant (Symbol_address key) ->
                     bug "the address of %s, which is not a table" (Instance.to_string key)

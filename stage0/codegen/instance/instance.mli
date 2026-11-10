@@ -40,6 +40,14 @@ type key =
   | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
       (** The table of an [any] value of a type and trait: the type's drop, then an entry for each
           of the trait's methods *)
+  | Locked_entry of { capability : Path.t; name : string }
+      (** The entry of a capability's locking table for one of its methods. It locks the mutex of
+          the evidence it is called with, calls the implementation's entry, and unlocks the mutex.
+      *)
+  | Locked_table of Path.t
+      (** A capability's locking table: a [Locked_entry] for each of its methods. A [provide mut]
+          whose body can use [Tasks] builds its evidence with this table, so that calls of one
+          implementation by several tasks are mutually exclusive. *)
 
 val compare : key -> key -> int
 val equal : key -> key -> bool

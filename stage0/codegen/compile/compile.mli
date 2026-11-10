@@ -128,15 +128,18 @@ type unshippable = {
    [echo], every [echo], once each, in order of position. *)
 val unshippable : t -> main:Path.t -> echo:bool -> (unshippable list, string) result
 
-(* Builds the program whose [main] is at that path, and runs it with the
-   arguments, and [input] as its standard input if given, returning its exit
-   status, its output, and its errors. *)
 (* Builds the program whose [main] is at that path into an executable at
    [output]. *)
 val build_program : t -> main:Path.t -> output:string -> (unit, string) result
 
+(* Builds the program whose [main] is at that path, and runs it with the
+   arguments, and [input] as its standard input if given, returning its exit
+   status, its output, and its errors. With [in_order], the program is
+   linked with the runtime that starts no threads, as a test program is, so
+   its tasks and [parallel] branches run sequentially. *)
 val run_program :
   ?input:string ->
+  ?in_order:bool ->
   t ->
   main:Path.t ->
   arguments:string list ->

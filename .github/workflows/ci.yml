@@ -192,13 +192,18 @@ jobs:
         run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune test --force stage0/test/codegen
 
       # The programs that run on several threads, again under
-      # ThreadSanitizer, which the other sanitizers cannot run beside.
-      - name: Test parallel programs under ThreadSanitizer
+      # ThreadSanitizer, which the other sanitizers cannot run beside. The
+      # tests of tasks and shared values that run on threads have "on
+      # threads" in their names.
+      - name: Test programs on threads under ThreadSanitizer
         env:
           TRUSS_SANITIZE: thread
           TRUSS_OBJECT_CACHE: /home/runner/.cache/truss-objects
         working-directory: _build/default/stage0/test/codegen
-        run: ./parallel_tests.exe && ./shared_tests.exe
+        run: |
+          ./parallel_tests.exe
+          TRUSS_TEST="on threads" ./shared_tests.exe
+          TRUSS_TEST="on threads" ./concurrent_tests.exe
 
       - if: github.event_name == 'push'
         run: mkdir -p ~/.cache/truss-objects && find ~/.cache/truss-objects -type f -mtime +14 -delete

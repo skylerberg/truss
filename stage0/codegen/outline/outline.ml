@@ -376,10 +376,21 @@ let outline_fork env ~first_number (f : Lir.function_) =
             ]
       in
       let start = (List.hd regions).start in
+      let fills = List.concat_map (fun (_, _, _, fill, _) -> fill) made in
+      (* The environment of a task region is filled once, at the end of
+         the function's entry block. A loop can reach the region again
+         while tasks it spawned earlier still read the environment, and
+         filling it there again would be a data race. The addresses it
+         holds are of this function's locals, which do not change. *)
+      let at_entry =
+        start <> 0 && match made with (_, _, _, _, Task _) :: _ -> true | _ -> false
+      in
+      if at_entry then
+        blocks.(0) <- { (blocks.(0)) with statements = blocks.(0).statements @ fills };
       (* A fork whose last region always fails never ends. *)
       blocks.(start) <-
         {
-          statements = List.concat_map (fun (_, _, _, fill, _) -> fill) made @ replacement;
+          statements = (if at_entry then [] else fills) @ replacement;
           terminator = (match end_block with Some block -> Goto block | None -> Unreachable);
         };
       Option.iter

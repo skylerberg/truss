@@ -1145,11 +1145,49 @@ implementation, `SystemTasks`, calls the runtime's task functions.
 | `lock(mutex)`, `unlock(mutex)` | Mutual exclusion between the calls of a `mut` implementation |
 | `yield_now()` | Yields the thread to another task |
 
-The runtime does not give a task its own thread yet. `spawn` calls the
-task's function and returns when the function returns, so the tasks of a
-group run sequentially, in the order they are spawned. A task that calls
-`wait` would deadlock, because the task that would wake it cannot run, so
-`wait` panics. `lock`, `unlock`, and `yield_now` do nothing.
+The runtime runs each task on an operating-system thread of its own:
+
+- **A group** counts its tasks that have not ended. `join` blocks until
+  the count is zero and then frees the group.
+- **Cancellation** is a flag on the group. A task is cancelled when its
+  group, or a group that encloses it, is. `cancel` sets the flag once and
+  wakes every waiter, so that a cancelled one returns from `wait`.
+- **Waiting on a key** uses a fixed table of slots. A key hashes to a
+  slot, which counts the wakes of its keys. `watch` returns the count,
+  `wait` blocks while the count is unchanged, and `wake` increments it.
+  Two keys can share a slot, so `wait` can return without a wake of its
+  own key, and its caller tests its condition again.
+- **A mutex** is a `UInt64` that its owner initialized to zero. `lock`
+  changes it from 0 to 1 with a compare-and-swap, and a thread that finds
+  it locked waits on its address as a key. That wait is not cancellable.
+- **A test program, and code run while compiling, start no thread.**
+  `spawn` calls the task's function and returns when it returns, so tasks
+  run sequentially, in the order they are spawned. A task that calls
+  `wait` would deadlock, because the task that would wake it cannot run,
+  so `wait` panics there.
+
+### Mutual exclusion for a `mut` implementation
+
+Several tasks can call one implementation at the same time. If the
+implementation is provided `mut`, that would be a data race on its state.
+So at a `provide mut` whose body can use `Tasks`, lowering replaces the
+evidence of each capability of the implementation:
+
+- The replacement's table is the capability's *locking table*, an
+  instance generated once for the capability. Its entry for a method
+  calls `Tasks.lock`, calls the same method through the implementation's
+  own evidence, and calls `Tasks.unlock`.
+- The replacement holds the address of the mutex, the implementation's
+  own evidence, and the evidence for `Tasks`. The mutex is a word in the
+  frame of the `provide`, shared by all capabilities of the
+  implementation.
+- The locks go through `Tasks`, not straight to the runtime, so that a
+  scheduler provided as `Tasks` sees every lock. They use the `Tasks`
+  implementation that the same `provide` lists, or else the enclosing
+  one.
+- An implementation of `Tasks` is never locked. It guards its own state.
+- A `provide` whose body cannot use `Tasks`, and one without `mut`, are
+  lowered as before, so their calls cost nothing more.
 
 The intrinsic module also has coroutines, for a scheduler written in Truss
 that runs one task at a time. `coroutine_start(work, item)` creates a
@@ -2054,18 +2092,17 @@ a command line can hold.
 - **A `parallel for` over any other method at once.** A collection that
   cannot give its parts by position needs a way to split itself in two,
   as Rust's rayon and Java's `Spliterator` have.
-- **A thread for each task.** The runtime is first to run each task on its
-  own operating-system thread, so that the real capability implementations
-  block as they do now. Later a task is to have its own stack and run on
-  the pool's threads: a call that would block registers what it waits for
-  with the operating system and switches to another task. A call that the
+- **Tasks without a thread each.** A task has an operating-system thread
+  of its own, so a program with very many blocked tasks runs out of
+  threads. Later a task is to have its own stack and run on the pool's
+  threads: a call that would block registers what it waits for with the
+  operating system and switches to another task. A call that the
   operating system cannot wait for that way, such as reading a file or
-  looking up a host, runs on a thread kept for such calls. In a cancelled
-  task, each call that would block returns the cancelled error at once.
-- **Mutual exclusion for a `mut` implementation.** At a `provide mut` whose
-  body can use `Tasks`, the evidence is to point at entries that call
-  `Tasks.lock`, call the method, and call `Tasks.unlock`. Any other
-  `provide` is lowered as it is now.
+  looking up a host, runs on a thread kept for such calls.
+- **Cancellation of a blocked system call.** A cancelled task returns from
+  `Tasks.wait`, but a task blocked in a call of the operating system, such
+  as a read or a sleep, stays blocked until the call returns. In a
+  cancelled task, each such call is to return the cancelled error at once.
 - **The seeded `Tasks`.** It is to run each task as a coroutine, one at a
   time, and pick the next by its seed at each capability call that blocks,
   spawns a task, or locks a mutex.
