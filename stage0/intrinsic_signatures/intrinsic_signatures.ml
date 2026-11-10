@@ -43,6 +43,21 @@ let signature (operation : Intrinsic.operation) : T.signature =
     make ~generics:[ "Value" ] ~output:(Returns output) [ input "left" value; input "right" value ]
   in
   let unary output = make ~generics:[ "Value" ] ~output:(Returns output) [ input "value" value ] in
+  (* An operation on an [Array[Element, count]], generic over both. *)
+  let over_array ~output parameters =
+    let count = parameter operation "count" in
+    let array =
+      T.Named
+        {
+          path = Intrinsic.builtin_path Array;
+          arguments = [ T.Type element; T.Value (Value_parameter count) ];
+        }
+    in
+    {
+      (make ~output (parameters array)) with
+      generics = [ generic "Element"; { T.generic = count; kind = Value_generic } ];
+    }
+  in
   let with_storage ?(mode = T.Read) ?(output = T.Returns T.unit) rest =
     make ~generics:[ "Element" ] ~output (input ~mode "storage" (storage element) :: rest)
   in
@@ -93,18 +108,14 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Storage_remove -> with_storage ~mode:Mut ~output:(Returns element) [ input "index" usize ]
   | Storage_swap -> with_storage ~mode:Mut [ input "first" usize; input "second" usize ]
   | Storage_from_array ->
-      let count = parameter operation "count" in
-      let array =
-        T.Named
-          {
-            path = Intrinsic.builtin_path Array;
-            arguments = [ T.Type element; T.Value (Value_parameter count) ];
-          }
-      in
-      {
-        (make ~output:(Returns (storage element)) [ input ~mode:Own "array" array ]) with
-        generics = [ generic "Element"; { T.generic = count; kind = Value_generic } ];
-      }
+      over_array
+        ~output:(Returns (storage element))
+        (fun array -> [ input ~mode:Own "array" array ])
+  | Array_view -> over_array ~output:(Returns (view element)) (fun array -> [ input "array" array ])
+  | Array_at_mut ->
+      over_array
+        ~output:(Lends (Mut, element))
+        (fun array -> [ input ~mode:Mut "array" array; input "index" usize ])
   | Storage_at -> with_storage ~output:(Lends (Read, element)) [ input "index" usize ]
   | Storage_at_mut -> with_storage ~mode:Mut ~output:(Lends (Mut, element)) [ input "index" usize ]
   | Storage_view -> with_storage ~output:(Returns (view element)) []
@@ -201,9 +212,9 @@ let cost (operation : Intrinsic.operation) =
   | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
   | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
   | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
-  | View_slice | View_address | Storage_model | View_model | Array_model | Crash | Storage_lengthen
-  | Storage_push | Handle_from | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks
-  | Libc_number _ ->
+  | View_slice | View_address | Array_view | Array_at_mut | Storage_model | View_model | Array_model
+  | Crash | Storage_lengthen | Storage_push | Handle_from | Handle_descriptor | Handle_release
+  | Report_tests_to | Live_blocks | Libc_number _ ->
       { time = Constant_time; allocations = No_allocations }
   | Compare_bytes | Storage_remove | Storage_insert ->
       { time = Linear_in 0; allocations = No_allocations }

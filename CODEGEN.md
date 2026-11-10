@@ -1030,6 +1030,7 @@ until both handle it.
 | Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits`, `from_bits` |
 | Storage | empty, with a capacity, from an array, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view |
 | Views | length, lend an element, slice |
+| Arrays | a view of the elements, lend an element to change |
 | Operating system | the C library's functions and numbers, a handle from a descriptor and its descriptor, the address of a view, crash |
 | A test program | run a test by its number, have failures reported to a descriptor, how many blocks are allocated and not freed |
 
@@ -1038,6 +1039,11 @@ numbers as primitive operations, and storage and views as a few statements
 over their fields, so the C compiler sees each whole. The operations that
 lend an element, such as `storage_at`, lend the place `buffer[index]`
 itself.
+
+`array_view` gives a view of an array's elements, whose address is the
+array's own, so indexing and slicing an array read it in place.
+`array_at_mut` lends the element at an index to change, which is the
+place `array[index]` itself.
 
 `storage_from_array` moves an `own` array into new storage whose length
 and capacity are the array's length. An array's bytes are its elements in

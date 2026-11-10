@@ -8,6 +8,7 @@
 
 module T = Types
 open Graph
+open Context
 open Moves
 
 (* What each holder may view. A holder with an entry is known to hold a
@@ -318,4 +319,90 @@ let check context (graph : Graph.t) =
                      (show_root context local.root))
             | None -> ())
       | Enter | Take_lent _ | Bind _ | Exit | Hold _ -> ())
-    graph.points
+    graph.points;
+  (* What a stretch of code changes and uses, for [parallel]. *)
+  let effects (range : range) =
+    let changes = ref [] and uses = ref [] in
+    for index = range.first to range.limit - 1 do
+      let point = graph.points.(index) in
+      match point.action with
+      | Read place -> uses := place :: !uses
+      | Mutate place ->
+          uses := place :: !uses;
+          changes := (place, point.origin) :: !changes
+      | Assign place -> changes := (place, point.origin) :: !changes
+      | Move { place; type_; returned; captured; _ } -> (
+          uses := place :: !uses;
+          match verdict context place ~type_ ~returned ~captured with
+          | Moves -> changes := (place, point.origin) :: !changes
+          | Reads | Refused _ -> ())
+      | _ -> ()
+    done;
+    (!changes, !uses)
+  in
+  (* The branches of a [parallel] block run at the same time. A place that
+     one branch changes must not overlap a place that another branch uses.
+     Two elements of one collection may be different: the prover decides. *)
+  List.iter
+    (fun branches ->
+      let branches = List.map effects branches in
+      List.iteri
+        (fun index (changes, _) ->
+          List.iteri
+            (fun other (other_changes, other_uses) ->
+              if other <> index then (
+                let used = other_uses @ List.map fst other_changes in
+                List.iter
+                  (fun (place, origin) ->
+                    if List.exists (fun other -> Place.overlap other place = Overlap) used then
+                      report context Parallel_conflict (span context origin)
+                        (Printf.sprintf
+                           "One branch of this `parallel` block changes `%s`, which another branch \
+                            uses."
+                           (show context place));
+                    if other > index then
+                      List.iter
+                        (fun other ->
+                          match Place.overlap place other with
+                          | Maybe_apart (first, second) ->
+                              context.disjoint <- (first, second) :: context.disjoint
+                          | Overlap | Apart -> ())
+                        used)
+                  changes;
+                if other > index then
+                  (* The other branch's changes against this branch's reads. *)
+                  let _, uses = List.nth branches index in
+                  List.iter
+                    (fun (place, _) ->
+                      List.iter
+                        (fun used ->
+                          match Place.overlap place used with
+                          | Maybe_apart (first, second) ->
+                              context.disjoint <- (first, second) :: context.disjoint
+                          | Overlap | Apart -> ())
+                        uses)
+                    other_changes))
+            branches)
+        branches)
+    graph.parallel_blocks;
+  (* Each iteration of a [parallel for] runs at the same time as the
+     others, so the body may change only what belongs to one iteration: the
+     locals that the pattern binds and the locals bound in the body. *)
+  List.iter
+    (fun ((range : range), own) ->
+      let bound = ref own in
+      for index = range.first to range.limit - 1 do
+        match graph.points.(index).action with Bind locals -> bound := locals @ !bound | _ -> ()
+      done;
+      List.iter
+        (fun ((place : Place.t), origin) ->
+          let outside =
+            match place.root with
+            | Constant _ | Local Self -> true
+            | Local local -> not (List.mem local !bound)
+          in
+          if outside then
+            report context Parallel_conflict (span context origin)
+              "A `parallel for` may change only its own element and its own locals.")
+        (fst (effects range)))
+    graph.parallel_loops
