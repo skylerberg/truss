@@ -352,7 +352,7 @@ let write_output st output =
     (Code { path = write_fully; type_arguments = [] })
     ~signature ~substitution:[]
     ~arguments:[ (Read, int32, descriptor); (Read, view_ty, view) ]
-    ~mask:0 ~destination:(temporary st result)
+    ~destination:(temporary st result) ()
 
 (* Code run while compiling: works out a constant's value and writes its
    binary form to standard output. *)

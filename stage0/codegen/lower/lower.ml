@@ -211,7 +211,7 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
       let result = temporary st result_ty in
       call_instance st
         (Code { path = function_; type_arguments = [] })
-        ~signature ~substitution:[] ~arguments:passed ~mask:0 ~destination:result;
+        ~signature ~substitution:[] ~arguments:passed ~destination:result ();
       let output = Constants.begin_output st in
       Glue.encode_call context.glue st.b
         ~output:(Address { place = output; writable = true })

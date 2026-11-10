@@ -502,10 +502,14 @@ generation only decides how each Truss parameter becomes C parameters.
 
 A function with defaults takes a mask with one bit for each parameter that
 has a default, set when the caller passed it. The function's first block
-fills in each missing argument from its constant. A caller that passes
-everything passes 0. This keeps DESIGN.md's rule that defaults are applied by
-the function, so changing one compiles only the function again. It avoids
-Kotlin's separate `$default` method, which costs an extra call.
+fills in each missing argument from its constant. A call that has an
+argument for every parameter sets every bit: a call through a function
+value, an entry of a table, a call the compiler writes itself, and a call
+that is run while compiling are all such calls. Only a call written in
+source can leave an argument out. This keeps DESIGN.md's rule that defaults
+are applied by the function, so changing one compiles only the function
+again. It avoids Kotlin's separate `$default` method, which costs an extra
+call.
 
 Where the default must be owned, for a record field or an `own` parameter,
 filling it in copies the constant: free for numbers, strings, and empty
