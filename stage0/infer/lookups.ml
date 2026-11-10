@@ -12,10 +12,9 @@ module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
 
-let rec coerce state (value : expression) ~found ~expected =
-  match resolve state found with
-  | Never -> ()
-  | _ -> if not (unify state expected found) then mismatch state value.span ~expected ~found
+(* An expression's value where a type is expected of it. *)
+let rec coerce state env ?argument (value : expression) ~found ~expected =
+  convert state env ?argument ~expression:value.id value.span ~found ~expected
 
 and literal_type state ~expected kind =
   match Option.map (resolve state) expected with
@@ -32,16 +31,15 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
       | None -> bug "the local `%s` has no type" text)
-  | Value_parameter id ->
-      state.tables.meanings.(value.id) <-
-        Some (Generic_value (Lower.declared state.context id name));
+  | Value_parameter parameter ->
+      state.tables.meanings.(value.id) <- Some (Generic_value parameter);
       T.builtin USize
   | Type_parameter _ | Capability_parameter _ ->
       error state Not_a_value value.span (Printf.sprintf "`%s` is a type, not a value." text)
   | Definition ((Function | Theorem), path) -> (
       match function_signature state path with
       | Some (Ok signature) ->
-          let instance = instantiate state ~span:value.span signature in
+          let instance = instantiate state value.span signature in
           Option.iter (explicit_type_arguments state value instance) type_arguments;
           state.tables.meanings.(value.id) <-
             Some (Global { path; type_arguments = instance.type_arguments });
@@ -65,7 +63,8 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Definition ((Trait | Capability), _) ->
       error state Not_a_value value.span (Printf.sprintf "`%s` is not a value." text)
   | Variant (type_path, variant) ->
-      variant_value state value type_path variant ~arguments:(fresh_arguments state type_path)
+      variant_value state value type_path variant
+        ~arguments:(instantiate_type state value.span type_path)
   | Field field -> (
       match env.self with
       | Some (T.Named { path = self_path; arguments }) -> (
@@ -200,7 +199,7 @@ and static_member state (value : expression) type_ (member : name) =
             | (_, method_path) :: _ -> (
                 match function_signature state method_path with
                 | Some (Ok signature) ->
-                    let instance = instantiate state signature in
+                    let instance = instantiate state value.span signature in
                     (match instance.signature.receiver with
                     | Some (_, receiver) -> ignore (unify state receiver type_)
                     | None -> ());
@@ -401,7 +400,7 @@ and trait_candidates state receiver_type name =
                (Query.demand state.database Members.traits_declaring (package, name)))
            (Members.visible_packages state.database state.package))
 
-and each_call state type_ mode =
+and each_call state (span : span) type_ mode =
   let receiver : Path.receiver = match mode with T.Read -> Read | Mut -> Mut | Own -> Own in
   match type_ with
   | T.Named { path; _ } -> (
@@ -409,7 +408,7 @@ and each_call state type_ mode =
       | Some method_path -> (
           match function_signature state method_path with
           | Some (Ok signature) -> (
-              let instance = instantiate state signature in
+              let instance = instantiate state span signature in
               (match instance.signature.receiver with
               | Some (_, self_type) -> ignore (unify state self_type type_)
               | None -> ());
@@ -439,7 +438,7 @@ and each_call state type_ mode =
           with
           | Some method_ -> (
               let instance =
-                instantiate state
+                instantiate state span
                   ~extra:[ ({ owner = trait.trait; name = "Self" }, T.Type type_) ]
                   method_.method_signature
               in
@@ -475,7 +474,7 @@ and each_call state type_ mode =
   | _ -> None
 
 (* What a value's [each] yields for a loop's mode. *)
-and yielded state type_ mode =
+and yielded state (span : span) type_ mode =
   let receiver : Path.receiver = match mode with T.Read -> Read | Mut -> Mut | Own -> Own in
   match type_ with
   | T.Named { path; _ } -> (
@@ -483,7 +482,7 @@ and yielded state type_ mode =
       | Some method_path -> (
           match function_signature state method_path with
           | Some (Ok signature) -> (
-              let instance = instantiate state signature in
+              let instance = instantiate state span signature in
               (match instance.signature.receiver with
               | Some (_, self_type) -> ignore (unify state self_type type_)
               | None -> ());

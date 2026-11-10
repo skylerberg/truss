@@ -63,11 +63,8 @@ let trait_methods database trait name =
 (* The fields of a record type, with its type arguments substituted. *)
 let substitution_for database path arguments =
   match Query.demand database Environment.type_interface path with
-  | Some interface when List.length interface.type_generics = List.length arguments ->
-      List.combine
-        (List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics)
-        arguments
-  | _ -> []
+  | Some interface -> Option.value ~default:[] (T.substitution_of interface.type_generics arguments)
+  | None -> []
 
 let fields database path arguments =
   match Query.demand database Environment.type_interface path with

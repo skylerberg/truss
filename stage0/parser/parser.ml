@@ -31,6 +31,7 @@ let item (cursor : Cursor.t) value : _ Syntax.item =
     text = Cursor.text cursor (Source.span cursor.base last.span.stop);
     blank_line_before = cursor.tokens.(cursor.first).blank_line_before;
     value;
+    within = None;
   }
 
 let parsed cursor value diagnostics =
@@ -41,11 +42,13 @@ let check cursor definition =
   Operators.definition cursor definition;
   Check.definition cursor definition
 
-let definition source tokens piece =
+(* One definition from a piece of its own, by [parse], or the error that
+   stands for it when its header does not parse. *)
+let one_definition source tokens piece parse =
   let value, cursor, diagnostics =
     with_cursor source tokens piece (fun cursor ->
         let definition : Syntax.definition =
-          match Parse_definition.definition cursor with
+          match parse cursor with
           | definition ->
               check cursor definition;
               definition
@@ -64,7 +67,31 @@ let definition source tokens piece =
         in
         { definition with recovered })
   in
-  parsed cursor value diagnostics
+  (parsed cursor value diagnostics, List.rev !(cursor.methods))
+
+(* A definition, and the methods written inside it when it is a trait, an
+   [impl], or a capability: each a definition of its own, with its own
+   tokens, positions, and node ids, so that a change to one method is a
+   change to nothing else. *)
+let definition source tokens piece =
+  let parsed, methods = one_definition source tokens piece Parse_definition.definition in
+  let within : Parse_definition.container option =
+    match parsed.value.value.kind with
+    | Trait _ -> Some In_trait
+    | Impl _ -> Some In_impl
+    | Capability _ -> Some In_capability
+    | _ -> None
+  in
+  ( parsed,
+    match within with
+    | Some within ->
+        List.map
+          (fun (first, stop) ->
+            fst
+              (one_definition source tokens { first; stop }
+                 (Parse_definition.method_ ~within ~visibility:parsed.value.value.visibility)))
+          methods
+    | None -> [] )
 
 (* [use standard::file_system]. *)
 let use_path cursor : Syntax.path option =
@@ -137,14 +164,19 @@ let parse source tokens =
           ~diagnostics:((line_diagnostics @ moved) :: diagnostics)
           ~destination
     | piece :: rest ->
-        let parsed = definition source tokens piece in
+        let parsed, methods = definition source tokens piece in
         let destination =
           match (definitions, destination) with
           | [], None -> Some (Source.line_start source parsed.value.base)
           | _ -> destination
         in
-        gather rest ~uses ~definitions:(parsed.value :: definitions)
-          ~diagnostics:(placed parsed :: diagnostics) ~destination
+        let within = Some (List.length definitions) in
+        gather rest ~uses
+          ~definitions:
+            (List.rev_map (fun (method_ : _ parsed) -> { method_.value with within }) methods
+            @ (parsed.value :: definitions))
+          ~diagnostics:(List.rev_map placed methods @ (placed parsed :: diagnostics))
+          ~destination
   in
   let uses, definitions, diagnostics =
     gather (split tokens) ~uses:[] ~definitions:[] ~diagnostics:[] ~destination:None

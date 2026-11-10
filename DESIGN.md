@@ -74,11 +74,18 @@ stage0's stages, which [IMPLEMENTATION.md](IMPLEMENTATION.md) lists.
 - **Development builds do not inline across the definitions being worked
   on.** Inlining one definition into another makes the caller's code depend
   on the callee's body. Development builds inline only from the standard
-  library and from dependencies, whose bodies change only with a new
-  toolchain or a new version in the manifest, so inlining never widens a
-  rebuild while editing. Cargo users get the same effect by hand, by
-  optimizing dependencies in development profiles. Release builds inline
-  across everything.
+  library and from registry packages, whose bodies change only with a new
+  toolchain or a new version in the lock file, so inlining never widens a
+  rebuild while editing. A project's own packages are being worked on,
+  whichever of them a definition is in. Cargo users get the same effect by
+  hand, by optimizing dependencies in development profiles. Release builds
+  inline across everything.
+- **Upgrading a dependency costs what the upgrade changed.** A path holds
+  no version, so a new version of a package is an edit to code the project
+  does not own, and is followed like any edit: a release that changed three
+  bodies compiles those again and runs the tests that reach them, and a
+  caller whose callees' signatures are unchanged is neither type-checked nor
+  proven again. See [Packages](#packages).
 - **A new compiler release redoes only what it changed.** Each stage of the
   compiler is versioned on its own: the parser, the type checker, the prover
   with its pinned solver, code generation, and each rule for deriving. A
@@ -895,8 +902,11 @@ choices below keep method calls predictable:
   the same name is an error at the `impl`, and two traits with the same
   method name is an error at the call. Upgrading a dependency can therefore
   break a call only with an error that names both sides, never by changing
-  what it does. Adding a public method to a type can break another package's
-  `impl`, so tools that check versions treat it as possibly breaking.
+  what it does. Adding a public method to a type can so break another
+  package's `impl`, with an error whose fix is a rename. A release that only
+  adds names is still a compatible one (see [Versions](#versions)), as in
+  Go's compatibility promise and Rust's rules for minor releases: otherwise
+  no type could ever gain a method.
 - **Each type has at most one implementation of a trait,** for each set of
   the trait's arguments.
 - **An `impl` lives with its trait or with a type it names.** It must be in
@@ -1403,21 +1413,64 @@ along. So the package manifest grants each dependency its capabilities:
 
 - **A dependency gets no capabilities unless granted.** It can only do pure
   computation.
+- **Every dependency has a grant, a project's own packages included.** A
+  project split into packages says in its manifests what each part may do,
+  so a reviewer reads there that the package that parses can touch nothing.
+  Much of a project's own code is written by LLMs and not all of it is
+  reviewed, so the limit matters at home as it does for a stranger's code.
 - **Exceeding a grant fails the build.** The error names the dependency's
   function and the capability it used. Giving a package more power is always a
   visible change to the manifest.
-- **Grants are checked at signatures.** A call to a dependency's function, or
-  a `provide` of its type, is checked against the dependency's grant, from
-  the callee's `uses`. The dependency's bodies are already checked against
-  its own signatures, so nothing it does can go further. A dependency that
-  offers both a client and a server needs only the grants for what the
-  program calls.
-- **Grants nest.** A dependency can only grant its own dependencies a subset of
-  what it was granted.
+- **A missing grant is never fixed automatically.** The error says which
+  capability to add to which entry, and no tool adds it: `truss check --fix`
+  never widens a grant. Whoever grants one, person or agent, writes a line
+  in the manifest that a reviewer sees.
+- **Grants are checked at signatures, wherever a dependency's code is
+  named.** A call to a dependency's function is checked against the
+  dependency's grant, from the callee's `uses`. So is every other way of
+  handing its code on: taking its function as a value, using its `impl`
+  where a bound or an `any` needs one, and a `provide` of its type.
+  Otherwise a package with no grant could have its `impl` run by a package
+  that has one. The dependency's bodies are already checked against its own
+  signatures, so nothing it does can go further. A dependency that offers
+  both a client and a server needs only the grants for what the program
+  names.
+- **A grant names a capability as code does:** a prelude capability by its
+  name, and any other by its full path. A package needs a grant even for a
+  capability it defines itself, since what the capability can do is decided
+  by whoever provides it.
+- **Grants nest, and signatures are what make them.** A package can hand its
+  own dependencies no more than it holds. No rule about manifests checks
+  that, since a published package's manifest is fixed while what it is
+  granted differs from one user to the next. It follows from the signatures:
+  a function a package offers under a grant carries in its `uses` every
+  capability anything beneath it uses, so nothing beneath it can use more.
 - **Passing through does not count.** Running a caller's callback with the
   caller's capabilities (through a `capability Granted` parameter) is not the
   dependency doing anything itself.
 - **The standard library needs no grant.** It holds the real implementations.
+- **A new version cannot take more for what is already called.** A release
+  that adds a capability to a function's `uses` is not a compatible one (see
+  [Versions](#versions)), so an upgrade under one name can change what a
+  function already called computes, and never what it may touch.
+- **What each package holds is written down.** The lock file records, for
+  every package of the build, the capabilities its users grant it. An
+  upgrade deep in the graph that hands a package the network shows as a
+  changed line.
+- **Nothing in a package runs when it is fetched or built.** Truss has no
+  build scripts and no macros, the code that runs while compiling is pure
+  (see [Tagged templates](#tagged-templates)), and a test has no
+  capabilities but the fakes it provides. npm's install scripts, Cargo's
+  build scripts, and Rust's procedural macros run a dependency's code on
+  the developer's machine with everything the developer can reach, which is
+  how a package that steals a publishing token goes on to publish itself
+  under its victim's name. A dependency's external tests, which do get real
+  capabilities, are never run by a project that depends on it.
+
+What grants cannot stop is a wrong answer. A pure dependency can still
+return a result that its user then acts on with capabilities of its own.
+Contracts narrow that, and review of what a project depends on is still
+needed.
 
 Because `main`'s `uses` clause is complete, a later compiler could also apply
 operating system restrictions such as seccomp, Landlock, or pledge to match.
@@ -1984,6 +2037,37 @@ enough in it, plus a set of approved packages, that most programs need few
 outside dependencies. Every dependency is a possible target for a supply-chain
 attack.
 
+- **The standard library is part of the toolchain.** It has no version of
+  its own and is in no manifest and no lock file: every package may use it,
+  and it is the toolchain's.
+- **A package says which Truss it is written for,** with `truss = "1.4"` in
+  its manifest, as Go's `go` line does. That one number is the language
+  version the package's files are read as, and the least toolchain that can
+  build it, since the standard library it may use is that toolchain's. A
+  build needs a toolchain at least as new as the newest of its packages
+  asks for, and a toolchain reads each package as the language version it
+  names, so a package written for an older Truss builds unchanged beside
+  one written for a newer, as Rust's editions and Go's per-module language
+  versions allow.
+- **The standard library never breaks within a language version.** It
+  follows the rule every published package follows (see
+  [Versions](#versions)), and has no second name to move to.
+- **It holds what needs the compiler:** the prelude, the built-in types and
+  collections, the real implementations of the standard capabilities, and
+  the code that differs between platforms. It is the only package that
+  needs no grant (see [Dependencies](#dependencies)) and the only one that
+  reaches the operating system (see [No foreign code](#no-foreign-code)).
+- **The approved packages are the registry's packages owned by `truss`,**
+  such as `truss::json` and `truss::http`. They are plain Truss, written on
+  the standard library's capabilities and granted them like any dependency,
+  and are held to the review and release rules of the toolchain itself. Go's
+  `golang.org/x` and Deno's `@std` are kept the same way. They are apart
+  from the standard library so that each can have versions of its own, and a
+  second name when it must break, which the standard library never can:
+  Python's standard library holds modules that could neither be fixed nor
+  removed for decades. A package another owner wrote becomes approved by
+  moving to `truss`, which is a rename for its users.
+
 A small prelude of names that nearly every program needs (built-in types,
 `Option`, `Result`, the core collections and traits, and the standard
 capabilities) is in scope
@@ -2022,6 +2106,277 @@ The access boundary is the package rather than the file, because a type's
 methods can live in any file of its package. Public types expose their fields
 unless marked `opaque`, following Gleam. This is visible in review, because
 the fields are written right in the type's public declaration.
+
+There is no level between `internal` and `public`, such as one for the
+packages of one project. Swift's `package` level and Go's `internal`
+directories work because the code they span is versioned as one unit. Truss
+versions each package on its own, so two packages that shared more than
+their public definitions could be paired at versions that were never
+checked together. Code that shares its internals belongs in one package,
+which costs nothing, since a package is not a unit of building (see
+[Packages](#packages)). Within a project nothing is lost: `public` there
+promises nothing until a package is published.
+
+## Packages
+
+A package is the unit of every boundary Truss checks. It is the first part of
+every path into it, the reach of `internal` and of `opaque`, where a type's
+methods and a trait's `impl`s may live, what a manifest grants capabilities
+to, and what is published and given a version. A package with a `main`
+builds one program.
+
+- **A package is not a unit of building.** Results are kept for each
+  definition, so splitting a package makes no build faster and joining two
+  makes none slower. Rust's crates and Bazel's targets are split to keep
+  builds quick, which puts boundaries where the build wants them. A Truss
+  package is split only where someone wants a boundary checked.
+- **Every kind of package works one way.** A package is named by a path
+  that is the same in every file of every project, and where its code comes
+  from follows from the name:
+
+  | Kind | Named | Its code | Its version |
+  |---|---|---|---|
+  | The standard library | `standard` | Part of the toolchain | The toolchain's |
+  | A project's own | Its manifest's name | Under the project's directory | None |
+  | From the registry | `owner::name` | Fetched, and kept by the hash of its content | In the project's lock file |
+
+- **A package's program starts at the `main` of its `main` module,** so
+  finding it is one lookup and not a search of the package, as with Cargo's
+  `src/main.rs`. A package builds at most one program, so a project with
+  several programs has a package for each, and a library is a package with
+  no `main` module.
+
+### Projects
+
+A project is the packages that are worked on together: every package in the
+directory tree under a manifest that has a `[project]` table. A package with
+no such manifest above it is a project by itself, so a single package needs
+nothing more than its own manifest.
+
+- **Every package under the project's root belongs to it.** There is no
+  list of members, as Cargo's `[workspace]` and Go's `go.work` have. A list
+  is one more file that every agent adding a package must edit, and so one
+  more place for two agents to collide.
+- **Packages find each other by name, never by a path.** A dependency names
+  a package, and if the project has a package by that name, that is the one.
+  Cargo's `path = "../geometry"` breaks when a directory moves, and says in
+  every manifest where another package is kept. This is the rule for
+  modules, which have no relative paths either.
+- **A project's package takes the place of the registry's package of the
+  same name.** A copy of `acme::geometry` put in the project is the
+  `acme::geometry` every package of the build uses. That is how a
+  dependency is fixed ahead of its owner, and how a library is worked on
+  together with a program that uses it. Cargo's `[patch]` and Go's
+  `replace` are tables for this. In Truss the name already says which
+  package is meant, so there is nothing more to write, and the copy is in
+  the repository for a reviewer to see.
+- **A project has one lock file,** at its root, with the version of every
+  registry package any of its packages uses, as a Cargo workspace has.
+- **A project's own packages have no versions.** They are the code being
+  worked on. A version is what the registry gives a package when it is
+  published.
+
+### Package names
+
+- **A registry package is named `owner::name`,** and is written that way in
+  code, as in `use acme::geometry::vector`. An owner is an account on the
+  registry, and only its owner publishes under it. crates.io and PyPI have
+  one flat list of names, where a name is whoever took it first, and a
+  package whose name is one letter from a well-known one is how much
+  malware arrives. LLMs make this worse: they make up names of packages
+  that do not exist, and attackers publish under the names they make up.
+  With an owner in the name, who published the code is in every path that
+  uses it, and a reviewer who trusts `truss` and `acme` can see at once a
+  path that starts with neither.
+- **The name in code is the registry's name, with no other.** Cargo lets a
+  manifest give a package a different name, and Go an import. Either is an
+  alias, which Truss has none of: a path is written the same everywhere and
+  found by searching for it. Go's import paths and npm's `@scope/name`
+  put the registry's name in the code in the same way, and Java's and PHP's
+  conventions do.
+- **A project's own package may have a name of one part,** such as
+  `weather`, and must have an owner in its name before it is published. A
+  name of one part cannot be the owner of another package of the build, so
+  that every path reads one way.
+- **A name is one package for good.** The registry never hands a name, or an
+  owner, to someone else, and never removes or replaces a version that was
+  published under one.
+- **`standard` is the standard library, and the owner `truss` is the Truss
+  project's,** for its approved packages (see
+  [The standard library and prelude](#the-standard-library-and-prelude)).
+
+### Versions
+
+- **A build holds one version of each package.** Definitions are named by
+  path, and a path means one thing. Cargo and npm let two versions of one
+  package into a build, and then one path names two types: Rust's "expected
+  `Vector`, found `Vector`" is the error that results.
+- **So a release never breaks what an earlier one of the same name
+  offered.** A change that would is published under a new name, the old one
+  with `_v2` after it, as Go requires `/v2` in the import path of a module's
+  second major version. `acme::geometry` and `acme::geometry_v2` are two
+  packages. Both can be in one build, and one file can use both while its
+  code moves over. Cargo and npm instead leave this to each author's care,
+  and breaking changes in releases that claimed to be compatible are
+  routine.
+- **The registry checks it, from the signatures.** GOALS.md has the
+  signature say everything important about a definition, so whether a
+  release keeps its promises can be read from the two releases. A release
+  is compatible with the one before when:
+  - every public definition is still there, at the same path
+  - a function, method, or theorem has the same parameters and result, no
+    capability more in its `uses`, a `requires` that the old one implies,
+    an `ensures` that implies the old one, and no cost greater than before,
+    which is how an `impl`'s method may differ from its trait's (see
+    [Traits that require other traits](#traits-that-require-other-traits)),
+    and a method that could be pulled still can be
+  - a type that shows its fields has the same fields, variants, and
+    invariant; an opaque type may change everything inside it
+  - a trait or capability has the same methods, associated types, required
+    traits, and laws, and at most gains methods that have bodies, since
+    anything else it gained would have to be added to every `impl` in
+    another package
+  - every `impl` is still there
+  - a constant has the same type and value, since a constant's value
+    reaches the types and patterns of its users
+  - a package that ran on every target still does (see
+    [Integers](#integers))
+
+  Elm's registry checks releases the same way, from types alone, and
+  `cargo-semver-checks` and Go's `gorelease` check what they can outside
+  their registries. Truss's signatures hold more, so the check covers more.
+- **Bodies are not promised.** A release may change what a function
+  computes within its contract, and that is how a fix reaches its users,
+  under the same name. A body the prover reads as its function's definition
+  (see [What a function means to the prover](#what-a-function-means-to-the-prover))
+  is no exception, nor is a parameter's default: a proof in another package
+  that leaned on one is checked again after an upgrade, and may need
+  repair. What a package's users are meant to rely on goes in an `ensures`,
+  where it is promised.
+- **The registry gives each release its number.** The first is 1.0.0. After
+  that, a release whose public signatures are all unchanged gets the next
+  patch number, and one that added to them gets the next minor number, as
+  Elm's tools work a release's number out from what changed. The first part
+  is the number in the
+  package's name, 1 where the name has none, so `acme::geometry_v2` starts
+  at 2.0.0. An author never chooses a number, so a number is never wrong
+  about what changed.
+- **There are no 0.x versions,** as in Elm. A version that may break at any
+  release cannot be the one version of its name in a build. A package whose
+  shape is still changing publishes `_v2`, then `_v3`, and its users move
+  when they choose.
+- **A compatible release can still surface two kinds of error.** A name it
+  added can clash with one a user of it defined, such as a method added to
+  a type for which another package implements a trait with a method of the
+  same name (see [Methods](#methods)). And a contract that got stronger is a
+  different question for the solver, which is not certain to answer it
+  within its limits. Both are errors that say what is wrong, never a change
+  in what code does. A project that meets one holds the upgrade back, or
+  keeps a fixed copy of the package it breaks in the project until its
+  owner publishes one.
+
+### Choosing versions
+
+- **A build uses the newest version that any of its packages was checked
+  with,** and nothing newer. Every published package records the version of
+  each registry package it was published with, its dependencies and theirs,
+  and a project's lock file records the same for the project. The version
+  of a package in a build is the highest that the project or any package of
+  the build records. This is Go's minimal version selection.
+- **Nothing new enters a build until someone asks.** Cargo and npm choose
+  the newest release that a range allows, each time versions are chosen
+  afresh. A release published an hour ago is then in every such build,
+  which is how a compromised release of a popular package reaches
+  thousands of machines before anyone has read it. Under Truss's rule a
+  release reaches a build only when someone upgrades to it, or to a package
+  that was published with it.
+- **There are no ranges and no solver.** Every version under one name is
+  compatible with those before it, so "at least this one" is all a
+  requirement can say, and the highest of several is the answer. Choosing
+  versions among ranges is NP-complete, and its answer changes as packages
+  are published. This rule's answer depends only on the lock file and the
+  records of the packages it names, so it is the same on every machine, on
+  every day.
+- **Versions are written only in the lock file.** A manifest names a
+  package's dependencies and what each may do. `truss add` and
+  `truss upgrade` look versions up and write the lock file. An LLM does not
+  know which versions exist today, and one written from memory is stale or
+  made up, so no file a person or an agent writes by hand holds one.
+- **The lock file names content.** Beside each version is the hash of the
+  package's files. A build fetches what the lock file names when it does
+  not have it, and uses nothing whose hash differs. Fetching by hash changes
+  no answer, so it needs no command. Choosing versions never happens unless
+  asked for.
+- **Two changes to a lock file always merge.** For each package the merged
+  line is the higher version, and the rest follows from the rule above.
+  A lock file written by a solver is one of many valid answers, so two of
+  them cannot be merged without solving again, which may bring in versions
+  neither side had.
+- **An upgrade is tried before it is made.** `truss upgrade` checks the new
+  versions in a state of their own, as a rename is checked, and reports
+  what the change reaches: the signatures the project reads that changed,
+  the packages that enter the build, and each package that would hold a
+  capability it did not. The upgrade is then a decision made with its
+  consequences in view.
+
+### The registry
+
+- **A package is published as its source,** and that is all the registry
+  holds of it: its manifest, its modules, its lock file, and the
+  documentation beside them. There is nothing built and nothing generated,
+  so what a reviewer reads in the registry is exactly what compiles. A
+  release whose published files differed from its repository's is how the
+  xz backdoor was shipped.
+- **Content is checked against a public log.** The registry keeps an
+  append-only log of every version's hash, as Go's checksum database does,
+  and the toolchain checks that the hash it puts in a lock file is in the
+  log. So the registry cannot give two users different code under one
+  version, a copy from a mirror needs no trust, and a company's own
+  registry or mirror is a directory of files.
+- **A package is published only when it is finished:** it has no
+  diagnostics, every proof is done, it has no `todo` and no `echo`, its
+  tests that have no `uses` pass, and every dependency is a registry
+  package. The registry checks all of this again itself, which is safe to
+  do with a stranger's code, because nothing that runs while checking,
+  proving, or testing has a capability.
+- **Proofs are shared, signed.** The registry signs the solver's answers
+  and the test results it computed for a release, under the keys those
+  results always have (see [DATABASE.md](DATABASE.md)). A build needs the
+  proofs of the dependency code it can reach, as it needs its own, and
+  finds them signed or else proves them itself. The toolchain trusts the
+  registry's key unless a project says otherwise. Proving a whole
+  dependency tree on a machine that starts with nothing is the cost
+  GOALS.md sets out to remove, and an agent in a new container is such a
+  machine. The trust is in a claim anyone can check: every signed result
+  is a function of its key, so a registry that signed a false one is caught
+  by whoever computes it again.
+- **A new toolchain proves the registry again,** as far as it changed what
+  is proven, since a proof is kept under the solver and the question that
+  made it. A toolchain that can no longer prove what the last one proved
+  of the approved packages is not released.
+- **A release can be marked as one not to use,** by its owner or the
+  registry, with the reason. It stays where it is, and builds that use it
+  still build: a mark that broke them would let one compromised account
+  stop every project that depends on it. `truss upgrade` never chooses a
+  marked release, and says so when a project is on one.
+
+### What packages do without
+
+- **Optional parts of a package,** such as Cargo's features. They exist to
+  keep unwanted code and dependencies out of a build. In Truss code that
+  nothing reaches is never compiled, a package that nothing reaches is
+  never granted anything and runs nothing, and a grant covers only what a
+  program names, so there is nothing for a switch to save. Features cost
+  Cargo's users builds that work only with some sets of switches.
+- **A second list of dependencies for tests.** A package has one list.
+  Which of its dependencies only its tests reach is worked out when it is
+  published, from what its definitions read, and a project that uses the
+  package does not take those on.
+- **Dependencies on a git repository or a directory.** A package is one of
+  the project's or one of the registry's. Code that is not published is
+  worked on in the project that uses it.
+- **Build scripts and code generators.** Nothing in a package runs to
+  build it (see [Dependencies](#dependencies)).
 
 ## Strings
 
@@ -2218,7 +2573,9 @@ searching for it. Rust's `crate::` would survive renaming the package, but
 code inside a package would look different from code outside it, and
 relative paths such as `super::` make one module look different depending on
 where it is named from. Renaming a package is rare and is a mechanical
-rename.
+rename. A registry package's name has its owner in front, so a path into one
+starts `acme::geometry` (see [Package names](#package-names)), and holds no
+version, so an upgrade changes no path.
 
 **Modules in a package may depend on each other in a cycle.** Each top-level
 definition is kept on its own, so dependencies are tracked between

@@ -7,7 +7,6 @@ module C = Checked
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
 open Hooks
@@ -81,7 +80,9 @@ let rec string_literal state env ?expected (literal : string_literal) =
   | Some tag -> (
       match target state tag.last with
       | Some (Definition (Type, tag_path)) ->
-          let tag_type = T.Named { path = tag_path; arguments = fresh_arguments state tag_path } in
+          let tag_type =
+            T.Named { path = tag_path; arguments = instantiate_type state tag.last.span tag_path }
+          in
           (match expected with
           | Some expected -> ignore (unify state tag_type expected)
           | None -> ());
@@ -203,15 +204,9 @@ and lambda state env ?expected (value : expression) parameters body =
         let output = output_type function_type.output in
         let lambda_env = { env with output = Some (Returns output) } in
         let body_type = block_value state lambda_env ~expected:output body in
-        (match resolve state body_type with
-        | T.Never -> ()
-        | found
-          when env.specification && T.is_integer_type found && resolve state output = T.Integer ->
-            (* A built-in integer is an [Integer] in a specification. *)
-            ()
-        | _ ->
-            if not (unify state output body_type) then
-              mismatch state body.span ~expected:output ~found:body_type);
+        ignore
+          (convert state lambda_env ?expression:(block_end body) body.span ~found:body_type
+             ~expected:output);
         T.Function function_type
     | Some (T.Function function_type) ->
         untyped
@@ -250,7 +245,7 @@ and lambda state env ?expected (value : expression) parameters body =
 
 and if_ state env ?expected (test : expression) then_ else_ =
   let condition_type = in_statement state env test.span (fun () -> expression state env test) in
-  coerce state test ~found:condition_type ~expected:T.bool;
+  ignore (coerce state env test ~found:condition_type ~expected:T.bool);
   match else_ with
   | None ->
       let then_type = block_value state env ~expected:T.unit then_ in
@@ -262,26 +257,42 @@ and if_ state env ?expected (test : expression) then_ else_ =
       T.unit
   | Some branch ->
       let then_type = block_value state env ?expected then_ in
-      let else_type, else_span =
+      let else_type, else_span, else_end =
         match branch with
-        | Else block -> (block_value state env ?expected block, block.span)
+        | Else block -> (block_value state env ?expected block, block.span, block_end block)
         | Else_if branch_expression ->
-            (expression state env ?expected branch_expression, branch_expression.span)
+            ( expression state env ?expected branch_expression,
+              branch_expression.span,
+              Some branch_expression.id )
       in
-      join state ~expected [ (then_type, then_.span); (else_type, else_span) ]
+      join state env ~expected
+        [ (then_type, then_.span, block_end then_); (else_type, else_span, else_end) ]
 
-(* The type of branches together: arms of type [Never] are left out. *)
-and join state ~expected branches =
-  let live = List.filter (fun (type_, _) -> resolve state type_ <> T.Never) branches in
+(* The expression a block ends with, whose value is the block's. *)
+and block_end (written : block) =
+  match List.rev written.statements with
+  | { kind = Expression value; _ } :: _ -> Some value.id
+  | _ -> None
+
+(* The type of branches together: arms of type [Never] are left out. Each
+   branch's value, the expression it ends with, meets the type expected of
+   them all, and with none expected the branches have one type. *)
+and join state env ~expected branches =
+  let live = List.filter (fun (type_, _, _) -> resolve state type_ <> T.Never) branches in
   match (live, expected) with
   | [], _ -> T.Never
-  | (first, _) :: rest, _ ->
-      let target = match expected with Some expected -> expected | None -> first in
+  | _, Some expected ->
       List.iter
-        (fun (type_, span) ->
-          if not (unify state target type_) then mismatch state span ~expected:target ~found:type_)
-        (match expected with Some _ -> live | None -> rest);
-      target
+        (fun (found, span, expression) ->
+          ignore (convert state env ?expression span ~found ~expected))
+        live;
+      expected
+  | (first, _, _) :: rest, None ->
+      List.iter
+        (fun (type_, span, _) ->
+          if not (unify state first type_) then mismatch state span ~expected:first ~found:type_)
+        rest;
+      first
 
 and match_ state env ?expected (value : expression) scrutinees arms =
   (* When the guards cover everything, the [match] ends with
@@ -322,10 +333,12 @@ and match_ state env ?expected (value : expression) scrutinees arms =
               pattern state env written type_ ~mode:(mode_of scrutinee))
             arm.patterns types;
         Option.iter (fun guard -> check state env guard T.bool) arm.guard;
-        (arm_value state env ?expected arm.body, arm.body.span))
+        ( arm_value state env ?expected arm.body,
+          arm.body.span,
+          match arm.body.kind with Expression value -> Some value.id | _ -> None ))
       arms
   in
-  join state ~expected branch_types
+  join state env ~expected branch_types
 
 (* An arm's body is a statement. As a value, a body that is not an
    expression has type [Unit]. *)
@@ -342,7 +355,7 @@ and element_of_collection state env (collection : expression) =
   | T.Named { path; arguments = [ T.Type element ] } when Path.equal path range_path -> element
   | T.Error _ | T.Hole -> collection_type
   | _ -> (
-      match yielded state collection_type T.Read with
+      match yielded state collection.span collection_type T.Read with
       | Some element -> element
       | None ->
           error state Not_indexable collection.span

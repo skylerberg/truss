@@ -103,9 +103,9 @@ let () =
         \    true\n\
         \  }\n\
          }"
-        "(trait Ordered : Equal (type Key: Hash) (fn compare (self (other: Self)) -> Ordering) (fn \
-         max (own self (other: own Self)) -> Self (ensures true) (block self)) (law transitive \
-         ((a: Self) (b: Self)) (requires (<= a b)) (block true)))";
+        "(trait Ordered : Equal (type Key: Hash) (law transitive ((a: Self) (b: Self)) (requires \
+         (<= a b)) (block true)) (fn compare (self (other: Self)) -> Ordering) (fn max (own self \
+         (other: own Self)) -> Self (ensures true) (block self)))";
       definition "trait Loggable: Display + Hash {}" "(trait Loggable : Display + Hash)");
   test "an impl" (fun () ->
       definition

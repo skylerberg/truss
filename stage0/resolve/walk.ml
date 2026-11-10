@@ -14,9 +14,10 @@ type cost_function = Log | Power | Time | Calls
 type target =
   | Binding  (** This name binds a local, a parameter, or a generic parameter. *)
   | Local of id  (** A local or parameter, by the id of the name that binds it. *)
-  | Type_parameter of id  (** A generic type parameter, by the id of the name that binds it. *)
-  | Capability_parameter of id  (** A generic parameter declared [capability Name]. *)
-  | Value_parameter of id  (** A [USize] generic parameter. *)
+  | Type_parameter of Types.parameter
+      (** A generic type parameter, by the definition that declares it and its name. *)
+  | Capability_parameter of Types.parameter  (** A generic parameter declared [capability Name]. *)
+  | Value_parameter of Types.parameter  (** A [USize] generic parameter. *)
   | Definition of Names.named * Path.t  (** A definition, and what kind of definition it is. *)
   | Variant of Path.t * string  (** A prelude variant written bare, such as [Some]. *)
   | Module of Path.module_
@@ -32,7 +33,7 @@ type target =
 type bracket = Index | Type_arguments | Method_bracket
 
 (* What a local value name in scope is. *)
-type value = Value_local of id | Value_generic of id | Value_field of string
+type value = Value_local of id | Value_generic of Types.parameter | Value_field of string
 
 type specification = {
   active : bool;  (** In a specification or a proof, where [old] has its meaning. *)
@@ -297,7 +298,7 @@ and type_argument state scope = function
 (* A lowercase type argument: a value generic parameter, or a constant. *)
 and count_name state scope (name : name) =
   match String_map.find_opt name.text scope.values with
-  | Some (Value_generic id, _) -> set state name (Value_parameter id)
+  | Some (Value_generic parameter, _) -> set state name (Value_parameter parameter)
   | _ -> (
       match file_item state name.text with
       | Some item when item.kind = Constant ->
@@ -356,7 +357,7 @@ and local_value state scope (name : name) =
   let text = name.text in
   match String_map.find_opt text scope.values with
   | Some (Value_local id, _) -> set state name (Local id)
-  | Some (Value_generic id, _) -> set state name (Value_parameter id)
+  | Some (Value_generic parameter, _) -> set state name (Value_parameter parameter)
   | Some (Value_field field, _) -> set state name (Field field)
   | None ->
       if scope.specification.active && text = "old" then set state name Old
@@ -637,7 +638,7 @@ and pattern state scope bound (pattern_ : pattern) =
   | Wildcard | Pattern_error -> ()
   | Binding_or_constant name -> (
       match String_map.find_opt name.text scope.values with
-      | Some (Value_generic id, _) -> set state name (Value_parameter id)
+      | Some (Value_generic parameter, _) -> set state name (Value_parameter parameter)
       | _ -> (
           match file_item state name.text with
           | Some item when item.kind = Constant ->
@@ -712,7 +713,7 @@ and range_end state scope (end_ : range_end) =
   | End_constant constant_ -> qualified_constant state scope constant_
   | End_name name -> (
       match (String_map.find_opt name.text scope.values, file_item state name.text) with
-      | Some (Value_generic id, _), _ -> set state name (Value_parameter id)
+      | Some (Value_generic parameter, _), _ -> set state name (Value_parameter parameter)
       | _, Some item when item.kind = Constant ->
           set state name (Definition (Constant, Top { module_ = state.module_; name = name.text }))
       | _ ->
@@ -806,7 +807,7 @@ and loop_clause ?(for_loop = false) state scope (written : loop_clause) =
 
 (* Generic parameters *)
 
-let declare_type state scope (name : name) ~parameter =
+let declare_type state scope (name : name) target =
   let hides what =
     report state Hides_name name.span
       (Printf.sprintf "`%s` is already %s, and a name cannot hide another. Choose another name."
@@ -819,24 +820,30 @@ let declare_type state scope (name : name) ~parameter =
          hides (Names.kind_name (Names.kind_of_named item.kind) ^ " in this file")
      | _ -> if List.mem name.text Prelude.names then hides "a name in the prelude");
   set state name Binding;
-  { scope with types = String_map.add name.text (parameter name.id) scope.types }
+  { scope with types = String_map.add name.text target scope.types }
 
-let generics state scope (generics : generic_parameter list) =
+(* A definition's generic parameters, each named by the definition that
+   declares it, [owner], and its own name: an [impl]'s by the [impl], and a
+   method's own by the method. *)
+let generics state scope ~(owner : Path.t) (generics : generic_parameter list) =
+  let parameter (name : name) : Types.parameter = { owner; name = name.text } in
   (* All of a list's parameters are in scope in each one's bounds. *)
   let scope =
     List.fold_left
       (fun scope (generic : generic_parameter) ->
         match generic.kind with
         | Type_parameter (name, _) ->
-            declare_type state scope name ~parameter:(fun id : target -> Type_parameter id)
+            declare_type state scope name (Type_parameter (parameter name))
         | Capability_parameter name ->
-            declare_type state scope name ~parameter:(fun id : target -> Capability_parameter id)
+            declare_type state scope name (Capability_parameter (parameter name))
         | Value_parameter (name, _) ->
             let scope = declare_value state scope name in
             {
               scope with
               values =
-                String_map.add name.text (Value_generic name.id, "a generic parameter") scope.values;
+                String_map.add name.text
+                  (Value_generic (parameter name), "a generic parameter")
+                  scope.values;
             }
         | Generic_error -> scope)
       scope generics
@@ -875,16 +882,16 @@ let empty_scope =
 
 (* The scope a definition's head gives: the type head's generic parameters,
    for a method or a member constant. *)
-let head state scope = function
+let head state scope ~owner = function
   | Plain_name _ -> scope
   | Member_name (head_, _) ->
       type_name state scope head_.path;
-      generics state scope head_.generics
+      generics state scope ~owner head_.generics
 
-let signature state scope ~(broken : bool) (signature_ : signature) =
+let signature state scope ~owner ~(broken : bool) (signature_ : signature) =
   if broken then None
   else begin
-    let scope = generics state scope signature_.generics in
+    let scope = generics state scope ~owner signature_.generics in
     let scope = parameters state scope signature_.parameters in
     result state scope signature_.result;
     let scope =
@@ -914,21 +921,56 @@ let field_names (fields_ : field list) =
 
 (* The definition *)
 
-let definition state (definition_ : definition) =
+(* The generic parameters of the trait or the [impl] a method is written
+   inside, which the method's own tree does not hold: they are in scope as
+   that one's, and it is where they are bound and their bounds resolved. *)
+let inherited scope ~(owner : Path.t) (generics : generic_parameter list) =
+  List.fold_left
+    (fun scope (generic : generic_parameter) ->
+      let parameter (name : name) : Types.parameter = { owner; name = name.text } in
+      let type_ (name : name) (target : target) =
+        { scope with types = String_map.add name.text target scope.types }
+      in
+      match generic.kind with
+      | Type_parameter (name, _) -> type_ name (Type_parameter (parameter name))
+      | Capability_parameter name -> type_ name (Capability_parameter (parameter name))
+      | Value_parameter (name, _) ->
+          {
+            scope with
+            values =
+              String_map.add name.text
+                (Value_generic (parameter name), "a generic parameter")
+                scope.values;
+          }
+      | Generic_error -> scope)
+    scope generics
+
+(* [container] is the trait, the [impl], or the capability a method is
+   written inside, with its path. *)
+let definition state ~(path : Path.t) ?(container : (Path.t * definition) option)
+    (definition_ : definition) =
   let broken part = Parts.broken definition_ part in
   let header_broken = broken Header and body_broken = broken Body in
-  let scope = empty_scope in
+  let scope =
+    match container with
+    | Some (owner, { kind = Trait { generics = generics_; _ }; _ }) ->
+        inherited empty_scope ~owner generics_
+    | Some (owner, { kind = Impl { type_; _ }; _ }) -> inherited empty_scope ~owner type_.generics
+    | _ -> empty_scope
+  in
   match definition_.kind with
   | Function { signature = signature_; body } ->
       if not header_broken then begin
-        let scope = head state scope signature_.name in
-        match signature state scope ~broken:false signature_ with
+        let scope = head state scope ~owner:path signature_.name in
+        match signature state scope ~owner:path ~broken:false signature_ with
         | Some scope -> if not body_broken then block state scope body
         | None -> ()
       end
+  | Method_declaration signature_ ->
+      if not header_broken then ignore (signature state scope ~owner:path ~broken:false signature_)
   | Type_definition { generics = generics_; body; clauses; _ } ->
       if not header_broken then begin
-        let scope = generics state scope generics_ in
+        let scope = generics state scope ~owner:path generics_ in
         let record_fields = match body with Fields fields_ -> field_names fields_ | _ -> [] in
         (match body with
         | Fields fields_ -> fields state scope fields_
@@ -956,17 +998,12 @@ let definition state (definition_ : definition) =
       end
   | Trait { generics = generics_; requires; members; _ } ->
       if not header_broken then begin
-        let scope = generics state scope generics_ in
+        let scope = generics state scope ~owner:path generics_ in
         List.iter (path_type state scope) requires;
         List.iteri
           (fun index (line : trait_member line) ->
             if not (broken (Member_header index)) then
               match line.kind with
-              | Trait_method { signature = signature_; body } -> (
-                  match signature state scope ~broken:false signature_ with
-                  | Some inner ->
-                      if not (broken (Member_body index)) then Option.iter (block state inner) body
-                  | None -> ())
               | Associated_type (_, bounds) -> List.iter (path_type state scope) bounds
               | Law { parameters = parameters_; requires; body; _ } ->
                   let inner =
@@ -980,33 +1017,21 @@ let definition state (definition_ : definition) =
   | Impl { trait_; type_; uses; members } ->
       if not header_broken then begin
         type_name state scope type_.path;
-        let scope = generics state scope type_.generics in
+        let scope = generics state scope ~owner:path type_.generics in
         path_type state scope trait_;
         List.iter (path_type state scope) uses;
         List.iteri
           (fun index (line : impl_member line) ->
             if not (broken (Member_header index)) then
               match line.kind with
-              | Impl_method { signature = signature_; body } -> (
-                  match signature state scope ~broken:false signature_ with
-                  | Some inner -> if not (broken (Member_body index)) then block state inner body
-                  | None -> ())
               | Associated_definition (_, type_) -> type_expression state scope type_
               | Impl_member_error -> ())
           members
       end
-  | Capability { members; _ } ->
-      List.iteri
-        (fun index (line : capability_member line) ->
-          if not (broken (Member_header index)) then
-            match line.kind with
-            | Capability_method signature_ ->
-                ignore (signature state scope ~broken:false signature_)
-            | Capability_member_error -> ())
-        members
+  | Capability _ -> ()
   | Constant { name; type_; value } ->
       if not header_broken then begin
-        let scope = head state scope name in
+        let scope = head state scope ~owner:path name in
         type_expression state scope type_;
         if not body_broken then expression state scope value
       end
@@ -1017,7 +1042,9 @@ let definition state (definition_ : definition) =
       end
   | Theorem { generics = generics_; parameters = parameters_; clauses; body; _ } ->
       if not header_broken then begin
-        let scope = generics state { scope with specification = in_specification } generics_ in
+        let scope =
+          generics state { scope with specification = in_specification } ~owner:path generics_
+        in
         let scope = parameters state scope parameters_ in
         List.iter (clause state scope) clauses;
         if not body_broken then block state scope body

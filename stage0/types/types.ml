@@ -195,6 +195,30 @@ and trait_unsolved trait =
 let terminates (function_type : function_type) =
   List.exists (fun (cost : cost) -> cost.resource = "time") function_type.costs
 
+let same_clauses (left : function_type) (right : function_type) =
+  List.sort_uniq compare left.uses = List.sort_uniq compare right.uses
+  && List.sort_uniq compare left.costs = List.sort_uniq compare right.costs
+
+let bound_implies (given : cost_bound) (wanted : cost_bound) =
+  match (given, wanted) with
+  | _, Finite_cost -> true
+  | (Order_of | No_more_than _ | Exactly_cost _), Order_of -> true
+  | (No_more_than (Some given) | Exactly_cost (Some given)), No_more_than (Some wanted) ->
+      Z.leq given wanted
+  | Exactly_cost (Some given), Exactly_cost (Some wanted) -> Z.equal given wanted
+  | _ -> false
+
+let costs_imply ~(given : cost list) ~(wanted : cost list) =
+  List.for_all
+    (fun (wanted : cost) ->
+      List.exists
+        (fun (given : cost) ->
+          given.resource = wanted.resource
+          && (wanted.amortized || not given.amortized)
+          && bound_implies given.bound wanted.bound)
+        given)
+    wanted
+
 (* Showing *)
 
 let path_name = function Path.Top { name; _ } -> name | path -> Path.show path
@@ -283,6 +307,20 @@ and show_function (function_type : function_type) =
 
 type generic_kind = Type_generic of trait_reference list | Value_generic | Capability_generic
 type generic = { generic : parameter; kind : generic_kind }
+
+let capability_parameters (generics : generic list) =
+  List.filter_map
+    (fun generic ->
+      match generic.kind with
+      | Capability_generic -> Some generic.generic
+      | Type_generic _ | Value_generic -> None)
+    generics
+
+let substitution_of (generics : generic list) arguments : substitution option =
+  if List.length generics = List.length arguments then
+    Some (List.combine (List.map (fun generic -> generic.generic) generics) arguments)
+  else None
+
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
 type signature = {

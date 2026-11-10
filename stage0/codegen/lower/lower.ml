@@ -66,16 +66,7 @@ let any_table = Generated.any_table
 let real_evidence = Generated.real_evidence
 
 let trait_provides context ~trait ~name ~receiver =
-  match demand context Names.definition (key_of context trait) with
-  | Some { kind = Trait { members; _ }; _ } ->
-      List.exists
-        (fun (member : S.trait_member S.line) ->
-          match member.kind with
-          | Trait_method { signature; body = Some _ } ->
-              name_of signature = name && receiver_of signature.parameters = receiver
-          | _ -> false)
-        members
-  | _ -> false
+  written context (Method { owner = trait; name; receiver }) <> None
 
 (* Binds the parameters of the code being lowered, each as [how] passes it.
    The function owns each [own] one, apart from one with a default, which

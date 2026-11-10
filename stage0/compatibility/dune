@@ -1,0 +1,12 @@
+(library
+ (name compatibility)
+ (libraries
+  query
+  path
+  types
+  workspace
+  syntax
+  syntax_print
+  resolve
+  interface
+  ownership))

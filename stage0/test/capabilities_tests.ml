@@ -314,4 +314,382 @@ let () =
         \  }\n\
          }\n")
 
+(* A grant wherever a dependency's code is named *)
+
+(* The codes of [app::main], whose manifest lists the dependencies given,
+   each with what it is granted. *)
+let codes_with_grants files grants =
+  let database = setup files in
+  Engine.set (Engine.of_context database) Workspace.packages "app"
+    {
+      name = "app";
+      dependencies =
+        List.map (fun (package, capabilities) -> { Workspace.package; capabilities }) grants;
+      modules = [ module_of "app::main" ];
+      usize_bits = 32;
+    };
+  (database, codes (check database (module_of "app::main")))
+
+let expect_codes ~expected (_, found) =
+  if found <> expected then
+    fail "found [%s], expected [%s]" (String.concat "; " found) (String.concat "; " expected)
+
+let time =
+  ("clock_library::time", "public fn stamp() -> Instant\n  uses Clock\n{\n  Clock.now()\n}\n")
+
+let sources =
+  ("framework::sources", "public trait Source {\n  fn read(self) -> Instant\n    uses Clock\n}\n")
+
+let timers =
+  ( "plugins::timers",
+    "use framework::sources\n\n\
+     public type Timer()\n\n\
+     impl sources::Source for Timer {\n\
+    \  fn read(self) -> Instant\n\
+    \    uses Clock\n\
+    \  {\n\
+    \    Clock.now()\n\
+    \  }\n\
+     }\n" )
+
+let () =
+  let value =
+    ( "app::main",
+      "use clock_library::time\n\n\
+       fn f() -> Instant\n\
+      \  uses Clock\n\
+       {\n\
+      \  let stamp = time::stamp\n\
+      \  stamp()\n\
+       }\n" )
+  in
+  test "a dependency's function taken as a value may use only what it is granted" (fun () ->
+      expect_codes ~expected:[ "capabilities.not_granted" ]
+        (codes_with_grants [ value; time ] [ ("clock_library", []) ]));
+  test "a dependency's function taken as a value may use what it is granted" (fun () ->
+      expect_codes ~expected:[]
+        (codes_with_grants [ value; time ] [ ("clock_library", [ "Clock" ]) ]));
+  let bound =
+    ( "app::main",
+      "use framework::sources\n\
+       use plugins::timers\n\n\
+       fn first[Reader: sources::Source](reader: Reader) -> Instant\n\
+      \  uses Clock\n\
+       {\n\
+      \  reader.read()\n\
+       }\n\n\
+       fn f() -> Instant\n\
+      \  uses Clock\n\
+       {\n\
+      \  first(timers::Timer())\n\
+       }\n" )
+  in
+  test "an impl of a dependency that meets a bound may use only what the dependency is granted"
+    (fun () ->
+      expect_codes ~expected:[ "capabilities.not_granted" ]
+        (codes_with_grants [ bound; sources; timers ]
+           [ ("framework", [ "Clock" ]); ("plugins", []) ]));
+  test "an impl of a dependency that meets a bound may use what the dependency is granted"
+    (fun () ->
+      expect_codes ~expected:[]
+        (codes_with_grants [ bound; sources; timers ]
+           [ ("framework", [ "Clock" ]); ("plugins", [ "Clock" ]) ]));
+  test "an impl of a dependency made into an any value may use only what the dependency is granted"
+    (fun () ->
+      expect_codes ~expected:[ "capabilities.not_granted" ]
+        (codes_with_grants
+           [
+             ( "app::main",
+               "use framework::sources\n\
+                use plugins::timers\n\n\
+                fn f() -> any sources::Source {\n\
+               \  any timers::Timer()\n\
+                }\n" );
+             sources;
+             timers;
+           ]
+           [ ("framework", [ "Clock" ]); ("plugins", []) ]))
+
+(* What a grant names *)
+
+let ledger =
+  ( "store::ledger",
+    "public capability Ledger {\n\
+    \  fn record(amount: Int64)\n\
+     }\n\n\
+     public fn pay(amount: Int64)\n\
+    \  uses Ledger\n\
+     {\n\
+    \  Ledger.record(amount)\n\
+     }\n" )
+
+let pays =
+  ("app::main", "use store::ledger\n\nfn f()\n  uses ledger::Ledger\n{\n  ledger::pay(1)\n}\n")
+
+let problems database = Query.demand database Package_checks.manifest_problems "app"
+
+let () =
+  test "a grant names a capability outside the prelude by its full path" (fun () ->
+      expect_codes ~expected:[]
+        (codes_with_grants [ pays; ledger ] [ ("store", [ "store::ledger::Ledger" ]) ]));
+  test "a capability's name alone grants only one of the prelude" (fun () ->
+      let database, found = codes_with_grants [ pays; ledger ] [ ("store", [ "Ledger" ]) ] in
+      expect_codes ~expected:[ "capabilities.not_granted" ] (database, found);
+      match problems database with
+      | [ Not_a_capability { dependency = "store"; name = "Ledger" } ] -> ()
+      | _ -> fail "the grant is not reported");
+  test "a grant covers only the capabilities it names" (fun () ->
+      expect_codes ~expected:[ "capabilities.not_granted" ]
+        (codes_with_grants [ pays; ledger ] [ ("store", [ "Clock" ]) ]))
+
+(* A dependency that nothing uses *)
+
+let () =
+  test "a dependency that nothing in the package names is reported" (fun () ->
+      let database, _ =
+        codes_with_grants
+          [ ("app::main", "fn f() -> Int64 {\n  1\n}\n"); time ]
+          [ ("clock_library", []) ]
+      in
+      match problems database with [ Unused "clock_library" ] -> () | _ -> fail "not reported");
+  test "a dependency named in a path is used" (fun () ->
+      let database, _ =
+        codes_with_grants [ pays; ledger ] [ ("store", [ "store::ledger::Ledger" ]) ]
+      in
+      if problems database <> [] then fail "reported");
+  test "a dependency whose trait's method is called with a dot is used" (fun () ->
+      let database, found =
+        codes_with_grants
+          [
+            ("app::main", "fn f(side: Int64) -> Int64 {\n  side.doubled()\n}\n");
+            ( "shapes::sizes",
+              "public trait Doubled {\n\
+              \  fn doubled(self) -> Int64\n\
+               }\n\n\
+               impl Doubled for Int64 {\n\
+              \  fn doubled(self) -> Int64 {\n\
+              \    self\n\
+              \  }\n\
+               }\n" );
+          ]
+          [ ("shapes", []) ]
+      in
+      expect_codes ~expected:[] (database, found);
+      if problems database <> [] then fail "reported");
+  test "a package with an error is not told that a dependency is unused" (fun () ->
+      let database, _ =
+        codes_with_grants
+          [ ("app::main", "fn f() -> Int64 {\n  true\n}\n"); time ]
+          [ ("clock_library", []) ]
+      in
+      if problems database <> [] then fail "reported")
+
+(* Function values and the capabilities their types list *)
+
+let ticks =
+  "fn tick() -> Instant\n\
+  \  uses Clock\n\
+   {\n\
+  \  Clock.now()\n\
+   }\n\n\
+   fn still() -> Instant {\n\
+  \  todo\n\
+   }\n\n\
+   fn each_time[capability Granted](action: (fn() -> Instant uses Granted)) -> Instant\n\
+  \  uses Granted\n\
+   {\n\
+  \  action()\n\
+   }\n\n"
+
+let () =
+  test "a function that uses a capability is not passed as one that uses none" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn apply(action: fn() -> Instant) -> Instant {\n\
+         \  action()\n\
+          }\n\n\
+          fn f() -> Instant {\n\
+         \  apply(tick)\n\
+          }\n")
+        "types.mismatch");
+  test "a function that uses a capability is not bound as one that uses none" (fun () ->
+      one_diagnostic
+        (ticks ^ "fn f() -> Instant {\n  let action: fn() -> Instant = tick\n  action()\n}\n")
+        "types.mismatch");
+  test "a function that uses a capability is not returned as one that uses none" (fun () ->
+      one_diagnostic (ticks ^ "fn f() -> fn() -> Instant {\n  tick\n}\n") "types.mismatch");
+  test "a function that uses a capability is not stored as one that uses none" (fun () ->
+      one_diagnostic
+        (ticks ^ "type Job(action: fn() -> Instant)\n\nfn f() -> Job {\n  Job(tick)\n}\n")
+        "types.mismatch");
+  test "a function that uses a capability is not assigned as one that uses none" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn f() -> Instant {\n\
+         \  var action: fn() -> Instant = still\n\
+         \  action = tick\n\
+         \  action()\n\
+          }\n")
+        "types.mismatch");
+  test "function types inside a type must list the same capabilities" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn f() -> USize\n\
+         \  uses Clock\n\
+          {\n\
+         \  let actions: List[(fn() -> Instant uses Clock)] = [tick]\n\
+         \  let plain: List[fn() -> Instant] = actions\n\
+         \  plain.length()\n\
+          }\n")
+        "types.mismatch");
+  test "a function that uses nothing is passed as one that may use a capability" (fun () ->
+      fine
+        (ticks
+       ^ "fn f() -> Instant\n\
+         \  uses Clock\n\
+          {\n\
+         \  let action: (fn() -> Instant uses Clock) = still\n\
+         \  action()\n\
+          }\n"));
+  test "a branch's function meets the function type expected of the branches" (fun () ->
+      fine
+        (ticks
+       ^ "fn f(fast: Bool) -> Instant\n\
+         \  uses Clock\n\
+          {\n\
+         \  let action: (fn() -> Instant uses Clock) = if fast { still } else { tick }\n\
+         \  action()\n\
+          }\n"));
+  test "a branch's function that uses a capability is not bound as one that uses none" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn f(fast: Bool) -> Instant {\n\
+         \  let action: fn() -> Instant = if fast { still } else { tick }\n\
+         \  action()\n\
+          }\n")
+        "types.mismatch");
+  test "a capability parameter is what the functions passed for it use" (fun () ->
+      fine (ticks ^ "fn f() -> Instant\n  uses Clock\n{\n  each_time(tick)\n}\n"));
+  test "what a function passed for a capability parameter uses must be available" (fun () ->
+      one_diagnostic
+        (ticks ^ "fn f() -> Instant {\n  each_time(tick)\n}\n")
+        "capabilities.not_available");
+  test "what a lambda in parentheses uses is passed for a capability parameter" (fun () ->
+      one_diagnostic
+        (ticks ^ "fn f() -> Instant {\n  each_time((fn() { Clock.now() }))\n}\n")
+        "capabilities.not_available");
+  test "what a function in a branch uses is passed for a capability parameter" (fun () ->
+      one_diagnostic
+        (ticks ^ "fn f(fast: Bool) -> Instant {\n  each_time(if fast { still } else { tick })\n}\n")
+        "capabilities.not_available");
+  test "what a lambda in a branch uses is passed for a capability parameter" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn f(fast: Bool) -> Instant {\n\
+         \  each_time(if fast { still } else { fn() { Clock.now() } })\n\
+          }\n")
+        "capabilities.not_available");
+  test "a function passes its own capability parameter on" (fun () ->
+      fine
+        (ticks
+       ^ "fn passes_on[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant\n\
+         \  uses Mine\n\
+          {\n\
+         \  each_time(action)\n\
+          }\n"));
+  test "a function's own capability parameter stands for itself in a lambda's type" (fun () ->
+      one_diagnostic
+        "fn sneaky[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant\n\
+        \  uses Mine\n\
+         {\n\
+        \  let again: (fn() -> Instant uses Mine) = fn() { Clock.now() }\n\
+        \  again()\n\
+         }\n"
+        "capabilities.lambda_uses");
+  test "a function's own capability parameter stands for itself in a binding's type" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn sneaky[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant\n\
+         \  uses Mine\n\
+          {\n\
+         \  let again: (fn() -> Instant uses Mine) = tick\n\
+         \  again()\n\
+          }\n")
+        "types.mismatch");
+  test "a function calls itself with its own capability parameter" (fun () ->
+      fine
+        "fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant\n\
+        \  uses Mine\n\
+         {\n\
+        \  if again {\n\
+        \    repeat(action, again: false)\n\
+        \  } else {\n\
+        \    action()\n\
+        \  }\n\
+         }\n");
+  test "a function calling itself passes nothing more for its capability parameter" (fun () ->
+      one_diagnostic
+        (ticks
+       ^ "fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant\n\
+         \  uses Mine\n\
+          {\n\
+         \  if again {\n\
+         \    repeat(tick, again: false)\n\
+         \  } else {\n\
+         \    action()\n\
+         \  }\n\
+          }\n")
+        "types.mismatch")
+
+(* Function values and the costs their types promise *)
+
+(* The obligations checking the first definition of a text leaves the
+   prover. *)
+let obligations text =
+  let database = setup [ ("app::main", text) ] in
+  let key =
+    Resolve.Names.key_of
+      (List.hd (Query.demand database Resolve.Names.declarations (module_of "app::main")))
+  in
+  match Query.demand database Infer.checked key with
+  | Some { checked; _ } -> checked.obligations
+  | None -> failwith "the definition was not checked"
+
+let () =
+  test "a function bound as a type that promises a cost leaves the cost to the prover" (fun () ->
+      match
+        obligations
+          "fn f() -> Int64 {\n\
+          \  let action: (fn() -> Int64 cost time finite) = forever\n\
+          \  action()\n\
+           }\n\n\
+           fn forever() -> Int64 {\n\
+          \  while true {}\n\
+           }\n"
+      with
+      | [ Costs_imply _ ] -> ()
+      | found -> fail "%d obligations" (List.length found));
+  test "a function that promises to end is bound as one that does with nothing to prove" (fun () ->
+      match
+        obligations
+          "fn f() -> Int64 {\n\
+          \  let action: (fn() -> Int64 cost time finite) = quick\n\
+          \  action()\n\
+           }\n\n\
+           fn quick() -> Int64\n\
+          \  cost time O(1)\n\
+           {\n\
+          \  1\n\
+           }\n"
+      with
+      | [] -> ()
+      | found -> fail "%d obligations" (List.length found));
+  test "function types inside a type must promise the same costs" (fun () ->
+      one_diagnostic
+        "fn f(actions: List[fn() -> Int64]) -> USize {\n\
+        \  let bounded: List[(fn() -> Int64 cost time finite)] = actions\n\
+        \  bounded.length()\n\
+         }\n"
+        "types.mismatch")
+
 let () = finish ()

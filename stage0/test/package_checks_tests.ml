@@ -113,6 +113,18 @@ let () =
         \  | Leaf\n\
         \  | Node(children: Couple[Tree, Int64])\n"
         "package.needs_indirect");
+  test "a type held in place through an associated type needs indirect" (fun () ->
+      one_diagnostic
+        "trait Shown {\n\
+        \  type Part\n\
+         }\n\n\
+         type Marker()\n\n\
+         impl Shown for Marker {\n\
+        \  type Part = Tree\n\
+         }\n\n\
+         type Kept[Source: Shown](part: Source.Part)\n\n\
+         type Tree(kept: Kept[Marker], count: Int64)\n"
+        "package.needs_indirect");
   test "a type held through a generic type's collection needs no indirect" (fun () ->
       fine
         "type Wrapper[Element](items: List[Element])\n\n\

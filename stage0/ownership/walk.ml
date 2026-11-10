@@ -5,7 +5,6 @@
 open Syntax
 module T = Types
 module C = Checked
-module Properties = Interface.Properties
 open Context
 open Flow
 
@@ -211,22 +210,14 @@ and owned_value state flow (value : expression) =
 and returned state flow (value : expression) =
   let context = state.context in
   (if is_view context (type_of context value) then
-     let locals =
-       List.filter_map
-         (fun place ->
-           match place.root with
-           | Local id when not (List.mem id context.parameters) -> Some id
-           | _ -> None)
-         (viewed state value)
-     in
-     match locals with
-     | id :: _ ->
+     match List.find_opt (ends_with_function context) (viewed state value) with
+     | Some local ->
          report context Returns_local_view value.span
            (Printf.sprintf
               "This returns a view of `%s`, which is local to the function, so it would outlive \
                it. A function returns views only of its parameters."
-              (Option.value ~default:"a local" (Hashtbl.find_opt context.names id)))
-     | [] -> ());
+              (show_root context.names local.root))
+     | None -> ());
   match place_of context value with
   | Some place when not (plain context (type_of context value)) -> (
       match kind_of context place.root with
@@ -366,7 +357,34 @@ and call state flow (value : expression) (callee : expression) =
               state.loans <- { lent; lent_mode; lent_to = To_statement } :: state.loans
           | None -> ())
       | _ -> ());
+      (* A place given [mut] that can hold views may keep what the call was
+         lent, as [mut views.push(data[0..2])] keeps a view of [data]. *)
+      List.iter
+        (fun ((argument : C.argument), (written : expression)) ->
+          match place_of context (inner_of written) with
+          | Some place when argument.mode = T.Mut && is_view context (type_of context written) ->
+              let others =
+                List.filter
+                  (fun (other : expression) -> other != written)
+                  (lent_arguments context checked_call)
+              in
+              keeps_views state place value.span others
+          | _ -> ())
+        arguments;
       flow
+
+(* A place comes to hold what some values view, none of which may be a
+   temporary that the statement drops. *)
+and keeps_views state (place : place) (span : span) (values : expression list) =
+  List.iter
+    (fun (temporary : expression) ->
+      report state.context Views_temporary temporary.span
+        (Printf.sprintf
+           "This value is dropped at the end of the statement, but `%s` may still view it. Bind it \
+            to a name first, so it lives as long as the view."
+           (show_root state.context.names place.root)))
+    (List.concat_map (viewed_temporaries state) values);
+  stored state place span (List.concat_map (viewed state) values)
 
 (* A statement, at whose end everything a lending call lent in it has gone
    back. *)
@@ -415,8 +433,8 @@ and statement_parts state (flow : flow) (written : statement) : flow =
               "This value is dropped at the end of the statement, but what the statement binds \
                still views it. Bind it to a name first, so it lives as long as the view.")
           (viewed_temporaries state value);
-      if viewed_places <> [] then
-        state.views <- List.map (fun id -> (id, viewed_places)) holders @ state.views;
+      if holds_views || viewed_places <> [] then
+        state.views <- List.map (fun id -> (Local id, viewed_places)) holders @ state.views;
       (match else_ with Some block_ -> ignore (block state flow block_) | None -> ());
       rebound flow holders
   | Assignment { target; operator; value } -> (
@@ -429,7 +447,10 @@ and statement_parts state (flow : flow) (written : statement) : flow =
       | Some place ->
           let flow = subexpressions state flow target in
           if operator <> Assign then used state flow place target.span;
-          assigned state flow place target.span
+          let flow = assigned state flow place target.span in
+          if is_view context (type_of context value) then
+            keeps_views state place written.span [ value ];
+          flow
       | None -> expression state flow target)
   | For { iterable; body; parallel; pattern; _ } ->
       let flow =
@@ -501,7 +522,7 @@ and loop state flow body ?(bound = []) ~held ~held_mode ?condition () =
   let result = iterate flow 0 in
   state.loans <- loans_before;
   state.loop_frames <- List.tl state.loop_frames;
-  state.views <- views_before;
+  leave state views_before body;
   join result frame.breaks
 
 and block state flow (written : block) =
@@ -509,8 +530,23 @@ and block state flow (written : block) =
   let result =
     List.fold_left (fun flow written -> statement state flow written) flow written.statements
   in
-  state.views <- views_before;
+  leave state views_before written;
   result
+
+(* The views a block leaves: what it bound is gone with it, and what it put
+   in a holder from before it stays. *)
+and leave state views_before (written : block) =
+  let from_before = function
+    | Self_root -> true
+    | Local id ->
+        Option.value ~default:0 (Hashtbl.find_opt state.context.declared id) < written.span.start
+  in
+  let rec added views =
+    if views == views_before then []
+    else match views with entry :: rest -> entry :: added rest | [] -> []
+  in
+  state.views <-
+    List.filter (fun (holder, _) -> from_before holder) (added state.views) @ views_before
 
 (* A function's body: its last expression is what it returns. *)
 and function_body state (written : block) =

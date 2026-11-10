@@ -229,8 +229,7 @@ let () =
         []);
   test "a constant whose value is not worked out covers nothing else" (fun () ->
       expect
-        "fn make() -> Int64 { 3 }\n\n\
-         let made: Int64 = make()\n\n\
+        "let made: Int64 = 3 << 0\n\n\
          fn f(n: Int64) -> Int64 {\n\
         \  match n {\n\
         \    made => 1\n\

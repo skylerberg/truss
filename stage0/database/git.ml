@@ -20,8 +20,12 @@ let common_directory directory =
   Option.map
     (fun path ->
       let path = trim path in
-      if Filename.is_relative path then Filename.concat directory path else path)
+      let path = if Filename.is_relative path then Filename.concat directory path else path in
+      try Unix.realpath path with Unix.Unix_error _ -> path)
     (run ~directory [ "rev-parse"; "--git-common-dir" ])
+
+(* Where a directory is under the top of its worktree. *)
+let prefix directory = Option.map trim (run ~directory [ "rev-parse"; "--show-prefix" ])
 
 let resolve ~directory revision =
   Option.map trim (run ~directory [ "rev-parse"; "--verify"; revision ^ "^{commit}" ])
@@ -40,9 +44,10 @@ let default_branch ~directory =
 let merge_base ~directory left right =
   Option.map trim (run ~directory [ "merge-base"; left; right ])
 
-(* Every manifest and module file of a commit, with its text. *)
+(* Every manifest and module file of a commit under a directory, by its
+   path from the directory, with its text. *)
 let files ~directory commit =
-  match run ~directory [ "ls-tree"; "-r"; "-z"; "--full-tree"; commit ] with
+  match run ~directory [ "ls-tree"; "-r"; "-z"; commit ] with
   | None -> None
   | Some listing ->
       let entries =
@@ -59,7 +64,8 @@ let files ~directory commit =
                 in
                 if
                   (not skipped)
-                  && (base = "truss.toml" || Filename.check_suffix base ".truss")
+                  && (base = "truss.toml" || base = "truss.lock"
+                     || Filename.check_suffix base ".truss")
                   && match meta with [ _; "blob"; _ ] -> true | _ -> false
                 then Some (path, List.nth meta 2)
                 else None)

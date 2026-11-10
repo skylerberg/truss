@@ -4,8 +4,7 @@
    This runs once a definition's bodies are checked, over the checked form,
    and records in it what each capability parameter stands for at each call
    and what each [provide] builds. Each walk returns the capabilities its
-   code uses, which is what a lambda's [uses] are inferred from and what a
-   capability parameter is solved as. *)
+   code uses, which is what a lambda's [uses] are inferred from. *)
 
 open Syntax
 module T = Types
@@ -35,16 +34,20 @@ let minus left right = List.filter (fun capability -> not (List.mem capability r
    (inside a lambda, what it uses is collected instead, for its [uses]).
    [restricted] names code that may use less than the function declares: a
    [parallel] branch, which may use only [Panic], or a specification or a
-   proof, which may use nothing. [lambdas] holds, for the whole definition,
-   what each lambda checked so far uses, by its id. *)
+   proof, which may use nothing. *)
 type scope = {
   available : T.capability list;
   collecting : bool;
   restricted : string option;
-  lambdas : (id, T.capability list) Hashtbl.t;
   handed_on : T.capability option;
       (** In an implementation of a capability, that capability, which only calls through function
           values may use. *)
+  own : T.parameter list;
+      (** The capability parameters of the function being checked, each of which stands for itself.
+      *)
+  passed : (T.parameter * T.capability list ref) list;
+      (** In the arguments of a call, each capability parameter of what it calls, with what has been
+          passed for it so far, nearest call first. *)
 }
 
 (* Code that may use only [Panic], whatever the function declares. *)
@@ -80,39 +83,49 @@ let capability_impls (state : state) (type_ : T.ty) =
            (List.sort_uniq compare [ Path.package path; state.package; "standard" ]))
   | _ -> []
 
-let dependency_grant (state : state) package =
-  match Workspace.package state.database state.package with
-  | Some manifest ->
-      Option.map
-        (fun (dependency : Workspace.dependency) -> dependency.capabilities)
-        (List.find_opt
-           (fun (dependency : Workspace.dependency) -> dependency.package = package)
-           manifest.dependencies)
-  | None -> None
-
 (* A dependency may use only what its manifest entry grants: [what] of the
    [package] uses [uses], except what reaches it through a capability
    parameter, which is the caller's own. *)
 let check_grant (state : state) (span : span) ~what package (uses : T.capability list) =
-  if package <> state.package && package <> "standard" then
-    match dependency_grant state package with
-    | Some granted ->
+  List.iter
+    (fun capability ->
+      report state Not_granted span (Interface.Grants.message ~what ~of_:package capability))
+    (Interface.Grants.missing state.database ~package:state.package ~of_:package uses)
+
+(* A function value that uses more than the function type it meets lists.
+   What the type does not list is passed for the type's capability
+   parameters, each of which the nearest call around of the function it
+   belongs to solves. With no such call, nothing allows it. *)
+let pass state scope (span : span) ~what ~uses ~unlisted =
+  if unlisted <> [] then
+    match
+      List.filter_map
+        (function
+          | T.Capability_parameter parameter -> List.assoc_opt parameter scope.passed
+          | T.Capability _ -> None)
+        uses
+    with
+    | [] ->
         List.iter
-          (function
-            | T.Capability capability_path ->
-                let name = show_capability (T.Capability capability_path) in
-                if not (List.mem name granted) then
-                  report state Not_granted span
-                    (Printf.sprintf
-                       "%s uses `%s`, which the manifest does not grant `%s`. Grant it in the \
-                        manifest's entry for `%s`."
-                       what name package package)
-            | T.Capability_parameter _ -> ())
-          uses
-    | None -> ()
+          (fun capability ->
+            report state Lambda_uses span
+              (Printf.sprintf
+                 "%s uses `%s`, which the function type it is passed as does not allow." what
+                 (show_capability capability)))
+          unlisted
+    | solving -> List.iter (fun passed -> passed := union !passed unlisted) solving
+
+(* The signature of the function a call calls, when it is one. *)
+let called state (call : C.call) =
+  match call.callee with
+  | Function { path; _ } ->
+      Option.map
+        (fun signature -> (path, signature))
+        (Query.demand state.database Environment.signature path)
+  | _ -> None
 
 let rec expression state scope (value : expression) : T.capability list =
-  let children () =
+  let children scope =
     let used = ref [] in
     let rec visit_statement (written : statement) =
       used := union !used (statement state scope written)
@@ -122,15 +135,43 @@ let rec expression state scope (value : expression) : T.capability list =
     Syntax_walk.expression_parts ~expression:visit_expression ~statement:visit_statement value;
     !used
   in
+  (match Hashtbl.find_opt state.widened value.id with
+  | Some (uses, unlisted) -> pass state scope value.span ~what:"This function" ~uses ~unlisted
+  | None -> ());
   match value.kind with
   | Lambda { body; _ } -> lambda state scope value body
   | Provide { implementations; body } -> provide state scope value implementations body
   | Quantified _ -> quantifier state scope value
   | _ -> (
-      let inner = children () in
+      (* A function taken as a value is named as surely as one that is
+         called, and whoever is handed the value may call it. *)
+      (match state.tables.meanings.(value.id) with
+      | Some (Global { path; _ }) ->
+          Option.iter
+            (fun (signature : T.signature) ->
+              check_grant state value.span
+                ~what:(Printf.sprintf "`%s`" (Path.show path))
+                (Path.package path) signature.uses)
+            (Query.demand state.database Environment.signature path)
+      | _ -> ());
       match state.tables.calls.(value.id) with
-      | Some call -> union inner (call_needs state scope value call)
-      | None -> inner)
+      | Some call ->
+          (* What the arguments pass for each capability parameter of what
+             is called, which a call of a function by itself leaves as it
+             is. *)
+          let callee = called state call in
+          let passed =
+            match callee with
+            | Some (_, signature) ->
+                List.filter_map
+                  (fun parameter ->
+                    if List.mem parameter scope.own then None else Some (parameter, ref []))
+                  (T.capability_parameters signature.generics)
+            | None -> []
+          in
+          let inner = children { scope with passed = passed @ scope.passed } in
+          union inner (call_needs state scope value call callee passed)
+      | None -> children scope)
 
 and statement state scope (written : statement) : T.capability list =
   match written.kind with
@@ -172,85 +213,10 @@ and quantifier state scope (value : expression) =
   Syntax_walk.expression_parts ~expression:visit_expression ~statement:visit_statement value;
   []
 
-(* What a call needs, with each of the callee's capability parameters
-   solved as what the lambdas and function values passed for it use. *)
-and call_needs state scope (value : expression) (call : C.call) : T.capability list =
-  let callee_parameters, path =
-    match call.callee with
-    | Function { path; _ } -> (
-        match Query.demand state.database Environment.signature path with
-        | Some signature ->
-            ( List.filter_map
-                (fun (generic : T.generic) ->
-                  match generic.kind with Capability_generic -> Some generic.generic | _ -> None)
-                signature.generics,
-              Some (path, signature) )
-        | None -> ([], None))
-    | _ -> ([], None)
-  in
-  let solved =
-    List.map
-      (fun parameter ->
-        let from_arguments =
-          match path with
-          | Some (_, signature) ->
-              List.concat_map
-                (fun (argument : C.argument) ->
-                  let parameter_type =
-                    if argument.parameter = 0 && signature.receiver <> None then None
-                    else
-                      let index =
-                        if signature.receiver <> None then argument.parameter - 1
-                        else argument.parameter
-                      in
-                      Option.map
-                        (fun (info : T.parameter_info) -> info.type_)
-                        (List.nth_opt signature.parameters index)
-                  in
-                  match parameter_type with
-                  | Some (T.Function { uses; _ })
-                    when List.mem (T.Capability_parameter parameter) uses -> (
-                      match state.tables.types.(argument.expression) with
-                      | Some (T.Function given) -> given.uses
-                      | _ -> [])
-                  | _ -> [])
-                call.arguments
-          | None -> []
-        in
-        (parameter, List.sort_uniq compare from_arguments))
-      callee_parameters
-  in
-  let lambda_uses =
-    List.concat_map
-      (fun (argument : C.argument) ->
-        match Hashtbl.find_opt scope.lambdas argument.expression with
-        | Some used -> [ (argument, used) ]
-        | None -> [])
-      call.arguments
-  in
-  let solved =
-    List.map
-      (fun (parameter, from_values) ->
-        let from_lambdas =
-          match path with
-          | Some (_, signature) ->
-              List.concat_map
-                (fun ((argument : C.argument), used) ->
-                  let index =
-                    if signature.receiver <> None then argument.parameter - 1
-                    else argument.parameter
-                  in
-                  match List.nth_opt signature.parameters index with
-                  | Some { type_ = T.Function { uses; _ }; _ }
-                    when List.mem (T.Capability_parameter parameter) uses ->
-                      used
-                  | _ -> [])
-                lambda_uses
-          | None -> []
-        in
-        (parameter, minus (union from_values from_lambdas) [ T.Capability_parameter parameter ]))
-      solved
-  in
+(* What a call needs, with each capability parameter of what it calls
+   solved as what was passed for it. *)
+and call_needs state scope (value : expression) (call : C.call) callee passed : T.capability list =
+  let solved = List.map (fun (parameter, passed) -> (parameter, !passed)) passed in
   let needed =
     List.sort_uniq compare
       (List.concat_map
@@ -263,7 +229,7 @@ and call_needs state scope (value : expression) (call : C.call) : T.capability l
   state.tables.calls.(value.id) <- Some { call with capability_arguments = solved; uses = needed };
   (* A dependency may use only what its manifest grants, except what reaches
      it through a capability parameter, which is the caller's own. *)
-  (match (path, call.callee) with
+  (match (callee, call.callee) with
   | Some (callee, signature), _ ->
       check_grant state value.span
         ~what:(Printf.sprintf "`%s`" (Path.show callee))
@@ -323,8 +289,8 @@ and call_needs state scope (value : expression) (call : C.call) : T.capability l
   needed
 
 (* A lambda's [uses] are inferred from its body, and must be within the
-   [uses] of the function type it is checked against, unless that is a
-   capability parameter, which the call solves from them. *)
+   [uses] of the function type it is checked against, but for what a call
+   around it solves a capability parameter of that type as. *)
 and lambda state scope (value : expression) body =
   let inner = { scope with available = []; collecting = true } in
   let used =
@@ -332,21 +298,9 @@ and lambda state scope (value : expression) body =
       (fun used written -> union used (statement state inner written))
       [] body.statements
   in
-  Hashtbl.replace scope.lambdas value.id used;
   (match state.tables.types.(value.id) with
   | Some (T.Function { uses; _ }) ->
-      let open_parameter =
-        List.exists (function T.Capability_parameter _ -> true | _ -> false) uses
-      in
-      if not open_parameter then
-        List.iter
-          (fun capability ->
-            if not (List.mem capability uses) then
-              report state Lambda_uses value.span
-                (Printf.sprintf
-                   "This lambda uses `%s`, which the function type it is passed as does not allow."
-                   (show_capability capability)))
-          used
+      pass state scope value.span ~what:"This lambda" ~uses ~unlisted:(minus used uses)
   | _ -> ());
   []
 
@@ -432,19 +386,20 @@ and provide state scope (value : expression) implementations body =
   union !used (minus body_used !provided)
 
 let check (state : state) (lowered : Environment.lowered) =
-  let lambdas = Hashtbl.create 16 in
-  let scope available =
-    { available; collecting = false; restricted = None; lambdas; handed_on = None }
+  let scope ?(own = []) available =
+    { available; collecting = false; restricted = None; handed_on = None; own; passed = [] }
   in
   let definition = state.definition in
   let broken = Resolve.Parts.broken definition in
   let run_in scope (body : block) =
     List.iter (fun written -> ignore (statement state scope written)) body.statements
   in
-  let run available body = run_in (scope available) body in
+  let run (signature : T.signature) body =
+    run_in (scope ~own:(T.capability_parameters signature.generics) signature.uses) body
+  in
   if not (broken Header || broken Body) then
     match (definition.kind, lowered.interface) with
-    | Function { body; signature = written }, Function_interface signature ->
+    | Function { body; signature = written }, Function_interface signature -> (
         (* A function's clauses are specifications, with only [Panic]. *)
         List.iter
           (fun (clause : clause) ->
@@ -457,60 +412,31 @@ let check (state : state) (lowered : Environment.lowered) =
             | Cost { bound = Big_o value | At_most value | Exactly value; _ } -> check value
             | Cost { bound = Finite; _ } | Uses _ | Clause_error -> ())
           written.clauses;
-        run signature.uses body
-    | Test { body; _ }, Test_interface uses -> run (union uses [ panic ]) body
+        (* Inside an implementation of a capability, what is available is
+           what the [impl] declares, and a function value it calls may use
+           the capability, which there means this implementation, as
+           [write_with] hands [FileWrite] to its callback. A direct call of
+           the capability would call the implementation itself, so it still
+           needs [uses]. *)
+        let implemented =
+          Option.bind (Query.demand state.database Names.container state.key) (fun container ->
+              match Query.demand state.database Environment.lowered container with
+              | Some { interface = Impl_interface impl; _ }
+                when Interface.Summary.kind_of state.database impl.implements.trait
+                     = Some Capability ->
+                  Some impl
+              | _ -> None)
+        in
+        match implemented with
+        | Some impl ->
+            run_in
+              {
+                (scope ~own:(T.capability_parameters signature.generics) impl.impl_uses) with
+                handed_on = Some (T.Capability impl.implements.trait);
+              }
+              body
+        | None -> run signature body)
+    | Test { body; _ }, Test_interface uses -> run_in (scope (union uses [ panic ])) body
     | Theorem { body; _ }, _ | Law_proof { body; _ }, _ ->
         run_in (pure_only (scope []) "a proof") body
-    | Impl { members; _ }, Impl_interface impl ->
-        let is_capability =
-          Interface.Summary.kind_of state.database impl.implements.trait = Some Capability
-        in
-        List.iter
-          (fun (line : impl_member line) ->
-            match line.kind with
-            | Impl_method { body; signature } ->
-                let name =
-                  match signature.name with Plain_name name | Member_name (_, name) -> name.text
-                in
-                let receiver = Names.receiver signature.parameters in
-                let uses =
-                  if is_capability then impl.impl_uses
-                  else
-                    match
-                      List.find_opt
-                        (fun (method_name, method_receiver, _) ->
-                          method_name = name && method_receiver = receiver)
-                        impl.impl_methods
-                    with
-                    | Some (_, _, method_signature) -> method_signature.uses
-                    | None -> []
-                in
-                (* Inside an implementation of a capability, a function
-                   value it calls may use the capability, which there means
-                   this implementation, as [write_with] hands [FileWrite] to
-                   its callback. A direct call of the capability would call
-                   the implementation itself, so it still needs [uses]. *)
-                let own =
-                  if is_capability then Some (T.Capability impl.implements.trait) else None
-                in
-                run_in { (scope uses) with handed_on = own } body
-            | _ -> ())
-          members
-    | Trait { members; _ }, Trait_interface trait ->
-        List.iter
-          (fun (line : trait_member line) ->
-            match line.kind with
-            | Trait_method { body = Some body; signature } -> (
-                let name =
-                  match signature.name with Plain_name name | Member_name (_, name) -> name.text
-                in
-                match
-                  List.find_opt
-                    (fun (method_ : T.trait_method) -> method_.method_name = name)
-                    trait.methods
-                with
-                | Some method_ -> run method_.method_signature.uses body
-                | None -> ())
-            | _ -> ())
-          members
     | _ -> ()

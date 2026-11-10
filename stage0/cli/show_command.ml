@@ -7,9 +7,9 @@ type found = { declaration : Names.declaration; file : string; line : int; text 
 (* The module a path names, if it names one: [weather], or
    [weather::forecast]. *)
 let as_module database parts : Path.module_ option =
-  match parts with
-  | [] -> None
-  | package :: modules ->
+  match Workspace.split_path database parts with
+  | None -> None
+  | Some (package, modules) ->
       let module_ : Path.module_ = { package; modules } in
       if Query.demand database Workspace.module_exists module_ then Some module_ else None
 
@@ -52,8 +52,8 @@ let resolve (project : Project.t) text =
   let in_package package =
     List.concat_map (declarations database) (package_modules database package)
   in
-  match (parts, as_module database parts) with
-  | [ package ], _ when Workspace.package database package <> None ->
+  match (Workspace.split_path database parts, as_module database parts) with
+  | Some (package, []), _ ->
       (* A package: what it makes public. *)
       List.filter
         (fun (d : Names.declaration) ->

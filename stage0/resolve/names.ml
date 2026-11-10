@@ -48,12 +48,15 @@ let kind_name : kind -> string = function
 (* A definition, as its file declares it. [ordinal] counts the definitions
    before it in the file with the same path, so only the first, with
    ordinal 0, is what the path names; the others are reported as
-   duplicates. [index] is its place among the file's definitions. *)
+   duplicates. [index] is its place among the file's definitions, and
+   [container] the place of the trait, the [impl], or the capability it is
+   written inside, when it is a method of one. *)
 type declaration = {
   module_ : Path.module_;  (** Where it is written. *)
   path : Path.t;
   ordinal : int;
   index : int;
+  container : int option;
   kind : kind;
   visibility : visibility;
   generic : bool;
@@ -115,6 +118,11 @@ let spell_head (head : type_head) =
   | [] -> spell_path head.path
   | _ -> Printf.sprintf "%s[%s]" (spell_path head.path) (String.concat ", " generics)
 
+(* A function's own name, which comes after the type head when it is
+   written on a type. *)
+let signature_name (signature : signature) =
+  match signature.name with Plain_name name | Member_name (_, name) -> name
+
 let receiver (parameters : parameter list) : Path.receiver =
   match parameters with
   | { kind = Self_parameter None; _ } :: _ -> Read
@@ -123,31 +131,6 @@ let receiver (parameters : parameter list) : Path.receiver =
   | _ -> Static
 
 (* Imports *)
-
-(* The module a [use] line names: [use standard::file_system] is the
-   package [standard] and the module [file_system]. *)
-let used_module (path : path) : Path.module_ =
-  match path.modules with
-  | [] -> { package = path.last.text; modules = [] }
-  | package :: rest ->
-      {
-        package = package.text;
-        modules = List.map (fun (name : name) -> name.text) rest @ [ path.last.text ];
-      }
-
-let last_name (module_ : Path.module_) =
-  match List.rev module_.modules with last :: _ -> last | [] -> module_.package
-
-(* The modules a file imports, by the name code writes them with. *)
-let imports =
-  Query.query ~name:"imports" ~phase:Syntax ~saved:true ~show:Path.show_module
-    (fun database module_ ->
-      let file = Query.demand database Workspace.file module_ in
-      List.map
-        (fun (item : path Syntax.item) ->
-          let used = used_module item.value in
-          (last_name used, used))
-        file.uses)
 
 (* The packages a file can name at the start of a path: its own, the
    standard library, and its dependencies. *)
@@ -161,6 +144,37 @@ let packages database (module_ : Path.module_) =
     | None -> []
   in
   List.sort_uniq compare (module_.package :: Prelude.standard :: dependencies)
+
+(* The module a full path's names give, written in a file of [from]: a
+   package's name, which is two of them when it has an owner, and then the
+   modules'. [standard::file_system] is the package [standard] and the
+   module [file_system], and [acme::geometry::vector] is the package
+   [acme::geometry] and the module [vector]. *)
+let full_module database ~(from : Path.module_) (names : string list) : Path.module_ =
+  match names with
+  | owner :: name :: rest when List.mem (owner ^ "::" ^ name) (packages database from) ->
+      { package = owner ^ "::" ^ name; modules = rest }
+  | package :: rest -> { package; modules = rest }
+  | [] -> { package = ""; modules = [] }
+
+(* The module a [use] line names. *)
+let used_module database ~from (path : path) =
+  full_module database ~from
+    (List.map (fun (name : name) -> name.text) path.modules @ [ path.last.text ])
+
+let last_name (module_ : Path.module_) =
+  match List.rev (Path.module_parts module_) with last :: _ -> last | [] -> ""
+
+(* The modules a file imports, by the name code writes them with. *)
+let imports =
+  Query.query ~name:"imports" ~phase:Syntax ~saved:true ~show:Path.show_module
+    (fun database module_ ->
+      let file = Query.demand database Workspace.file module_ in
+      List.map
+        (fun (item : path Syntax.item) ->
+          let used = used_module database ~from:module_ item.value in
+          (last_name used, used))
+        file.uses)
 
 let module_exists database (module_ : Path.module_) =
   module_ = Intrinsic.module_ || Query.demand database Workspace.module_exists module_
@@ -194,6 +208,9 @@ let plain_items (definitions : definition Syntax.item list) =
         [ { name; kind; visibility = definition.visibility; generic } ]
       in
       match definition.kind with
+      (* A method written inside a trait, an [impl], or a capability is
+         reached through that one, not by its name. *)
+      | _ when Option.is_some item.within -> []
       | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
           plain name.text Function (generics <> [])
       | Type_definition { name; generics; _ } -> plain name.text Type (generics <> [])
@@ -203,7 +220,9 @@ let plain_items (definitions : definition Syntax.item list) =
       | Theorem { name; generics; _ } -> plain name.text Theorem (generics <> [])
       | Definition_error { name = Some (Plain_name name); keyword } -> (
           match named_of_keyword keyword with Some kind -> plain name.text kind false | None -> [])
-      | Function _ | Constant _ | Impl _ | Test _ | Law_proof _ | Definition_error _ -> [])
+      | Function _ | Method_declaration _ | Constant _ | Impl _ | Test _ | Law_proof _
+      | Definition_error _ ->
+          [])
     definitions
 
 let builtin_items () =
@@ -288,9 +307,8 @@ let lookup_module database ~(from : Path.module_) (names : string list) =
           (List.assoc_opt first (Query.demand database imports from))
       in
       let package =
-        if List.mem first (packages database from) then
-          Some ({ package = first; modules = rest } : Path.module_)
-        else None
+        let module_ = full_module database ~from names in
+        if List.mem module_.package (packages database from) then Some module_ else None
       in
       let exists module_ = module_exists database module_ in
       match (imported, package) with
@@ -337,71 +355,113 @@ let declarations =
     (fun database module_ ->
       let file = Query.demand database Workspace.file module_ in
       let counts = Hashtbl.create 16 in
-      let declare index (definition : definition) path kind generic =
+      (* The traits, [impl]s, and capabilities so far, by index: the path of
+         each, and whether its methods take no [self], as a capability's do
+         not. *)
+      let containers = Hashtbl.create 8 in
+      let declare index (item : definition Syntax.item) path kind generic =
         let ordinal = Option.value ~default:0 (Hashtbl.find_opt counts path) in
         Hashtbl.replace counts path (ordinal + 1);
-        Some { module_; path; ordinal; index; kind; visibility = definition.visibility; generic }
+        (match item.value.kind with
+        | Trait _ | Impl _ -> Hashtbl.replace containers index (path, false)
+        | Capability _ -> Hashtbl.replace containers index (path, true)
+        | _ -> ());
+        Some
+          {
+            module_;
+            path;
+            ordinal;
+            index;
+            container = item.within;
+            kind;
+            visibility = item.value.visibility;
+            generic;
+          }
       in
       List.filter_map Fun.id
         (List.mapi
            (fun index (item : definition Syntax.item) ->
              let definition = item.value in
-             let declare = declare index definition in
-             match definition.kind with
-             | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
-                 declare (top module_ name.text) Function (generics <> [])
-             | Function
-                 { signature = { name = Member_name (head, name); generics; parameters; _ }; _ } ->
+             let declare = declare index item in
+             match (definition.kind, Option.bind item.within (Hashtbl.find_opt containers)) with
+             (* A method written inside a trait, an [impl], or a capability
+                is that one's. *)
+             | (Function { signature; _ } | Method_declaration signature), Some (owner, static) ->
                  declare
                    (Method
                       {
-                        owner = owner database ~from:module_ head;
-                        name = name.text;
-                        receiver = receiver parameters;
+                        owner;
+                        name = (signature_name signature).text;
+                        receiver = (if static then Static else receiver signature.parameters);
                       })
-                   Method (generics <> [])
-             | Type_definition { name; generics; _ } ->
-                 declare (top module_ name.text) Type (generics <> [])
-             | Trait { name; generics; _ } -> declare (top module_ name.text) Trait (generics <> [])
-             | Capability { name; _ } -> declare (top module_ name.text) Capability false
-             | Constant { name = Plain_name name; _ } ->
-                 declare (top module_ name.text) Constant false
-             | Constant { name = Member_name (head, name); _ } ->
-                 declare
-                   (Member_constant { owner = owner database ~from:module_ head; name = name.text })
-                   Member_constant false
-             | Theorem { name; generics; _ } ->
-                 declare (top module_ name.text) Theorem (generics <> [])
-             | Impl { trait_; type_; _ } ->
-                 declare
-                   (Impl { module_; name = spell_path_type trait_ ^ " for " ^ spell_head type_ })
-                   Impl (type_.generics <> [])
-             | Test { name; _ } ->
-                 let text =
-                   name.first.value
-                   ^ String.concat "" (List.map (fun (_, (text : text)) -> text.value) name.rest)
-                 in
-                 declare (Test { module_; name = text }) Test false
-             | Law_proof { trait_; law; type_; _ } ->
-                 declare
-                   (Law_proof
-                      {
-                        module_;
-                        name =
-                          Printf.sprintf "%s.%s for %s" (spell_path_type trait_) law.text
-                            (spell_type type_);
-                      })
-                   Law_proof false
-             | Definition_error { name = Some (Plain_name name); keyword } -> (
-                 match named_of_keyword keyword with
-                 | Some kind -> declare (top module_ name.text) (kind_of_named kind) false
-                 | None -> None)
-             | Definition_error { name = Some (Member_name (head, name)); keyword } ->
-                 let owner = owner database ~from:module_ head in
-                 if keyword = Some Let then
-                   declare (Member_constant { owner; name = name.text }) Member_constant false
-                 else declare (Method { owner; name = name.text; receiver = Static }) Method false
-             | Definition_error { name = None; _ } -> None)
+                   Method (signature.generics <> [])
+             | ( Definition_error { name = Some (Plain_name name | Member_name (_, name)); _ },
+                 Some (owner, _) ) ->
+                 declare (Method { owner; name = name.text; receiver = Static }) Method false
+             | _, Some _ -> None
+             | kind, None -> (
+                 match kind with
+                 | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
+                     declare (top module_ name.text) Function (generics <> [])
+                 | Function
+                     { signature = { name = Member_name (head, name); generics; parameters; _ }; _ }
+                   ->
+                     declare
+                       (Method
+                          {
+                            owner = owner database ~from:module_ head;
+                            name = name.text;
+                            receiver = receiver parameters;
+                          })
+                       Method (generics <> [])
+                 | Type_definition { name; generics; _ } ->
+                     declare (top module_ name.text) Type (generics <> [])
+                 | Trait { name; generics; _ } ->
+                     declare (top module_ name.text) Trait (generics <> [])
+                 | Capability { name; _ } -> declare (top module_ name.text) Capability false
+                 | Constant { name = Plain_name name; _ } ->
+                     declare (top module_ name.text) Constant false
+                 | Constant { name = Member_name (head, name); _ } ->
+                     declare
+                       (Member_constant
+                          { owner = owner database ~from:module_ head; name = name.text })
+                       Member_constant false
+                 | Theorem { name; generics; _ } ->
+                     declare (top module_ name.text) Theorem (generics <> [])
+                 | Impl { trait_; type_; _ } ->
+                     declare
+                       (Impl { module_; name = spell_path_type trait_ ^ " for " ^ spell_head type_ })
+                       Impl (type_.generics <> [])
+                 | Test { name; _ } ->
+                     let text =
+                       name.first.value
+                       ^ String.concat ""
+                           (List.map (fun (_, (text : text)) -> text.value) name.rest)
+                     in
+                     declare (Test { module_; name = text }) Test false
+                 | Law_proof { trait_; law; type_; _ } ->
+                     declare
+                       (Law_proof
+                          {
+                            module_;
+                            name =
+                              Printf.sprintf "%s.%s for %s" (spell_path_type trait_) law.text
+                                (spell_type type_);
+                          })
+                       Law_proof false
+                 | Definition_error { name = Some (Plain_name name); keyword } -> (
+                     match named_of_keyword keyword with
+                     | Some kind -> declare (top module_ name.text) (kind_of_named kind) false
+                     | None -> None)
+                 | Definition_error { name = Some (Member_name (head, name)); keyword } ->
+                     let owner = owner database ~from:module_ head in
+                     if keyword = Some Let then
+                       declare (Member_constant { owner; name = name.text }) Member_constant false
+                     else
+                       declare (Method { owner; name = name.text; receiver = Static }) Method false
+                 (* A method without a body is written only inside a trait or a
+                capability. *)
+                 | Method_declaration _ | Definition_error { name = None; _ } -> None))
            file.definitions))
 
 module Member_map = Map.Make (struct
@@ -480,6 +540,29 @@ let locate =
         (fun declaration -> (key.module_, declaration))
         (Declaration_map.find_opt (key.path, key.ordinal)
            (Query.demand database declaration_index key.module_)))
+
+(* The trait, the [impl], or the capability a method is written inside. *)
+let container =
+  Query.query ~name:"container" ~phase:Declarations ~show:show_key (fun database key ->
+      match Query.demand database locate key with
+      | Some (module_, { container = Some index; _ }) ->
+          Option.map key_of
+            (List.find_opt
+               (fun (declaration : declaration) -> declaration.index = index)
+               (Query.demand database declarations module_))
+      | _ -> None)
+
+(* The methods written inside a trait, an [impl], or a capability, in the
+   order they are written. *)
+let contained =
+  Query.query ~name:"contained" ~phase:Declarations ~show:show_key (fun database key ->
+      match Query.demand database locate key with
+      | Some (module_, { index; _ }) ->
+          List.filter_map
+            (fun (declaration : declaration) ->
+              if declaration.container = Some index then Some (key_of declaration) else None)
+            (Query.demand database declarations module_)
+      | None -> [])
 
 (* A definition's tree, with positions relative to it, so that a definition
    that only moved gives the same tree and changes nothing that reads it. *)

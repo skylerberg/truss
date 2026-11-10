@@ -604,6 +604,7 @@ and field_defaults st ty variant left_out =
         caller.code with
         definition_key = key;
         anchor = path;
+        within = None;
         text = text_of st.context key;
         checked = checked_of st.context key;
         substitution = bind interface.type_generics type_args;

@@ -7,7 +7,6 @@ module C = Checked
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
 open Hooks
@@ -514,16 +513,15 @@ and any_ state env ?expected (value : expression) (inner : expression) =
   match Option.map (normalize state) expected with
   | Some (T.Any trait as any_type) ->
       let inner_type = expression state env inner in
-      defer state (fun () ->
-          let inner_type = normalize state inner_type in
-          if T.contains_unsolved inner_type then false
-          else begin
-            if Option.is_none (implements state inner_type { trait with associated = [] }) then
-              report state No_impl value.span
-                (Printf.sprintf "`%s` does not implement `%s`." (T.show inner_type)
-                   (T.show_trait trait));
-            true
-          end);
+      require state ~at:value.span inner_type trait ~unmet:(fun inner_type other ->
+          report state No_impl value.span
+            (match other with
+            | None ->
+                Printf.sprintf "`%s` does not implement `%s`." (T.show inner_type)
+                  (T.show_trait trait)
+            | Some (name, given) ->
+                Printf.sprintf "`%s` is expected, and the `%s` of `%s` is `%s`." (T.show any_type)
+                  name (T.show inner_type) (show state given)));
       any_type
   | _ ->
       ignore (expression state env inner);

@@ -12,4 +12,5 @@
   memory_layout
   build
   type_checker
+  registry
   compile))

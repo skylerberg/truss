@@ -221,7 +221,8 @@ the order they appear in the LIR, so the result is the same on every run.
 Each instance gets a C symbol made from its key: a `t_` prefix, the module
 path with `__` between its parts, a type's method after a single `_`, and
 the type arguments between markers, such as
-`t_standard__list__List_each_Of_standard__Int64_End_`. Names stay readable
+`t_standard__list__List_each_Of_standard__Int64_End_`. A package with an
+owner in its name gives two parts, as in `t_acme__geometry__vector__length`. Names stay readable
 in profilers and debuggers. A marker is `_`, an `UpperCamelCase` word, and
 `_`, such as `_Of_`, `_Mut_`, or `_Drop_`, which no Truss name can contain,
 since a name with `_` has no uppercase letter and an `UpperCamelCase` name
@@ -714,12 +715,13 @@ and its siblings. Full-width multiplication, used by hashing and
   their type, and on `Bool`, and records, variants, strings, lists, and
   arrays of parts that fold. Another constant's value, where it folds, is
   written in place, since C cannot initialize static data from another
-  object. Whatever the folder does not know, or cannot give exactly, such
-  as a sum that does not fit its type, is not folded: the constant's
-  evaluator is run (see [Code run while compiling](#code-run-while-compiling)),
-  so folding can be incomplete and never wrong. A constant made of one that
-  is run is run too, and its evaluator copies that one's static data,
-  since nothing is moved out of a constant.
+  object. Whatever the folder does not know, such as a `Map` literal, or
+  cannot give exactly, such as a shift whose result does not fit its type,
+  is not folded: the constant's evaluator is run (see
+  [Code run while compiling](#code-run-while-compiling)), so folding can be
+  incomplete and never wrong. A constant made of one that is run is run
+  too, and its evaluator copies that one's static data, since nothing is
+  moved out of a constant.
 - **A list or map literal in a function body** allocates its buffer and
   fills it, which is the one allocation DESIGN.md counts. A literal whose
   parts are all constant, and which is only read, can be static data
@@ -813,8 +815,8 @@ statement's early exits are recorded the same way, but the method runs to its
 end before the caller acts on them.
 
 In release builds, and in development builds when the method is in the
-standard library or a dependency, `List.each` and the body are in the same C
-file. The C compiler inlines both, and the loop becomes a plain loop over the
+standard library or a registry package, `List.each` and the body are in the
+same C file. The C compiler inlines both, and the loop becomes a plain loop over the
 buffer. In a development build of a package's own yielding method, the body
 is called once per element. That is the cost DESIGN.md accepts for keeping
 rebuilds narrow.
@@ -1329,11 +1331,13 @@ so upgrading clang recompiles objects but invalidates no test result.
   once for each instance whose C changed, in parallel across cores, and
   each instance is an external function of its own file.
 - **A development build puts small callees in the caller's file.** A
-  function an instance calls, from another package than the instance's
-  own, with little code and no lambdas, is emitted into the instance's
+  function an instance calls, from the standard library or a registry
+  package, with little code and no lambdas, is emitted into the instance's
   file too, as a `static inline` copy, so the C compiler can inline it, as
-  DESIGN.md allows for development builds. A package's own small functions
-  stay calls, so that an edit to one compiles only it again. An object
+  DESIGN.md allows for development builds. Those change only with the
+  toolchain or a version in the lock file. The small functions of the
+  project's own packages stay calls, whichever of its packages calls them,
+  so that an edit to one compiles only it again. An object
   file is found by its C's text, which the copies are part of, so a change
   to a callee compiles its callers' files again. Lowering writes lending
   and yielding methods and primitive operations into their callers
@@ -1397,7 +1401,7 @@ a command line can hold.
 - **Small callees of small callees, and generated functions, in the
   caller's C file.** Only the functions an instance calls itself are
   copied in, and a type's drop and copy functions are not.
-- **The standard library and dependencies at `-O2` in development
+- **The standard library and registry packages at `-O2` in development
   builds,** cached, so a project's development builds run them at full
   speed.
 - **A quantifier in code.** It is to be a loop over its range or collection,

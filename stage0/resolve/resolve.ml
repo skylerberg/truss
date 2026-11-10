@@ -7,9 +7,9 @@ type cost_function = Walk.cost_function = Log | Power | Time | Calls
 type target = Walk.target =
   | Binding
   | Local of Syntax.id
-  | Type_parameter of Syntax.id
-  | Capability_parameter of Syntax.id
-  | Value_parameter of Syntax.id
+  | Type_parameter of Types.parameter
+  | Capability_parameter of Types.parameter
+  | Value_parameter of Types.parameter
   | Definition of Names.named * Path.t
   | Variant of Path.t * string
   | Module of Path.module_
@@ -26,7 +26,7 @@ type bracket = Walk.bracket = Index | Type_arguments | Method_bracket
 
 type value = Walk.value =
   | Value_local of Syntax.id
-  | Value_generic of Syntax.id
+  | Value_generic of Types.parameter
   | Value_field of string
 
 type resolved = {
@@ -57,6 +57,7 @@ let rec head resolved (value : Syntax.expression) =
 let declared_name (definition : Syntax.definition) : Syntax.name option =
   match definition.kind with
   | Function { signature = { name = Plain_name name | Member_name (_, name); _ }; _ }
+  | Method_declaration { name = Plain_name name | Member_name (_, name); _ }
   | Constant { name = Plain_name name | Member_name (_, name); _ }
   | Type_definition { name; _ }
   | Trait { name; _ }
@@ -84,7 +85,18 @@ let resolved =
               holes = [];
             }
           in
-          Walk.definition state definition;
+          let container =
+            Option.bind (Query.demand database Names.container key) (fun (container : Names.key) ->
+                Option.map
+                  (fun definition -> (container.path, definition))
+                  (Query.demand database Names.definition container))
+          in
+          (* Nothing written inside a definition whose own header did not
+             parse is resolved, since what it is written inside is not
+             known. *)
+          (match container with
+          | Some (_, around) when Parts.broken around Header -> ()
+          | _ -> Walk.definition state ~path:key.path ?container definition);
           (* The prelude is the same everywhere, so no definition outside the
              module that defines a prelude name may take it. *)
           (match key.path with
@@ -168,7 +180,7 @@ let file_diagnostics =
         (List.fold_left
            (fun seen (item : Syntax.path Syntax.item) ->
              let span = Source.span item.base (item.base + String.length item.text) in
-             let used_module = Names.used_module item.value in
+             let used_module = Names.used_module database ~from:module_ item.value in
              let last = Names.last_name used_module in
              if used_module = Intrinsic.module_ && module_.package <> Prelude.standard then
                report Intrinsic_import span

@@ -73,11 +73,7 @@ let () =
       | _ -> fail "wrong definitions");
   test "a definition whose header did not parse keeps its keyword and name" (fun () ->
       let file, _ = parse "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn f() {}" in
-      let printed =
-        List.map
-          (fun (item : Syntax.definition Syntax.item) -> Syntax_print.definition item.value)
-          file.definitions
-      in
+      let printed = Syntax_print.definitions file.definitions in
       if printed <> [ "(error fn List[Element].sort)"; "(error type Point)"; "(fn f () (block))" ]
       then fail "got [%s]" (String.concat "; " printed));
   test "a function without a body keeps its signature" (fun () ->
@@ -187,10 +183,34 @@ let () =
     let tokens, _ = Lexer.lex source in
     (source, tokens, Parser.split tokens)
   in
+  test "a method is a definition of its own, inside its impl" (fun () ->
+      let text = "impl Clock for Fixed {\n  fn now(self) -> Instant {\n    todo\n  }\n}" in
+      let file, _ = parse text in
+      match file.definitions with
+      | [ around; method_ ] ->
+          if around.within <> None then fail "the impl is inside something";
+          if method_.within <> Some 0 then fail "the method is not inside the impl";
+          if method_.text <> "fn now(self) -> Instant {\n    todo\n  }" then
+            fail "the method's text is %S" method_.text;
+          if method_.base <> 25 then fail "the method starts at %d" method_.base
+      | definitions -> fail "%d definitions" (List.length definitions));
+  test "a method's tree does not depend on what is around it" (fun () ->
+      let method_of text =
+        match (fst (parse text)).definitions with
+        | [ _; method_ ] -> method_.value
+        | _ -> failwith "expected an impl and its method"
+      in
+      let method_text = "  fn now(self) -> Instant {\n    todo\n  }\n" in
+      if
+        method_of ("impl Clock for Fixed {\n" ^ method_text ^ "}")
+        <> method_of
+             ("impl Clock for Other[Element] uses Random {\n  type Tick = Int64\n\n" ^ method_text
+            ^ "}")
+      then fail "the trees differ");
   test "a definition's diagnostics are placed in the file by its base" (fun () ->
       match pieces "fn g() {}\nfn f() { x = }" with
       | source, tokens, [ _; second ] -> (
-          let parsed = Parser.definition source tokens second in
+          let parsed, _ = Parser.definition source tokens second in
           match Parser.placed parsed with
           | [ diagnostic ] ->
               if diagnostic.span.start <> 23 then fail "start %d" diagnostic.span.start
@@ -201,7 +221,7 @@ let () =
       let parsed text =
         let source, tokens, pieces = pieces text in
         let last = List.nth pieces (List.length pieces - 1) in
-        let parsed = Parser.definition source tokens last in
+        let parsed, _ = Parser.definition source tokens last in
         (parsed.value.value, parsed.diagnostics)
       in
       if parsed text <> parsed ("fn g() {}\n\n\n" ^ text) then fail "the results differ")

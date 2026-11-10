@@ -55,26 +55,33 @@ touches. It follows [GOALS.md](GOALS.md) and the decisions in
 | `truss explain` | Says what is at a position: what a name means, its type, and the signature it refers to |
 | `truss overlap` | Lists where the worktree's changes meet other worktrees', or a branch's |
 | `truss rename` | Renames a definition, method, or module, and every reference to it in the worktree |
+| `truss add` | Makes registry packages dependencies of the package, and writes their versions in the lock file |
+| `truss upgrade` | Moves the project's registry packages to other versions, and says what that changes |
+| `truss publish` | Adds the package to the registry as its next version, once it is finished and breaks nothing |
 | `truss new` | Makes a new package |
 | `truss sync`, `truss status`, `truss stop` | Brings a worktree's session up to date, lists the background process's sessions, and stops it |
 | `truss clean` | Stops the background process and deletes the store |
 
-`truss --version` prints the version of each stage that has one: code
-generation and the Unicode tables. Those are the versions in exact keys, so a
+`truss --version` prints the version of Truss the toolchain is, which a
+package's `truss` is compared with, and the version of each stage that has
+one: code generation and the Unicode tables. Those are the versions in exact keys, so a
 report of a stale result can say which stage it came from. Every other
 result is kept under the compiler's identity, the hash of its executable.
 
 ### Finding the packages
 
-A command acts on the packages of the worktree it is run in, through that
-worktree's session in the code database, as DATABASE.md's "Sessions"
-describes. The worktree is the top of the git worktree, or outside git, the
-nearest directory at or above the current one that holds a `truss.toml`,
-the way Cargo and Go find a package. The command is about the packages at
-or under the current directory, or else the one it is in, so running in a
+A command acts on the packages of the project it is run in, through that
+project's session in the code database, as DATABASE.md's "Sessions"
+describes. The project's root is the nearest directory at or above the
+current one whose `truss.toml` has a `[project]` table, or with none, the
+nearest that holds a `truss.toml`, which is a package that is a project by
+itself, as SYNTAX.md's "Projects" says. Cargo finds a workspace the same
+way. A directory with no manifest at or above it is in no project, and a
+command there cannot do its job. The command is about the packages at or
+under the current directory, or else the one it is in, so running in a
 package's directory, or any directory below it, is about that package, and
-running at the top of a repository of several packages is about all of
-them. `run` and `build` need exactly one, and say so when there are more.
+running at the root of a project of several packages is about all of them.
+`run` and `build` need exactly one, and say so when there are more.
 `-C DIRECTORY`, as in `git` and `make`, runs as if from that directory,
 written before the command or after it. The positional arguments are free
 for what each command acts on.
@@ -84,13 +91,40 @@ SYNTAX.md says, with two exceptions:
 
 - **A directory with its own `truss.toml` is another package,** and none of
   its files are modules of this one, as with Cargo's and Go's nested
-  modules.
+  modules. It is a package of the same project, unless its manifest has a
+  `[project]` table, which makes it and everything under it another
+  project, or the root has none, which makes the root a project of one
+  package.
 - **Directories whose names start with `.`, and `_build` and
   `node_modules`, are skipped,** so `.git` and an editor's hidden
   directories are never read.
 
-A manifest that cannot be read, or a package name used twice, is a problem
-in the code, reported with the diagnostics, and the exit status is 1.
+A package's dependencies are found among the project's packages, by name,
+and then among the registry's, at the versions the project's lock file
+gives (see [Registry packages](#registry-packages)).
+
+What is wrong with a manifest is a problem in the code, reported with the
+diagnostics, and the exit status is 1:
+
+- a manifest that cannot be read, with the line
+- a package name used twice in the project, or the name `standard`
+- a package without `truss`, or written for a newer Truss than the
+  toolchain's, which `truss --version` gives
+- a dependency that is no package of the project and that the lock file
+  gives no version, a package that depends on itself, and packages that
+  depend on each other in a cycle
+- a lock file that cannot be read, that names a package whose files cannot
+  be had, or that is not the one the manifests give
+- a package that runs on every target with a dependency that says
+  `usize_bits = 64`
+- a package name of one part that is the owner in another package's name,
+  since a path that starts with it could then be read two ways
+- a `[test]` table in a manifest that is not the project's
+- a grant that names no capability
+- a dependency that nothing in its package uses
+
+The last two need the package's code, as TYPECHECKER.md's "The manifest"
+describes, and are reported for the packages the command is about.
 
 ### Common options
 
@@ -171,7 +205,10 @@ same round, since applying both could give what neither meant; the second
 waits for the next round, after the file is checked again. Rounds stop
 after 32, so fixes that undo each other cannot run forever. A diagnostic with several fixes, such as an addition
 that may overflow, which offers four, is a choice for the person or agent,
-so it is reported and left alone. An agent that has chosen applies the
+so it is reported and left alone. A dependency that nothing uses has one
+fix, which deletes its entry from the manifest, and `--fix` applies it. A
+capability that is not granted has none: `--fix` never widens a grant, as
+DESIGN.md's "Dependencies" decides. An agent that has chosen applies the
 fix's edits from the JSON itself. This follows `ruff check --fix` and
 `eslint --fix`, which put fixing on the checking command, rather than
 Cargo's separate `cargo fix`; a separate command would load and check the
@@ -258,10 +295,10 @@ whose result is kept is not built or run again. External tests, those with
   new ones, as `go test -count=1` does. Results are deterministic, so this
   is only for doubting the cache, after a suspected compiler bug, or for
   timing every test on this machine now.
-- **The time limit** for each test is its package's, set in the manifest as
-  `[test] time_limit = 10`, in seconds, with 10 as the default. It is not a
-  flag, so that every machine and CI run uses the same limit. A run over
-  several packages builds one test program for each.
+- **The time limit** for each test is its project's, set in the project's
+  manifest as `[test] time_limit = 10`, in seconds, with 10 as the default.
+  It is not a flag, so that every machine and CI run uses the same limit. A
+  run over several packages builds one test program for each.
 - **The JSON document** is `{"format", "diagnostics", "tests", "timings"}`,
   where each test is `{"module", "name", "file", "line", "outcome",
   "cached", "microseconds", "message", "echo"}`, for every selected test,
@@ -276,10 +313,11 @@ truss run [--release] [--] [ARGUMENT...]
 truss build [--output PATH] [--json]
 ```
 
-A package has at most one `main`, and its program is built from it, as
-IMPLEMENTATION.md has a package compile to a single program or library. A
-package with no `main` has no program, so `run` and `build` stop with 2; one
-with several has a problem in its code, so they stop with 1.
+A package's program starts at the `main` of its `main` module, as DESIGN.md's
+"Packages" says, and a package compiles to a single program or library, as
+IMPLEMENTATION.md has it. A package without that `main` is a library and
+has no program, so `run` and `build` stop with 2. A function named `main` in
+another module is an ordinary function.
 
 **`truss run`** builds a development program, as CODEGEN.md's "C files and
 optimization" describes, and runs it on the terminal with the arguments, so
@@ -473,7 +511,7 @@ truss rename [--json] FROM TO
 ```
 
 Renames a definition, every version of a method, or a module, and rewrites
-every reference to it in every package of the worktree, whichever directory
+every reference to it in every package of the project, whichever directory
 it is run from. `TO` is a new name, as in `truss
 rename weather::forecast::parse read`, or a full path that keeps the
 definition in its module and a method with its type. Renaming a module, as
@@ -485,7 +523,7 @@ cause any diagnostic, such as for a name that is taken, breaks a naming
 rule, or would hide another, which are the diagnostics a hand-made rename
 would cause. A worktree that already has diagnostics is refused too, since its
 references are found through checked code. References in packages outside
-the worktree cannot be changed, so renaming a public definition changes the
+the project cannot be changed, so renaming a public definition changes the
 package's public interface, which `truss impact` reports like any other
 changed signature. Each edit replaces the name's tokens alone, so the files
 need no formatting afterward. The callers of what was renamed are checked
@@ -495,14 +533,178 @@ variable is left to the language server, which has the
 cursor's position. The JSON document is `{"format", "diagnostics", "edits",
 "moved"}`, with each edit's file, byte range, and replacement.
 
+## Registry packages
+
+A package whose name has an owner, and that is no package of the project,
+comes from the registry, as DESIGN.md's "Packages" describes.
+
+- **The registry is a directory,** which `TRUSS_REGISTRY` names. It holds,
+  for each package, `owner/name/versions`, a line for each version with the
+  hash of its files, the oldest first, and `owner/name/VERSION/`, the files
+  published as that version. A registry is only added to. A command sends
+  the registry its own environment names to the background process, so the
+  answer does not depend on how that process was started.
+- **A build's versions come from `truss.lock`,** at the project's root, and
+  from the records of the packages it names, as SYNTAX.md's "The lock file"
+  and DESIGN.md's "Choosing versions" say: for each package, the highest
+  version that the lock file or any package of the build names. No command
+  but `add` and `upgrade` chooses a version.
+- **A package's files are fetched when the build does not have them,** from
+  the registry into the store, in a directory named by their hash, and are
+  kept only if they have the hash the lock file names. Fetching changes no
+  answer, so any command does it. A package that is in the store needs no
+  registry.
+- **A registry package is checked as far as the project reads it,** like
+  any code: the signatures the project's code uses, and the bodies its
+  programs and tests reach. Its own tests are not the project's, and
+  `truss test` does not run them.
+- **The lock file is written one way.** It has a line for each registry
+  package the build uses and no other, at the build's versions, with the
+  capabilities each holds. One that differs is a problem that says how,
+  and `truss check --fix` writes the one the manifests give. That never
+  chooses a version: a dependency that no lock file and no record gives a
+  version is a problem that says to run `truss add`.
+
+### `truss add`
+
+```text
+truss add [--json] PACKAGE...
+```
+
+Makes each package a dependency of the package the command is run in. It
+writes an entry in the manifest that grants the package nothing, since a
+grant is a choice someone makes, and a line in the project's lock file at
+the registry's newest version, or at the one written after `@`, as in
+`truss add acme::geometry@1.4.2`. The packages it depends on come with it,
+at the versions it was published with, unless the build already has newer
+ones. It prints what entered the build. A package the registry does not hold
+is a bad argument, and nothing is written. The JSON document is `{"format",
+"diagnostics", "changes", "signatures", "breaks"}`, as `upgrade` writes it.
+
+### `truss upgrade`
+
+```text
+truss upgrade [--json] [PACKAGE...]
+```
+
+Moves every registry package of the build to its newest version, or only the
+packages named, each to its newest or to the version written after `@`. The
+other versions follow as a build's do, so a package named may bring newer
+versions of what it depends on. A version can be asked for that is lower
+than the build's, and is the build's only if no package of the build was
+published with a higher one.
+
+The new versions are checked before the lock file is written, in a state of
+their own that starts from the project's session and holds what they
+change, as a rename is checked. The command prints:
+
+- **What changes in the lock file:** each package that moves, enters, or
+  leaves, and each that would hold a capability it did not.
+- **The signatures the project reads that change,** each as it was and as it
+  would be, with the project's definitions that read it. These are the
+  places to review, and no others: a package whose signatures the project
+  reads are all unchanged can only have changed what its bodies compute.
+- **The errors the project would have that it does not have now.**
+
+```text
+`acme::units` goes from 1.1.0 to 1.2.0.
+
+Signatures the project reads that change:
+  acme::units::lengths::meter
+    was: public fn meter() -> Int64
+    now: public fn meter(scale: Int64) -> Int64
+    read by: weather::main::height
+
+With these versions the project has errors it does not have now:
+  main.truss: `scale` is not given, and has no default.
+```
+
+It then writes the lock file. The exit status is 1 when the project would
+have new errors, since the code then has a problem, and 0 otherwise. The
+JSON document is `{"format", "diagnostics", "changes", "signatures",
+"breaks"}`: each change with its kind, `moved`, `entered`, `left`, or
+`holds`, its package, and its versions or the capabilities gained, each
+signature with its path, its text before and after, and what reads it, and
+each error as a sentence.
+
+### `truss publish`
+
+```text
+truss publish [--json]
+```
+
+Adds the package the command is run in to the registry, as DESIGN.md's
+"Versions" and "The registry" describe. The package must have an owner in
+its name. It is published only when:
+
+- **It has no errors,** proofs included, and no problem with its manifest or
+  the lock file.
+- **It has no `todo` and no `echo`,** anywhere, since a library has no
+  `main` to reach them from. Each is listed with its place.
+- **Its tests that have no `uses` pass.** They are run as `truss test` runs
+  them, so a result that is kept is not run again.
+- **It is published with registry packages only.** A dependency that is one
+  of the project's packages counts as the registry's when its files are
+  those of a version the registry holds, which is how a project's packages
+  are published one after another, and otherwise is to be published first.
+- **It breaks nothing its last version offers** (below).
+
+What is published is the package's files, as SYNTAX.md's "The lock file"
+lists them: its manifest as it is written, its modules, and the Markdown
+files beside them, with a lock file in place of the project's that has a
+line for each registry package the package's code uses, its tests apart,
+and for each that those use in turn, at the build's versions. A dependency
+that only tests use is left out, so that a project that uses the package
+does not take it on. Files that are the newest version already are not
+published again.
+
+**The number is the registry's to give,** as DESIGN.md decides. The first
+version is 1.0.0, or 2.0.0 for a name that ends in `_v2`. After that, the
+package is compared with its newest version, which is loaded into a state
+of its own with the packages it was published with:
+
+- A release that breaks something is refused, with each definition that
+  breaks, what about it does, and its signature as it was and as it is, and
+  the name to publish it under.
+- A release that offers more gets the next minor number, and what is new is
+  listed.
+- Any other gets the next patch number.
+
+```text
+This would break what `acme::geometry` 1.4.2 offers, so it cannot be published under that name:
+  acme::geometry::vector::length has other parameters or another result.
+    was: public fn length(self) -> Float64
+    now: public fn length(self, scale: Float64) -> Float64
+Publish it under a new name, such as `acme::geometry_v2`.
+```
+
+The comparison is of every public definition and every `impl`:
+
+| Of | Breaks | Offers more |
+|---|---|---|
+| Any public definition | It is gone, moved, or no longer public | It is new |
+| A function, method, or theorem | Other generic parameters, parameters, or result; a capability more in `uses`; a `requires` clause more; an `ensures` or `cost` clause fewer; a `time` clause gone; a default gone; a yielding method that could be pulled and no longer can | A capability fewer; a `requires` clause fewer; an `ensures` or `cost` clause more; a default more; a yielding method that can be pulled where it could not |
+| A type that shows its fields | Other fields, variants, or invariant; `opaque` added; a derived trait fewer | A derived trait more |
+| An opaque type | Other generic parameters; a derived trait fewer | `opaque` taken away; a derived trait more |
+| A trait or capability | Other generic parameters, required traits, associated types, or laws; a method gone or changed as a function's may not; a method more without a body | A method more with a body |
+| A constant | Another type or value | |
+| An `impl` | It is gone | It is new |
+| The package | `usize_bits = 64` where it ran on every target | |
+
+Types are compared as the checker worked them out, so a type written
+through another `use` is the same type. The exit status is 1 when the
+package is not published, and the JSON document is `{"format",
+"diagnostics", "problems", "package", "version", "hash", "grows"}`, or with
+`"refused"`, the sentences that say why.
+
 ## Making a package
 
 ```text
 truss new NAME
 ```
 
-Makes a directory `NAME` with a `truss.toml` naming the package and a
-`main.truss` with an empty `main`:
+Makes a directory with a `truss.toml` that names the package and the
+toolchain's Truss, and a `main.truss` with an empty `main`:
 
 ```truss
 fn main(arguments: List[String]) -> ExitCode {
@@ -511,8 +713,10 @@ fn main(arguments: List[String]) -> ExitCode {
 ```
 
 A library is a package without `main`, so it needs no flag: delete the
-file. The name must be a `lower_snake_case` name, since it is the first
-part of every module path.
+file. The name must be a package's, a `lower_snake_case` name or an owner
+and a name, such as `acme::weather`, since it starts every module path. The
+directory is named after the package without its owner. Made under a
+project's root, the package is one of the project's.
 
 ## The background process
 
@@ -564,16 +768,31 @@ It is left out of each command's help.
 - **A watch mode,** such as `cargo watch` or `vitest --watch`. The
   background process already checks every open worktree as its files
   change, so running a command again does what a watch would, at once.
-- **`truss add`, `truss publish`, and a lock file.** There is no package
-  registry yet. Adding a dependency is a manifest edit that grants
-  capabilities, which is the change DESIGN.md wants reviewers to see, so a
-  command for it should only come with the registry.
 - **Selecting tests by what changed,** as Nx's `affected` does. The cache
   already runs only the tests whose code changed, and exactly those, so a
   selection by files changed could only be less exact.
 
 ## Not built
 
+- **A contract compared by what it means.** DESIGN.md has a release keep a
+  `requires` that the old one implies and an `ensures` that implies the old
+  one, which is the prover's to show. `truss publish` compares a contract's
+  clauses as they are written: one that is reworded breaks, and one whose
+  words are the same and whose meaning changed, because a private
+  definition it names did, is not seen.
+- **The registry checking a release itself.** `truss publish` checks the
+  package where it is run and writes to the registry's directory.
+- **A registry that is not a directory.** DESIGN.md's registry is served
+  over a network, keeps a public log of every version's hash, signs the
+  proofs it computed, has owners who alone publish under their names, and
+  can mark a release as one not to use. Stage0's is a directory that
+  anyone who can write to it adds to, and a lock file's hash is checked
+  against the files and against the records of the packages that name it,
+  and against nothing else.
+- **The tests whose code an upgrade changes,** listed by `truss upgrade` as
+  `truss impact` lists them.
+- **A package read as the Truss it names.** There is one version of Truss,
+  so `truss` only says whether the toolchain is new enough.
 - **`truss fmt [--check] [FILE...]`,** which waits for the formatter. It is
   to rewrite the package's files, or the named ones, into the one layout
   SYNTAX.md describes, and print the names of the files it changed, with no

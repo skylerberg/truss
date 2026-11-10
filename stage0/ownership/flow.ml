@@ -5,7 +5,6 @@
 open Syntax
 module T = Types
 module C = Checked
-module Properties = Interface.Properties
 open Context
 
 (* The places that may have been moved, each with where. [None] is a point
@@ -17,9 +16,9 @@ let join (left : flow) (right : flow) : flow =
   | None, other | other, None -> other
   | Some left, Some right -> Some (left @ List.filter (fun entry -> not (List.mem entry left)) right)
 
-(* The views live at a point: each local that holds loans, with the places
-   it holds them on. *)
-type views = (id * place list) list
+(* The views live at a point: what holds views, a local or what the caller
+   keeps, with the places it views. One holder may have several entries. *)
+type views = (root * place list) list
 type loop_frame = { mutable breaks : flow; mutable continues : flow }
 
 (* A place lent for a stretch of code: by a loop over it, for the loop, or by
@@ -131,15 +130,18 @@ let changed state (place : place) (span : span) ~what =
     state.parallel_bodies;
   List.iter
     (fun (holder, lent) ->
-      if
-        List.exists (fun lent_place -> overlap lent_place place <> No_overlap) lent
-        && live state.context holder ~at:span.start
-      then
-        report state.context Changed_while_viewed span
+      (* A local is in use while it is read again, and what the caller
+         keeps is in use for good. *)
+      let in_use =
+        match holder with
+        | Local id when not (kept_by_caller context { root = holder; steps = [] }) ->
+            live context id ~at:span.start
+        | Local _ | Self_root -> true
+      in
+      if List.exists (fun lent_place -> overlap lent_place place <> No_overlap) lent && in_use then
+        report context Changed_while_viewed span
           (Printf.sprintf "`%s` cannot %s while `%s`, which views it, is still in use."
-             (show_place state.context.names place)
-             what
-             (Option.value ~default:"a view" (Hashtbl.find_opt state.context.names holder))))
+             (show_place context.names place) what (show_root context.names holder)))
     state.views
 
 let moved_out state (flow : flow) (place : place) (value : expression) =
@@ -201,15 +203,31 @@ let assigned state (flow : flow) (place : place) (span : span) =
   changed state place span ~what:"change";
   Option.map (List.filter (fun (moved_place, _) -> not (is_prefix place moved_place))) flow
 
-(* The places a value of a view type may view: those of the read-only and
-   view-typed arguments of the call that made it, of a slice's collection,
-   and of the locals a lambda captures. *)
+(* What a holder is known to view, or [None] when nothing was noted of
+   it. *)
+let held state (holder : root) =
+  match List.filter (fun (other, _) -> other = holder) state.views with
+  | [] -> None
+  | entries -> Some (List.concat_map snd entries)
+
+(* The places a value may view.
+
+   A place named as a value is a view of that place, and of what the place
+   holds views of. But a local that is itself a view, or that only views
+   another place, has nothing of its own to view: a value read from it views
+   what the local was noted to view, and the local itself only when nothing
+   was noted. So [let part = items[0..2]] and then [part] views [items].
+
+   A call's result views what its arguments let it: those lent to it, which
+   are the read-only and [mut] ones that are not [Plain], and those that
+   are views. A slice views what its collection does, and a lambda the
+   locals it captures. *)
 let rec viewed state (value : expression) : place list =
   let context = state.context in
   match value.kind with
-  | Parenthesized inner | Echo inner -> viewed state inner
-  | Bracket (base, [ Item { kind = Range _; _ } ]) -> (
-      match place_of context base with Some place -> [ place ] | None -> viewed state base)
+  | Parenthesized inner | Echo inner | Mode (_, inner) -> viewed state inner
+  | Bracket (base, [ Item { kind = Range _; _ } ]) when place_of context base = None ->
+      viewed state base
   | Lambda _ -> (
       match context.checked.captures.(value.id) with
       | Some captures -> List.map (fun id -> { root = Local id; steps = [] }) captures
@@ -217,24 +235,38 @@ let rec viewed state (value : expression) : place list =
   | _ -> (
       match place_of context value with
       | Some place -> (
-          match place.root with
-          | Local id ->
-              (match List.assoc_opt id state.views with Some held -> held | None -> [])
-              @ [ place ]
-          | Self_root -> [ place ])
+          let known = held state place.root in
+          let its_own =
+            match place.root with
+            | Self_root -> true
+            | Local id ->
+                List.mem id context.parameters
+                || kind_of context place.root = Owned
+                   && not
+                        (match context.checked.local_types.(id) with
+                        | Some type_ -> is_view context type_
+                        | None -> false)
+          in
+          match known with
+          | Some places when not its_own -> places
+          | _ -> Option.value ~default:[] known @ [ place ])
       | None -> (
           match context.checked.calls.(value.id) with
-          | Some call ->
-              List.concat_map
-                (fun (argument : C.argument) ->
-                  match find_expression context argument.expression with
-                  | Some expression
-                    when (argument.mode = T.Read && not (plain context (type_of context expression)))
-                         || is_view context (type_of context expression) ->
-                      viewed state expression
-                  | _ -> [])
-                call.arguments
+          | Some call -> List.concat_map (viewed state) (lent_arguments context call)
           | None -> []))
+
+(* The arguments of a call that what the call makes, or what it is given
+   [mut], may come to view. *)
+and lent_arguments context (call : C.call) =
+  List.filter_map
+    (fun (argument : C.argument) ->
+      match find_expression context argument.expression with
+      | Some expression
+        when (argument.mode <> T.Own && not (plain context (type_of context expression)))
+             || is_view context (type_of context expression) ->
+          Some expression
+      | _ -> None)
+    call.arguments
 
 (* The temporaries a value of a view type views: owned values that only
    the statement holds, passed read-only to the call that made it. A string
@@ -271,3 +303,24 @@ and owned_temporary state (value : expression) =
   | _ -> [ value ]
 
 and find_expression context id = Hashtbl.find_opt context.nodes id
+
+(* A place comes to hold views: of what is assigned to it, or of what a call
+   that takes it [mut] was given, which the call may have kept in it. Its
+   holder views them from then on. What the caller keeps must not view what
+   ends with the function. *)
+let stored state (place : place) (span : span) (places : place list) =
+  let context = state.context in
+  if places <> [] && not (List.mem (place.root, places) state.views) then
+    state.views <- (place.root, places) :: state.views;
+  if kept_by_caller context place then
+    match List.find_opt (ends_with_function context) places with
+    | Some local ->
+        report context Stores_local_view span
+          (Printf.sprintf
+             "This puts a view of `%s` in `%s`, which the caller keeps, so the view would outlive \
+              `%s`. What the caller keeps views only what reached the function through its \
+              parameters."
+             (show_root context.names local.root)
+             (show_root context.names place.root)
+             (show_root context.names local.root))
+    | None -> ()

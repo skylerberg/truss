@@ -19,6 +19,7 @@ type occurrence = {
 let declared_name (definition : Syntax.definition) : Syntax.name option =
   match definition.kind with
   | Function { signature = { name = Plain_name name | Member_name (_, name); _ }; _ }
+  | Method_declaration { name = Plain_name name | Member_name (_, name); _ }
   | Constant { name = Plain_name name | Member_name (_, name); _ }
   | Type_definition { name; _ }
   | Trait { name; _ }
@@ -73,11 +74,20 @@ let of_definition database (key : Names.key) =
                | Some (Definition (_, path)) -> [ occurrence name.span (Definition path) ]
                | Some (Module m) ->
                    (* A module is written as its import's name, one name, or
-                      as its full path, the package's name and then each
+                      as its full path, the package's names and then each
                       module's, which follow it among the names. *)
-                   let length =
-                     if name.text = m.package && m.modules <> [] then List.length m.modules else 0
+                   let parts = Path.module_parts m in
+                   let written_in_full =
+                     List.length parts > 1
+                     && List.for_all Fun.id
+                          (List.mapi
+                             (fun offset part ->
+                               match List.nth_opt names (index + offset) with
+                               | Some (written : Syntax.name) -> written.text = part
+                               | None -> false)
+                             parts)
                    in
+                   let length = if written_in_full then List.length parts - 1 else 0 in
                    let last =
                      match List.nth_opt names (index + length) with
                      | Some (last : Syntax.name) -> last
@@ -121,7 +131,7 @@ let uses (project : Project.t) (wanted : Path.module_) =
       List.filter_map
         (fun (item : Syntax.path Syntax.item) ->
           let path = item.value in
-          if Names.used_module path = wanted then
+          if Names.used_module project.context ~from:module_ path = wanted then
             let first = match path.modules with first :: _ -> first | [] -> path.last in
             Some
               (module_, Source.span (item.base + first.span.start) (item.base + path.last.span.stop))

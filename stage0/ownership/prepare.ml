@@ -5,7 +5,6 @@
 open Syntax
 module T = Types
 module C = Checked
-module Properties = Interface.Properties
 open Context
 
 let prepare context =
@@ -108,16 +107,6 @@ let prepare context =
     match context.definition.kind with
     | Function { body; _ } | Test { body; _ } | Theorem { body; _ } | Law_proof { body; _ } ->
         [ body ]
-    | Impl { members; _ } ->
-        List.filter_map
-          (fun (line : impl_member line) ->
-            match line.kind with Impl_method { body; _ } -> Some body | _ -> None)
-          members
-    | Trait { members; _ } ->
-        List.filter_map
-          (fun (line : trait_member line) ->
-            match line.kind with Trait_method { body; _ } -> body | _ -> None)
-          members
     | _ -> []
   in
   List.iter (block ~path:[] ~loop_ids:[]) bodies

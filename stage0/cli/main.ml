@@ -254,12 +254,48 @@ let rename =
   let to_ = Arg.(required & pos 1 (some string) None & info [] ~docv:"TO") in
   command "rename"
     ~doc:
-      "Rename a definition, method, or module, and every reference to it in the worktree's \
-       packages."
+      "Rename a definition, method, or module, and every reference to it in the project's packages."
     Term.(
       const (fun directory from_ to_ json ->
           exit_with (fun () -> Rename_command.run ~directory ~from_ ~to_ ~json))
       $ directory $ from_ $ to_ $ json)
+
+let packages_argument ~doc = Arg.(value & pos_all string [] & info [] ~docv:"PACKAGE" ~doc)
+
+let add =
+  command "add"
+    ~doc:
+      "Make registry packages dependencies of the package, each granted nothing, at the version \
+       written after $(b,@), or at its newest."
+    Term.(
+      const (fun directory names json ->
+          exit_with (fun () -> Add_command.run ~directory ~names ~json))
+      $ directory
+      $ packages_argument
+          ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."
+      $ json)
+
+let upgrade =
+  command "upgrade"
+    ~doc:
+      "Move the project's registry packages to their newest versions, or the packages named to \
+       theirs or to the version written after $(b,@), and say what that changes."
+    Term.(
+      const (fun directory names json ->
+          exit_with (fun () -> Upgrade_command.run ~directory ~names ~json))
+      $ directory
+      $ packages_argument
+          ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."
+      $ json)
+
+let publish =
+  command "publish"
+    ~doc:
+      "Add the package to the registry as its next version, once it is finished and breaks nothing \
+       its last version offers."
+    Term.(
+      const (fun directory json -> exit_with (fun () -> Publish_command.run ~directory ~json))
+      $ directory $ json)
 
 let new_ =
   let name = Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME") in
@@ -270,7 +306,7 @@ let new_ =
 
 let sync =
   command "sync"
-    ~doc:"Bring the worktree's session up to date with its files, and do nothing else."
+    ~doc:"Bring the project's session up to date with its files, and do nothing else."
     Term.(
       const (fun directory ->
           exit_with (fun () ->
@@ -302,7 +338,9 @@ let clean =
   command "clean" ~doc:"Stop the background process and delete the store, which costs only time."
     Term.(const (fun () -> Outcome.Exit 0) $ const ())
 
-let version = Printf.sprintf "stage0 (code generation %d, Unicode %s)" Lir.version Unicode.version
+let version =
+  Printf.sprintf "stage0 (Truss %s, code generation %d, Unicode %s)"
+    Type_checker.Manifest.truss_version Lir.version Unicode.version
 
 let truss =
   Cmd.group
@@ -328,6 +366,9 @@ let truss =
       explain;
       overlap;
       rename;
+      add;
+      upgrade;
+      publish;
       new_;
       sync;
       status;
@@ -360,6 +401,7 @@ let evaluate arguments =
 type request = {
   arguments : string list;
   directory : string;  (** The client's current directory *)
+  registry : string option;  (** The registry the client's environment names *)
   terminal : bool;
   columns : int option;
 }
@@ -377,6 +419,7 @@ let handle ~progress request =
       ~finally:(fun () -> try Sys.chdir previous with Sys_error _ -> ())
       (fun () ->
         Sys.chdir request.directory;
+        Registry.Index.configure request.registry;
         Output.with_
           {
             out = Buffer.add_string buffer;
@@ -419,6 +462,7 @@ let request arguments =
   {
     arguments;
     directory = Sys.getcwd ();
+    registry = Sys.getenv_opt Registry.Index.variable;
     terminal = Output.terminal ();
     columns = Output.columns ();
   }

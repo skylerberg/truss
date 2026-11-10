@@ -1,6 +1,12 @@
 type module_ = { package : string; modules : string list }
 
-let show_module module_ = String.concat "::" (module_.package :: module_.modules)
+let package_parts package =
+  match String.split_on_char ':' package with
+  | [ owner; ""; name ] -> [ owner; name ]
+  | _ -> [ package ]
+
+let module_parts module_ = package_parts module_.package @ module_.modules
+let show_module module_ = String.concat "::" (module_parts module_)
 
 type receiver = Static | Read | Mut | Own
 
@@ -35,3 +41,12 @@ let rec show = function
 
 let compare = Stdlib.compare
 let equal left right = compare left right = 0
+
+module Ordered = struct
+  type nonrec t = t
+
+  let compare = compare
+end
+
+module Map = Map.Make (Ordered)
+module Set = Set.Make (Ordered)

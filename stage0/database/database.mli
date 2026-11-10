@@ -1,4 +1,4 @@
-(** The code database: sessions, which keep each worktree's packages and modules as inputs and every
+(** The code database: sessions, which keep each project's packages and modules as inputs and every
     result asked of them current as files change, with each state written to the store as a
     difference over an earlier one; the questions the graph of those results answers; and the
     background process that holds sessions between commands.
@@ -13,10 +13,12 @@
 type session
 
 val open_session : string -> (session * (string * string) list, string) result
-(** The session for the worktree holding a directory, brought up to date with its files, and the
+(** The session for the project a directory is in, brought up to date with its files, and the
     packages the directory is about: those at or under it, or the one it is in, each as its
-    directory relative to the worktree's root and its name. An error says why the session cannot be
-    opened, such as another process holding it. *)
+    directory relative to the project's root and its name. The project's root is the nearest
+    directory at or above whose manifest has a [[project]] table, or with none, the nearest with a
+    manifest. An error says why the session cannot be opened, such as no manifest, or another
+    process holding it. *)
 
 val refresh : session -> unit
 (** Reads the files that changed since the session last looked, after a command changed some. *)
@@ -25,21 +27,39 @@ val save_session : session -> unit
 (** Saves what the session computed to the store. *)
 
 val root : session -> string
-(** The worktree's root, absolute. *)
+(** The project's root, absolute. *)
 
 val engine : session -> Engine.t
 val context : session -> Query.context
 
 val problems : session -> string list
-(** Manifests that could not be read, and package names used twice, each as a sentence. *)
+(** What reading the project's manifests shows to be wrong, each as its file and sentences: one that
+    could not be read, a package name used twice, a dependency that is no package of the project. *)
+
+val manifest_problems :
+  session -> string list -> (string * string * Type_checker.manifest_problem) list
+(** What only the code of the named packages shows to be wrong with their manifests: each one's
+    file, relative to the project's root, its package, and the problem. Asking checks those
+    packages. *)
 
 val packages : session -> (string * string) list
-(** Every package of the worktree: its directory relative to the root, and its name. *)
+(** Every package of the project: its directory relative to the root, and its name. *)
+
+val time_limit : session -> int
+(** The time each test of the project may take, in seconds. *)
+
+val registry_packages : session -> (string * Registry.Version.t * string) list
+(** The registry packages of the project's build, in order of name: each one's name, its version,
+    and the hash of its files. *)
+
+val lock_fix : session -> string option
+(** The lock file the project's manifests give, when the one that is written is another, which is a
+    problem whose fix is to write this one. *)
 
 val package_modules : session -> string -> Path.module_ list
 
 val module_file : session -> Path.module_ -> string
-(** A module's file, relative to the worktree's root. *)
+(** A module's file, relative to the project's root. *)
 
 val diagnostics : session -> Path.module_ -> Diagnostic.t list
 (** A file's diagnostics, kept current and saved. *)
@@ -108,7 +128,7 @@ type overlap =
       (** One worktree's change reads what the other changes *)
 
 val other_worktrees : session -> session list
-(** The open sessions of the other worktrees of the same repository. *)
+(** The open sessions of the same project in the other worktrees of its repository. *)
 
 val overlap_with : session -> session -> (overlap list, string) result
 (** Where two sessions' changes from their common commit meet. *)
@@ -159,6 +179,30 @@ val load_standard : Engine.t -> unit
 
 val standard_base : unit -> Engine.t
 (** The standard library, checked whole and frozen as a fixed base for engines to be made over. *)
+
+type lock_plan = {
+  text : string;  (** The lock file as it would be written *)
+  before : Registry.Lock.t;
+  after : Registry.Lock.t;
+}
+
+val plan_lock :
+  session -> set:(string * Registry.Version.t option) list -> all:bool -> (lock_plan, string) result
+(** The lock file a project would have with other versions: each package of [set] at the version
+    given, or at the registry's newest, and with [all], every registry package of the build at its
+    newest. The rest follow as a build's versions do. It fetches what it needs and writes no file.
+    An error says, in sentences, why there is no such lock file. *)
+
+val published_engine : string -> Registry.Version.t -> (Engine.t, string) result
+(** A published package at a version, in an engine of its own with the packages it was published
+    with, for comparing a release with it. An error says, as a sentence, why it cannot be had. *)
+
+val code_packages : session -> string -> string list
+(** The packages a package's code uses, its tests apart. *)
+
+val trial_with_lock : session -> string -> session
+(** A session that starts from another's state, with a lock file in place of its own, for seeing
+    what other versions would change before the file is written. *)
 
 val trial : session -> Engine.t
 (** An engine that starts from a session's state and changes on its own, for trying a change, such

@@ -7,7 +7,6 @@ module C = Checked
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
 open Hooks
@@ -226,7 +225,7 @@ and statement state env (written : statement) ~last : unit =
           in
           let found = expression state env ~expected:element inner in
           if inner != value then record state value found;
-          coerce state inner ~found ~expected:element
+          ignore (coerce state env inner ~found ~expected:element)
       | _ ->
           ignore (expression state env value);
           report state Wrong_yield written.span
@@ -285,7 +284,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
           call.result
       | T.Error _, _ | T.Hole, _ -> type_
       | _ -> (
-          match each_call state type_ mode with
+          match each_call state iterable.span type_ mode with
           | Some (call, element) ->
               state.tables.loops.(written.id) <- Some (Yielding { call; mode });
               element

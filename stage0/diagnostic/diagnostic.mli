@@ -148,6 +148,8 @@ module Code : sig
     | Private_in_public
     | Method_outside_package
     | Default_not_constant
+    | Not_constant
+    | Constant_overflow
     | Main_signature
     | Duplicate_field
     | Cannot_derive
@@ -174,6 +176,7 @@ module Code : sig
     | Conflicting_loan
     | Changed_while_viewed
     | Returns_local_view
+    | Stores_local_view
     | Needs_owned
     | Lends_count
     | Not_pullable
