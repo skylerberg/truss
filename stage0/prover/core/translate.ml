@@ -1480,19 +1480,6 @@ and short_circuit context frame right ~runs ~otherwise ~binds combine =
     | Some (joined, None) -> Some (joined, L.Boolean true)
     | None -> None
 
-(* A guard, which runs only on some paths: it may make obligations there,
-   and bind names, as an [is] does, but not change a local, since the paths
-   would then need joining. *)
-and pure_operand context frame node =
-  let after, term = value context frame node in
-  if Locals.exists (fun id term -> Locals.find_opt id after.locals <> Some term) frame.locals then
-    unsupported (at frame node) "changing a variable in a guard";
-  (after, term)
-
-(* [a == b] on a type: the solver's equality where it is structural, the
-   lawful equality of floats, and otherwise the type's [Equal] as a
-   function of the two, which a derived [Equal] defines field by field
-   with each field's own [==], unfolded once for each two it compares. *)
 and equal_of context frame (ty : T.ty) a b =
   if structural context ty then L.equal a b
   else if float_format ty <> None then float_equal a b
@@ -4259,7 +4246,13 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
   let scrutinee_values = List.rev scrutinee_values in
   let result_type = type_of context frame node in
   let carries_value = not (T.equal result_type T.unit || result_type = T.Never) in
-  let remaining = ref (L.Boolean true) in
+  let scoped (joined : frame) =
+    { joined with locals = Locals.filter (fun id _ -> Locals.mem id frame.locals) joined.locals }
+  in
+  (* Each arm is tried where no arm before it was taken: where its patterns
+     did not match, or they did and its guard, which may change locals, was
+     false. *)
+  let untaken = ref (Some frame) in
   let reached =
     List.filter_map
       (fun (arm_ : arm) ->
@@ -4267,27 +4260,27 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
           unsupported
             (span_of frame.source arm_.origin)
             "an arm with a different number of patterns";
-        let condition, bound =
-          List.fold_left2
-            (fun (condition, frame) pattern (term, ty) ->
-              let inner, frame = pattern_match context frame pattern term ty in
-              (L.( &&& ) condition inner, frame))
-            (L.Boolean true, frame) arm_.patterns scrutinee_values
-        in
-        let entered = restrict bound (L.( &&& ) !remaining condition) in
-        let taken, entered =
-          match arm_.guard with
-          | Some guard ->
-              let after, test = pure_operand context entered guard in
-              (L.( &&& ) condition test, restrict after test)
-          | None -> (condition, entered)
-        in
-        remaining := L.( &&& ) !remaining (L.not_ taken);
-        block_value context entered arm_.body)
+        match !untaken with
+        | None -> None
+        | Some current ->
+            let condition, bound =
+              List.fold_left2
+                (fun (condition, frame) pattern (term, ty) ->
+                  let inner, frame = pattern_match context frame pattern term ty in
+                  (L.( &&& ) condition inner, frame))
+                (L.Boolean true, current) arm_.patterns scrutinee_values
+            in
+            let entered = restrict bound condition in
+            let entered, passed_over =
+              match arm_.guard with
+              | Some guard ->
+                  let after, test = value context entered guard in
+                  (restrict after test, [ scoped (restrict after (L.not_ test)) ])
+              | None -> (entered, [])
+            in
+            untaken := join_frames context (restrict current (L.not_ condition) :: passed_over);
+            block_value context entered arm_.body)
       arms
-  in
-  let scoped (joined : frame) =
-    { joined with locals = Locals.filter (fun id _ -> Locals.mem id frame.locals) joined.locals }
   in
   if carries_value then
     match join context ~value_type:result_type (List.map (fun (f, t) -> (f, Some t)) reached) with
@@ -6949,12 +6942,17 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
         ~each:false ~result:None ~yielded:before ~finished:(Some (L.Boolean true));
       { another; element; through; advance = Fun.id })
 
-(* The local a loop's cursor is in. *)
-and cursor_local frame (node : statement) (cursor : place) =
-  match cursor with
-  | Local { local; _ } when local <> Self -> local
-  | _ ->
-      unsupported (span_of frame.source node.origin) "a loop over a cursor that is not in a local"
+(* What a loop changes, with the local or [self] its cursor is in, which
+   each pull changes. *)
+and with_cursor frame (node : statement) (changed : changed) (cursor : place) =
+  match root_of cursor with
+  | Some Self -> { changed with changes_self = frame.self <> None }
+  | Some local ->
+      { changed with changed_locals = List.sort_uniq compare (local :: changed.changed_locals) }
+  | None ->
+      unsupported
+        (span_of frame.source node.origin)
+        "a loop over a cursor that is not in a local or a field of one"
 
 (* A [for] loop over a cursor pulls it until it ends, putting the cursor
    that is left back where it was. Its [yielded] is everything the cursor
@@ -6968,19 +6966,15 @@ and pulled_loop context frame (node : statement) pattern (cursor_place : place) 
     | Some made -> made
     | None -> unsupported span "a loop over a cursor whose method the prover does not know"
   in
-  let id = cursor_local frame node cursor_place in
   if context.terminates && not (signature_terminates context method_) then
     oblige context frame Termination span
       "This loop may not end: the method its cursor comes from has no `time` clause."
       (L.Boolean false);
-  let in_body = changed_places frame body in
-  let changed =
-    { in_body with changed_locals = List.sort_uniq compare (id :: in_body.changed_locals) }
-  in
+  let changed = with_cursor frame node (changed_places frame body) cursor_place in
   let at_head = ref cursor in
   receiving_loop context frame node pattern clauses body ~element_type:made.element ~changed
     ~start:(fun head ->
-      let cursor = Locals.find id head.locals in
+      let _, cursor = place_value context { head with checking = false } cursor_place in
       context.cursors <- (cursor, made) :: context.cursors;
       at_head := cursor;
       cursor_yielded context cursor_type made.element cursor)
@@ -6991,7 +6985,7 @@ and pulled_loop context frame (node : statement) pattern (cursor_place : place) 
         another = L.Apply (L.tester (constructor_name option_type (Some "Some")), [ pulled ]);
         element = L.Apply (selector_name option_type (Some "Some") "value", [ pulled ]);
         through = cursor_yielded context cursor_type made.element later;
-        advance = (fun (frame : frame) -> { frame with locals = Locals.add id later frame.locals });
+        advance = (fun (frame : frame) -> store context frame cursor_place later);
       })
 
 (* A [for] loop over a value of a type's own [Cursor]: each iteration
@@ -7002,7 +6996,6 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
     (next : callee) clauses body ~cursor_type =
   let span = span_of frame.source node.origin in
   let frame, _ = place_value context frame cursor_place in
-  let id = cursor_local frame node cursor_place in
   let element_type = substituted context frame pattern.type_ in
   let trait, evidence =
     match next with
@@ -7024,14 +7017,7 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
   let call_ : call =
     {
       callee = next;
-      arguments =
-        [
-          Passed
-            {
-              mode = T.Mut;
-              value = Place (Local { local = id; type_ = cursor_type; origin = node.origin });
-            };
-        ];
+      arguments = [ Passed { mode = T.Mut; value = Place cursor_place } ];
       lends = None;
       uses = [];
     }
@@ -7055,10 +7041,7 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
       (List.map (fun measure -> snd (value context { at with checking = false } measure)))
       measures
   in
-  let in_body = changed_places frame body in
-  let changed =
-    { in_body with changed_locals = List.sort_uniq compare (id :: in_body.changed_locals) }
-  in
+  let changed = with_cursor frame node (changed_places frame body) cursor_place in
   receiving_loop context frame node pattern clauses body ~element_type ~changed
     ~each_iteration:(fun ~head ~ends ->
       (* The pull is part of the iteration, so the measure is compared from
@@ -7077,12 +7060,9 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
         | None -> ())
     ~start:(fun head -> some_parts context head element_type)
     ~receive:(fun head before ->
-      let cursor = Locals.find id head.locals in
+      let _, cursor = place_value context { head with checking = false } cursor_place in
       let havoc_mut (frame : frame) =
-        {
-          frame with
-          locals = Locals.add id (arrive context frame "changed" cursor_type) frame.locals;
-        }
+        store context frame cursor_place (arrive context frame "changed" cursor_type)
       in
       let after, pulled =
         contract_call ~lent_final:None context head pulling call_ path contract
@@ -7090,8 +7070,7 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
             {
               position = 0;
               mode = T.Mut;
-              operand =
-                Some (Place (Local { local = id; type_ = cursor_type; origin = node.origin }));
+              operand = Some (Place cursor_place);
               type_ = cursor_type;
               term = cursor;
             };
@@ -7111,11 +7090,8 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
         through = appended context inside element_type before element;
         advance =
           (fun (frame : frame) ->
-            {
-              frame with
-              locals = Locals.add id (Locals.find id after.locals) frame.locals;
-              spent = after.spent;
-            });
+            let _, now = place_value context { after with checking = false } cursor_place in
+            { (store context frame cursor_place now) with spent = after.spent });
       })
 
 (* A [for] loop that receives parts one at a time: from a yielding method

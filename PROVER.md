@@ -462,7 +462,9 @@ with its number of paths. No step goes around a loop: each loop is cut at
 its head by its invariant, as below. The right side of `&&`, `||`, or
 `==>` runs on only one path, so when it changes a local, as a call with a
 `mut` argument does, that path joins the one where it did not run, as the
-two arms of an `if` do.
+two arms of an `if` do. A `match` arm's guard runs only where its patterns matched, so
+the next arm is tried where they did not, joined with where they did and
+the guard, which may change locals the same way, was false.
 
 An `assert` makes one query: the facts gathered before it, and its fact as
 the goal, guarded by its path. Once made, it is a fact for the rest of the
@@ -1189,8 +1191,8 @@ sanitized runs, test the trusted base against real executions.
   specification module has no sum over a finite set or map, so a
   potential that needs one is reported as one the prover cannot read.
 - **Code the prover cannot read yet.** Among what is reported as
-  `prover.unsupported`: a loop over a cursor that is not in a local, and a
-  string pattern with a tag or interpolations.
+  `prover.unsupported`: a loop over a cursor, or a `mut` loop over a
+  place, that is not a local or a field of one.
 - **More in a diagnostic.** A note at the clause an obligation comes from,
   the branches a counterexample's path takes, listed by position, the
   values of locals, and a fix that adds an obligation about parameters
