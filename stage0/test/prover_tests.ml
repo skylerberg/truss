@@ -2213,7 +2213,7 @@ let () =
 
 let () =
   test "a construct the prover cannot read yet" (fun () ->
-      not_proven "fn f() -> Range[Int64] {\n  0..3\n}\n" "prover.unsupported");
+      not_proven "fn f() -> Array[Int64, 3] {\n  [1, 2, 3]\n}\n" "prover.unsupported");
   test "alternatives bind each name to the part that matched" (fun () ->
       proven
         "type Side =\n\

@@ -100,7 +100,7 @@ public fn List[Element: Equal].find_slice(self, needle: Slice[Element]) -> Optio
 }
 
 public fn List[Element: Ordered].is_sorted(self) -> Bool
-  cost time O(self.length())
+  cost time finite
 {
   self.slice().is_sorted()
 }

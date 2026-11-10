@@ -37,7 +37,11 @@ public fn List[Element].with_capacity(capacity: USize) -> List[Element]
   List(storage: intrinsic::storage_with_capacity(capacity))
 }
 
-internal fn List[Element].from_storage(storage: own intrinsic::Storage[Element]) -> List[Element] {
+internal fn List[Element].from_storage(storage: own intrinsic::Storage[Element]) -> List[Element]
+  ensures identical(result.model(), intrinsic::storage_model(storage))
+  cost time O(1)
+  cost allocations == 0
+{
   List(storage: own storage)
 }
 

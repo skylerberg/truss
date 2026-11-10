@@ -107,7 +107,7 @@ public fn Slice[Element: Equal].find_slice(self, needle: Slice[Element]) -> Opti
 }
 
 public fn Slice[Element: Ordered].is_sorted(self) -> Bool
-  cost time O(self.length())
+  cost time finite
 {
   forall i in 1..self.length() => self[i - 1] <= self[i]
 }

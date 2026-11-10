@@ -139,7 +139,7 @@ let rec place_in (resolved : Resolve.resolved) (checked : C.t) (value : expressi
          && match checked.types.(base.id) with Some type_ -> storage type_ | None -> false ->
       (* A slice, as [items[a..b]], is some elements, as an index is one. *)
       Option.map
-        (fun place -> { place with steps = place.steps @ [ Element key.id ] })
+        (fun place -> { place with steps = place.steps @ [ Element value.id ] })
         (place_of () base)
   | Parenthesized inner -> place_of () inner
   | _ -> None
