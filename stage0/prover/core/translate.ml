@@ -2195,8 +2195,9 @@ and libc_call context frame ~(node : expression) (function_ : Libc.function_) op
   List.iteri
     (fun position passes ->
       match (passes, List.nth_opt operands position, List.nth_opt changed position) with
-      | Some ((Libc.Room scalar | Elements_to_change scalar) as passes), Some before, Some after
-        -> (
+      | ( Some ((Libc.Room (scalar, _) | Elements_to_change (scalar, _)) as passes),
+          Some before,
+          Some after ) -> (
           let element = storage_of scalar in
           let model term = buffer_model context Storage element term in
           assume context frame
