@@ -405,7 +405,10 @@ decides when a body is a definition. In the solver:
   needed, as a caller's bound on a callee that itself unfolds several
   others' arithmetic. Leaving facts out is always sound, so such a query is
   asked once more without what unfolding gave, and is proven if that one
-  is.
+  is. This is what Dafny's and Verus's ways to hide a body from the
+  solver are for, so Truss has no such way: pruning keeps a definition out
+  of a query that does not reach it, and this keeps one that does from
+  costing a proof its contract alone would give.
 - **Every other function is a fresh result.** A call to a function that is
   not pure, or has no `time` clause, gives a new value about which its
   `ensures` is known, and two calls are not known to agree.
@@ -755,6 +758,12 @@ A query's text is canonical, so that its hash can be its cache key:
   a fast one passes. The limit is set by the prover's version, not by the
   project or the code, so a proof that passes anywhere passes everywhere. A
   proof that needs more help gets it from a `proof` block or a theorem.
+  The limit does not grow with a query's size: a limit that did would make
+  a query's answer depend on facts that have nothing to do with its goal,
+  which is what keeping one limit is for. Its value is two million steps,
+  under which the standard library proves. A change to it changes every
+  answer's key, so it is made by itself, with the benchmark of solving to
+  show what it costs.
 - **One process per query,** given the query's text through SMT-LIB, with a
   fixed random seed. A solver that answered earlier queries carries state
   that can change later answers, so no state is shared.
@@ -1227,13 +1236,6 @@ sanitized runs, test the trusted base against real executions.
   that no obligation the prover proves fails its run-time check when the
   mutated program runs. `stage0/tools/proof_benchmark` times solving the
   standard library's proofs, with no answers kept, by module.
-- **Turning off a definition** is not decided. Dafny and Verus can hide a
-  body from the solver, which keeps large definitions from slowing queries
-  that do not need them. Pruning may be enough; if not, a way to say so is
-  needed.
-- **The limit in steps** is not settled. Its value, and whether it should
-  grow with the size of a query, are to be set by measuring the standard
-  library's proofs.
 - **`concurrent`.** Its branches are to be proven as `parallel`'s are, one
   after another. They change disjoint places, and a capability call
   already gives a fresh value, so nothing a proof relies on is changed by
