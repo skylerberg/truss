@@ -1366,6 +1366,47 @@ test "the cursor of a yielding method, given to generic code" {
 }
 |}
 
+let () =
+  passes "any of a trait whose methods name an associated type, over two kinds of cursor"
+    {|type Countdown(left: Int64)
+
+impl Cursor for Countdown {
+  type Element = Int64
+
+  fn next(mut self) -> Option[Int64] {
+    if self.left <= 0 {
+      return None
+    }
+    self.left = self.left.wrapping_add(-1)
+    Some(self.left)
+  }
+}
+
+fn sum(items: mut any Cursor[Element = Int64]) -> Int64 {
+  var total: Int64 = 0
+  while mut items.next() is Some(item) {
+    total = total.wrapping_add(item)
+  }
+  total
+}
+
+test "any Cursor, of a cursor that is written and of a yielding method's" {
+  var written: any Cursor[Element = Int64] = any Countdown(left: 4)
+  assert sum(mut written) == 6
+  let items: List[Int64] = [3, 1, 4]
+  var made: any Cursor[Element = Int64] = any items.each()
+  assert sum(mut made) == 8
+  var searched: any Cursor[Element = Int64] = any items.each()
+  assert mut searched.find(fn(item) { item < 2 }) == Some(1)
+  assert mut searched.next() == Some(4)
+  assert mut searched.next() == None
+  var counted: any Cursor[Element = Int64] = any items.each()
+  assert own counted.count() == 3
+  var last: any Cursor[Element = Int64] = any Countdown(left: 3)
+  assert own last.last() == Some(0)
+}
+|}
+
 (* Checks which of a module's constants fold and which are worked out by
    running their evaluators, and that the module's test passes. *)
 let folds what ~folded ~run source =

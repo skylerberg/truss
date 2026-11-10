@@ -414,6 +414,14 @@ vtable for that type and trait. A vtable holds:
 - one entry for each method that can be called through `any`, after the
   receiver and its evidence
 
+The methods with an entry are the ones the type checker lets a call
+through `any` reach: a method with no generic parameters of its own, whose
+parameters and result do not name `Self` other than as the type an
+associated type is of. An entry's C signature is the trait's method read
+with `Self` as the `any` type, which fixes each associated type, so the
+code that fills a table for an `impl` and the code that calls through the
+`any` type agree on it.
+
 `any value` allocates the block and moves the value in, which is the one
 allocation DESIGN.md says it costs.
 
