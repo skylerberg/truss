@@ -67,6 +67,18 @@ internal fn Set[Element: Hash + Ordered].empty() -> Set[Element]
   Set(elements: [])
 }
 
+internal fn Set[Element: Hash + Ordered].from_array[count: USize](
+  elements: own Array[Element, count],
+) -> Set[Element]
+  ensures forall index in 0..count => contains_equal(result.model(), value: elements[index])
+  ensures forall value: Element =>
+    result.model().contains(value) ==> exists index in 0..count => elements[index] == value
+  ensures result.length() <= count
+  cost time finite
+{
+  todo
+}
+
 public fn Set[Element: Hash + Ordered].seeded() -> Set[Element]
   uses Random
   ensures result.length() == 0
