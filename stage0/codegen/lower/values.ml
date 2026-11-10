@@ -37,32 +37,9 @@ and list_into st (ty : Ground.ty) (elements : S.expression list) destination ~sp
             (fun i (e : S.expression) -> into st e (destination / Index (usize i)))
             elements
       | Record [ (_, Typed _) ] ->
-          list_of st ty destination ~span
+          list_of st ty destination ~site:(site st span)
             (List.map (fun (e : S.expression) value -> into st e value) elements)
       | _ -> unsupported st span "a list literal of %s" (Ground.to_string ty))
-
-(* A [List] in [destination], with storage of exactly its length, holding
-   what each fill writes to the element's place it is given. *)
-and list_of st ty destination ~span fills =
-  match Monomorphic.shape st.context.monomorphic ty with
-  | Record [ (field, Typed storage) ] -> (
-      match Monomorphic.kind st.context.monomorphic storage with
-      | Storage element ->
-          let storage_place = destination / Field field in
-          let lower operation arguments destination =
-            ignore
-              (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types
-                 operation ~type_arguments:[ element ] arguments ~destination ~site:(site st span))
-          in
-          lower Storage_with_capacity [ Value (usize (List.length fills)) ] (Some storage_place);
-          List.iter
-            (fun fill ->
-              let value = temporary st element in
-              fill value;
-              lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
-            fills
-      | _ -> bug "a list of %s" (Ground.to_string ty))
-  | _ -> bug "%s is not a list" (Ground.to_string ty)
 
 (* A tagged string, such as [Sql"..."]: a [Template] of its literal text,
    each piece a [Literal] of static bytes, and its parts, each made the
@@ -85,7 +62,7 @@ and template_into st (literal : S.string_literal) (template : C.template) destin
     literal.first.value :: List.map (fun (_, (text : S.text)) -> text.value) literal.rest
   in
   let built =
-    template_value st template_ty texts ~span
+    template_value st template_ty texts ~site:(site st span)
       ~parts:
         (List.map2
            (fun ((part : S.expression), _) conversion value ->
@@ -100,41 +77,6 @@ and template_into st (literal : S.string_literal) (template : C.template) destin
     ~signature ~substitution
     ~arguments:[ (mode, template_ty, built) ]
     ~mask:0 ~destination
-
-(* A [Template] of these literal texts, each piece a [Literal] of static
-   bytes, with its parts each filled in by one of [parts]. *)
-and template_value st template_ty texts ~span ~parts =
-  let field_type ty name =
-    match Monomorphic.shape st.context.monomorphic ty with
-    | Record fields -> (
-        match List.assoc_opt name fields with
-        | Some (Memory_layout.Typed ty) -> ty
-        | _ -> bug "%s has no field %s" (Ground.to_string ty) name)
-    | _ -> bug "%s is not a record" (Ground.to_string ty)
-  in
-  let element list_ty =
-    match Monomorphic.shape st.context.monomorphic list_ty with
-    | Record [ (_, Typed storage) ] -> (
-        match Monomorphic.kind st.context.monomorphic storage with
-        | Storage element -> element
-        | _ -> bug "%s is not a list" (Ground.to_string list_ty))
-    | _ -> bug "%s is not a list" (Ground.to_string list_ty)
-  in
-  let literals_ty = field_type template_ty "literals" in
-  let parts_ty = field_type template_ty "parts" in
-  let literal_ty = element literals_ty in
-  let slice_ty = field_type literal_ty "text" in
-  let built = temporary st template_ty in
-  list_of st literals_ty (built / Field "literals") ~span
-    (List.map
-       (fun text value ->
-         let slice = string_place st slice_ty text in
-         emit st.b
-           (Assign
-              (value, Build { ty = literal_ty; variant = None; fields = [ ("text", Copy slice) ] })))
-       texts);
-  list_of st parts_ty (built / Field "parts") ~span parts;
-  built
 
 (* A [Set] or [Map] literal: the collection made empty, then each item
    inserted with the type's own [insert], which keeps it in order and keeps

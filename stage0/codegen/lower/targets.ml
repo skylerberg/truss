@@ -453,6 +453,71 @@ let string_literal st (ty : Ground.ty) text ~(destination : Lir.place) =
       build field (Copy bytes)
   | _ -> bug "a string literal of type %s" (Ground.to_string ty)
 
+(* A constant's static data, as a place. *)
+let static_constant st path : Lir.place =
+  match demand st.context Environment.constant_type path with
+  | Some ty -> { root = Static { key = Constant path; ty = ground st ty }; projections = [] }
+  | None -> bug "no type for the constant %s" (Path.show path)
+
+(* Writes a [List] to [destination], with storage of exactly its length. Each
+   fill writes one element to the place it is given. *)
+let list_of st ty destination ~site fills =
+  match Monomorphic.shape st.context.monomorphic ty with
+  | Record [ (field, Typed storage) ] -> (
+      match Monomorphic.kind st.context.monomorphic storage with
+      | Storage element ->
+          let storage_place = destination / Field field in
+          let lower operation arguments destination =
+            ignore
+              (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types
+                 operation ~type_arguments:[ element ] arguments ~destination ~site)
+          in
+          lower Storage_with_capacity [ Value (usize (List.length fills)) ] (Some storage_place);
+          List.iter
+            (fun fill ->
+              let value = temporary st element in
+              fill value;
+              lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
+            fills
+      | _ -> bug "a list of %s" (Ground.to_string ty))
+  | _ -> bug "%s is not a list" (Ground.to_string ty)
+
+(* A [Template] of these literal texts, each a [Literal] of static bytes,
+   with one part for each fill in [parts]. *)
+let template_value st template_ty texts ~site ~parts =
+  let field_type ty name =
+    match Monomorphic.shape st.context.monomorphic ty with
+    | Record fields -> (
+        match List.assoc_opt name fields with
+        | Some (Memory_layout.Typed ty) -> ty
+        | _ -> bug "%s has no field %s" (Ground.to_string ty) name)
+    | _ -> bug "%s is not a record" (Ground.to_string ty)
+  in
+  let element list_ty =
+    match Monomorphic.shape st.context.monomorphic list_ty with
+    | Record [ (_, Typed storage) ] -> (
+        match Monomorphic.kind st.context.monomorphic storage with
+        | Storage element -> element
+        | _ -> bug "%s is not a list" (Ground.to_string list_ty))
+    | _ -> bug "%s is not a list" (Ground.to_string list_ty)
+  in
+  let literals_ty = field_type template_ty "literals" in
+  let parts_ty = field_type template_ty "parts" in
+  let literal_ty = element literals_ty in
+  let slice_ty = field_type literal_ty "text" in
+  let built = temporary st template_ty in
+  list_of st literals_ty (built / Field "literals") ~site
+    (List.map
+       (fun text value ->
+         let slice = temporary st slice_ty in
+         string_literal st slice_ty text ~destination:slice;
+         emit st.b
+           (Assign
+              (value, Build { ty = literal_ty; variant = None; fields = [ ("text", Copy slice) ] })))
+       texts);
+  list_of st parts_ty (built / Field "parts") ~site parts;
+  built
+
 (* The type that a lending or yielding method gives at its [yield], for the
    method's type arguments. *)
 let yielded_type st path type_arguments =
