@@ -2,7 +2,7 @@
 
 open Ir
 
-let version = 13
+let version = 14
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -184,9 +184,14 @@ let encode_target instance = function
       tagged 1 [ encode_operand instance value; encode_signature instance signature ]
   | Intrinsic intrinsic -> tagged 2 [ Cbor.int (intrinsic_tag intrinsic) ]
   | Foreign declaration -> tagged 5 [ encode_foreign declaration ]
-  | Evidence_call { evidence; slot; signature } ->
+  | Evidence_call { evidence; capability; slot; signature } ->
       tagged 3
-        [ encode_operand instance evidence; Cbor.int slot; encode_signature instance signature ]
+        [
+          encode_operand instance evidence;
+          instance.path capability;
+          Cbor.int slot;
+          encode_signature instance signature;
+        ]
   | Table_call { table; value; slot; signature } ->
       tagged 4
         [
@@ -307,6 +312,7 @@ let encode_table ?(path = Ground.encode_path) ?instance (table : table) =
   Cbor.Array
     [
       instance table.table_key;
+      option path table.capability;
       list
         (fun (key, s) -> Cbor.Array [ instance key; encode_signature encoders_default s ])
         table.entries;
