@@ -4,18 +4,18 @@ module T = Types
 
 type root = Local of Core.local | Constant of Path.t
 
-(* [Element] holds the id of the index call or of the slice that selects
-   the elements. The check does not compare indexes, so an [Element] step
-   stands for some elements of the collection. *)
-type step = Field of string | Element of Core.id
+(* [Element] names the index call or the slice that selects the elements,
+   by its node id and its origin. The check does not compare indexes, so an
+   [Element] step stands for some elements of the collection. *)
+type step = Field of string | Element of { node : Core.id; origin : Core.origin }
 type t = { root : root; steps : step list }
 
 type overlap =
   | Apart
   | Overlap
-  | Maybe_apart of Core.id * Core.id
+  | Maybe_apart of Core.origin * Core.origin
       (** The places are different elements of one collection if the two index calls or slices,
-          named by their ids, select different elements. The prover decides. *)
+          named by their origins, select different elements. The prover decides. *)
 
 (* Two places overlap if one is a prefix of the other. *)
 let overlap left right =
@@ -27,8 +27,11 @@ let overlap left right =
       | Field first :: left, Field second :: right ->
           if first = second then go left right else Apart
       | Element first :: left, Element second :: right -> (
-          if first = second then go left right
-          else match go left right with Apart -> Apart | _ -> Maybe_apart (first, second))
+          if first.node = second.node then go left right
+          else
+            match go left right with
+            | Apart -> Apart
+            | _ -> Maybe_apart (first.origin, second.origin))
       | _ :: left, _ :: right -> go left right
     in
     go left.steps right.steps
@@ -88,7 +91,7 @@ let rec of_core (place : Core.place) : t option =
   | Field { base; field; _ } -> with_step base (Field field)
   | Lent index -> (
       match storage_index index with
-      | Some collection -> with_step collection (Element index.id)
+      | Some collection -> with_step collection (Element { node = index.id; origin = index.origin })
       | None -> None)
   | Temporary _ -> None
 
@@ -97,7 +100,8 @@ let of_slice (slice : Core.expression) : t option =
   match slice.kind with
   | Slice { base; _ } ->
       Option.map
-        (fun base -> { base with steps = base.steps @ [ Element slice.id ] })
+        (fun base ->
+          { base with steps = base.steps @ [ Element { node = slice.id; origin = slice.origin } ] })
         (of_core base)
   | _ -> None
 
@@ -108,3 +112,15 @@ let rec is_lent_part (place : Core.place) =
   | Lent index -> Option.is_none (storage_index index)
   | Field { base; _ } -> is_lent_part base
   | Local _ | Constant _ | Temporary _ -> false
+
+(* The place that lends a part, and how: the receiver of the lending call
+   that the part comes from. [None] if the place is not a lent part, or if
+   the receiver is not a tracked place. *)
+let rec lender (place : Core.place) : (t * T.mode) option =
+  match place with
+  | Field { base; _ } -> lender base
+  | Lent
+      ({ kind = Call { arguments = Passed { mode; value = Place receiver } :: _; _ }; _ } as call)
+    when Option.is_none (storage_index call) ->
+      Option.map (fun lent -> (lent, if mode = T.Mut then T.Mut else T.Read)) (of_core receiver)
+  | Lent _ | Local _ | Constant _ | Temporary _ -> None
