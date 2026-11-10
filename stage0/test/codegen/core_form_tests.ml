@@ -1,38 +1,10 @@
-(* Lowering from the core form: which bodies are lowered from it, and that
-   the code lowered from it runs correctly. *)
+(* Lowering from the core form: a program for each kind of node, whose test
+   passes when the code lowered from it runs correctly. *)
 
 open Codegen_support
 
-let int64 = Monomorphic.builtin Int64
-
-(* Checks that the module's test passes and that each named function, with
-   the given type arguments, is lowered from its core form. With [tests],
-   the tests' bodies must be lowered from their core forms too. [pulled]
-   names yielding functions whose pulled versions must be as well. *)
-let lowers what ?(tests = false) ?(pulled = []) functions source =
-  test what (fun () ->
-      let database, _ = load source in
-      let context = Lower.context ~checks:true database target_64 in
-      let from_core key =
-        match Lower.core_fallback_reason context key with
-        | None -> ()
-        | Some reason ->
-            fail "%s was lowered from the syntax tree because of %s" (Instance.to_string key) reason
-      in
-      List.iter
-        (fun (name, type_arguments) ->
-          from_core (Code { path = Top { module_ = example; name }; type_arguments }))
-        functions;
-      if tests then List.iter (fun path -> from_core (Lower.test_key path)) (tests_of database);
-      List.iter
-        (fun name ->
-          from_core (Cursor_next { method_ = Top { module_ = example; name }; type_arguments = [] }))
-        pulled;
-      expect_output source "test 0 passed\n")
-
 let () =
-  lowers "calls, operators, comparisons, a let, an if, and a return" ~tests:true
-    [ ("double", []); ("larger", []); ("pick", []) ]
+  passes "calls, operators, comparisons, a let, an if, and a return"
     {|fn double(value: Int64) -> Int64 {
   value + value
 }
@@ -55,8 +27,7 @@ test "picks" {
   assert !(pick(1, second: 1) > 3) || pick(1, second: 1) == 3
 }
 |};
-  lowers "`let x = own y` moves the value, and `let x = y` aliases the place"
-    [ ("keep", []); ("count", []) ]
+  passes "`let x = own y` moves the value, and `let x = y` aliases the place"
     {|fn keep(items: own List[Int64]) -> List[Int64] {
   let held = own items
   held
@@ -72,8 +43,7 @@ test "moves" {
   assert count(kept) == 3
 }
 |};
-  lowers "a trait method call resolves to the type's impl, or to a bound in a generic function"
-    [ ("same", [ Ground.Type int64 ]); ("equal_lengths", []) ]
+  passes "a trait method call resolves to the type's impl, or to a bound in a generic function"
     {|type Meters(value: Int64)
   derives Equal
 
@@ -90,8 +60,7 @@ test "equal" {
   assert equal_lengths(Meters(value: 2), second: Meters(value: 2))
 }
 |};
-  lowers "an assignment, a call that omits an argument with a default, and a field access"
-    [ ("twice", []); ("width", []) ]
+  passes "an assignment, a call that omits an argument with a default, and a field access"
     {|type Box(width: Int64, height: Int64)
 
 fn step(start: Int64, by: Int64 = 1) -> Int64 {
@@ -115,8 +84,7 @@ test "steps" {
 |}
 
 let () =
-  lowers "a string literal, a constant, and a constructor call with every field" ~tests:true
-    [ ("labelled", []) ]
+  passes "a string literal, a constant, and a constructor call with every field"
     {|type Box(width: Int64, label: String)
 
 let wide: Int64 = 40
@@ -133,8 +101,7 @@ test "builds" {
 |}
 
 let () =
-  lowers "a while loop with break and continue, and a for loop over an integer range" ~tests:true
-    [ ("sum_of_odds_below", []); ("triangle", []) ]
+  passes "a while loop with break and continue, and a for loop over an integer range"
     {|fn sum_of_odds_below(limit: Int64) -> Int64 {
   var total = 0
   var next = 0
@@ -164,8 +131,7 @@ test "loops" {
   assert triangle(4) == 10
 }
 |};
-  lowers "a for loop over a yielding method's call"
-    [ ("total", []) ]
+  passes "a for loop over a yielding method's call"
     {|fn total(items: List[Int64]) -> Int64 {
   var sum = 0
   for item in items {
@@ -180,8 +146,7 @@ test "sums" {
 |}
 
 let () =
-  lowers "a match on literals, a range, strings, and two values at once" ~tests:true
-    [ ("kind", []); ("greeting", []); ("both", []) ]
+  passes "a match on literals, a range, strings, and two values at once"
     {|fn kind(value: Int64) -> String {
   match value {
     0 => "zero"
@@ -222,8 +187,7 @@ test "matches" {
   assert both(None, second: None) == 0
 }
 |};
-  lowers "alternatives that bind a name bind it from the alternative that matched" ~tests:true
-    [ ("size", []); ("text_length", []); ("take_text", []) ]
+  passes "alternatives that bind a name bind it from the alternative that matched"
     {|type Shape =
   | Circle(radius: Int64)
   | Square(extra: Int64, side: Int64)
@@ -269,8 +233,7 @@ test "alternatives" {
   assert take_text(Shape.Point) == "none"
 }
 |};
-  lowers "a let with an else, an is-test, a guard, and a pattern in a let and in a for loop"
-    [ ("first_or", []); ("positive", []); ("sign", []); ("area", []); ("total_area", []) ]
+  passes "a let with an else, an is-test, a guard, and a pattern in a let and in a for loop"
     {|type Box(width: Int64, height: Int64)
 
 fn first_or(value: Option[Int64], fallback: Int64) -> Int64 {
@@ -324,8 +287,7 @@ test "binds" {
 |}
 
 let () =
-  lowers "a todo and an unreachable on paths not taken, and a proof block" ~tests:true
-    [ ("checked", []) ]
+  passes "a todo and an unreachable on paths not taken, and a proof block"
     {|fn checked(value: Int64) -> Int64 {
   if value < 0 {
     todo
@@ -345,8 +307,7 @@ test "checks" {
 |}
 
 let () =
-  lowers "an is-test on a call's result keeps the result for the names it binds" ~tests:true
-    [ ("total_length", []); ("first_length", []) ]
+  passes "an is-test on a call's result keeps the result for the names it binds"
     {|fn label(count: Int64) -> Option[String] {
   if count > 0 {
     return Some("label ${count}")
@@ -381,8 +342,7 @@ test "keeps" {
 |}
 
 let () =
-  lowers "defaults of a plain, a read-only, and an own parameter, and a requires clause" ~tests:true
-    [ ("step", []); ("length", []); ("keep", []) ]
+  passes "defaults of a plain, a read-only, and an own parameter, and a requires clause"
     {|fn step(start: Int64, by: Int64 = 2 * 3) -> Int64
   requires by > 0
 {
@@ -424,9 +384,7 @@ test "breaks" {
         \  at example/main.truss:2:12\n")
 
 let () =
-  lowers "an index, a lending method with a default, and a yielding method that returns early"
-    ~tests:true
-    [ ("second", []); ("corner", []); ("even_total", []); ("raise_corner", []) ]
+  passes "an index, a lending method with a default, and a yielding method that returns early"
     {|type Grid(cells: List[Int64], width: USize)
 
 fn Grid.cell(self, row: USize, column: USize = 0) lends Int64
@@ -483,8 +441,7 @@ test "lends and yields" {
 |}
 
 let () =
-  lowers "a capability method call, a provide, and a crash on a path not taken" ~tests:true
-    [ ("record", []); ("counted", []); ("checked", []) ]
+  passes "a capability method call, a provide, and a crash on a path not taken"
     {|capability Tally {
   fn add(amount: Int64)
   fn total() -> Int64
@@ -532,8 +489,7 @@ test "counts" {
   assert checked(3) == 3
 }
 |};
-  lowers "a value converted to an any value, from an impl and from a bound"
-    [ ("boxed", []); ("boxed_from", [ Ground.Type (Monomorphic.builtin Int64) ]) ]
+  passes "a value converted to an any value, from an impl and from a bound"
     {|trait Named {
   fn name(self) -> String
 }
@@ -569,8 +525,7 @@ test "boxes" {
 |}
 
 let () =
-  lowers "an interpolated string, a tagged string, and a copy" ~tests:true
-    [ ("describe", []); ("sum", []); ("twice", []) ]
+  passes "an interpolated string, a tagged string, and a copy"
     {|type Sum(pieces: USize, total: Int64)
 
 impl FromTemplate for Sum {
@@ -606,10 +561,7 @@ test "strings" {
   assert twice("ab") == "abab"
 }
 |};
-  lowers "a set, a map, a record update, a field default, and a parallel block" ~tests:true
-    [
-      ("colors", []); ("ages", []); ("renamed", []); ("defaults", []); ("circle", []); ("both", []);
-    ]
+  passes "a set, a map, a record update, a field default, and a parallel block"
     {|type Settings(name: String = "default", retries: Int64 = 2 + 1, verbose: Bool = false)
 
 type Shape =
@@ -663,8 +615,7 @@ test "values" {
 |}
 
 let () =
-  lowers "an array literal and a generic value parameter used as a value" ~tests:true
-    [ ("squares", []); ("capacity", [ Ground.Value (Z.of_int 3) ]) ]
+  passes "an array literal and a generic value parameter used as a value"
     {|fn squares() -> Array[Int64, 3] {
   [1, 4, 9]
 }
@@ -706,9 +657,7 @@ test "reads" {
         "test 0 panicked\nmessage 35\nno cell\n  at example/main.truss:6:3\n")
 
 let () =
-  lowers "a loop over a recursive yielding function pulls a cursor over it" ~tests:true
-    ~pulled:[ "descend" ]
-    [ ("total", []) ]
+  passes "a loop over a recursive yielding function pulls a cursor over it"
     {|fn descend(from: Int64) yields Int64 {
   if from > 0 {
     yield from
@@ -731,8 +680,7 @@ test "descends" {
   assert total(0) == 0
 }
 |};
-  lowers "a pulled yielding function copies the places it yields" ~pulled:[ "labels" ]
-    [ ("longest", []) ]
+  passes "a pulled yielding function copies the places it yields"
     {|fn labels(names: List[String], depth: Int64) yields String {
   for name in names {
     yield name
@@ -758,8 +706,7 @@ test "labels" {
   assert longest(["a", "abc", "ab"]) == 3
 }
 |};
-  lowers "a named function as a value, at its own type and at a wider one" ~tests:true
-    [ ("doubled", []); ("named", []) ]
+  passes "a named function as a value, at its own type and at a wider one"
     {|fn double(value: Int64) -> Int64 {
   value * 2
 }
@@ -783,9 +730,7 @@ test "function values" {
 |}
 
 let () =
-  lowers "a lambda that captures a local and one that captures self, called through a value"
-    ~tests:true
-    [ ("apply", []); ("add_all", []); ("longest_over", []) ]
+  passes "a lambda that captures a local and one that captures self, called through a value"
     {|type Scale(factor: Int64)
 
 fn Scale.scaled(self, items: List[Int64]) -> List[Int64] {
@@ -819,8 +764,7 @@ test "lambdas" {
   assert longest_over(["a", "abc"], least: 2) == 3
 }
 |};
-  lowers "a method called through an any value" ~tests:true
-    [ ("total", []); ("names", []) ]
+  passes "a method called through an any value"
     {|trait Shape {
   fn area(self) -> Int64
   fn name(self) -> String
@@ -872,8 +816,7 @@ test "shapes" {
   assert names(shapes) == ["square 3", "rectangle 2x5"]
 }
 |};
-  lowers "next on a cursor and a loop over the rest of it" ~tests:true ~pulled:[ "numbers" ]
-    [ ("first_and_rest", []) ]
+  passes "next on a cursor and a loop over the rest of it"
     {|fn numbers(limit: Int64) yields Int64 {
   var next = 1
   while next <= limit {
