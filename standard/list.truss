@@ -400,6 +400,7 @@ public fn List[Element].capacity(self) -> USize
 public fn List[Element].reserve(mut self, additional: USize)
   ensures identical(self.model(), old(self.model()))
   ensures self.capacity() >= self.length() + additional
+  cost amortized time O(additional)
 {
   growth::reserve(mut self.storage, additional: additional)
 }

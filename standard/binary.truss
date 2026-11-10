@@ -1,3 +1,5 @@
+use standard::intrinsic
+
 public type ByteOrder = BigEndian | LittleEndian
   derives Equal
 
@@ -7,12 +9,23 @@ public type DecodeError =
   derives Equal
 
 impl Display for DecodeError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      UnexpectedEnd(needed, available) => {
+        mut output.write("the bytes end: ")
+        needed.display(mut output)
+        mut output.write(" needed, ")
+        available.display(mut output)
+        mut output.write(" left")
+      }
+      Overlong => mut output.write("the variable-length integer does not fit in 64 bits")
+    }
   }
 }
 
 public opaque type Decoder(bytes: Slice[UInt8], position: USize)
+  invariant position <= bytes.length()
 
 public fn Decoder.new(bytes: Slice[UInt8]) -> Decoder
   ensures result.position() == 0
@@ -28,21 +41,27 @@ public fn Decoder.position(self) -> USize
 }
 
 public fn Decoder.remaining(self) -> Slice[UInt8]
+  ensures result.length() == self.bytes.length() - self.position
   cost time O(1)
 {
-  todo
+  self.bytes.slice_range(self.position, stop: self.bytes.length())
 }
 
 public fn Decoder.is_at_end(self) -> Bool
   cost time O(1)
 {
-  todo
+  self.position == self.bytes.length()
 }
 
 public fn Decoder.skip(mut self, count: USize) -> Result[Unit, DecodeError]
   cost time O(1)
 {
-  todo
+  let available = self.bytes.length() - self.position
+  if count > available {
+    return Err(DecodeError.UnexpectedEnd(needed: count, available: available))
+  }
+  self.position += count
+  Ok(Unit)
 }
 
 public fn Decoder.bytes(mut self, count: USize) -> Result[Slice[UInt8], DecodeError]
@@ -52,79 +71,146 @@ public fn Decoder.bytes(mut self, count: USize) -> Result[Slice[UInt8], DecodeEr
   }
   cost time O(1)
 {
-  todo
+  let available = self.bytes.length() - self.position
+  if count > available {
+    return Err(DecodeError.UnexpectedEnd(needed: count, available: available))
+  }
+  let start = self.position
+  self.position += count
+  Ok(self.bytes.slice_range(start, stop: start + count))
+}
+
+internal fn Decoder.take_2(mut self) -> Result[Array[UInt8, 2], DecodeError]
+  cost time O(1)
+{
+  let taken = mut self.bytes(2)?
+  Ok([taken[0], taken[1]])
+}
+
+internal fn Decoder.take_4(mut self) -> Result[Array[UInt8, 4], DecodeError]
+  cost time O(1)
+{
+  let taken = mut self.bytes(4)?
+  Ok([taken[0], taken[1], taken[2], taken[3]])
+}
+
+internal fn Decoder.take_8(mut self) -> Result[Array[UInt8, 8], DecodeError]
+  cost time O(1)
+{
+  let taken = mut self.bytes(8)?
+  Ok([taken[0], taken[1], taken[2], taken[3], taken[4], taken[5], taken[6], taken[7]])
 }
 
 public fn Decoder.uint8(mut self) -> Result[UInt8, DecodeError]
   cost time O(1)
 {
-  todo
+  let taken = mut self.bytes(1)?
+  Ok(taken[0])
 }
 
 public fn Decoder.uint16(mut self, order: ByteOrder = ByteOrder.BigEndian) -> Result[UInt16, DecodeError]
   cost time O(1)
 {
-  todo
+  let bytes = mut self.take_2()?
+  if order == ByteOrder.BigEndian {
+    Ok(UInt16.from_big_endian_bytes(bytes))
+  } else {
+    Ok(UInt16.from_little_endian_bytes(bytes))
+  }
 }
 
 public fn Decoder.uint32(mut self, order: ByteOrder = ByteOrder.BigEndian) -> Result[UInt32, DecodeError]
   cost time O(1)
 {
-  todo
+  let bytes = mut self.take_4()?
+  if order == ByteOrder.BigEndian {
+    Ok(UInt32.from_big_endian_bytes(bytes))
+  } else {
+    Ok(UInt32.from_little_endian_bytes(bytes))
+  }
 }
 
 public fn Decoder.uint64(mut self, order: ByteOrder = ByteOrder.BigEndian) -> Result[UInt64, DecodeError]
   cost time O(1)
 {
-  todo
+  let bytes = mut self.take_8()?
+  if order == ByteOrder.BigEndian {
+    Ok(UInt64.from_big_endian_bytes(bytes))
+  } else {
+    Ok(UInt64.from_little_endian_bytes(bytes))
+  }
 }
 
 public fn Decoder.int8(mut self) -> Result[Int8, DecodeError]
   cost time O(1)
 {
-  todo
+  Ok(mut self.uint8()?.to_signed_bits())
 }
 
 public fn Decoder.int16(mut self, order: ByteOrder = ByteOrder.BigEndian) -> Result[Int16, DecodeError]
   cost time O(1)
 {
-  todo
+  Ok(mut self.uint16(order: order)?.to_signed_bits())
 }
 
 public fn Decoder.int32(mut self, order: ByteOrder = ByteOrder.BigEndian) -> Result[Int32, DecodeError]
   cost time O(1)
 {
-  todo
+  Ok(mut self.uint32(order: order)?.to_signed_bits())
 }
 
 public fn Decoder.int64(mut self, order: ByteOrder = ByteOrder.BigEndian) -> Result[Int64, DecodeError]
   cost time O(1)
 {
-  todo
+  Ok(mut self.uint64(order: order)?.to_signed_bits())
 }
 
 public fn Decoder.float32(mut self, order: ByteOrder = ByteOrder.BigEndian) -> Result[Float32, DecodeError]
   cost time O(1)
 {
-  todo
+  Ok(Float32.from_bits(mut self.uint32(order: order)?))
 }
 
 public fn Decoder.float64(mut self, order: ByteOrder = ByteOrder.BigEndian) -> Result[Float64, DecodeError]
   cost time O(1)
 {
-  todo
+  Ok(Float64.from_bits(mut self.uint64(order: order)?))
 }
 
 public fn Decoder.variable_uint64(mut self) -> Result[UInt64, DecodeError]
   cost time O(1)
 {
-  todo
+  var value: UInt64 = 0
+  var index: USize = 0
+  while index < 10
+    invariant index <= 10
+    invariant self.position <= self.bytes.length()
+    decreases 10 - index
+  {
+    let byte = mut self.uint8()?
+    if index == 9 && byte > 1 {
+      return Err(DecodeError.Overlong)
+    }
+    let group: UInt64 = intrinsic::convert(byte % 128)
+    value = value | (group << (7 * index))
+    if byte < 128 {
+      return Ok(value)
+    }
+    index += 1
+  }
+  Err(DecodeError.Overlong)
 }
 
 public fn Decoder.variable_int64(mut self) -> Result[Int64, DecodeError]
   cost time O(1)
 {
-  todo
+  let folded = mut self.variable_uint64()?
+  let half = folded >> 1
+  if folded % 2 == 0 {
+    Ok(half.to_signed_bits())
+  } else {
+    Ok((half ^ UInt64.maximum).to_signed_bits())
+  }
 }
 
 public opaque type Encoder(bytes: List[UInt8])
@@ -168,77 +254,85 @@ public fn Encoder.bytes(mut self, bytes: Slice[UInt8])
   ensures self.length() == old(self.length()) + bytes.length()
   cost amortized time O(bytes.length())
 {
-  todo
+  mut self.bytes.reserve(bytes.length())
+  for index in 0..bytes.length()
+    invariant self.length() == old(self.length()) + yielded.length()
+  {
+    mut self.bytes.push(bytes[index])
+  }
 }
 
 public fn Encoder.uint8(mut self, value: UInt8)
   ensures self.length() == old(self.length()) + 1
   cost amortized time O(1)
 {
-  todo
+  mut self.bytes.push(value)
 }
 
 public fn Encoder.uint16(mut self, value: UInt16, order: ByteOrder = ByteOrder.BigEndian)
   ensures self.length() == old(self.length()) + 2
   cost amortized time O(1)
 {
-  todo
+  let bytes = if order == ByteOrder.BigEndian { value.to_big_endian_bytes() } else { value.to_little_endian_bytes() }
+  mut self.bytes(bytes.slice())
 }
 
 public fn Encoder.uint32(mut self, value: UInt32, order: ByteOrder = ByteOrder.BigEndian)
   ensures self.length() == old(self.length()) + 4
   cost amortized time O(1)
 {
-  todo
+  let bytes = if order == ByteOrder.BigEndian { value.to_big_endian_bytes() } else { value.to_little_endian_bytes() }
+  mut self.bytes(bytes.slice())
 }
 
 public fn Encoder.uint64(mut self, value: UInt64, order: ByteOrder = ByteOrder.BigEndian)
   ensures self.length() == old(self.length()) + 8
   cost amortized time O(1)
 {
-  todo
+  let bytes = if order == ByteOrder.BigEndian { value.to_big_endian_bytes() } else { value.to_little_endian_bytes() }
+  mut self.bytes(bytes.slice())
 }
 
 public fn Encoder.int8(mut self, value: Int8)
   ensures self.length() == old(self.length()) + 1
   cost amortized time O(1)
 {
-  todo
+  mut self.bytes.push(value.to_unsigned_bits())
 }
 
 public fn Encoder.int16(mut self, value: Int16, order: ByteOrder = ByteOrder.BigEndian)
   ensures self.length() == old(self.length()) + 2
   cost amortized time O(1)
 {
-  todo
+  mut self.uint16(value.to_unsigned_bits(), order: order)
 }
 
 public fn Encoder.int32(mut self, value: Int32, order: ByteOrder = ByteOrder.BigEndian)
   ensures self.length() == old(self.length()) + 4
   cost amortized time O(1)
 {
-  todo
+  mut self.uint32(value.to_unsigned_bits(), order: order)
 }
 
 public fn Encoder.int64(mut self, value: Int64, order: ByteOrder = ByteOrder.BigEndian)
   ensures self.length() == old(self.length()) + 8
   cost amortized time O(1)
 {
-  todo
+  mut self.uint64(value.to_unsigned_bits(), order: order)
 }
 
 public fn Encoder.float32(mut self, value: Float32, order: ByteOrder = ByteOrder.BigEndian)
   ensures self.length() == old(self.length()) + 4
   cost amortized time O(1)
 {
-  todo
+  mut self.uint32(value.to_bits(), order: order)
 }
 
 public fn Encoder.float64(mut self, value: Float64, order: ByteOrder = ByteOrder.BigEndian)
   ensures self.length() == old(self.length()) + 8
   cost amortized time O(1)
 {
-  todo
+  mut self.uint64(value.to_bits(), order: order)
 }
 
 public fn Encoder.variable_uint64(mut self, value: UInt64)
@@ -246,7 +340,21 @@ public fn Encoder.variable_uint64(mut self, value: UInt64)
   ensures self.length() <= old(self.length()) + 10
   cost amortized time O(1)
 {
-  todo
+  var groups: Array[UInt8, 10] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  var count: USize = 0
+  var more = true
+  while more
+    invariant count <= 10
+    invariant more ==> count <= 9
+    invariant !more ==> count >= 1
+    decreases 10 - count
+  {
+    let group = (value >> (7 * count)) % 128
+    more = count < 9 && (value >> (7 * count + 7)) != 0
+    groups[count] = intrinsic::convert(if more { group + 128 } else { group })
+    count += 1
+  }
+  mut self.bytes(groups.slice_range(0, stop: count))
 }
 
 public fn Encoder.variable_int64(mut self, value: Int64)
@@ -254,5 +362,6 @@ public fn Encoder.variable_int64(mut self, value: Int64)
   ensures self.length() <= old(self.length()) + 10
   cost amortized time O(1)
 {
-  todo
+  let doubled = value.to_unsigned_bits() << 1
+  mut self.variable_uint64(if value < 0 { doubled ^ UInt64.maximum } else { doubled })
 }

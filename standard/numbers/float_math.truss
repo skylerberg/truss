@@ -1,4 +1,5 @@
 use standard::core
+use standard::intrinsic
 use standard::text
 
 public let Float32.infinity: Float32 = 1.0 / 0.0
@@ -276,13 +277,13 @@ public fn Float32.fused_multiply_add(self, multiplier: Float32, addend: Float32)
 public fn Float32.to_bits(self) -> UInt32
   cost time O(1)
 {
-  todo
+  intrinsic::to_bits[Float32, UInt32](self)
 }
 
 public fn Float32.from_bits(bits: UInt32) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::from_bits[UInt32, Float32](bits)
 }
 
 public fn Float32.sum(items: Slice[Float32]) -> Float32
@@ -690,13 +691,13 @@ public fn Float64.fused_multiply_add(self, multiplier: Float64, addend: Float64)
 public fn Float64.to_bits(self) -> UInt64
   cost time O(1)
 {
-  todo
+  intrinsic::to_bits[Float64, UInt64](self)
 }
 
 public fn Float64.from_bits(bits: UInt64) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::from_bits[UInt64, Float64](bits)
 }
 
 public fn Float64.sum(items: Slice[Float64]) -> Float64
