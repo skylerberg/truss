@@ -373,12 +373,9 @@ and into st (value : Core.expression) (destination : Lir.place) =
             parameters taken;
           block_into inner body (result_place inner))
         destination
-  | Slice _ ->
-      Compiler_bug.unsupported
-        ~at:(at_site (site_of st value.origin))
-        "a slice of a range of elements, such as `items[1..3]`"
+  | Slice { call; _ } -> into st call destination
   | Implies _ | Result | Old _ | Quantified _ | Yielded | Finished | Identical _ | Cost_function _
-    ->
+  | Method_time _ ->
       bug "a specification-only expression in code that runs"
 
 (* Evaluates a call's arguments, one for each of the callee's parameters, in

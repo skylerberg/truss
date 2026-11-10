@@ -212,6 +212,105 @@ internal fn number_at(bytes: intrinsic::View[UInt8], offset: USize, size: USize)
   value
 }
 
+fn done(outcome: Int32) -> Result[Unit, Int32] {
+  if outcome < 0 { Err(intrinsic::libc_errno()) } else { Ok(Unit) }
+}
+
+internal fn make_directory(path: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
+  let name = ended_with_zero_byte(path)?
+  done(intrinsic::libc_mkdir(intrinsic::storage_view(name), mode: 0o777))
+}
+
+internal fn remove(path: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
+  let name = ended_with_zero_byte(path)?
+  done(intrinsic::libc_remove(intrinsic::storage_view(name)))
+}
+
+internal fn rename(from: intrinsic::View[UInt8], to: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
+  let old_name = ended_with_zero_byte(from)?
+  let new_name = ended_with_zero_byte(to)?
+  done(intrinsic::libc_rename(intrinsic::storage_view(old_name), to: intrinsic::storage_view(new_name)))
+}
+
+internal fn make_link(
+  target: intrinsic::View[UInt8],
+  link: intrinsic::View[UInt8],
+  symbolic: Bool,
+) -> Result[Unit, Int32] {
+  let target_name = ended_with_zero_byte(target)?
+  let link_name = ended_with_zero_byte(link)?
+  if symbolic {
+    done(intrinsic::libc_symlink(intrinsic::storage_view(target_name), link: intrinsic::storage_view(link_name)))
+  } else {
+    done(intrinsic::libc_link(intrinsic::storage_view(target_name), link: intrinsic::storage_view(link_name)))
+  }
+}
+
+internal fn set_mode(path: intrinsic::View[UInt8], mode: Int32) -> Result[Unit, Int32] {
+  let name = ended_with_zero_byte(path)?
+  done(intrinsic::libc_chmod(intrinsic::storage_view(name), mode: mode))
+}
+
+internal fn set_modified(path: intrinsic::View[UInt8], seconds: Int64, nanoseconds: Int64) -> Result[Unit, Int32] {
+  let name = ended_with_zero_byte(path)?
+  var times: intrinsic::Storage[Int64] = intrinsic::storage_with_capacity(4)
+  intrinsic::storage_push(mut times, value: 0)
+  intrinsic::storage_push(mut times, value: intrinsic::libc_utime_omit())
+  intrinsic::storage_push(mut times, value: seconds)
+  intrinsic::storage_push(mut times, value: nanoseconds)
+  done(
+    intrinsic::libc_utimensat(
+      intrinsic::libc_at_fdcwd(),
+      path: intrinsic::storage_view(name),
+      times: intrinsic::storage_view(times),
+      flags: 0,
+    ),
+  )
+}
+
+internal fn read_link(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32] {
+  let name = ended_with_zero_byte(path)?
+  let room = intrinsic::libc_path_max()
+  var target: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
+  let got = intrinsic::libc_readlink(intrinsic::storage_view(name), buffer: mut target, count: room)
+  if got < 0 {
+    return Err(intrinsic::libc_errno())
+  }
+  let length: USize = intrinsic::convert(got)
+  if length > room {
+    return Err(intrinsic::libc_eio())
+  }
+  intrinsic::storage_lengthen(mut target, by: length)
+  Ok(own target)
+}
+
+internal fn resolve(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32] {
+  let name = ended_with_zero_byte(path)?
+  var room: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(intrinsic::libc_path_max())
+  var found = false
+  let resolved = intrinsic::libc_realpath(intrinsic::storage_view(name), resolved: mut room, found: mut found)
+  if found { Ok(copy_of(resolved)) } else { Err(intrinsic::libc_errno()) }
+}
+
+internal fn sleep(seconds: Int64, nanoseconds: Int64) {
+  var left_seconds = seconds
+  var left_nanoseconds = nanoseconds
+  var sleeping = true
+  while sleeping {
+    var duration: intrinsic::Storage[Int64] = intrinsic::storage_with_capacity(2)
+    intrinsic::storage_push(mut duration, value: left_seconds)
+    intrinsic::storage_push(mut duration, value: left_nanoseconds)
+    let outcome = intrinsic::libc_nanosleep(
+      intrinsic::storage_view(duration),
+      remaining_seconds: mut left_seconds,
+      remaining_nanoseconds: mut left_nanoseconds,
+    )
+    if outcome == 0 || !interrupted_by_signal() {
+      sleeping = false
+    }
+  }
+}
+
 internal fn ended_with_zero_byte(bytes: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32] {
   let length = intrinsic::view_length(bytes)
   var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length + 1)

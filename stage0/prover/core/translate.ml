@@ -217,6 +217,9 @@ type context = {
   mutable holes : (Names.key * span) list;  (** Reversed. *)
   mutable call_targets : (L.term * Core.local) list;
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
+  ranking : bool;
+      (** Whether the definition proven may show a recursive call ends by being on a part of its
+          parameters, the one use of the order of parts, which is stated only then. *)
   mutable validating : T.ty list;
       (** The types whose invariants are being read, around this point. A type is valid inside the
           reading of its own invariant, as it is inside its own fields, so a type that holds itself
@@ -557,6 +560,14 @@ let in_range ty term =
           within &&& not_ (Apply ("<=", [ int 0xD800; term ]) &&& Apply ("<=", [ term; int 0xDFFF ])))
       else within
   | None -> L.Boolean true
+
+(* Runs [make] the first time a key is met in a definition's proof, for a
+   fact that is stated once. *)
+let once context key make =
+  if not (Hashtbl.mem context.declared key) then begin
+    Hashtbl.replace context.declared key ();
+    make ()
+  end
 
 (* A sort's name, as part of a symbol's. *)
 let sort_label (sort : L.sort) =
@@ -1364,6 +1375,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       extensional context frame (type_of context frame first) first_value second_value;
       Some (frame, L.equal first_value second_value)
   | Cost_function { function_; arguments } -> cost_function context frame node function_ arguments
+  | Method_time _ -> unsupported (at frame node) "the time of a method of a type parameter"
 
 (* The right side of [&&], [||], or [==>], which runs only where [runs]
    holds. One that changes a local, as a call with a [mut] argument does,
@@ -2791,7 +2803,26 @@ and sequence_at context element term index =
       let symbol = "function." ^ Path.show path ^ "[" ^ type_key sequence ^ "]" in
       declare context
         (L.Function (symbol, [ sort_of context sequence; L.Int ], sort_of context element));
-      Some (L.Apply (symbol, [ term; index ]))
+      let at sequence index = L.Apply (symbol, [ sequence; index ]) in
+      (* An element of a sequence of parts is below the sequence, as a
+         field is below its value, so recursion on an element ends. *)
+      if context.ranking && constructors context element <> None then
+        once context
+          ("ranked." ^ type_key sequence)
+          (fun () ->
+            let each = "ranked.sequence" and index = "ranked.index" in
+            let ranked = L.Symbol each and position = L.Symbol index in
+            let below = rank context element (at ranked position) in
+            context.facts <-
+              L.Forall
+                ( [ (each, sort_of context sequence); (index, L.Int) ],
+                  L.(
+                    Apply ("<=", [ int 0; position ])
+                    &&& Apply ("<", [ position; sequence_length context element ranked ])
+                    ==> (Apply ("<=", [ int 0; below ])
+                        &&& Apply ("<", [ below; rank context sequence ranked ]))) )
+              :: context.facts);
+      Some (at term index)
   | [] -> None
 
 (* Two sequences with the same length and the same elements are identical:
@@ -3194,8 +3225,27 @@ and model_function context (ty : T.ty) ~(model : T.ty) =
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
       let symbol = "function." ^ Path.show path ^ "[" ^ type_key ty ^ "]" in
       declare context (L.Function (symbol, [ sort_of context ty ], sort_of context model));
+      model_ranked context ty ~model symbol;
       Some (fun term -> L.Apply (symbol, [ term ]))
   | [] -> None
+
+(* A value's model is no higher in the order of parts than the value, so
+   an element of a list's model is below the list. [symbol] is the model's
+   function. *)
+and model_ranked context (ty : T.ty) ~(model : T.ty) symbol =
+  if context.ranking then
+    once context ("ranked." ^ symbol) (fun () ->
+        let each = "ranked.value" in
+        context.facts <-
+          L.Forall
+            ( [ (each, sort_of context ty) ],
+              L.Apply
+                ( "<=",
+                  [
+                    rank context model (L.Apply (symbol, [ L.Symbol each ]));
+                    rank context ty (L.Symbol each);
+                  ] ) )
+          :: context.facts)
 
 (* Cursors. A cursor carries what it has handed out and whether it has
    ended as ghost parts of its value. *)
@@ -3345,9 +3395,9 @@ and signature_terminates context path =
 and field_of context frame ty variant field field_type term =
   let part = L.Apply (selector_name ty variant field, [ term ]) in
   assume context frame (in_range field_type part);
-  (* A part of a value is below it, which is how structural recursion is
-     shown to end. *)
-  if constructors context field_type <> None then begin
+  (* A part of a value is below it, whatever its type, which is how
+     structural recursion is shown to end. *)
+  if context.ranking then begin
     let below = rank context field_type part in
     assume context frame
       L.(Apply ("<=", [ int 0; below ]) &&& Apply ("<", [ below; rank context ty term ]))
@@ -4093,6 +4143,14 @@ and contract_call context frame (node : expression) (call_ : call) path contract
           own_bound
       in
       declare context (L.Function (symbol, sorts, sort_of context result_type));
+      (match (path, own_bound) with
+      | Method { name = "model"; receiver = Read; _ }, [ (self, _) ] when self.local = Self ->
+          model_ranked context
+            (Interface.Impls.normalize context.database
+               ~bounds:(fun _ -> [])
+               (T.substitute (substitution_of own) self.type_))
+            ~model:result_type symbol
+      | _ -> ());
       let term = L.Apply (symbol, own_arguments) in
       assume context after (in_range result_type term);
       note_known_call context call_ path term own_arguments;
@@ -6458,6 +6516,11 @@ let new_context database ~home ~current ~terminates ~measures =
     holes = [];
     call_targets = [];
     validating = [];
+    ranking =
+      terminates && measures = []
+      && Call_graph.recursive
+           (Query.demand database Call_graph.graph (Path.package current))
+           current;
     disjoint =
       (match Query.demand database Ownership.ownership home with
       | Some ownership ->
