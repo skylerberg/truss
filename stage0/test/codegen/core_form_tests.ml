@@ -418,4 +418,63 @@ test "breaks" {
          requirement not met: requires by > 0\n\
         \  at example/main.truss:2:12\n")
 
+let () =
+  lowers "an index, a lending method with a default, and a yielding method that returns early"
+    ~tests:true
+    [ ("second", []); ("corner", []); ("even_total", []); ("raise_corner", []) ]
+    {|type Grid(cells: List[Int64], width: USize)
+
+fn Grid.cell(self, row: USize, column: USize = 0) lends Int64
+  requires row * self.width + column < self.cells.length()
+{
+  yield self.cells[row * self.width + column]
+}
+
+fn Grid.cell(mut self, row: USize, column: USize = 0) lends mut Int64
+  requires row * self.width + column < self.cells.length()
+{
+  yield mut self.cells[row * self.width + column]
+}
+
+fn Grid.evens(self, limit: Int64 = 100) yields Int64 {
+  for cell in self.cells {
+    if cell > limit {
+      return
+    }
+    if cell % 2 == 0 {
+      yield cell
+    }
+  }
+}
+
+fn second(items: List[Int64]) -> Int64 {
+  items[1]
+}
+
+fn corner(grid: Grid) -> Int64 {
+  grid.cell(1, column: 1) + grid.cell(1)
+}
+
+fn raise_corner(grid: mut Grid) {
+  mut grid.cell(1, column: 1) += 10
+}
+
+fn even_total(grid: Grid) -> Int64 {
+  var total = 0
+  for cell in grid.evens(limit: 10) {
+    total += cell
+  }
+  total
+}
+
+test "lends and yields" {
+  var grid = Grid(cells: [1, 2, 3, 4, 12, 6], width: 2)
+  assert second([5, 6, 7]) == 6
+  assert corner(grid) == 7
+  assert even_total(grid) == 6
+  raise_corner(mut grid)
+  assert corner(grid) == 17
+}
+|}
+
 let () = Harness.finish ()

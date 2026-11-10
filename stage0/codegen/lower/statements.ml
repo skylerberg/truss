@@ -281,7 +281,8 @@ and for_ st (s : S.statement) ~pattern ~iterable ~body =
           let depth = List.length st.scopes in
           let after = block st.b in
           let call_site = site st s.span in
-          inline st path type_arguments ~arguments ~call_site ~on_yield:(fun place ~resume ~stop ->
+          inline st path type_arguments ~source:syntax_tree ~arguments ~call_site
+            ~on_yield:(fun place ~resume ~stop ->
               let inner = st.frame in
               st.frame <- caller;
               let element_ty = yielded_type st path type_arguments in
