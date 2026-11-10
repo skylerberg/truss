@@ -741,7 +741,7 @@ type unshippable = {
 let unshippable t ~main ~echo =
   reporting t @@ fun () ->
   let root = Instance.Program_main main in
-  let reached = Reachable.reached t.context.env ~lookup:(compiled t) [ root ] in
+  let reached = Reachable.running t.context.env ~lookup:(compiled t) [ root ] in
   begin
     let definitions keys =
       List.fold_left

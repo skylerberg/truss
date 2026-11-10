@@ -192,8 +192,8 @@ let map_rvalue ~place ~block rvalue =
 
 let map_target ~place ~block = function
   | Indirect { value; signature } -> Indirect { value = map_operand ~place ~block value; signature }
-  | Evidence_call { evidence; slot; signature } ->
-      Evidence_call { evidence = map_operand ~place ~block evidence; slot; signature }
+  | Evidence_call { evidence; capability; slot; signature } ->
+      Evidence_call { evidence = map_operand ~place ~block evidence; capability; slot; signature }
   | Table_call { table; value; slot; signature } ->
       Table_call
         {

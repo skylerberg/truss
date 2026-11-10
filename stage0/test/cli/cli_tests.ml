@@ -605,6 +605,55 @@ let () =
             (List.map Path.show way)
       | Ok found -> fail "found %d" (List.length found)
       | Error message -> fail "%s" message);
+  test "a todo in a capability's method counts only where the method is called" (fun () ->
+      let program called =
+        Project.load
+          (package
+             [
+               ( "main.truss",
+                 Printf.sprintf
+                   "capability Speaker {\n\
+                   \  fn say(text: StringSlice)\n\
+                   \  fn shout(text: StringSlice)\n\
+                    }\n\n\
+                    type Quiet()\n\n\
+                    impl Speaker for Quiet {\n\
+                   \  fn say(self, text: StringSlice) {}\n\n\
+                   \  fn shout(self, text: StringSlice) {\n\
+                   \    todo\n\
+                   \  }\n\
+                    }\n\n\
+                    fn speak()\n\
+                   \  uses Speaker\n\
+                    {\n\
+                   \  Speaker.%s(\"hello\")\n\
+                    }\n\n\
+                    fn main(arguments: List[String]) -> ExitCode {\n\
+                   \  provide Quiet() {\n\
+                   \    speak()\n\
+                   \  }\n\
+                   \  ExitCode.success\n\
+                    }\n"
+                   called );
+             ])
+      in
+      let found called =
+        let project = program called in
+        match
+          Compile.unshippable (lowering project)
+            ~main:(List.hd (Program_command.mains project))
+            ~echo:false
+        with
+        | Ok found -> found
+        | Error message -> failwith message
+      in
+      (match found "say" with [] -> () | _ -> fail "a method nothing calls stops the program");
+      match found "shout" with
+      | [ { failure = `Todo; line = 12; way; _ } ] -> (
+          match List.map Path.show way with
+          | "demo::main::main" :: "demo::main::speak" :: _ -> ()
+          | way -> fail "reached by %s" (String.concat ", " way))
+      | found -> fail "found %d" (List.length found));
   test "a package's program is the main of its main module, and of no other" (fun () ->
       let main_text = "fn main(arguments: List[String]) -> ExitCode {\n  ExitCode.success\n}\n" in
       let with_main = Project.load (package [ ("main.truss", main_text) ]) in
