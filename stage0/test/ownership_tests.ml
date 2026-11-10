@@ -591,6 +591,31 @@ let () =
          \  first + tally.counts.length()\n\
           }\n"))
 
+(* Views in the branches of a [parallel] block *)
+
+let () =
+  test "one branch of a `parallel` block cannot change what another branch's view views" (fun () ->
+      one_diagnostic
+        "fn f(items: mut List[Int64]) -> USize {\n\
+        \  let part = items[..]\n\
+        \  parallel {\n\
+        \    let length = part.length()\n\
+        \    mut items.push(1)\n\
+        \  }\n\
+        \  length\n\
+         }\n"
+        "ownership.parallel_conflict");
+  test "two branches of a `parallel` block can read through views of one place" (fun () ->
+      fine
+        "fn f(items: List[Int64]) -> USize {\n\
+        \  let part = items[..]\n\
+        \  parallel {\n\
+        \    let first = part.length()\n\
+        \    let second = items.length()\n\
+        \  }\n\
+        \  first + second\n\
+         }\n")
+
 (* Constants *)
 
 let () =

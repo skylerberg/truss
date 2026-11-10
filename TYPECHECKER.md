@@ -1430,7 +1430,10 @@ Each branch of a `parallel` block, and each iteration of a `parallel for`,
 is checked as if it ran at the same time as the others. A place that one
 branch changes, by assignment, `mut`, or `own`, must not overlap any place
 another branch uses, with disjointness obligations for indexes as above. A
-`parallel for` may change only its own element and its own locals.
+use of a view is a use of what it views, and a write through a slice is a
+change of what the slice views, so one branch cannot push to a list while
+another reads a slice of it. A `parallel for` may change only its own
+element and its own locals.
 
 ## Capabilities
 
