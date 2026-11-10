@@ -127,6 +127,11 @@ binding, each pattern's variants, and so on.
 - **An id means something only within its definition.** A result never
   names a node in another definition. It names the definition, by path, as
   every reference across definitions does.
+- **A generic parameter is named by what declares it and its name,** not by
+  a node. Resolution records a use of `Element` as the parameter `Element` of
+  `List.push`, or of the `impl` the method is in, which is the same pair a
+  type names it by. So a parameter means the same thing in every tree that
+  can see it, and nothing maps a node to it.
 - **Tables are dense arrays** indexed by id, kept like every other result. A
   node a stage says nothing about has an empty entry.
 

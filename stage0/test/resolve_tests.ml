@@ -127,8 +127,8 @@ let describe names base (target : Resolve.target option) =
   | None -> "nothing"
   | Some Binding -> "binding"
   | Some (Local id) -> Printf.sprintf "local at %d" (offset id)
-  | Some (Type_parameter id | Capability_parameter id | Value_parameter id) ->
-      Printf.sprintf "generic at %d" (offset id)
+  | Some (Type_parameter parameter | Capability_parameter parameter | Value_parameter parameter) ->
+      Printf.sprintf "generic %s of %s" parameter.name (Path.show parameter.owner)
   | Some (Definition (_, path)) -> Path.show path
   | Some (Variant (type_, name)) -> Printf.sprintf "variant %s of %s" name (Path.show type_)
   | Some (Module module_) -> "module " ^ Path.show_module module_

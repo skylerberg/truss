@@ -587,11 +587,11 @@ let rec static_ state (value : expression) : static_ option =
   | Self_type_value, _ -> Option.map (fun self -> Static_type self) state.context.self_type
   | _, Some { target = Definition (Type, path); type_arguments; _ } ->
       Some (Static_type (named_type state value path type_arguments))
-  | _, Some { target = Type_parameter id; name; type_arguments } ->
+  | _, Some { target = Type_parameter parameter; name; type_arguments } ->
       if Option.is_some type_arguments then
         report state Arity value.span
           (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." name.text);
-      Some (Static_type (T.Parameter (Lower.declared state.context id name)))
+      Some (Static_type (T.Parameter parameter))
   | _, Some { target = Definition (Trait, path); type_arguments; _ } ->
       Some (Static_trait (path, Option.map (written_arguments state) type_arguments))
   | _, Some { target = Definition (Capability, path); _ } -> Some (Static_capability path)
@@ -638,8 +638,7 @@ and written_arguments state items =
 and type_argument_of_expression state (value : expression) : T.argument =
   match (value.kind, head state value) with
   | Integer value, _ -> T.Value (Known value)
-  | _, Some { target = Value_parameter id; name; _ } ->
-      T.Value (Value_parameter (Lower.declared state.context id name))
+  | _, Some { target = Value_parameter parameter; _ } -> T.Value (Value_parameter parameter)
   | _, Some { target = Definition (Constant, path); name; _ } -> (
       match Query.demand state.database Interface.Constants.value_of path with
       | Some value -> T.Value (Known value)

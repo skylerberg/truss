@@ -14,10 +14,10 @@ type cost_function = Walk.cost_function = Log | Power | Time | Calls
 type target = Walk.target =
   | Binding  (** This name binds a local, a parameter, or a generic parameter. *)
   | Local of Syntax.id  (** A local or parameter, by the id of the name that binds it. *)
-  | Type_parameter of Syntax.id
-      (** A generic type parameter, by the id of the name that binds it. *)
-  | Capability_parameter of Syntax.id  (** A generic parameter declared [capability Name]. *)
-  | Value_parameter of Syntax.id  (** A [USize] generic parameter. *)
+  | Type_parameter of Types.parameter
+      (** A generic type parameter, by the definition that declares it and its name. *)
+  | Capability_parameter of Types.parameter  (** A generic parameter declared [capability Name]. *)
+  | Value_parameter of Types.parameter  (** A [USize] generic parameter. *)
   | Definition of Names.named * Path.t  (** A definition, and what kind of definition it is. *)
   | Variant of Path.t * string  (** A prelude variant written bare, such as [Some]. *)
   | Module of Path.module_
@@ -38,7 +38,7 @@ type bracket = Walk.bracket =
 (** A value a name in scope means. *)
 type value =
   | Value_local of Syntax.id  (** A local or parameter, by the id of the name that binds it. *)
-  | Value_generic of Syntax.id  (** A [USize] generic parameter, by the id of its name. *)
+  | Value_generic of Types.parameter  (** A [USize] generic parameter. *)
   | Value_field of string  (** A field, in a record's invariant or potential. *)
 
 type resolved = {

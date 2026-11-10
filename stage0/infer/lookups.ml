@@ -31,9 +31,8 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
       | None -> bug "the local `%s` has no type" text)
-  | Value_parameter id ->
-      state.tables.meanings.(value.id) <-
-        Some (Generic_value (Lower.declared state.context id name));
+  | Value_parameter parameter ->
+      state.tables.meanings.(value.id) <- Some (Generic_value parameter);
       T.builtin USize
   | Type_parameter _ | Capability_parameter _ ->
       error state Not_a_value value.span (Printf.sprintf "`%s` is a type, not a value." text)
