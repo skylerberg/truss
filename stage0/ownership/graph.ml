@@ -51,7 +51,9 @@ type action =
   | Ends of Core.local list
       (** These locals stop being bound: a loop's variables when the loop ends, an arm's names after
           the arm, and a lambda's parameters at the end of its body. *)
-  | Suspend  (** A [yield]. A loop may stop a yielding method here. *)
+  | Suspend of view list
+      (** A [yield]. A loop may stop a yielding method here. The views are what the yielded value
+          views, if its type can hold a view. *)
   | Exit  (** The function returns. *)
   | Hold of { holders : Core.local list; views : view list }
       (** A [let] binds names to a value that views these places, and whatever the roots of these
@@ -825,7 +827,11 @@ and statement_kind builder frontier (node : Core.statement) =
 
 and statement_parts builder frontier (node : Core.statement) =
   let frontier = statement_kind builder frontier node in
-  match node.kind with Yield _ -> emit builder frontier Suspend node.origin | _ -> frontier
+  match node.kind with
+  | Yield { part; _ } ->
+      let views = if builder.is_view (operand_type part) then viewed_operand builder part else [] in
+      emit builder frontier (Suspend views) node.origin
+  | _ -> frontier
 
 (* A [let]: its value, then what its names come to view. *)
 and let_ builder frontier (node : Core.statement) (pattern : Core.pattern) (value : Core.operand)
@@ -882,16 +888,22 @@ and loop builder frontier ~bound ~views ~held ~condition ~parallel (body : Core.
   | _ ->
       let head = add builder (Bind bound) origin in
       link builder frontier head;
+      (* Each step of a loop that is lent a place [mut] may change the place. *)
+      let stepped =
+        match held with
+        | Some { lent; mode = Mut; _ } -> emit builder [ head ] (Mutate lent) origin
+        | _ -> [ head ]
+      in
       let breaks = ref [] and continues = ref [] in
       builder.loops <- (breaks, continues) :: builder.loops;
       let loans = builder.loans in
       let tested =
         match condition with
         | Some condition ->
-            let tested = expression builder [ head ] condition in
+            let tested = expression builder stepped condition in
             builder.loans <- loans;
             tested
-        | None -> [ head ]
+        | None -> stepped
       in
       builder.loans <- Option.to_list held @ loans;
       let entered =
