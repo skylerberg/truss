@@ -40,24 +40,12 @@ let bind_local st (local : Core.local) place =
 
 (* Descriptions of the node kinds that are not handled yet. *)
 let expression_kind : Core.kind -> string = function
-  | Interpolated _ -> "an interpolated string"
-  | Template _ -> "a tagged string"
-  | Copy _ -> "a copy"
   | Function_value _ -> "a function as a value"
-  | Value_parameter _ -> "a generic value parameter"
   | Lambda _ -> "a lambda"
-  | Collection_literal _ | Map_literal _ -> "a collection literal"
-  | Record_update _ -> "a record update"
   | Slice _ -> "a slice"
   | Cursor_next _ -> "a cursor's next value"
   | Convert _ -> "a conversion"
   | _ -> "a specification-only expression"
-
-let statement_kind : Core.statement_kind -> string = function
-  | Parallel _ -> "a parallel block"
-  | Evaluate _ | Let _ | Assign _ | Compound_assign _ | Assert _ | For _ | While _ | Proof _
-  | Yield _ ->
-      "a statement"
 
 let binary : Core.comparison -> Lir.binary = function
   | Equal -> Equal
@@ -197,11 +185,81 @@ and into st (value : Core.expression) (destination : Lir.place) =
         List.map
           (fun (name, (field : Core.expression option)) ->
             match field with
-            | None -> unhandled "a field left to its default"
-            | Some field -> (name, owned st (value_place st field) (ground st field.type_)))
+            | Some field -> (name, owned st (value_place st field) (ground st field.type_))
+            | None ->
+                (* The default is written in the type's definition, so it is
+                   lowered in that definition's frame. *)
+                let default = field_default st ty ~variant ~field:name in
+                Calls.in_type_definition st ty (fun () ->
+                    (name, owned st (value_place st default) (ground st default.type_))))
           fields
       in
       assign (Build { ty; variant; fields })
+  | Interpolated { pieces; builder_new; builder_write; builder_finish } ->
+      (* Each piece is written to one text builder: a literal as it is, and
+         a value through its [Display]. *)
+      let builder = temporary st (result_type st builder_new) in
+      call_with_places st builder_new [] ~destination:builder;
+      let text_type = List.nth (parameter_types st builder_write) 1 in
+      let discarded callee = temporary st (result_type st callee) in
+      List.iter
+        (fun (piece : Core.piece) ->
+          match piece with
+          | Text "" -> ()
+          | Text text ->
+              let slice = temporary st text_type in
+              string_literal st text_type text ~destination:slice;
+              call_with_places st builder_write [ builder; slice ]
+                ~destination:(discarded builder_write)
+          | Displayed { value; display } ->
+              call_with_places st display
+                [ operand_place st value; builder ]
+                ~destination:(discarded display))
+        pieces;
+      call_with_places st builder_finish [ builder ] ~destination
+  | Template { call; _ } -> into st call destination
+  | Copy source ->
+      Glue.copy_into st.context.glue st.b ~destination ~source:(operand_place st source) ty
+  | Value_parameter parameter -> (
+      match
+        Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution
+          (Value (Value_parameter parameter))
+      with
+      | Value number -> assign (Use (constant_of st ty (Integer_value number)))
+      | _ -> bug "the value parameter %s is not a number" parameter.name)
+  | Collection_literal { elements; construction = Array } ->
+      List.iteri (fun index element -> into st element (destination / Index (usize index))) elements
+  | Collection_literal { elements; construction = By_insertion { empty; insert } } ->
+      call_with_places st empty [] ~destination;
+      List.iter
+        (fun element ->
+          call_with_places st insert
+            [ destination; value_place st element ]
+            ~destination:(temporary st (result_type st insert)))
+        elements
+  | Map_literal { entries; construction = By_insertion { empty; insert } } ->
+      call_with_places st empty [] ~destination;
+      List.iter
+        (fun (key, entry) ->
+          let key = value_place st key in
+          call_with_places st insert
+            [ destination; key; value_place st entry ]
+            ~destination:(temporary st (result_type st insert)))
+        entries
+  | Collection_literal { construction = Specification_only; _ } | Map_literal _ ->
+      bug "a specification's collection in code that runs"
+  | Record_update { base; updates } ->
+      into st base destination;
+      List.iter
+        (fun (path, (value : Core.expression)) ->
+          let target =
+            List.fold_left (fun place field -> place / Lir.Field field) destination path
+          in
+          let field_ty = ground st value.type_ in
+          let new_value = temporary st field_ty in
+          into st value new_value;
+          replace st target field_ty ~by:new_value)
+        updates
   | Call call -> call_into st value call destination
   | Operator { operation; arguments } ->
       ignore
@@ -405,6 +463,57 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
       end
   | None, _ -> unhandled "a call through a function value"
 
+(* The function or method that a callee resolves to, with its type
+   arguments, its signature, and the substitution for its generic
+   parameters. *)
+and resolved st (callee : Core.callee) =
+  match resolve_callee st callee with
+  | Some (path, type_arguments) ->
+      let signature = signature_of st.context path in
+      (path, type_arguments, signature, bind signature.generics type_arguments)
+  | None -> bug "a callee that is not a function or a method"
+
+(* The types of a callee's parameters, in order, a receiver first. *)
+and parameter_types st (callee : Core.callee) =
+  let _, _, signature, substitution = resolved st callee in
+  List.map
+    (fun (_, ty) -> Monomorphic.ground st.context.monomorphic substitution ty)
+    (interface_parameters signature)
+
+and result_type st (callee : Core.callee) =
+  let path, _, signature, substitution = resolved st callee in
+  match signature.output with
+  | Returns ty -> Monomorphic.ground st.context.monomorphic substitution ty
+  | Yields _ | Lends _ -> bug "%s does not return a value" (Path.show path)
+
+(* Calls a function or a method with arguments that are already in places,
+   one for each parameter in order. *)
+and call_with_places st (callee : Core.callee) (places : Lir.place list) ~destination =
+  let path, type_arguments, signature, substitution = resolved st callee in
+  let arguments =
+    List.map2
+      (fun (mode, ty) place ->
+        (mode, Monomorphic.ground st.context.monomorphic substitution ty, place))
+      (interface_parameters signature) places
+  in
+  call_instance st
+    (Code { path; type_arguments })
+    ~signature ~substitution ~arguments ~mask:0 ~destination
+
+(* The default of a field, from the core form of the type's definition. *)
+and field_default st (ty : Ground.ty) ~variant ~field : Core.expression =
+  let path =
+    match ty with Named { path; _ } -> path | _ -> bug "defaults of %s" (Ground.to_string ty)
+  in
+  match demand st.context Infer.core_of_path path with
+  | Some ({ definition = Type { defaults; _ }; _ }, _) -> (
+      match
+        List.find_opt (fun (of_variant, name, _) -> of_variant = variant && name = field) defaults
+      with
+      | Some (_, _, default) -> default
+      | None -> bug "%s has no default for %s" (Path.show path) field)
+  | _ -> bug "%s has no core form" (Path.show path)
+
 (* Lowers a call of an intrinsic. Returns the place it lends, for one that
    lends. *)
 and intrinsic st operation ~type_arguments (arguments : Core.argument list) ~destination ~site =
@@ -553,6 +662,9 @@ and statement st (node : Core.statement) =
       | Evaluate { kind = Use source; _ } -> ignore (place st source)
       | Evaluate value -> ignore (value_place st value)
       | Proof _ -> ()
+      | Parallel statements ->
+          (* Stage0 runs the statements of a [parallel] block in order. *)
+          List.iter (statement st) statements
       | Let { pattern = { kind = Bind { local; name; _ }; type_; _ }; value; else_ = None } -> (
           let ty = ground st type_ in
           match value with
@@ -733,8 +845,7 @@ and statement st (node : Core.statement) =
                   finish st.b (Goto exit)
               | None -> finish st.b Unreachable);
               start st.b resume
-          | None -> unhandled "a yield in a method that is not inlined")
-      | kind -> unhandled (statement_kind kind))
+          | None -> unhandled "a yield in a method that is not inlined"))
 
 (* Falls through where the value at a place matches a pattern, and goes to
    [failed] where it does not. Binds nothing and moves nothing. *)
@@ -752,21 +863,10 @@ and test_pattern st (pattern : Core.pattern) (place : Lir.place) ~failed =
   | Range { start = low; stop = high; inclusive } ->
       require (Binary (Greater_equal, Copy place, operand st low));
       require (Binary ((if inclusive then Less_equal else Less), Copy place, operand st high))
-  | Equal_to { value; equal } -> (
-      let ty = ground st pattern.type_ in
-      let other = value_place st value in
+  | Equal_to { value; equal } ->
       let result = temporary st st.context.bool in
-      match resolve_callee st equal with
-      | Some (path, type_arguments) ->
-          let signature = signature_of st.context path in
-          call_instance st
-            (Code { path; type_arguments })
-            ~signature
-            ~substitution:(bind signature.generics type_arguments)
-            ~arguments:[ (Read, ty, place); (Read, ty, other) ]
-            ~mask:0 ~destination:result;
-          require (Use (Copy result))
-      | None -> bug "a pattern compares with what is not a method")
+      call_with_places st equal [ place; value_place st value ] ~destination:result;
+      require (Use (Copy result))
   | Alternatives alternatives ->
       let matched = block st.b in
       let rec test = function

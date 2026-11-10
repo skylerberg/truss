@@ -95,6 +95,44 @@ let core_body st path : Core.block =
   | Some ({ definition = Function { body = Some body; _ }; _ }, _) -> body
   | _ -> bug "%s has no body in its core form" (Path.show path)
 
+(* Runs [f] with the current frame set to the definition of a named type,
+   with the type's generic parameters bound to the type's arguments. A
+   field's default is lowered there, because it is written in the type's
+   definition. *)
+let in_type_definition st (ty : Ground.ty) f =
+  let path, arguments =
+    match ty with
+    | Named { path; arguments } -> (path, arguments)
+    | _ -> bug "defaults of %s" (Ground.to_string ty)
+  in
+  let key = key_of st.context path in
+  let interface =
+    match demand st.context Environment.type_interface path with
+    | Some i -> i
+    | None -> bug "no interface for %s" (Path.show path)
+  in
+  let caller = st.frame in
+  st.frame <-
+    {
+      caller with
+      code =
+        {
+          caller.code with
+          definition_key = key;
+          anchor = path;
+          within = None;
+          text = text_of st.context key;
+          checked = checked_of st.context key;
+          substitution = bind interface.type_generics arguments;
+        };
+      bindings = Hashtbl.create 1;
+      synthetic = Hashtbl.create 1;
+      self_place = None;
+    };
+  let result = f () in
+  st.frame <- caller;
+  result
+
 (* The instance a call to a function or a trait method reaches. *)
 let rec resolve_callee st (call_ : C.call) =
   match call_.callee with
@@ -323,7 +361,13 @@ and inline_lending st path type_arguments ~source ~arguments ~call_site : Lir.pl
         :: scope.owned;
       start st.b goes_on
   | None -> ());
-  match !lent with Some place -> place | None -> bug "a lending method that lends nothing"
+  match !lent with
+  | Some place -> place
+  | None when Method_yields.count body = 0 ->
+      (* The method has no [yield], so it never returns, and the code after
+         the call never runs. The place is never read. *)
+      temporary st (yielded_type st path type_arguments)
+  | None -> bug "a lending method that lends nothing"
 
 and call st (e : S.expression) ~callee ~arguments destination =
   match st.frame.code.checked.calls.(e.id) with
@@ -626,56 +670,29 @@ and field_defaults st ty variant left_out =
           (List.find (fun (v : Memory_layout.variant_shape) -> v.name = name) variants).fields
       | _ -> []
     in
-    let caller = st.frame in
-    let type_args = match ty with Named { arguments; _ } -> arguments | _ -> [] in
-    let interface =
-      match demand st.context Environment.type_interface path with
-      | Some i -> i
-      | None -> bug "no interface for %s" (Path.show path)
-    in
-    let code =
-      {
-        caller.code with
-        definition_key = key;
-        anchor = path;
-        within = None;
-        text = text_of st.context key;
-        checked = checked_of st.context key;
-        substitution = bind interface.type_generics type_args;
-      }
-    in
-    st.frame <-
-      {
-        caller with
-        code;
-        bindings = Hashtbl.create 1;
-        synthetic = Hashtbl.create 1;
-        self_place = None;
-      };
-    let values =
-      List.map
-        (fun name ->
-          let default =
-            List.find_map
-              (fun (field : S.field) ->
-                match field.kind with
-                | Field_declaration { name = n; default = Some d; _ } when n.text = name -> Some d
-                | _ -> None)
-              declared
-          in
-          let field_ty =
-            match List.assoc_opt name shape with Some (Typed t) -> t | _ -> bug "no field %s" name
-          in
-          match default with
-          | Some d ->
-              let value = temporary st field_ty in
-              into st d value;
-              (name, owned st value field_ty)
-          | None -> bug "no default for %s" name)
-        left_out
-    in
-    st.frame <- caller;
-    values
+    in_type_definition st ty (fun () ->
+        List.map
+          (fun name ->
+            let default =
+              List.find_map
+                (fun (field : S.field) ->
+                  match field.kind with
+                  | Field_declaration { name = n; default = Some d; _ } when n.text = name -> Some d
+                  | _ -> None)
+                declared
+            in
+            let field_ty =
+              match List.assoc_opt name shape with
+              | Some (Typed t) -> t
+              | _ -> bug "no field %s" name
+            in
+            match default with
+            | Some d ->
+                let value = temporary st field_ty in
+                into st d value;
+                (name, owned st value field_ty)
+            | None -> bug "no default for %s" name)
+          left_out)
 
 (* A call through a function value: its code, given its environment first,
    then the arguments by position. *)

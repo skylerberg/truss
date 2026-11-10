@@ -301,6 +301,15 @@ let string_literal st (ty : Ground.ty) text ~(destination : Lir.place) =
       build field (Copy bytes)
   | _ -> bug "a string literal of type %s" (Ground.to_string ty)
 
+(* The type that a lending or yielding method gives at its [yield], for the
+   method's type arguments. *)
+let yielded_type st path type_arguments =
+  let signature = signature_of st.context path in
+  match signature.output with
+  | Yields (_, ty) | Lends (_, ty) ->
+      Monomorphic.ground st.context.monomorphic (bind signature.generics type_arguments) ty
+  | Returns _ -> bug "%s does not yield" (Path.show path)
+
 (* What a yielding method yields, in an instance. *)
 let cursor_element context (yielding : Ground.yielding) =
   let signature = signature_of context yielding.method_ in
