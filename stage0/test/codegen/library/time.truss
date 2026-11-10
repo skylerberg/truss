@@ -14,3 +14,153 @@ test "an instant is made from seconds and milliseconds, unless they do not fit" 
   assert time::Instant.from_unix_milliseconds(3) is Some(late) && late.unix_nanoseconds() == 3000000
   assert time::Instant.from_unix_seconds(9223372036854775807) is None
 }
+
+fn date(year: Int32, month: UInt8, day: UInt8) -> time::Date {
+  match time::Date.new(year, month: month, day: day) {
+    Some(found) => found
+    None => date(1970, month: 1, day: 1)
+  }
+}
+
+test "durations are made from each unit and taken apart again" {
+  assert time::Duration.seconds(90).total_nanoseconds() == 90000000000
+  assert time::Duration.minutes(2).total_seconds() == 120
+  assert time::Duration.hours(1).total_milliseconds() == 3600000
+  assert time::Duration.days(1).total_seconds() == 86400
+  assert time::Duration.milliseconds(1500).subsecond_nanoseconds() == 500000000
+  assert time::Duration.milliseconds(-1500).subsecond_nanoseconds() == -500000000
+  assert time::Duration.microseconds(7).total_nanoseconds() == 7000
+}
+
+test "duration arithmetic is checked, or stops at the ends" {
+  let second = time::Duration.seconds(1)
+  assert time::Duration.maximum.checked_add(second) is None
+  assert second.checked_add(second) == Some(time::Duration.seconds(2))
+  assert time::Duration.minimum.checked_subtract(second) is None
+  assert second.checked_multiply(3) == Some(time::Duration.seconds(3))
+  assert time::Duration.maximum.checked_multiply(2) is None
+  assert time::Duration.seconds(-5).absolute() == time::Duration.seconds(5)
+  assert time::Duration.minimum.absolute() == time::Duration.maximum
+  assert -second == time::Duration.seconds(-1)
+  assert -time::Duration.minimum == time::Duration.maximum
+  assert second / 4 == Some(time::Duration.milliseconds(250))
+  assert second / 0 == None
+}
+
+test "an instant moves by a duration unless it would leave its range" {
+  let start = time::Instant.from_unix_nanoseconds(1000)
+  assert start.checked_add(time::Duration.nanoseconds(5)) == Some(time::Instant.from_unix_nanoseconds(1005))
+  assert start.checked_subtract(time::Duration.nanoseconds(2000)) == Some(time::Instant.from_unix_nanoseconds(-1000))
+  assert start.checked_add(time::Duration.maximum) is None
+}
+
+test "months and weekdays have numbers, lengths, and names" {
+  assert time::Month.January.number() == 1
+  assert time::Month.December.number() == 12
+  assert time::Month.from_number(2) == Some(time::Month.February)
+  assert time::Month.from_number(0) is None
+  assert time::Month.from_number(13) is None
+  assert time::Month.February.days(false) == 28
+  assert time::Month.February.days(true) == 29
+  assert time::Month.April.days(false) == 30
+  assert time::Month.December.days(true) == 31
+  assert "${time::Month.September}" == "September"
+  assert time::Weekday.Monday.number_from_monday() == 1
+  assert time::Weekday.Sunday.number_from_monday() == 7
+  assert "${time::Weekday.Wednesday}" == "Wednesday"
+}
+
+test "a time of day is made from its fields and gives them back" {
+  assert time::TimeOfDay.new(23, minute: 59, second: 58, nanosecond: 999999999) is Some(late) && late.hour() == 23
+    && late.minute() == 59 && late.second() == 58 && late.nanosecond() == 999999999
+  assert time::TimeOfDay.new(0, minute: 0) == Some(time::TimeOfDay.midnight)
+  assert time::TimeOfDay.new(12, minute: 0) == Some(time::TimeOfDay.noon)
+  assert time::TimeOfDay.new(24, minute: 0) is None
+  assert time::TimeOfDay.new(0, minute: 60) is None
+  assert time::TimeOfDay.new(0, minute: 0, second: 60) is None
+  assert time::TimeOfDay.new(0, minute: 0, second: 0, nanosecond: 1000000000) is None
+}
+
+test "a date is made only from a day that exists" {
+  assert time::Date.new(2024, month: 2, day: 29) is Some(_)
+  assert time::Date.new(2023, month: 2, day: 29) is None
+  assert time::Date.new(2000, month: 2, day: 29) is Some(_)
+  assert time::Date.new(1900, month: 2, day: 29) is None
+  assert time::Date.new(0, month: 2, day: 29) is Some(_)
+  assert time::Date.new(2024, month: 4, day: 31) is None
+  assert time::Date.new(2024, month: 13, day: 1) is None
+  assert time::Date.new(2024, month: 0, day: 1) is None
+  assert time::Date.new(2024, month: 1, day: 0) is None
+  assert time::Date.new(5881580, month: 7, day: 11) is Some(_)
+  assert time::Date.new(5881580, month: 7, day: 12) is None
+  assert time::Date.new(-5877641, month: 6, day: 23) is Some(_)
+  assert time::Date.new(-5877641, month: 6, day: 22) is None
+  assert time::Date.from_day_of_year(2024, day_of_year: 366) == time::Date.new(2024, month: 12, day: 31)
+  assert time::Date.from_day_of_year(2023, day_of_year: 366) is None
+  assert time::Date.from_day_of_year(2023, day_of_year: 60) == time::Date.new(2023, month: 3, day: 1)
+}
+
+test "a date gives its year, month, day, weekday, and day of the year" {
+  let epoch = date(1970, month: 1, day: 1)
+  assert epoch.year() == 1970
+  assert epoch.month() == time::Month.January
+  assert epoch.day() == 1
+  assert epoch.weekday() == time::Weekday.Thursday
+  assert epoch.day_of_year() == 1
+  let leap_day = date(2024, month: 2, day: 29)
+  assert leap_day.weekday() == time::Weekday.Thursday
+  assert leap_day.day_of_year() == 60
+  assert date(2024, month: 12, day: 31).day_of_year() == 366
+  assert date(2023, month: 12, day: 31).day_of_year() == 365
+  assert date(2000, month: 1, day: 1).weekday() == time::Weekday.Saturday
+  assert date(1969, month: 12, day: 31).weekday() == time::Weekday.Wednesday
+  let old = date(-44, month: 3, day: 15)
+  assert old.year() == -44
+  assert old.month() == time::Month.March
+  assert old.day() == 15
+}
+
+test "the week of the year follows ISO 8601 at the ends of a year" {
+  assert date(2021, month: 1, day: 3).week_of_year() == 53
+  assert date(2021, month: 1, day: 4).week_of_year() == 1
+  assert date(2020, month: 12, day: 31).week_of_year() == 53
+  assert date(2019, month: 12, day: 30).week_of_year() == 1
+  assert date(2024, month: 12, day: 30).week_of_year() == 1
+  assert date(2015, month: 12, day: 31).week_of_year() == 53
+  assert date(2024, month: 6, day: 15).week_of_year() == 24
+  assert date(2023, month: 1, day: 1).week_of_year() == 52
+}
+
+test "dates move by days, months, and years" {
+  let epoch = date(1970, month: 1, day: 1)
+  assert epoch.plus_days(10957) == Some(date(2000, month: 1, day: 1))
+  assert epoch.days_until(date(2000, month: 1, day: 1)) == 10957
+  assert date(2000, month: 1, day: 1).days_until(epoch) == -10957
+  assert epoch.plus_days(-1) == Some(date(1969, month: 12, day: 31))
+  assert date(2024, month: 1, day: 31).plus_months(1) == Some(date(2024, month: 2, day: 29))
+  assert date(2024, month: 1, day: 31).plus_months(13) == Some(date(2025, month: 2, day: 28))
+  assert date(2024, month: 3, day: 31).plus_months(-1) == Some(date(2024, month: 2, day: 29))
+  assert date(2024, month: 11, day: 15).plus_months(3) == Some(date(2025, month: 2, day: 15))
+  assert date(2024, month: 2, day: 29).plus_years(1) == Some(date(2025, month: 2, day: 28))
+  assert date(2024, month: 2, day: 29).plus_years(4) == Some(date(2028, month: 2, day: 29))
+  assert date(-1, month: 12, day: 31).plus_days(1) == Some(date(0, month: 1, day: 1))
+  assert date(5881580, month: 7, day: 11).plus_days(1) is None
+  assert epoch.plus_years(2000000000) is None
+}
+
+test "a date is displayed as year, month, and day" {
+  assert "${date(2024, month: 3, day: 9)}" == "2024-03-09"
+  assert "${date(44, month: 12, day: 25)}" == "0044-12-25"
+  assert "${date(-44, month: 3, day: 15)}" == "-0044-03-15"
+  assert "${date(12345, month: 1, day: 1)}" == "12345-01-01"
+}
+
+test "taking a date apart and making it again gives the same date" {
+  let epoch = date(1970, month: 1, day: 1)
+  var days: Int32 = -800000
+  while days < 800000 {
+    assert epoch.plus_days(days) is Some(day) && time::Date.new(day.year(), month: day.month().number(), day: day.day())
+      == Some(day)
+    days += 7919
+  }
+}
