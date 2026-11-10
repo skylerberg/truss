@@ -98,24 +98,7 @@ public fn List[Element].partition_point(self, before: (fn(Element) -> Bool cost 
   ensures forall i in result..self.length() => !before(self.model()[i])
   cost time O(log(self.length()) * time(before))
 {
-  var low: USize = 0
-  var high = self.length()
-  while low < high
-    invariant low <= high
-    invariant high <= self.length()
-    invariant forall i in 0..low => before(self.model()[i])
-    invariant forall i in high..self.length() => !before(self.model()[i])
-    decreases high - low
-    cost time O((log(self.length()) - log(high - low)) * time(before))
-  {
-    let middle = low + (high - low) / 2
-    if before(self[middle]) {
-      low = middle + 1
-    } else {
-      high = middle
-    }
-  }
-  low
+  self.slice().partition_point(before)
 }
 
 public fn List[Element].slice(self) -> Slice[Element]

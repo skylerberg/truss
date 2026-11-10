@@ -137,10 +137,14 @@ public fn Array[Element: Ordered, count: USize].binary_search(self, target: Elem
 }
 
 public fn Array[Element, count: USize].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> USize
+  requires forall i in 0..self.length() => forall j in i..self.length() =>
+    before(self.model()[j]) ==> before(self.model()[i])
   ensures result <= self.length()
+  ensures forall i in 0..result => before(self.model()[i])
+  ensures forall i in result..self.length() => !before(self.model()[i])
   cost time O(log(self.length()) * time(before))
 {
-  todo
+  self.slice().partition_point(before)
 }
 
 public fn Array[Element: Ordered, count: USize].minimum(self) lends Option[Element]
@@ -156,17 +160,18 @@ public fn Array[Element: Ordered, count: USize].maximum(self) lends Option[Eleme
 }
 
 public fn Array[Element: Copyable, count: USize].to_list(self) -> List[Element]
-  ensures result.length() == self.length()
-  cost time O(self.length())
+  ensures identical(result.model(), self.model())
+  cost time O(self.length() * time(Element.copy))
 {
-  todo
+  self.slice().to_list()
 }
 
 public fn Array[Element: Copyable, count: USize].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
   ensures result.length() <= self.length()
-  cost time O(self.length() * time(keep))
+  ensures forall i in 0..result.length() => keep(result.model()[i])
+  cost time O(self.length() * (time(keep) + time(Element.copy)))
 {
-  todo
+  self.slice().filter(keep)
 }
 
 public fn Array[Element: Ordered + Copyable, count: USize].sorted(self) -> List[Element]

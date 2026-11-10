@@ -131,8 +131,10 @@ public fn Array[Element, count: USize].map_each[Output, capability Granted](
 }
 
 impl Equal for Array[Element: Equal, count: USize] {
-  fn equal(self, other: Array[Element, count]) -> Bool {
-    todo
+  fn equal(self, other: Array[Element, count]) -> Bool
+    ensures result == (forall i in 0..count => self.model()[i] == other.model()[i])
+  {
+    self.slice() == other.slice()
   }
 }
 
@@ -143,13 +145,15 @@ impl Ordered for Array[Element: Ordered, count: USize] {
 }
 
 impl Hash for Array[Element: Hash, count: USize] {
-  fn hash(self, hasher: mut Hasher) {
-    todo
+  fn hash(self, hasher: mut Hasher)
+  {
+    self.slice().hash(mut hasher)
   }
 }
 
 impl Display for Array[Element: Display, count: USize] {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    self.slice().display(mut output)
   }
 }
