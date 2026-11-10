@@ -127,6 +127,18 @@ internal fn open_with(file: Path, flags: Int32) -> Result[streams::Handle, Syste
   Ok(streams::Handle(descriptor: own descriptor, number: 0))
 }
 
+internal fn duplicate(descriptor: Int32) -> streams::Handle {
+  let copy = intrinsic::libc_fcntl_dupfd_cloexec(descriptor, least: 3)
+  streams::Handle(descriptor: intrinsic::handle_from(copy), number: 0)
+}
+
+internal fn controlling_terminal() -> streams::Handle {
+  match calls::open_file("/dev/tty".slice().bytes, flags: intrinsic::libc_o_rdwr()) {
+    Ok(descriptor) => streams::Handle(descriptor: own descriptor, number: 0)
+    Err(_) => streams::Handle(descriptor: intrinsic::handle_from(-1), number: 0)
+  }
+}
+
 internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[Value, SystemError]
   ensures !(result is Ok(kept) && outcome is Ok(given) && !identical(kept, given))
   ensures (result is Ok(_)) == (outcome is Ok(_))

@@ -78,6 +78,7 @@ type number =
   | At_fdcwd
   | Utime_omit
   | Path_max
+  | F_dupfd_cloexec
 
 (** How many elements a function reads or writes through an address it is given. The prover holds
     every call to it: a view has that many elements, and storage has room for that many. *)
@@ -107,6 +108,9 @@ type passes =
           numbers then go to [mut] arguments of these names, one each *)
   | Always of int
       (** A number that is no argument of the Truss call: the function always gets it *)
+  | Fixed of number
+      (** A number of the system that is no argument of the Truss call, such as the request that a
+          row of [fcntl] is for *)
   | Environment
       (** The environment the process was started with, which is no argument of the Truss call *)
 
@@ -178,6 +182,7 @@ type function_ =
   | Gethostname
   | Getpid
   | Proc_pidpath  (** Only macOS has it *)
+  | Fcntl_dupfd_cloexec  (** [fcntl] with the request [F_DUPFD_CLOEXEC] *)
 
 val functions : function_ list
 

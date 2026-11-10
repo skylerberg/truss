@@ -501,6 +501,43 @@ fn main(arguments: List[String]) -> ExitCode
         output)
 
 let () =
+  test "a program's log records go to standard error, one line each" (fun () ->
+      let status, output, errors =
+        run_main
+          {|use standard::log
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Log
+{
+  log::debug("left out")
+  log::information(
+    "started",
+    fields: [
+      log::Field.integer("port", value: 8080),
+      log::Field.string("host", value: "a \"quoted\" name\n"),
+      log::Field.bool("ready", value: true),
+      log::Field.float("load", value: 0.5),
+      log::Field.duration("took", value: Duration.nanoseconds(1500)),
+    ],
+  )
+  log::error("stopped")
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"" output;
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               {|level=information message="started" port=8080 host="a \"quoted\" name\n" ready=true load=0.5 took=1500ns|};
+               {|level=error message="stopped"|};
+               "";
+             ])
+        errors)
+
+let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"
     (fun () ->
       let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in

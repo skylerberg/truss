@@ -1,13 +1,61 @@
+use standard::intrinsic
 use standard::log
+use standard::system::calls
 
 internal type SystemLog()
 
 impl Log for SystemLog {
   fn record(self, record: log::Record) {
-    todo
+    var line = TextBuilder.new()
+    mut line.write("level=")
+    match record.level {
+      Debug => mut line.write("debug")
+      Information => mut line.write("information")
+      Warning => mut line.write("warning")
+      Error => mut line.write("error")
+    }
+    mut line.write(" message=")
+    quoted(mut line, text: record.message.slice())
+    for field in record.fields {
+      mut line.write(" ")
+      mut line.write(field.name.slice())
+      mut line.write("=")
+      match field.value {
+        String(value) => quoted(mut line, text: value.slice())
+        Integer(value) => mut line.write_signed(value)
+        Float(value) => mut line.write_float64(value)
+        Bool(value) => if value { mut line.write("true") } else { mut line.write("false") }
+        Duration(value) => {
+          mut line.write_signed(value.total_nanoseconds())
+          mut line.write("ns")
+        }
+        Instant(value) => mut line.write_signed(value.unix_nanoseconds())
+      }
+    }
+    mut line.write("\n")
+    let text = own line.finish()
+    let _ = calls::write_fully(2, bytes: text.slice().bytes)
   }
 
   fn enabled(self, level: log::Level) -> Bool {
     level >= log::Level.Information
   }
+}
+
+fn quoted(line: mut TextBuilder, text: StringSlice) {
+  mut line.write_byte(34)
+  let bytes = text.bytes
+  for index in 0..intrinsic::view_length(bytes) {
+    let byte = intrinsic::view_at(bytes, index: index)
+    if byte == 34 || byte == 92 {
+      mut line.write_byte(92)
+      mut line.write_byte(byte)
+    } else if byte == 10 {
+      mut line.write_byte(92)
+      mut line.write_byte(110)
+    } else {
+      mut line.write_byte(byte)
+    }
+  }
+  mut line.write_byte(34)
 }
