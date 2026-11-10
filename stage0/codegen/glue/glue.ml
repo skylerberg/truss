@@ -114,23 +114,16 @@ let drop t ty =
   | _, Storage element ->
       if not (trivial t element) then
         loop t b
-          ~count:(Copy (value / Field "length"))
-          (fun index -> emit b (Drop (value / Field "buffer" / Index (Copy (at index)))));
-      let owned = local b (Raw Bool) in
-      let free = block b in
-      let after = block b in
-      emit b (Assign (at owned, Binary (Not_equal, Copy (value / Field "capacity"), usize 0)));
-      finish b (Switch { value = Copy (at owned); cases = [ (Z.one, free) ]; default = Some after });
-      start b free;
-      emit b
-        (Call
-           {
-             target = Intrinsic Free;
-             arguments = [ Copy (value / Field "buffer") ];
-             result = Discarded;
-           });
-      finish b (Goto after);
-      start b after
+          ~count:(Copy (Storage.length value))
+          (fun index -> emit b (Drop (Storage.at value (Copy (at index)))));
+      when_ b (Storage.owns_buffer b value) (fun () ->
+          emit b
+            (Call
+               {
+                 target = Intrinsic Free;
+                 arguments = [ Copy (Storage.buffer value) ];
+                 result = Discarded;
+               }))
   | _, Shape (Record fields) ->
       List.iter
         (fun (name, member) -> if droppable t member then emit b (Drop (value / Field name)))
@@ -247,35 +240,29 @@ let copy t ty =
      match t.kind_of ty with
      | Handle -> bug "a copy of a handle, which is not Copyable"
      | Storage element ->
+         (* A storage that owns no buffer, empty or static, is shared. One
+            that owns a buffer is never shared, or two would free it: with
+            no elements its copy is empty, and otherwise its copy gets a
+            buffer of exactly its length. *)
          let layout = Memory_layout.of_type t.env element in
-         let shared = local b (Raw Bool) in
-         let empty = local b (Raw Bool) in
-         let share = block b in
-         let check = block b in
-         let allocate = block b in
-         let after = block b in
-         (* Static bytes, an empty buffer, and elements of zero size are
-            shared, not copied. *)
-         emit b (Assign (at shared, Binary (Equal, Copy (self / Field "capacity"), usize 0)));
-         finish b
-           (Switch { value = Copy (at shared); cases = [ (Z.one, share) ]; default = Some check });
-         start b check;
-         emit b (Assign (at empty, Binary (Equal, Copy (self / Field "length"), usize 0)));
-         finish b
-           (Switch
-              {
-                value = Copy (at empty);
-                cases = [ (Z.one, share) ];
-                default = Some (if layout.size = 0 then share else allocate);
-              });
+         let share = block b and owning = block b and hollow = block b in
+         let allocate = block b and after = block b in
+         let owns = Storage.owns_buffer b self in
+         finish b (Switch { value = owns; cases = [ (Z.one, owning) ]; default = Some share });
          start b share;
          emit b (Assign (result, Use (Copy self)));
+         finish b (Goto after);
+         start b owning;
+         let empty = Storage.is_empty b self in
+         finish b (Switch { value = empty; cases = [ (Z.one, hollow) ]; default = Some allocate });
+         start b hollow;
+         emit b (Assign (result, Storage.empty ty));
          finish b (Goto after);
          start b allocate;
          let bytes = local b (Value t.usize) in
          let buffer = local b ~name:"buffer" (Raw (Pointer (Data element))) in
          emit b
-           (Assign (at bytes, Binary (Multiply, Copy (self / Field "length"), usize layout.size)));
+           (Assign (at bytes, Binary (Multiply, Copy (Storage.length self), usize layout.size)));
          emit b
            (Call
               {
@@ -288,31 +275,24 @@ let copy t ty =
              (Call
                 {
                   target = Intrinsic Copy_bytes;
-                  arguments = [ Copy (at buffer); Copy (self / Field "buffer"); Copy (at bytes) ];
+                  arguments = [ Copy (at buffer); Copy (Storage.buffer self); Copy (at bytes) ];
                   result = Discarded;
                 })
          else
            loop t b
-             ~count:(Copy (self / Field "length"))
+             ~count:(Copy (Storage.length self))
              (fun index ->
                copy_into t b
                  ~destination:(at buffer / Index (Copy (at index)))
-                 ~source:(self / Field "buffer" / Index (Copy (at index)))
+                 ~source:(Storage.at self (Copy (at index)))
                  element);
          emit b
            (Assign
               ( result,
-                Build
-                  {
-                    ty;
-                    variant = None;
-                    fields =
-                      [
-                        ("buffer", Copy (at buffer));
-                        ("length", Copy (self / Field "length"));
-                        ("capacity", Copy (self / Field "length"));
-                      ];
-                  } ));
+                Storage.owning ty
+                  ~buffer:(Copy (at buffer))
+                  ~length:(Copy (Storage.length self))
+                  ~capacity:(Copy (Storage.length self)) ));
          finish b (Goto after);
          start b after
      | Shape (Record fields) ->
@@ -430,23 +410,21 @@ let debug t ty =
         debug_call t b element (element_at (Lir.Copy (at index))));
     text b "]"
   and storage_or_view field_ty (place : Lir.place) ~as_text =
-    let element, buffer =
-      match t.kind_of field_ty with
-      | Storage element -> (element, place / Field "buffer")
-      | Shape (Record [ ("elements", Raw (Pointer (Data element))); _ ]) ->
-          (element, place / Field "elements")
-      | _ -> bug "%s is not storage or a view" (Ground.to_string field_ty)
+    let element, buffer, count =
+      match (Storage.elements_of field_ty, Storage.viewed field_ty) with
+      | Some element, _ -> (element, Storage.buffer place, Storage.length place)
+      | None, Some element -> (element, Storage.view_elements place, Storage.view_length place)
+      | None, None -> bug "%s is not storage or a view" (Ground.to_string field_ty)
     in
     if as_text then
       emit b
         (Call
            {
              target = Intrinsic Debug_string;
-             arguments = [ Copy buffer; Copy (place / Field "length") ];
+             arguments = [ Copy buffer; Copy count ];
              result = Discarded;
            })
-    else
-      list_of element ~element_at:(fun i -> buffer / Index i) ~count:(Copy (place / Field "length"))
+    else list_of element ~element_at:(fun i -> buffer / Index i) ~count:(Copy count)
   and fields_debug name (fields : (string * Memory_layout.member) list) field_place =
     text b name;
     match fields with
@@ -472,9 +450,7 @@ let debug t ty =
       storage_or_view field_ty (value / Field field) ~as_text:(t.debug_form ty = Text)
   | _, Handle -> text b "Handle"
   | _, Storage element ->
-      list_of element
-        ~element_at:(fun i -> value / Field "buffer" / Index i)
-        ~count:(Copy (value / Field "length"))
+      list_of element ~element_at:(Storage.at value) ~count:(Copy (Storage.length value))
   | _, Shape shape -> (
       match (ty, shape) with
       | Never, _ -> ()
@@ -562,10 +538,10 @@ let encode t ty =
      match t.kind_of ty with
      | Handle -> bug "a handle cannot be worked out while compiling"
      | Storage element ->
-         bytes (value / Field "length") (Memory_layout.of_type t.env t.usize).size;
+         bytes (Storage.length value) (Memory_layout.of_type t.env t.usize).size;
          loop t b
-           ~count:(Copy (value / Field "length"))
-           (fun index -> encode_call t b element (value / Field "buffer" / Index (Copy (at index))))
+           ~count:(Copy (Storage.length value))
+           (fun index -> encode_call t b element (Storage.at value (Copy (at index))))
      | Shape (Scalar _) -> bytes value (Memory_layout.of_type t.env ty).size
      | Shape (Record members) -> fields value None members
      | Shape (Array (element, count)) ->

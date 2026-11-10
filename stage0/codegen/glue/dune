@@ -1,6 +1,7 @@
 (library
  (name glue)
  (libraries
+  storage
   compiler_bug
   lir_builder
   ground

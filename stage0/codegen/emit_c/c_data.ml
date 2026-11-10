@@ -63,7 +63,8 @@ let rec initializer_c context ty (value : Lir.static_value) : string option =
         end
       in
       Some
-        (Printf.sprintf "{ .f_buffer = %s, .f_length = %d, .f_capacity = %d }" buffer count
+        (Printf.sprintf "{ .f_%s = %s, .f_%s = %d, .f_%s = %d }" Storage.buffer_field buffer
+           Storage.length_field count Storage.capacity_field
            (if owned then count else 0))
   | Scalar _, Static_scalar constant -> Some (fst (constant_c context constant))
   | Struct fields, Static_record values -> Some ("{ " ^ fields_c fields values "" ^ " }")

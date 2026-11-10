@@ -1,6 +1,7 @@
 (library
  (name emit_c)
  (libraries
+  storage
   compiler_bug
   path
   ground

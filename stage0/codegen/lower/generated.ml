@@ -228,15 +228,7 @@ let program_main context (key : Instance.key) main_path : Lir.t =
       emit b
         (Assign
            ( text / Field field,
-             Build
-               {
-                 ty = storage;
-                 variant = None;
-                 fields =
-                   [
-                     ("buffer", Copy (at bytes)); ("length", Copy (at length)); ("capacity", usize 0);
-                   ];
-               } ))
+             Storage.static storage ~elements:(Copy (at bytes)) ~length:(Copy (at length)) ))
   | _ -> bug "a String that is not storage");
   lower Storage_push [ string_ty ] [ Place (list / Field storage_field); Value (Move text) ] None;
   emit b (Assign (at index, Binary (Add, Copy (at index), Constant (Integer (Int32, Z.one)))));
