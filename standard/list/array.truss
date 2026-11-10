@@ -90,17 +90,37 @@ impl Iterable for Array[Element, count: USize] {
   type Element = Element
 
   fn each(self) yields Element
+    ensures identical(result, self.model()[yielded.length()])
+    ensures yielded.length() <= count
+    ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
     ensures finished ==> yielded.length() == count
+    ensures finished ==> identical(yielded, self.model())
     cost time O(count)
   {
-    todo
+    var index: USize = 0
+    while index < count
+      invariant index <= count
+      invariant yielded.length() == index
+      invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+      decreases count - index
+    {
+      yield self[index]
+      index += 1
+    }
   }
 }
 
 public fn Array[Element, count: USize].each(mut self) yields mut Element
   cost time O(count)
 {
-  todo
+  var index: USize = 0
+  while index < count
+    invariant index <= count
+    decreases count - index
+  {
+    yield mut self[index]
+    index += 1
+  }
 }
 
 public fn Array[Element, count: USize].each(own self) yields own Element

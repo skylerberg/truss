@@ -1,0 +1,80 @@
+fn same_items(found: Slice[Int64], expected: Slice[Int64]) -> Bool {
+  if found.length() != expected.length() {
+    return false
+  }
+  for index in 0..found.length() {
+    if found[index] != expected[index] {
+      return false
+    }
+  }
+  true
+}
+
+test "a loop goes over an array's elements in order, and can change them" {
+  let fixed: Array[Int64, 4] = [1, 2, 3, 4]
+  var total = 0
+  var last = 0
+  for item in fixed {
+    total += item
+    last = item
+  }
+  assert total == 10
+  assert last == 4
+  var changed: Array[Int64, 3] = [1, 2, 3]
+  for item in mut changed {
+    item = item * 10
+  }
+  assert same_items(changed[..], expected: [10, 20, 30])
+  let words: Array[String, 2] = ["a${1}", "bb${2}"]
+  var lengths: USize = 0
+  for word in words {
+    lengths += word.length()
+  }
+  assert lengths == 5
+}
+
+test "an array is swapped, reversed, and rotated in place" {
+  var fixed: Array[Int64, 5] = [1, 2, 3, 4, 5]
+  mut fixed.swap(0, second: 4)
+  assert same_items(fixed[..], expected: [5, 2, 3, 4, 1])
+  mut fixed.reverse()
+  assert same_items(fixed[..], expected: [1, 4, 3, 2, 5])
+  mut fixed.rotate_left(2)
+  assert same_items(fixed[..], expected: [3, 2, 5, 1, 4])
+  mut fixed.rotate_right(1)
+  assert same_items(fixed[..], expected: [4, 3, 2, 5, 1])
+}
+
+test "fill, copy_from, and update_each replace an array's elements" {
+  var fixed: Array[Int64, 3] = [1, 2, 3]
+  mut fixed.fill(7)
+  assert same_items(fixed[..], expected: [7, 7, 7])
+  let source: List[Int64] = [4, 5, 6]
+  mut fixed.copy_from(source)
+  assert same_items(fixed[..], expected: [4, 5, 6])
+  mut fixed.update_each(fn(item) { item = item - 4 })
+  assert same_items(fixed[..], expected: [0, 1, 2])
+}
+
+test "an array lends its elements to change with their indexes, in pairs, and back to front" {
+  var fixed: Array[Int64, 3] = [10, 20, 30]
+  for entry in mut fixed.enumerate() {
+    if entry.index == 2 {
+      entry.element = 0
+    }
+  }
+  assert same_items(fixed[..], expected: [10, 20, 0])
+  var other: List[Int64] = [1, 2, 3]
+  for pair in mut fixed.zip(mut other[..]) {
+    pair.first = pair.first + pair.second
+    pair.second = 0
+  }
+  assert same_items(fixed[..], expected: [11, 22, 3])
+  assert same_items(other, expected: [0, 0, 0])
+  var next = 1
+  for item in mut fixed.reversed() {
+    item = next
+    next += 1
+  }
+  assert same_items(fixed[..], expected: [3, 2, 1])
+}
