@@ -50,12 +50,15 @@ type context = Definitions.context = {
   bool : Ground.ty;
   cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
   checks : bool;
-  evaluate : (Path.t -> Ground.ty -> Lir.static_value) ref;
+  constant : (Path.t -> Lir.static_value option) ref;
 }
 
 let context = Definitions.context
 let test_key = Definitions.test_key
 let cursor_result = Targets.cursor_result
+
+type constant = Constants.constant = Folded of Lir.data | Run of Ground.ty
+
 let constant = Constants.constant
 let evaluator = Constants.evaluator
 let table = Generated.table

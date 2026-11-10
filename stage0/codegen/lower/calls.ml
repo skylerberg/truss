@@ -130,7 +130,7 @@ and evaluate_arguments ?(evaluated = []) st ~(expressions : S.expression list)
     let ty = type_of st e.id in
     let moved place =
       let taken = temporary st ty in
-      emit st.b (Assign (taken, Use (owned st place ty)));
+      take st place ty ~destination:taken;
       taken
     in
     let place =

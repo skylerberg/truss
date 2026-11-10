@@ -10,37 +10,118 @@ open Lir_builder
 
 (* Constants *)
 
-(* Wraps an integer to a type's width, as a shift may need. *)
-let wrap st ty value =
-  let integer = integer_of st ty in
-  let bytes = Memory_layout.integer_size (Memory_layout.target st.context.env) integer in
-  let bits = 8 * bytes in
-  let modulus = Z.shift_left Z.one bits in
-  let low = Z.erem value modulus in
-  match integer with
-  | Int8 | Int16 | Int32 | Int64 | ISize ->
-      if Z.geq low (Z.shift_left Z.one (bits - 1)) then Z.sub low modulus else low
-  | _ -> low
+let ( let* ) = Option.bind
 
-(* A constant expression's value, worked out exactly: literals, arithmetic
-   on numbers, other constants, and records, variants, strings, lists, and
-   arrays built from constant parts. *)
-let rec static_of st (e : S.expression) : Lir.static_value =
+(* Every value, if each of them is there. *)
+let all values =
+  List.fold_right
+    (fun value rest ->
+      let* value = value in
+      let* rest = rest in
+      Some (value :: rest))
+    values (Some [])
+
+(* An integer of a kind, if the kind holds it. *)
+let integer st (kind : Memory_layout.integer) value =
+  let bits = 8 * Memory_layout.integer_size (Memory_layout.target st.context.env) kind in
+  let low, high =
+    match kind with
+    | Int8 | Int16 | Int32 | Int64 | ISize ->
+        (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
+    | UInt8 | UInt16 | UInt32 | UInt64 | USize -> (Z.zero, Z.pred (Z.shift_left Z.one bits))
+  in
+  if Z.leq low value && Z.leq value high then Some (Lir.Static_scalar (Integer (kind, value)))
+  else None
+
+(* The integer kind a type is, if it is one. *)
+let integer_kind st ty =
+  match (Memory_layout.of_type st.context.env ty).form with
+  | Scalar (Integer kind) -> Some kind
+  | _ -> None
+
+let truth value = Some (Lir.Static_scalar (Bool value))
+
+(* An operator on two folded values, where both are numbers or both [Bool]
+   and the result is exactly what running the operator gives. Anything else,
+   such as a sum that does not fit its type, is left to be run. *)
+let binary st ty (operator : S.binary) (left : Lir.static_value) (right : Lir.static_value) =
+  match (left, right) with
+  | Static_scalar (Integer (kind, x)), Static_scalar (Integer (_, y)) -> (
+      let bits = 8 * Memory_layout.integer_size (Memory_layout.target st.context.env) kind in
+      let number value =
+        let* kind = integer_kind st ty in
+        integer st kind value
+      in
+      let shift by =
+        if Z.sign y >= 0 && Z.lt y (Z.of_int bits) then number (by x (Z.to_int y)) else None
+      in
+      match operator with
+      | Add -> number (Z.add x y)
+      | Subtract -> number (Z.sub x y)
+      | Multiply -> number (Z.mul x y)
+      | Divide -> if Z.equal y Z.zero then None else number (Z.div x y)
+      | Remainder -> if Z.equal y Z.zero then None else number (Z.rem x y)
+      | Bit_and -> number (Z.logand x y)
+      | Bit_or -> number (Z.logor x y)
+      | Bit_xor -> number (Z.logxor x y)
+      | Shift_left -> shift Z.shift_left
+      | Shift_right -> shift Z.shift_right
+      | Equal -> truth (Z.equal x y)
+      | Not_equal -> truth (not (Z.equal x y))
+      | Less -> truth (Z.lt x y)
+      | Less_equal -> truth (Z.leq x y)
+      | Greater -> truth (Z.gt x y)
+      | Greater_equal -> truth (Z.geq x y)
+      | And | Or | Implies -> None)
+  | Static_scalar (Float64 x), Static_scalar (Float64 y) -> (
+      let number value = Some (Lir.Static_scalar (Float64 (Int64.bits_of_float value))) in
+      let x = Int64.float_of_bits x and y = Int64.float_of_bits y in
+      match operator with
+      | Add -> number (x +. y)
+      | Subtract -> number (x -. y)
+      | Multiply -> number (x *. y)
+      | Divide -> number (x /. y)
+      | _ -> None)
+  | Static_scalar (Float32 x), Static_scalar (Float32 y) -> (
+      let number value = Some (Lir.Static_scalar (Float32 (Int32.bits_of_float value))) in
+      let x = Int32.float_of_bits x and y = Int32.float_of_bits y in
+      match operator with
+      | Add -> number (x +. y)
+      | Subtract -> number (x -. y)
+      | Multiply -> number (x *. y)
+      | Divide -> number (x /. y)
+      | _ -> None)
+  | Static_scalar (Bool x), Static_scalar (Bool y) -> (
+      match operator with
+      | And -> truth (x && y)
+      | Or -> truth (x || y)
+      | Equal -> truth (x = y)
+      | Not_equal -> truth (x <> y)
+      | _ -> None)
+  | _ -> None
+
+(* A constant expression's value, where it can be worked out here exactly
+   as running it would: literals, operators on numbers and on [Bool],
+   other constants that fold, and records, variants, strings, lists, and
+   arrays built from parts that fold. For anything else there is none, and
+   the value is worked out by running the constant's evaluator. Running is
+   what a constant's value means; folding only saves the run. *)
+let rec fold st (e : S.expression) : Lir.static_value option =
   let ty = type_of st e.id in
-  let number value : Lir.static_value =
-    Static_scalar (match operand_constant st ty value with c -> c)
+  let checked = st.frame.code.checked in
+  let number value =
+    match constant_of st ty value with Constant c -> Some (Lir.Static_scalar c) | _ -> None
   in
   match e.kind with
-  | Parenthesized inner -> static_of st inner
+  | Parenthesized inner -> fold st inner
   | Integer _ | Float _ -> number (literal st e.id)
-  | Prefix (Negate, ({ kind = Integer _; _ } as inner))
-    when st.frame.code.checked.calls.(e.id) = None -> (
+  | Prefix (Negate, ({ kind = Integer _; _ } as inner)) when checked.calls.(e.id) = None -> (
       match literal st inner.id with
       | Integer_value v -> number (Integer_value (Z.neg v))
       | Float_value v -> number (Float_value (Float.neg v)))
-  | True -> Static_scalar (Bool true)
-  | False -> Static_scalar (Bool false)
-  | String _ when st.frame.code.checked.literals.(e.id) <> None -> number (literal st e.id)
+  | True -> truth true
+  | False -> truth false
+  | String _ when checked.literals.(e.id) <> None -> number (literal st e.id)
   | String literal when literal.rest = [] && literal.tag = None -> (
       match Monomorphic.shape st.context.monomorphic ty with
       | Record [ (field, Typed _) ] ->
@@ -48,111 +129,78 @@ let rec static_of st (e : S.expression) : Lir.static_value =
             List.init (String.length literal.first.value) (fun i ->
                 Lir.Static_scalar (Integer (UInt8, Z.of_int (Char.code literal.first.value.[i]))))
           in
-          Static_record
-            [
-              ( field,
-                Static_storage
-                  { element = Monomorphic.builtin UInt8; elements = bytes; owned = false } );
-            ]
-      | _ -> bug "a string constant of %s" (Ground.to_string ty))
+          Some
+            (Lir.Static_record
+               [
+                 ( field,
+                   Static_storage
+                     { element = Monomorphic.builtin UInt8; elements = bytes; owned = false } );
+               ])
+      | _ -> None)
   | List elements -> (
+      let* values = all (List.map (fold st) elements) in
       match Monomorphic.shape st.context.monomorphic ty with
-      | Array _ -> Static_array (List.map (static_of st) elements)
+      | Array _ -> Some (Lir.Static_array values)
       | Record [ (field, Typed storage) ] -> (
           match Monomorphic.kind st.context.monomorphic storage with
           | Storage element ->
-              Static_record
-                [
-                  ( field,
-                    Static_storage
-                      { element; elements = List.map (static_of st) elements; owned = true } );
-                ]
-          | _ -> raise Needs_running)
-      | _ -> raise Needs_running)
+              Some
+                (Lir.Static_record
+                   [ (field, Static_storage { element; elements = values; owned = true }) ])
+          | _ -> None)
+      | _ -> None)
   | Name _ | Member _ -> (
-      match st.frame.code.checked.meanings.(e.id) with
-      | Some (Global { path; _ }) -> (constant_data st.context path).value
-      | Some (Variant_value { variant; _ }) -> Static_variant (variant, [])
-      | _ -> bug "a constant that names something else: %s" (source st e.span))
+      match checked.meanings.(e.id) with
+      | Some (Global { path; _ }) -> !(st.context.constant) path
+      | Some (Variant_value { variant; _ }) -> Some (Lir.Static_variant (variant, []))
+      | _ -> None)
   | Call (_, arguments) -> (
-      match st.frame.code.checked.calls.(e.id) with
-      | Some { callee = Constructor { variant; _ }; arguments = checked; _ } -> (
+      match checked.calls.(e.id) with
+      | Some { callee = Constructor { variant; _ }; arguments = passed; defaults_left_out = []; _ }
+        ->
           let names = constructor_fields st ty variant in
-          let fields =
-            List.map
-              (fun (argument : C.argument) ->
-                let value =
-                  (List.find (fun (a : S.argument) -> a.value.id = argument.expression) arguments)
-                    .value
-                in
-                (List.nth names argument.parameter, static_of st value))
-              checked
+          let* fields =
+            all
+              (List.map
+                 (fun (argument : C.argument) ->
+                   let* written =
+                     List.find_opt
+                       (fun (a : S.argument) -> a.value.id = argument.expression)
+                       arguments
+                   in
+                   let* value = fold st written.value in
+                   let* name = List.nth_opt names argument.parameter in
+                   Some (name, value))
+                 passed)
           in
-          match variant with Some v -> Static_variant (v, fields) | None -> Static_record fields)
-      | _ -> raise Needs_running)
+          Some
+            (match variant with
+            | Some v -> Lir.Static_variant (v, fields)
+            | None -> Static_record fields)
+      | _ -> None)
   | Binary { operator; left; right; _ } ->
-      fold st ty ~operator:(Some operator) [ static_of st left; static_of st right ]
-  | Prefix (Negate, inner) -> fold st ty ~operator:None [ static_of st inner ]
-  | _ -> raise Needs_running
-
-and operand_constant st ty literal =
-  match constant_of st ty literal with
-  | Constant c -> c
-  | _ -> bug "a literal that is not a constant"
-
-(* Arithmetic on constant numbers, exact for integers, which the type
-   checker has shown do not overflow, and IEEE for floats. *)
-and fold st ty ~operator values : Lir.static_value =
-  let integer = function
-    | Lir.Static_scalar (Integer (_, v)) -> v
-    | _ -> bug "an integer constant"
-  in
-  let real = function
-    | Lir.Static_scalar (Float64 bits) -> Int64.float_of_bits bits
-    | Static_scalar (Float32 bits) -> Int32.float_of_bits bits
-    | _ -> bug "a float constant"
-  in
-  match scalar_of st ty with
-  | Integer kind -> (
-      let v op = Lir.Static_scalar (Integer (kind, wrap st ty op)) in
-      match (operator, List.map integer values) with
-      | None, [ a ] -> v (Z.neg a)
-      | Some Add, [ a; b ] -> v (Z.add a b)
-      | Some Subtract, [ a; b ] -> v (Z.sub a b)
-      | Some Multiply, [ a; b ] -> v (Z.mul a b)
-      | Some Divide, [ a; b ] -> v (Z.div a b)
-      | Some Remainder, [ a; b ] -> v (Z.rem a b)
-      | Some Bit_and, [ a; b ] -> v (Z.logand a b)
-      | Some Bit_or, [ a; b ] -> v (Z.logor a b)
-      | Some Bit_xor, [ a; b ] -> v (Z.logxor a b)
-      | Some Shift_left, [ a; b ] -> v (Z.shift_left a (Z.to_int b))
-      | Some Shift_right, [ a; b ] -> v (Z.shift_right a (Z.to_int b))
-      | _ -> bug "an operation in a constant that is not folded")
-  | (Float32 | Float64) as scalar -> (
-      let v x =
-        Lir.Static_scalar
-          (if scalar = Float32 then Float32 (Int32.bits_of_float x)
-           else Float64 (Int64.bits_of_float x))
-      in
-      match (operator, List.map real values) with
-      | None, [ a ] -> v (Float.neg a)
-      | Some Add, [ a; b ] -> v (a +. b)
-      | Some Subtract, [ a; b ] -> v (a -. b)
-      | Some Multiply, [ a; b ] -> v (a *. b)
-      | Some Divide, [ a; b ] -> v (a /. b)
-      | _ -> bug "an operation in a constant that is not folded")
-  | _ -> bug "arithmetic in a constant on %s" (Ground.to_string ty)
-
-(* A constant's static data: folded while compiling, or else worked out by
-   running its code. *)
-and constant_data context path : Lir.data =
-  let st, value, ty = constant_state context path in
-  let value = try static_of st value with Needs_running -> !(context.evaluate) path ty in
-  { data_key = Constant path; ty; value }
+      let* left = fold st left in
+      let* right = fold st right in
+      binary st ty operator left right
+  | Prefix (Negate, inner) -> (
+      let* value = fold st inner in
+      match value with
+      | Static_scalar (Integer (kind, x)) -> integer st kind (Z.neg x)
+      | Static_scalar (Float64 x) ->
+          Some
+            (Lir.Static_scalar (Float64 (Int64.bits_of_float (Float.neg (Int64.float_of_bits x)))))
+      | Static_scalar (Float32 x) ->
+          Some
+            (Lir.Static_scalar (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits x)))))
+      | _ -> None)
+  | Prefix (Not, inner) -> (
+      let* value = fold st inner in
+      match value with Static_scalar (Bool x) -> truth (not x) | _ -> None)
+  | _ -> None
 
 (* The state to lower a constant's expression in, the expression, and its
    type. *)
-and constant_state context path =
+let constant_state context path =
   let key = key_of context path in
   let value =
     match demand context Names.definition key with
@@ -174,7 +222,15 @@ and constant_state context path =
   let st = enter context (frame_of code ~inlined:[]) in
   (st, value, ty)
 
-let constant context path = constant_data context path
+(* A constant's static data, where its value folds, and otherwise the type
+   of the value its evaluator works out. *)
+type constant = Folded of Lir.data | Run of Ground.ty
+
+let constant context path =
+  let st, value, ty = constant_state context path in
+  match fold st value with
+  | Some value -> Folded { data_key = Constant path; ty; value }
+  | None -> Run ty
 
 (* Code run while compiling leaves what it works out in the debug buffer, in
    its binary form, and writes the buffer to standard output as it ends. *)

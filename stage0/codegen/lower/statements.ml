@@ -177,7 +177,7 @@ and let_ st ~mutable_ (pattern : S.pattern) (value : S.expression) =
           bind (snapshot st place)
       | Some place ->
           let local = binding st ~name:name.text ty in
-          emit st.b (Assign (local, Use (owned st place ty)));
+          take st place ty ~destination:local;
           bind local
       | None ->
           let local = binding st ~name:name.text ty in

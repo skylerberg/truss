@@ -8,6 +8,7 @@
    - every block a terminator goes to and every local a place names exists,
      and every place fits the type it projects from
    - no [yield] is left
+   - nothing is moved out of a constant's static data
    - a function with a result returns one on every [return], and one
      without returns none
    - a call gives its target as many arguments as the target's signature

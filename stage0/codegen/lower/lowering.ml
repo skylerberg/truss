@@ -298,6 +298,15 @@ let unreachable_block st =
    temporary or was marked [own], or copies implicitly. *)
 let owned st place ty = if trivial st ty then Lir.Copy place else Lir.Move place
 
+(* Gives [destination], which holds nothing, the value at a place as its
+   own: moved out of the place, or for a constant's static data, which
+   nothing moves from, copied. *)
+let take st (place : Lir.place) ty ~destination =
+  match place.root with
+  | Static _ when not (trivial st ty) ->
+      Glue.copy_into st.context.glue st.b ~destination ~source:place ty
+  | Static _ | Local _ -> emit st.b (Assign (destination, Use (owned st place ty)))
+
 (* Replaces the value at a place the program names with one worked out
    beforehand: what the place still owns is dropped, and the new value moved
    in. *)
