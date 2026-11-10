@@ -179,14 +179,6 @@ internal fn Map[Key: Hash + Ordered, Value].insert_absent(mut self, key: own Key
   }
 }
 
-internal fn Map[Key: Hash + Ordered, Value].empty() -> Map[Key, Value]
-  ensures result.length() == 0
-  ensures forall key: Key => !result.model().contains_key(key)
-  cost time O(1)
-{
-  Map(entries: [])
-}
-
 public fn Map[Key: Hash + Ordered, Value].with_capacity(capacity: USize) -> Map[Key, Value]
   ensures result.length() == 0
   ensures forall key: Key => !result.model().contains_key(key)
