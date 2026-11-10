@@ -1220,6 +1220,12 @@ all read from one account of what a value views:
   the callee may keep a view in it. After `mut views.push(data[0..2])`,
   `views` views `data`, and `mut data.push(4)` is rejected while `views` is
   in use.
+- **The value of an `if`, a `match`, or a block views what any of its
+  branches' values view.** After
+  `let part = if first { items[..1] } else { items[1..] }`, `part` views
+  `items`. A copy of a view views what the view does, and a record made by
+  `with` views what its base and its new fields view. The checker decides
+  this for every kind of expression, with no default.
 - **A place assigned a view views what the value does.** After
   `holder.view = data[0..2]`, `holder` views `data`. A variable assigned
   again still views what it viewed before, since the checker follows no
