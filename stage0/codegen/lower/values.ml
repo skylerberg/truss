@@ -57,7 +57,7 @@ and list_of st ty destination ~span fills =
           lower Storage_with_capacity [ Value (usize (List.length fills)) ] (Some storage_place);
           List.iter
             (fun fill ->
-              let value = new_local st element in
+              let value = temporary st element in
               fill value;
               lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
             fills
@@ -157,7 +157,7 @@ and collection_into st ty destination ~span items =
       let values =
         List.map
           (fun ((e : S.expression), part_ty) ->
-            let value = new_local st part_ty in
+            let value = temporary st part_ty in
             into st e value;
             (T.Own, part_ty, value))
           parts
@@ -167,7 +167,7 @@ and collection_into st ty destination ~span items =
         ~signature ~substitution
         ~arguments:((T.Mut, ty, destination) :: values)
         ~mask:0
-        ~destination:(new_local st (Monomorphic.builtin Unit)))
+        ~destination:(temporary st (Monomorphic.builtin Unit)))
     items
 
 (* [provide]: each implementation evaluated once, as a place or a temporary
@@ -277,8 +277,9 @@ and try_ st (inner : S.expression) destination =
         | Raw _ -> bug "a raw field")
       (fields failure)
   in
-  let built = new_local st result_ty in
+  let built = temporary st result_ty in
   emit st.b (Assign (built, Build { ty = result_ty; variant = Some failure; fields = returned }));
+  clear_result st;
   Option.iter (fun result -> emit st.b (Assign (result, Use (Move built)))) (result_place st);
   leave_to st 0;
   finish st.b (return_result st);
@@ -358,7 +359,11 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
   let environment_parameter = local b ~name:"environment" (Raw (Nullable_pointer Opaque)) in
   let result_ty = match f.result with Returns ty -> ty | _ -> bug "a lambda that yields" in
   result_slot inner (Convention.result st.context.env result_ty);
-  let taken = List.map (fun (mode, ty) -> (parameter inner mode ty, mode, ty)) f.parameters in
+  let taken =
+    List.map
+      (fun ((mode : Ground.mode), ty) -> (parameter inner ~owned:(mode = Own) mode ty, mode, ty))
+      f.parameters
+  in
   let evidence = evidence_parameters inner f.uses in
   let environment_pointer = local b (Pointer { target = Environment index; writable = false }) in
   start b (block b);
@@ -398,7 +403,11 @@ and with_ st (base : S.expression) (updates : S.update list) destination =
               destination (field :: path)
           in
           match value with
-          | Some value -> into st value target
+          | Some value ->
+              let field_ty = type_of st value.id in
+              let fresh = temporary st field_ty in
+              into st value fresh;
+              replace st target field_ty ~by:fresh
           | None -> (
               (* [with (x)] uses the local named [x]. *)
               let resolved = demand st.context Resolve.resolved st.frame.code.definition_key in
@@ -411,7 +420,7 @@ and with_ st (base : S.expression) (updates : S.update list) destination =
                         | Some ty -> ground st ty
                         | None -> bug "a local with no type"
                       in
-                      emit st.b (Assign (target, Use (owned st place field_ty)))
+                      replace st target field_ty ~by:place
                   | None -> bug "an unbound local in with")
               | _ -> bug "with (x) names no local"))
       | Update_error -> bug "an update that did not parse")
@@ -432,12 +441,12 @@ and interpolate st (literal : S.string_literal) destination =
       (Code { path; type_arguments = [] })
       ~signature ~substitution:[] ~arguments ~mask:0 ~destination
   in
-  let builder = new_local st builder_ty in
+  let builder = temporary st builder_ty in
   call (method_ "new" Static) [] builder;
   let unit = Monomorphic.builtin Unit in
   let write text =
     if text <> "" then begin
-      let slice = new_local st slice_ty in
+      let slice = temporary st slice_ty in
       (match Monomorphic.shape st.context.monomorphic slice_ty with
       | Record [ (field, Typed view) ] ->
           emit st.b
@@ -455,7 +464,7 @@ and interpolate st (literal : S.string_literal) destination =
       | _ -> bug "a StringSlice that is not a view");
       call (method_ "write" Mut)
         [ (Mut, builder_ty, builder); (Read, slice_ty, slice) ]
-        (new_local st unit)
+        (temporary st unit)
     end
   in
   write literal.first.value;
@@ -467,7 +476,7 @@ and interpolate st (literal : S.string_literal) destination =
         ~trait:(Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Display" })
         ~name:"display" ~receiver:Read ~self:ty
         ~arguments:[ (Read, ty, place); (Mut, builder_ty, builder) ]
-        ~destination:(new_local st unit);
+        ~destination:(temporary st unit);
       write text.value)
     literal.rest;
   call (method_ "finish" Own) [ (Own, builder_ty, builder) ] destination
@@ -505,20 +514,21 @@ and any_value st (e : S.expression) (inner : S.expression) destination =
         | None -> bug "an unbound parameter of %s" (Path.show impl))
       interface.impl_generics
   in
-  let layout = Memory_layout.of_type st.context.env inner_ty in
+  (* The value is worked out before its block is made, so that leaving
+     early on the way leaves no block behind. *)
+  let value = expression st inner in
   let block = local st.b (Raw (Pointer Opaque)) in
-  if layout.size = 0 then emit st.b (Assign (at block, Use (Constant (Bytes ""))))
+  if zero_size st inner_ty then emit st.b (Assign (at block, Use (Constant (Bytes ""))))
   else begin
     emit st.b
       (Call
          {
            target = Intrinsic Allocate;
-           arguments = [ usize layout.size; usize layout.alignment ];
+           arguments = [ Constant (Size_of inner_ty); Constant (Alignment_of inner_ty) ];
            result = Returned (at block);
          });
     let typed = local st.b (Pointer { target = Value inner_ty; writable = true }) in
     emit st.b (Assign (at typed, Use (Copy (at block))));
-    let value = expression st inner in
     emit st.b
       (Assign ({ root = Local typed; projections = [ Deref ] }, Use (owned st value inner_ty)))
   end;
@@ -603,7 +613,9 @@ and return_ st value =
       start st.b (block st.b)
   | None ->
       (match (value, result_place st) with
-      | Some e, Some result -> into st e result
+      | Some e, Some result ->
+          clear_result st;
+          into st e result
       | Some e, None -> ignore (expression st e)
       | None, _ -> ());
       leave_to st 0;

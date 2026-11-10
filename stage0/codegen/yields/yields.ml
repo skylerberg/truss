@@ -46,7 +46,8 @@ let loop_form env ~(body : Ground.function_type) (f : Lir.function_) =
     locals =
       Array.append f.locals
         [|
-          { ty = Value (Function body); name = Some "body" }; { ty = go_on_ty; name = Some "go_on" };
+          { ty = Value (Function body); name = Some "body"; borrowed = true };
+          { ty = go_on_ty; name = Some "go_on"; borrowed = false };
         |];
     blocks;
   }
@@ -267,10 +268,12 @@ let cursor_next env ~cursor ~result (f : Lir.function_) =
     locals =
       Array.concat
         [
-          Array.of_list (List.map (fun ty -> { Lir.ty; name = Some "result" }) result_pointer);
-          [| { ty = cursor_ty; name = Some "cursor" } |];
+          Array.of_list
+            (List.map (fun ty -> { Lir.ty; name = Some "result"; borrowed = false }) result_pointer);
+          [| { ty = cursor_ty; name = Some "cursor"; borrowed = false } |];
           f.locals;
-          (if through_pointer then [||] else [| { Lir.ty = Value result; name = Some "result" } |]);
+          (if through_pointer then [||]
+           else [| { Lir.ty = Value result; name = Some "result"; borrowed = false } |]);
         ];
     blocks =
       Array.concat
@@ -287,8 +290,8 @@ let cursor_drop _env ~cursor ~owned (f : Lir.function_) =
       ~return_:(fun () -> ([], Return None))
   in
   let finished = count + 1 in
-  let start_block = Array.length blocks + 1 in
-  let done_block = start_block + 1 in
+  let done_block = Array.length blocks + 1 in
+  let start_block = done_block + 1 in
   let stops =
     List.mapi
       (fun i (_, _, stop) ->
@@ -300,27 +303,77 @@ let cursor_drop _env ~cursor ~owned (f : Lir.function_) =
   let entry =
     entry_switch 0 (((0, start_block) :: stops) @ [ (finished, done_block) ]) ~default:None
   in
-  let start : Lir.basic_block =
-    {
-      statements =
-        List.map
-          (fun local ->
-            Lir.Drop { root = Local 0; projections = [ Deref; Field (field_name f local) ] })
-          owned;
-      terminator = Return None;
-    }
+  (* Before the method starts, the blocks from [start_block] drop each
+     argument the cursor owns, testing the mask first for one that is there
+     only when it was passed. *)
+  let field local : Lir.place =
+    { root = Local 0; projections = [ Deref; Field (field_name f local) ] }
   in
+  let added = ref [] in
+  let new_local ty =
+    added := { Lir.ty; name = None; borrowed = false } :: !added;
+    Array.length f.locals + List.length !added
+  in
+  let started = ref [] and statements = ref [] in
+  let close terminator =
+    started := { Lir.statements = List.rev !statements; terminator } :: !started;
+    statements := []
+  in
+  List.iter
+    (fun (local, given) ->
+      match given with
+      | None -> statements := Lir.Drop (field local) :: !statements
+      | Some (mask, bit) ->
+          let passed = new_local (Raw (Integer UInt64)) and given = new_local (Raw Bool) in
+          statements :=
+            Lir.Assign
+              ( local_place given,
+                Binary (Not_equal, Copy (local_place passed), Constant (Integer (UInt64, Z.zero)))
+              )
+            :: Assign
+                 ( local_place passed,
+                   Binary
+                     ( Bit_and,
+                       Copy (field mask),
+                       Constant (Integer (UInt64, Z.shift_left Z.one bit)) ) )
+            :: !statements;
+          let here = start_block + List.length !started in
+          close
+            (Switch
+               {
+                 value = Copy (local_place given);
+                 cases = [ (Z.one, here + 1) ];
+                 default = Some (here + 2);
+               });
+          statements := [ Lir.Drop (field local) ];
+          close (Goto (here + 2)))
+    owned;
+  close (Return None);
   {
     Lir.parameters = [ 0 ];
     written_result = None;
     result = None;
     returns = true;
     locals =
-      Array.append
-        [| { Lir.ty = Pointer { target = Value cursor; writable = true }; name = Some "cursor" } |]
-        f.locals;
+      Array.concat
+        [
+          [|
+            {
+              Lir.ty = Pointer { target = Value cursor; writable = true };
+              name = Some "cursor";
+              borrowed = false;
+            };
+          |];
+          f.locals;
+          Array.of_list (List.rev !added);
+        ];
     blocks =
       Array.concat
-        [ [| entry |]; blocks; [| start; { statements = []; terminator = Return None } |] ];
+        [
+          [| entry |];
+          blocks;
+          [| { statements = []; terminator = Return None } |];
+          Array.of_list (List.rev !started);
+        ];
     environment = [];
   }

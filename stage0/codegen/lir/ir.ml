@@ -217,7 +217,14 @@ type terminator =
           lending method's [yield] has none, since it always continues. *)
 
 type basic_block = { statements : statement list; terminator : terminator }
-type local_info = { ty : ty; name : string option }
+
+type local_info = {
+  ty : ty;
+  name : string option;
+  borrowed : bool;
+      (** Holds the bits of a value that something else owns, as a read-only parameter passed by
+          value does: nothing here drops it *)
+}
 
 type function_ = {
   parameters : local list;  (** Locals that arrive as the parameters, in order *)
@@ -530,7 +537,7 @@ let canonical (f : function_) =
         statements;
       ignore (map_terminator ~place:(rename number) ~block:identity terminator))
     order;
-  let locals = Array.make !next { ty = Raw Bool; name = None } in
+  let locals = Array.make !next { ty = Raw Bool; name = None; borrowed = false } in
   Array.iteri (fun old index -> if index >= 0 then locals.(index) <- f.locals.(old)) local_number;
   let map_local local = local_number.(local) in
   let map_block block = block_number.(block) in

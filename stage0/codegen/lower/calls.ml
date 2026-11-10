@@ -94,7 +94,7 @@ and convert st (argument : C.argument) place ty =
               Monomorphic.shape st.context.monomorphic view_ty )
           with
           | Record [ (storage_field, _) ], Record [ (view_field, Typed view) ] ->
-              let viewed = new_local st view_ty in
+              let viewed = temporary st view_ty in
               emit st.b
                 (Assign
                    ( viewed / Field view_field,
@@ -114,22 +114,32 @@ and convert st (argument : C.argument) place ty =
   | Some From_never | Some Function_widening | None -> (place, ty)
   | Some (To_integer | From_integer) -> bug "a conversion that exists only in specifications"
 
-(* The arguments of a call as places, in parameter order. *)
-and evaluate_arguments st ~(expressions : S.expression list) ~(arguments : C.argument list) =
-  let by_id id = List.find (fun (e : S.expression) -> e.id = id) expressions in
+(* The arguments of a call as places, in parameter order, each evaluated
+   once. An expression whose place the caller has found already, which
+   [evaluated] gives by its node, is not evaluated again. An [own] argument
+   that names a place is moved into a temporary the callee takes. *)
+and evaluate_arguments ?(evaluated = []) st ~(expressions : S.expression list)
+    ~(arguments : C.argument list) =
+  let by_id id =
+    match List.find_opt (fun (e : S.expression) -> e.id = id) expressions with
+    | Some e -> e
+    | None -> bug "an argument that is none of the call's expressions"
+  in
   let evaluate (argument : C.argument) =
     let e = by_id argument.expression in
     let ty = type_of st e.id in
+    let moved place =
+      let taken = temporary st ty in
+      emit st.b (Assign (taken, Use (owned st place ty)));
+      taken
+    in
     let place =
-      match argument.mode with
-      | Mut | Read -> expression st e
-      | Own -> (
-          match place_expression st e with
-          | Some place ->
-              let moved = new_local st ty in
-              emit st.b (Assign (moved, Use (owned st place ty)));
-              moved
-          | None -> expression st e)
+      match (List.assoc_opt e.id evaluated, argument.mode) with
+      | Some place, (Mut | Read) -> place
+      | Some place, Own -> moved place
+      | None, (Mut | Read) -> expression st e
+      | None, Own -> (
+          match place_expression st e with Some place -> moved place | None -> expression st e)
     in
     let place, ty = convert st argument place ty in
     (argument.parameter, argument.mode, ty, place)
@@ -160,27 +170,25 @@ and inline st path type_arguments ~arguments ~call_site ~on_yield =
   st.frame <- frame;
   in_scope st (fun () ->
       List.iteri
-        (fun index (mode, written_ty, (parameter : S.parameter)) ->
-          let ty, place, filled =
+        (fun index (_, written_ty, (parameter : S.parameter)) ->
+          let place =
             match List.find_opt (fun (i, _, _, _) -> i = index) arguments with
-            | Some (_, _, ty, place) -> (ty, place, false)
+            | Some (_, _, _, place) -> place
             | None -> (
                 let ty = Monomorphic.ground st.context.monomorphic code.substitution written_ty in
                 match parameter.kind with
                 | Named_parameter { default = Some default; _ } ->
-                    let place = new_local st ty in
-                    st.temporaries <- [] :: st.temporaries;
-                    into st default place;
-                    end_statement st;
-                    (ty, place, true)
+                    (* A default is the method's own to drop, whatever the
+                       mode. *)
+                    let place = binding st ty in
+                    in_statement st (fun () -> into st default place);
+                    place
                 | _ -> bug "%s is given no argument for parameter %d" (Path.show path) index)
           in
-          (match parameter.kind with
+          match parameter.kind with
           | Self_parameter _ -> frame.self_place <- Some place
           | Named_parameter { name; _ } -> Hashtbl.replace frame.bindings name.id place
-          | Parameter_error -> ());
-          (* A default is the method's own to drop, whatever the mode. *)
-          if (mode = T.Own || filled) && not (trivial st ty) then own_in_scope st place)
+          | Parameter_error -> ())
         code.parameter_types;
       check_requires st ~call_site;
       block_into st code.body None);
@@ -193,11 +201,11 @@ and inline st path type_arguments ~arguments ~call_site ~on_yield =
    method that has nothing left to do then: each [yield] is the last thing
    its path does, and what it lends is none of the method's own values,
    which are dropped as its body ends. *)
-and lend st call_ ~expressions ~arguments ~span =
+and lend ?evaluated st call_ ~expressions ~arguments ~span =
   match resolve_callee st call_ with
   | Some (path, type_arguments) -> (
       let call_site = site st span in
-      let arguments = evaluate_arguments st ~expressions ~arguments in
+      let arguments = evaluate_arguments ?evaluated st ~expressions ~arguments in
       if not (yields_last (code_of st.context path type_arguments).body) then
         unsupported st span "%s, a lending method that does more after its yield" (Path.show path);
       let own_from = local_count st.b in
@@ -280,35 +288,18 @@ and call st (e : S.expression) ~callee ~arguments destination =
 
 (* A call whose arguments are [expressions], which the checked form's
    [arguments] say where they go. *)
-and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments : C.argument list)
-    destination ~span =
+and call_with ?evaluated st (call_ : C.call) ~(expressions : S.expression list)
+    ~(arguments : C.argument list) destination ~span =
   if lends st call_ then
     emit st.b
       (Assign
          ( destination,
-           Use (owned st (lend st call_ ~expressions ~arguments ~span) (ground st call_.result)) ))
+           Use
+             (owned st
+                (lend ?evaluated st call_ ~expressions ~arguments ~span)
+                (ground st call_.result)) ))
   else
-    let by_id id = List.find (fun (e : S.expression) -> e.id = id) expressions in
-    let evaluate (argument : C.argument) =
-      let e = by_id argument.expression in
-      let ty = type_of st e.id in
-      let place =
-        match argument.mode with
-        | Mut | Read -> expression st e
-        | Own -> (
-            match place_expression st e with
-            | Some place ->
-                (* An [own] place moves into a temporary the callee takes. *)
-                let moved = new_local st ty in
-                emit st.b (Assign (moved, Use (owned st place ty)));
-                moved
-            | None -> expression st e)
-      in
-      let place, ty = convert st argument place ty in
-      (argument.parameter, argument.mode, ty, place)
-    in
-    let evaluated = List.map evaluate arguments in
-    let in_order = List.sort (fun (a, _, _, _) (b, _, _, _) -> Int.compare a b) evaluated in
+    let in_order = evaluate_arguments ?evaluated st ~expressions ~arguments in
     match call_.callee with
     | (Function _ | Trait_method _) when yields_cursor st call_ ->
         (* A yielding method called outside a [for] loop makes a cursor,
@@ -525,7 +516,7 @@ and with_placeholders st (signature : T.signature) substitution in_order =
       | None ->
           ( mode,
             Monomorphic.ground st.context.monomorphic substitution ty,
-            new_local st (Monomorphic.ground st.context.monomorphic substitution ty) ))
+            temporary st (Monomorphic.ground st.context.monomorphic substitution ty) ))
     (interface_parameters signature)
 
 and yields_cursor st (call_ : C.call) =
@@ -618,7 +609,7 @@ and field_defaults st ty variant left_out =
           in
           match default with
           | Some d ->
-              let value = new_local st field_ty in
+              let value = temporary st field_ty in
               into st d value;
               (name, owned st value field_ty)
           | None -> bug "no default for %s" name)
@@ -645,7 +636,7 @@ and call_function_value st ~(callee : S.expression) ~(arguments : S.argument lis
            let place =
              match (place_expression st argument.value, mode) with
              | Some place, Own ->
-                 let moved = new_local st ty in
+                 let moved = temporary st ty in
                  emit st.b (Assign (moved, Use (owned st place ty)));
                  moved
              | Some place, _ -> place
@@ -710,7 +701,7 @@ and check_requires ?call_site st =
       (fun (clause : S.expression) ->
         if executable st clause then begin
           let holds = block st.b and broken = block st.b in
-          let scope = open_scope st in
+          let scope = open_scope st Bindings in
           branch st clause ~yes:holds ~no:broken;
           start st.b broken;
           let message = "requirement not met: requires " ^ source st clause.span in
@@ -729,56 +720,73 @@ and check_requires ?call_site st =
 
 (* Fills in each parameter whose default the caller left out, as the bits
    of [mask] say, from the default's expression, so that changing a default
-   compiles only the function again. A parameter that arrives as a pointer
-   is pointed at the default's value instead. *)
+   compiles only the function again. An [own] parameter with a default may
+   arrive holding nothing, so the function does not own it as it arrives:
+   its name is bound to a local the function owns, which takes the argument
+   or the default. A parameter that is a view is pointed at the default's
+   value, or given its bits, and the function owns that value. *)
 and fill_defaults st mask =
   let b = st.b in
-  let code = st.frame.code in
   let defaulted =
     List.filter_map
       (fun (mode, ty, (parameter : S.parameter)) ->
         match parameter.kind with
         | Named_parameter { name; default = Some default; _ } -> Some (mode, ty, name, default)
         | _ -> None)
-      code.parameter_types
+      st.frame.code.parameter_types
   in
   List.iteri
-    (fun bit (mode, ty, (name : S.name), default) ->
-      let ty = Monomorphic.ground st.context.monomorphic code.substitution ty in
+    (fun bit (mode, ty, (name : S.name), (default : S.expression)) ->
+      let ty = ground st ty in
       let passed = local b (Raw (Integer UInt64)) and given = local b (Raw Bool) in
       emit b
         (Assign
            ( at passed,
              Binary (Bit_and, Copy (at mask), constant_int UInt64 (Z.shift_left Z.one bit)) ));
       emit b (Assign (at given, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
+      let arrived =
+        match Hashtbl.find_opt st.frame.bindings name.id with
+        | Some place -> place
+        | None -> bug "%s has a default and no place" name.text
+      in
       let fill = block b and after = block b in
-      finish b (Switch { value = Copy (at given); cases = [ (Z.one, after) ]; default = Some fill });
-      start b fill;
-      st.temporaries <- [] :: st.temporaries;
-      (match Hashtbl.find_opt st.frame.bindings name.id with
-      | Some ({ projections = [ Deref ]; root = Local pointer } : Lir.place) ->
-          if st.pulling then
-            unsupported st (default : S.expression).span
-              "a default for %s, which is passed by address, in a yielding method that is pulled"
-              name.text;
-          let value = new_local st ty in
-          into st default value;
-          if not (trivial st ty) then own_in_scope st value;
-          emit b (Assign (at pointer, Use (Address { place = value; writable = true })))
-      | Some place when mode <> T.Own && not (trivial st ty) ->
-          if st.pulling then
-            unsupported st (default : S.expression).span
-              "a default for %s, which is a view, in a yielding method that is pulled" name.text;
-          (* The parameter is a view: of the caller's value, or of the
-             default, which the function owns, and drops only where it made
-             one. *)
-          let value = new_local st ty in
-          into st default value;
-          own_in_scope st value;
-          emit b (Assign (place, Use (Copy value)))
-      | Some place -> into st default place
-      | None -> ());
-      st.temporaries <- List.tl st.temporaries;
+      let unless_given other =
+        finish b
+          (Switch { value = Copy (at given); cases = [ (Z.one, other) ]; default = Some fill })
+      in
+      let pulled what =
+        if st.pulling then
+          unsupported st default.span "a default for %s, %s, in a yielding method that is pulled"
+            name.text what
+      in
+      if mode = T.Own && not (trivial st ty) then begin
+        let held = binding st ~name:name.text ty in
+        Hashtbl.replace st.frame.bindings name.id held;
+        let taken = block b in
+        unless_given taken;
+        start b taken;
+        emit b (Assign (held, Use (Move arrived)));
+        finish b (Goto after);
+        start b fill;
+        in_statement st (fun () -> into st default held)
+      end
+      else begin
+        unless_given after;
+        start b fill;
+        in_statement st (fun () ->
+            match arrived with
+            | { projections = [ Deref ]; root = Local pointer } ->
+                pulled "which is passed by address";
+                let value = binding st ty in
+                into st default value;
+                emit b (Assign (at pointer, Use (Address { place = value; writable = true })))
+            | place when not (trivial st ty) ->
+                pulled "which is a view";
+                let value = binding st ty in
+                into st default value;
+                emit b (Assign (place, Use (Copy value)))
+            | place -> into st default place)
+      end;
       finish b (Goto after);
       start b after)
     defaulted

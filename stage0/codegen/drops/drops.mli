@@ -16,11 +16,19 @@
      where the place is given a value and cleared where it is moved, decides
      at run time
 
-   An assignment to a place that may still own a value drops that value
-   first, after the assignment's own moves, so [items = rebuild(own items)]
-   drops nothing. Drops of types with nothing to drop are removed. A
-   [yield]'s [stop] edge is an edge like any other, so a loop that stops at
-   a [yield] drops what the method owns there. *)
+   A write gives a place a value and drops nothing: whatever replaces a
+   value drops it first, with a [drop] of its own, which is removed where
+   the place holds nothing. So that this holds, and so that nothing is
+   leaked, the pass checks what it is given, and a failure is a compiler
+   bug:
+
+   - no write is to a place that may still own a value
+   - where the function returns, none of its locals owns a value still
+
+   A [borrowed] local holds a value something else owns, and is left
+   alone. Drops of types with nothing to drop are removed. A [yield]'s
+   [stop] edge is an edge like any other, so a loop that stops at a
+   [yield] drops what the method owns there. *)
 
 val elaborate :
   Memory_layout.env ->

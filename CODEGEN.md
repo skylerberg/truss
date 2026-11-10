@@ -473,16 +473,37 @@ use of a moved place. The LIR states each move explicitly. A move is a
 memory copy of the value's bytes, after which the source place holds nothing
 to drop.
 
+### Who owns a value
+
+Every value lowering makes has an owner from its first moment, so that no
+way out of the code can forget it:
+
+- **A scope owns what is dropped as it ends.** A block's scope owns the
+  names bound in it. Each statement has a scope of its own, which owns the
+  statement's temporaries: an argument evaluated before the call, a value a
+  pattern looks into, the text an interpolation builds. Scopes are one
+  stack, so `return`, `?`, `break`, `continue`, and a loop's `stop` at a
+  `yield` each leave exactly the scopes inside where they go, the
+  statements' among them.
+- **A local for a value is made with its owner.** Lowering has no way to
+  make one without: a temporary belongs to the statement being lowered, and
+  a binding to the names around it. The one exception is the slot for the
+  function's result, which is the caller's once the function returns.
+- **A parameter says whose it is.** The function owns an `own` parameter,
+  and drops it unless it gives it away. Any other is the caller's, and one
+  passed by value is marked *borrowed* in the LIR: it holds the bits of a
+  value something else owns, and nothing drops it. An `own` parameter with a
+  default may arrive holding nothing, so its name is bound to a local the
+  function owns, which takes the argument or the default.
+
 ### Drop elaboration
 
-Lowering writes `drop(place)` wherever an owned local goes out of scope, on
-every path out of the scope, including `return`, `?`, `break`, and a loop's
-`stop` at a `yield`, since lowering is where scopes are known. Such a drop
-means "drop whatever this place still owns here", which lowering cannot
-always tell. `Drops` works it out, as Rust's drop elaboration does over MIR:
-a dataflow analysis over each function finds, at each point, which places,
-and which fields of places, may own a value and which may not. Then each
-`drop(place)` becomes:
+Lowering writes `drop(place)` wherever a scope ends, on every path out of
+it, for each thing the scope owns. Such a drop means "drop whatever this
+place still owns here", which lowering cannot always tell. `Drops` works it
+out, as Rust's drop elaboration does over MIR: a dataflow analysis over
+each function finds, at each point, which places, and which fields of
+places, may own a value and which may not. Then each `drop(place)` becomes:
 
 - **nothing,** where the place was moved out on every path
 - **a drop of the whole place,** where nothing in it was moved out
@@ -505,16 +526,30 @@ it. A drop of an element reached through an index stays as it is, since
 elements are never moved out, which is how a `Storage`'s drop drops each
 element.
 
-A function starts with every parameter holding a value, except what the
-pointer for a large result points to: the LIR names that parameter, so the
-first write of the result drops nothing, whatever the caller's memory held
-before.
+A function starts with every parameter it owns holding a value, except
+what the pointer for a large result points to: the LIR names that
+parameter, so the first write of the result drops nothing, whatever the
+caller's memory held before.
 
-An assignment to a place that may still own a value drops that value first,
-after the assignment's own moves, so `items = rebuild(own items)` drops
-nothing and `name = other_name` drops the old `name`. The new value is
-computed into a temporary first, so the old one is dropped only once
-nothing can read it.
+**A write gives a place a value and drops nothing.** Whatever replaces a
+value drops it first, with a `drop` of its own. So an assignment works its
+new value out into a temporary, drops what the place still owns, and moves
+the temporary in: `items = rebuild(own items)` drops nothing, since the
+place was moved from, `name = other_name` drops the old `name`, and
+`names[0] = other_name` drops the old element. A compound assignment and a
+field written by `with` do the same, and each evaluates the place it
+names once. The temporary is also what keeps a call's result apart from
+its arguments: a callee writes a large result through a `restrict` pointer,
+which must not be to a place the callee was also given, as in
+`point = moved(point)`.
+
+`Drops` checks what it is given, so that a mistake in lowering is a
+compiler bug in whatever code has it, not a leak in the runs that reach
+it:
+- no write is to a place that may still own a value
+- where a function returns, none of its locals owns a value still. What a
+  pointer points at is not looked at, since it may be the caller's or a
+  block's.
 
 Drops of types with nothing to drop, such as plain data, are removed.
 Values are dropped in reverse order of declaration. No program can observe
@@ -1181,7 +1216,9 @@ Each instance is checked as it is lowered, once its passes have run:
 - no `yield` is left
 - a function with a result returns one on every `return`, and one without
   returns none
-- a call gives its target as many arguments as the target's signature takes
+- a call gives its target as many arguments as the target's signature
+  takes, and writes a large result to a place it does not also pass by
+  address
 - a value that has a size is built as a record or a variant its type has,
   with fields the type has, since the emitter leaves out a field it does
   not find in the layout, as it must for a field of no size

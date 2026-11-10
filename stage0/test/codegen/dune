@@ -10,7 +10,8 @@
   feature_tests
   program_tests
   evaluate_tests
-  failure_tests)
+  failure_tests
+  owning_tests)
  (modules
   codegen_support
   layout_tests
@@ -23,7 +24,8 @@
   feature_tests
   program_tests
   evaluate_tests
-  failure_tests)
+  failure_tests
+  owning_tests)
  (libraries
   harness
   compiler_bug
