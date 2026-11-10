@@ -544,59 +544,73 @@ let answers ?(running = not_running) solver (obligations : Translate.obligation 
   in
   List.map (fun obligation -> (obligation, solve obligation chosen)) obligations
 
-let definition_diagnostics ?running database solver (key : Names.key) =
+(* An obligation's state: where it is, what it asks, and, where it was not
+   shown, the diagnostic that says why. *)
+type state = {
+  code : Diagnostic.Code.prover;
+  span : Diagnostic.span;
+  shows : string;
+  failure : Diagnostic.t option;
+}
+
+let definition_states ?running database solver (key : Names.key) =
   let source_span span = source_span (within database key span) in
   match Query.demand database proof key with
   | Not_proven_here -> []
   | Unsupported (span, what) ->
+      let message =
+        Printf.sprintf "The prover cannot read %s yet, so nothing in this definition is proven."
+          what
+      in
       [
-        diagnostic Unsupported (source_span span)
-          (Printf.sprintf "The prover cannot read %s yet, so nothing in this definition is proven."
-             what);
+        {
+          code = Unsupported;
+          span = source_span span;
+          shows = message;
+          failure = Some (diagnostic Unsupported (source_span span) message);
+        };
       ]
   | Obligations outcome ->
-      (* The same failure on another path, as a second index into the same
-         list with the same index is, is reported once. *)
-      let failed =
-        List.fold_left
-          (fun failed ((obligation : Translate.obligation), answer) ->
-            if
-              answer = Solved Proven
-              || List.exists
-                   (fun ((other : Translate.obligation), _) ->
-                     other.code = obligation.code && other.message = obligation.message)
-                   failed
-            then failed
-            else failed @ [ (obligation, answer) ])
-          []
-          (answers ?running solver outcome.obligations)
-      in
-      List.filter_map
+      List.map
         (fun ((obligation : Translate.obligation), (answer : answer)) ->
-          match answer with
-          | Solved Proven -> None
-          | Ran_false ->
-              Some
-                (diagnostic obligation.code (source_span obligation.span)
-                   (obligation.message ^ " Running it on this template's text gives `false`."))
-          | Ran_too_long ->
-              Some
-                (diagnostic obligation.code (source_span obligation.span)
-                   (obligation.message
-                  ^ " Running it on this template's text took longer than the time limit, so it is \
-                     not known."))
-          | Solved (Counterexample values) ->
-              Some
-                (diagnostic obligation.code (source_span obligation.span)
-                   (obligation.message
-                   ^ counterexample (Logic.members obligation.query) obligation values))
-          | Solved Out_of_steps ->
-              Some
-                (diagnostic obligation.code (source_span obligation.span)
-                   (obligation.message
-                  ^ " The solver ran out of steps, so it may hold but needs help: a `proof` block \
-                     or a theorem.")))
-        failed
+          let span = source_span obligation.span in
+          let failed explained =
+            Some (diagnostic obligation.code span (obligation.message ^ explained))
+          in
+          {
+            code = obligation.code;
+            span;
+            shows = obligation.message;
+            failure =
+              (match answer with
+              | Solved Proven -> None
+              | Ran_false -> failed " Running it on this template's text gives `false`."
+              | Ran_too_long ->
+                  failed
+                    " Running it on this template's text took longer than the time limit, so it is \
+                     not known."
+              | Solved (Counterexample values) ->
+                  failed (counterexample (Logic.members obligation.query) obligation values)
+              | Solved Out_of_steps ->
+                  failed
+                    " The solver ran out of steps, so it may hold but needs help: a `proof` block \
+                     or a theorem.");
+          })
+        (answers ?running solver outcome.obligations)
+
+(* The failures among a definition's states. The same failure on another
+   path, as a second index into the same list with the same index is, is
+   reported once. *)
+let definition_diagnostics ?running database solver key =
+  List.fold_left
+    (fun (reported, diagnostics) state ->
+      match state.failure with
+      | Some failure when not (List.mem (state.code, state.shows) reported) ->
+          ((state.code, state.shows) :: reported, diagnostics @ [ failure ])
+      | _ -> (reported, diagnostics))
+    ([], [])
+    (definition_states ?running database solver key)
+  |> snd
 
 (* The queries of every definition of the modules, solved together,
    several at once, so that reading each definition's answers after finds
@@ -618,3 +632,23 @@ let solve_ahead ?(running = not_running) database solver modules =
 let diagnostics ?(running = not_running) database solver module_ =
   solve_ahead ~running database solver [ module_ ];
   Names.per_definition database module_ (definition_diagnostics ~running database solver)
+
+let states ?(running = not_running) database solver module_ =
+  solve_ahead ~running database solver [ module_ ];
+  List.concat_map
+    (fun declaration ->
+      let key = Names.key_of declaration in
+      match Query.demand database Names.base key with
+      | Some (_, base) ->
+          let moved (span : Diagnostic.span) = Source.span (span.start + base) (span.stop + base) in
+          List.map
+            (fun state ->
+              {
+                state with
+                span = moved state.span;
+                failure = Option.map (Diagnostic.move base) state.failure;
+              })
+            (definition_states ~running database solver key)
+      | None -> [])
+    (Query.demand database Names.declarations module_)
+  |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
