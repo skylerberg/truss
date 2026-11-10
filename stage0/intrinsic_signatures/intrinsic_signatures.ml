@@ -182,6 +182,11 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Run_test -> make [ input "index" (T.builtin UInt32) ]
   | Report_tests_to -> make [ input "descriptor" (T.builtin Int32) ]
   | Live_blocks -> make ~output:(Returns usize) []
+  | Environment_entry ->
+      make
+        ~output:(Returns (view (T.builtin UInt8)))
+        [ input "index" usize; input ~mode:Mut "found" bool ]
+  | System_is_os _ | System_is_architecture _ -> make ~output:(Returns bool) []
   | Libc function_ ->
       let { Libc.parameters; result; _ } = Libc.signature function_ in
       let found = match result with Text -> [ input ~mode:Mut "found" bool ] | _ -> [] in
@@ -230,9 +235,10 @@ let cost (operation : Intrinsic.operation) =
   | View_length | View_at | View_at_mut | View_swap | Storage_take_view | View_take_view
   | Array_take_view | View_slice | View_address | Array_view | Array_at_mut | Storage_model
   | View_model | Array_model | Crash | Storage_lengthen | Storage_push | Handle_from
-  | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks | Libc_number _ ->
+  | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks | Libc_number _
+  | System_is_os _ | System_is_architecture _ ->
       { time = Constant_time; allocations = No_allocations }
-  | Compare_bytes | Storage_remove | Storage_insert ->
+  | Compare_bytes | Storage_remove | Storage_insert | Environment_entry ->
       { time = Linear_in 0; allocations = No_allocations }
   | Storage_set_capacity -> { time = Linear_in 0; allocations = Unknown_allocations }
   | Storage_with_capacity -> { time = Constant_time; allocations = One_if_positive (Argument 0) }

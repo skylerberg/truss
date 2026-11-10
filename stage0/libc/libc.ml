@@ -2,6 +2,8 @@ type os = Linux | Macos
 type architecture = X86_64 | Arm64
 type system = { os : os; architecture : architecture }
 
+let oses = [ Linux; Macos ]
+let architectures = [ X86_64; Arm64 ]
 let os_name = function Linux -> "Linux" | Macos -> "macOS"
 let architecture_name = function X86_64 -> "x86-64" | Arm64 -> "ARM64"
 let system_name system = os_name system.os ^ " on " ^ architecture_name system.architecture
@@ -141,6 +143,10 @@ type function_ =
   | Readlink
   | Realpath
   | Nanosleep
+  | Getcwd
+  | Gethostname
+  | Getpid
+  | Proc_pidpath
 
 let functions =
   [
@@ -180,6 +186,10 @@ let functions =
     Readlink;
     Realpath;
     Nanosleep;
+    Getcwd;
+    Gethostname;
+    Getpid;
+    Proc_pidpath;
   ]
 
 let function_name = function
@@ -219,6 +229,10 @@ let function_name = function
   | Readlink -> "readlink"
   | Realpath -> "realpath"
   | Nanosleep -> "nanosleep"
+  | Getcwd -> "getcwd"
+  | Gethostname -> "gethostname"
+  | Getpid -> "getpid"
+  | Proc_pidpath -> "proc_pidpath"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -231,6 +245,7 @@ type row = {
   returns : system -> string;
   result : result;
   at_most : string option;
+  on : os -> bool;
   parameters : (string * passes * (system -> string)) list;
   variadic_from : int option;
   headers : string list;
@@ -256,8 +271,8 @@ let offset = by_os (function Linux -> "long" | Macos -> "long long")
 
 let describe function_ =
   let row ?(symbol = everywhere (function_name function_)) ?variadic_from ?(layout = [])
-      ?(named = []) ?at_most returns result parameters ~headers =
-    { symbol; returns; result; at_most; parameters; variadic_from; headers; layout; named }
+      ?(named = []) ?at_most ?(on = fun _ -> true) returns result parameters ~headers =
+    { symbol; returns; result; at_most; on; parameters; variadic_from; headers; layout; named }
   in
   let counted by = Counted { by; each = 1 } in
   match function_ with
@@ -556,6 +571,37 @@ let describe function_ =
             everywhere "struct timespec *" );
         ]
         ~headers:[ "time.h" ]
+  | Getcwd ->
+      (* The path is written into the room given, and the address returned
+         is that room's. *)
+      row (everywhere "char *") Text
+        [
+          ("buffer", Room (UInt8, counted "size"), everywhere "char *"); ("size", Value USize, size);
+        ]
+        ~headers:[ "unistd.h" ]
+  | Gethostname ->
+      (* The name ends with a zero byte unless it fills the bytes given. *)
+      row (everywhere "int") (Returns Int32)
+        [
+          ("name", Elements_to_change (UInt8, counted "size"), everywhere "char *");
+          ("size", Value USize, size);
+        ]
+        ~headers:[ "unistd.h" ]
+  | Getpid -> row (everywhere "int") (Returns Int32) [] ~headers:[ "unistd.h" ]
+  | Proc_pidpath ->
+      (* The path of a process's executable, which Linux gives as a link
+         in its [/proc]. *)
+      row ~at_most:"size"
+        ~on:(fun os -> os = Macos)
+        (everywhere "int") (Returns Int32)
+        [
+          ("process", Value Int32, everywhere "int");
+          ("buffer", Room (UInt8, counted "size"), everywhere "void *");
+          ("size", Value USize, everywhere "unsigned int");
+        ]
+        ~headers:[ "libproc.h" ]
+
+let available system function_ = (describe function_).on system.os
 
 let signature function_ =
   let row = describe function_ in
@@ -884,6 +930,7 @@ let bytes = function
   | USize | ISize -> invalid_arg "a USize the C library reaches through an address"
 
 let check system =
+  let functions = List.filter (available system) functions in
   let headers =
     List.fold_left
       (fun seen header -> if List.mem header seen then seen else seen @ [ header ])

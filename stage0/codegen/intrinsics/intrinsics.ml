@@ -160,6 +160,25 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
             binary op
         | _ -> binary op
       in
+      let byte : Ground.ty = Named { path = Intrinsic.builtin_path UInt8; arguments = [] } in
+      (* The text at an address that may be null: the bytes up to a zero
+         byte, as a view, with [found] saying whether the address was
+         there. A view's address is never null, so text that is not there
+         is an empty view of static bytes. *)
+      let text_at address ~found =
+        emit b (Assign (found, Binary (Not_equal, Copy (at address), Constant Null)));
+        let elements = local b (Raw (Pointer (Data byte))) in
+        let count = usize_local "length" in
+        emit b (Assign (at elements, Use (Constant (Bytes ""))));
+        emit b (Assign (at count, Use (usize 0)));
+        when_ b (Copy found) (fun () ->
+            emit b (Assign (at elements, Use (Copy (at address))));
+            call ~result:(at count) Terminated_length [ Copy (at address) ]);
+        set
+          (Storage.view (Storage.view_of_elements byte)
+             ~elements:(Copy (at elements))
+             ~length:(Copy (at count)))
+      in
       (match (operation : Intrinsic.operation) with
       | Storage_at | Storage_at_mut | View_at | View_at_mut | Array_at_mut -> ()
       | Add -> checked_arithmetic Add Add_overflow
@@ -511,6 +530,49 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
       | Run_test -> call Run_test [ value 0 ]
       | Report_tests_to -> call Report_tests_to [ value 0 ]
       | Live_blocks -> call ?result:destination Live_blocks []
+      | System_is_os os -> set (Use (Constant (Bool ((Memory_layout.target env).system.os = os))))
+      | System_is_architecture architecture ->
+          set
+            (Use (Constant (Bool ((Memory_layout.target env).system.architecture = architecture))))
+      | Environment_entry ->
+          (* The entries are counted from the first each time, so the null
+             address after the last is never passed. *)
+          let environment = local b (Raw (Pointer Opaque)) in
+          call ~result:(at environment) Environment [];
+          let position = usize_local "position" in
+          emit b (Assign (at position, Use (usize 0)));
+          let entry = local b (Raw (Nullable_pointer (Data byte))) in
+          let test = block b and next = block b and after = block b in
+          finish b (Goto test);
+          start b test;
+          call ~result:(at entry) Program_argument [ Copy (at environment); Copy (at position) ];
+          let last = local b (Raw Bool) and reached = local b (Raw Bool) in
+          let stop = local b (Raw Bool) in
+          emit b (Assign (at last, Binary (Equal, Copy (at entry), Constant Null)));
+          emit b (Assign (at reached, Binary (Equal, Copy (at position), value 0)));
+          emit b (Assign (at stop, Binary (Bit_or, Copy (at last), Copy (at reached))));
+          finish b
+            (Switch { value = Copy (at stop); cases = [ (Z.one, after) ]; default = Some next });
+          start b next;
+          emit b (Assign (at position, Binary (Add, Copy (at position), usize 1)));
+          finish b (Goto test);
+          start b after;
+          text_at entry ~found:(place (argument 1))
+      | Libc function_ when not (Libc.available (Memory_layout.target env).system function_) ->
+          (* The standard library asks which system it is built for before
+             it calls a function that only some have. *)
+          let message =
+            Printf.sprintf "this system's C library has no %s" (Libc.function_name function_)
+          in
+          finish b
+            (Fail
+               {
+                 failure = Panic;
+                 message = Constant (Bytes message);
+                 length = usize (String.length message);
+                 site;
+               });
+          start b (block b)
       | Libc function_ -> (
           let ground scalar =
             Ground.Named
@@ -590,30 +652,9 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
               call (Returned (at address));
               set (Use (Copy (at address / Deref)))
           | Text ->
-              let bytes = ground UInt8 in
-              let address = local b (Raw (Nullable_pointer (Data bytes))) in
+              let address = local b (Raw (Nullable_pointer (Data byte))) in
               call (Returned (at address));
-              let found = place (argument (taken ())) in
-              emit b (Assign (found, Binary (Not_equal, Copy (at address), Constant Null)));
-              (* A view's address is never null, so text that is not there
-                 is an empty view of static bytes. *)
-              let elements = local b (Raw (Pointer (Data bytes))) in
-              let count = usize_local "length" in
-              emit b (Assign (at elements, Use (Constant (Bytes ""))));
-              emit b (Assign (at count, Use (usize 0)));
-              when_ b (Copy found) (fun () ->
-                  emit b (Assign (at elements, Use (Copy (at address))));
-                  emit b
-                    (Call
-                       {
-                         target = Intrinsic Terminated_length;
-                         arguments = [ Copy (at address) ];
-                         result = Returned (at count);
-                       }));
-              set
-                (Storage.view (Storage.view_of_elements bytes)
-                   ~elements:(Copy (at elements))
-                   ~length:(Copy (at count))))
+              text_at address ~found:(place (argument (taken ()))))
       | Libc_number number ->
           let integer =
             match

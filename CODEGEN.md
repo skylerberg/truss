@@ -1039,7 +1039,7 @@ until both handle it.
 | Storage | empty, with a capacity, from an array, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view, view to change the elements through, take a view back |
 | Views | length, lend an element, lend an element to change, swap, slice, take a view back |
 | Arrays | a view of the elements, lend an element to change, take a view back |
-| Operating system | the C library's functions and numbers, a handle from a descriptor and its descriptor, the address of a view, crash |
+| Operating system | the C library's functions and numbers, which system the program is built for, an entry of the environment, a handle from a descriptor and its descriptor, the address of a view, crash |
 | A test program | run a test by its number, have failures reported to a descriptor, how many blocks are allocated and not freed |
 
 `Intrinsics` writes every operation into the caller's LIR, never as a call:
@@ -1181,6 +1181,14 @@ x86-64 or ARM64. The architecture matters where a structure's layout or a
 function's symbol depends on it, as `struct stat` does on Linux and the
 symbol of `stat` does on macOS. Stage0 builds for the system it runs on.
 
+A function that only some systems have says so in its row, as
+`proc_pidpath` is macOS's. The standard library asks which system the
+program is built for with `system_is_linux()`, `system_is_macos()`,
+`system_is_x86_64()`, and `system_is_arm64()`, which lowering writes as
+constants, and calls such a function only where it exists. A call of it
+on a system that lacks it is lowered to a failure, so the program never
+names a symbol its C library does not have.
+
 A test compiles the table against the system's own headers: every number
 must have the value the table gives, every prototype must be the one the
 headers declare, and every structure must be laid out as the storage
@@ -1222,7 +1230,18 @@ where a symbolic link points with `readlink` and resolves a path with
 `SystemClock.sleep` calls `nanosleep`, and sleeps again for the time left
 when a signal interrupts it; the monotonic clock is `clock_gettime` with
 `CLOCK_MONOTONIC`.
-`SystemEnvironment` reads `getenv`. `SystemProcesses` runs a program found
+`SystemEnvironment` reads one variable with `getenv` and all of them with
+`environment_entry`, an intrinsic that gives the entry at an index of the
+environment the process was started with and counts from the first entry
+each time, so that it never reads past the last. The current directory is
+`getcwd`'s, and the platform is the system the program was built for with
+`sysconf`'s count of processors, `gethostname`, and `getpid`. The
+program's own path is the link `/proc/self/exe` on Linux and
+`proc_pidpath` on macOS. The other locations come from `HOME`, `TMPDIR`,
+and on Linux the `XDG` variables. The local time zone is `TZ`, or where
+`/etc/localtime` links to, and a zone's rules are its file under
+`/usr/share/zoneinfo`, for a name that stays inside that directory.
+`SystemProcesses` runs a program found
 on the `PATH` with `posix_spawnp` and waits for it with `waitpid`: it lays
 the program's name and its arguments end to end, each with its zero byte,
 refusing one that holds a zero byte, and reads the exit status, or 128 and

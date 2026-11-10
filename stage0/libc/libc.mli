@@ -8,6 +8,8 @@ type architecture = X86_64 | Arm64
 type system = { os : os; architecture : architecture }
 (** A system stage0 builds for. *)
 
+val oses : os list
+val architectures : architecture list
 val os_name : os -> string
 val system_name : system -> string
 
@@ -172,11 +174,20 @@ type function_ =
   | Readlink
   | Realpath
   | Nanosleep
+  | Getcwd
+  | Gethostname
+  | Getpid
+  | Proc_pidpath  (** Only macOS has it *)
 
 val functions : function_ list
 
 val function_name : function_ -> string
 (** The name the standard library calls it by. *)
+
+val available : system -> function_ -> bool
+(** Whether the system's C library has the function. A program built for a system never calls one
+    that the system lacks: the call is a failure, so the standard library asks first which system it
+    is built for. *)
 
 val signature : function_ -> signature
 val declaration : system -> function_ -> declaration
