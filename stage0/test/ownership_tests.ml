@@ -675,6 +675,29 @@ let () =
          \  first + second + buffer.length()\n\
           }\n"))
 
+(* Cursors that a yielding method makes *)
+
+let () =
+  test "the `Cursor` trait's own methods are called on a yielding method's cursor" (fun () ->
+      fine
+        "fn f(items: List[Int64], text: String) -> USize {\n\
+        \  var cursor = items.each()\n\
+        \  let _ = mut cursor.find(fn(item) { item > 3 })\n\
+        \  let _ = items.each().fold(0, combine: fn(total, item) { total + item })\n\
+        \  let skipped = items.each().skip(1).count()\n\
+        \  let taken = items.each().take(1).count()\n\
+        \  skipped + taken + text.characters().skip(1).count()\n\
+         }\n");
+  test "a cursor that would copy its elements cannot be given to generic code" (fun () ->
+      one_diagnostic
+        "fn f(names: List[String]) -> List[String] {\n  List.collect(names.each())\n}\n"
+        "ownership.not_pullable");
+  test "a cursor that would copy its elements cannot be used through the trait's methods" (fun () ->
+      one_diagnostic "fn f(names: List[String]) -> List[String] {\n  names.each().to_list()\n}\n"
+        "ownership.not_pullable");
+  test "a cursor over `Plain` elements can be given to generic code" (fun () ->
+      fine "fn f(items: List[Int64]) -> List[Int64] {\n  List.collect(items.each())\n}\n")
+
 (* Constants *)
 
 let () =

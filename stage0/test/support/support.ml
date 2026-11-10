@@ -121,12 +121,15 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   let callee (callee : Core.callee) =
     match callee with
     | Function { type_arguments; _ } -> List.iter (argument "a call's type argument") type_arguments
-    | Trait_method { trait = reference; self_type; type_arguments; evidence; _ } -> (
+    | Trait_method { trait = reference; name; self_type; type_arguments; evidence; _ } -> (
         trait "a call's trait" reference;
         type_ "a call's `Self`" self_type;
         List.iter (argument "a call's type argument") type_arguments;
         match evidence with
-        | Impl { arguments; _ } ->
+        | Impl { impl; arguments } ->
+            (* The [next] of a yielding method's cursor is a [Cursor_next]. *)
+            if name = "next" && Option.is_some (Interface.Impls.cursor_of_impl impl) then
+              wrong "the `next` of a yielding method's cursor is a call";
             List.iter (fun (_, given) -> argument "an `impl`'s type argument" given) arguments
         | Bound | Dynamic -> ())
     | Intrinsic { type_arguments; _ } ->

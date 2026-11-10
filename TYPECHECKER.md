@@ -1429,17 +1429,22 @@ unless it is `Plain`. Otherwise the error offers both fixes.
   `for` loop's expression drives the loop. Calling it anywhere else makes a
   cursor, which is a view of the receiver when the method takes `self`, and
   owns it when the method takes `own self`. A method that yields `mut`
-  cannot be pulled, which is an error at the pull: a `next()` call, or a
-  `for` loop over a cursor held in a variable.
+  cannot make a cursor, since the cursor would store that access.
+- **Whether a cursor can be made is checked where it is made.** Whatever
+  holds a cursor pulls it: a `next()` call, a `for` loop over it, one of the
+  `Cursor` trait's own methods such as `count`, and generic code that is
+  given it, as in `List.collect(names.each())`. Generic code is checked
+  without knowing what it will be given, so the rule cannot wait for the
+  pull.
 - **A pull hands out an owned value.** `next()` returns `Option[Element]`,
   so a method that yields read-only views of places, as `List.each` yields
-  `self[index]`, can be pulled only where its element is `Plain`, which is
-  copied implicitly anyway. A named place counts, whether a field, an
+  `self[index]`, can make a cursor only where its element is `Plain`, which
+  is copied implicitly anyway. A named place counts, whether a field, an
   element, a parameter, or a local. Anything else would be copied unasked,
-  which DESIGN.md rules out, so pulling it is an error that suggests a `for`
-  loop or a method that yields owned values. A method that yields only
-  temporaries, such as calls' results, yields owned values, which a pull
-  moves.
+  which DESIGN.md rules out, so making the cursor is an error that suggests
+  a `for` loop or a method that yields owned values. A method that yields
+  only temporaries, such as calls' results, yields owned values, which a
+  pull moves.
 - **Pullability is worked out from the body,** as DESIGN.md says. A
   `yields` method whose yields reach a recursive call, through a `for` over
   a method in its own call cycle, cannot be pulled, and whether a method
@@ -1800,7 +1805,13 @@ The core form records these decisions:
   expression is in the callee's own core form. A callee is a function or a
   method of a type with its type arguments, a trait method with the
   evidence that selects its `impl`, a capability method, an operation of
-  `standard::intrinsic`, or a function value (an indirect call).
+  `standard::intrinsic`, or a function value (an indirect call). The
+  cursor of a yielding method has an `impl` of `Cursor` that nobody writes,
+  named by the method, as a derived `impl` is named by its type. So a
+  method that `Cursor` gives a body, such as `count`, is called on such a
+  cursor like any trait method, with that `impl` as its evidence. The
+  cursor's `next` is the method's own code, and is a node of its own, as
+  `copy` is.
 - **Every expression is a place or a value.** A place is a local, a
   constant, a field of a place, the result of a lending call, or a
   temporary that holds a value for the enclosing statement. An index
