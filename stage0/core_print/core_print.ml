@@ -63,7 +63,7 @@ let rec expression names (node : expression) =
         (match variant with Some variant -> "." ^ variant | None -> "")
         (list
            (fun (name, given) ->
-             name ^ ": " ^ match given with Some given -> expression given | None -> "default")
+             name ^ ": " ^ match given with Some given -> operand given | None -> "default")
            fields)
   | Collection_literal { elements; construction = how } ->
       Printf.sprintf "%s[%s]" (construction how) (list expression elements)

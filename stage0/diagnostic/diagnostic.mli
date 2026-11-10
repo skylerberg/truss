@@ -183,6 +183,7 @@ module Code : sig
     | Parallel_conflict
     | Keeps_lent_part
     | Read_only_view
+    | Owned_beside_lent
 
   type capabilities =
     | Not_available

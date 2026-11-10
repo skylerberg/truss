@@ -3790,8 +3790,7 @@ and constant_value context frame path =
 
 (* Building a record or a variant: its constructor, with each field given
    or defaulted. *)
-and construct context frame (node : expression) variant (fields : (string * expression option) list)
-    =
+and construct context frame (node : expression) variant (fields : (string * operand option) list) =
   let ty = type_of context frame node in
   if T.equal ty T.unit then begin
     (* The one value of [Unit]. *)
@@ -3804,7 +3803,7 @@ and construct context frame (node : expression) variant (fields : (string * expr
         (fun (frame, given) (field, written) ->
           match written with
           | Some written ->
-              let frame, term = value context frame written in
+              let frame, term = operand_value context frame written in
               (frame, given @ [ (field, term) ])
           | None -> (frame, given @ [ (field, field_default context frame node ty variant field) ]))
         (frame, []) fields
@@ -5872,6 +5871,8 @@ and handing_out context frame (node : statement) (mode : T.mode) (part : operand
         | T.Mut, Place place ->
             let part_after = arrive context frame "lent" part_type in
             (store context frame place part_after, part_after)
+        | T.Mut, Value { kind = Construct _; _ } when Core_walk.lent_places part <> [] ->
+            unsupported span "a `yield` of a constructor that lends places `mut`"
         | _ -> (frame, handed)
       in
       let after = appended context frame part_type before part_after in

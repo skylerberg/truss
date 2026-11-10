@@ -368,7 +368,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
             let parameter : T.parameter_info =
               { name = "self"; mode; type_ = receiver_type; has_default = false }
             in
-            let conversion = argument_value state env first.value parameter in
+            let conversion, mode = argument_value state env first.value parameter in
             ignore (default_literal state self_type);
             ( [ { C.expression = first.value.id; parameter = 0; mode; conversion } ],
               1,

@@ -438,8 +438,9 @@ let form database (path : Path.t) : Core.t option =
                               (fun (field : T.field) ->
                                 ( field.field_name,
                                   Some
-                                    (method_of trait "default" Static field.field_type []
-                                       field.field_type) ))
+                                    (Core.Value
+                                       (method_of trait "default" Static field.field_type []
+                                          field.field_type)) ))
                               (record_fields ());
                         }))
             | _ -> bug "`%s` cannot be derived" (Path.show path)
