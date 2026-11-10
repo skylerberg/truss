@@ -147,7 +147,18 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
       | Multiply -> checked_arithmetic Multiply Multiply_overflow
       | Divide -> checked_division Divide
       | Remainder -> checked_division Remainder
-      | Negate -> unary Negate
+      | Negate -> (
+          (* The least value of a signed type has no negation in the type. *)
+          match integer_argument () with
+          | Some ((Int8 | Int16 | Int32 | Int64 | ISize) as integer) when checks ->
+              let bits = 8 * Memory_layout.integer_size (Memory_layout.target env) integer in
+              let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
+              let of_least = local b (Raw Bool) in
+              emit b
+                (Assign (at of_least, Binary (Equal, value 0, Constant (Integer (integer, least)))));
+              panic_when (Copy (at of_least)) "arithmetic overflow";
+              unary Negate
+          | _ -> unary Negate)
       | Wrapping_add -> binary Add
       | Wrapping_subtract -> binary Subtract
       | Wrapping_multiply -> binary Multiply
