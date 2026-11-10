@@ -178,6 +178,89 @@ fn main(arguments: List[String]) -> ExitCode
       expect_string ~expected:"22 bytes\nstreamed one two\nfirst\nsecond line\nmissing\n" output)
 
 let () =
+  test "a program opens a file to update it, writes and reads at offsets, and closes it" (fun () ->
+      let path = Filename.concat (Lazy.force scratch) "updated.bin" in
+      let status, output, _ =
+        run_main ~arguments:[ path ]
+          {|use standard::files
+use standard::streams
+
+fn report(label: String, outcome: Result[USize, SystemError]) uses Console {
+  match outcome {
+    Ok(count) => Console.print_line("${label} ${count}".slice())
+    Err(_) => Console.print_line("${label} failed".slice())
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, FileRead, FileWrite, Handles
+{
+  let path = Path.new(arguments[1].slice())
+  var file = match FileWrite.open(path, mode: files::WriteMode.Update) {
+    Ok(file) => own file
+    Err(_) => {
+      return ExitCode(1)
+    }
+  }
+  let hello_world: List[UInt8] = [104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100]
+  let there: List[UInt8] = [116, 104, 101, 114, 101]
+  report("wrote", outcome: mut file.write(hello_world.slice()))
+  report("wrote at", outcome: mut file.write_at(6, bytes: there.slice()))
+  var read: List[UInt8] = []
+  report("read at", outcome: mut file.read_at(0, buffer: mut read, limit: 5))
+  report("read at again", outcome: mut file.read_at(6, buffer: mut read, limit: 100))
+  Console.print_line("${read.length()} bytes read".slice())
+  if mut file.seek(streams::Position.FromEnd(offset: -5)) is Ok(position) {
+    Console.print_line("at ${position}".slice())
+  }
+  var tail: List[UInt8] = []
+  report("read", outcome: mut file.read(mut tail, limit: 100))
+  if mut file.set_length(4) is Ok(_) && mut file.synchronize() is Ok(_) {
+    Console.print_line("shortened".slice())
+  }
+  if own file.close() is Ok(_) {
+    Console.print_line("closed".slice())
+  }
+  if FileRead.read_text(path) is Ok(text) {
+    Console.print_line("now ${text}".slice())
+  }
+  if FileWrite.open(path, mode: files::WriteMode.CreateNew) is Err(AlreadyExists) {
+    Console.print_line("exists".slice())
+  }
+  match FileWrite.open(path, mode: files::WriteMode.Append) {
+    Ok(appended) => {
+      var appending = own appended
+      let mark: List[UInt8] = [33]
+      report("appended", outcome: mut appending.write(mark.slice()))
+    }
+    Err(_) => {}
+  }
+  if FileRead.read_text(path) is Ok(text) {
+    Console.print_line("then ${text}".slice())
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string
+        ~expected:
+          "wrote 11\n\
+           wrote at 5\n\
+           read at 5\n\
+           read at again 5\n\
+           10 bytes read\n\
+           at 6\n\
+           read 5\n\
+           shortened\n\
+           closed\n\
+           now hell\n\
+           exists\n\
+           appended 1\n\
+           then hell!\n"
+        output)
+
+let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"
     (fun () ->
       let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in
