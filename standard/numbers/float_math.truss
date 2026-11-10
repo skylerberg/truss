@@ -93,43 +93,43 @@ public fn Float32.sign(self) -> Float32
 public fn Float32.cube_root(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().cube_root().to_float32()
 }
 
 public fn Float32.exponential(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().exponential().to_float32()
 }
 
 public fn Float32.exponential_minus_one(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().exponential_minus_one().to_float32()
 }
 
 public fn Float32.logarithm(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().logarithm().to_float32()
 }
 
 public fn Float32.logarithm_2(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().logarithm_2().to_float32()
 }
 
 public fn Float32.logarithm_10(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().logarithm_10().to_float32()
 }
 
 public fn Float32.logarithm_one_plus(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().logarithm_one_plus().to_float32()
 }
 
 public fn Float32.sine(self) -> Float32
@@ -171,37 +171,37 @@ public fn Float32.arctangent(self) -> Float32
 public fn Float32.hyperbolic_sine(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().hyperbolic_sine().to_float32()
 }
 
 public fn Float32.hyperbolic_cosine(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().hyperbolic_cosine().to_float32()
 }
 
 public fn Float32.hyperbolic_tangent(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().hyperbolic_tangent().to_float32()
 }
 
 public fn Float32.inverse_hyperbolic_sine(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().inverse_hyperbolic_sine().to_float32()
 }
 
 public fn Float32.inverse_hyperbolic_cosine(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().inverse_hyperbolic_cosine().to_float32()
 }
 
 public fn Float32.inverse_hyperbolic_tangent(self) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().inverse_hyperbolic_tangent().to_float32()
 }
 
 public fn Float32.to_degrees(self) -> Float32
@@ -219,13 +219,13 @@ public fn Float32.to_radians(self) -> Float32
 public fn Float32.power(self, exponent: Float32) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().power(exponent.widened()).to_float32()
 }
 
 public fn Float32.logarithm_base(self, base: Float32) -> Float32
   cost time O(1)
 {
-  todo
+  self.widened().logarithm_base(base.widened()).to_float32()
 }
 
 public fn Float32.arctangent_2(self, x: Float32) -> Float32
@@ -602,46 +602,252 @@ public fn Float64.sign(self) -> Float64
   }
 }
 
+internal type Parts(fraction: Float64, exponent: Int64)
+
+internal fn Float64.split_exponent(self) -> Parts
+  ensures -1100 <= result.exponent && result.exponent <= 1100
+  cost time O(1)
+{
+  if self == 0.0 || !self.is_finite() {
+    return Parts(fraction: self, exponent: 0)
+  }
+  let small = self.absolute() < 2.2250738585072014e-308
+  let value = if small { self * 4503599627370496.0 } else { self }
+  let bits = value.to_bits()
+  let field: Int64 = intrinsic::convert((bits >> 52) & 2047)
+  let fraction = Float64.from_bits((bits & 0x800f_ffff_ffff_ffff) | 0x3fe0_0000_0000_0000)
+  Parts(fraction: fraction, exponent: field - 1022 - (if small { 52 } else { 0 }))
+}
+
+internal fn Float64.scaled_by_power(self, power: Int64) -> Float64
+  cost time O(1)
+{
+  if self == 0.0 || !self.is_finite() {
+    return self
+  }
+  let parts = self.split_exponent()
+  let bounded: Int64 = if power > 4000 { 4000 } else if power < -4000 { -4000 } else { power }
+  let total = parts.exponent + bounded
+  if total < -1074 {
+    let zero: Float64 = 0.0
+    return zero.copy_sign(self)
+  }
+  if total > 1024 {
+    return Float64.infinity.copy_sign(self)
+  }
+  let subnormal = total < -1020
+  let field: UInt64 = intrinsic::convert(total + 1022 + (if subnormal { 53 } else { 0 }))
+  let scaled = Float64.from_bits((parts.fraction.to_bits() & 0x800f_ffff_ffff_ffff) | (field << 52))
+  if subnormal { scaled * 1.1102230246251565e-16 } else { scaled }
+}
+
+internal fn Float64.raised_to_whole(self, start: Float64, whole: UInt64) -> Parts
+  ensures -540000 <= result.exponent && result.exponent <= 540000
+  cost time O(1)
+{
+  let parts = self.split_exponent()
+  var mantissa = start
+  var power_of_two: Int64 = 0
+  var base = parts.fraction
+  var base_power = parts.exponent
+  var remaining = whole
+  var bit: Int64 = 0
+  var stopped = false
+  while bit < 64 && remaining != 0 && !stopped
+    invariant 0 <= bit && bit <= 64
+    invariant -8200 <= base_power && base_power <= 8200
+    invariant -8200 * (bit + 1) <= power_of_two && power_of_two <= 8200 * (bit + 1)
+    decreases 64 - bit + (if stopped { 0 } else { 1 })
+  {
+    if base_power < -4096 || base_power > 4096 {
+      power_of_two += base_power
+      stopped = true
+      bit += 1
+    } else {
+      if remaining % 2 == 1 {
+        mantissa = mantissa * base
+        power_of_two += base_power
+      }
+      base = base * base
+      base_power = base_power * 2
+      if base < 0.5 {
+        base = base + base
+        base_power -= 1
+      }
+      remaining = remaining / 2
+      bit += 1
+    }
+  }
+  Parts(fraction: mantissa, exponent: power_of_two)
+}
+
+internal type Double(high: Float64, low: Float64)
+
+internal fn exact_sum(first: Float64, second: Float64) -> Double
+  cost time O(1)
+{
+  let high = first + second
+  let virtual = high - first
+  Double(high: high, low: (first - (high - virtual)) + (second - virtual))
+}
+
+internal fn Float64.precise_logarithm(self) -> Double
+  cost time O(1)
+{
+  let parts = self.split_exponent()
+  let low_half = parts.fraction < 0.7071067811865476
+  let fraction = if low_half { parts.fraction * 2.0 } else { parts.fraction }
+  let power = (parts.exponent - (if low_half { 1 } else { 0 })).to_float64()
+  let above = fraction - 1.0
+  let below = fraction + 1.0
+  let below_rest = fraction - (below - 1.0)
+  let ratio = above / below
+  let ratio_rest = (intrinsic::fused_multiply_add(-ratio, multiplier: below, addend: above) - ratio * below_rest) / below
+  let square = ratio * ratio
+  let fourth = square * square
+  let odd = square * (0.6666666666666735 + fourth * (0.2857142874366239 + fourth * (0.1818357216161805 + fourth * 0.14798198605116586)))
+  let even = fourth * (0.3999999999940942 + fourth * (0.22222198432149784 + fourth * 0.15313837699209373))
+  let leading = exact_sum(power * 0.6931471803691238, second: ratio + ratio)
+  let with_series = exact_sum(leading.high, second: ratio * (odd + even))
+  let whole = exact_sum(with_series.high, second: power * 1.9082149292705877e-10)
+  Double(high: whole.high, low: leading.low + with_series.low + whole.low + 2.0 * ratio_rest)
+}
+
+internal fn Float32.widened(self) -> Float64
+  cost time O(1)
+{
+  intrinsic::convert(self)
+}
+
+internal fn Float64.is_odd_integer(self) -> Bool
+  cost time O(1)
+{
+  if self.absolute() >= 9007199254740992.0 {
+    return false
+  }
+  let whole = intrinsic::truncate(self)
+  if whole != self || !intrinsic::fits[Float64, Int64](whole) {
+    return false
+  }
+  intrinsic::convert[Float64, Int64](whole) % 2 != 0
+}
+
 public fn Float64.cube_root(self) -> Float64
   cost time O(1)
 {
-  todo
+  if self == 0.0 || !self.is_finite() {
+    return self
+  }
+  let magnitude = self.absolute()
+  let first = (magnitude.logarithm() / 3.0).exponential()
+  let ratio = first * first / magnitude * first
+  let second = first * ((ratio + 2.0) / (2.0 * ratio + 1.0))
+  let again = second * second / magnitude * second
+  let third = second * ((again + 2.0) / (2.0 * again + 1.0))
+  third.copy_sign(self)
 }
 
 public fn Float64.exponential(self) -> Float64
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) || self == Float64.infinity {
+    return self
+  }
+  if self < -745.1332191019411 {
+    return 0.0
+  }
+  if self > 709.782712893384 {
+    return Float64.infinity
+  }
+  if self > -3.725290298461914e-09 && self < 3.725290298461914e-09 {
+    return 1.0 + self
+  }
+  let scaled = if self < 0.0 { 1.4426950408889634 * self - 0.5 } else { 1.4426950408889634 * self + 0.5 }
+  let count: Int64 = if intrinsic::fits[Float64, Int64](scaled) { intrinsic::convert(scaled) } else { 0 }
+  let steps = count.to_float64()
+  let high = self - steps * 0.6931471803691238
+  let low = steps * 1.9082149292705877e-10
+  let rest = high - low
+  let square = rest * rest
+  let correction = rest - square * (0.16666666666666666 + square * (-0.0027777777777015593 + square * (6.613756321437934e-05 + square * (-1.6533902205465252e-06 + square * 4.1381367970572385e-08))))
+  let value = 1.0 - ((low - (rest * correction) / (2.0 - correction)) - high)
+  value.scaled_by_power(count)
 }
 
 public fn Float64.exponential_minus_one(self) -> Float64
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) || self == Float64.infinity {
+    return self
+  }
+  let power = self.exponential()
+  if power == 1.0 {
+    return self
+  }
+  if power == Float64.infinity {
+    return power
+  }
+  let below = power - 1.0
+  if below == -1.0 {
+    return -1.0
+  }
+  below * self / power.logarithm()
 }
 
 public fn Float64.logarithm(self) -> Float64
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) || self == Float64.infinity {
+    return self
+  }
+  if self < 0.0 {
+    return Float64.not_a_number
+  }
+  if self == 0.0 {
+    return Float64.negative_infinity
+  }
+  let parts = self.split_exponent()
+  let low_half = parts.fraction < 0.7071067811865476
+  let fraction = if low_half { parts.fraction * 2.0 } else { parts.fraction }
+  let power = (parts.exponent - (if low_half { 1 } else { 0 })).to_float64()
+  let above = fraction - 1.0
+  let ratio = above / (2.0 + above)
+  let square = ratio * ratio
+  let fourth = square * square
+  let odd = square * (0.6666666666666735 + fourth * (0.2857142874366239 + fourth * (0.1818357216161805 + fourth * 0.14798198605116586)))
+  let even = fourth * (0.3999999999940942 + fourth * (0.22222198432149784 + fourth * 0.15313837699209373))
+  let series = odd + even
+  let half_square = 0.5 * above * above
+  power * 0.6931471803691238 - ((half_square - (ratio * (half_square + series) + power * 1.9082149292705877e-10)) - above)
 }
 
 public fn Float64.logarithm_2(self) -> Float64
   cost time O(1)
 {
-  todo
+  let parts = self.split_exponent()
+  if parts.fraction == 0.5 {
+    return (parts.exponent - 1).to_float64()
+  }
+  parts.fraction.logarithm() * 1.4426950408889634 + parts.exponent.to_float64()
 }
 
 public fn Float64.logarithm_10(self) -> Float64
   cost time O(1)
 {
-  todo
+  self.logarithm_2() * 0.3010299956639812
 }
 
 public fn Float64.logarithm_one_plus(self) -> Float64
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) || self == Float64.infinity {
+    return self
+  }
+  let sum = 1.0 + self
+  if sum == 1.0 {
+    return self
+  }
+  sum.logarithm() * (self / (sum - 1.0))
 }
 
 public fn Float64.sine(self) -> Float64
@@ -683,37 +889,114 @@ public fn Float64.arctangent(self) -> Float64
 public fn Float64.hyperbolic_sine(self) -> Float64
   cost time O(1)
 {
-  todo
+  if !self.is_finite() {
+    return self
+  }
+  let magnitude = self.absolute()
+  if magnitude < 3.725290298461914e-09 {
+    return self
+  }
+  if magnitude > 709.0 {
+    let half = (magnitude * 0.5).exponential()
+    return (half * 0.5 * half).copy_sign(self)
+  }
+  let grown = magnitude.exponential_minus_one()
+  ((grown + grown / (grown + 1.0)) * 0.5).copy_sign(self)
 }
 
 public fn Float64.hyperbolic_cosine(self) -> Float64
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) {
+    return self
+  }
+  let magnitude = self.absolute()
+  if magnitude > 709.0 {
+    let half = (magnitude * 0.5).exponential()
+    return half * 0.5 * half
+  }
+  let power = magnitude.exponential()
+  (power + 1.0 / power) * 0.5
 }
 
 public fn Float64.hyperbolic_tangent(self) -> Float64
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) {
+    return self
+  }
+  let magnitude = self.absolute()
+  let one: Float64 = 1.0
+  if magnitude > 22.0 {
+    return one.copy_sign(self)
+  }
+  let grown = (2.0 * magnitude).exponential_minus_one()
+  (grown / (grown + 2.0)).copy_sign(self)
 }
 
 public fn Float64.inverse_hyperbolic_sine(self) -> Float64
   cost time O(1)
 {
-  todo
+  if !self.is_finite() {
+    return self
+  }
+  let magnitude = self.absolute()
+  if magnitude < 3.725290298461914e-09 {
+    return self
+  }
+  let found = if magnitude > 268435456.0 {
+    magnitude.logarithm() + 0.6931471805599453
+  } else if magnitude > 2.0 {
+    (2.0 * magnitude + 1.0 / (intrinsic::square_root(magnitude * magnitude + 1.0) + magnitude)).logarithm()
+  } else {
+    let square = magnitude * magnitude
+    (magnitude + square / (1.0 + intrinsic::square_root(1.0 + square))).logarithm_one_plus()
+  }
+  found.copy_sign(self)
 }
 
 public fn Float64.inverse_hyperbolic_cosine(self) -> Float64
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) {
+    return self
+  }
+  if self < 1.0 {
+    return Float64.not_a_number
+  }
+  if self >= 268435456.0 {
+    self.logarithm() + 0.6931471805599453
+  } else if self > 2.0 {
+    (2.0 * self - 1.0 / (self + intrinsic::square_root(self * self - 1.0))).logarithm()
+  } else {
+    let above = self - 1.0
+    (above + intrinsic::square_root(2.0 * above + above * above)).logarithm_one_plus()
+  }
 }
 
 public fn Float64.inverse_hyperbolic_tangent(self) -> Float64
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) {
+    return self
+  }
+  let magnitude = self.absolute()
+  if magnitude > 1.0 {
+    return Float64.not_a_number
+  }
+  if magnitude == 1.0 {
+    return Float64.infinity.copy_sign(self)
+  }
+  if magnitude < 3.725290298461914e-09 {
+    return self
+  }
+  let double = magnitude + magnitude
+  let found = if magnitude < 0.5 {
+    0.5 * (double + double * magnitude / (1.0 - magnitude)).logarithm_one_plus()
+  } else {
+    0.5 * (double / (1.0 - magnitude)).logarithm_one_plus()
+  }
+  found.copy_sign(self)
 }
 
 public fn Float64.to_degrees(self) -> Float64
@@ -731,13 +1014,71 @@ public fn Float64.to_radians(self) -> Float64
 public fn Float64.power(self, exponent: Float64) -> Float64
   cost time O(1)
 {
-  todo
+  if exponent == 0.0 || self == 1.0 {
+    return 1.0
+  }
+  if exponent == 1.0 {
+    return self
+  }
+  if intrinsic::is_nan(self) || intrinsic::is_nan(exponent) {
+    return Float64.not_a_number
+  }
+  let odd = exponent.is_odd_integer()
+  if self == 0.0 {
+    if exponent < 0.0 {
+      return if odd { Float64.infinity.copy_sign(self) } else { Float64.infinity }
+    }
+    return if odd { self } else { 0.0 }
+  }
+  if exponent.is_infinite() {
+    if self == -1.0 {
+      return 1.0
+    }
+    return if (self.absolute() < 1.0) == (exponent > 0.0) { 0.0 } else { Float64.infinity }
+  }
+  if self.is_infinite() {
+    if exponent < 0.0 {
+      return if odd && self < 0.0 { -0.0 } else { 0.0 }
+    }
+    return if odd && self < 0.0 { Float64.negative_infinity } else { Float64.infinity }
+  }
+  if exponent == 0.5 {
+    return intrinsic::square_root(self)
+  }
+  if exponent == -0.5 {
+    return 1.0 / intrinsic::square_root(self)
+  }
+  let whole = intrinsic::truncate(exponent) == exponent
+  if !whole && self < 0.0 {
+    return Float64.not_a_number
+  }
+  let base = self.absolute()
+  let steps = exponent.absolute()
+  let found = if whole && steps <= 64.0 && intrinsic::fits[Float64, UInt64](steps) {
+    let raised = base.raised_to_whole(1.0, whole: intrinsic::convert(steps))
+    if exponent < 0.0 {
+      (1.0 / raised.fraction).scaled_by_power(-raised.exponent)
+    } else {
+      raised.fraction.scaled_by_power(raised.exponent)
+    }
+  } else {
+    let logarithm = base.precise_logarithm()
+    let high = exponent * logarithm.high
+    let low = intrinsic::fused_multiply_add(exponent, multiplier: logarithm.high, addend: -high) + exponent * logarithm.low
+    let grown = high.exponential()
+    if grown.is_finite() && grown != 0.0 {
+      intrinsic::fused_multiply_add(grown, multiplier: low, addend: grown)
+    } else {
+      grown
+    }
+  }
+  if odd && self < 0.0 { -found } else { found }
 }
 
 public fn Float64.logarithm_base(self, base: Float64) -> Float64
   cost time O(1)
 {
-  todo
+  self.logarithm() / base.logarithm()
 }
 
 public fn Float64.arctangent_2(self, x: Float64) -> Float64

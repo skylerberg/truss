@@ -231,3 +231,175 @@ test "a float is cut toward zero and held within an integer's range" {
   assert Int8.saturating_from(-129.0) == -128
   assert USize.saturating_from(1.0e30) == USize.maximum
 }
+
+fn exponential(value: Float64) -> Float64 {
+  value.exponential()
+}
+
+fn logarithm(value: Float64) -> Float64 {
+  value.logarithm()
+}
+
+test "the exponential reaches both ends of the floats" {
+  assert exponential(0.0) == 1.0
+  assert close(exponential(1.0), expected: 2.718281828459045)
+  assert close(exponential(-1.0), expected: 0.36787944117144233)
+  assert close(exponential(0.5), expected: 1.6487212707001282)
+  assert close(exponential(10.0), expected: 22026.465794806718)
+  assert close(exponential(700.0), expected: 1.0142320547350045e+304)
+  assert close(exponential(-700.0), expected: 9.85967654375977e-305)
+  assert exponential(1.0e-10) == 1.0000000001
+  assert exponential(-745.0) > 0.0
+  assert exponential(-745.0) <= 1.0e-323
+  assert exponential(1000.0) == Float64.infinity
+  assert exponential(-1000.0) == 0.0
+  assert exponential(Float64.infinity) == Float64.infinity
+  assert exponential(Float64.negative_infinity) == 0.0
+  assert exponential(Float64.not_a_number).is_nan()
+}
+
+test "the natural logarithm undoes the exponential" {
+  assert logarithm(1.0) == 0.0
+  assert close(logarithm(2.0), expected: 0.6931471805599453)
+  assert close(logarithm(0.5), expected: -0.6931471805599453)
+  assert close(logarithm(10.0), expected: 2.302585092994046)
+  assert close(logarithm(2.718281828459045), expected: 1.0)
+  assert close(logarithm(1.0e-300), expected: -690.7755278982137)
+  assert close(logarithm(1.0e300), expected: 690.7755278982137)
+  assert close(logarithm(5.0e-324), expected: -744.4400719213812)
+  assert logarithm(0.0) == Float64.negative_infinity
+  assert logarithm(-1.0).is_nan()
+  assert logarithm(Float64.infinity) == Float64.infinity
+  assert logarithm(Float64.not_a_number).is_nan()
+}
+
+test "the other logarithms and the exponential less one keep small values" {
+  let eight: Float64 = 8.0
+  let eighth: Float64 = 0.125
+  let three: Float64 = 3.0
+  let tiny: Float64 = 1.0e-320
+  let thousand: Float64 = 1000.0
+  assert eight.logarithm_2() == 3.0
+  assert eighth.logarithm_2() == -3.0
+  assert close(three.logarithm_2(), expected: 1.584962500721156)
+  assert close(tiny.logarithm_2(), expected: -1063.0170064253057)
+  assert close(thousand.logarithm_10(), expected: 3.0)
+  assert close(eight.logarithm_base(2.0), expected: 3.0)
+  let small: Float64 = 1.0e-10
+  let smaller: Float64 = 1.0e-20
+  let half: Float64 = 0.5
+  let minus_one: Float64 = -1.0
+  assert close(small.logarithm_one_plus(), expected: 9.999999999500001e-11)
+  assert smaller.logarithm_one_plus() == 1.0e-20
+  assert close(half.logarithm_one_plus(), expected: 0.4054651081081644)
+  assert minus_one.logarithm_one_plus() == Float64.negative_infinity
+  assert close(small.exponential_minus_one(), expected: 1.00000000005e-10)
+  assert smaller.exponential_minus_one() == 1.0e-20
+  assert close(half.exponential_minus_one(), expected: 0.6487212707001282)
+  assert close(three.exponential_minus_one(), expected: 19.085536923187668)
+  let far: Float64 = -40.0
+  assert far.exponential_minus_one() == -1.0
+}
+
+test "the hyperbolic functions and their inverses" {
+  let half: Float64 = 0.5
+  let minus_two: Float64 = -2.0
+  let small: Float64 = 1.0e-9
+  let twenty: Float64 = 20.0
+  let large: Float64 = 710.0
+  assert close(half.hyperbolic_sine(), expected: 0.5210953054937474)
+  assert close(minus_two.hyperbolic_sine(), expected: -3.6268604078470186)
+  assert small.hyperbolic_sine() == 1.0e-9
+  assert close(twenty.hyperbolic_sine(), expected: 242582597.70489514)
+  assert close(large.hyperbolic_sine(), expected: 1.1169973830808555e+308)
+  assert close(half.hyperbolic_cosine(), expected: 1.1276259652063807)
+  assert close(minus_two.hyperbolic_cosine(), expected: 3.7621956910836314)
+  assert close(large.hyperbolic_cosine(), expected: 1.1169973830808555e+308)
+  assert close(half.hyperbolic_tangent(), expected: 0.46211715726000974)
+  assert close(minus_two.hyperbolic_tangent(), expected: -0.9640275800758169)
+  let thirty: Float64 = 30.0
+  assert thirty.hyperbolic_tangent() == 1.0
+  assert close(half.inverse_hyperbolic_sine(), expected: 0.48121182505960347)
+  assert close(minus_two.inverse_hyperbolic_sine(), expected: -1.4436354751788103)
+  let huge: Float64 = 1.0e10
+  assert close(huge.inverse_hyperbolic_sine(), expected: 23.7189981105004)
+  let one: Float64 = 1.0
+  let three: Float64 = 3.0
+  assert one.inverse_hyperbolic_cosine() == 0.0
+  assert close(three.inverse_hyperbolic_cosine(), expected: 1.762747174039086)
+  assert half.inverse_hyperbolic_cosine().is_nan()
+  assert close(half.inverse_hyperbolic_tangent(), expected: 0.5493061443340549)
+  let nearly: Float64 = 0.9
+  assert close(nearly.inverse_hyperbolic_tangent(), expected: 1.4722194895832204)
+  assert one.inverse_hyperbolic_tangent() == Float64.infinity
+  assert three.inverse_hyperbolic_tangent().is_nan()
+}
+
+fn power(base: Float64, exponent: Float64) -> Float64 {
+  base.power(exponent)
+}
+
+test "a float is raised to a float" {
+  assert power(2.0, exponent: 10.0) == 1024.0
+  assert power(2.0, exponent: 0.5) == 1.4142135623730951
+  assert close(power(10.0, exponent: -2.0), expected: 0.01)
+  assert close(power(1.5, exponent: 2.5), expected: 2.7556759606310752)
+  assert power(-8.0, exponent: 3.0) == -512.0
+  assert power(-2.0, exponent: 2.0) == 4.0
+  assert power(2.0, exponent: -1074.0) == 5.0e-324
+  assert power(0.5, exponent: 1074.0) == 5.0e-324
+  assert power(9.0, exponent: 0.5) == 3.0
+  assert close(power(1.0000001, exponent: 10000000.0), expected: 2.7182816941320818)
+  assert close(power(3.0, exponent: 100.0), expected: 5.153775207320113e+47)
+  assert close(power(1.5, exponent: -1000.0), expected: 8.104774656527566e-177)
+  assert close(power(2.5, exponent: 300.7), expected: 4.576786014669805e+119)
+  assert close(power(0.3, exponent: -555.5), expected: 2.878346032146866e+290)
+  assert close(power(123456.789, exponent: 12.5), expected: 4.404911776708696e+63)
+  assert close(power(0.999, exponent: 700000.0), expected: 6.946374402185022e-305)
+  assert close(power(7.0, exponent: 0.3333333333333333), expected: 1.912931182772389)
+  assert power(-8.0, exponent: 0.5).is_nan()
+  assert power(2.0, exponent: 2000.0) == Float64.infinity
+  assert power(2.0, exponent: -2000.0) == 0.0
+}
+
+test "a power at the edges follows IEEE 754" {
+  assert power(Float64.not_a_number, exponent: 0.0) == 1.0
+  assert power(1.0, exponent: Float64.not_a_number) == 1.0
+  assert power(2.0, exponent: Float64.not_a_number).is_nan()
+  assert power(0.0, exponent: -1.0) == Float64.infinity
+  assert power(-0.0, exponent: -1.0) == Float64.negative_infinity
+  assert power(0.0, exponent: 2.0) == 0.0
+  assert power(-1.0, exponent: Float64.infinity) == 1.0
+  assert power(0.5, exponent: Float64.infinity) == 0.0
+  assert power(2.0, exponent: Float64.infinity) == Float64.infinity
+  assert power(2.0, exponent: Float64.negative_infinity) == 0.0
+  assert power(Float64.infinity, exponent: -1.0) == 0.0
+  assert power(Float64.negative_infinity, exponent: 3.0) == Float64.negative_infinity
+  assert power(Float64.negative_infinity, exponent: 2.0) == Float64.infinity
+}
+
+test "a cube root keeps the sign" {
+  let cube: Float64 = 27.0
+  let negative: Float64 = -8.0
+  let two: Float64 = 2.0
+  let tiny: Float64 = 1.0e-300
+  let huge: Float64 = 1.0e300
+  let zero: Float64 = 0.0
+  assert close(cube.cube_root(), expected: 3.0)
+  assert close(negative.cube_root(), expected: -2.0)
+  assert close(two.cube_root(), expected: 1.2599210498948732)
+  assert close(tiny.cube_root(), expected: 1.0e-100)
+  assert close(huge.cube_root(), expected: 1.0e100)
+  assert zero.cube_root() == 0.0
+  assert Float64.infinity.cube_root() == Float64.infinity
+}
+
+test "a single goes through the same functions" {
+  let two: Float32 = 2.0
+  let eight: Float32 = 8.0
+  assert (two.exponential() - 7.389056).absolute() < 0.00001
+  assert (two.logarithm() - 0.6931472).absolute() < 0.000001
+  assert eight.logarithm_2() == 3.0
+  assert eight.cube_root() == 2.0
+  assert two.power(10.0) == 1024.0
+}

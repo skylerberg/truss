@@ -84,19 +84,31 @@ impl Hash for Float32 {
   }
 }
 
-public fn Float32.ieee_equal(self, other: Float32) -> Bool {
+public fn Float32.ieee_equal(self, other: Float32) -> Bool
+  cost time O(1)
+  cost allocations == 0
+{
   intrinsic::ieee_equal(self, right: other)
 }
 
-public fn Float32.ieee_less(self, other: Float32) -> Bool {
+public fn Float32.ieee_less(self, other: Float32) -> Bool
+  cost time O(1)
+  cost allocations == 0
+{
   intrinsic::ieee_less(self, right: other)
 }
 
-public fn Float32.is_nan(self) -> Bool {
+public fn Float32.is_nan(self) -> Bool
+  cost time O(1)
+  cost allocations == 0
+{
   intrinsic::is_nan(self)
 }
 
-public fn Float32.square_root(self) -> Float32 {
+public fn Float32.square_root(self) -> Float32
+  cost time O(1)
+  cost allocations == 0
+{
   intrinsic::square_root(self)
 }
 
@@ -184,18 +196,30 @@ impl Hash for Float64 {
   }
 }
 
-public fn Float64.ieee_equal(self, other: Float64) -> Bool {
+public fn Float64.ieee_equal(self, other: Float64) -> Bool
+  cost time O(1)
+  cost allocations == 0
+{
   intrinsic::ieee_equal(self, right: other)
 }
 
-public fn Float64.ieee_less(self, other: Float64) -> Bool {
+public fn Float64.ieee_less(self, other: Float64) -> Bool
+  cost time O(1)
+  cost allocations == 0
+{
   intrinsic::ieee_less(self, right: other)
 }
 
-public fn Float64.is_nan(self) -> Bool {
+public fn Float64.is_nan(self) -> Bool
+  cost time O(1)
+  cost allocations == 0
+{
   intrinsic::is_nan(self)
 }
 
-public fn Float64.square_root(self) -> Float64 {
+public fn Float64.square_root(self) -> Float64
+  cost time O(1)
+  cost allocations == 0
+{
   intrinsic::square_root(self)
 }
