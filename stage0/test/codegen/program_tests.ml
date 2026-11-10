@@ -538,7 +538,8 @@ fn main(arguments: List[String]) -> ExitCode
         errors)
 
 let () =
-  test "a program runs others: their status, output, variables, directory, and a signal" (fun () ->
+  test "a program runs others: their status, output, variables, directory, pipes, and a signal"
+    (fun () ->
       let status, output, _ =
         run_main
           {|use standard::processes
@@ -597,6 +598,30 @@ fn main(arguments: List[String]) -> ExitCode
   if Processes.run(processes::Command.new("no-such-program-anywhere")) is Err(NotFound) {
     say("not found")
   }
+  let copier = processes::Command.new("cat")
+    .input(processes::Redirect.Pipe)
+    .output(processes::Redirect.Pipe)
+  if Processes.spawn(copier) is Ok(started) {
+    var child = own started
+    if mut child.take_input() is Some(taken) {
+      var input = own taken
+      let sent: List[UInt8] = [112, 105, 112, 101, 100, 10]
+      let _ = mut input.write(sent.slice())
+      let _ = own input.close()
+    }
+    if mut child.take_output() is Some(taken) {
+      var output = own taken
+      var received: List[UInt8] = []
+      var reading = true
+      while reading {
+        reading = mut output.read(mut received, limit: 100) is Ok(count) && count > 0
+      }
+      show("through cat ", bytes: received)
+    }
+    if mut child.wait() is Ok(status) {
+      say("cat ${shown(status)}")
+    }
+  }
   if Processes.spawn(processes::Command.new("sleep").argument("30")) is Ok(started) {
     var sleeper = own started
     say("sleeping ${sleeper.identifier() > 1}")
@@ -628,6 +653,8 @@ fn main(arguments: List[String]) -> ExitCode
                "and err";
                "without variables home=.";
                "not found";
+               "through cat piped";
+               "cat exited 0";
                "sleeping true";
                "sleep ended by terminate";
                "discarded exited 0";
