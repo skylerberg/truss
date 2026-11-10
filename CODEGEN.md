@@ -1005,9 +1005,12 @@ the end it drops nothing. A method whose yields go through a recursive call has
 no fixed-size state, so the type checker reports any pull of it, as
 DESIGN.md says.
 
-Every cursor implements the prelude's `Cursor` trait, whose `next` is the
-state machine's entry, so `any Cursor[Element = Int64]` gets an ordinary
-vtable.
+Every cursor implements the prelude's `Cursor` trait, by an `impl` that the
+compiler derives for the yielding function. A call of that `impl`'s `next`,
+which generic code reaches through a bound, is a call of the state machine.
+The methods that the trait gives a body, such as `count` and `skip`, are
+instances of the trait's code for the cursor's type, as for any `impl`. So
+`any Cursor[Element = Int64]` gets an ordinary vtable.
 
 ## Capabilities
 

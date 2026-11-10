@@ -1326,6 +1326,46 @@ test "floats that are not finite, as constants" {
 }
 |}
 
+let () =
+  passes "a yielding function's cursor through a bound, and the methods Cursor gives it"
+    {|fn total[Source: Cursor[Element = Int64]](items: own Source) -> Int64 {
+  var cursor = own items
+  var sum: Int64 = 0
+  while mut cursor.next() is Some(item) {
+    sum = sum.wrapping_add(item)
+  }
+  sum
+}
+
+fn counted[Source: Cursor](items: own Source) -> USize {
+  own items.count()
+}
+
+fn skipped[Source: Cursor[Element = Int64]](items: own Source) -> Int64 {
+  total(own items.skip(1))
+}
+
+fn count_to(limit: Int64) yields Int64 {
+  var next: Int64 = 1
+  while next <= limit {
+    yield next
+    next = next.wrapping_add(1)
+  }
+}
+
+test "the cursor of a yielding method, given to generic code" {
+  let items: List[Int64] = [3, 1, 4]
+  assert total(items.each()) == 8
+  assert counted(items.each()) == 3
+  assert skipped(items.each()) == 5
+  let copied: List[Int64] = List.collect(items.each())
+  assert copied.length() == 3 && copied[2] == 4
+  assert items.each().count() == 3
+  assert total(items.each().skip(2)) == 4
+  assert total(count_to(4)) == 10
+}
+|}
+
 (* Checks which of a module's constants fold and which are worked out by
    running their evaluators, and that the module's test passes. *)
 let folds what ~folded ~run source =
