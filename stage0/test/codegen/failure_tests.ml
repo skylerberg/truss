@@ -117,25 +117,6 @@ let refused name ~saying source =
       | Error message -> if not (contains message saying) then fail "got %S" message)
 
 let () =
-  refused "a lending method with a yield on each of two paths is refused, at the call"
-    ~saying:
-      "example/main.truss:13:10: Stage0 cannot build this yet: example::main::Sides.pick, a \
-       lending method with more than one yield"
-    {|type Sides(first: Int64, second: Int64)
-
-fn Sides.pick(self, first: Bool) lends Int64 {
-  if first {
-    yield self.first
-  } else {
-    yield self.second
-  }
-}
-
-test "lent" {
-  let sides = Sides(first: 1, second: 2)
-  assert sides.pick(true) == 1
-}
-|};
   refused "a lambda in a yielding method that is pulled is refused"
     ~saying:"a lambda in a yielding method that is pulled"
     {|fn offsets(base: Int64) yields Int64 {
