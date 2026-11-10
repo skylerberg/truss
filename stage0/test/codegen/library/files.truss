@@ -1,0 +1,102 @@
+fn shows(path: Path, expected: StringSlice) -> Bool {
+  match path.text() {
+    Some(text) => text == expected
+    None => false
+  }
+}
+
+fn holds(found: Option[StringSlice], expected: StringSlice) -> Bool {
+  match found {
+    Some(text) => text == expected
+    None => false
+  }
+}
+
+test "joining puts one separator between two paths, and an absolute part replaces" {
+  assert shows(Path.new("a").join("b"), expected: "a/b")
+  assert shows(Path.new("a/").join("b"), expected: "a/b")
+  assert shows(Path.new("/").join("b"), expected: "/b")
+  assert shows(Path.new("").join("b"), expected: "b")
+  assert shows(Path.new("a").join("/b"), expected: "/b")
+  assert shows(Path.new("a").join(""), expected: "a/")
+  assert shows(Path.new("a/b").join_path(Path.new("c/d")), expected: "a/b/c/d")
+  assert Path.new("/usr").is_absolute()
+  assert !Path.new("usr").is_absolute()
+  assert !Path.new("").is_absolute()
+}
+
+test "a path's parent is the path without its last component" {
+  assert Path.new("a/b/c").parent() is Some(parent) && shows(parent, expected: "a/b")
+  assert Path.new("a/b/").parent() is Some(parent) && shows(parent, expected: "a")
+  assert Path.new("a//b").parent() is Some(parent) && shows(parent, expected: "a")
+  assert Path.new("/a").parent() is Some(parent) && shows(parent, expected: "/")
+  assert Path.new("a").parent() is Some(parent) && shows(parent, expected: "")
+  assert Path.new("/").parent() is None
+  assert Path.new("").parent() is None
+}
+
+test "a path's file name, stem, and extension come from its last component" {
+  let archive = Path.new("backups/archive.tar.gz")
+  assert holds(archive.file_name(), expected: "archive.tar.gz")
+  assert holds(archive.stem(), expected: "archive.tar")
+  assert holds(archive.extension(), expected: "gz")
+  let hidden = Path.new("/home/user/.profile")
+  assert holds(hidden.file_name(), expected: ".profile")
+  assert holds(hidden.stem(), expected: ".profile")
+  assert hidden.extension() is None
+  let plain = Path.new("notes/")
+  assert holds(plain.file_name(), expected: "notes")
+  assert plain.extension() is None
+  let dotted = Path.new("name.")
+  assert holds(dotted.stem(), expected: "name")
+  assert holds(dotted.extension(), expected: "")
+  assert Path.new("/").file_name() is None
+  assert Path.new("a/..").file_name() is None
+  assert Path.new("").file_name() is None
+}
+
+test "the file name and the extension can be replaced" {
+  assert shows(Path.new("a/b.txt").with_extension("md"), expected: "a/b.md")
+  assert shows(Path.new("a/b").with_extension("md"), expected: "a/b.md")
+  assert shows(Path.new("a/b.tar.gz").with_extension(""), expected: "a/b.tar")
+  assert shows(Path.new("a/b.txt").with_file_name("c.md"), expected: "a/c.md")
+  assert shows(Path.new("b.txt").with_file_name("c"), expected: "c")
+  assert shows(Path.new("/").with_file_name("c"), expected: "/c")
+}
+
+test "components are the names between separators" {
+  var names: List[String] = []
+  for component in Path.new("/usr//local/bin/").components() {
+    mut names.push(component.to_string())
+  }
+  assert names.length() == 3
+  assert names[0] == "usr"
+  assert names[1] == "local"
+  assert names[2] == "bin"
+  var none = 0
+  for _ in Path.new("/").components() {
+    none += 1
+  }
+  assert none == 0
+}
+
+test "a path starts with another when its first components are the other's" {
+  assert Path.new("/usr/local/bin").starts_with(Path.new("/usr/local"))
+  assert Path.new("/usr/local/bin").starts_with(Path.new("/usr/local/"))
+  assert Path.new("/usr/local").starts_with(Path.new("/usr/local"))
+  assert !Path.new("/usr/locale").starts_with(Path.new("/usr/local"))
+  assert !Path.new("/usr").starts_with(Path.new("/usr/local"))
+  assert !Path.new("usr/local").starts_with(Path.new("/usr"))
+  assert Path.new("a/b").starts_with(Path.new(""))
+  assert Path.new("/usr/local/bin").relative_to(Path.new("/usr")) is Some(rest) && shows(rest, expected: "local/bin")
+  assert Path.new("/usr").relative_to(Path.new("/usr")) is Some(rest) && shows(rest, expected: "")
+  assert Path.new("/usr/locale").relative_to(Path.new("/usr/local")) is None
+  assert Path.new("a/b/c").relative_to(Path.new("a")) is Some(rest) && shows(rest, expected: "b/c")
+}
+
+test "a path is made from bytes only when they are UTF-8" {
+  let valid: List[UInt8] = [47, 116, 109, 112]
+  assert Path.from_bytes(own valid) is Some(path) && shows(path, expected: "/tmp")
+  let invalid: List[UInt8] = [47, 255]
+  assert Path.from_bytes(own invalid) is None
+}

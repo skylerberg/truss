@@ -189,11 +189,13 @@ public fn Literal.text(self) -> StringSlice
 }
 
 public fn StringSlice.to_string(self) -> String
-  ensures identical(result.model(), self.model())
+  ensures result.length() == self.length()
+  cost time O(self.length())
+  cost allocations <= 1
 {
-  var text = String(storage: intrinsic::storage_with_capacity(self.length()))
-  mut text.push(self)
-  text
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(self.length())
+  self.copy_onto(mut output)
+  String(storage: own output)
 }
 
 public fn TextBuilder.new() -> TextBuilder {
