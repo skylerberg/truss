@@ -68,20 +68,22 @@ let () =
           ordinal = 0;
         }
       in
-      match Query.demand database Infer.checked key with
-      | Some result -> (
-          match List.filter_map Fun.id (Array.to_list result.checked.provides) with
-          | [
-           {
-             implementations =
-               [ (_, [ { capability; impl = Impl _; arguments = [ (_, Type tag) ] } ]) ];
-           };
-          ]
-            when Path.show capability = "standard::capabilities::Clock" && Types.show tag = "Bool"
-            ->
-              ()
-          | _ -> fail "not recorded")
-      | None -> fail "not checked");
+      match
+        List.filter_map
+          (fun (node : Core.expression) ->
+            match node.kind with
+            | Provide { implementations; _ } ->
+                Some
+                  (List.map
+                     (fun (implementation : Core.implementation) -> implementation.provides)
+                     implementations)
+            | _ -> None)
+          (core_nodes database key).expressions
+      with
+      | [ [ [ { capability; impl = Impl _; arguments = [ (_, Type tag) ] } ] ] ]
+        when Path.show capability = "standard::capabilities::Clock" && Types.show tag = "Bool" ->
+          ()
+      | _ -> fail "not recorded");
   test "a specification may not use Panic" (fun () ->
       one_diagnostic
         "fn checked() -> Bool\n\
@@ -836,22 +838,20 @@ let () =
 
 (* Function values and the costs their types promise *)
 
-(* The obligations checking the first definition of a text leaves the
-   prover. *)
-let obligations text =
-  let database = setup [ ("app::main", text) ] in
-  let key =
-    Resolve.Names.key_of
-      (List.hd (Query.demand database Resolve.Names.declarations (module_of "app::main")))
-  in
-  match Query.demand database Infer.checked key with
-  | Some { checked; _ } -> checked.obligations
-  | None -> failwith "the definition was not checked"
+(* How many conversions of a function value to a function type with weaker
+   costs the first definition of a text has. The prover must show that the
+   given costs imply the expected ones at each. *)
+let widenings text =
+  List.length
+    (List.filter
+       (fun (node : Core.expression) ->
+         match node.kind with Convert { conversion = Widen; _ } -> true | _ -> false)
+       (first_core_nodes text).expressions)
 
 let () =
   test "a function bound as a type that promises a cost leaves the cost to the prover" (fun () ->
       match
-        obligations
+        widenings
           "fn f() -> Int64 {\n\
           \  let action: (fn() -> Int64 cost time finite) = forever\n\
           \  action()\n\
@@ -860,23 +860,19 @@ let () =
           \  while true {}\n\
            }\n"
       with
-      | [ Costs_imply _ ] -> ()
-      | found -> fail "%d obligations" (List.length found));
-  test "a function that promises to end is bound as one that does with nothing to prove" (fun () ->
-      match
-        obligations
-          "fn f() -> Int64 {\n\
-          \  let action: (fn() -> Int64 cost time finite) = quick\n\
-          \  action()\n\
-           }\n\n\
-           fn quick() -> Int64\n\
-          \  cost time O(1)\n\
-           {\n\
-          \  1\n\
-           }\n"
-      with
-      | [] -> ()
-      | found -> fail "%d obligations" (List.length found));
+      | 1 -> ()
+      | found -> fail "%d conversions" found);
+  test "a function that promises to end can be bound as one that does" (fun () ->
+      fine
+        "fn f() -> Int64 {\n\
+        \  let action: (fn() -> Int64 cost time finite) = quick\n\
+        \  action()\n\
+         }\n\n\
+         fn quick() -> Int64\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  1\n\
+         }\n");
   test "function types inside a type must promise the same costs" (fun () ->
       one_diagnostic
         "fn f(actions: List[fn() -> Int64]) -> USize {\n\

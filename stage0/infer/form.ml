@@ -4,7 +4,7 @@
 
 open Syntax
 module T = Types
-module C = Checked
+module C = Tables
 module Impls = Interface.Impls
 module Properties = Interface.Properties
 open State

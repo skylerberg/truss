@@ -1771,12 +1771,7 @@ let disjoint_obligations text =
   List.fold_left
     (fun total declaration ->
       match Query.demand database Ownership.ownership (Resolve.Names.key_of declaration) with
-      | Some result ->
-          total
-          + List.length
-              (List.filter
-                 (function Checked.Disjoint _ -> true | _ -> false)
-                 result.Ownership.obligations)
+      | Some result -> total + List.length result.Ownership.disjoint
       | None -> total)
     0
     (Query.demand database Resolve.Names.declarations module_)
