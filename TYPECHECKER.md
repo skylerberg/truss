@@ -171,10 +171,10 @@ what a name is.
 
 **An expression is read as a name in one way.** `parse`, `(parse)`,
 `parse[Int64]`, and `(parse)[Int64]` all name `parse`, the last two with
-type arguments. One function of `Resolve` reads an expression so.
-Resolution, checking a name as a value, checking it as a callee, and
-reading a type written in an expression all use it, so each takes
-parentheses and type arguments alike.
+type arguments. That reading is made in one place, which resolution,
+checking a name as a value, checking it as a callee, and reading a type
+written in an expression all use, so each takes parentheses and type
+arguments alike.
 
 Definitions are named in the resolved form by package, module path, and
 name, never by a hash, as DESIGN.md requires. A method is named
