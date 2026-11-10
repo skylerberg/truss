@@ -149,7 +149,7 @@ and value_place st (value : Core.expression) : Lir.place =
   let ty =
     match value.kind with
     (* These diverge, so the temporary is never read. *)
-    | Return _ | Break | Continue -> Monomorphic.builtin Unit
+    | Return _ | Break | Continue | Leaving _ -> Monomorphic.builtin Unit
     | _ -> ground st value.type_
   in
   let result = temporary st ty in
@@ -290,20 +290,8 @@ and into st (value : Core.expression) (destination : Lir.place) =
       match st.compound_target with
       | Some target -> take st target ty ~destination
       | None -> bug "the current value of a target outside a compound assignment")
-  | Break -> (
-      match st.loops with
-      | loop :: _ ->
-          leave_to st loop.break_depth;
-          finish st.b (Goto loop.break_);
-          start st.b (block st.b)
-      | [] -> bug "a break outside a loop")
-  | Continue -> (
-      match st.loops with
-      | loop :: _ ->
-          leave_to st loop.continue_depth;
-          finish st.b (Goto loop.continue_);
-          start st.b (block st.b)
-      | [] -> bug "a continue outside a loop")
+  | Break -> break_loop st
+  | Continue -> continue_loop st
   | Todo ->
       let message = "todo reached" in
       finish st.b
@@ -388,7 +376,8 @@ and into st (value : Core.expression) (destination : Lir.place) =
             bug "a quantifier that only a specification can have, in code that runs"
       in
       assign (Use (Constant (Bool (not deciding))));
-      for_each st ~origin:value.origin ~parallel:false ~pattern ~iteration ~body:(fun () ->
+      for_each st ~origin:value.origin ~schedule:Sequential ~iteration ~each:(fun bound ->
+          match_patterns st [ (pattern, bound) ] ~failed:(block st.b);
           let holds = temporary st st.context.bool in
           in_statement st (fun () -> into st body holds);
           let decided = block st.b and goes_on = block st.b in
@@ -401,16 +390,27 @@ and into st (value : Core.expression) (destination : Lir.place) =
                });
           start st.b decided;
           assign (Use (Constant (Bool deciding)));
-          (match st.loops with
-          | loop :: _ ->
-              leave_to st loop.break_depth;
-              finish st.b (Goto loop.break_)
-          | [] -> bug "a quantifier's body outside its loop");
+          break_loop st;
           start st.b goes_on)
   | Implies _ | Result | Old _ | Yielded | Finished | Identical _ | Specification_function _
   | Method_time _ ->
       bug "a specification-only expression in code that runs"
-  | Leaving _ -> Compiler_bug.unsupported "an early exit from `concurrent` code"
+  | Leaving { tasks; exit } ->
+      (* The task evaluates the return value into a temporary of its own
+         before it cancels the group. Several tasks may do so at the same
+         time, and only the first to cancel moves its value out. *)
+      let value =
+        match (exit.kind, st.frame.exit, returned_type st) with
+        | Return (Some returned), None, Some ty ->
+            let value = temporary st ty in
+            into st returned value;
+            Some value
+        | Return (Some returned), _, _ ->
+            ignore (value_place st returned);
+            None
+        | _ -> None
+      in
+      early_exit st ~tasks ~exit ~value
 
 (* Evaluates a call's arguments, one for each of the callee's parameters, in
    order. An argument that is a place is passed where it is, and a value is
@@ -607,17 +607,28 @@ and argument_place st (argument : Core.argument) =
   | Passed { mode; value } -> (mode, ground st (operand_type value), operand_place st value)
   | Default -> bug "an omitted argument in a call that has no defaults"
 
-(* Runs [body] once for each value of an iteration, with the pattern's names
-   bound, as the innermost loop: a [break] in it leaves the loop and a
-   [continue] goes on to the next value. *)
-and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.iteration)
-    ~(body : unit -> unit) =
-  (* The loop of a method that a [parallel for] is inlining is marked
-     though it is in an inlined method: the [parallel for] was where a
-     region may be, and its body, which is what the [yield] runs, cannot
-     leave. *)
-  let chunked = (parallel && at_once st) || st.chunk_next_range in
-  st.chunk_next_range <- false;
+(* Lowers a loop over [iteration]. [each] lowers the loop body for the
+   place of one value. The loop is the innermost loop for the body: a
+   [break] exits it and a [continue] starts the next iteration. *)
+and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
+    ~(each : Lir.place -> unit) =
+  (* [st.next_range] is set when a [parallel for] or a [concurrent for] is
+     inlining a method that yields by position. This range loop is then
+     the method's loop, and it takes the schedule of the loop in the
+     source. *)
+  let schedule =
+    match (st.next_range, schedule) with
+    | Sequential, Chunked when not (at_once st) -> Sequential
+    | Sequential, own -> own
+    | inherited, _ -> inherited
+  in
+  st.next_range <- Sequential;
+  (* How a spawned iteration receives a value that the loop owns. *)
+  let owned_each =
+    match schedule with
+    | Spawned loop -> fun value -> spawn_with_owned_item st loop value ~each
+    | Sequential | Chunked -> each
+  in
   (* What a range of a type counts in. A range of [Character] goes from
      U+D7FF to U+E000, since the surrogates between them are no
      characters. *)
@@ -641,8 +652,8 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
     emit st.b (Assign (at answer, Binary (op, left, right)));
     Lir.Copy (at answer)
   in
-  match iteration with
-  | Integer_range { start = low; stop = high; inclusive } when chunked ->
+  match (iteration, schedule) with
+  | Integer_range { start = low; stop = high; inclusive }, Chunked ->
       (* The loop is a region that covers a part of the range's indexes,
          counted from 0 as [UInt64], so that a range of any integer type
          has as many indexes as fit. As it is written here it covers them
@@ -699,8 +710,7 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
                  (compare Less (Copy first_value) (constant 0xD800))
                  (compare Greater_equal (Copy bound) (constant 0xD800)))
               (fun () -> emit st.b (Assign (bound, Binary (Add, Copy bound, constant 0x800))));
-          match_patterns st [ (pattern, bound) ] ~failed:(block st.b);
-          looping st ~continue_:step ~break_:done_ ~depth body);
+          looping st ~continue_:step ~break_:done_ ~depth (fun () -> each bound));
       finish st.b (Goto step);
       start st.b step;
       let ended = local st.b (Raw Bool) in
@@ -715,9 +725,9 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
       emit st.b (Regions_end { fork });
       finish st.b (Goto after);
       start st.b after
-  | Integer_range { start = low; stop = high; inclusive } ->
+  | Integer_range { start = low; stop = high; inclusive }, (Sequential | Spawned _) ->
       let element = ground st low.type_ in
-      let _, constant, characters = counting element in
+      let scalar, constant, characters = counting element in
       let index = binding st ~name:"index" element in
       let stop = binding st element in
       emit st.b (Assign (index, Use (operand st low)));
@@ -732,11 +742,22 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
       finish st.b
         (Switch { value = Copy (at going); cases = [ (Z.one, inside) ]; default = Some after });
       start st.b inside;
-      in_scope st (fun () ->
-          let bound = binding st element in
-          emit st.b (Assign (bound, Use (Copy index)));
-          match_patterns st [ (pattern, bound) ] ~failed:(block st.b);
-          looping st ~continue_:step ~break_:after ~depth body);
+      looping st ~continue_:step ~break_:after ~depth (fun () ->
+          let run value =
+            in_scope st (fun () ->
+                let bound = binding st element in
+                emit st.b (Assign (bound, value));
+                each bound)
+          in
+          match schedule with
+          | Spawned loop ->
+              (* The task's argument is the index, converted to [UInt64]
+                 and back. *)
+              let item = at loop.item in
+              emit st.b (Assign (item, Convert (Copy index, Integer UInt64)));
+              spawn_iteration st loop ~not_spawned:ignore (fun () ->
+                  run (Convert (Copy item, scalar)))
+          | Sequential | Chunked -> run (Use (Copy index)));
       finish st.b (Goto step);
       start st.b step;
       (* An inclusive range stops after its last value without adding
@@ -756,7 +777,7 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
           (fun () -> emit st.b (Assign (index, Use (constant 0xE000))));
       finish st.b (Goto test);
       start st.b after
-  | Yielding_call ({ kind = Call call; _ } as iterated) -> (
+  | Yielding_call ({ kind = Call call; _ } as iterated), _ -> (
       (* The yielding method is inlined here, with the loop body at each
          of its [yield]s. *)
       match resolve_callee st call.callee with
@@ -770,23 +791,47 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
               let cursor = boxed_cursor st yielding in
               call_into st iterated call cursor;
               own_in_scope st cursor;
-              pull_cursor st yielding cursor ~pattern ~body)
+              pull_cursor st yielding cursor ~each:owned_each)
       | Some (path, type_arguments) ->
-          (match (signature_of st.context path).output with
-          | Yields _ -> ()
-          | Returns _ | Lends _ -> bug "a loop over %s, which does not yield" (Path.show path));
+          let mode =
+            match (signature_of st.context path).output with
+            | Yields (mode, _) -> mode
+            | Returns _ | Lends _ -> bug "a loop over %s, which does not yield" (Path.show path)
+          in
           let arguments = arguments_to_inline st path type_arguments call.arguments in
           let caller = st.frame in
           let depth = List.length st.scopes in
           let after = block st.b in
-          st.chunk_next_range <- parallel && at_once st && yields_by_position st path;
+          (* A method that yields by position has one range loop, and that
+             loop takes this loop's schedule. Any other method runs
+             sequentially in the enclosing code. A task spawned at one of
+             its [yield]s outlives the [yield], so the task cannot borrow
+             the yielded place: the method may change or drop the place
+             when it resumes, which would be a use after free. The task
+             gets what a cursor's [next] returns: an owned value, or a
+             bitwise copy of a trivial one. *)
+          let each =
+            match schedule with
+            | Sequential -> each
+            | (Chunked | Spawned _) when yields_by_position st path ->
+                st.next_range <- schedule;
+                each
+            | Chunked -> each
+            | Spawned loop ->
+                if mode = Mut || (mode = Read && not (trivial st loop.element)) then
+                  Compiler_bug.unsupported
+                    ~at:(at_site (site_of st origin))
+                    "a `concurrent for` over `%s`, which yields borrowed places and whose body is \
+                     not a single `for` over a range"
+                    (Path.show path);
+                owned_each
+          in
           inline st path type_arguments ~arguments ~call_site:(site_of st origin)
             ~on_yield:(fun yielded ~resume ~stop ->
               let inner = st.frame in
               st.frame <- caller;
               let around = List.length st.scopes in
               in_scope st (fun () ->
-                  match_patterns st [ (pattern, yielded) ] ~failed:(block st.b);
                   st.loops <-
                     {
                       continue_ = resume;
@@ -795,27 +840,25 @@ and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.i
                       break_depth = depth;
                     }
                     :: st.loops;
-                  body ();
+                  each yielded;
                   st.loops <- List.tl st.loops);
               finish st.b (Goto resume);
               ignore stop;
               st.frame <- inner);
           finish st.b (Goto after);
           start st.b after)
-  | Yielding_call _ -> bug "a loop over what is not a call"
-  | Cursor { cursor; next = None } -> (
+  | Yielding_call _, _ -> bug "a loop over what is not a call"
+  | Cursor { cursor; next = None }, _ -> (
       match ground st (Core_walk.place_type cursor) with
-      | Cursor yielding -> pull_cursor st yielding (place st cursor) ~pattern ~body
+      | Cursor yielding -> pull_cursor st yielding (place st cursor) ~each:owned_each
       | cursor_ty -> bug "a loop over %s, which is not a cursor" (Ground.to_string cursor_ty))
-  | Cursor { cursor; next = Some next } ->
+  | Cursor { cursor; next = Some next }, _ ->
       (* A value of a type that implements [Cursor]: its own [next] is
          called until it gives [None]. *)
       let cursor = place st cursor in
       pull_loop st ~option:(result_type st next)
         ~call_next:(fun destination -> call_with_places st next [ cursor ] ~destination)
-        ~body:(fun value ->
-          match_patterns st [ (pattern, value) ] ~failed:(block st.b);
-          body ())
+        ~body:owned_each
 
 (* Whether a yielding method gives its parts by position: its body is one
    loop over a range of integers that does nothing but yield. The loop's
@@ -842,13 +885,11 @@ and yields_by_position st path =
 
 (* A loop over the cursor of a yielding method's call: the pulled method's
    [next] is called until it gives [None]. *)
-and pull_cursor st (yielding : Ground.yielding) cursor ~pattern ~(body : unit -> unit) =
+and pull_cursor st (yielding : Ground.yielding) cursor ~(each : Lir.place -> unit) =
   pull_loop st
     ~option:(cursor_result st.context yielding)
     ~call_next:(fun destination -> call_next st yielding cursor destination)
-    ~body:(fun value ->
-      match_patterns st [ (pattern, value) ] ~failed:(block st.b);
-      body ())
+    ~body:each
 
 (* The value a method yields with places lent into it.
 
@@ -1051,23 +1092,313 @@ and arguments_to_inline st path type_arguments (arguments : Core.argument list) 
        (List.combine evaluated arguments))
 
 and return_ st (returned : Core.expression option) =
-  match st.frame.exit with
+  (match (returned, st.frame.exit, result_place st) with
+  | Some returned, None, Some result ->
+      clear_result st;
+      into st returned result
+  | Some returned, _, _ -> ignore (value_place st returned)
+  | None, _, _ -> ());
+  return_from_frame st
+
+(* Returns from the function, whose result is already written. In an
+   inlined method, jumps to the method's end instead. *)
+and return_from_frame st =
+  (match st.frame.exit with
   | Some (exit, depth) ->
-      (* A [return] in an inlined method ends the method. *)
-      Option.iter (fun returned -> ignore (value_place st returned)) returned;
       leave_to st depth;
-      finish st.b (Goto exit);
-      start st.b (block st.b)
+      finish st.b (Goto exit)
   | None ->
-      (match (returned, result_place st) with
-      | Some returned, Some result ->
-          clear_result st;
-          into st returned result
-      | Some returned, None -> ignore (value_place st returned)
-      | None, _ -> ());
       leave_to st 0;
-      finish st.b (return_result st);
+      finish st.b (return_result st));
+  start st.b (block st.b)
+
+and break_loop st =
+  match st.loops with
+  | loop :: _ ->
+      leave_to st loop.break_depth;
+      finish st.b (Goto loop.break_);
       start st.b (block st.b)
+  | [] -> bug "a break outside a loop"
+
+and continue_loop st =
+  match st.loops with
+  | loop :: _ ->
+      leave_to st loop.continue_depth;
+      finish st.b (Goto loop.continue_);
+      start st.b (block st.b)
+  | [] -> bug "a continue outside a loop"
+
+(* A call of the [Tasks] method [name]. [places] holds one argument for
+   each parameter, and the call writes its return value to [result]. *)
+and tasks_call st name ?result (places : Lir.place list) : Lir.statement =
+  let capability = Core_walk.tasks_capability in
+  let slot, signature = capability_method st.context capability name in
+  let lir_signature, convention = entry_signature st.context signature in
+  Call
+    {
+      target =
+        Evidence_call
+          { evidence = evidence_of st capability; capability; slot; signature = lir_signature };
+      arguments =
+        List.filter_map Fun.id
+          (List.map2
+             (fun (mode, ty) place ->
+               pass st mode (Monomorphic.ground st.context.monomorphic [] ty) place)
+             (interface_parameters { signature with receiver = None })
+             places);
+      result =
+        (match result with
+        | Some place -> Convention.destination convention place
+        | None -> Discarded);
+    }
+
+(* Calls a [Tasks] method that returns a [Bool], and gives the result. *)
+and tasks_bool st name places : Lir.operand =
+  let result = at (local st.b (Value st.context.bool)) in
+  emit st.b (tasks_call st name ~result places);
+  Copy result
+
+(* Opens a task group, runs [f] with it, and joins it. A scope owns the
+   join, so an early exit from [f] joins the group too. The scope's other
+   temporaries are dropped after the join, because a task may still read
+   them until then. *)
+and with_group st ~origin (f : Lir.place -> unit) =
+  if st.pulling then
+    Compiler_bug.unsupported
+      ~at:(at_site (site_of st origin))
+      "`concurrent` code in a yielding method that is pulled";
+  let scope = open_scope st Statement in
+  let group = at (local st.b ~name:"group" (Value (Monomorphic.builtin UInt64))) in
+  emit st.b (tasks_call st "open" ~result:group []);
+  let join = tasks_call st "join" [ group ] in
+  let cleanup = Join_group join in
+  scope.owned <- [ cleanup ];
+  f group;
+  emit st.b join;
+  scope.owned <- List.filter (fun owned -> owned != cleanup) scope.owned;
+  close_scope st scope
+
+(* The type of the function value that [Tasks.spawn] takes. *)
+and task_function_type st : Lir.ty =
+  let _, signature = capability_method st.context Core_walk.tasks_capability "spawn" in
+  match signature.parameters with
+  | [ _; work; _ ] -> Value (Monomorphic.ground st.context.monomorphic [] work.type_)
+  | _ -> bug "Tasks.spawn does not take a group, a function, and an item"
+
+(* Lowers the body of a task with [f]. The body starts at the region mark
+   that the caller has just emitted. Every exit from the task jumps to
+   [end_block], which is the current block when this returns. *)
+and task_body st ~(id : Core.task) ~group ~early_exits (f : task -> unit) =
+  let task =
+    { id; group; early_exits; end_block = block st.b; scope_depth = List.length st.scopes }
+  in
+  st.tasks <- task :: st.tasks;
+  f task;
+  st.tasks <- List.tl st.tasks;
+  finish st.b (Goto task.end_block);
+  start st.b task.end_block
+
+(* Lowers an early exit that still has to end [tasks], the enclosing tasks
+   it leaves, innermost first. [value] holds the return value of a
+   [return] that has one.
+
+   With no task left, this is the plain exit. Otherwise the innermost task
+   cancels its group. If it is the first to cancel, it records the exit's
+   number and the return value for the code that joins the group. The task
+   then ends, whether or not it was first. *)
+and early_exit st ~(tasks : Core.task list) ~(exit : Core.expression) ~(value : Lir.place option) =
+  match (tasks, st.tasks) with
+  | [], _ -> (
+      match exit.kind with
+      | Return _ ->
+          (match (value, result_place st, returned_type st) with
+          | Some value, Some result, Some ty ->
+              clear_result st;
+              emit st.b (Assign (result, Use (owned st value ty)))
+          | _ -> ());
+          return_from_frame st
+      | Break -> break_loop st
+      | Continue -> continue_loop st
+      | _ -> bug "an early exit that is not a return, a break, or a continue")
+  | id :: rest, task :: _ when id = task.id ->
+      let exits = task.early_exits in
+      exits.exits <- (rest, exit) :: exits.exits;
+      let number = List.length exits.exits in
+      when_ st.b (tasks_bool st "cancel" [ task.group ]) (fun () ->
+          emit st.b (Assign (exits.winner, Use (constant_int UInt32 (Z.of_int number))));
+          match (value, returned_type st) with
+          | Some value, Some ty ->
+              let return_value =
+                match exits.return_value with
+                | Some return_value -> return_value
+                | None ->
+                    let return_value = owned_local st ~name:"return_value" exits.scope ty in
+                    exits.return_value <- Some return_value;
+                    return_value
+              in
+              (* Only one exit wins, so [return_value] is empty here. Drop
+                 elaboration cannot prove that when a loop repeats this
+                 code, so the assignment is lowered as a replacement. *)
+              replace st return_value ty ~by:value
+          | _ -> ());
+      leave_to st task.scope_depth;
+      finish st.b (Goto task.end_block);
+      start st.b (block st.b)
+  | _ -> bug "an early exit leaves a task that is not the innermost enclosing task"
+
+(* After a group is joined: if one of its tasks' early exits won, performs
+   that exit in the enclosing code. *)
+and resume_early_exit st ~of_loop (exits : early_exits) =
+  match List.rev exits.exits with
+  | [] -> ()
+  | recorded ->
+      let after = block st.b in
+      let targets = List.map (fun _ -> block st.b) recorded in
+      finish st.b
+        (Switch
+           {
+             value = Copy exits.winner;
+             cases = List.mapi (fun index target -> (Z.of_int (index + 1), target)) targets;
+             default = Some after;
+           });
+      List.iter2
+        (fun target ((tasks, exit) : Core.task list * Core.expression) ->
+          start st.b target;
+          (match (tasks, exit.kind) with
+          (* A [break] of the [concurrent for] itself. The loop has already
+             ended. *)
+          | [], Break when of_loop -> ()
+          | _, Return _ -> early_exit st ~tasks ~exit ~value:exits.return_value
+          | _ -> early_exit st ~tasks ~exit ~value:None);
+          finish st.b (Goto after))
+        targets recorded;
+      start st.b after
+
+(* Lowers a [concurrent] block. Each branch is a [Task] region, which
+   outlining turns into a nested function. The code after the regions
+   spawns each function as a task of one group. *)
+and concurrent_block st ~origin (branches : Core.statement list) =
+  let function_type = task_function_type st in
+  let item = local st.b (Value (Monomorphic.builtin UInt64)) in
+  emit st.b (Assign (at item, Use (constant_int UInt64 Z.zero)));
+  let branches =
+    List.mapi
+      (fun index branch ->
+        (index, branch, new_early_exits st, local st.b ~name:"task" function_type))
+      branches
+  in
+  if branches <> [] then
+    with_group st ~origin (fun group ->
+        let fork = fresh_fork st in
+        List.iter
+          (fun (index, branch, early_exits, function_value) ->
+            emit st.b (Region { fork; region = Task { function_value; item } });
+            task_body st
+              ~id:(Branch { block = origin; index })
+              ~group ~early_exits
+              (fun _ -> statement st branch))
+          branches;
+        emit st.b (Regions_end { fork });
+        (* [spawn] returns false once the group is cancelled, and the
+           branch then never runs. *)
+        List.iter
+          (fun (_, _, _, function_value) ->
+            ignore (tasks_bool st "spawn" [ group; at function_value; at item ]))
+          branches);
+  List.iter (fun (_, _, early_exits, _) -> resume_early_exit st ~of_loop:false early_exits) branches
+
+(* Lowers a [concurrent for] loop. The enclosing code runs the iteration
+   and spawns one task for each value. *)
+and concurrent_for st ~origin ~(pattern : Core.pattern) ~iteration ~(body : Core.block) =
+  let early_exits = new_early_exits st in
+  with_group st ~origin (fun group ->
+      let loop =
+        {
+          origin;
+          group;
+          early_exits;
+          item = local st.b ~name:"item" (Value (Monomorphic.builtin UInt64));
+          element = ground st pattern.type_;
+        }
+      in
+      for_each st ~origin ~schedule:(Spawned loop) ~iteration ~each:(fun value ->
+          match_patterns st [ (pattern, value) ] ~failed:(block st.b);
+          block_into st body None));
+  resume_early_exit st ~of_loop:true early_exits
+
+(* Spawns one iteration of a [concurrent for] loop as a task. [f] lowers
+   the iteration's body, and the task's argument is the current value of
+   [loop.item]. If the group is already cancelled, [spawn] returns false:
+   [not_spawned] then releases what the item owns, and the enclosing code
+   breaks out of the loop that produces the items. *)
+and spawn_iteration st (loop : spawn_loop) ~(not_spawned : unit -> unit) (f : unit -> unit) =
+  let fork = fresh_fork st in
+  let function_value = local st.b ~name:"task" (task_function_type st) in
+  emit st.b (Region { fork; region = Task { function_value; item = loop.item } });
+  task_body st
+    ~id:(Iteration { loop = loop.origin })
+    ~group:loop.group ~early_exits:loop.early_exits
+    (fun task ->
+      (* A [continue] of the loop ends the task. A [break] of the loop
+         never jumps: it is an early exit that ends the task. *)
+      looping st ~continue_:task.end_block ~break_:task.end_block ~depth:task.scope_depth f);
+  emit st.b (Regions_end { fork });
+  let spawned = tasks_bool st "spawn" [ loop.group; at function_value; at loop.item ] in
+  let next = block st.b and cancelled = block st.b in
+  finish st.b (Switch { value = spawned; cases = [ (Z.one, next) ]; default = Some cancelled });
+  start st.b cancelled;
+  not_spawned ();
+  break_loop st;
+  start st.b next
+
+(* Spawns one iteration of a [concurrent for] loop with a value that the
+   loop owns. The value is moved into a heap block, the block's address is
+   the task's argument, and the task moves the value out and frees the
+   block. A zero-sized value needs no block. *)
+and spawn_with_owned_item st (loop : spawn_loop) (value : Lir.place) ~(each : Lir.place -> unit) =
+  let ty = loop.element in
+  let item = at loop.item in
+  let boxed = not (zero_size st ty) in
+  (* The block's address, read back from the item, and the value's place
+     in the block. The pointer is [borrowed] so that drop elaboration does
+     not track the block's contents: ownership passes from the loop to the
+     task through the block. *)
+  let block_of () : Lir.local * Lir.place =
+    let pointer = local st.b (Raw (Pointer Opaque)) in
+    emit st.b (Assign (at pointer, Convert (Copy item, Pointer Opaque)));
+    let typed = local st.b ~borrowed:true (Pointer { target = Value ty; writable = true }) in
+    emit st.b (Assign (at typed, Use (Copy (at pointer))));
+    (pointer, { root = Local typed; projections = [ Deref ] })
+  in
+  (* Moves the value out of the block into a local of the enclosing scope
+     and frees the block. *)
+  let unbox () : Lir.place =
+    if boxed then begin
+      let unboxed = binding st ty in
+      let pointer, inside = block_of () in
+      emit st.b (Assign (unboxed, Use (owned st inside ty)));
+      emit st.b
+        (Call { target = Intrinsic Free; arguments = [ Copy (at pointer) ]; result = Discarded });
+      unboxed
+    end
+    else at (local st.b (Value ty))
+  in
+  if boxed then begin
+    let pointer = local st.b (Raw (Pointer Opaque)) in
+    emit st.b
+      (Call
+         {
+           target = Intrinsic Allocate;
+           arguments = [ Constant (Size_of ty); Constant (Alignment_of ty) ];
+           result = Returned (at pointer);
+         });
+    emit st.b (Assign (item, Convert (Copy (at pointer), Integer UInt64)));
+    emit st.b (Assign (snd (block_of ()), Use (owned st value ty)))
+  end
+  else emit st.b (Assign (item, Use (constant_int UInt64 Z.zero)));
+  spawn_iteration st loop
+    ~not_spawned:(fun () -> in_scope st (fun () -> ignore (unbox ())))
+    (fun () -> in_scope st (fun () -> each (unbox ())))
 
 and if_ st ~(condition : Core.expression) ~(then_ : Core.block) ~(else_ : Core.block option)
     destination =
@@ -1125,6 +1456,9 @@ and statement st (node : Core.statement) =
       | Evaluate { kind = Use source; _ } -> ignore (place st source)
       | Evaluate value -> ignore (value_place st value)
       | Proof _ -> ()
+      | Concurrent branches -> concurrent_block st ~origin:node.origin branches
+      | For { pattern; iteration; body; mode = Concurrent_loop; _ } ->
+          concurrent_for st ~origin:node.origin ~pattern ~iteration ~body
       | Parallel statements when at_once st ->
           (* Each branch is a region, which outlining makes a function of
              its own once drops are elaborated. A branch cannot leave the
@@ -1137,8 +1471,6 @@ and statement st (node : Core.statement) =
             statements;
           emit st.b (Regions_end { fork })
       | Parallel statements -> List.iter (statement st) statements
-      | Concurrent _ -> Compiler_bug.unsupported "a `concurrent` block"
-      | For { mode = Concurrent_loop; _ } -> Compiler_bug.unsupported "a `concurrent for` loop"
       | Let { pattern = { kind = Bind { local; name; _ }; type_; _ }; value; else_ = None } -> (
           let ty = ground st type_ in
           match value with
@@ -1222,8 +1554,12 @@ and statement st (node : Core.statement) =
           finish st.b (Goto test);
           start st.b after
       | For { pattern; iteration; body; mode; _ } ->
-          for_each st ~origin:node.origin ~parallel:(mode = Parallel_loop) ~pattern ~iteration
-            ~body:(fun () -> block_into st body None)
+          for_each st ~origin:node.origin
+            ~schedule:(if mode = Parallel_loop then Chunked else Sequential)
+            ~iteration
+            ~each:(fun value ->
+              match_patterns st [ (pattern, value) ] ~failed:(block st.b);
+              block_into st body None)
       | Yield { mode; part } -> (
           let lends =
             match part with

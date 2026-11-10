@@ -86,6 +86,7 @@ let libc_builtin : Libc.scalar -> builtin = function
   | UInt64 -> UInt64
   | USize -> USize
   | ISize -> ISize
+  | Float32 -> Float32
   | Float64 -> Float64
 
 type operation =
@@ -170,6 +171,10 @@ type operation =
   | Report_tests_to
   | Live_blocks
   | Environment_entry
+  | Coroutine_start
+  | Coroutine_resume
+  | Coroutine_suspend
+  | Tasks_spawn
   | System_is_os of Libc.os
   | System_is_architecture of Libc.architecture
   | Libc of Libc.function_
@@ -258,6 +263,10 @@ let operations =
     Report_tests_to;
     Live_blocks;
     Environment_entry;
+    Coroutine_start;
+    Coroutine_resume;
+    Coroutine_suspend;
+    Tasks_spawn;
   ]
   @ List.map (fun os -> System_is_os os) Libc.oses
   @ List.map (fun architecture -> System_is_architecture architecture) Libc.architectures
@@ -346,6 +355,10 @@ let operation_name = function
   | Report_tests_to -> "report_tests_to"
   | Live_blocks -> "live_blocks"
   | Environment_entry -> "environment_entry"
+  | Coroutine_start -> "coroutine_start"
+  | Coroutine_resume -> "coroutine_resume"
+  | Coroutine_suspend -> "coroutine_suspend"
+  | Tasks_spawn -> "tasks_spawn"
   | System_is_os Linux -> "system_is_linux"
   | System_is_os Macos -> "system_is_macos"
   | System_is_architecture X86_64 -> "system_is_x86_64"
@@ -359,6 +372,7 @@ let operation_name = function
       "libc_" ^ String.lowercase_ascii (String.sub name from (String.length name - from))
 
 let operation_path operation = Path.Top { module_; name = operation_name operation }
+let uses (_ : operation) : Path.t list = []
 
 let operation_of_path = function
   | Path.Top { module_ = m; name } when m = module_ ->

@@ -118,9 +118,20 @@ let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
   in
   if erased context (snd root) then None else walk root place.projections
 
-and address_c context fc place ~writable =
+and address_c context fc (place : Lir.place) ~writable =
   match place_c context fc place with
-  | Some (text, ty) -> Some ("(&" ^ text ^ ")", Lir.Pointer { target = ty; writable })
+  | Some (text, ty) ->
+      let pointer = Lir.Pointer { target = ty; writable } in
+      (* A pointer parameter is declared [restrict]. The cast removes the
+         qualifier from the type of the parameter's address, which C does
+         not convert implicitly. *)
+      let text =
+        match (place, ty) with
+        | { root = Local local; projections = [] }, Pointer _ when List.mem local fc.f.parameters ->
+            Printf.sprintf "((%s)&%s)" (c_ty context fc.symbol pointer) text
+        | _ -> "(&" ^ text ^ ")"
+      in
+      Some (text, pointer)
   | None -> bug "the address of a place of zero size"
 
 and operand_c context fc : Lir.operand -> (string * Lir.ty) option = function

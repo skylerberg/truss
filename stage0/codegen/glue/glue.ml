@@ -158,7 +158,9 @@ let drop t ty =
   instance (Drop ty) (build b ~parameters:[ pointer ] ~result:None)
 
 (* The drop in slot 0 of an [any] table, which takes the value's pointer
-   untyped, as the slot is called. *)
+   untyped, as the slot is called. It calls the type's drop function. A
+   [Drop] statement would be removed: drop elaboration treats a place
+   behind a pointer that is not a parameter as uninitialized. *)
 let any_drop t ty =
   let b = create () in
   let untyped = local b ~name:"value" (Raw (Pointer Opaque)) in
@@ -166,7 +168,14 @@ let any_drop t ty =
   if not (trivial t ty) then begin
     let typed = local b (Pointer { target = Value ty; writable = true }) in
     emit b (Assign (at typed, Use (Copy (at untyped))));
-    emit b (Drop { root = Local typed; projections = [ Deref ] })
+    emit b
+      (Call
+         {
+           target =
+             Direct { function_ = Instance (Drop ty); signature = Convention.drop_signature ty };
+           arguments = [ Copy (at typed) ];
+           result = Discarded;
+         })
   end;
   finish b (Return None);
   instance (Any_drop ty) (build b ~parameters:[ untyped ] ~result:None)

@@ -116,6 +116,46 @@ public fn sleep(duration: Duration)
 public type SeededTasks(seed: UInt64)
 
 impl Tasks for SeededTasks {
+  fn open(mut self) -> UInt64 {
+    todo
+  }
+
+  fn spawn(mut self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {
+    todo
+  }
+
+  fn join(mut self, task_group: UInt64) {
+    todo
+  }
+
+  fn cancel(mut self, task_group: UInt64) -> Bool {
+    todo
+  }
+
+  fn cancelled(mut self) -> Bool {
+    todo
+  }
+
+  fn watch(mut self, key: UInt64) -> UInt64 {
+    todo
+  }
+
+  fn wait(mut self, key: UInt64, ticket: UInt64, reason: StringSlice) {
+    todo
+  }
+
+  fn wake(mut self, key: UInt64) {
+    todo
+  }
+
+  fn lock(mut self, mutex: UInt64) {
+    todo
+  }
+
+  fn unlock(mut self, mutex: UInt64) {
+    todo
+  }
+
   fn yield_now(mut self) {
     todo
   }

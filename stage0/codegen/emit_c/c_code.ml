@@ -67,6 +67,18 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
         (helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
   | Run_test -> "t_runtime_run_test(" ^ all ^ ")"
+  | Coroutine_start ->
+      Printf.sprintf
+        "t_runtime_coroutine_start((void (*)(void *, uint64_t))%s.f_code, (void \
+         *)%s.f_environment, %s)"
+        (argument 0) (argument 0) (argument 1)
+  | Coroutine_resume -> "t_runtime_coroutine_resume(" ^ all ^ ")"
+  | Coroutine_suspend -> "t_runtime_coroutine_suspend()"
+  | Tasks_spawn ->
+      Printf.sprintf
+        "t_runtime_tasks_spawn(%s, (void (*)(void *, uint64_t))%s.f_code, (void \
+         *)%s.f_environment, %s)"
+        (argument 0) (argument 1) (argument 1) (argument 2)
   | Report_tests_to -> "t_runtime_report_tests_to(" ^ all ^ ")"
   | Live_blocks -> "t_runtime_live_blocks()"
   | Environment ->

@@ -8,13 +8,15 @@ open Lir_builder
 
 (* What leaving a scope does: drop what a place still owns, free the heap
    block a pointer points at, once what is in it has been dropped, give a
-   place back the value that was lent out of it to be changed, or let a
-   lending method go on. *)
+   place back the value that was lent out of it to be changed, let a
+   lending method go on, or join a task group with the given call of
+   [Tasks.join]. *)
 type cleanup =
   | Drop_value of Lir.place
   | Free_pointed of Lir.place
   | Give_back of { lent : Lir.place; source : Lir.place; ty : Ground.ty }
   | Finish_lend of lend
+  | Join_group of Lir.statement
 
 (* A lending call whose method has more to do once it has lent its part. The
    method's body is written into the caller up to its [yield]; the rest of
@@ -54,6 +56,45 @@ type frame = {
       (** In an inlined method, where its [return] goes and how many scopes that keeps *)
 }
 
+(* The early exits of the tasks of one [concurrent] block or loop. An
+   early exit is a [return], [break], or [continue] that leaves a task
+   before its end. The task calls [Tasks.cancel] on its group, and the
+   first task to cancel wins: it stores its exit's number, counted from 1
+   in [exits], in [winner], and the value of a [return] in [return_value].
+   The code that joins the group then switches on [winner] and performs
+   that exit. Each branch of a block has its own record, because each
+   branch is a separate region. The iterations of a loop share one. *)
+type early_exits = {
+  winner : Lir.place;  (** A [UInt32], 0 while no exit has won *)
+  mutable return_value : Lir.place option;
+  scope : scope;  (** The scope enclosing the block or loop, which owns [return_value] *)
+  mutable exits : (Core.task list * Core.expression) list;
+      (** Most recent first. Each entry is the enclosing tasks that the exit has yet to end,
+          innermost first, and the exit itself. *)
+}
+
+(* A task whose body is being lowered. *)
+type task = {
+  id : Core.task;
+  group : Lir.place;
+  early_exits : early_exits;
+  end_block : Lir.block;  (** Every exit from the task jumps here *)
+  scope_depth : int;  (** The number of scopes enclosing the task *)
+}
+
+(* A [concurrent for] loop whose iterations are being spawned. *)
+type spawn_loop = {
+  origin : Core.origin;
+  group : Lir.place;
+  early_exits : early_exits;
+  item : Lir.local;  (** A [UInt64]: the argument of the next task *)
+  element : Ground.ty;  (** The type of the value that the loop's pattern matches *)
+}
+
+(* How the iterations of a loop run: one after another, as chunks of a
+   range on several threads, or each as a spawned task. *)
+type schedule = Sequential | Chunked | Spawned of spawn_loop
+
 (* Where a function's result goes: through the pointer it is given, into a
    local it returns, or nowhere. *)
 type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
@@ -71,9 +112,11 @@ type state = {
       (** The target of the compound assignment whose new value is being lowered *)
   pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
   mutable forks : int;  (** How many [parallel] statements the function has marked *)
-  mutable chunk_next_range : bool;
-      (** Whether the next loop over a range is the loop of a method that a [parallel for] is
-          inlining, and so is the one to run in parts *)
+  mutable tasks : task list;  (** The tasks around the code being lowered, innermost first *)
+  mutable next_range : schedule;
+      (** The schedule of the next range loop, when it is not [Sequential]: a [parallel for] or a
+          [concurrent for] is inlining a method that yields by position, and the next range loop is
+          that method's loop *)
 }
 
 (* The code a function starts lowering: its own, with nothing bound yet. *)
@@ -104,7 +147,8 @@ let enter context ?(pulling = false) ?(nested = ref []) frame =
     compound_target = None;
     pulling;
     forks = 0;
-    chunk_next_range = false;
+    tasks = [];
+    next_range = Sequential;
   }
 
 (* Whether a [parallel] statement's parts are marked here, to become
@@ -118,6 +162,14 @@ let at_once st = (not st.pulling) && st.frame.on_yield = None && st.frame.exit =
 let fresh_fork st =
   st.forks <- st.forks + 1;
   st.forks - 1
+
+(* A record for the early exits of a block's branch or a loop's
+   iterations. The current scope owns the return value, so the value
+   outlives the tasks. *)
+let new_early_exits st =
+  let winner = at (local st.b ~name:"winner" (Raw (Integer UInt32))) in
+  emit st.b (Assign (winner, Use (Constant (Integer (UInt32, Z.zero)))));
+  { winner; return_value = None; scope = List.hd st.scopes; exits = [] }
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
 let trivial st ty = Glue.trivial st.context.glue ty
@@ -228,15 +280,20 @@ let result_place st : Lir.place option =
   | Returned_in local -> Some (at local)
   | No_result -> None
 
+(* The type of the function's result, if it has one with a size. *)
+let returned_type st =
+  match st.result with
+  | Through slot | Returned_in slot -> (
+      match local_type st.b slot with
+      | Value ty | Pointer { target = Value ty; _ } -> Some ty
+      | _ -> None)
+  | No_result -> None
+
 (* Drops what the result's slot holds, before it is written again: an early
    [return] can come after part of the result was written. *)
 let clear_result st =
-  match (st.result, result_place st) with
-  | (Through slot | Returned_in slot), Some place -> (
-      match local_type st.b slot with
-      | Value ty | Pointer { target = Value ty; _ } ->
-          if not (trivial st ty) then emit st.b (Drop place)
-      | _ -> ())
+  match (returned_type st, result_place st) with
+  | Some ty, Some place -> if not (trivial st ty) then emit st.b (Drop place)
   | _ -> ()
 
 let return_result st : Lir.terminator =
@@ -272,7 +329,8 @@ let drop_scope st (scope : scope) =
                           List.mapi (fun i way -> (Z.of_int (List.length ways - 1 - i), way)) ways;
                         default = None;
                       }));
-          start st.b way)
+          start st.b way
+      | Join_group join -> emit st.b join)
     scope.owned
 
 (* Drops everything owned in the scopes inside the [depth] outermost, as a
