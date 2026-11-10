@@ -376,6 +376,7 @@ internal fn reverse_run(storage: mut intrinsic::Storage[UInt8], from: USize, to:
   requires from <= to
   requires to <= intrinsic::storage_length(storage)
   ensures intrinsic::storage_length(storage) == old(intrinsic::storage_length(storage))
+  ensures intrinsic::storage_capacity(storage) == old(intrinsic::storage_capacity(storage))
   cost time O(to - from)
   cost allocations == 0
 {
@@ -386,6 +387,7 @@ internal fn reverse_run(storage: mut intrinsic::Storage[UInt8], from: USize, to:
     invariant low <= high
     invariant high <= to
     invariant intrinsic::storage_length(storage) == old(intrinsic::storage_length(storage))
+    invariant intrinsic::storage_capacity(storage) == old(intrinsic::storage_capacity(storage))
     decreases high - low
     cost time O(low - from)
     cost allocations == 0
@@ -521,10 +523,11 @@ public fn String.reserve(mut self, additional: USize)
 
 public fn String.clear(mut self)
   ensures self.length() == 0
+  ensures self.capacity() == old(self.capacity())
   cost time O(1)
   cost allocations == 0
 {
-  self.storage = intrinsic::storage_empty()
+  intrinsic::storage_shorten(mut self.storage, length: 0)
 }
 
 public fn String.push_character(mut self, character: Character)
@@ -559,14 +562,7 @@ public fn String.pop_character(mut self) -> Option[Character]
   }
   let start = self.slice().previous_start(self.length())
   let character = self.slice().decode(start).character
-  while self.length() > start
-    invariant start <= self.length()
-    invariant self.length() <= old(self.length())
-    decreases self.length() - start
-    cost allocations == 0
-  {
-    let _ = intrinsic::storage_pop(mut self.storage)
-  }
+  intrinsic::storage_shorten(mut self.storage, length: start)
   Some(character)
 }
 
@@ -608,16 +604,7 @@ public fn String.remove_range(mut self, from: USize, to: USize)
     intrinsic::storage_swap(mut self.storage, first: index - width, second: index)
     index += 1
   }
-  var removed: USize = 0
-  while removed < width
-    invariant self.length() == old(self.length()) - removed
-    invariant removed <= width
-    decreases width - removed
-    cost allocations == 0
-  {
-    let _ = intrinsic::storage_pop(mut self.storage)
-    removed += 1
-  }
+  intrinsic::storage_shorten(mut self.storage, length: self.length() - width)
 }
 
 public fn String.truncate(mut self, length: USize)
@@ -627,7 +614,7 @@ public fn String.truncate(mut self, length: USize)
   cost time O(1)
   cost allocations == 0
 {
-  todo
+  intrinsic::storage_shorten(mut self.storage, length: length)
 }
 
 impl Default for String {

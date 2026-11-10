@@ -483,3 +483,29 @@ test "UTF-16 units become a string, and a lone surrogate says where it is" {
   let stray: List[UInt8] = [97, 128, 98]
   assert String.from_utf8(own stray) is Err(error) && "${error}" == "the bytes are not UTF-8 at offset 1"
 }
+
+test "truncate and clear shorten a string and keep its room" {
+  var text: String = "h\u{e9}llo world"
+  mut text.push("!")
+  let room = text.capacity()
+  mut text.truncate(6)
+  assert text == "h\u{e9}llo"
+  assert text.capacity() == room
+  mut text.truncate(6)
+  assert text == "h\u{e9}llo"
+  mut text.push(" again")
+  assert text == "h\u{e9}llo again"
+  mut text.truncate(0)
+  assert text.is_empty()
+  mut text.push("abc")
+  mut text.clear()
+  assert text.is_empty()
+  assert text.capacity() == room
+  mut text.push("xyz")
+  assert text == "xyz"
+  var literal: String = "constant"
+  mut literal.truncate(3)
+  assert literal == "con"
+  mut literal.push("e")
+  assert literal == "cone"
+}
