@@ -135,59 +135,10 @@ let trait_substitution context impl =
   | Some substitution -> substitution
   | None -> bug "no trait for %s" (Path.show impl)
 
-let rec signature_of context (path : Path.t) =
-  match demand context Environment.signature path with
-  | Some signature -> (
-      (* An [impl]'s method is an instance of the [impl]'s parameters as well
-         as its own, which come first, and uses what the [impl] uses. *)
-      match path with
-      | Method { owner = Impl _ as owner; _ } ->
-          let impl = impl_interface context owner in
-          let missing =
-            List.filter
-              (fun (g : T.generic) ->
-                not (List.exists (fun (h : T.generic) -> h.generic = g.generic) signature.generics))
-              impl.impl_generics
-          in
-          (* Its [impl]'s [uses] are its own too. *)
-          let uses =
-            signature.uses
-            @ List.filter
-                (fun capability -> not (List.mem capability signature.uses))
-                impl.impl_uses
-          in
-          { signature with generics = missing @ signature.generics; uses }
-      | _ -> signature)
-  | None -> (
-      match path with
-      | Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
-          (* A method the [impl] leaves to its trait, or one of a derived
-             [impl]: the trait's signature, with [Self] and the trait's
-             parameters standing for what the [impl] gives them. *)
-          let impl = impl_interface context owner in
-          let trait = impl.implements.trait in
-          let trait_signature = signature_of context (Method { owner = trait; name; receiver }) in
-          let substitute = T.substitute (trait_substitution context owner) in
-          let result : T.result -> T.result = function
-            | Returns ty -> Returns (substitute ty)
-            | Yields (m, ty) -> Yields (m, substitute ty)
-            | Lends (m, ty) -> Lends (m, substitute ty)
-          in
-          {
-            trait_signature with
-            generics =
-              impl.impl_generics
-              @ List.filter
-                  (fun (g : T.generic) -> not (Path.equal g.generic.owner trait))
-                  trait_signature.generics;
-            receiver = Option.map (fun (r, ty) -> (r, substitute ty)) trait_signature.receiver;
-            parameters =
-              List.map
-                (fun (p : T.parameter_info) -> { p with type_ = substitute p.type_ })
-                trait_signature.parameters;
-            output = result trait_signature.output;
-          }
-      | _ -> bug "no signature for %s" (Path.show path))
+let signature_of context (path : Path.t) =
+  match Interface.Impls.signature context.database path with
+  | Some signature -> signature
+  | None -> bug "no signature for %s" (Path.show path)
 
 let parameter_types (signature : T.signature) (parameters : S.parameter list) =
   let written =
