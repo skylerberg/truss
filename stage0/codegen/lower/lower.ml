@@ -174,16 +174,18 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
           | Named_parameter { name; _ } -> Hashtbl.replace st.frame.bindings name.id built
           | _ -> bug "a from_template without a named parameter")
       | _ -> bug "from_template takes one template");
-      Constants.begin_output st;
+      let output = Constants.begin_output st in
       List.iter
         (fun clause ->
           if executable st clause then begin
             let holds = temporary st context.bool in
             into st clause holds;
-            Glue.encode_call context.glue st.b context.bool holds
+            Glue.encode_call context.glue st.b
+              ~output:(Address { place = output; writable = true })
+              context.bool holds
           end)
         code.requires;
-      Constants.write_output st);
+      Constants.write_output st output);
   { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
 
 let instance context (key : Instance.key) : Lir.t =

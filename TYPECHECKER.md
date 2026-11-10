@@ -1235,6 +1235,13 @@ the implementation's own evidence. A direct call of the capability would
 call the implementation itself, so it still needs the capability among the
 `impl`'s `uses`, from outside.
 
+The check runs on [the core form](#the-core-form), where every call the
+code makes is a node, however it was written. So a `for` loop over a value
+needs what the value's `each` uses, as the call written out would, and so
+does what a piece of a string is displayed by. A definition with an error
+has no form, and is not checked for what it may call until the error is
+gone.
+
 - **A capability call,** such as `Clock.now()`, needs its capability
   available.
 - **A call to a function with `uses`** needs every capability in it, after
@@ -1244,21 +1251,25 @@ call the implementation itself, so it still needs the capability among the
 - **A lambda's `uses` are inferred** from its body: the capabilities it
   calls. They must be within the `uses` of the function type it is checked
   against.
-- **A capability parameter of the function a call calls is solved** as the
-  union of what is passed for it: what each lambda and each function that
-  meets a function type listing the parameter uses beyond what the type
-  lists, wherever in the call's arguments it is, in parentheses or at the
-  end of a branch as well. That set must then be available at the call. So
+- **A capability parameter of what a call calls,** a function or a trait's
+  method, **is solved** as the union of what is passed for it: what each
+  lambda and each function that meets a function type listing the parameter
+  uses beyond what the type lists, wherever in the call's arguments it is,
+  in parentheses or at the end of a branch as well. That set must then be
+  available at the call. So
   `for_each(3, visit: tick)` needs `Clock` when `tick` uses it and `visit`
   is a `(fn(Int64) uses Granted)`.
 - **A function's own capability parameter stands for itself** throughout its
   body. Inside `for_each`, a `(fn(Int64) uses Granted)` takes only functions
   that use `Granted` or nothing, and a call of `for_each` by itself passes
   `Granted` on as it is.
-- **Specifications and quantifiers' bodies** have no capabilities at all,
-  not even `Panic`, since what they mean must be a value. **`parallel`
-  branches and `parallel for` bodies** have only `Panic` available. A test
-  without `uses` has only `Panic`, and whatever it provides.
+- **What states and does not run** has no capabilities at all, not even
+  `Panic`, since what it means must be a value: a contract's clauses, what
+  a function-typed parameter requires, a loop's clauses, a type's invariant
+  and potential, a law, a proof, and a quantifier's body, whatever the
+  function around it declares. **`parallel` branches and `parallel for`
+  bodies** have only `Panic` available. A test without `uses` has only
+  `Panic`, and whatever it provides.
 - **A `uses` clause that is never needed is not an error,** since a function
   may declare a capability its later versions will use, and callers already
   provide it.
@@ -1568,12 +1579,17 @@ is built, which later results are keyed by, and the id of the syntax node
 it came from, which is how a diagnostic finds the text to quote. Several
 nodes can come from one syntax node, as the call and the update of
 `total += step` do. No node holds a span, so a definition that was only
-laid out again has the same form.
+laid out again has the same form. Where each syntax node is, by its id, is
+a result of its own, which only what shows source asks for.
 
 The type checker says how each node is built where it decides what the
 expression, statement, or pattern is, and builds the form once the
 definition has checked: only then is every type final, and every choice a
 statement settles at its end, such as the `impl` an operator means.
+[What code may call](#what-code-may-call) is checked on the form before it
+is given out, which sets on each call what the call needs and what each
+capability parameter of what it calls stands for there, and on each
+`provide` what its implementations provide.
 
 ### Obligations the type checker creates
 

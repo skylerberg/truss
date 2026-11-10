@@ -607,8 +607,10 @@ so they are compiled once and shared:
 - **Debug output:** the built-in debug output every type has, used by
   `echo`, failed `assert`s, and the test runner, and to write out values
   computed while compiling. A debug function takes a read-only pointer to
-  the value and appends its text to the runtime's debug buffer, one for
-  each thread, so it needs nothing from the standard library. The text is
+  the value and the storage of bytes to append its text to, which its
+  caller owns, so there is no buffer of the program's. It writes a number
+  and quoted text by calling the standard library's functions that do. The
+  text is
   Truss as it would build the value: `Point(x: 1.0, y: 2.0)`, `Some(3)`,
   with a single field written bare, `None`, `[1, 2, 3]` for storage, views,
   and the standard library's lists and slices, and quoted text with escapes
@@ -689,10 +691,10 @@ and its siblings. Full-width multiplication, used by hashing and
   into one `TextBuilder`, and returns the `String`. It never builds a
   `Template` or its lists.
 - **Numbers display as their debug output does.** Integers are written in
-  decimal by the standard library. A float is written by the
-  `write_float` intrinsic, the shortest decimal that reads back as the same
-  value, which is the runtime's function behind debug output too, so
-  `"${x}"` and `echo x` agree.
+  decimal by the standard library. A float is the shortest decimal that
+  reads back as the same value: the standard library asks the C library's
+  `snprintf` for one more digit until `strtod` gives the float back. Debug
+  output calls the same functions, so `"${x}"` and `echo x` agree.
 - **Other tags build a `Template`** with the literal text as constant data,
   which costs nothing, and the parts in a list that the tag usually keeps,
   as `SqlQuery` does. Each part becomes the tag's `Part` through the `From`
@@ -733,8 +735,8 @@ and its siblings. Full-width multiplication, used by hashing and
 
 ### Code that does not ship
 
-- **`echo`** calls the runtime's echo function with the value's debug output
-  and its position. It writes to the test's report in a test, and to stderr
+- **`echo`** appends the value's debug output to storage of its own, and
+  calls the runtime's echo function with that and its position. It writes to the test's report in a test, and to stderr
   elsewhere. Builds refuse programs that can reach it, so it only exists in
   test and development runs.
 - **`todo`** reached in a test calls a function that tells the runner the
@@ -1173,8 +1175,8 @@ value cannot be folded from its expression, and a tagged template's check.
 
 A constant whose value cannot be folded from its expression, such as one
 that calls a function or is a `Map` or a `Set`, has an `Evaluator`
-instance: it works the value out, writes its binary form with
-the generated `Encode` functions into the debug buffer, and writes that to
+instance: it works the value out, appends its binary form with
+the generated `Encode` functions to storage of its own, and writes that to
 standard output. The compiler builds it, with everything it reaches, into a
 program for the host, runs it, and reads the bytes back into static data by
 the type's shape. The binary form is:
@@ -1459,10 +1461,12 @@ a command line can hold.
 - **Checkers shipped compiled.** The standard library's are to ship already
   compiled with the toolchain, for each host and both widths of `USize`, and
   a dependency's to be compiled once per version.
-- **The rest of the runtime in Truss.** A float's text, debug output, and
-  the test runner are functions of the C runtime. Each is to be Truss in the standard library
-  on the C library's functions, leaving the runtime only startup, failing,
-  and allocation.
+- **The test runner in Truss.** It is the one part of the C runtime that
+  is to be Truss in the standard library, on the C library's functions,
+  leaving the runtime only startup, failing, and allocation.
+- **A float's text without the C library.** DESIGN.md has it written in
+  Truss so that it is the same on every system. The loop is Truss; the
+  digits are `snprintf`'s and the check `strtod`'s.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.

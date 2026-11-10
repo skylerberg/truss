@@ -204,7 +204,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | Match { scrutinees; arms } -> match_ state env ?expected value scrutinees arms
   | Provide { implementations; body } ->
       List.iter (fun implementation -> ignore (expression state env implementation)) implementations;
-      draft state value (fun () -> Form.provide state value implementations body);
+      draft state value (fun () -> Form.provide state implementations body);
       block_value state env ?expected body
   | Block body ->
       draft state value (fun () -> Block (built_block state body));

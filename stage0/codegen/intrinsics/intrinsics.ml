@@ -376,12 +376,6 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                  site;
                });
           start b (block b)
-      | Write_float ->
-          let storage = place (argument 0) in
-          let count = usize_local "count" in
-          call ~result:(at count) Float_text
-            [ value 1; Address { place = element_at storage (length storage); writable = true } ];
-          add_to_length storage (Copy (at count))
       | Handle_from ->
           set
             (Build

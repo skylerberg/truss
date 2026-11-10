@@ -306,6 +306,102 @@ let () =
      ensures (old(count) == count)\n\
      { true }"
 
+let () =
+  builds "part of a place is changed through a slice of it"
+    "fn sort_part(part: mut Slice[Int64]) {}\n\n\
+     fn g(items: mut List[Int64]) {\n\
+    \  sort_part(mut items[..2])\n\
+     }\n"
+    "{ app::main::sort_part(mut items[..2]) }"
+
+(* Capabilities *)
+
+let () =
+  test "a call holds what each capability parameter of what it calls stands for" (fun () ->
+      let text =
+        "fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))\n\
+        \  uses Granted\n\
+         {\n\
+        \  visit(count)\n\
+         }\n\n\
+         fn g()\n\
+        \  uses Clock\n\
+         {\n\
+        \  for_each(3, visit: fn(step) {\n\
+        \    let _ = Clock.now()\n\
+        \    let _ = step\n\
+        \  })\n\
+         }\n"
+      in
+      let database = setup [ ("app::main", text) ] in
+      let found = ref [] in
+      List.iter
+        (fun (declaration : Resolve.Names.declaration) ->
+          let key = Resolve.Names.key_of declaration in
+          if Path.show key.path = "app::main::g" then
+            match Query.demand database Infer.core key with
+            | Some form ->
+                Core_walk.parts
+                  {
+                    Core_walk.nothing with
+                    expression =
+                      (fun (node : Core.expression) ->
+                        match node.kind with
+                        | Call { callee = Function { path; _ }; capability_arguments; uses; _ }
+                          when Path.show path = "app::main::for_each" ->
+                            found :=
+                              List.map
+                                (fun ((parameter : Types.parameter), solved) ->
+                                  Printf.sprintf "%s = %d, uses %d" parameter.name
+                                    (List.length solved) (List.length uses))
+                                capability_arguments
+                        | _ -> ());
+                  }
+                  form.parts
+            | None -> fail "no form")
+        (Query.demand database Resolve.Names.declarations (module_of "app::main"));
+      if !found <> [ "Granted = 1, uses 1" ] then fail "found [%s]" (String.concat "; " !found))
+
+(* Where a node came from *)
+
+let () =
+  test "a node's origin finds the source it came from" (fun () ->
+      let text =
+        "fn g(items: List[Int64]) -> Int64 {\n\
+        \  var total = 0\n\
+        \  for item in items {\n\
+        \    total += item\n\
+        \  }\n\
+        \  total\n\
+         }\n"
+      in
+      let database = setup [ ("app::main", text) ] in
+      List.iter
+        (fun (declaration : Resolve.Names.declaration) ->
+          let key = Resolve.Names.key_of declaration in
+          match
+            ( Query.demand database Infer.core key,
+              Query.demand database Resolve.Names.spans key,
+              Query.demand database Resolve.Names.text key )
+          with
+          | Some form, Some spans, Some written ->
+              let found = ref [] in
+              Core_walk.parts
+                {
+                  Core_walk.nothing with
+                  statement =
+                    (fun (node : Core.statement) ->
+                      match node.kind with
+                      | Update _ ->
+                          let span = spans.(node.origin) in
+                          found := String.sub written span.start (span.stop - span.start) :: !found
+                      | _ -> ());
+                }
+                form.parts;
+              if !found <> [ "total += item" ] then fail "found [%s]" (String.concat "; " !found)
+          | _ -> fail "no form")
+        (Query.demand database Resolve.Names.declarations (module_of "app::main")))
+
 (* Every form of the standard library holds together. *)
 
 let () =
@@ -355,6 +451,9 @@ let () =
                           | Call { arguments; _ } ->
                               List.iter
                                 (function
+                                  | Core.Passed { mode = Mut; value = Value { kind = Slice _; _ } }
+                                    ->
+                                      ()
                                   | Core.Passed { mode = Mut; value = Value _ } ->
                                       wrong "a value is passed where a place is changed"
                                   | Passed { mode = Own; value = Place _ } ->
@@ -372,6 +471,7 @@ let () =
                         (fun (node : Core.pattern) ->
                           once node.id;
                           decided "a pattern" node.type_);
+                      callee = ignore;
                     }
                     form.parts)
             (Query.demand database Resolve.Names.declarations module_)))

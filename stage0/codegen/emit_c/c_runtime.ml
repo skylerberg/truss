@@ -71,19 +71,6 @@ let runtime_declarations (target : Memory_layout.target) =
       "void *t_runtime_allocate(t_usize size, t_usize alignment);\n";
       "void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usize alignment);\n";
       "void t_runtime_free(void *pointer);\n";
-      "t_usize t_runtime_float32_text(float value, uint8_t *bytes);\n";
-      "t_usize t_runtime_float64_text(double value, uint8_t *bytes);\n";
-      "void t_runtime_debug_begin(void);\n";
-      "void t_runtime_debug_text(const void *bytes, t_usize count);\n";
-      "void t_runtime_debug_signed(int64_t value);\n";
-      "void t_runtime_debug_unsigned(uint64_t value);\n";
-      "void t_runtime_debug_float32(float value);\n";
-      "void t_runtime_debug_float64(double value);\n";
-      "void t_runtime_debug_bool(uint8_t value);\n";
-      "void t_runtime_debug_character(uint32_t value);\n";
-      "void t_runtime_debug_string(const uint8_t *bytes, t_usize count);\n";
-      "uint8_t *t_runtime_debug_bytes(void);\n";
-      "t_usize t_runtime_debug_length(void);\n";
     ]
 
 (* Small functions that generated code calls, each emitted only into the

@@ -143,21 +143,9 @@ let intrinsic_tag = function
   | Round_even -> 21
   | Float_bits -> 22
   | Float_from_bits -> 23
-  | Debug_begin -> 29
-  | Debug_text -> 30
-  | Debug_signed -> 31
-  | Debug_unsigned -> 32
-  | Debug_float32 -> 33
-  | Debug_float64 -> 34
-  | Debug_bool -> 35
-  | Debug_character -> 36
-  | Debug_string -> 37
-  | Debug_bytes -> 38
-  | Debug_length -> 39
   | Evidence_implementation -> 40
   | Evidence_outer -> 41
   | Program_argument -> 42
-  | Float_text -> 43
   | Evidence_fill -> 44
   | Environment -> 49
   | Terminated_length -> 50

@@ -538,6 +538,20 @@ let () =
       let signature = at database (Types.named (app "FixedClock") []) clock "now" in
       match signature.uses with [ Capability _ ] -> () | uses -> fail "%d uses" (List.length uses))
 
+(* Real implementations *)
+
+let () =
+  test "a capability's real implementation is the one standard::system holds" (fun () ->
+      let database = setup [] in
+      match Interface.Impls.real_implementation database (standard [ "capabilities" ] "Clock") with
+      | Some (Impl { module_ = { package = "standard"; modules = "system" :: _ }; _ }) -> ()
+      | Some impl -> fail "found %s" (Path.show impl)
+      | None -> fail "none found");
+  test "a trait that is no capability has no real implementation" (fun () ->
+      let database = setup [] in
+      if Option.is_some (Interface.Impls.real_implementation database (standard [ "core" ] "Equal"))
+      then fail "found one")
+
 (* Incremental work *)
 
 let () =

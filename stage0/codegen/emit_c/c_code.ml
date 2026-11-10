@@ -82,20 +82,6 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
         "(%s->evidence.implementation = (void *)%s, %s->evidence.table = (const void *const *)%s, \
          %s%s->evidence.outer = %s->outer)"
         slot (argument 1) slot (argument 2) (String.concat "" outer) slot slot
-  | Float_text ->
-      (if scalar 0 = Float32 then "t_runtime_float32_text(" else "t_runtime_float64_text(")
-      ^ all ^ ")"
-  | Debug_begin -> "t_runtime_debug_begin(" ^ all ^ ")"
-  | Debug_text -> "t_runtime_debug_text(" ^ all ^ ")"
-  | Debug_signed -> "t_runtime_debug_signed(" ^ all ^ ")"
-  | Debug_unsigned -> "t_runtime_debug_unsigned(" ^ all ^ ")"
-  | Debug_float32 -> "t_runtime_debug_float32(" ^ all ^ ")"
-  | Debug_float64 -> "t_runtime_debug_float64(" ^ all ^ ")"
-  | Debug_bool -> "t_runtime_debug_bool(" ^ all ^ ")"
-  | Debug_character -> "t_runtime_debug_character(" ^ all ^ ")"
-  | Debug_string -> "t_runtime_debug_string(" ^ all ^ ")"
-  | Debug_bytes -> "t_runtime_debug_bytes(" ^ all ^ ")"
-  | Debug_length -> "t_runtime_debug_length(" ^ all ^ ")"
   | Evidence_implementation ->
       Printf.sprintf "((const struct t_evidence *)%s)->implementation" (argument 0)
   | Program_argument -> Printf.sprintf "((void *)((char **)%s)[%s])" (argument 0) (argument 1)
