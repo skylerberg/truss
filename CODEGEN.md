@@ -32,8 +32,9 @@ Code generation:
 
 It does not:
 
-- check anything about the program. Every error a user can see is reported
-  by an earlier stage. A failure here is a compiler bug.
+- check anything about the program. Every error in a program is reported
+  by an earlier stage. A failure here is a bug in the compiler, or a valid
+  program that stage0 cannot build yet (see [Failures](#failures)).
 - insert run-time checks into a program. Indexes, overflow, division,
   shifts, and `unreachable` have all been proven before a program is built.
   The only checks in a program are the ones it asks for, such as
@@ -761,8 +762,16 @@ on after the `yield`, and `break` takes the `yield`'s `stop` path, so the
 method's locals are dropped as the loop leaves them. This gives the plain
 loop the C compiler would make of the loop form, and needs no rewriting of
 the caller into continuation-passing style. The caller then reads the
-method's body, and depends on it. A lending method's `yield` must be
-its last statement, which needs the loop form above to lift.
+method's body, and depends on it.
+
+An inlined lending method runs to its end before the caller's statement
+uses the part, where DESIGN.md has it go on only after that statement. So
+stage0 lowers a lending method only when the two cannot be told apart, and
+refuses any other as one it cannot build yet:
+- each `yield` is the last thing its path does, so nothing of the method is
+  left to run
+- what it lends is none of the method's own values, which are dropped as its
+  body ends
 
 A loop over a yielding method that is already inlined around it, as a
 tree's `each` loops over its subtrees, would be inlined forever. Stage0
@@ -1140,6 +1149,46 @@ which the key leaves out so that moving code keeps its results, so those
 tests run again, as do tests that ran out of time or crashed, which the
 machine may have caused. A sanitized run keeps nothing.
 
+## Failures
+
+Code generation fails in three ways, and tells them apart, since each is
+for someone else to act on:
+
+| Failure | What it is | How it is reported |
+|---|---|---|
+| A compiler bug | An invariant of code generation does not hold: a pass met LIR it cannot have been given, or the verifier refused what a pass made | An exception that carries the stage that found it, what it found, and what the compiler was doing, such as the instance being lowered. Nothing in code generation catches it: the command line reports it once and exits with status 2. |
+| A program stage0 cannot build yet | The program is valid, and lowering has no code for something in it, which [Not built](#not-built) lists | An exception that carries what it is and its position. The driver gives it as the build's error, with the file and line. |
+| A build that cannot be done | The C compiler or the linker refused, or a program run while compiling ended badly | The build's error, with what they wrote |
+
+The two exceptions are every stage's to use. A broken invariant that the
+OCaml standard library finds first, such as a missing list element, is
+turned into a bug where an instance is lowered, so no failure of the
+compiler reads as a failure of the program.
+
+### The verifier
+
+`Verify` checks the LIR, so that a mistake in lowering or in a pass is a
+compiler bug that names its instance, instead of C that is wrong in a way
+the C compiler cannot see. Each instance is a C file of its own, which
+declares what it calls from its own side, so a caller and a callee that
+disagree compile and link without complaint.
+
+Each instance is checked as it is lowered, once its passes have run:
+- every block a terminator goes to and every local a place names exists,
+  and every place fits the type it projects from
+- no `yield` is left
+- a function with a result returns one on every `return`, and one without
+  returns none
+- a call gives its target as many arguments as the target's signature takes
+- a call of a nested function names it with the signature it has
+
+Everything a build links is checked together before any C is emitted:
+- each call names its callee with the signature the callee has, as does
+  each entry of a table and each named function used as a value
+- a drop reaches a drop function
+- each address of static evidence, of a table, or of a constant reaches one
+- what an instance compiles to is the instance that was asked for
+
 ## Building
 
 ### Lowering
@@ -1248,6 +1297,13 @@ a command line can hold.
   through the same `each` a `for` loop calls, that stops at the first
   element that decides the answer: `forall` at the first false body,
   `exists` at the first true one.
+- **A lending method that goes on after the caller's statement.** One that
+  does more after its `yield`, or lends a value it made, or lends through a
+  call to itself, is refused (see
+  [Loops and lending calls](#loops-and-lending-calls)).
+- **A lambda in a yielding method that is pulled,** and in a pulled method
+  a default for a parameter that is passed by address or is a view.
+- **A range without both of its ends, as a value.**
 - **A template without interpolation as a constant.** Its value is to be
   computed while compiling and placed in static memory. A `Regex"[a-z]+"`
   that is only read is then used in place, and where an owned value is

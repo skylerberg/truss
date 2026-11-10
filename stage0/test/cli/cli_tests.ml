@@ -221,11 +221,14 @@ let () =
           "start 0\nstart 1\nmessage 4\nboom\ntest 1 panicked 30\ntest 0 passed 12\n"
       in
       match records with
-      | [
-       { outcome = Passed; microseconds = 12; _ }; { outcome = Panicked; message = Some "boom"; _ };
-      ] ->
+      | Ok
+          [
+            { outcome = Passed; microseconds = 12; _ };
+            { outcome = Panicked; message = Some "boom"; _ };
+          ] ->
           ()
-      | _ -> fail "read %d records differently" (List.length records));
+      | Ok records -> fail "read %d records differently" (List.length records)
+      | Error message -> fail "%s" message);
   test "a duration is shown in the largest unit under its size" (fun () ->
       expect_strings ~expected:[ "2.31s"; "42ms"; "87µs" ]
         (List.map Test_command.duration [ 2_310_000; 42_000; 87 ]));

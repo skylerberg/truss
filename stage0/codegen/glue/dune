@@ -1,3 +1,11 @@
 (library
  (name glue)
- (libraries lir_builder ground instance memory_layout lir convention zarith))
+ (libraries
+  compiler_bug
+  lir_builder
+  ground
+  instance
+  memory_layout
+  lir
+  convention
+  zarith))

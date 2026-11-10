@@ -195,9 +195,8 @@ let real_evidence_of context ~user capabilities =
     (fun capability ->
       if Interface.Impls.impl_interface context.database (real_implementation capability) = None
       then
-        invalid_arg
-          (Printf.sprintf "%s uses %s, which stage0's runtime has no real implementation of yet"
-             user (Ground.path_name capability));
+        Compiler_bug.unsupported "%s uses %s, which has no real implementation" user
+          (Ground.path_name capability);
       (capability, Lir.Constant (Symbol_address (Real_evidence capability))))
     capabilities
 

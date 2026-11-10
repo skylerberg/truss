@@ -38,7 +38,7 @@ let function_value env (f : Ground.function_type) : Lir.signature =
     match f.result with
     | Returns Never -> (Nothing, false)
     | Returns ty -> (result env ty, true)
-    | Yields _ | Lends _ -> invalid_arg "Convention.function_value: a function type that yields"
+    | Yields _ | Lends _ -> Compiler_bug.bug ~stage:"Convention" "a function type that yields"
   in
   let written = List.filter_map (fun (mode, ty) -> parameter env mode ty) f.parameters in
   let evidence = List.map (fun _ -> evidence) f.uses in

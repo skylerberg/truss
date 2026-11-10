@@ -1,4 +1,4 @@
-let bug format = Printf.ksprintf (fun message -> invalid_arg ("Glue: " ^ message)) format
+let bug format = Compiler_bug.bug ~stage:"Glue" format
 
 type kind =
   | Shape of Memory_layout.shape

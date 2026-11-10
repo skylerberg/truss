@@ -39,7 +39,7 @@ and list_into st (ty : Ground.ty) (elements : S.expression list) destination ~sp
       | Record [ (_, Typed _) ] ->
           list_of st ty destination ~span
             (List.map (fun (e : S.expression) value -> into st e value) elements)
-      | _ -> bug "a list literal of %s, which is not lowered yet" (Ground.to_string ty))
+      | _ -> unsupported st span "a list literal of %s" (Ground.to_string ty))
 
 (* A [List] in [destination], with storage of exactly its length, holding
    what each fill writes to the element's place it is given. *)
@@ -299,6 +299,7 @@ and try_ st (inner : S.expression) destination =
    local it reads, made on the caller's stack, so making one never
    allocates. *)
 and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block) destination =
+  if st.pulling then unsupported st e.span "a lambda in a yielding method that is pulled";
   let f =
     match type_of st e.id with Function f -> f | ty -> bug "a lambda of %s" (Ground.to_string ty)
   in
@@ -637,7 +638,7 @@ and name_value st (e : S.expression) destination =
                  Function_value { code = Instance (Adapter { function_; ty }); environment = None }
                ))
       | ty -> bug "a global of %s" (Ground.to_string ty))
-  | Some meaning -> bug "this name is not lowered yet: %s" (C.show_meaning meaning)
+  | Some meaning -> unsupported st e.span "this name as a value: %s" (C.show_meaning meaning)
   | None -> bug "a name with no meaning: %s" (source st e.span)
 
 and return_ st value =

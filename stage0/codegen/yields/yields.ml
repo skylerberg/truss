@@ -1,4 +1,4 @@
-let bug format = Printf.ksprintf (fun message -> invalid_arg ("Yields: " ^ message)) format
+let bug format = Compiler_bug.bug ~stage:"Yields" format
 let local_place local : Lir.place = { root = Local local; projections = [] }
 
 (* The loop form *)
