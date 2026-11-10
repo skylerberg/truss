@@ -358,21 +358,17 @@ and type_clause_kind =
 
 type law = { name : name; parameters : parameter list; requires : expression list; body : block }
 
-type trait_member =
-  | Trait_method of { signature : signature; body : block option }
-  | Associated_type of name * path_type list
-  | Law of law
-  | Trait_member_error
-
-type impl_member =
-  | Impl_method of function_definition
-  | Associated_definition of name * type_expression
-  | Impl_member_error
-
-type capability_member = Capability_method of signature | Capability_member_error
+(* What a trait, an [impl], or a capability holds besides its methods. Each
+   method written inside one is a definition of its own, which comes after
+   it among the file's definitions and says which one it is inside. *)
+type trait_member = Associated_type of name * path_type list | Law of law | Trait_member_error
+type impl_member = Associated_definition of name * type_expression | Impl_member_error
+type capability_member = Capability_member_error
 
 type definition_kind =
   | Function of function_definition
+  | Method_declaration of signature
+      (** A method that a trait or a capability declares without a body. *)
   | Type_definition of {
       name : name;
       generics : generic_parameter list;
@@ -419,9 +415,18 @@ type definition = {
   id : id;
 }
 
-(* A top-level item: a [use] line or a definition, with its base, the
+(* An item of a file: a [use] line or a definition, with its base, the
    absolute offset of its first token, and its source text, from its first
    token to the end of its last. Spans inside [value] are relative to
-   [base], and index into [text]. *)
-type 'value item = { base : int; text : string; blank_line_before : bool; value : 'value }
+   [base], and index into [text]. A method written inside a trait, an
+   [impl], or a capability is an item of its own, [within] that one, by its
+   index among the file's definitions. *)
+type 'value item = {
+  base : int;
+  text : string;
+  blank_line_before : bool;
+  value : 'value;
+  within : int option;
+}
+
 type file = { uses : path item list; definitions : definition item list }

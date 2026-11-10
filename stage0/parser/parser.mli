@@ -22,8 +22,11 @@ type 'value parsed = { value : 'value Syntax.item; diagnostics : relative_diagno
 val placed : _ parsed -> Diagnostic.t list
 (** A piece's diagnostics, moved by its base to their place in the file. *)
 
-val definition : Source.t -> Token.t array -> piece -> Syntax.definition parsed
-(** A definition, with the checks that need its whole tree. *)
+val definition :
+  Source.t -> Token.t array -> piece -> Syntax.definition parsed * Syntax.definition parsed list
+(** A definition, with the checks that need its whole tree, and the methods written inside it when
+    it is a trait, an [impl], or a capability. Each method is a definition of its own, parsed from
+    its own tokens, with its own positions and node ids. *)
 
 val use_line : Source.t -> Token.t array -> piece -> Syntax.path option parsed
 (** A [use] line, and its path if it parsed. Whether it comes before every definition depends on the

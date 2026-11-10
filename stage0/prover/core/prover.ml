@@ -27,25 +27,9 @@ let inherited database impl (signature : signature) name =
           (Translate.receiver_of signature.parameters)
       with
       | Some (part, _) ->
-          let trait_generics =
-            match
-              Query.demand database Interface.Environment.interface interface.implements.trait
-            with
-            | Some (Interface.Environment.Trait_interface trait) ->
-                List.map (fun (generic : Types.generic) -> generic.generic) trait.trait_generics
-            | _ -> []
-          in
-          let rec pair parameters arguments =
-            match (parameters, arguments) with
-            | parameter :: parameters, argument :: arguments ->
-                (parameter, argument) :: pair parameters arguments
-            | _ -> []
-          in
           Some
             ( part,
-              ( { Types.owner = interface.implements.trait; name = "Self" },
-                Types.Type interface.for_type )
-              :: pair trait_generics interface.implements.trait_arguments,
+              Option.value ~default:[] (Interface.Impls.trait_substitution database impl),
               Translate.provided_body database interface.implements.trait name
                 (Translate.receiver_of signature.parameters) )
       | None -> None)
@@ -110,35 +94,30 @@ let prove database (key : Names.key) =
   | Some definition, Some source -> (
       try
         match definition.kind with
+        (* A trait's own method is proven where an [impl] takes it, as its
+           body is what the method means there. *)
+        | Function _ when Call_graph.in_trait database key -> Not_proven_here
         | Function { signature; body } ->
             let updating_helper =
               definition.visibility = Private
               && (match signature.name with Member_name _ -> true | Plain_name _ -> false)
               && Translate.receiver_of signature.parameters = Mut
             in
+            (* A method written inside an [impl] keeps its trait's clauses. *)
+            let inherited =
+              match Call_graph.container database key with
+              | Some (impl, { kind = Impl _; _ }) ->
+                  inherited database impl.path signature (Names.signature_name signature).text
+              | _ -> None
+            in
             Obligations
-              (Translate.function_ ~updating_helper database source ~path:key.path signature body)
+              (Translate.function_ ~updating_helper ?inherited database source ~path:key.path
+                 signature body)
         | Test { body; _ } -> Obligations (Translate.test database source ~path:key.path body)
         | Theorem { parameters; clauses; body; _ } ->
             Obligations (Translate.theorem database source ~path:key.path ~parameters ~clauses body)
-        | Impl { members; _ } ->
-            let outcomes =
-              List.filter_map
-                (fun (member : impl_member line) ->
-                  match member.kind with
-                  | Impl_method { signature; body } ->
-                      let name =
-                        match signature.name with
-                        | Plain_name name | Member_name (_, name) -> name.text
-                      in
-                      let inherited = inherited database key.path signature name in
-                      Some
-                        (Translate.function_ ?inherited database source
-                           ~path:(method_path key signature name) signature body)
-                  | _ -> None)
-                members
-            in
-            let outcomes = outcomes @ impl_laws database key source definition in
+        | Impl _ ->
+            let outcomes = impl_laws database key source definition in
             Obligations
               {
                 obligations =

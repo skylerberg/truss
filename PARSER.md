@@ -80,6 +80,25 @@ Because the lexer's bracket recovery closes every open bracket at a
 definition keyword in column 0 (see [LEXER.md](LEXER.md#brackets)), a missing
 `}` in one definition never swallows the next one.
 
+### Methods written inside a definition
+
+A method written inside a trait, an `impl`, or a capability is a definition
+of its own. The parser of the trait, the `impl`, or the capability reads its
+header and the members it holds itself, an associated type or a law. Where a
+member starts with `fn`, it notes the method's tokens, found by the same rule
+that splits a file, and passes over them. Each method is then parsed from
+its own tokens, with a fresh `Cursor`, like any other definition.
+
+- **A method has its own base, text, and node ids,** so a change to one
+  method changes nothing of the others in the same `impl`, or of the `impl`.
+- **A method says which definition it is written inside.** Its item holds
+  that definition's index among the file's definitions, and it comes after
+  it in the file's list.
+- **A method takes the visibility of what it is inside,** since it has none
+  of its own.
+- **A method that does not parse** is a definition whose header did not
+  parse, like any other, and the methods around it are unaffected.
+
 ### Parsing one definition
 
 Each definition is parsed from its own token slice, with a fresh `Cursor`.
@@ -208,11 +227,11 @@ its visibility, its kind, and its span.
 - **An operation records where its operator is.** `Binary`, `Is`, and
   `Range` keep their operator's span, so an error about a combination points
   at the operator, and the language server can find it.
-- **Types rule out trees that cannot be written.** A trait's members, an
-  `impl`'s members, and a capability's methods have a type each, so an `impl`
-  cannot hold a law. Only a trait's method may have no body; a top-level
-  function and an `impl`'s method always have one. A `with` update names at
-  least one field.
+- **Types rule out trees that cannot be written.** A trait's members and an
+  `impl`'s members have a type each, so an `impl` cannot hold a law. A method
+  without a body is a kind of definition of its own, which only a trait or a
+  capability can hold; a function always has a body. A `with` update names
+  at least one field.
 - **Every part that can fail to parse has an `Error` case:** definitions,
   members, statements, arms, clauses, parameters, generic parameters,
   fields, updates, expressions, patterns, and types. A part that did not parse becomes an

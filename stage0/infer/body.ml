@@ -177,6 +177,9 @@ let check_definition state (lowered : Environment.lowered) =
     match (definition.kind, lowered.interface) with
     | Function { signature; body = written }, Function_interface lowered_signature ->
         check_function state ~broken_body:(broken Body) signature (Some written) lowered_signature
+    (* A method without a body still has clauses to check. *)
+    | Method_declaration signature, Function_interface lowered_signature ->
+        check_function state ~broken_body:true signature None lowered_signature
     | Type_definition { body = type_body; clauses; _ }, Type_interface interface -> (
         let self =
           T.Named
@@ -229,28 +232,12 @@ let check_definition state (lowered : Environment.lowered) =
                 | _ -> ())
               variants
         | _ -> ())
-    | Trait { members; _ }, Trait_interface trait ->
+    | Trait { members; _ }, Trait_interface _ ->
         let self = T.Parameter { owner = state.key.path; name = "Self" } in
         List.iteri
           (fun index (line : trait_member line) ->
             if not (broken (Member_header index)) then
               match line.kind with
-              | Trait_method { signature; body } -> (
-                  let name =
-                    match signature.name with Plain_name name | Member_name (_, name) -> name.text
-                  in
-                  let receiver = Names.receiver signature.parameters in
-                  match
-                    List.find_opt
-                      (fun (method_ : T.trait_method) ->
-                        method_.method_name = name && method_.method_receiver = receiver)
-                      trait.methods
-                  with
-                  | Some method_ ->
-                      (* A method without a body still has clauses to check. *)
-                      check_function state ~broken_body:(broken (Member_body index)) signature body
-                        method_.method_signature
-                  | None -> ())
               | Law law ->
                   let env : env = { no_output with specification = true; self = Some self } in
                   List.iter
@@ -269,48 +256,6 @@ let check_definition state (lowered : Environment.lowered) =
                   if not (broken (Member_body index)) then
                     body state { env with output = Some (Returns T.bool) } law.body
               | Associated_type _ | Trait_member_error -> ())
-          members
-    | Capability { members; _ }, Trait_interface capability ->
-        (* A capability's methods have no bodies, but clauses to check. *)
-        List.iteri
-          (fun index (line : capability_member line) ->
-            if not (broken (Member_header index)) then
-              match line.kind with
-              | Capability_method signature -> (
-                  let name =
-                    match signature.name with Plain_name name | Member_name (_, name) -> name.text
-                  in
-                  match
-                    List.find_opt
-                      (fun (method_ : T.trait_method) -> method_.method_name = name)
-                      capability.methods
-                  with
-                  | Some method_ ->
-                      check_function state ~broken_body:true signature None method_.method_signature
-                  | None -> ())
-              | Capability_member_error -> ())
-          members
-    | Impl { members; _ }, Impl_interface impl ->
-        List.iteri
-          (fun index (line : impl_member line) ->
-            if not (broken (Member_header index)) then
-              match line.kind with
-              | Impl_method { signature; body = written } -> (
-                  let name =
-                    match signature.name with Plain_name name | Member_name (_, name) -> name.text
-                  in
-                  let receiver = Names.receiver signature.parameters in
-                  match
-                    List.find_opt
-                      (fun (method_name, method_receiver, _) ->
-                        method_name = name && method_receiver = receiver)
-                      impl.impl_methods
-                  with
-                  | Some (_, _, lowered_signature) ->
-                      check_function state ~broken_body:(broken (Member_body index)) signature
-                        (Some written) lowered_signature
-                  | None -> ())
-              | Associated_definition _ | Impl_member_error -> ())
           members
     | Constant { value; _ }, Constant_interface constant ->
         if not (broken Body) then begin
@@ -446,7 +391,7 @@ let check database (key : Names.key) =
       (* The definition's module is in its key. Where it starts in its file
          is not read, so a definition that only moved is not checked again. *)
       let module_ = key.module_ in
-      let lowered, context = Environment.lower_definition database key definition resolved in
+      let lowered, context = Environment.lower database key definition resolved in
       let text = Option.value ~default:"" (Query.demand database Names.text key) in
       let binding_spans = Hashtbl.create 64 in
       List.iter

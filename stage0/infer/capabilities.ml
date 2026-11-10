@@ -399,7 +399,7 @@ let check (state : state) (lowered : Environment.lowered) =
   in
   if not (broken Header || broken Body) then
     match (definition.kind, lowered.interface) with
-    | Function { body; signature = written }, Function_interface signature ->
+    | Function { body; signature = written }, Function_interface signature -> (
         (* A function's clauses are specifications, with only [Panic]. *)
         List.iter
           (fun (clause : clause) ->
@@ -412,60 +412,31 @@ let check (state : state) (lowered : Environment.lowered) =
             | Cost { bound = Big_o value | At_most value | Exactly value; _ } -> check value
             | Cost { bound = Finite; _ } | Uses _ | Clause_error -> ())
           written.clauses;
-        run signature body
+        (* Inside an implementation of a capability, what is available is
+           what the [impl] declares, and a function value it calls may use
+           the capability, which there means this implementation, as
+           [write_with] hands [FileWrite] to its callback. A direct call of
+           the capability would call the implementation itself, so it still
+           needs [uses]. *)
+        let implemented =
+          Option.bind (Query.demand state.database Names.container state.key) (fun container ->
+              match Query.demand state.database Environment.lowered container with
+              | Some { interface = Impl_interface impl; _ }
+                when Interface.Summary.kind_of state.database impl.implements.trait
+                     = Some Capability ->
+                  Some impl
+              | _ -> None)
+        in
+        match implemented with
+        | Some impl ->
+            run_in
+              {
+                (scope ~own:(T.capability_parameters signature.generics) impl.impl_uses) with
+                handed_on = Some (T.Capability impl.implements.trait);
+              }
+              body
+        | None -> run signature body)
     | Test { body; _ }, Test_interface uses -> run_in (scope (union uses [ panic ])) body
     | Theorem { body; _ }, _ | Law_proof { body; _ }, _ ->
         run_in (pure_only (scope []) "a proof") body
-    | Impl { members; _ }, Impl_interface impl ->
-        let is_capability =
-          Interface.Summary.kind_of state.database impl.implements.trait = Some Capability
-        in
-        List.iter
-          (fun (line : impl_member line) ->
-            match line.kind with
-            | Impl_method { body; signature } ->
-                let name =
-                  match signature.name with Plain_name name | Member_name (_, name) -> name.text
-                in
-                let receiver = Names.receiver signature.parameters in
-                let uses, own =
-                  match
-                    List.find_opt
-                      (fun (method_name, method_receiver, _) ->
-                        method_name = name && method_receiver = receiver)
-                      impl.impl_methods
-                  with
-                  | Some (_, _, (method_signature : T.signature)) ->
-                      ( (if is_capability then impl.impl_uses else method_signature.uses),
-                        T.capability_parameters method_signature.generics )
-                  | None -> ((if is_capability then impl.impl_uses else []), [])
-                in
-                (* Inside an implementation of a capability, a function
-                   value it calls may use the capability, which there means
-                   this implementation, as [write_with] hands [FileWrite] to
-                   its callback. A direct call of the capability would call
-                   the implementation itself, so it still needs [uses]. *)
-                let handed_on =
-                  if is_capability then Some (T.Capability impl.implements.trait) else None
-                in
-                run_in { (scope ~own uses) with handed_on } body
-            | _ -> ())
-          members
-    | Trait { members; _ }, Trait_interface trait ->
-        List.iter
-          (fun (line : trait_member line) ->
-            match line.kind with
-            | Trait_method { body = Some body; signature } -> (
-                let name =
-                  match signature.name with Plain_name name | Member_name (_, name) -> name.text
-                in
-                match
-                  List.find_opt
-                    (fun (method_ : T.trait_method) -> method_.method_name = name)
-                    trait.methods
-                with
-                | Some method_ -> run method_.method_signature body
-                | None -> ())
-            | _ -> ())
-          members
     | _ -> ()

@@ -175,6 +175,30 @@ let () =
       let again = computed directory in
       if List.mem "checked(app::main::double)" again then fail "checked double again";
       if not (List.mem "checked(app::other::triple)" again) then fail "did not check triple");
+  test "editing one method's body checks only that method again" (fun () ->
+      fresh_store ();
+      let directory = package () in
+      let shapes area =
+        "trait Shape {\n\
+        \  fn area(self) -> Int64\n\
+        \  fn sides(self) -> Int64\n\
+         }\n\n\
+         type Square(side: Int64)\n\n\
+         impl Shape for Square {\n\
+        \  fn area(self) -> Int64 {\n\
+        \    " ^ area ^ "\n  }\n\n  fn sides(self) -> Int64 {\n    4\n  }\n}\n"
+      in
+      write directory "shapes.truss" (shapes "1");
+      expect_errors directory 0;
+      clear directory;
+      (* The change moves [sides], which is the same method where it is. *)
+      write directory "shapes.truss" (shapes "10 + 2");
+      expect_errors directory 0;
+      let again = computed directory in
+      if not (List.mem "checked(app::shapes::impl Shape for Square.area)" again) then
+        fail "did not check area";
+      if List.mem "checked(app::shapes::impl Shape for Square.sides)" again then
+        fail "checked sides again");
   test "a removed module is gone from the package" (fun () ->
       fresh_store ();
       let directory = package () in

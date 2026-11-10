@@ -355,10 +355,13 @@ let fields list_ = form "" (list field list_)
 let members print (members : _ line list) =
   list (fun (member : _ line) -> print member.kind) members
 
-let definition (definition : definition) =
+(* [methods] are the methods written inside a trait, an [impl], or a
+   capability, already printed, which come after its own members. *)
+let definition ?(methods = []) (definition : definition) =
   let body =
     match definition.kind with
     | Function function_ -> function_definition function_
+    | Method_declaration declared -> form "fn" (signature declared)
     | Type_definition { name; generics = parameters; body; clauses } ->
         let body =
           match body with
@@ -396,7 +399,6 @@ let definition (definition : definition) =
            ]
           @ members
               (function
-                | Trait_method { signature; body } -> function_ signature body
                 | Associated_type (name, []) -> form "type" [ name.text ]
                 | Associated_type (name, bounds) ->
                     form "type"
@@ -407,7 +409,8 @@ let definition (definition : definition) =
                       @ list (fun value -> form "requires" [ expression value ]) requires
                       @ [ block body ])
                 | Trait_member_error -> "error")
-              trait_members)
+              trait_members
+          @ methods)
     | Impl { trait_; type_; uses; members = impl_members } ->
         form "impl"
           ([
@@ -418,19 +421,15 @@ let definition (definition : definition) =
            ]
           @ members
               (function
-                | Impl_method function_ -> function_definition function_
                 | Associated_definition (name, type_) ->
                     form "type" [ name.text; "="; type_expression type_ ]
                 | Impl_member_error -> "error")
-              impl_members)
+              impl_members
+          @ methods)
     | Capability { name; members = capability_members } ->
         form "capability"
-          (name.text
-          :: members
-               (function
-                 | Capability_method method_ -> form "fn" (signature method_)
-                 | Capability_member_error -> "error")
-               capability_members)
+          ((name.text :: members (function Capability_member_error -> "error") capability_members)
+          @ methods)
     | Constant { name; type_; value } ->
         form "let" [ definition_name name; ": " ^ type_expression type_; expression value ]
     | Test { name; uses; body } ->
@@ -453,7 +452,24 @@ let definition (definition : definition) =
   in
   match visibility definition.visibility with "" -> body | written -> form written [ body ]
 
+(* A file's definitions, with each method inside the trait, the [impl], or
+   the capability it is written inside. *)
+let definitions (items : definition item list) =
+  let inside index =
+    List.filter_map
+      (fun (item : definition item) ->
+        if item.within = Some index then Some (definition item.value) else None)
+      items
+  in
+  List.concat
+    (List.mapi
+       (fun index (item : definition item) ->
+         match item.within with
+         | Some _ -> []
+         | None -> [ definition ~methods:(inside index) item.value ])
+       items)
+
 let file (file : file) =
   String.concat "\n"
     (List.map (fun (item : path item) -> form "use" [ path item.value ]) file.uses
-    @ List.map (fun (item : definition item) -> definition item.value) file.definitions)
+    @ definitions file.definitions)

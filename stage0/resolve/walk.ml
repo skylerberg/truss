@@ -921,14 +921,42 @@ let field_names (fields_ : field list) =
 
 (* The definition *)
 
-let definition state ~(path : Path.t) (definition_ : definition) =
+(* The generic parameters of the trait or the [impl] a method is written
+   inside, which the method's own tree does not hold: they are in scope as
+   that one's, and it is where they are bound and their bounds resolved. *)
+let inherited scope ~(owner : Path.t) (generics : generic_parameter list) =
+  List.fold_left
+    (fun scope (generic : generic_parameter) ->
+      let parameter (name : name) : Types.parameter = { owner; name = name.text } in
+      let type_ (name : name) (target : target) =
+        { scope with types = String_map.add name.text target scope.types }
+      in
+      match generic.kind with
+      | Type_parameter (name, _) -> type_ name (Type_parameter (parameter name))
+      | Capability_parameter name -> type_ name (Capability_parameter (parameter name))
+      | Value_parameter (name, _) ->
+          {
+            scope with
+            values =
+              String_map.add name.text
+                (Value_generic (parameter name), "a generic parameter")
+                scope.values;
+          }
+      | Generic_error -> scope)
+    scope generics
+
+(* [container] is the trait, the [impl], or the capability a method is
+   written inside, with its path. *)
+let definition state ~(path : Path.t) ?(container : (Path.t * definition) option)
+    (definition_ : definition) =
   let broken part = Parts.broken definition_ part in
   let header_broken = broken Header and body_broken = broken Body in
-  let scope = empty_scope in
-  (* A method written inside a trait, an [impl], or a capability owns its
-     own generic parameters. *)
-  let member receiver (signature_ : signature) : Path.t =
-    Method { owner = path; name = (Names.signature_name signature_).text; receiver }
+  let scope =
+    match container with
+    | Some (owner, { kind = Trait { generics = generics_; _ }; _ }) ->
+        inherited empty_scope ~owner generics_
+    | Some (owner, { kind = Impl { type_; _ }; _ }) -> inherited empty_scope ~owner type_.generics
+    | _ -> empty_scope
   in
   match definition_.kind with
   | Function { signature = signature_; body } ->
@@ -938,6 +966,8 @@ let definition state ~(path : Path.t) (definition_ : definition) =
         | Some scope -> if not body_broken then block state scope body
         | None -> ()
       end
+  | Method_declaration signature_ ->
+      if not header_broken then ignore (signature state scope ~owner:path ~broken:false signature_)
   | Type_definition { generics = generics_; body; clauses; _ } ->
       if not header_broken then begin
         let scope = generics state scope ~owner:path generics_ in
@@ -974,12 +1004,6 @@ let definition state ~(path : Path.t) (definition_ : definition) =
           (fun index (line : trait_member line) ->
             if not (broken (Member_header index)) then
               match line.kind with
-              | Trait_method { signature = signature_; body } -> (
-                  let owner = member (Names.receiver signature_.parameters) signature_ in
-                  match signature state scope ~owner ~broken:false signature_ with
-                  | Some inner ->
-                      if not (broken (Member_body index)) then Option.iter (block state inner) body
-                  | None -> ())
               | Associated_type (_, bounds) -> List.iter (path_type state scope) bounds
               | Law { parameters = parameters_; requires; body; _ } ->
                   let inner =
@@ -1000,25 +1024,11 @@ let definition state ~(path : Path.t) (definition_ : definition) =
           (fun index (line : impl_member line) ->
             if not (broken (Member_header index)) then
               match line.kind with
-              | Impl_method { signature = signature_; body } -> (
-                  let owner = member (Names.receiver signature_.parameters) signature_ in
-                  match signature state scope ~owner ~broken:false signature_ with
-                  | Some inner -> if not (broken (Member_body index)) then block state inner body
-                  | None -> ())
               | Associated_definition (_, type_) -> type_expression state scope type_
               | Impl_member_error -> ())
           members
       end
-  | Capability { members; _ } ->
-      List.iteri
-        (fun index (line : capability_member line) ->
-          if not (broken (Member_header index)) then
-            match line.kind with
-            | Capability_method signature_ ->
-                ignore
-                  (signature state scope ~owner:(member Static signature_) ~broken:false signature_)
-            | Capability_member_error -> ())
-        members
+  | Capability _ -> ()
   | Constant { name; type_; value } ->
       if not header_broken then begin
         let scope = head state scope ~owner:path name in
