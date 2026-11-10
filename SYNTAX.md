@@ -1727,7 +1727,7 @@ fn sum[count: USize](values: Array[Int64, count]) -> Int64
 | `scores[i] = 0` | Replaces element `i`, which must be in bounds. |
 | `ports[name]` | The value for `name`, which must be proven present, for example by an earlier `if ports.contains(name)`. |
 | `ports.get(name)` | `Some(value)`, or `None` if `name` is missing. |
-| `ports[name] = 8080` | Inserts or replaces the value for `name`. |
+| `ports[own name] = 8080` | Inserts or replaces the value for `name`. The map keeps the key, so a key that is not plain data is given up with `own` or copied. |
 
 - Ranges without a start or an end, such as `2..`, are only allowed inside
   brackets.
@@ -1737,6 +1737,10 @@ fn sum[count: USize](values: Array[Int64, count]) -> Int64
   lending methods give read and `mut` access to an element and state with
   `requires` what an index must satisfy. See
   [Lending and yielding methods](#lending-and-yielding-methods).
+- An assignment `collection[key] = value` inserts a missing key when the
+  type also implements `IndexAssign`, whose one method `assign` takes the
+  key and the value. `Map` does. For any other type the assignment replaces
+  the element that `Index` lends, so the key must be there.
 
 ### Loops
 

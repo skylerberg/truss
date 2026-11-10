@@ -693,11 +693,11 @@ public fn decode_query(text: StringSlice) -> Result[List[Parameter], ParseError]
   {
     let end = first_of(text, from: index, to: text.length(), first: 38, second: 38, third: 38)
     if end > index && intrinsic::storage_length(output) < room {
-      let read = parameter_of(text, from: index, to: end)
-      if read is Err(error) {
-        failure = Some(error)
-      } else if own read is Ok(parameter) {
-        intrinsic::storage_push(mut output, value: own parameter)
+      match parameter_of(text, from: index, to: end) {
+        Ok(parameter) => intrinsic::storage_push(mut output, value: own parameter)
+        Err(error) => {
+          failure = Some(error)
+        }
       }
     }
     failed = failure is Some(_)
