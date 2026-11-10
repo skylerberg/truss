@@ -44,9 +44,7 @@ let rec expression names (node : expression) =
           pieces
       ^ ")"
   | Template { literals; call } ->
-      Printf.sprintf "template(%s) call %s"
-        (list (Printf.sprintf "%S") literals)
-        (expression call)
+      Printf.sprintf "template(%s) call %s" (list (Printf.sprintf "%S") literals) (expression call)
   | Use found -> place found
   | Copy given -> "copy(" ^ operand given ^ ")"
   | Function_value { path; type_arguments = arguments } ->

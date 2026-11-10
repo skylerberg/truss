@@ -82,7 +82,8 @@ let clause_expressions (clauses : clause list) =
       match clause.kind with
       | Requires value | Ensures value -> [ (value, `Bool) ]
       | Decreases measures -> List.map (fun measure -> (measure, `Cost_function)) measures
-      | Cost { bound = Big_o value | At_most value | Exactly value; _ } -> [ (value, `Cost_function) ]
+      | Cost { bound = Big_o value | At_most value | Exactly value; _ } ->
+          [ (value, `Cost_function) ]
       | Cost { bound = Finite; _ } | Uses _ | Clause_error -> [])
     clauses
 
@@ -317,10 +318,14 @@ let check_definition state (lowered : Environment.lowered) =
                 {
                   defaults;
                   invariants =
-                    clause (function Type_invariant value -> Some (build_expression state value) | _ -> None);
+                    clause (function
+                      | Type_invariant value -> Some (build_expression state value)
+                      | _ -> None);
                   potential =
                     (match
-                       clause (function Potential value -> Some (build_expression state value) | _ -> None)
+                       clause (function
+                         | Potential value -> Some (build_expression state value)
+                         | _ -> None)
                      with
                     | first :: _ -> Some first
                     | [] -> None);
@@ -589,10 +594,10 @@ let check database (key : Names.key) =
           (since interface_named !(context.named))
         @ state.diagnostics;
       finalize state;
-      (* A definition has a core form when it parsed whole, nothing in it is
-         an error, and every type in it is decided: an error elsewhere that
-         reaches it through a type, or a [todo] whose type nothing fixes,
-         leaves nothing to build on. *)
+      (* A definition has a core form if it parsed completely, has no
+         diagnostic, and no recorded type contains an error or a hole. A
+         type contains an error when it depends on a definition that has
+         one, and a hole when a [todo] leaves it uninferred. *)
       let decided table =
         Array.for_all
           (function
@@ -623,25 +628,28 @@ let check database (key : Names.key) =
         let definition =
           match state.form.definition_builder with Some build -> build () | None -> Core.Empty
         in
-        { parts; nodes = state.form.next_node_id; made = state.form.synthetic_local_count }
+        {
+          definition;
+          node_count = state.form.next_node_id;
+          synthetic_local_count = state.form.synthetic_local_count;
+        }
       in
-      (* What code may call is checked on the form, where every call is a
-         node, and that is where the unknown sets of capabilities are
-         solved: what each must hold is what the calls need. One with no
-         form to solve it on is empty. *)
+      (* The capability check runs on the core form, and it solves the
+         capability variables. Without a core form, every capability
+         variable is solved as the empty set. *)
       let form = if whole then Some (build ()) else None in
       (match form with
       | Some form -> Capabilities.check state lowered form
       | None -> state.capability_solution <- Some (Hashtbl.create 1));
-      (* What they were solved as is written into every type: those of the
-         tables, and those of the form, which is built again from them. A
-         definition that failed the check has no form to give out. *)
-      let capability_variable_count = state.unifier.capability_variable_count > 0 in
-      if capability_variable_count then finalize state;
+      (* If there were capability variables, substitute their solutions
+         into the recorded types and build the core form again from them. A
+         definition that failed the capability check has no core form. *)
+      let has_capability_variables = state.unifier.capability_variable_count > 0 in
+      if has_capability_variables then finalize state;
       let core : Core.t option =
         match form with
         | Some form when state.diagnostics = [] ->
-            let form = if capability_variable_count then build () else form in
+            let form = if has_capability_variables then build () else form in
             Core_walk.definition
               {
                 Core_walk.ignore_all with

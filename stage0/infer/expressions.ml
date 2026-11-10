@@ -42,12 +42,12 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   match value.kind with
   | Integer number ->
       state.tables.literals.(value.id) <- Some (Integer_value number);
-      register_expression state value (fun () -> Form.literal state value.id);
+      register_expression state value (fun () -> Form.numeric_literal state value.id);
       let type_ = literal_type state ~expected Integer_literal in
       check_literal_fits state value number type_;
       type_
   | Float number ->
-      register_expression state value (fun () -> Form.literal state value.id);
+      register_expression state value (fun () -> Form.numeric_literal state value.id);
       let type_ = literal_type state ~expected Float_literal in
       let significand = number.significand and exponent = number.exponent in
       (* Rounded once, from the exact decimal, to the type the statement
@@ -73,7 +73,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | String literal -> (
       match character_tag state literal with
       | Some builtin ->
-          register_expression state value (fun () -> Form.literal state value.id);
+          register_expression state value (fun () -> Form.numeric_literal state value.id);
           character_literal state value.id literal builtin
       | None -> string_literal state env ?expected value literal)
   | True | False ->
@@ -143,7 +143,8 @@ and expression_kind state env ?expected (value : expression) : T.ty =
         | Some only, None | None, Some only -> expression state env only
         | None, None -> fresh state
       in
-      register_expression state value (fun () -> Form.range state value start stop ~inclusive);
+      register_expression state value (fun () ->
+          Form.range_record state value start stop ~inclusive);
       T.Named { path = range_path; arguments = [ T.Type element ] }
   | Quantified { quantifier; binder; body } ->
       (match binder with

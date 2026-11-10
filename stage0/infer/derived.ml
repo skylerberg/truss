@@ -48,7 +48,9 @@ let form database (path : Path.t) : Core.t option =
           let node type_ kind : Core.expression = { id = id (); origin; type_; kind } in
           let pattern type_ kind : Core.pattern = { id = id (); origin; type_; kind } in
           let statement kind : Core.statement = { id = id (); origin; kind } in
-          let giving value : Core.block = { statements = []; value = Some value; diverges = false } in
+          let giving value : Core.block =
+            { statements = []; value = Some value; diverges = false }
+          in
           let arm found body : Core.arm = { patterns = [ found ]; guard = None; body; origin } in
           let self_type = interface.for_type in
           let bounds (parameter : T.parameter) =
@@ -193,9 +195,10 @@ let form database (path : Path.t) : Core.t option =
                           guards_exhaustive = false;
                         }))
           in
-          (* What [same] gives of the parts of [other] where it is the
-             variant [self] is, and [else_] where it is another. *)
-          let of_other other type_ variant (mine : (T.field * Core.place) list) ~same ~else_ =
+          (* Matches [other]. If [other] is the same variant as [self], the
+             result is [same] applied to the fields of [other]. If it is a
+             different variant, the result is [different ()]. *)
+          let of_other other type_ variant (mine : (T.field * Core.place) list) ~same ~different =
             match variant with
             | None -> same (record_parts other)
             | Some variant ->
@@ -208,7 +211,7 @@ let form database (path : Path.t) : Core.t option =
                          arm (binding variant theirs) (giving (same (parts theirs)))
                          ::
                          (if alone then []
-                          else [ arm (pattern self_type Wildcard) (giving (else_ ())) ]);
+                          else [ arm (pattern self_type Wildcard) (giving (different ())) ]);
                        guards_exhaustive = false;
                      })
           in
@@ -241,7 +244,7 @@ let form database (path : Path.t) : Core.t option =
                           node bool (Matches { value = Place other; pattern = is variant })
                       | _ ->
                           of_other other bool variant mine ~same:(each_equal mine)
-                            ~else_:(fun () -> node bool (Boolean false))))
+                            ~different:(fun () -> node bool (Boolean false))))
             | "Hash", "hash" ->
                 let hasher, hasher_type =
                   match List.rev parameters with
@@ -343,7 +346,7 @@ let form database (path : Path.t) : Core.t option =
                     of_self result (fun variant _ mine ->
                         giving
                           (of_other other result variant mine ~same:(in_turn mine)
-                             ~else_:(fun () -> ordering "Equal")))
+                             ~different:(fun () -> ordering "Equal")))
                 | Some variants ->
                     (* The other's variant as a number, which this one's is
                        compared with when the two differ. *)
@@ -382,7 +385,7 @@ let form database (path : Path.t) : Core.t option =
                       of_self result (fun variant index mine ->
                           giving
                             (of_other other result variant mine ~same:(in_turn mine)
-                               ~else_:(fun () -> by_number index)))
+                               ~different:(fun () -> by_number index)))
                     in
                     {
                       compared with

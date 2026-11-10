@@ -55,7 +55,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
   in
   match literal.tag with
   | None ->
-      register_expression state value (fun () -> Form.interpolated state literal);
+      register_expression state value (fun () -> Form.untagged_string state literal);
       (* Each part of a plain string is written out with its [Display]. *)
       List.iteri
         (fun index ((part : expression), part_type) ->
@@ -90,7 +90,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
           let part_type = ref None in
           register_expression state value (fun () ->
               match !part_type with
-              | Some part -> Form.template state value literal ~part:(final state part)
+              | Some part -> Form.tagged_string state value literal ~part:(final state part)
               | None -> bug "a tagged string's part type was not worked out");
           defer state (fun () ->
               let tag_type = normalize state tag_type in
@@ -166,7 +166,8 @@ and list_literal state env ?expected (value : expression) items =
         (element, fun element -> T.Named { path = list_path; arguments = [ T.Type element ] })
   in
   List.iter (fun item -> check state env item element) items;
-  register_expression state value (fun () -> Form.collection_literal state value (List.map (build_expression state) items));
+  register_expression state value (fun () ->
+      Form.collection_literal state value (List.map (build_expression state) items));
   make element
 
 and map_literal state env ?expected (value : expression) entries =
@@ -188,7 +189,7 @@ and map_literal state env ?expected (value : expression) entries =
       check state env entry_value value_type)
     entries;
   register_expression state value (fun () ->
-      Entries
+      Map_literal
         {
           entries =
             List.map
@@ -354,7 +355,8 @@ and match_ state env ?expected (value : expression) scrutinees arms =
         && List.exists (fun (arm : arm) -> Option.is_some arm.guard) earlier
     | _ -> false
   in
-  if guards_exhaustive then state.obligations <- Guards_cover { match_ = value.id } :: state.obligations;
+  if guards_exhaustive then
+    state.obligations <- Guards_cover { match_ = value.id } :: state.obligations;
   (* The values a [match] matches settle before its arms, as a header. *)
   let types =
     List.map

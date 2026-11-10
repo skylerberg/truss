@@ -189,8 +189,8 @@ val substitute_signature : substitution -> signature -> signature
 
 val method_in_impl :
   impl_generics:generic list -> impl_uses:capability list -> signature -> signature
-(** The full signature of a method defined in an [impl]: the [impl]'s generic parameters come
-    before the method's own, and the [impl]'s [uses] are added to the method's. *)
+(** The full signature of a method defined in an [impl]: the [impl]'s generic parameters come before
+    the method's own, and the [impl]'s [uses] are added to the method's. *)
 
 val function_type_of : signature -> function_type
 (** A signature as the type of a function value, with [self] as its first input. *)

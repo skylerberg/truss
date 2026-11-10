@@ -131,7 +131,7 @@ let derived_interface database ~type_ ~trait =
               (fun (method_ : T.trait_method) ->
                 ( method_.method_name,
                   method_.method_receiver,
-                  T.method_in_impl ~impl_generics:impl_generics ~impl_uses:[]
+                  T.method_in_impl ~impl_generics ~impl_uses:[]
                     (T.substitute_signature self method_.method_signature) ))
               trait_interface.methods;
           impl_broken = false;

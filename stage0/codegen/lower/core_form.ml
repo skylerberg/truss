@@ -44,7 +44,7 @@ let expression_kind : Core.kind -> string = function
   | Template _ -> "a tagged string"
   | Copy _ -> "a copy"
   | Function_value _ -> "a function as a value"
-  | Generic_value _ -> "a generic value"
+  | Value_parameter _ -> "a generic value"
   | Lambda _ -> "a lambda"
   | Collection_literal _ | Map_literal _ -> "a collection literal"
   | Record_update _ -> "a record with fields replaced"
@@ -327,11 +327,8 @@ and statement st (written : Core.statement) =
           | Place found -> ignore (place st found)
           | Value value -> ignore (value_place st value))
       | Let
-          {
-            pattern = { kind = Bind { local; name; mutable_; _ }; type_; _ };
-            value;
-            else_ = None;
-          } -> (
+          { pattern = { kind = Bind { local; name; mutable_; _ }; type_; _ }; value; else_ = None }
+        -> (
           let ty = ground st type_ in
           match value with
           | Place found when (not mutable_) && not (trivial st ty) ->
@@ -374,7 +371,7 @@ and statement st (written : Core.statement) =
    Where the body holds what is lowered only from the syntax tree, nothing
    written is to be kept, and the error says what it holds. *)
 let body st (form : Core.t) : (unit, string) result =
-  match form.parts with
+  match form.definition with
   | Function { body = Some inner; _ } | Test inner -> (
       match block_into st inner (result_place st) with
       | () -> Ok ()

@@ -1,8 +1,8 @@
 (** The core form: the type checker's output for one definition.
 
     The core form is a typed, desugared tree. Ownership checking, the prover, and code generation
-    read it instead of the syntax tree. It records every decision the type checker made, so a
-    later stage never repeats one:
+    read it instead of the syntax tree. It records every decision the type checker made, so a later
+    stage never repeats one:
 
     - every call names its callee, and lists one argument per parameter, in parameter order;
     - every operator is either a built-in operation or a call of a trait method;
@@ -37,8 +37,7 @@ type local =
 (** How a trait method call finds the [impl] it dispatches to. *)
 type evidence =
   | Impl of { impl : Path.t; arguments : Types.substitution }
-      (** A known [impl], written or derived, with the type arguments for its generic parameters.
-      *)
+      (** A known [impl], written or derived, with the type arguments for its generic parameters. *)
   | Bound
       (** A trait bound on a generic parameter (or on one of its associated types). The [impl] is
           known only after monomorphization. *)
@@ -96,8 +95,8 @@ and operand =
           never receives a [Place]: it receives [Value (Use place)]. *)
   | Value of expression
       (** A value. An [own] parameter takes ownership of it. A read-only parameter borrows it for
-          the call. A [mut] parameter receives a [Value] only when the value is a {!Slice}, which
-          is a mutable view of part of a place. *)
+          the call. A [mut] parameter receives a [Value] only when the value is a {!Slice}, which is
+          a mutable view of part of a place. *)
 
 (** A memory location. *)
 and place =
@@ -110,8 +109,8 @@ and place =
           [Index.at]) or [grid.cell(position)]. The expression is a {!Call} whose [lends] is
           [Some _]. The borrow lasts until the end of the enclosing statement. *)
   | Temporary of expression
-      (** A value that has no place of its own, stored in a temporary for the enclosing statement
-          so that part of it can be accessed, as in [origin().x]. *)
+      (** A value that has no place of its own, stored in a temporary for the enclosing statement so
+          that part of it can be accessed, as in [origin().x]. *)
 
 and expression = { id : id; origin : origin; type_ : Types.ty; kind : kind }
 
@@ -128,14 +127,14 @@ and kind =
       builder_finish : callee;  (** [TextBuilder.finish] *)
     }
       (** A string literal with interpolation. The result is the concatenation of the pieces. This
-          node will be desugared into the builder calls once the standard library gives them
-          [time] clauses. *)
+          node will be desugared into the builder calls once the standard library gives them [time]
+          clauses. *)
   | Template of { literals : string list; call : expression }
       (** A tagged string, such as [Sql"select ${column}"]. [call] is the call of the tag's
           [from_template] that produces the value; its argument is the constructed [Template]
-          record. [literals] are the literal text segments between the interpolated values (one
-          more segment than there are values). The prover evaluates the tag's [requires] clauses
-          on them. *)
+          record. [literals] are the literal text segments between the interpolated values (one more
+          segment than there are values). The prover evaluates the tag's [requires] clauses on them.
+      *)
   | Use of place
       (** Reads the value out of a place, consuming it: the value is copied if its type copies
           implicitly ([Plain]), and moved otherwise. Code that only borrows a place receives the
@@ -146,8 +145,7 @@ and kind =
       (** A reference to a named function or method, used as a value. A variant constructor used as
           a function is desugared to a {!Lambda}. *)
   | Constant of Path.t
-  | Value_parameter of Types.parameter
-      (** A use of a [USize] generic parameter as a value. *)
+  | Value_parameter of Types.parameter  (** A use of a [USize] generic parameter as a value. *)
   | Lambda of {
       parameters : pattern list;
       captures : local list;
@@ -157,9 +155,8 @@ and kind =
     }
   | Construct of { variant : string option; fields : (string * expression option) list }
       (** Constructs a record, or a variant of a sum type; the node's type says which type. [fields]
-          lists every field in declaration order. A field with [None] takes its default value,
-          which is in the type's core form. A range expression such as [1..5] is desugared to
-          this. *)
+          lists every field in declaration order. A field with [None] takes its default value, which
+          is in the type's core form. A range expression such as [1..5] is desugared to this. *)
   | Collection_literal of { elements : expression list; construction : construction }
       (** An array literal, a set literal, or a specification-only sequence or set. The node's type
           says which. List literals are not this node: they are desugared to calls. *)
@@ -173,17 +170,17 @@ and kind =
   | Call of call
   | Operator of { operation : Intrinsic.operation; arguments : expression list }
       (** An arithmetic, bitwise, or shift operation on built-in types. [left + right] and
-          [left.add(right)] both produce this node. The prover checks that the operation is
-          defined: no overflow, no division by zero, no out-of-range shift. *)
+          [left.add(right)] both produce this node. The prover checks that the operation is defined:
+          no overflow, no division by zero, no out-of-range shift. *)
   | Compare of { comparison : comparison; left : expression; right : expression }
       (** A comparison of two values of the same built-in type. In a specification, also a
           comparison of two integers by mathematical value. A comparison of any other type is a
           {!Call} of [Equal.equal], or a {!Matches} on the result of [Ordered.compare]. *)
   | Not of expression
-  | And of expression * expression  (** [&&]. The right operand is evaluated only if the left is
-                                        true. *)
-  | Or of expression * expression  (** [||]. The right operand is evaluated only if the left is
-                                       false. *)
+  | And of expression * expression
+      (** [&&]. The right operand is evaluated only if the left is true. *)
+  | Or of expression * expression
+      (** [||]. The right operand is evaluated only if the left is false. *)
   | Implies of expression * expression  (** [==>]. Specifications only. *)
   | Matches of { value : operand; pattern : pattern }
       (** [value is pattern]. Also used for ordering comparisons of non-built-in types:
@@ -217,11 +214,10 @@ and kind =
   | Old of expression  (** [old(e)]: the value of [e] when the function was called. *)
   | Current_target
       (** The value of the target of the enclosing {!Compound_assign} before the assignment. It
-          appears exactly once, as a direct argument of the {!Call} or {!Operator} that computes
-          the new value. *)
+          appears exactly once, as a direct argument of the {!Call} or {!Operator} that computes the
+          new value. *)
   | Quantified of { quantifier : Syntax.quantifier; binder : binder; body : expression }
-  | Yielded
-      (** [yielded]: the sequence of values a yielding method has yielded so far. *)
+  | Yielded  (** [yielded]: the sequence of values a yielding method has yielded so far. *)
   | Finished  (** [finished]: whether a yielding method has returned. *)
   | Identical of expression * expression  (** [identical(first, second)] *)
   | Cost_function of { function_ : cost_function; arguments : expression list }
@@ -252,8 +248,8 @@ and construction =
 and conversion =
   | Widen
       (** A function value converted to a function type with more [uses] or weaker [cost] clauses.
-          The prover checks that the value's costs imply the expected costs. The value's type is
-          the source type and the node's type is the target type. *)
+          The prover checks that the value's costs imply the expected costs. The value's type is the
+          source type and the node's type is the target type. *)
   | To_integer  (** A built-in integer converted to [Integer]. Specifications only. *)
   | From_integer
       (** An [Integer] converted to a built-in integer type. Specifications only. The prover checks
@@ -265,7 +261,6 @@ and binder =
   | Over_range of { pattern : pattern; start : expression; stop : expression; inclusive : bool }
   | Over_collection of { pattern : pattern; collection : expression }
 
-(** One implementation given to a [provide] block. *)
 and implementation = {
   origin : origin;
   mode : Types.mode;
@@ -276,6 +271,7 @@ and implementation = {
   provides : provided list;
       (** Each capability that the implementation's type implements, with the [impl]. *)
 }
+(** One implementation given to a [provide] block. *)
 
 and provided = { capability : Path.t; impl : Path.t; arguments : Types.substitution }
 
@@ -370,8 +366,7 @@ and pattern_kind =
   | Range of { start : expression; stop : expression; inclusive : bool }
       (** A range of literals or constants. *)
   | Equal_to of { value : expression; equal : callee }
-      (** A constant or a string literal, compared by calling [equal] (the type's [Equal.equal]).
-      *)
+      (** A constant or a string literal, compared by calling [equal] (the type's [Equal.equal]). *)
   | Alternatives of pattern list
 
 (** {1 Definitions} *)
@@ -424,6 +419,6 @@ type t = {
 }
 (** The core form of one definition.
 
-    Three kinds of node carry a proof obligation that the type checker created: a
-    {!From_integer} conversion (the value must fit), a {!Widen} conversion (the costs must imply),
-    and a {!Match} with [guards_exhaustive] (the guards must cover every case). *)
+    Three kinds of node carry a proof obligation that the type checker created: a {!From_integer}
+    conversion (the value must fit), a {!Widen} conversion (the costs must imply), and a {!Match}
+    with [guards_exhaustive] (the guards must cover every case). *)

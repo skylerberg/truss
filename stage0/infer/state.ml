@@ -57,10 +57,11 @@ type frame = {
   span : span;
 }
 
-(* The core form as it is being made: how the node of each expression,
-   statement, and pattern is built, by its id in the syntax tree. Each is
-   set where checking decides what the node is, and run once the whole
-   definition has checked, when every type and every choice is final. *)
+(* The core form under construction. Each array is indexed by syntax id
+   and holds a function that builds the core node for that syntax node.
+   The checker registers a builder when it checks the syntax node. The
+   builders run after the whole definition is checked, when every type is
+   final. *)
 type form = {
   expression_builders : (unit -> Core.expression) option array;
   statement_builders : (unit -> Core.statement) option array;
@@ -94,8 +95,8 @@ type state = {
       (** The report of the first statement whose types could not be worked out. *)
   mutable capability_constraints : subset_constraint list;
   mutable capability_solution : (int, T.capability list) Hashtbl.t option;
-      (** The set each capability variable was solved to. [None] until the constraints are solved.
-          A variable with no entry is the empty set. *)
+      (** The set each capability variable was solved to. [None] until the constraints are solved. A
+          variable with no entry is the empty set. *)
   mutable evidence : string list;  (** The packages whose [impl]s met a bound here. *)
 }
 
@@ -129,11 +130,14 @@ let fresh_node_id state =
   state.form.next_node_id <- id + 1;
   id
 
-(* A node that no expression of the syntax tree is: one an expansion makes. *)
-let synthetic_expression state ~origin type_ kind : Core.expression = { id = fresh_node_id state; origin; type_; kind }
+(* A core expression that desugaring introduces. It has no syntax node of
+   its own, so the caller gives its origin and type. *)
+let synthetic_expression state ~origin type_ kind : Core.expression =
+  { id = fresh_node_id state; origin; type_; kind }
 
-(* Says how an expression's node is built. Its type is the one checking
-   records for it. *)
+(* Registers the builder for an expression's core node. [kind] computes
+   the node's kind. The node's type is the type the checker recorded for
+   the expression. *)
 let register_expression state (value : expression) kind =
   state.form.expression_builders.(value.id) <-
     Some
@@ -157,7 +161,8 @@ let build_statement state (written : statement) : Core.statement =
   | Some build -> build ()
   | None -> bug "`%s` has no node in the core form" (source state written.span)
 
-(* Says how a pattern's node is built. Its type is that of what it matches. *)
+(* Registers the builder for a pattern's core node. The node's type is
+   the type of the value the pattern matches. *)
 let register_pattern state (written : pattern) kind =
   state.form.pattern_builders.(written.id) <-
     Some
@@ -172,12 +177,14 @@ let build_pattern state (written : pattern) : Core.pattern =
   | Some build -> build ()
   | None -> bug "`%s` has no node in the core form" (source state written.span)
 
-(* An expression whose node is another's: parentheses, and a mark. *)
+(* Makes an expression's core node the core node of [inner]. Used for
+   parentheses and for a mode marker such as [mut value]. *)
 let alias_expression state (value : expression) (inner : expression) =
   state.form.expression_builders.(value.id) <- Some (fun () -> build_expression state inner)
 
-(* Where a node's value is: the place it reads, or one that holds it for
-   the statement. *)
+(* The place a core expression denotes. A [Use] denotes the place it
+   reads. Any other expression is a value, which is stored in a
+   [Temporary]. *)
 let place_of (node : Core.expression) : Core.place =
   match node.kind with Use place -> place | _ -> Temporary node
 
@@ -226,23 +233,23 @@ let unsolved state =
       state.unsolved <- Some report;
       T.Error report
 
-(* A type as the finished definition has it: solved, normalized, and an
-   error where nothing decided it. *)
-(* A set of capabilities as the finished definition has it: each unknown
-   in it replaced by what it was solved as. Until they are solved, the set
-   as it is. *)
+(* Replaces each capability variable in a set by its solution. Returns
+   the set unchanged if the variables are not solved yet. *)
 let resolve_capabilities state (capabilities : T.capability list) =
   match state.capability_solution with
   | Some solution when T.has_capability_variable capabilities ->
       List.sort_uniq compare
         (List.concat_map
            (function
-             | T.Capability_variable unknown ->
-                 Option.value ~default:[] (Hashtbl.find_opt solution unknown)
+             | T.Capability_variable variable ->
+                 Option.value ~default:[] (Hashtbl.find_opt solution variable)
              | capability -> [ capability ])
            capabilities)
   | _ -> capabilities
 
+(* The final form of a type: inference variables replaced by their
+   solutions, projections normalized, and capability variables replaced
+   by their solutions. An unsolved inference variable becomes an error. *)
 let final state type_ =
   let type_ =
     T.map
@@ -269,11 +276,11 @@ let unify state left right =
   in
   Unify.unify state.unifier (normalize left) (normalize right)
 
-(* What a call gives meets the type expected of it before the call's
-   arguments are checked, so that the type arguments this decides are known
-   while they are. It decides nothing about sets of capabilities, which may
-   differ where a function value is widened: those are held where the value
-   is converted. *)
+(* Unifies a call's result type with the expected type before the call's
+   arguments are checked, so that the type arguments this infers are known
+   while the arguments are checked. Capability sets are left out: a
+   function value may be widened to a type with more [uses], and [convert]
+   compares the capability sets when it checks the value. *)
 let unify_as_hint state found expected =
   let deferred_capability_equalities = state.unifier.deferred_capability_equalities in
   ignore (unify state found expected);
@@ -634,9 +641,9 @@ let rec called (value : expression) =
   | Mode (_, inner) | Parenthesized inner -> called inner
   | _ -> None
 
-(* The error of an expression that is not what its place needs: the name's
-   own report when resolution found nothing by it, so that is the one
-   report, and a new one else_. *)
+(* The error type for an expression that is not valid where it is used.
+   If resolution already reported the expression's name as unknown, this
+   reuses that report instead of adding a second one. *)
 let error_at state ?fixes code (value : expression) message =
   match head state value with
   | Some { target = Unknown report; _ } -> T.Error report
@@ -710,7 +717,7 @@ type static_ =
      its view and, in a specification, a built-in integer becomes an
      [Integer] or an [Integer] a built-in integer that it fits.
 
-   Wildcard else must be the type expected. *)
+   In every other case, [found] must unify with [expected]. *)
 let convert state env ?(argument = false) ?expression (span : span) ~found ~expected :
     C.conversion option =
   (* What converts is the conversion's node from then on, of the type
@@ -725,7 +732,8 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
               let inner : Core.expression = build () in
               let expected = final state expected in
               let convert conversion =
-                synthetic_expression state ~origin:id expected (Convert { conversion; value = inner })
+                synthetic_expression state ~origin:id expected
+                  (Convert { conversion; value = inner })
               in
               match conversion with
               | From_never -> inner
@@ -802,7 +810,8 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
          within the type's is known once the unknowns are solved: one in the
          type is made to hold what the value uses beyond the rest. *)
       let unknown =
-        T.has_capability_variable given_function.uses || T.has_capability_variable wanted_function.uses
+        T.has_capability_variable given_function.uses
+        || T.has_capability_variable wanted_function.uses
       in
       let proven = T.costs_imply ~given:given_function.costs ~wanted:wanted_function.costs in
       if

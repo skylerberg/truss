@@ -149,7 +149,7 @@ and prefix state env ?expected (value : expression) operator (inner : expression
           (* The negation is the value: [-128] is one literal. *)
           state.tables.literals.(inner.id) <- Some (Integer_value number);
           state.tables.literals.(value.id) <- Some (Integer_value (Z.neg number));
-          register_expression state value (fun () -> Form.literal state value.id);
+          register_expression state value (fun () -> Form.numeric_literal state value.id);
           let type_ = literal_type state ~expected Integer_literal in
           record state inner type_;
           defer state (fun () ->
@@ -371,7 +371,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
       left_type
   | (Equal | Not_equal | Less | Less_equal | Greater | Greater_equal)
     when operands_hole state env left right ->
-      register_expression state value (fun () -> Form.compare_values state operator left right);
+      register_expression state value (fun () -> Form.built_in_comparison state operator left right);
       T.bool
   | Equal | Not_equal | Less | Less_equal | Greater | Greater_equal ->
       let left_type = Option.get state.tables.types.(left.id) in
@@ -383,7 +383,8 @@ and binary state env ?expected (value : expression) operator (left : expression)
         || match resolve state type_ with T.Literal (Integer_literal, _) -> true | _ -> false
       in
       if env.specification && integers left_type && integers right_type then begin
-        register_expression state value (fun () -> Form.compare_values state operator left right);
+        register_expression state value (fun () ->
+            Form.built_in_comparison state operator left right);
         T.bool
       end
       else begin

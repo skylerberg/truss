@@ -42,7 +42,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       | None -> bug "the local `%s` has no type" text)
   | Value_parameter parameter ->
       state.tables.meanings.(value.id) <- Some (Generic_value parameter);
-      register_expression state value (fun () -> Generic_value parameter);
+      register_expression state value (fun () -> Value_parameter parameter);
       T.builtin USize
   | Type_parameter _ | Capability_parameter _ ->
       error state Not_a_value value.span (Printf.sprintf "`%s` is a type, not a value." text)
@@ -411,10 +411,11 @@ and trait_candidates state receiver_type name =
                (Query.demand state.database Names.traits_declaring (package, name)))
            (Members.visible_packages state.database state.package))
 
-(* Whether the traits that give a type one name are one family: each is
-   reached from another through what it requires. Only then are their
-   methods versions of one method. Two unrelated traits that share a name
-   stay apart whatever way each takes [self], since else_ a trait added
+(* Whether the traits that declare a method of the same name are related:
+   each requires, or is required by, another trait in the list. Only then
+   are their methods versions of one method (such as a [self] version and a
+   [mut self] version). Unrelated traits that share a method name stay
+   ambiguous, whatever receiver each method takes. Otherwise a trait added
    later could take over a call on a temporary without an error. *)
 and one_family state (traits : T.trait_reference list) =
   let requires (first : T.trait_reference) (second : T.trait_reference) =
@@ -515,7 +516,7 @@ and each_call state (span : span) type_ mode =
                       type_arguments = [];
                       evidence =
                         (match type_ with
-                        | T.To_any _ -> Dynamic
+                        | T.Any _ -> Dynamic
                         | T.Parameter _ -> Bound
                         | _ -> (
                             match implements state type_ trait with

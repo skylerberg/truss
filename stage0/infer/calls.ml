@@ -68,7 +68,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
             uses = function_type.uses;
             result;
           };
-      Form.register_call ~through:callee state value;
+      Form.register_call ~function_value:callee state value;
       result
   | T.Error _ | T.Hole -> arguments_alone state env arguments callee_type
   | _ ->

@@ -59,7 +59,9 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
           constant_pattern state written.id written.span path type_
       | Some (Value_parameter parameter) ->
           register_pattern state written (fun () ->
-              Literal (synthetic_expression state ~origin:written.id (T.builtin USize) (Generic_value parameter)));
+              Literal
+                (synthetic_expression state ~origin:written.id (T.builtin USize)
+                   (Value_parameter parameter)));
           if not (unify state (T.builtin USize) type_) then
             mismatch state written.span ~expected:type_ ~found:(T.builtin USize)
       | _ -> ())

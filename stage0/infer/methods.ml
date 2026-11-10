@@ -73,7 +73,9 @@ and call_named state env ?expected (value : expression) (callee : expression)
               function_ =
                 (match function_ with Log -> Log | Power -> Power | Time -> Time | Calls -> Calls);
               arguments =
-                List.map (fun (argument : argument) -> build_expression state argument.value) arguments;
+                List.map
+                  (fun (argument : argument) -> build_expression state argument.value)
+                  arguments;
             });
       arguments_alone state env arguments T.Integer
   | Definition (Type, path) -> (
@@ -588,7 +590,7 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
      each set of arguments, and one that takes or returns [Self] names the
      hidden type, so neither can be called through it. *)
   (match receiver_type with
-  | T.To_any _ ->
+  | T.Any _ ->
       let self : T.parameter = { owner = trait.trait; name = "Self" } in
       let names_self type_ =
         let found = ref false in
@@ -639,7 +641,7 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
       conversion = None;
     }
   in
-  let evidence = match receiver_type with T.To_any _ -> C.Dynamic | _ -> C.Built_in in
+  let evidence = match receiver_type with T.Any _ -> C.Dynamic | _ -> C.Built_in in
   state.tables.calls.(value.id) <-
     Some
       {
@@ -660,7 +662,7 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
       };
   Form.register_call state value;
   (match receiver_type with
-  | T.To_any _ -> ()
+  | T.Any _ -> ()
   | _ -> resolve_evidence state value receiver_type reference);
   match instance.signature.output with
   | Yields _ ->
