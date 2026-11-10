@@ -1,0 +1,3 @@
+(library
+ (name outline)
+ (libraries compiler_bug memory_layout lir))

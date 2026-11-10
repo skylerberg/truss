@@ -388,7 +388,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
             bug "a quantifier that only a specification can have, in code that runs"
       in
       assign (Use (Constant (Bool (not deciding))));
-      for_each st ~origin:value.origin ~pattern ~iteration ~body:(fun () ->
+      for_each st ~origin:value.origin ~parallel:false ~pattern ~iteration ~body:(fun () ->
           let holds = temporary st st.context.bool in
           in_statement st (fun () -> into st body holds);
           let decided = block st.b and goes_on = block st.b in
@@ -610,9 +610,73 @@ and argument_place st (argument : Core.argument) =
 (* Runs [body] once for each value of an iteration, with the pattern's names
    bound, as the innermost loop: a [break] in it leaves the loop and a
    [continue] goes on to the next value. *)
-and for_each st ~origin ~(pattern : Core.pattern) ~(iteration : Core.iteration)
+and for_each st ~origin ~parallel ~(pattern : Core.pattern) ~(iteration : Core.iteration)
     ~(body : unit -> unit) =
+  (* The loop of a method that a [parallel for] is inlining is marked
+     though it is in an inlined method: the [parallel for] was where a
+     region may be, and its body, which is what the [yield] runs, cannot
+     leave. *)
+  let chunked = (parallel && at_once st) || st.chunk_next_range in
+  st.chunk_next_range <- false;
   match iteration with
+  | Integer_range { start = low; stop = high; inclusive } when chunked ->
+      (* The loop is a region that covers a part of the range's indexes,
+         counted from 0 as [UInt64], so that a range of any integer type
+         has as many indexes as fit. As it is written here it covers them
+         all; outlining has it run for parts of them at the same time. *)
+      let element = ground st low.type_ in
+      let integer = integer_of st element in
+      let wide = Lir.Raw (Integer UInt64) in
+      let one = constant_int UInt64 Z.one in
+      let first_value = binding st ~name:"start" element in
+      let last_value = binding st element in
+      emit st.b (Assign (first_value, Use (operand st low)));
+      emit st.b (Assign (last_value, Use (operand st high)));
+      let going = local st.b (Raw Bool) in
+      emit st.b
+        (Assign
+           ( at going,
+             Binary ((if inclusive then Less_equal else Less), Copy first_value, Copy last_value) ));
+      let inside = block st.b and after = block st.b in
+      let depth = List.length st.scopes in
+      finish st.b
+        (Switch { value = Copy (at going); cases = [ (Z.one, inside) ]; default = Some after });
+      start st.b inside;
+      let first = local st.b ~name:"first" wide and last = local st.b ~name:"last" wide in
+      let low_wide = local st.b wide and high_wide = local st.b wide in
+      emit st.b (Assign (at first, Use (constant_int UInt64 Z.zero)));
+      emit st.b (Assign (at low_wide, Convert (Copy first_value, Integer UInt64)));
+      emit st.b (Assign (at high_wide, Convert (Copy last_value, Integer UInt64)));
+      emit st.b (Assign (at last, Binary (Subtract, Copy (at high_wide), Copy (at low_wide))));
+      if not inclusive then emit st.b (Assign (at last, Binary (Subtract, Copy (at last), one)));
+      let fork = fresh_fork st in
+      emit st.b (Region { fork; region = Chunk { first; last } });
+      let index = local st.b ~name:"index" wide in
+      emit st.b (Assign (at index, Use (Copy (at first))));
+      let again = block st.b and step = block st.b and done_ = block st.b in
+      finish st.b (Goto again);
+      start st.b again;
+      in_scope st (fun () ->
+          let offset = binding st element in
+          let bound = binding st element in
+          emit st.b (Assign (offset, Convert (Copy (at index), Integer integer)));
+          emit st.b (Assign (bound, Binary (Add, Copy first_value, Copy offset)));
+          match_patterns st [ (pattern, bound) ] ~failed:(block st.b);
+          looping st ~continue_:step ~break_:done_ ~depth body);
+      finish st.b (Goto step);
+      start st.b step;
+      let ended = local st.b (Raw Bool) in
+      emit st.b (Assign (at ended, Binary (Equal, Copy (at index), Copy (at last))));
+      let next = block st.b in
+      finish st.b
+        (Switch { value = Copy (at ended); cases = [ (Z.one, done_) ]; default = Some next });
+      start st.b next;
+      emit st.b (Assign (at index, Binary (Add, Copy (at index), one)));
+      finish st.b (Goto again);
+      start st.b done_;
+      emit st.b (Regions_end { fork });
+      finish st.b (Goto after);
+      start st.b after
   | Integer_range { start = low; stop = high; inclusive } ->
       let element = ground st low.type_ in
       let index = binding st ~name:"index" element in
@@ -673,6 +737,7 @@ and for_each st ~origin ~(pattern : Core.pattern) ~(iteration : Core.iteration)
           let caller = st.frame in
           let depth = List.length st.scopes in
           let after = block st.b in
+          st.chunk_next_range <- parallel && at_once st && yields_by_position st path;
           inline st path type_arguments ~arguments ~call_site:(site_of st origin)
             ~on_yield:(fun yielded ~resume ~stop ->
               let inner = st.frame in
@@ -709,6 +774,29 @@ and for_each st ~origin ~(pattern : Core.pattern) ~(iteration : Core.iteration)
         ~body:(fun value ->
           match_patterns st [ (pattern, value) ] ~failed:(block st.b);
           body ())
+
+(* Whether a yielding method gives its parts by position: its body is one
+   loop over a range of integers that does nothing but yield. The loop's
+   iterations share nothing, so a [parallel for] over the method runs that
+   loop in parts. *)
+and yields_by_position st path =
+  let _, _, (body : Core.block) = body_of st.context path in
+  match (body.statements, body.value) with
+  | ( [
+        {
+          kind =
+            For
+              {
+                iteration = Integer_range _;
+                body = { statements = [ { kind = Yield _; _ } ]; value = None; _ };
+                _;
+              };
+          _;
+        };
+      ],
+      None ) ->
+      true
+  | _ -> false
 
 (* A loop over the cursor of a yielding method's call: the pulled method's
    [next] is called until it gives [None]. *)
@@ -995,9 +1083,18 @@ and statement st (node : Core.statement) =
       | Evaluate { kind = Use source; _ } -> ignore (place st source)
       | Evaluate value -> ignore (value_place st value)
       | Proof _ -> ()
-      | Parallel statements ->
-          (* Stage0 runs the statements of a [parallel] block in order. *)
-          List.iter (statement st) statements
+      | Parallel statements when at_once st ->
+          (* Each branch is a region, which outlining makes a function of
+             its own once drops are elaborated. A branch cannot leave the
+             block early, so its region has one way out. *)
+          let fork = fresh_fork st in
+          List.iter
+            (fun branch ->
+              emit st.b (Region { fork; region = Branch });
+              statement st branch)
+            statements;
+          emit st.b (Regions_end { fork })
+      | Parallel statements -> List.iter (statement st) statements
       | Concurrent _ -> Compiler_bug.unsupported "a `concurrent` block"
       | For { mode = Concurrent_loop; _ } -> Compiler_bug.unsupported "a `concurrent for` loop"
       | Let { pattern = { kind = Bind { local; name; _ }; type_; _ }; value; else_ = None } -> (
@@ -1082,9 +1179,9 @@ and statement st (node : Core.statement) =
           close_scope st names;
           finish st.b (Goto test);
           start st.b after
-      | For { pattern; iteration; body; _ } ->
-          for_each st ~origin:node.origin ~pattern ~iteration ~body:(fun () ->
-              block_into st body None)
+      | For { pattern; iteration; body; mode; _ } ->
+          for_each st ~origin:node.origin ~parallel:(mode = Parallel_loop) ~pattern ~iteration
+            ~body:(fun () -> block_into st body None)
       | Yield { mode; part } -> (
           let lends =
             match part with

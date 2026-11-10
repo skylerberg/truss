@@ -70,6 +70,10 @@ type state = {
   mutable compound_target : Lir.place option;
       (** The target of the compound assignment whose new value is being lowered *)
   pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
+  mutable forks : int;  (** How many [parallel] statements the function has marked *)
+  mutable chunk_next_range : bool;
+      (** Whether the next loop over a range is the loop of a method that a [parallel for] is
+          inlining, and so is the one to run in parts *)
 }
 
 (* The code a function starts lowering: its own, with nothing bound yet. *)
@@ -99,7 +103,21 @@ let enter context ?(pulling = false) ?(nested = ref []) frame =
     evidence = [];
     compound_target = None;
     pulling;
+    forks = 0;
+    chunk_next_range = false;
   }
+
+(* Whether a [parallel] statement's parts are marked here, to become
+   functions of their own that the runtime may run at the same time. They
+   are not in a method's pulled version, whose code is a state machine, nor
+   in a lending or yielding method that is inlined: a [yield] in a part
+   would run the caller's code there, which may leave, and a region has
+   one way out. *)
+let at_once st = (not st.pulling) && st.frame.on_yield = None && st.frame.exit = None
+
+let fresh_fork st =
+  st.forks <- st.forks + 1;
+  st.forks - 1
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
 let trivial st ty = Glue.trivial st.context.glue ty

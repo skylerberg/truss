@@ -12,8 +12,10 @@
 (* With [tests], the runtime of a test program: it counts the blocks that
    are allocated and not freed, and holds the program's table of tests,
    which the runner runs by number. A program that is not a test program has
-   neither. *)
-val runtime : Memory_layout.target -> tests:bool -> string
+   neither. With [in_order], the runtime runs the branches of a fork one
+   after another and has no threads, as a test program and code run while
+   compiling have it. *)
+val runtime : Memory_layout.target -> tests:bool -> in_order:bool -> string
 
 (* A C [main] that installs the stack-overflow handler, calls the C
    function [entry], which takes nothing and returns an [Int32], and exits

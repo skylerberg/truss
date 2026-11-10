@@ -38,6 +38,8 @@ Code generation:
   and defaults
 - turns yielding methods into calls that receive the caller's loop body, and
   pulled cursors into state machines
+- makes each branch of a `parallel` statement a function of its own, which
+  the runtime's threads run
 - emits C from the LIR, compiles it, and links the program, with the table
   that turns positions into file names and lines
 
@@ -86,9 +88,10 @@ Lowering straight from the core form to C text would put drops, yield
 lowering, state machines, and hashing all inside a string printer. A small IR
 between them gives:
 
-- **One place for every transformation.** Drop elaboration and the cursor
-  state machine are dataflow passes over a control-flow graph, which is the
-  form they are written in elsewhere. Rust's MIR exists for the same reasons.
+- **One place for every transformation.** Drop elaboration, the cursor
+  state machine, and the outlining of `parallel` branches are passes over a
+  control-flow graph, which is the form they are written in elsewhere.
+  Rust's MIR exists for the same reasons.
 - **The thing early cutoff compares.** A definition whose LIR comes out the
   same compiles to the same C, so nothing after it runs again, and tests that
   reach it keep their cached results. The LIR does not depend on which C
@@ -276,6 +279,9 @@ parameter. The emitter only prints.
 | `drop(place)` | Run the type's drop code. Before drop elaboration: drop whatever the place still owns |
 | `free_block(place, variant)` | Free the block of an `indirect` variant whose fields have all been moved out or dropped |
 | `echo(text, length, site)` | Record a value's debug output, with its position |
+| `region(fork, kind)`, `regions_end(fork)` | Before outlining only. The start of a region of a `parallel` statement, and the end of the fork's last region (see [Parallelism](#parallelism)) |
+| `fork(branches)` | Run each nested function, given the address of its environment, and go on when all have returned. They may run at the same time. |
+| `fork_range(body, environment, first, last)` | Run the nested function for parts that together hold each index from `first` to `last` once, and go on when all have returned |
 
 | Rvalue | Meaning |
 |---|---|
@@ -1093,8 +1099,91 @@ only `yield_now`, which does nothing, and nothing runs on a second thread.
 
 ## Parallelism
 
-Stage0 runs `parallel` blocks and `parallel for` loops one branch after
-another, which DESIGN.md allows.
+A branch of a `parallel` block, and the body of a `parallel for`, becomes a
+function of its own, which the runtime's threads run. It happens in two
+steps, with drop elaboration between them.
+
+### Regions
+
+Lowering writes a `parallel` statement's code where the statement is, in
+order, and marks where each part starts:
+
+- **A block's branches** are each a region. A branch cannot leave the block
+  early, so a region has one way in and one way out.
+- **A `parallel for` over a range** is one region that holds the loop. The
+  loop covers a part of the range's indexes, counted from 0 as `UInt64`,
+  so that a range of any integer type has as many indexes as fit. Two
+  locals hold the first and last index of the part, and where the region
+  is reached they hold the whole range's.
+- **A `parallel for` over a method that yields by position** is that
+  method's own loop, marked the same way, with the `parallel for`'s body
+  at its `yield`. A method yields by position when its body is one `for`
+  over a range that does nothing but `yield`: its iterations share
+  nothing, so they can run in any order and at the same time.
+- **Any other `parallel for`** runs in order. A method that keeps
+  something from one `yield` to the next, such as a count in a `while`
+  loop, has iterations that depend on each other.
+- **A method's pulled version** has no regions, since its code is a state
+  machine, and neither has a `parallel` block in a lending or yielding
+  method that is inlined, where a `yield` in a branch would run the
+  caller's code.
+
+Run in place, the regions mean what the statement means. So drop
+elaboration reads them as ordinary code: which branch gives a `let` its
+value, which takes a value out of a place, and which drops what, is worked
+out as for any other code.
+
+### Outlining
+
+After drops are elaborated, `Outline` makes each region a nested function
+and the statement a fork:
+
+- **A local that only the region names** becomes a local of the function.
+- **A local that the region shares** with the code around it or with
+  another region is reached through the function's environment, which
+  holds the address of each. The type checker has shown that the branches
+  change no place that another uses, so the addresses are never written
+  through at the same time.
+- **The locals of a loop's part** are the function's parameters.
+- **No two regions share a local that one of them gives a whole new
+  value.** No program can do that, so it would be a temporary of the
+  compiler's used twice, and `Outline` stops at it.
+
+The fork is `fork(branches)` for a block and `fork_range(body, environment,
+first, last)` for a loop. A fork inside a region is outlined after the
+region around it, from the function that region became.
+
+### The runtime's threads
+
+A fork gives a thread several branches. It runs the first itself and
+offers the rest on its own queue, where a thread with nothing to do takes
+one from the far end. When its first branch returns, the thread takes back
+each branch that is still there and runs it, and for one that was taken it
+waits, running other threads' branches meanwhile.
+
+- **The queue** is Chase and Lev's work-stealing deque, with the memory
+  orderings of Lê, Pop, Cohen, and Zappa Nardelli, and a fixed size: a
+  thread whose queue is full runs the branch itself.
+- **A branch's record** lives in the frame of the fork that offered it,
+  which does not return until every one of its branches is done. Nothing
+  is allocated.
+- **There is a thread for each core,** counting the thread that forks
+  first. They start at the first fork a program reaches, each with a stack
+  as large as the first thread's, and with every signal held back, so that
+  a signal sent to the process goes to the first thread as it does in a
+  program that has one. `TRUSS_WORKERS` gives another number of threads,
+  which changes how long a program takes and nothing it does.
+- **A thread with nothing to do sleeps** after looking a while, and a fork
+  wakes one. A thread waiting for a branch that was taken sleeps too, and
+  the thread that finishes the branch wakes it.
+- **A loop's range is run by halves,** down to parts whose size depends
+  only on the range, never on the number of threads.
+- **A test program, and code run while compiling, run a fork's branches in
+  order** on the one thread they have. The code is the same as a
+  program's; the runtime they are linked with has no threads.
+- **The text of a failure or an `echo` is built by one thread at a time,**
+  and a thread that is ending the run never gives the buffer up, so one
+  failure is reported.
 
 ## The system interface
 
@@ -1815,14 +1904,13 @@ a command line can hold.
   allocated by `from_template` too, and the copy writes no byte that
   `from_template` did not write.
 - **A template's list of literals as static data.** It is allocated.
-- **`parallel` branches at once.** Each branch is to become a function of
-  its own that takes the address of the enclosing function's locals, and
-  the statement that starts them hands all but the first to a pool of
-  threads, one for each core, runs the first itself, and then runs or waits
-  for the rest. A thread with nothing to do takes a branch that another has
-  not started. A `parallel for` splits its range in halves down to a size
-  that depends only on the range. The pool starts at the first such
-  statement a program reaches. A test program runs branches in order.
+- **A `parallel for` over a `List`, a `Slice`, or an `Array` at once.**
+  Their `each` methods are `while` loops that keep an index between
+  `yield`s, so such a loop runs in order. Written as one `for` over a
+  range that only yields, they would run in parts with no change here.
+- **A `parallel for` over any other method at once.** A collection that
+  cannot give its parts by position needs a way to split itself in two,
+  as Rust's rayon and Java's `Spliterator` have.
 - **`concurrent`.** A branch is to become a function as a `parallel`
   branch does, started as a task through the evidence for `Tasks`, which
   also ends the block: it waits for every branch, and cancels the rest

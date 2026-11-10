@@ -77,6 +77,14 @@ let function_ env (instance : Lir.t) what (f : Lir.function_) =
         | _ -> ());
     }
   in
+  (* A nested function that a fork runs takes its environment, and for a
+     range the part to cover, and returns nothing. *)
+  let forked n (parameters : Lir.ty list) =
+    if n < 0 || n >= Array.length instance.nested then bug "a fork of nested function %d" n;
+    let signature = Lir.signature instance.nested.(n) in
+    if signature.parameters <> parameters || signature.result <> None then
+      bug "a fork of nested function %d, which does not take what a fork gives" n
+  in
   let nested_value : Lir.statement -> unit = function
     | Assign (_, Function_value { code = Nested n; _ }) ->
         if n < 0 || n >= Array.length instance.nested then bug "a value of nested function %d" n
@@ -145,6 +153,14 @@ let function_ env (instance : Lir.t) what (f : Lir.function_) =
                   if given <> taken then
                     bug "a call that passes %d arguments to a target that takes %d" given taken)
                 (target_signature instance target)
+          | Region _ | Regions_end _ -> bug "a region that outlining left in place"
+          | Fork { branches } ->
+              List.iter
+                (fun (nested, _) -> forked nested [ Lir.Raw (Nullable_pointer Opaque) ])
+                branches
+          | Fork_range { body; _ } ->
+              forked body
+                [ Lir.Raw (Nullable_pointer Opaque); Raw (Integer UInt64); Raw (Integer UInt64) ]
           | Assign _ | Drop _ | Echo _ | Free_block _ -> ())
         block.statements;
       Lir.visit_terminator visitor block.terminator;
@@ -214,7 +230,9 @@ let links env ~find (compiled : Lir.compiled) =
                   | Some (Value ty) -> has (Drop ty) (Convention.drop_signature ty)
                   | Some _ -> bug "a drop of a place that is not a value"
                   | None -> ())
-              | Assign _ | Call _ | Echo _ | Free_block _ -> ());
+              | Assign _ | Call _ | Echo _ | Free_block _ | Region _ | Regions_end _ | Fork _
+              | Fork_range _ ->
+                  ());
           Array.iter
             (fun (block : Lir.basic_block) -> Lir.visit_terminator visitor block.terminator)
             f.blocks)

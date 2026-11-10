@@ -2,7 +2,7 @@
 
 open Ir
 
-let version = 16
+let version = 17
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -227,6 +227,26 @@ let encode_statement instance = function
           instance.path site.definition;
           Cbor.int site.line;
           Cbor.int site.column;
+        ]
+  | Region { fork; region = Branch } -> tagged 5 [ Cbor.int fork ]
+  | Region { fork; region = Chunk { first; last } } ->
+      tagged 6 [ Cbor.int fork; Cbor.int first; Cbor.int last ]
+  | Regions_end { fork } -> tagged 7 [ Cbor.int fork ]
+  | Fork { branches } ->
+      tagged 8
+        [
+          list
+            (fun (nested, environment) ->
+              Cbor.Array [ Cbor.int nested; encode_operand instance environment ])
+            branches;
+        ]
+  | Fork_range { body; environment; first; last } ->
+      tagged 9
+        [
+          Cbor.int body;
+          encode_operand instance environment;
+          encode_operand instance first;
+          encode_operand instance last;
         ]
 
 let encode_terminator instance terminator =

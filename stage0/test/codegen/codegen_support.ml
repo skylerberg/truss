@@ -177,12 +177,17 @@ let cache =
        | _ -> Filename.concat (Lazy.force scratch) "objects"))
 
 (* [TRUSS_SANITIZE=1] builds every test's C with AddressSanitizer and
-   UndefinedBehaviorSanitizer, as [truss --sanitize] does; a report is a
-   compiler bug. *)
+   UndefinedBehaviorSanitizer, as [truss --sanitize] does, and
+   [TRUSS_SANITIZE=thread] with ThreadSanitizer, which watches the threads
+   that run branches at once; a report is a compiler bug. *)
 let sanitizers =
-  if Sys.getenv_opt "TRUSS_SANITIZE" = Some "1" then
-    [ "-fsanitize=address,undefined"; "-fno-sanitize-recover=undefined"; "-fno-omit-frame-pointer" ]
-  else []
+  match Sys.getenv_opt "TRUSS_SANITIZE" with
+  | Some "1" ->
+      [
+        "-fsanitize=address,undefined"; "-fno-sanitize-recover=undefined"; "-fno-omit-frame-pointer";
+      ]
+  | Some "thread" -> [ "-fsanitize=thread"; "-fno-omit-frame-pointer" ]
+  | _ -> []
 
 let settings : Build.settings =
   { build = Development; optimization = O1; extra = strict @ sanitizers }

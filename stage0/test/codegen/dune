@@ -13,6 +13,7 @@
   failure_tests
   owning_tests
   libc_tests
+  parallel_tests
   core_form_tests
   library_tests)
  (modules
@@ -30,6 +31,7 @@
   failure_tests
   owning_tests
   libc_tests
+  parallel_tests
   core_form_tests
   library_tests)
  (libraries
@@ -48,6 +50,7 @@
   startup
   positions
   drops
+  outline
   yields
   glue
   reachable

@@ -79,7 +79,8 @@ let statement_effect (statement : Lir.statement) =
         dropped = None;
       }
   | Drop place -> { moves = place_index_moves place; init = None; dropped = Some place }
-  | Free_block _ -> { moves = []; init = None; dropped = None }
+  | Free_block _ | Region _ | Regions_end _ -> { moves = []; init = None; dropped = None }
+  | Fork _ | Fork_range _ -> bug "a fork, which outlining makes after drops are elaborated"
   | Echo { text; length; _ } ->
       { moves = operand_moves text @ operand_moves length; init = None; dropped = None }
 
@@ -558,7 +559,7 @@ let elaborate env ~needs_drop ~environment (f : Lir.function_) =
                 push builder statement;
                 apply a s statement;
                 update before s
-            | Free_block _ | Echo _ ->
+            | Free_block _ | Echo _ | Region _ | Regions_end _ | Fork _ | Fork_range _ ->
                 push builder statement;
                 apply a s statement;
                 update before s)

@@ -38,11 +38,12 @@ let elaborate_code (context : Lower.context) (instance : Lir.t) =
   let elaborate f = Drops.elaborate context.env ~needs_drop ~environment:(environment instance) f in
   Lir.Code
     (Lir.canonical_instance
-       {
-         instance with
-         main = elaborate instance.main;
-         nested = Array.map elaborate instance.nested;
-       })
+       (Outline.instance context.env
+          {
+            instance with
+            main = elaborate instance.main;
+            nested = Array.map elaborate instance.nested;
+          }))
 
 (* A lowering context of its own for one computation, which reads a pulled
    method's cursor and another constant's value through the queries below,
@@ -424,7 +425,7 @@ let test_runner : Instance.key =
 (* Builds what the roots reach into a program at [output], with the given
    startup code, once the instances agree with one another. An instance
    among [made] is itself, and no query's. *)
-let rec build ?progress ?tests ?(made = []) t ~roots ~startup ~output =
+let rec build ?progress ?tests ?in_order ?(made = []) t ~roots ~startup ~output =
   let lookup key =
     match List.find_opt (fun (instance : Lir.t) -> Instance.equal instance.key key) made with
     | Some instance -> Lir.Code instance
@@ -455,7 +456,7 @@ let rec build ?progress ?tests ?(made = []) t ~roots ~startup ~output =
     | Release -> fun _ -> []
   in
   match
-    Build.program ?progress ?tests ~copied t.toolchain t.cache t.context.env t.settings
+    Build.program ?progress ?tests ?in_order ~copied t.toolchain t.cache t.context.env t.settings
       ~files:(List.map (fun unit -> [ unit ]) units)
       ~sources ~output
   with
@@ -478,7 +479,8 @@ and build_and_run ?input ?time_limit t ~roots ~startup ~arguments =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "truss-%d-%d" (Unix.getpid ()) (Hashtbl.hash roots))
   in
-  build t ~roots ~startup ~output;
+  (* Code run while compiling starts no threads. *)
+  build t ~in_order:true ~roots ~startup ~output;
   let result = Toolchain.run ?input ?time_limit output arguments in
   (try Sys.remove output with Sys_error _ -> ());
   result

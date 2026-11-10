@@ -169,6 +169,14 @@ type destination =
       (** Written by the callee through a pointer to the place, the call's first argument, for a
           result too large to return *)
 
+(* How the code of a region runs once it is a function of its own. *)
+type region =
+  | Branch  (** Once, while the fork's other regions run *)
+  | Chunk of { first : local; last : local }
+      (** Once for each part of a range of [UInt64] indexes. The two locals hold the first and the
+          last index of the part the region is to cover, and where the region is reached they hold
+          the whole range's. *)
+
 type statement =
   | Assign of place * rvalue
   | Call of { target : target; arguments : operand list; result : destination }
@@ -178,6 +186,19 @@ type statement =
   | Free_block of { place : place; variant : string }
       (** Frees the block of an [indirect] variant whose fields have all been moved out or dropped
       *)
+  | Region of { fork : int; region : region }
+      (** Before outlining only. Where a region of a [parallel] statement starts. Its code runs from
+          here to the next [Region] or the [Regions_end] of the same [fork], which is its one way
+          out, and the regions of a fork touch no place that another changes. Run in place, in
+          order, the regions mean what the statement means. *)
+  | Regions_end of { fork : int }  (** Before outlining only. Where a fork's last region ends. *)
+  | Fork of { branches : (int * operand) list }
+      (** Runs each nested function, given the address of its environment, and goes on when all have
+          returned. They may run at the same time. *)
+  | Fork_range of { body : int; environment : operand; first : operand; last : operand }
+      (** Runs the nested function, given the address of its environment and the first and last
+          index of a part, for parts that together hold each [UInt64] index from [first] to [last]
+          once, and goes on when all have returned. The parts may run at the same time. *)
 
 type terminator =
   | Goto of block

@@ -48,6 +48,8 @@ develop as well as make it easier to bootstrap the compiler in parts.
   - **The build, formatting, the opam file, and the tests are one dune run,**
     so they overlap. Two things run beside it, each on a runner of its own:
     the codegen tests under sanitizers, and the standard library's proofs.
+    The sanitizers' job runs the programs that use several threads a second
+    time under ThreadSanitizer, which cannot run beside the others.
   - **The standard library's proofs have their own jobs.** They are the
     longest test, and the one that grows with the library, so they do not
     share a runner's cores with the rest. The dune run sets

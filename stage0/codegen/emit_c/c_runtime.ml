@@ -71,6 +71,10 @@ let runtime_declarations (target : Memory_layout.target) =
       "void *t_runtime_allocate(t_usize size, t_usize alignment);\n";
       "void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usize alignment);\n";
       "void t_runtime_free(void *pointer);\n";
+      "struct t_branch {\n  void (*run)(void *environment);\n  void *environment;\n};\n";
+      "void t_runtime_parallel(const struct t_branch *branches, t_usize count);\n";
+      "void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t \
+       last), void *environment, uint64_t first, uint64_t last);\n";
       "void t_runtime_run_test(uint32_t index);\n";
       "void t_runtime_report_tests_to(int32_t descriptor);\n";
       "t_usize t_runtime_live_blocks(void);\n";
