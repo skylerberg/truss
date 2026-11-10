@@ -498,13 +498,21 @@ is `Plain` exactly when `Value` is.
 |---|---|---|
 | `Copyable` | every type except the standard library's handles and types that hold one | call `copy()` |
 | `Plain` | integers, floats, `Bool`, `Character`, `Unit`, arrays, records, and sum types made only of `Plain` parts, with no heap data and no handle | copy implicitly. `Plain` requires `Copyable`. |
-| View | `Slice`, `StringSlice`, a cursor from a `self` method, every function type, every `any` type, and anything holding a view anywhere, in a field, a variant, an element, or a type argument | nothing extra; values of view types stay within their function (see [Views](#views)) |
+| View | `Slice`, `StringSlice`, a cursor from a `self` method, every function type, every `any` type whose trait does not require `Storable`, and anything holding a view anywhere, in a field, a variant, an element, or a type argument | nothing extra; values of view types stay within their function (see [Views](#views)) |
+| `Storable` | every type that is not a view type, whatever its type parameters stand for: a type parameter counts only when it is bounded by `Storable` | be kept where no view can be followed, such as a channel's queue. A generic type that keeps a value there bounds it, as in `Channel[Message: Storable]`. |
 | Structural equality | the built-in integers, `Bool`, `Character`, `Unit`, `String`, the types of specifications, and a type that derives `Equal` whose fields all have it; never floats, a hand-written `Equal`, or, outside its package, an opaque type | be a constant in a pattern; the prover substitutes through `==` |
 
-- **`Copyable` and `Plain` are prelude traits that the compiler implements.**
-  No `impl` of them can be written. A generic parameter has them only when
-  bounded, as in `[Element: Copyable]`, so a plain `[Element]` accepts
-  everything, including handles.
+- **`Copyable`, `Plain`, and `Storable` are prelude traits that the compiler
+  implements.** No `impl` of them can be written. A generic parameter has
+  them only when bounded, as in `[Element: Copyable]`, so a plain
+  `[Element]` accepts everything, including handles and views.
+- **`Storable` is worked out from the fields of every type,** opaque or
+  not, as whether a type is a view is. It says that no instance of the type
+  can hold a view: `List[Element]` is `Storable` where `Element` is, and no
+  function type is.
+- **`any Trait` is `Storable` only when `Trait` requires `Storable`,** as
+  with `Copyable`. Every type that implements such a trait holds no view,
+  so the value behind the `any` holds none.
 - **An opaque type has them only when declared** with `derives Copyable` or
   `derives Plain`. The checker verifies that the fields allow it. Other
   packages rely on the declaration, so adding a field that cannot be copied
@@ -1352,10 +1360,11 @@ required, such as an `own` function-typed parameter. Putting a view into a
 record or a list makes that record or list a view, so "a view cannot be
 stored" holds by construction.
 
-An `any Trait` type does not say what the value inside holds, so every
-`any` type is a view type. A conversion to `any` views what the converted
-value views, so a record that holds a slice of a local cannot be returned
-inside an `any`, and an `any` made from owned data views nothing.
+An `any Trait` type does not say what the value inside holds, so it is a
+view type unless `Trait` requires `Storable`. A conversion to `any` views
+what the converted value views, so a record that holds a slice of a local
+cannot be returned inside an `any`, and an `any` made from owned data views
+nothing.
 
 A function type does not say whether a function captures, so every function
 type is a view type, and the value decides what it views. A conversion to a
@@ -2281,12 +2290,9 @@ list's `each`, which only the `impl`'s method has.
 
 ## Not built
 
-- **One rule for `concurrent` code.** The checker builds `concurrent`
-  blocks and loops, and the ownership check applies its rules to them. The
-  prover and code generation report them as not built. Still to be built
-  here: the type argument of `Channel` is never a view type, which leaves
-  out every function type and every `any` type. The standard library has
-  no `Channel` yet.
+- **The bound on a channel's message.** `Storable` is built, and the
+  standard library's `Channel[Message]` does not bound `Message` by it
+  yet, so a channel of views is still accepted.
 - **An interpolated string as calls.** It is still a node that names the
   text builder's methods and each value's `display`. It will be desugared
   to those calls once they have `time` clauses.

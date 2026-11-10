@@ -2279,8 +2279,9 @@ fn total_size(paths: Slice[Path]) -> USize
 }
 ```
 
-- A message is owned: sending it moves it. Its type is a record or a sum
-  type of owned data, and never a view, a function, or an `any` type.
+- A message is owned: sending it moves it. Its type is `Storable`: a
+  record or a sum type of owned data, and never a view or a function. An
+  `any Trait` can be sent only when `Trait` requires `Storable`.
 - A channel's methods take `self` read-only, so every branch can use a
   channel that is declared before the block.
 - A task that waits for several kinds of message receives a sum type from
@@ -2805,6 +2806,14 @@ conditions its fields give: `Slice[Element]` is `Plain` for every `Element`,
 because the view it holds is. Generic code that copies says so with a bound,
 as in `[Element: Copyable]`.
 
+`Storable` is a third. Every type that is not a view type has it (see
+[DESIGN.md](DESIGN.md#views)), and no type declares it: the compiler works
+it out from the fields of every type, opaque or not. A type parameter has
+it only when bounded, so `List[Element]` is `Storable` where `Element` is,
+and `any Trait` has it only when `Trait` requires it.
+Generic code that keeps a value past the function that made it says so with
+a bound, as in `Channel[Message: Storable]`.
+
 Every type also has debug output, which tools such as the test runner use to
 show values, as in a failed `assert`. Nothing needs to be derived for it. To
 use a value in `${...}` interpolation, its type must implement `Display` by
@@ -3238,9 +3247,9 @@ never clash with variable or function names:
 - `Option` (`Some`, `None`) and `Result` (`Ok`, `Err`)
 - the core collections: `List`, `Slice`, `Map`, and `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
-  `Copyable`, `Plain`, `Index`, `Iterable`, `Cursor`, `FromTemplate`, `Model`,
-  and the arithmetic traits `Add`, `Subtract`, `Multiply`, `Divide`,
-  `Remainder`, and `Negate`
+  `Copyable`, `Plain`, `Storable`, `Index`, `IndexAssign`, `Iterable`,
+  `Cursor`, `FromTemplate`, `Model`, and the arithmetic traits `Add`,
+  `Subtract`, `Multiply`, `Divide`, `Remainder`, and `Negate`
 - `Integer`, `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`, for
   specifications
 - the standard capabilities, such as `Console`, `FileRead`, and `Panic`, and

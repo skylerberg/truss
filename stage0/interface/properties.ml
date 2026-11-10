@@ -15,6 +15,7 @@ module T = Types
 let core name : Path.t = Top { module_ = { package = "standard"; modules = [ "core" ] }; name }
 let copyable_trait = core "Copyable"
 let plain_trait = core "Plain"
+let storable_trait = core "Storable"
 
 (* What a trait's [Self] and parameters stand for in a reference to it. A
    reference with the wrong number of arguments, which lowering reported,
@@ -146,19 +147,17 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (ty
   | T.Function _ -> if property = View then None else Some []
   | T.Parameter _ | T.Projection _ -> leaf type_
   | T.Any trait -> (
+      let requires traits =
+        List.exists
+          (fun (bound : T.trait_reference) -> List.exists (Path.equal bound.trait) traits)
+          (bound_closure database ~self:type_ trait)
+      in
       match property with
-      | Copyable ->
-          if
-            List.exists
-              (fun (bound : T.trait_reference) ->
-                Path.equal bound.trait copyable_trait || Path.equal bound.trait plain_trait)
-              (bound_closure database ~self:type_ trait)
-          then Some []
-          else None
+      | Copyable -> if requires [ copyable_trait; plain_trait ] then Some [] else None
       | Plain -> None
-      (* The type does not say what the value inside holds, so every [any]
-         is a view. *)
-      | View -> None)
+      (* The type does not say what the value inside holds, so an [any] is
+         a view unless its trait requires [Storable]. *)
+      | View -> if requires [ storable_trait ] then Some [] else None)
   (* A cursor from an [own self] method owns what it goes over; one from a
      [self] method views it. *)
   | T.Cursor { method_ = Method { receiver = Own; _ }; arguments } when property = View ->
@@ -397,6 +396,17 @@ let has database ~bounds ~normalize property type_ =
       (normalize type_)
   in
   match property with Copyable | Plain -> Option.is_some found | View -> Option.is_none found
+
+(* Whether a type is not a view type whatever its generic parameters stand
+   for, which is what the prelude trait [Storable] says. A generic
+   parameter, or an associated type of one, counts only when it is bounded
+   by [Storable], because what it stands for may be a view. So
+   [List[Element]] is [Storable] where [Element] is. *)
+let storable database ~bounds ~normalize type_ =
+  let leaf type_ = if has_bound database ~bounds type_ storable_trait then Some [] else None in
+  Option.is_some
+    (conditions database ~facts_of:(Query.demand database facts) ~resolve:normalize ~leaf View
+       (normalize type_))
 
 (* The named types a value of a type holds in place. *)
 let held database ~normalize type_ =

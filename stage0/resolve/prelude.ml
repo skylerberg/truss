@@ -34,6 +34,7 @@ let types =
             "TryFrom";
             "Copyable";
             "Plain";
+            "Storable";
             "Add";
             "Subtract";
             "Multiply";
