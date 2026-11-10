@@ -10,15 +10,15 @@ type count = Zero | One | Many
 
 let add left right = match (left, right) with Zero, other | other, Zero -> other | _ -> Many
 
-(* The counts that the paths through a body end with. *)
+(* The yield counts at the ends of the paths through a body. *)
 let yield_counts (body : Core.block) : count list =
   let returned = ref [] in
   let rec block counts (body : Core.block) =
     let counts = List.fold_left statement counts body.statements in
     match body.value with Some value -> evaluated counts value | None -> counts
-  (* An expression evaluated for its effect. A path that reaches [todo] is
-     unfinished, not wrong. A path through an expression of type [Never]
-     does not reach the end. *)
+  (* An expression statement. A path that reaches [todo] is incomplete, so
+     it is not reported. A path through an expression of type [Never]
+     diverges, so it has no end. *)
   and evaluated counts (value : Core.expression) =
     match value.kind with
     | Todo -> List.map (fun _ -> One) counts
@@ -54,7 +54,7 @@ let yield_counts (body : Core.block) : count list =
   ended @ !returned
 
 (* A lending method yields exactly once on every path. *)
-let check_lends context (body : Core.block) ~(name : Syntax.span) =
+let check_yields_once context (body : Core.block) ~(name : Syntax.span) =
   let counts = yield_counts body in
   if List.mem Zero counts then
     report context Lends_count name
@@ -73,12 +73,12 @@ let body_of database (path : Path.t) : Core.block option =
   | Some { definition = Function { body; _ }; _ } -> body
   | _ -> None
 
-(* Calls [found] on every statement of a block, at any depth. *)
-let each_statement (body : Core.block) found =
-  Core_walk.block (Core_walk.deep { Core_walk.ignore_all with statement = found }) body
+(* Calls [visit] on every statement of a block, at any depth. *)
+let each_statement (body : Core.block) visit =
+  Core_walk.block (Core_walk.deep { Core_walk.ignore_all with statement = visit }) body
 
-(* The yielding functions that a function yields through: those that a
-   [for] loop in its body iterates over, where the loop's body yields. *)
+(* The yielding functions that a function delegates to: those that a [for]
+   loop in its body iterates over, where the loop body yields. *)
 let yields_through =
   Query.query ~name:"yields_through" ~phase:Bodies ~saved:true ~show:Path.show
     (fun database (path : Path.t) ->
@@ -110,9 +110,9 @@ type pulling =
       (** The method yields through itself, as a tree's [each] that loops over its subtrees. Its
           cursor would need a stack of its own. *)
   | Yields_places
-      (** The method yields read-only views of places, such as [self[index]]. A pull hands out an
-          owned value, so only a [Plain] element can be pulled: anything else would be copied
-          without a [copy()]. *)
+      (** The method yields read-only views of places, such as [self[index]]. A pull returns an
+          owned value, so only a [Plain] element can be pulled: an element of any other type would
+          be copied implicitly. *)
 
 let pullable =
   Query.query ~name:"pullable" ~phase:Bodies ~saved:true ~show:Path.show
@@ -149,36 +149,36 @@ let pullable =
       | Some (Yields (Read, _)) when yields_places () -> Yields_places
       | _ -> Pullable)
 
-(* A cursor made from a method that cannot be pulled. Whatever holds a
-   cursor pulls it: a call of [next], a [for] loop over it, and generic
-   code that is given it. So the rule is checked once, where the cursor is
-   made. [element] is the type that a pull hands out. *)
+(* Reports a cursor that is created from a method that cannot be pulled.
+   Every holder of a cursor may pull it, through [next], a [for] loop, or
+   generic code, so the rule is checked once, where the cursor is created.
+   [element] is the type of the value that a pull returns. *)
 let check_cursor context (at : Syntax.span) method_ element =
   let refuse message = report context Not_pullable at message in
   match Query.demand context.database pullable method_ with
   | Pullable -> ()
   | Yields_mut ->
       refuse
-        "A method that yields `mut` access can drive a `for` loop, but cannot make a cursor, since \
-         the cursor would store that access."
+        "A method that yields `mut` access can drive a `for` loop, but it cannot be made into a \
+         cursor, because the cursor would store a `mut` borrow between pulls."
   | Recursive ->
       refuse
         (Printf.sprintf
-           "`%s` yields through a recursive loop, so it can drive a `for` loop but cannot make a \
-            cursor. A cursor over it is a type with its own stack."
+           "`%s` yields recursively, so it can drive a `for` loop but cannot be made into a \
+            cursor. Write a cursor type that keeps its own stack."
            (Path.show method_))
   | Yields_places ->
       if not (plain context element) then
         refuse
           (Printf.sprintf
-             "`%s` yields views of its elements, and a cursor hands each one out as a value, which \
-              would copy a `%s` unasked. Loop over it with `for`, or make the cursor from a method \
-              that yields owned values."
+             "`%s` yields views of its elements, and a cursor returns each element by value, which \
+              would copy a `%s` implicitly. Loop over it with `for`, or create the cursor from a \
+              method that yields owned values."
              (Path.show method_) (T.show element))
 
-(* Every cursor that a definition makes: a call of a yielding method that
-   does not drive a [for] loop or a quantifier itself. *)
-let check_pulls context (definition : Core.definition) =
+(* Checks every cursor that a definition creates: each call of a yielding
+   method that is not the iteration of a [for] loop or of a quantifier. *)
+let check_cursors context (definition : Core.definition) =
   let driving = Hashtbl.create 8 in
   Core_walk.definition
     {
