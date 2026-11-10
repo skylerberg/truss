@@ -24,6 +24,7 @@
   registry_tests
   compatibility_tests
   prover_tests
+  library_use_tests
   scale_tests)
  (libraries
   harness

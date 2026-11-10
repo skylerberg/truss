@@ -1,0 +1,118 @@
+fn order(set: Set[Int64]) -> String {
+  var text = ""
+  for element in set {
+    mut text.push("${element} ")
+  }
+  text
+}
+
+fn sample() -> Set[Int64] {
+  [3, 1, 2]
+}
+
+test "a set holds each element once" {
+  var seen: Set[String] = []
+  assert seen.is_empty() && seen.length() == 0
+  mut seen.insert("a")
+  mut seen.insert("b")
+  mut seen.insert("a")
+  assert seen.length() == 2 && !seen.is_empty()
+  assert seen.contains("a") && seen.contains("b") && !seen.contains("c")
+  assert mut seen.insert_new("c")
+  assert !mut seen.insert_new("c")
+  assert seen.length() == 3
+}
+
+test "a set is walked in the order its elements were first inserted" {
+  var made = sample()
+  assert order(made) == "3 1 2 "
+  mut made.insert(1)
+  assert order(made) == "3 1 2 "
+  mut made.remove(1)
+  mut made.insert(1)
+  assert order(made) == "3 2 1 "
+  let repeated: Set[Int64] = [5, 4, 5, 4, 6]
+  assert order(repeated) == "5 4 6 "
+}
+
+test "remove, take, clear, and retain take elements out of a set" {
+  var made = sample()
+  mut made.remove(9)
+  assert made.length() == 3
+  mut made.remove(3)
+  assert made.length() == 2 && !made.contains(3)
+  assert mut made.take(1) == Some(1)
+  assert mut made.take(1) is None
+  assert order(made) == "2 "
+  var kept: Set[Int64] = [1, 2, 3, 4, 5, 6]
+  mut kept.retain(fn(element) { element % 2 == 0 })
+  assert order(kept) == "2 4 6 "
+  mut kept.remove_all([4, 9, 2])
+  assert order(kept) == "6 "
+  mut kept.clear()
+  assert kept.is_empty() && !kept.contains(6)
+}
+
+test "sets are compared as wholes" {
+  let small: Set[Int64] = [1, 2]
+  let large: Set[Int64] = [2, 3, 1]
+  let other: Set[Int64] = [7, 8]
+  let empty: Set[Int64] = []
+  assert small.is_subset_of(large) && !large.is_subset_of(small)
+  assert large.is_superset_of(small) && !small.is_superset_of(large)
+  assert small.is_subset_of(small) && empty.is_subset_of(small)
+  assert small.is_disjoint_from(other) && !small.is_disjoint_from(large) && empty.is_disjoint_from(empty)
+  let same: Set[Int64] = [2, 1]
+  assert small == same && small != large && small != other && empty == []
+}
+
+test "union, intersection, and the differences make new sets" {
+  let first: Set[Int64] = [1, 2, 3]
+  let second: Set[Int64] = [3, 4, 2]
+  assert order(first.union(second)) == "1 2 3 4 "
+  assert order(first.intersection(second)) == "2 3 "
+  assert order(first.difference(second)) == "1 "
+  assert order(second.difference(first)) == "4 "
+  assert order(first.symmetric_difference(second)) == "1 4 "
+  assert first.length() == 3 && second.length() == 3
+}
+
+test "a set is made from a list or a cursor, and gives its elements away" {
+  let items: List[Int64] = [4, 4, 2, 4, 9]
+  let made: Set[Int64] = Set.from(items.copy())
+  assert order(made) == "4 2 9 "
+  var collected: Set[Int64] = Set.collect(items.each())
+  assert collected == made
+  let more: List[Int64] = [9, 1]
+  mut collected.extend(more.each())
+  assert order(collected) == "4 2 9 1 "
+  var sum: Int64 = 0
+  for element in own collected {
+    sum += element
+  }
+  assert sum == 16
+}
+
+test "equal sets hash alike, whatever order they were made in" {
+  let first: Set[Int64] = [1, 2, 3]
+  let second: Set[Int64] = [3, 1, 2]
+  let third: Set[Int64] = [1, 2, 4]
+  var one = Hasher.new()
+  var two = Hasher.new()
+  var three = Hasher.new()
+  first.hash(mut one)
+  second.hash(mut two)
+  third.hash(mut three)
+  assert one.finish() == two.finish() && one.finish() != three.finish()
+}
+
+test "a copy of a set changes on its own" {
+  var made = sample()
+  var copied = made.copy()
+  mut copied.insert(10)
+  mut made.reserve(50)
+  assert made.length() == 3 && copied.length() == 4
+  let roomy: Set[Int64] = Set.with_capacity(8)
+  let fresh: Set[Int64] = Set.default()
+  assert roomy.is_empty() && roomy == fresh
+}

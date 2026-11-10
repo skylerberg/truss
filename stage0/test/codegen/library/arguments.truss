@@ -1,0 +1,144 @@
+use standard::arguments
+
+fn tool() -> arguments::Parser {
+  arguments::Parser.new("tool", about: "Does things to files.")
+    .flag("verbose", help: "Say more.", short: Some(Character"v"))
+    .flag("force", help: "Do not ask.", short: Some(Character"f"))
+    .option("output", help: "Where to write.", short: Some(Character"o"), default: Some("out.txt"))
+    .option("include", help: "A directory to search.", short: Some(Character"I"), repeated: true)
+    .option("level", help: "How hard to try.")
+    .positional("input", help: "The file to read.")
+    .rest("extra", help: "More files.")
+}
+
+fn given(parser: arguments::Parser, text: StringSlice) -> Result[arguments::Parsed, arguments::Error] {
+  var words: List[String] = []
+  for word in text.split_whitespace() {
+    mut words.push(word.to_string())
+  }
+  parser.parse(words.slice())
+}
+
+fn fails(parser: arguments::Parser, text: StringSlice, expected: arguments::Error) -> Bool {
+  match given(parser, text: text) {
+    Ok(_) => false
+    Err(error) => error == expected
+  }
+}
+
+fn joined(values: Slice[String]) -> String {
+  var text = ""
+  for value in values {
+    mut text.push(value.slice())
+    mut text.push(",")
+  }
+  text
+}
+
+test "flags, options, and positional arguments are read in any order" {
+  assert given(tool(), text: "in.txt") is Ok(parsed)
+    && !parsed.flag("verbose")
+    && !parsed.flag("force")
+    && parsed.value("input") == Some("in.txt")
+    && parsed.value("output") == Some("out.txt")
+    && parsed.value("level") is None
+    && parsed.values("include").length() == 0
+    && parsed.values("extra").length() == 0
+  assert given(tool(), text: "--verbose --output result.bin in.txt --level=3 a b") is Ok(parsed)
+    && parsed.flag("verbose")
+    && !parsed.flag("force")
+    && parsed.value("output") == Some("result.bin")
+    && parsed.value("level") == Some("3")
+    && parsed.value("input") == Some("in.txt")
+    && joined(parsed.values("extra")) == "a,b,"
+}
+
+test "short options are read alone, in a cluster, and with a value attached" {
+  assert given(tool(), text: "-v -f in.txt") is Ok(parsed) && parsed.flag("verbose") && parsed.flag("force")
+  assert given(tool(), text: "-vf in.txt") is Ok(parsed) && parsed.flag("verbose") && parsed.flag("force")
+  assert given(tool(), text: "-o x.bin in.txt") is Ok(parsed) && parsed.value("output") == Some("x.bin")
+  assert given(tool(), text: "-ox.bin in.txt") is Ok(parsed) && parsed.value("output") == Some("x.bin")
+  assert given(tool(), text: "-vfo x.bin in.txt") is Ok(parsed)
+    && parsed.flag("verbose")
+    && parsed.flag("force")
+    && parsed.value("output") == Some("x.bin")
+}
+
+test "a repeated option keeps every value and any other keeps its last" {
+  assert given(tool(), text: "-I a --include b --include=c in.txt") is Ok(parsed)
+    && joined(parsed.values("include")) == "a,b,c,"
+    && parsed.value("include") == Some("c")
+  assert given(tool(), text: "--level 1 --level 2 in.txt") is Ok(parsed)
+    && joined(parsed.values("level")) == "2,"
+}
+
+test "everything after `--` is positional, and so is a negative number" {
+  assert given(tool(), text: "-- --verbose -f") is Ok(parsed)
+    && !parsed.flag("verbose")
+    && parsed.value("input") == Some("--verbose")
+    && joined(parsed.values("extra")) == "-f,"
+  assert given(tool(), text: "in.txt -5 -.5 -") is Ok(parsed) && joined(parsed.values("extra")) == "-5,-.5,-,"
+}
+
+test "arguments that do not fit say what is wrong" {
+  assert fails(tool(), text: "--color in.txt", expected: arguments::Error.UnknownOption(name: "--color"))
+  assert fails(tool(), text: "-x in.txt", expected: arguments::Error.UnknownOption(name: "-x"))
+  assert fails(tool(), text: "in.txt --level", expected: arguments::Error.MissingValue(name: "level"))
+  assert fails(tool(), text: "in.txt -o", expected: arguments::Error.MissingValue(name: "output"))
+  assert fails(tool(), text: "--verbose", expected: arguments::Error.MissingRequired(name: "input"))
+  assert fails(tool(), text: "--verbose=yes in.txt", expected: arguments::Error.UnexpectedArgument(value: "yes"))
+  assert fails(tool(), text: "in.txt --help", expected: arguments::Error.HelpRequested)
+  assert fails(tool(), text: "-h", expected: arguments::Error.HelpRequested)
+  let strict = arguments::Parser.new("strict").option("key", help: "", required: true).positional("one", help: "")
+  assert fails(strict, text: "a", expected: arguments::Error.MissingRequired(name: "key"))
+  assert fails(strict, text: "--key k a b", expected: arguments::Error.UnexpectedArgument(value: "b"))
+  assert "${arguments::Error.MissingValue(name: "level")}" == "`level` needs a value"
+  assert "${arguments::Error.UnknownOption(name: "--color")}" == "unknown option `--color`"
+}
+
+test "a value is read as the type that is asked for" {
+  assert given(tool(), text: "--level 12 in.txt") is Ok(parsed)
+    && parsed.value_as[Int64]("level") == Ok(Some(12))
+    && parsed.value_as[Int64]("output") == Err(arguments::Error.InvalidValue(name: "output", value: "out.txt"))
+  assert given(tool(), text: "in.txt") is Ok(parsed) && parsed.value_as[Int64]("level") == Ok(None)
+}
+
+fn version_control() -> arguments::Parser {
+  arguments::Parser.new("vc", about: "Keeps versions.")
+    .flag("quiet", help: "Say less.", short: Some(Character"q"))
+    .command(
+      arguments::Parser.new("commit", about: "Record changes.")
+        .option("message", help: "What changed.", short: Some(Character"m"), required: true)
+        .flag("all", help: "Every change.", short: Some(Character"a")),
+    )
+    .command(arguments::Parser.new("log", about: "Show history.").positional("path", help: "", required: false))
+}
+
+test "a command takes the arguments after its name" {
+  assert given(version_control(), text: "-q commit -a -m fix") is Ok(parsed)
+    && parsed.flag("quiet")
+    && parsed.command_name() == Some("commit")
+    && parsed.command() is Some(inner)
+    && inner.flag("all")
+    && inner.value("message") == Some("fix")
+    && inner.command_name() is None
+  assert given(version_control(), text: "log") is Ok(parsed)
+    && parsed.command_name() == Some("log")
+    && parsed.command() is Some(inner)
+    && inner.value("path") is None
+  assert given(version_control(), text: "") is Ok(parsed) && parsed.command_name() is None && parsed.command() is None
+  assert fails(version_control(), text: "push", expected: arguments::Error.UnknownCommand(name: "push"))
+  assert fails(version_control(), text: "commit -a", expected: arguments::Error.MissingRequired(name: "message"))
+}
+
+test "usage and help describe the parser" {
+  assert tool().usage()
+    == "usage: tool [--verbose] [--force] [--output <output>] [--include <include>] [--level <level>] <input> [<extra>...]"
+  assert version_control().usage() == "usage: vc [--quiet] <command>"
+  let expected = "Keeps versions.\n\nusage: vc [--quiet] <command>\n\noptions:\n  -q, --quiet  Say less.\n\ncommands:\n  commit       Record changes.\n  log          Show history.\n"
+  assert version_control().help() == expected
+  let help = tool().help()
+  assert help.contains("arguments:\n  <input>                  The file to read.\n  <extra>...               More files.\n")
+  assert help.contains("  -o, --output <output>    Where to write. (default: out.txt)\n")
+  assert help.contains("      --level <level>      How hard to try.\n")
+}

@@ -72,7 +72,14 @@ public fn List[Element].push(mut self, item: own Element)
   growth::push(mut self.storage, value: own item)
 }
 
-public fn List[Element].pop(mut self) -> Option[Element] {
+public fn List[Element].pop(mut self) -> Option[Element]
+  ensures (result is Some(_)) == (old(self.length()) > 0)
+  ensures self.length() + (if old(self.length()) > 0 { 1 } else { 0 }) == old(self.length())
+  ensures forall i in 0..self.length() => identical(self.model()[i], old(self.model())[i])
+  ensures !(result is Some(item) && !identical(item, old(self.model())[old(self.length()) - 1]))
+  cost time O(1)
+  cost allocations == 0
+{
   if self.length() == 0 { None } else { Some(intrinsic::storage_pop(mut self.storage)) }
 }
 
@@ -160,13 +167,10 @@ impl Iterable for List[Element] {
 }
 
 public fn List[Element].each(mut self) yields mut Element {
-  var index: USize = 0
-  while index < self.length()
+  for index in 0..self.length()
     invariant self.length() == old(self.length())
-    invariant index <= self.length()
   {
     yield mut self[index]
-    index += 1
   }
 }
 
@@ -277,14 +281,10 @@ impl Iterable for Slice[Element] {
 public fn Slice[Element].each(mut self) yields mut Element
   cost time O(self.length())
 {
-  var index: USize = 0
-  while index < self.length()
+  for index in 0..self.length()
     invariant self.length() == old(self.length())
-    invariant index <= self.length()
-    decreases self.length() - index
   {
     yield mut self[index]
-    index += 1
   }
 }
 
@@ -452,12 +452,14 @@ public fn List[Element].clear(mut self)
 
 public fn List[Element].truncate(mut self, length: USize)
   ensures self.length() == (if length < old(self.length()) { length } else { old(self.length()) })
+  ensures forall i in 0..self.length() => identical(self.model()[i], old(self.model())[i])
   cost time O(old(self.length()))
   cost allocations == 0
 {
   while self.length() > length
     invariant self.length() == old(self.length()) || self.length() >= length
     invariant self.length() <= old(self.length())
+    invariant forall i in 0..self.length() => identical(self.model()[i], old(self.model())[i])
     decreases self.length()
     cost allocations == 0
   {
@@ -469,6 +471,8 @@ public fn List[Element].remove_at(mut self, index: USize) -> Element
   requires index < self.length()
   ensures self.length() == old(self.length()) - 1
   ensures identical(result, old(self.model())[index])
+  ensures forall i in 0..index => identical(self.model()[i], old(self.model())[i])
+  ensures forall i in index..self.length() => identical(self.model()[i], old(self.model())[i + 1])
   cost time O(old(self.length()))
   cost allocations == 0
 {
