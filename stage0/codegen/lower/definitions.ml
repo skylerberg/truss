@@ -1,8 +1,7 @@
-(* What lowering reads: its context, and the code, the signature, and the
-   tables of the instance being lowered. *)
+(* What lowering reads: its context, and the code and the signature of the
+   instance being lowered. *)
 
 module S = Syntax
-module C = Checked
 module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -63,26 +62,21 @@ let test_key path = Instance.Code { path; type_arguments = [] }
 
 (* Finding the code of an instance *)
 
-(* A function's body, where it is written, and what its generic parameters
-   stand for in this instance. *)
+(* Where a function is written, and what its generic parameters stand for in
+   this instance. Its body is in the core form of the definition. *)
 type code = {
-  definition_key : Names.key;  (** The definition whose tree and checked form hold the body *)
+  definition_key : Names.key;  (** The definition that holds the body *)
   anchor : Path.t;  (** The definition positions in the body are relative to *)
   within : Path.t option;
       (** The [impl] this is a method of, whether the [impl] writes it or leaves it to its trait *)
   text : string;  (** The definition's source text, for positions and messages *)
-  checked : C.t;
-  parameters : S.parameter list;
-  body : S.block;
   result : T.result;
-  parameter_types : (T.mode * T.ty * S.parameter) list;  (** In order, [self] first *)
   substitution : T.substitution;
   uses : T.capability list;
   real : Path.t list;
       (** The capabilities the code gets the real implementations of, as [main]'s do: an external
           test's [uses] *)
   has_defaults : bool;
-  requires : S.expression list;  (** The [requires] clauses, which a checked build tests on entry *)
 }
 
 let demand context query key = Query.demand context.database query key
@@ -96,27 +90,17 @@ let unwritten ~definition_key ~anchor ~substitution ~result =
     anchor;
     within = None;
     text = "";
-    checked = Checked.create 0;
-    parameters = [];
-    body = { statements = []; span = S.Span.make 0 0; id = 0 };
     result;
-    parameter_types = [];
     substitution;
     uses = [];
     real = [];
     has_defaults = false;
-    requires = [];
   }
 
 let key_of context path =
   match demand context Interface.Summary.key path with
   | Some key -> key
   | None -> bug "no definition for %s" (Path.show path)
-
-let checked_of context key =
-  match demand context Infer.checked key with
-  | Some result -> result.checked
-  | None -> bug "no checked form for %s" (Names.show_key key)
 
 let text_of context key = match demand context Names.text key with Some text -> text | None -> ""
 let back = Monomorphic.back
@@ -140,24 +124,6 @@ let signature_of context (path : Path.t) =
   | Some signature -> signature
   | None -> bug "no signature for %s" (Path.show path)
 
-let parameter_types (signature : T.signature) (parameters : S.parameter list) =
-  let written =
-    List.filter
-      (fun (p : S.parameter) -> match p.kind with Self_parameter _ -> false | _ -> true)
-      parameters
-  in
-  let self =
-    match (signature.receiver, parameters) with
-    | Some (receiver, ty), first :: _ ->
-        let mode : T.mode = match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read in
-        [ (mode, ty, first) ]
-    | _ -> []
-  in
-  self
-  @ List.map2
-      (fun (info : T.parameter_info) parameter -> (info.mode, info.type_, parameter))
-      signature.parameters written
-
 (* A function written in source at a path: its definition's key, its
    signature, and its body. Each method of an [impl] or a trait is one. *)
 let written context path =
@@ -166,38 +132,27 @@ let written context path =
   | _ -> None
 
 let code_of context (path : Path.t) type_arguments : code =
-  let function_code ~anchor ~within (key, (signature : S.signature), body) ~interface ~substitution
-      =
+  let function_code ~anchor ~within (key, _, _) ~(interface : T.signature) ~substitution =
     {
       definition_key = key;
       anchor;
       within;
       text = text_of context key;
-      checked = checked_of context key;
-      parameters = signature.parameters;
-      body;
-      result = interface.T.output;
-      parameter_types = parameter_types interface signature.parameters;
+      result = interface.output;
       substitution;
       uses = interface.uses;
       real = [];
       has_defaults = List.exists (fun (p : T.parameter_info) -> p.has_default) interface.parameters;
-      requires =
-        List.filter_map
-          (fun (clause : S.clause) -> match clause.kind with Requires e -> Some e | _ -> None)
-          signature.clauses;
     }
   in
   match path with
   | Test _ -> (
       let key = key_of context path in
       match demand context Names.definition key with
-      | Some { kind = Test { body; _ }; _ } ->
+      | Some { kind = Test _; _ } ->
           {
             (unwritten ~definition_key:key ~anchor:path ~substitution:[] ~result:(Returns T.unit)) with
             text = text_of context key;
-            checked = checked_of context key;
-            body;
             real =
               (match demand context Environment.interface path with
               | Some (Test_interface uses) ->

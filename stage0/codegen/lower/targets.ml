@@ -10,7 +10,7 @@ open Lir_builder
 
 (* The [impl] that evidence stands for in this instance, with the type
    arguments for the [impl]'s generic parameters. *)
-let resolve_impl st ~(trait : T.trait_reference) ~self_type ~(evidence : C.evidence) =
+let resolve_impl st ~(trait : T.trait_reference) ~self_type ~(evidence : Core.evidence) =
   let substitute = T.substitute st.frame.code.substitution in
   let impl, arguments =
     match evidence with
@@ -29,7 +29,6 @@ let resolve_impl st ~(trait : T.trait_reference) ~self_type ~(evidence : C.evide
         | Some (From_impl { impl; substitution }) -> (impl, substitution)
         | _ -> bug "no impl of %s for %s" (T.show_trait trait) (T.show self))
     | Dynamic -> bug "a call through any, which reaches no one instance"
-    | Built_in -> bug "a built-in trait's method"
   in
   let impl_interface =
     match Interface.Impls.impl_interface st.context.database impl with
@@ -48,7 +47,7 @@ let resolve_impl st ~(trait : T.trait_reference) ~self_type ~(evidence : C.evide
 
 (* The instance a trait method's call reaches, once the types are known. *)
 let trait_method_key st ~(trait : T.trait_reference) ~name ~receiver ~self_type ~type_arguments
-    ~(evidence : C.evidence) =
+    ~(evidence : Core.evidence) =
   let impl, impl_arguments = resolve_impl st ~trait ~self_type ~evidence in
   Instance.Code
     {
@@ -353,6 +352,64 @@ let call_through_any st ~trait ~name ~(any : Lir.place)
        { target; arguments = passed @ evidence; result = Convention.destination result destination });
   if not lir_signature.returns then unreachable_block st
 
+(* Runs [f] with the current frame set to the definition of a named type,
+   with the type's generic parameters bound to the type's arguments. A
+   field's default is lowered there, because it is written in the type's
+   definition. *)
+let in_type_definition st (ty : Ground.ty) f =
+  let path, arguments =
+    match ty with
+    | Named { path; arguments } -> (path, arguments)
+    | _ -> bug "defaults of %s" (Ground.to_string ty)
+  in
+  let key = key_of st.context path in
+  let interface =
+    match demand st.context Environment.type_interface path with
+    | Some i -> i
+    | None -> bug "no interface for %s" (Path.show path)
+  in
+  let caller = st.frame in
+  st.frame <-
+    {
+      caller with
+      code =
+        {
+          caller.code with
+          definition_key = key;
+          anchor = path;
+          within = None;
+          text = text_of st.context key;
+          substitution = bind interface.type_generics arguments;
+        };
+      bindings = Hashtbl.create 1;
+      synthetic = Hashtbl.create 1;
+      self_place = None;
+    };
+  let result = f () in
+  st.frame <- caller;
+  result
+
+(* Writes the debug text of the value at a place to the test's echo
+   output, with the position it was echoed at. *)
+let echo st place ty ~site =
+  let output = temporary st Glue.output_ty in
+  emit st.b (Assign (output, Storage.empty Glue.output_ty));
+  let arguments = if zero_size st ty then [] else [ Lir.Address { place; writable = false } ] in
+  emit st.b
+    (Call
+       {
+         target =
+           Direct
+             {
+               function_ = Instance (Debug ty);
+               signature = Glue.debug_signature st.context.glue ty;
+             };
+         arguments = arguments @ [ Address { place = output; writable = true } ];
+         result = Discarded;
+       });
+  emit st.b
+    (Echo { text = Copy (Storage.buffer output); length = Copy (Storage.length output); site })
+
 (* Writes an [any] value to [destination]: the value at [value], moved into
    a heap block of its own, with the method table of its type's [impl]. *)
 let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lir.place) destination =
@@ -421,12 +478,10 @@ let call_instance st key ~(signature : T.signature) ~substitution
 
 (* Expressions *)
 
-let literal st (id : S.id) =
-  match st.frame.code.checked.literals.(id) with
-  | Some literal -> literal
-  | None -> bug "no literal for %d" id
+(* A number literal's value. *)
+type literal = Integer_value of Z.t | Float_value of float
 
-let constant_of st ty (literal : C.literal) : Lir.operand =
+let constant_of st ty (literal : literal) : Lir.operand =
   match (literal, scalar_of st ty) with
   | Integer_value value, Integer integer -> constant_int integer value
   | Integer_value value, Character -> Constant (Character (Z.to_int value))

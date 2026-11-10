@@ -2,20 +2,21 @@
 
    The core form records what the type checker resolved: the callee of each
    call, whether each operand is a place or a value, and every type. So this
-   lowering does no name resolution and no type inference. A body with a
-   node kind that is not handled yet raises [Unhandled_node], and the caller
-   lowers that body from the syntax tree instead. *)
+   lowering does no name resolution and no type inference. *)
 
 open Definitions
 open Lowering
 open Targets
 open Lir_builder
 
-(* A node kind that this lowering does not handle yet, with a description of
-   the kind. *)
-exception Unhandled_node of string
-
-let unhandled what = raise (Unhandled_node what)
+(* The parameters, the [requires] clauses, and the body of a function or a
+   test, from its core form. *)
+let body_of context path : Core.parameter list * Core.condition list * Core.block =
+  match demand context Infer.core_of_path path with
+  | Some ({ definition = Function { parameters; contract; body = Some body }; _ }, _) ->
+      (parameters, contract.requires, body)
+  | Some ({ definition = Test body; _ }, _) -> ([], [], body)
+  | _ -> bug "%s has no body in its core form" (Path.show path)
 
 let spans st =
   match demand st.context Names.spans st.frame.code.definition_key with
@@ -49,11 +50,6 @@ let binary : Core.comparison -> Lir.binary = function
   | Less_equal -> Less_equal
   | Greater -> Greater
   | Greater_equal -> Greater_equal
-
-let evidence : Core.evidence -> C.evidence = function
-  | Impl { impl; arguments } -> Impl { impl; arguments }
-  | Bound -> Bound
-  | Dynamic -> Dynamic
 
 (* Patterns *)
 
@@ -185,7 +181,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
                 (* The default is written in the type's definition, so it is
                    lowered in that definition's frame. *)
                 let default = field_default st ty ~variant ~field:name in
-                Calls.in_type_definition st ty (fun () ->
+                in_type_definition st ty (fun () ->
                     (name, owned st (value_place st default) (ground st default.type_))))
           fields
       in
@@ -357,18 +353,16 @@ and into st (value : Core.expression) (destination : Lir.place) =
       st.evidence <- added @ enclosing;
       block_into st body (Some destination);
       st.evidence <- enclosing
-  | To_any { value = inner; trait; evidence = core_evidence } ->
+  | To_any { value = inner; trait; evidence } ->
       let inner_ty = ground st inner.type_ in
-      let impl, type_arguments =
-        resolve_impl st ~trait ~self_type:inner.type_ ~evidence:(evidence core_evidence)
-      in
+      let impl, type_arguments = resolve_impl st ~trait ~self_type:inner.type_ ~evidence in
       (* The value is evaluated before its block is allocated, so that
          leaving early during the evaluation leaves no block behind. *)
       let value = value_place st inner in
       any_into st ~any_ty:ty ~inner_ty ~impl ~type_arguments ~value destination
   | Echo inner ->
       into st inner destination;
-      Values.echo st destination ty (spans st).(value.origin)
+      echo st destination ty ~site:(site_of st value.origin)
   | Cursor_next cursor -> (
       match ground st (Core_walk.place_type cursor) with
       | Cursor yielding -> call_next st yielding (place st cursor) destination
@@ -451,11 +445,8 @@ and resolve_callee st (callee : Core.callee) : (Path.t * Ground.argument list) o
             (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
             type_arguments )
   | Trait_method { evidence = Dynamic; _ } -> None
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence = core_evidence } -> (
-      match
-        trait_method_key st ~trait ~name ~receiver ~self_type ~type_arguments
-          ~evidence:(evidence core_evidence)
-      with
+  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } -> (
+      match trait_method_key st ~trait ~name ~receiver ~self_type ~type_arguments ~evidence with
       | Code { path; type_arguments } -> Some (path, type_arguments)
       | _ -> bug "a trait method's key")
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
@@ -649,9 +640,8 @@ and lend st (call : Core.call) ~call_site : Lir.place =
       match resolve_callee st callee with
       | Some (path, type_arguments) ->
           let arguments = arguments_to_inline st path type_arguments call.arguments in
-          Calls.inline_lending st path type_arguments ~source:(method_source st path) ~arguments
-            ~call_site
-      | None -> unhandled "a lending call through an any value")
+          inline_lending st path type_arguments ~arguments ~call_site
+      | None -> bug "a lending call that resolves to no method")
 
 (* Evaluates the arguments of a call that is inlined: each with its
    parameter's index, without the omitted ones, which the inlined method
@@ -873,7 +863,7 @@ and statement st (node : Core.statement) =
           (* The yielding method is inlined here, with the loop body at each
              of its [yield]s. *)
           match resolve_callee st call.callee with
-          | None -> unhandled "a loop over a call through an any value"
+          | None -> bug "a loop over a call that resolves to no method"
           | Some (path, type_arguments) when List.exists (Path.equal path) st.frame.inlined ->
               (* The method is already inlined around this loop, so inlining
                  it again would never end. The loop pulls a cursor over the
@@ -894,8 +884,8 @@ and statement st (node : Core.statement) =
               let caller = st.frame in
               let depth = List.length st.scopes in
               let after = block st.b in
-              Calls.inline st path type_arguments ~source:(method_source st path) ~arguments
-                ~call_site:(site_of st node.origin) ~on_yield:(fun yielded ~resume ~stop ->
+              inline st path type_arguments ~arguments ~call_site:(site_of st node.origin)
+                ~on_yield:(fun yielded ~resume ~stop ->
                   let inner = st.frame in
                   st.frame <- caller;
                   let around = List.length st.scopes in
@@ -1111,51 +1101,191 @@ and match_ st ~(scrutinees : Core.operand list) ~(arms : Core.arm list) destinat
   finish st.b Unreachable;
   start st.b after
 
-(* A function or a test, read from its core form. *)
-and core_form (form : Core.t) : function_source =
-  let parameters, requires, body =
-    match form.definition with
-    | Function { parameters; contract; body = Some body } -> (parameters, contract.requires, body)
-    | Test body -> ([], [], body)
-    | _ -> unhandled "a definition that has no body"
-  in
-  {
-    defaults =
-      (fun st ->
-        List.filter_map
-          (fun (parameter : Core.parameter) ->
-            match (parameter.default, parameter.local) with
-            | Some value, Named binding ->
-                Some
-                  {
-                    mode = parameter.mode;
-                    ty = ground st parameter.type_;
-                    binding;
-                    name = parameter.name;
-                    evaluate = (fun place -> into st value place);
-                    span = (spans st).(value.origin);
-                  }
-            | Some _, (Self | Synthetic _) -> bug "a default for a parameter with no name"
-            | None, _ -> None)
-          parameters);
-    requirements =
-      (fun st ->
-        List.filter_map
-          (fun (clause : Core.condition) ->
-            if clause.executable then
-              Some
-                {
-                  test = (fun ~yes ~no -> branch st clause.value ~yes ~no);
-                  text = source st (spans st).(clause.value.origin);
-                  site = site_of st clause.value.origin;
-                }
-            else None)
-          requires);
-    body = (fun st destination -> block_into st body destination);
-  }
+(* Inlines a lending or yielding method with its parameters bound to
+   [arguments], each by its parameter's index. Each [yield] in the method
+   calls [on_yield]. A parameter with no argument takes its default,
+   evaluated here. *)
+and inline st path type_arguments ~arguments ~call_site ~on_yield =
+  if List.exists (Path.equal path) st.frame.inlined then
+    Compiler_bug.unsupported ~at:(at_site call_site) "%s, which lends through a call to itself"
+      (Path.show path);
+  let parameters, requires, body = body_of st.context path in
+  let exit = block st.b in
+  let caller = st.frame in
+  st.frame <-
+    {
+      code = code_of st.context path type_arguments;
+      bindings = Hashtbl.create 16;
+      synthetic = Hashtbl.create 4;
+      self_place = None;
+      on_yield = Some on_yield;
+      inlined = path :: caller.inlined;
+      exit = Some (exit, List.length st.scopes);
+    };
+  in_scope st (fun () ->
+      List.iteri
+        (fun index (parameter : Core.parameter) ->
+          let place =
+            match (List.find_opt (fun (i, _, _, _) -> i = index) arguments, parameter.default) with
+            | Some (_, _, _, place), _ -> place
+            | None, Some default ->
+                (* The method owns a default's value and drops it, whatever
+                   the parameter's mode. *)
+                let place = binding st (ground st parameter.type_) in
+                in_statement st (fun () -> into st default place);
+                place
+            | None, None -> bug "%s is given no argument for parameter %d" (Path.show path) index
+          in
+          bind_local st parameter.local place)
+        parameters;
+      check_requires st ~call_site requires;
+      block_into st body None);
+  finish st.b (Goto exit);
+  start st.b exit;
+  st.frame <- caller
 
-(* The method at a path, read from its core form, to inline. *)
-and method_source st path : function_source =
-  match demand st.context Infer.core_of_path path with
-  | Some (form, _) -> core_form form
-  | None -> unhandled "a method with no core form"
+(* Inlines a lending method up to its [yield] and returns the place it
+   lends. What is left of the method, its code after the [yield] and the
+   drops of what it owns, runs as the caller's statement ends, on every way
+   out of it, so the innermost scope owns the lend. Where nothing is left,
+   as for an index into a [List], the method ends at its [yield]. *)
+and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
+  let _, _, body = body_of st.context path in
+  if Method_yields.count body > 1 then
+    Compiler_bug.unsupported ~at:(at_site call_site) "%s, a lending method with more than one yield"
+      (Path.show path);
+  let depth = List.length st.scopes in
+  let goes_on = block st.b in
+  let lent = ref None and waits = ref None in
+  inline st path type_arguments ~arguments ~call_site ~on_yield:(fun place ~resume ~stop:_ ->
+      lent := Some place;
+      let owns_nothing =
+        List.for_all
+          (fun (scope : scope) -> scope.owned = [])
+          (List.filteri (fun i _ -> List.length st.scopes - i > depth) st.scopes)
+      in
+      if Method_yields.each_is_last body && owns_nothing then finish st.b (Goto resume)
+      else begin
+        waits := Some resume;
+        finish st.b (Goto goes_on)
+      end);
+  (match !waits with
+  | Some resume ->
+      let scope = innermost_scope st in
+      scope.owned <-
+        Finish_lend
+          {
+            resume;
+            finished = current st.b;
+            selector = local st.b (Raw (Integer UInt32));
+            ways = [];
+          }
+        :: scope.owned;
+      start st.b goes_on
+  | None -> ());
+  match !lent with
+  | Some place -> place
+  | None when Method_yields.count body = 0 ->
+      (* The method has no [yield], so it never returns, and the code after
+         the call never runs. The place is never read. *)
+      temporary st (yielded_type st path type_arguments)
+  | None -> bug "a lending method that lends nothing"
+
+(* In a checked build, tests each [requires] clause that can run, on entry to
+   the code with its parameters bound, and panics with the clause's text
+   when one does not hold: at [call_site] for inlined code and at the clause
+   otherwise. Stage0's builds keep these checks whether or not the proofs
+   are done, so a test catches a call that breaks a contract as it runs. *)
+and check_requires ?call_site st (requires : Core.condition list) =
+  if st.context.checks then
+    List.iter
+      (fun (clause : Core.condition) ->
+        if clause.executable then begin
+          let holds = block st.b and broken = block st.b in
+          let scope = open_scope st Bindings in
+          branch st clause.value ~yes:holds ~no:broken;
+          start st.b broken;
+          let message =
+            "requirement not met: requires " ^ source st (spans st).(clause.value.origin)
+          in
+          finish st.b
+            (Fail
+               {
+                 failure = Panic;
+                 message = Constant (Bytes message);
+                 length = usize (String.length message);
+                 site = Option.value call_site ~default:(site_of st clause.value.origin);
+               });
+          start st.b holds;
+          close_scope st scope
+        end)
+      requires
+
+(* Fills in each parameter whose argument the caller omitted, as the bits
+   of [mask] say, by evaluating the default inside the function, so that
+   changing a default compiles only the function again. An [own] parameter
+   with a default may arrive holding nothing, so the function does not own
+   it as it arrives: its name is bound to a local the function owns, which
+   takes the argument or the default. A parameter that is a view is pointed
+   at the default's value, or given its bits, and the function owns that
+   value. *)
+and fill_defaults st mask (parameters : Core.parameter list) =
+  let b = st.b in
+  let defaulted =
+    List.filter_map
+      (fun (parameter : Core.parameter) ->
+        Option.map (fun default -> (parameter, default)) parameter.default)
+      parameters
+  in
+  List.iteri
+    (fun bit ((parameter : Core.parameter), (default : Core.expression)) ->
+      let ty = ground st parameter.type_ in
+      let passed = local b (Raw (Integer UInt64)) and given = local b (Raw Bool) in
+      emit b
+        (Assign
+           ( at passed,
+             Binary (Bit_and, Copy (at mask), constant_int UInt64 (Z.shift_left Z.one bit)) ));
+      emit b (Assign (at given, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
+      let arrived = local_place st parameter.local in
+      let fill = block b and after = block b in
+      let unless_given other =
+        finish b
+          (Switch { value = Copy (at given); cases = [ (Z.one, other) ]; default = Some fill })
+      in
+      let pulled what =
+        if st.pulling then
+          Compiler_bug.unsupported
+            ~at:(at_site (site_of st default.origin))
+            "a default for %s, %s, in a yielding method that is pulled" parameter.name what
+      in
+      if parameter.mode = Own && not (trivial st ty) then begin
+        let owned_here = binding st ~name:parameter.name ty in
+        bind_local st parameter.local owned_here;
+        let taken = block b in
+        unless_given taken;
+        start b taken;
+        emit b (Assign (owned_here, Use (Move arrived)));
+        finish b (Goto after);
+        start b fill;
+        in_statement st (fun () -> into st default owned_here)
+      end
+      else begin
+        unless_given after;
+        start b fill;
+        in_statement st (fun () ->
+            match arrived with
+            | { projections = [ Deref ]; root = Local pointer } ->
+                pulled "which is passed by address";
+                let value = binding st ty in
+                into st default value;
+                emit b (Assign (at pointer, Use (Address { place = value; writable = true })))
+            | place when not (trivial st ty) ->
+                pulled "which is a view";
+                let value = binding st ty in
+                into st default value;
+                emit b (Assign (place, Use (Copy value)))
+            | place -> into st default place)
+      end;
+      finish b (Goto after);
+      start b after)
+    defaulted

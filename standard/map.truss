@@ -131,6 +131,22 @@ internal fn Map[Key: Hash + Ordered, Value].empty() -> Map[Key, Value]
   Map(entries: [])
 }
 
+internal fn Map[Key: Hash + Ordered, Value].from_array[count: USize](
+  entries: own Array[Entry[Key, Value], count],
+) -> Map[Key, Value]
+  requires forall first in 0..count => forall second in 0..count =>
+    first < second ==> !(entries[first].key == entries[second].key)
+  ensures result.length() == count
+  ensures forall index in 0..count => exists key: Key =>
+    result.model().contains_key(key) && key == entries[index].key
+      && identical(result.model().get(key), entries[index].value)
+  ensures forall key: Key =>
+    result.model().contains_key(key) ==> exists index in 0..count => entries[index].key == key
+  cost time finite
+{
+  todo
+}
+
 public fn Map[Key: Hash + Ordered, Value].seeded() -> Map[Key, Value]
   uses Random
   ensures result.length() == 0

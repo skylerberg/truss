@@ -63,32 +63,6 @@ type state = {
   pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
 }
 
-(* A parameter's default, as function entry fills it in. *)
-type default = {
-  mode : T.mode;
-  ty : Ground.ty;
-  binding : S.id;  (** The key of the parameter's place in the frame's bindings *)
-  name : string;
-  evaluate : Lir.place -> unit;  (** Evaluates the default into a place *)
-  span : S.span;  (** The default's position *)
-}
-
-(* A [requires] clause that can run, as function entry tests it. *)
-type requirement = {
-  test : yes:Lir.block -> no:Lir.block -> unit;  (** Lowers the clause to jumps *)
-  text : string;  (** The clause's source text *)
-  site : Lir.site;  (** The clause's position *)
-}
-
-(* Where lowering reads a function from: the syntax tree or the core form.
-   Each function is called with the function's frame current. *)
-type function_source = {
-  defaults : state -> default list;  (** The parameters' defaults, in parameter order *)
-  requirements : state -> requirement list;  (** The [requires] clauses that can run *)
-  body : state -> Lir.place option -> unit;
-      (** Lowers the body, writing its value to the place if there is one *)
-}
-
 (* The code a function starts lowering: its own, with nothing bound yet. *)
 let frame_of code ~inlined =
   {
@@ -118,40 +92,8 @@ let enter context ?(pulling = false) ?(nested = ref []) frame =
   }
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
-
-let type_of st (id : S.id) =
-  match st.frame.code.checked.types.(id) with
-  | Some ty -> ground st ty
-  | None -> bug "no type for expression %d" id
-
-let raw_type_of st (id : S.id) = st.frame.code.checked.types.(id)
 let trivial st ty = Glue.trivial st.context.glue ty
 let zero_size st ty = (Memory_layout.of_type st.context.env ty).size = 0
-
-(* Whether a type is one of the built-in numbers, [Bool], or [Character],
-   whose operators are primitive operations, never calls. *)
-let primitive_methods =
-  [
-    ("add", "Add");
-    ("subtract", "Subtract");
-    ("multiply", "Multiply");
-    ("divide", "Divide");
-    ("remainder", "Remainder");
-    ("negate", "Negate");
-    ("equal", "Equal");
-    ("compare", "Ordered");
-  ]
-
-let primitive (ty : Ground.ty) =
-  match ty with
-  | Named { path; arguments = [] } -> (
-      match Intrinsic.builtin_of_path path with
-      | Some
-          ( Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
-          | Float32 | Float64 | Bool | Character ) ->
-          true
-      | _ -> false)
-  | _ -> false
 
 let site st (span : S.span) : Lir.site =
   let text = st.frame.code.text in
@@ -171,9 +113,6 @@ let site st (span : S.span) : Lir.site =
    lowered. *)
 let at_site ({ definition; line; column } : Lir.site) : Compiler_bug.site =
   { definition; line; column }
-
-let unsupported st (span : S.span) format =
-  Compiler_bug.unsupported ~at:(at_site (site st span)) format
 
 let source st (span : S.span) =
   let text = st.frame.code.text in

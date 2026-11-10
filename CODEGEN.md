@@ -3,38 +3,26 @@
 This document describes stage0's code generation, in
 [`stage0/codegen/`](stage0/codegen): everything between the type checker's
 output and a program that runs. It follows the decisions in
-[DESIGN.md](DESIGN.md) and [SYNTAX.md](SYNTAX.md), reads the checked form
+[DESIGN.md](DESIGN.md) and [SYNTAX.md](SYNTAX.md), reads the core form
 that [TYPECHECKER.md](TYPECHECKER.md) describes, and relies on the proofs
 that [PROVER.md](PROVER.md) describes.
 
 ## What code generation does
 
-Code generation takes the checked form of each definition the program can
+Code generation takes the core form of each definition the program can
 reach and produces C, which a C compiler turns into object files, which a
-linker turns into a program. The checked form records the type of every
-expression, the exact method, variant, field, `impl`, or associated type
-each name means, the mode of every argument, and which places each statement
-moves. Every proof obligation has been discharged by then.
+linker turns into a program. In the core form every call has a resolved
+callee and one argument per parameter, each argument is marked as a place
+or a value, every operator is resolved to an intrinsic operation or a call,
+and every type is fully inferred. Lowering from it needs no name resolution
+and no type inference. Every proof obligation has been discharged by then.
 
-Lowering takes function bodies from the core form, which TYPECHECKER.md
-describes. In the core form every call has a resolved callee and one
-argument per parameter, each argument is marked as a place or a value,
-every operator is resolved to an intrinsic operation or a call, and every
-type is fully inferred. Lowering from it needs no name resolution and no
-type inference.
-
-Every kind of node that runs lowers from the core form. A function's
-parameter defaults and `requires` checks are lowered from the core form
-with its body, and so are the lending and yielding methods inlined into it
-and the pulled version of a yielding method.
-
-Constant folding, a constant's evaluator, and the check of a tagged
-template read the core form too.
-
-The older lowering, which walks the syntax tree and the checked form's
-tables, is still in the compiler. A body falls back to it when lowering
-from the core form raises `Unhandled_node`, which no body in the tests
-does.
+Lowering reads nothing else of a definition's body. A function's
+parameters, parameter defaults, `requires` checks, and body all come from
+its core form, and so do the lending and yielding methods inlined into it,
+the pulled version of a yielding method, a constant's value, and the check
+of a tagged template. The syntax tree gives only the source text and the
+positions that failure messages quote.
 
 Code generation:
 
@@ -91,7 +79,7 @@ the platform's C toolchain, so emitting C adds almost no dependency.
 
 ### Why one IR before C
 
-Lowering straight from the checked form to C text would put drops, yield
+Lowering straight from the core form to C text would put drops, yield
 lowering, state machines, and hashing all inside a string printer. A small IR
 between them gives:
 
@@ -709,9 +697,7 @@ and its siblings. Full-width multiplication, used by hashing and
   emitted once, so each name is kept in a slot that every alternative
   fills: a local of the name's type where the name owns the part or copies
   it, and a pointer to the part otherwise. Alternatives that bind nothing
-  stay one pattern. The syntax-tree lowering reports alternatives that bind
-  a name as unsupported, because it would bind every name from the first
-  alternative.
+  stay one pattern.
 - **`while` and `for`** become blocks and gotos. A `for` over anything but a
   range of built-in integers calls `each` (see
   [Lending and yielding methods](#lending-and-yielding-methods)).
@@ -1460,7 +1446,7 @@ exactly the input each consumed:
 
 | Output | Kept by |
 |---|---|
-| An instance's LIR | A query on the instance, which reads the checked forms it lowers, the signatures it calls, the layouts it uses, and the bodies it inlines |
+| An instance's LIR | A query on the instance, which reads the core forms it lowers, the signatures it calls, the layouts it uses, and the bodies it inlines |
 | An object file | The C's text, the C compiler's identity (its `--version` output and path), and the flags, which name the target |
 
 Early cutoff happens at the LIR: if an instance's LIR comes out the same, so
@@ -1534,9 +1520,6 @@ a command line can hold.
 - **A float's text without the C library.** DESIGN.md has it written in
   Truss so that it is the same on every system. The loop is Truss; the
   digits are `snprintf`'s and the check `strtod`'s.
-- **Deleting the syntax-tree lowering.** Nothing needs it any more: bodies,
-  constants, and template checks all read the core form. The modules that
-  walk the syntax tree, and the fallback to them, are still to be removed.
 - **A slice of a range of elements,** `items[1..3]`. The type checker
   accepts it, and lowering reports it as unsupported.
 - **`for` over a value of a type that implements `Cursor`.** Only the
