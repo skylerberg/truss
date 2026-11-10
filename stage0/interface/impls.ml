@@ -52,6 +52,25 @@ let index =
             | _ -> [])
         (Query.demand database Names.package_declarations package))
 
+(* The real implementation of a capability: the one [impl] of it that
+   [standard::system] holds, which a program's start gives its [main]. *)
+let real_implementation database (capability : Path.t) : Path.t option =
+  match
+    List.filter_map
+      (fun ((trait, _), (impl : Path.t)) ->
+        match impl with
+        | Impl { module_ = { package = "standard"; modules = "system" :: _ }; _ }
+          when Path.equal trait capability ->
+            Some impl
+        | _ -> None)
+      (Query.demand database index "standard")
+  with
+  | [] -> None
+  | [ impl ] -> Some impl
+  | _ ->
+      Compiler_bug.bug ~stage:"Interface" "`%s` has more than one real implementation"
+        (Path.show capability)
+
 (* A package's impls by the type they are for: each with its trait. *)
 let by_type =
   Query.query ~name:"impls_by_type" ~phase:Interfaces ~show:Fun.id (fun database package ->

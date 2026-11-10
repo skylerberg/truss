@@ -9,4 +9,5 @@
   source
   diagnostic
   token
-  syntax))
+  syntax
+  syntax_walk))
