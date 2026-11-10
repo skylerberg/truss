@@ -1,0 +1,13 @@
+use standard::network
+
+internal type SystemNetworkServer()
+
+impl NetworkServer for SystemNetworkServer {
+  fn listen(self, address: network::SocketAddress) -> Result[network::Listener, SystemError] {
+    todo
+  }
+
+  fn bind_datagram(self, address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError] {
+    todo
+  }
+}

@@ -56,3 +56,171 @@ public fn Set[Element: Hash + Ordered].insert(mut self, element: own Element)
     }
   }
 }
+
+internal fn Set[Element: Hash + Ordered].empty() -> Set[Element] {
+  Set(elements: [])
+}
+
+public fn Set[Element: Hash + Ordered].seeded() -> Set[Element]
+  uses Random
+  ensures result.length() == 0
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].collect[Source: Cursor[Element = Element]](source: own Source) -> Set[Element] {
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
+  cost time O(1)
+{
+  self.length() == 0
+}
+
+public fn Set[Element: Hash + Ordered].insert_new(mut self, element: own Element) -> Bool
+  ensures self.contains(element)
+  ensures result == !old(self.contains(element))
+  cost amortized time O(log(self.length()))
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].remove(mut self, element: Element)
+  ensures !self.contains(element)
+  cost time O(log(old(self.length())))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].take(mut self, element: Element) -> Option[Element]
+  ensures !self.contains(element)
+  ensures (result is Some(_)) == old(self.contains(element))
+  cost time O(log(old(self.length())))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].clear(mut self)
+  ensures self.length() == 0
+  cost time O(old(self.length()))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].reserve(mut self, additional: USize)
+  ensures self.length() == old(self.length())
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].retain(mut self, keep: (fn(Element) -> Bool cost time finite))
+  ensures self.length() <= old(self.length())
+  cost time O(old(self.length()) * time(keep))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].extend[Source: Cursor[Element = Element]](mut self, elements: own Source) {
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].remove_all(mut self, other: Set[Element])
+  ensures self.length() <= old(self.length())
+  cost time O(other.length() * log(old(self.length())))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].is_subset_of(self, other: Set[Element]) -> Bool
+  cost time O(self.length() * log(other.length()))
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].is_superset_of(self, other: Set[Element]) -> Bool
+  cost time O(other.length() * log(self.length()))
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered].is_disjoint_from(self, other: Set[Element]) -> Bool
+  cost time O(self.length() * log(other.length()))
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered + Copyable].union(self, other: Set[Element]) -> Set[Element]
+  ensures result.length() <= self.length() + other.length()
+  cost time O((self.length() + other.length()) * log(self.length() + other.length()))
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered + Copyable].intersection(self, other: Set[Element]) -> Set[Element]
+  ensures result.length() <= self.length()
+  cost time O(self.length() * log(other.length()))
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered + Copyable].difference(self, other: Set[Element]) -> Set[Element]
+  ensures result.length() <= self.length()
+  cost time O(self.length() * log(other.length()))
+{
+  todo
+}
+
+public fn Set[Element: Hash + Ordered + Copyable].symmetric_difference(self, other: Set[Element]) -> Set[Element]
+  ensures result.length() <= self.length() + other.length()
+  cost time O((self.length() + other.length()) * log(self.length() + other.length()))
+{
+  todo
+}
+
+impl Iterable for Set[Element: Hash + Ordered] {
+  type Element = Element
+
+  fn each(self) yields Element
+    ensures finished ==> yielded.length() == self.length()
+    cost time O(self.length())
+  {
+    todo
+  }
+}
+
+public fn Set[Element: Hash + Ordered].each(own self) yields own Element
+  cost time O(self.length())
+{
+  todo
+}
+
+impl Equal for Set[Element: Hash + Ordered] {
+  fn equal(self, other: Set[Element]) -> Bool {
+    todo
+  }
+}
+
+impl Hash for Set[Element: Hash + Ordered] {
+  fn hash(self, hasher: mut Hasher) {
+    todo
+  }
+}
+
+impl Default for Set[Element: Hash + Ordered] {
+  fn default() -> Set[Element] {
+    []
+  }
+}
+
+impl From[List[Element]] for Set[Element: Hash + Ordered] {
+  fn from(value: own List[Element]) -> Set[Element] {
+    todo
+  }
+}

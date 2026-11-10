@@ -7,6 +7,10 @@ public opaque type List[Element](storage: intrinsic::Storage[Element])
 public opaque type Slice[Element](elements: intrinsic::View[Element])
   derives Plain
 
+public type SplitFirst[Element](first: Element, rest: Slice[Element])
+
+public type SplitLast[Element](last: Element, rest: Slice[Element])
+
 impl Model for List[Element] {
   type Value = Sequence[Element]
 
@@ -116,23 +120,27 @@ public fn List[Element].slice(self) -> Slice[Element]
   Slice(elements: intrinsic::storage_view(self.storage))
 }
 
-public fn List[Element].each(self) yields Element
-  ensures identical(result, self[yielded.length()])
-  ensures yielded.length() <= self.length()
-  ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
-  ensures finished ==> yielded.length() == self.length()
-  ensures finished ==> identical(yielded, self.model())
-  cost time O(self.length())
-{
-  var index: USize = 0
-  while index < self.length()
-    invariant index <= self.length()
-    invariant yielded.length() == index
-    invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
-    decreases self.length() - index
+impl Iterable for List[Element] {
+  type Element = Element
+
+  fn each(self) yields Element
+    ensures identical(result, self[yielded.length()])
+    ensures yielded.length() <= self.length()
+    ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+    ensures finished ==> yielded.length() == self.length()
+    ensures finished ==> identical(yielded, self.model())
+    cost time O(self.length())
   {
-    yield self[index]
-    index += 1
+    var index: USize = 0
+    while index < self.length()
+      invariant index <= self.length()
+      invariant yielded.length() == index
+      invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+      decreases self.length() - index
+    {
+      yield self[index]
+      index += 1
+    }
   }
 }
 
@@ -147,15 +155,9 @@ public fn List[Element].each(mut self) yields mut Element {
   }
 }
 
-public fn List[Element].map[Output](self, transform: fn(Element) -> Output) -> List[Output] {
-  var results: List[Output] = []
-  for item in self {
-    mut results.push(transform(item))
-  }
-  results
-}
-
-public fn List[Element].filter(self, keep: fn(Element) -> Bool) -> List[Element] {
+public fn List[Element].each(own self) yields own Element
+  cost time O(self.length())
+{
   todo
 }
 
@@ -166,24 +168,34 @@ public fn Slice[Element].length(self) -> USize
   intrinsic::view_length(self.elements)
 }
 
-public fn Slice[Element].each(self) yields Element
-  ensures identical(result, self[yielded.length()])
-  ensures yielded.length() <= self.length()
-  ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
-  ensures finished ==> yielded.length() == self.length()
-  ensures finished ==> identical(yielded, self.model())
+impl Iterable for Slice[Element] {
+  type Element = Element
+
+  fn each(self) yields Element
+    ensures identical(result, self[yielded.length()])
+    ensures yielded.length() <= self.length()
+    ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+    ensures finished ==> yielded.length() == self.length()
+    ensures finished ==> identical(yielded, self.model())
+    cost time O(self.length())
+  {
+    var index: USize = 0
+    while index < self.length()
+      invariant index <= self.length()
+      invariant yielded.length() == index
+      invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+      decreases self.length() - index
+    {
+      yield self[index]
+      index += 1
+    }
+  }
+}
+
+public fn Slice[Element].each(mut self) yields mut Element
   cost time O(self.length())
 {
-  var index: USize = 0
-  while index < self.length()
-    invariant index <= self.length()
-    invariant yielded.length() == index
-    invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
-    decreases self.length() - index
-  {
-    yield self[index]
-    index += 1
-  }
+  todo
 }
 
 impl Index for List[Element] {
@@ -257,5 +269,169 @@ impl Equal for List[Element: Equal] {
       index += 1
     }
     true
+  }
+}
+
+public fn List[Element: Copyable].filled(value: Element, count: USize) -> List[Element]
+  ensures result.length() == count
+  cost time O(count)
+{
+  todo
+}
+
+public fn List[Element].generate(
+  count: USize,
+  make: (fn(index: USize) -> Element requires index < count cost time finite),
+) -> List[Element]
+  ensures result.length() == count
+  cost calls(make) == count
+  cost time O(count * time(make))
+{
+  todo
+}
+
+public fn List[Element].collect[Source: Cursor[Element = Element]](source: own Source) -> List[Element] {
+  todo
+}
+
+public fn List[Element].capacity(self) -> USize
+  ensures result >= self.length()
+  cost time O(1)
+{
+  intrinsic::storage_capacity(self.storage)
+}
+
+public fn List[Element].reserve(mut self, additional: USize)
+  ensures identical(self.model(), old(self.model()))
+  ensures self.capacity() >= self.length() + additional
+{
+  growth::reserve(mut self.storage, additional: additional)
+}
+
+public fn List[Element].shrink_to_fit(mut self)
+  ensures identical(self.model(), old(self.model()))
+{
+  todo
+}
+
+public fn List[Element].clear(mut self)
+  ensures self.length() == 0
+  cost time O(old(self.length()))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn List[Element].truncate(mut self, length: USize)
+  ensures self.length() == (if length < old(self.length()) { length } else { old(self.length()) })
+  cost time O(old(self.length()))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn List[Element].remove_at(mut self, index: USize) -> Element
+  requires index < self.length()
+  ensures self.length() == old(self.length()) - 1
+  ensures identical(result, old(self.model())[index])
+  cost time O(old(self.length()))
+  cost allocations == 0
+{
+  intrinsic::storage_remove(mut self.storage, index: index)
+}
+
+public fn List[Element].swap_remove(mut self, index: USize) -> Element
+  requires index < self.length()
+  ensures self.length() == old(self.length()) - 1
+  ensures identical(result, old(self.model())[index])
+  cost time O(1)
+  cost allocations == 0
+{
+  todo
+}
+
+public fn List[Element].remove_range(mut self, range: Range[USize])
+  requires range.start <= range.stop
+  requires range.stop <= self.length()
+  requires !range.inclusive
+  ensures self.length() == old(self.length()) - (range.stop - range.start)
+  cost time O(old(self.length()))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn List[Element].split_off(mut self, at: USize) -> List[Element]
+  requires at <= self.length()
+  ensures self.length() == at
+  ensures result.length() == old(self.length()) - at
+  cost time O(result.length())
+{
+  todo
+}
+
+public fn List[Element].append(mut self, other: own List[Element])
+  ensures identical(self.model(), old(self.model()).concatenate(other.model()))
+  cost amortized time O(other.length())
+{
+  todo
+}
+
+public fn List[Element: Copyable].append_slice(mut self, items: Slice[Element])
+  ensures self.length() == old(self.length()) + items.length()
+  cost amortized time O(items.length())
+{
+  todo
+}
+
+public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, items: own Source) {
+  todo
+}
+
+public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time finite))
+  ensures self.length() <= old(self.length())
+  cost time O(old(self.length()) * time(keep))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn List[Element].filter(own self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+  ensures result.length() <= self.length()
+  cost time O(self.length() * time(keep))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn List[Element: Equal].deduplicate(mut self)
+  ensures self.length() <= old(self.length())
+  cost time O(old(self.length()))
+  cost allocations == 0
+{
+  todo
+}
+
+impl Default for List[Element] {
+  fn default() -> List[Element] {
+    []
+  }
+}
+
+impl Ordered for List[Element: Ordered] {
+  fn compare(self, other: List[Element]) -> Ordering {
+    todo
+  }
+}
+
+impl Hash for List[Element: Hash] {
+  fn hash(self, hasher: mut Hasher) {
+    self.slice().hash(mut hasher)
+  }
+}
+
+impl Display for List[Element: Display] {
+  fn display(self, output: mut TextBuilder) {
+    self.slice().display(mut output)
   }
 }

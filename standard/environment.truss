@@ -1,0 +1,80 @@
+public type OperatingSystem = Linux | MacOs | Windows | FreeBsd | Other
+  derives Equal, Hash
+
+public type Architecture = X86With64Bits | Arm64 | X86 | Arm | RiscV64 | WebAssembly32 | Other
+  derives Equal, Hash
+
+public type Platform(
+  operating_system: OperatingSystem,
+  architecture: Architecture,
+  processor_count: USize,
+  host_name: String,
+  process_identifier: UInt32,
+)
+
+public type Variable(name: String, value: String)
+
+public type Location = Home | Temporary | Executable | Configuration | Cache | Data
+  derives Equal, Hash, Ordered
+
+public opaque type FixedEnvironment(
+  variables: Map[String, String],
+  current_directory: Path,
+  platform: Platform,
+  locations: Map[Location, Path],
+  local_zone: Option[String],
+  zones: Map[String, List[UInt8]],
+)
+
+public fn FixedEnvironment.new(platform: own Platform, current_directory: own Path) -> FixedEnvironment {
+  FixedEnvironment(
+    variables: [:],
+    current_directory: own current_directory,
+    platform: own platform,
+    locations: [:],
+    local_zone: None,
+    zones: [:],
+  )
+}
+
+public fn FixedEnvironment.with_variable(own self, name: StringSlice, value: StringSlice) -> FixedEnvironment {
+  todo
+}
+
+public fn FixedEnvironment.with_location(own self, location: Location, path: own Path) -> FixedEnvironment {
+  todo
+}
+
+public fn FixedEnvironment.with_zone(own self, name: StringSlice, rules: own List[UInt8], local: Bool = false) -> FixedEnvironment {
+  todo
+}
+
+impl Environment for FixedEnvironment {
+  fn variable(self, name: StringSlice) -> Option[String] {
+    todo
+  }
+
+  fn variables(self) -> List[Variable] {
+    todo
+  }
+
+  fn current_directory(self) -> Result[Path, SystemError] {
+    Ok(self.current_directory.copy())
+  }
+
+  fn platform(self) -> Platform {
+    self.platform.copy()
+  }
+
+  fn location(self, location: Location) -> Option[Path] {
+    todo
+  }
+
+  fn local_zone(self) -> Option[String] {
+    self.local_zone.copy()
+  }
+
+  fn zone_rules(self, name: StringSlice) -> Option[List[UInt8]] {
+    todo
+  }
+}

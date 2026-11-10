@@ -489,9 +489,9 @@ two variables never refer to the same changeable data.
   happens silently. Flushing a buffered writer can fail, and losing its data
   would go unnoticed, which is how Rust's `BufWriter` loses writes when it is
   dropped. So a buffered writer is only ever lent, inside a scope:
-  `FileWrite.write_with(path, fn(writer) { ... })` lends the writer `mut` to
-  the function, then finishes it, and returns the first error from the
-  function or from finishing. This is Python's `with`, Kotlin's `use`,
+  `files::write_with(path, write: fn(writer) { ... })` lends the writer
+  `mut` to the function, then finishes it, and returns the first error from
+  the function or from finishing. This is Python's `with`, Kotlin's `use`,
   Java's try-with-resources, and Ruby's `File.open` with a block. User code
   never owns a writer, so it can never drop an unfinished one, and `?` inside
   the function needs no cleanup. Linear types, as in Austral and Vale, could
@@ -1184,7 +1184,7 @@ safe, it reports an error and suggests four fixes:
    first.
 2. **Require it from the caller** with a `requires` clause.
 3. **Use the checked version**, which returns an `Option` or `Result`, such as
-   `items.get(index)` or `checked_div`.
+   `items.get(index)` or `checked_divide`.
 4. **Declare `uses Panic`**, which allows a runtime failure and shows it in the
    signature.
 
@@ -1396,6 +1396,24 @@ whoever runs the function chooses the implementation with `provide`.
   files is separate from writing them, and opening connections is separate
   from accepting them. A config loader with only `FileRead` cannot destroy
   anything. They are in the prelude because signatures are written with them.
+- **Opening a handle and using a handle are separate capabilities.**
+  `FileRead.open`, `NetworkClient.connect`, `NetworkServer.listen`, and
+  `Processes.spawn` each return a handle. Every operation on a handle
+  (read, write, accept, wait, close) requires `Handles`. A function that is
+  passed a connection declares `uses Handles`. It can serve that
+  connection, and it cannot open another one.
+  - **The alternative fails for connections.** If a handle's methods
+    required the capability that opened the handle, `Connection.read` would
+    need `NetworkClient` for a connection the program opened and
+    `NetworkServer` for one it accepted. A request handler would then hold
+    the capability to open connections of its own.
+  - **It allows one `Reader` trait and one `Writer` trait.** An `impl`'s
+    methods can use only the capabilities their trait declares. With one
+    capability for every handle, files, connections, and pipes all
+    implement the same two traits.
+  - **A handle is a token.** The provider of `Handles` decides what a read
+    returns. A test's provider can simulate a file, or a network between
+    two tasks, and the code under test does not change.
 - **Narrowing is ordinary code.** An implementation's methods can use
   capabilities, and a call to the capability being implemented goes to the
   next provider out. So an implementation can check each call and pass it on,
@@ -2076,13 +2094,28 @@ attack.
 - **The standard library never breaks within a language version.** It
   follows the rule every published package follows (see
   [Versions](#versions)), and has no second name to move to.
-- **It holds what needs the compiler:** the prelude, the built-in types and
-  collections, the real implementations of the standard capabilities, and
-  the code that differs between platforms. It is the only package that
-  needs no grant (see [Dependencies](#dependencies)) and the only one that
-  reaches the operating system (see [No foreign code](#no-foreign-code)).
+- **It holds only what will not need a breaking change.** That is three
+  kinds of code:
+  - **Code that needs the compiler or the operating system:** the prelude,
+    the built-in types and collections, the capabilities and their real
+    implementations, and platform-specific code.
+  - **Types that packages must share to interoperate:** `Reader` and
+    `Writer`, `Path`, `Instant`, network addresses, `json::Value`.
+  - **Implementations of published standards:** JSON, CSV, Base64, URLs,
+    UUIDs, Unicode, SHA-2. A standard that is frozen cannot make its
+    implementation stale, which is how Python's standard library modules
+    went stale. This is what lets the library be large.
+
+  The cryptographic primitives are in it for a second reason. They need
+  processor instructions, and only the standard library can reach those
+  (see [No foreign code](#no-foreign-code)). The standard library is also
+  the only package that needs no grant (see
+  [Dependencies](#dependencies)).
+- **Anything still evolving is an approved package.** HTTP, TLS,
+  compression formats, database clients, and markup languages change with
+  practice, so a library for one of them will need breaking changes.
 - **The approved packages are the registry's packages owned by `truss`,**
-  such as `truss::json` and `truss::http`. They are plain Truss, written on
+  such as `truss::http` and `truss::toml`. They are plain Truss, written on
   the standard library's capabilities and granted them like any dependency,
   and are held to the review and release rules of the toolchain itself. Go's
   `golang.org/x` and Deno's `@std` are kept the same way. They are apart
@@ -2099,6 +2132,80 @@ in every file. The prelude is the same everywhere: projects cannot define their
 own, and code cannot hide a prelude name with its own definition. A reader or
 an LLM can therefore rely on `List` or `Result` meaning the same thing in every
 file of every project.
+
+A package cannot define a type with a prelude name. So a name is in the
+prelude only if signatures in most programs use it. `Path` and `SystemError`
+are in the prelude. `Pair`, `Indexed`, and `Literal` are not, because a
+package may want those names for its own types. They are `core::Pair`,
+`core::Indexed`, and `text::Literal`.
+
+### Standard library conventions
+
+- **Each module is one subject, one level below `standard`:**
+  `standard::json`, `standard::files`, `standard::time`. Code always
+  writes a name with its module, so a type's name does not repeat the
+  module's: `collections::Deque`, `time::Date`, `json::Value`. Go nests
+  modules by category, as in `encoding/json` and `crypto/sha256`. The
+  category is not written at the use site, so it only adds something to
+  remember. An LLM that wants JSON writes `use standard::json` without
+  knowing a category.
+- **Subdirectories hold files that no one imports:** the methods and
+  `impl`s of types declared in the parent module, and the real capability
+  implementations in `standard::system`.
+- **Every method of a view also exists on its owner.** `Slice` and
+  `StringSlice` define the methods that read elements or change them in
+  place. `List`, `Array`, and `String` define the same methods and forward
+  to the view, so `mut names.sort()` works without writing `names[..]`.
+  Rust gets this from auto-dereferencing at method calls. Truss converts an
+  owner to its view only at a parameter, so the standard library declares
+  the methods. Methods that change the length, such as `push` and
+  `truncate`, exist only on the owner.
+- **Methods that work on any collection are provided methods of
+  `Iterable`.** `fold`, `map`, `filter_map`, `count`, and `find` are
+  written in terms of `each`. A user's collection gets all of them by
+  implementing `each`. Methods that need an index are `Slice`'s.
+- **A collection method takes a pure callback. An `Option` or `Result`
+  method takes a callback that may use capabilities.** `map`, `filter`,
+  and `sort_by` call the callback once per element and may later run it in
+  parallel, so the callback is pure. `Option.map`, `Result.and_then`, and
+  `unwrap_or_else` call the callback at most once, in place of an `if`, so
+  they take a capability parameter. To run an effect for each element,
+  write a `for` loop.
+- **A lookup that can miss lends an `Option`.** `items.first()`,
+  `ports.get(name)`, and `heap.peek()` have the result `lends
+  Option[Element]`. The caller reads the element for one statement and
+  nothing is copied, whatever the element type. A method that removes the
+  element, such as `pop` or `take`, returns an owned `Option`.
+- **A capability declares only primitive operations.** `FileWrite` has
+  `open`. `files::write_with`, `files::copy`, and
+  `files::write_atomically` are ordinary functions that call it. A
+  narrowing implementation or a test fake then has few methods to write,
+  and every helper works with every implementation.
+- **Every operating-system failure is a `SystemError`,** whichever
+  capability made the call. Code that reads a file and sends it over a
+  connection handles one error type. Each parser has its own error type,
+  which carries the position of the error in the input.
+- **Text in an embedded language is a tagged template.** `Regex`,
+  `json::Value`, `url::Url`, `files::Glob`, `time::Layout`, and
+  `processes::Command` are tags. The compiler validates the literal text,
+  and an interpolated value cannot be parsed as syntax. A
+  `processes::Command` is a program and an argument list. It is never a
+  string passed to a shell.
+- **`Type.parse(text)` parses text,** through the `Parse` trait. `From`
+  and `TryFrom` convert between types. `Display` formats a value for
+  people.
+- **Each capability ships with its test fakes,** in the capability's
+  module: `time::ManualClock`, `random::SeededRandom`,
+  `files::MemoryFiles`, `console::CapturedConsole`, `log::CapturedLog`.
+  The narrowing implementations are there too, such as
+  `files::FilesWithin` and `network::HostsAllowed`.
+- **`simulation::World` fakes every capability at once.** It is an
+  in-memory machine: a file system, a network between its own hosts, a
+  clock that advances only when the test says, programs that return what
+  the test scripted, tasks scheduled by a seed, and fault injection.
+  FoundationDB tests its database this way. A test that opens both files
+  and connections provides a `World`, because one provider must implement
+  `Handles` for every handle, as the operating system does.
 
 ## Visibility
 
@@ -2582,10 +2689,10 @@ hand-written `Equal`, or a derived one over floats, could disagree with what
 the pattern matches.
 
 **Imports bring in modules, not individual names.** After
-`use standard::file_system`, code writes `file_system::read_text(path)`. Every
+`use standard::json`, code writes `json::parse(text)`. Every
 name that is not local or from the prelude shows where it comes from, right
-where it is used. Two modules can both define `Path` without a clash, so Truss
-needs no import aliases. Aliases would let the same thing go by different
+where it is used. Two modules can both define `ParseError` without a clash,
+so Truss needs no import aliases. Aliases would let the same thing go by different
 names in different files, which makes code harder to search, rename, and
 predict.
 

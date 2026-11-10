@@ -114,8 +114,8 @@ let () =
     "fn g(items: List[Int64], step: Int64) -> List[Int64] {\n\
     \  items.map(fn(item) { item + step })\n\
      }\n"
-    "{ standard::list::List.map[Int64, Int64](place items, lambda(item) capturing step { add(item, \
-     step) }) }"
+    "{ Iterable.map for List[Int64] by standard::list::impl Iterable for List[Element](place \
+     items, lambda(item) capturing step { add(item, step) }) }"
 
 (* Values *)
 
@@ -184,9 +184,10 @@ let () =
     \  }\n\
     \  total\n\
      }\n"
-    "{ let var own total = 0; for item in yielding_call standard::list::List.each[Int64](place \
-     items) { compound_assign total = add(current_target, item) }; for step in integer_range \
-     0..=total {  }; while (total < 3) { compound_assign total = add(current_target, 1) }; total }"
+    "{ let var own total = 0; for item in yielding_call standard::list::impl Iterable for \
+     List[Element].each[Int64](place items) { compound_assign total = add(current_target, item) }; \
+     for step in integer_range 0..=total {  }; while (total < 3) { compound_assign total = \
+     add(current_target, 1) }; total }"
 
 let () =
   expect_body "a `for` loop over the result of a call calls `each` on the result"
@@ -198,8 +199,8 @@ let () =
     \    let _ = item\n\
     \  }\n\
      }\n"
-    "{ for item in yielding_call standard::list::List.each[Int64](app::main::make()) { let _ = \
-     place item } }"
+    "{ for item in yielding_call standard::list::impl Iterable for \
+     List[Element].each[Int64](app::main::make()) { let _ = place item } }"
 
 (* Specifications *)
 

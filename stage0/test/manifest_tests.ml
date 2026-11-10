@@ -27,8 +27,8 @@ let () =
              dependencies =
                [
                  { package = "forecast"; capabilities = [] };
-                 { package = "truss::json"; capabilities = [] };
-                 { package = "truss::http"; capabilities = [ "NetworkClient"; "Clock" ] };
+                 { package = "truss::toml"; capabilities = [] };
+                 { package = "truss::http"; capabilities = [ "NetworkClient"; "Handles"; "Clock" ] };
                ];
              usize_bits = 32;
            };

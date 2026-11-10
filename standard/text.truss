@@ -226,7 +226,7 @@ internal fn TextBuilder.write_float64(mut self, value: Float64) {
   writing::float64(mut self.text.storage, value: value)
 }
 
-internal fn TextBuilder.write_character(mut self, character: Character) {
+public fn TextBuilder.write_character(mut self, character: Character) {
   writing::character(mut self.text.storage, value: character)
 }
 
@@ -276,4 +276,153 @@ impl Display for StringSlice {
   fn display(self, output: mut TextBuilder) {
     mut output.write(self)
   }
+}
+
+public trait Parse {
+  type Error
+  fn parse(text: StringSlice) -> Result[Self, Self.Error]
+}
+
+public type Utf8Error(valid_up_to: USize)
+  derives Equal
+
+impl Display for Utf8Error {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type Utf16Error(valid_up_to: USize)
+  derives Equal
+
+impl Display for Utf16Error {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public fn String.with_capacity(capacity: USize) -> String
+  ensures result.length() == 0
+{
+  String(storage: intrinsic::storage_with_capacity(capacity))
+}
+
+public fn String.from_utf8(bytes: own List[UInt8]) -> Result[String, Utf8Error]
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn String.from_utf8_lossy(bytes: Slice[UInt8]) -> String
+  cost time O(bytes.length())
+{
+  todo
+}
+
+public fn String.from_utf16(units: Slice[UInt16]) -> Result[String, Utf16Error]
+  cost time O(units.length())
+{
+  todo
+}
+
+public fn String.collect[Source: Cursor[Element = Character]](source: own Source) -> String {
+  todo
+}
+
+public fn String.capacity(self) -> USize
+  ensures result >= self.length()
+  cost time O(1)
+{
+  intrinsic::storage_capacity(self.storage)
+}
+
+public fn String.reserve(mut self, additional: USize)
+  ensures identical(self.model(), old(self.model()))
+{
+  growth::reserve(mut self.storage, additional: additional)
+}
+
+public fn String.clear(mut self)
+  ensures self.length() == 0
+  cost time O(1)
+  cost allocations == 0
+{
+  todo
+}
+
+public fn String.push_character(mut self, character: Character)
+  ensures self.length() == old(self.length()) + character.utf8_length()
+  cost amortized time O(1)
+{
+  todo
+}
+
+public fn String.pop_character(mut self) -> Option[Character]
+  ensures (result is None) == (old(self.length()) == 0)
+  cost time O(1)
+  cost allocations == 0
+{
+  todo
+}
+
+public fn String.insert(mut self, offset: USize, text: StringSlice)
+  requires offset <= self.length()
+  requires self.is_boundary(offset)
+  ensures self.length() == old(self.length()) + text.length()
+  cost amortized time O(old(self.length()) + text.length())
+{
+  todo
+}
+
+public fn String.remove_range(mut self, from: USize, to: USize)
+  requires from <= to
+  requires to <= self.length()
+  requires self.is_boundary(from)
+  requires self.is_boundary(to)
+  ensures self.length() == old(self.length()) - (to - from)
+  cost time O(old(self.length()))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn String.truncate(mut self, length: USize)
+  requires length <= self.length()
+  requires self.is_boundary(length)
+  ensures self.length() == length
+  cost time O(1)
+  cost allocations == 0
+{
+  todo
+}
+
+impl Default for String {
+  fn default() -> String {
+    ""
+  }
+}
+
+impl From[Character] for String {
+  fn from(value: own Character) -> String {
+    todo
+  }
+}
+
+public fn String.to_bytes(own self) -> List[UInt8]
+  ensures result.length() == self.length()
+  cost time O(1)
+  cost allocations == 0
+{
+  todo
+}
+
+public fn TextBuilder.with_capacity(capacity: USize) -> TextBuilder {
+  TextBuilder(text: String.with_capacity(capacity))
+}
+
+public fn TextBuilder.length(self) -> USize
+  cost time O(1)
+{
+  self.text.length()
 }

@@ -1,0 +1,266 @@
+use standard::collections
+use standard::map
+
+public fn collections::SortedMap[Key: Ordered, Value].new() -> collections::SortedMap[Key, Value]
+  ensures result.length() == 0
+  cost time O(1)
+  cost allocations == 0
+{
+  collections::SortedMap(entries: [])
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].collect[Source: Cursor[Element = map::Entry[Key, Value]]](
+  source: own Source,
+) -> collections::SortedMap[Key, Value] {
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].length(self) -> USize
+  cost time O(1)
+{
+  self.entries.length()
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
+  cost time O(1)
+{
+  self.length() == 0
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].contains(self, key: Key) -> Bool
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].get(self, key: Key) lends Option[Value]
+  ensures (result is Some(_)) == self.contains(key)
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].insert(mut self, key: own Key, value: own Value)
+  ensures self.contains(key)
+  cost amortized time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].replace(mut self, key: own Key, value: own Value) -> Option[Value]
+  ensures self.contains(key)
+  ensures (result is Some(_)) == old(self.contains(key))
+  cost amortized time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].get_or_insert(
+  mut self,
+  key: own Key,
+  default: own Value,
+) lends mut Value
+  cost amortized time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].update[capability Granted](
+  mut self,
+  key: own Key,
+  default: own Value,
+  change: (fn(mut Value) uses Granted cost time finite),
+)
+  uses Granted
+  ensures self.contains(key)
+  cost calls(change) == 1
+  cost amortized time O(log(self.length()) + time(change))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].remove(mut self, key: Key)
+  ensures !self.contains(key)
+  cost time O(log(old(self.length())))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].take(mut self, key: Key) -> Option[Value]
+  ensures !self.contains(key)
+  ensures (result is Some(_)) == old(self.contains(key))
+  cost time O(log(old(self.length())))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].clear(mut self)
+  ensures self.length() == 0
+  cost time O(old(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].first(self) lends Option[map::Entry[Key, Value]]
+  ensures (result is None) == (self.length() == 0)
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].last(self) lends Option[map::Entry[Key, Value]]
+  ensures (result is None) == (self.length() == 0)
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].pop_first(mut self) -> Option[map::Entry[Key, Value]]
+  ensures (result is None) == (old(self.length()) == 0)
+  cost time O(log(old(self.length())))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].pop_last(mut self) -> Option[map::Entry[Key, Value]]
+  ensures (result is None) == (old(self.length()) == 0)
+  cost time O(log(old(self.length())))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].at_or_before(self, key: Key) lends Option[map::Entry[Key, Value]]
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].at_or_after(self, key: Key) lends Option[map::Entry[Key, Value]]
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].before(self, key: Key) lends Option[map::Entry[Key, Value]]
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].after(self, key: Key) lends Option[map::Entry[Key, Value]]
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].within(self, range: Range[Key]) yields map::Entry[Key, Value]
+  ensures range.contains(result.key)
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].retain(
+  mut self,
+  keep: (fn(map::Entry[Key, Value]) -> Bool cost time finite),
+)
+  ensures self.length() <= old(self.length())
+  cost time O(old(self.length()) * time(keep))
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].extend[Source: Cursor[Element = map::Entry[Key, Value]]](
+  mut self,
+  entries: own Source,
+) {
+  todo
+}
+
+impl Index for collections::SortedMap[Key: Ordered, Value] {
+  type Key = Key
+  type Output = Value
+
+  fn contains_key(self, key: Key) -> Bool
+    cost time O(log(self.length()))
+  {
+    self.contains(key)
+  }
+
+  fn at(self, key: Key) lends Value
+    requires self.contains(key)
+    cost time O(log(self.length()))
+  {
+    todo
+  }
+
+  fn at(mut self, key: Key) lends mut Value
+    requires self.contains(key)
+    cost time O(log(self.length()))
+  {
+    todo
+  }
+}
+
+impl Iterable for collections::SortedMap[Key: Ordered, Value] {
+  type Element = map::Entry[Key, Value]
+
+  fn each(self) yields map::Entry[Key, Value]
+    ensures finished ==> yielded.length() == self.length()
+    cost time O(self.length())
+  {
+    todo
+  }
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].each(own self) yields own map::Entry[Key, Value]
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].reversed(self) yields map::Entry[Key, Value]
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].keys(self) yields Key
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].values(self) yields Value
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::SortedMap[Key: Ordered, Value].values(mut self) yields mut Value
+  cost time O(self.length())
+{
+  todo
+}
+
+impl Equal for collections::SortedMap[Key: Ordered, Value: Equal] {
+  fn equal(self, other: collections::SortedMap[Key, Value]) -> Bool {
+    todo
+  }
+}
+
+impl Default for collections::SortedMap[Key: Ordered, Value] {
+  fn default() -> collections::SortedMap[Key, Value] {
+    collections::SortedMap.new()
+  }
+}
+
+impl From[List[map::Entry[Key, Value]]] for collections::SortedMap[Key: Ordered, Value] {
+  fn from(value: own List[map::Entry[Key, Value]]) -> collections::SortedMap[Key, Value] {
+    todo
+  }
+}

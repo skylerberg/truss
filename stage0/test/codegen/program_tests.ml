@@ -135,8 +135,10 @@ let () =
       let path = Filename.concat (Lazy.force scratch) "written.txt" in
       let status, output, _ =
         run_main ~arguments:[ path ]
-          {|fn main(arguments: List[String]) -> ExitCode
-  uses Console, FileRead, FileWrite
+          {|use standard::files
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, FileRead, FileWrite, Handles
 {
   let path = Path.new(arguments[1].slice())
   if FileWrite.write_text(path, contents: "first\nsecond line\nlast".slice()) is Err(_) {
@@ -146,7 +148,7 @@ let () =
     Console.print_line("${text.length()} bytes".slice())
   }
   let streamed = Path.new("${arguments[1]}.streamed".slice())
-  let wrote = FileWrite.write_with(streamed, write: fn(writer) {
+  let wrote = files::write_with(streamed, write: fn(writer) {
     mut writer.write("one ".slice())?
     mut writer.write("two".slice())
   })
@@ -156,10 +158,10 @@ let () =
   match FileRead.open(path) {
     Ok(file) => {
       var reader = own file
-      if mut reader.read_line() is Ok(line) {
+      if mut reader.read_line() is Ok(Some(line)) {
         Console.print_line("${line}".slice())
       }
-      if mut reader.read_line() is Ok(line) {
+      if mut reader.read_line() is Ok(Some(line)) {
         Console.print_line("${line}".slice())
       }
     }
@@ -202,13 +204,17 @@ let () =
   test "a program runs other programs and reads their exit status" (fun () ->
       let status, output, _ =
         run_main
-          {|fn main(arguments: List[String]) -> ExitCode
+          {|use standard::processes
+
+fn main(arguments: List[String]) -> ExitCode
   uses Console, Processes
 {
-  if Processes.run(Path.new("sh".slice()), arguments: ["-c", "exit 7"]) is Ok(code) {
-    Console.print_line("exited ${code.code}".slice())
+  if Processes.run(processes::Command.new("sh").argument("-c").argument("exit 7")) is Ok(ended)
+    && ended.status is Exited(code)
+  {
+    Console.print_line("exited ${code}".slice())
   }
-  if Processes.run(Path.new("truss-no-such-program".slice()), arguments: []) is Err(NotFound) {
+  if Processes.run(processes::Command.new("truss-no-such-program")) is Err(NotFound) {
     Console.print_line("missing".slice())
   }
   ExitCode(0)
@@ -222,10 +228,12 @@ let () =
   test "a program run with an argument that holds a zero byte is not started" (fun () ->
       let status, output, _ =
         run_main
-          {|fn main(arguments: List[String]) -> ExitCode
+          {|use standard::processes
+
+fn main(arguments: List[String]) -> ExitCode
   uses Console, Processes
 {
-  if Processes.run(Path.new("sh".slice()), arguments: ["-c", "exit 3\0; exit 4"]) is Err(_) {
+  if Processes.run(processes::Command.new("sh").argument("-c").argument("exit 3\0; exit 4")) is Err(_) {
     Console.print_line("refused".slice())
   }
   ExitCode(0)
@@ -234,21 +242,25 @@ let () =
       in
       expect_int ~expected:0 status;
       expect_string ~expected:"refused\n" output);
-  test "a program that a signal ends is told by 128 and the signal" (fun () ->
+  test "a program that a signal ends is told which signal" (fun () ->
       let status, output, _ =
         run_main
-          {|fn main(arguments: List[String]) -> ExitCode
+          {|use standard::processes
+
+fn main(arguments: List[String]) -> ExitCode
   uses Console, Processes
 {
-  if Processes.run(Path.new("sh".slice()), arguments: ["-c", "kill -9 $$"]) is Ok(code) {
-    Console.print_line("ended ${code.code}".slice())
+  if Processes.run(processes::Command.new("sh").argument("-c").argument("kill -9 $$")) is Ok(ended)
+    && ended.status is Signaled(Kill)
+  {
+    Console.print_line("ended by a kill".slice())
   }
   ExitCode(0)
 }
 |}
       in
       expect_int ~expected:0 status;
-      expect_string ~expected:"ended 137\n" output);
+      expect_string ~expected:"ended by a kill\n" output);
   test "a program is given its arguments, with bytes that are not UTF-8 replaced" (fun () ->
       let _, output, _ =
         run_main ~arguments:[ "caf\xff"; "" ]
@@ -311,7 +323,7 @@ let () =
   let now = Clock.now()
   let first = Random.next()
   let second = Random.next()
-  let late = now.nanoseconds > 1600000000000000000
+  let late = now.unix_nanoseconds() > 1600000000000000000
   Console.print_line("${late} ${first != second}".slice())
   ExitCode(0)
 }
@@ -432,8 +444,7 @@ let () =
   |> List.iter (fun name ->
       List.iteri
         (fun index text ->
-          let database = Engine.context (Engine.create ()) in
-          Database.load_standard (Engine.of_context database);
+          let database = Engine.context (Engine.create ~bases:[ Lazy.force checked_standard ] ()) in
           Database.load_package (Engine.of_context database) ~name:"example" ~dependencies:[]
             [ (example, text) ];
           if Type_checker.diagnostics database example = [] then

@@ -1,0 +1,409 @@
+use standard::console
+use standard::environment
+use standard::files
+use standard::log
+use standard::network
+use standard::processes
+use standard::random
+use standard::streams
+
+public type Operation = Open | Read | Write | Connect | Accept | Resolve | Spawn
+  derives Equal, Hash
+
+type Fault(operation: Operation, error: SystemError)
+
+public opaque type World(
+  files: files::MemoryFiles,
+  console: console::CapturedConsole,
+  log: log::CapturedLog,
+  environment: environment::FixedEnvironment,
+  generator: random::Generator,
+  now: Instant,
+  elapsed: Duration,
+  hosts: Map[String, network::IpAddress],
+  programs: Map[String, fn(processes::Command) -> processes::Output],
+  faults: List[Fault],
+  pending_signals: List[processes::Signal],
+  next_handle: UInt64,
+)
+
+public fn World.new(seed: UInt64 = 0) -> World {
+  todo
+}
+
+public fn World.with_file(own self, path: Path, contents: StringSlice) -> World {
+  todo
+}
+
+public fn World.with_variable(own self, name: StringSlice, value: StringSlice) -> World {
+  todo
+}
+
+public fn World.with_input(own self, lines: own List[String]) -> World {
+  todo
+}
+
+public fn World.with_host(own self, name: StringSlice, address: network::IpAddress) -> World {
+  todo
+}
+
+public fn World.with_program(
+  own self,
+  name: StringSlice,
+  respond: own fn(processes::Command) -> processes::Output,
+) -> World {
+  todo
+}
+
+public fn World.with_time(own self, now: Instant) -> World {
+  todo
+}
+
+public fn World.output(self) -> StringSlice
+  cost time O(1)
+{
+  self.console.output()
+}
+
+public fn World.errors(self) -> StringSlice
+  cost time O(1)
+{
+  self.console.errors()
+}
+
+public fn World.records(self) -> Slice[log::Record]
+  cost time O(1)
+{
+  self.log.records.slice()
+}
+
+public fn World.file_text(self, path: Path) -> Option[String] {
+  self.files.text(path)
+}
+
+public fn World.file_bytes(self, path: Path) lends Option[List[UInt8]] {
+  todo
+}
+
+public fn World.now(self) -> Instant
+  cost time O(1)
+{
+  self.now
+}
+
+public fn World.advance(mut self, by: Duration)
+  requires !by.is_negative()
+{
+  todo
+}
+
+public fn World.fail_next(mut self, operation: Operation, error: SystemError) {
+  mut self.faults.push(Fault(operation: operation, error: error.copy()))
+}
+
+public fn World.deliver(mut self, signal: processes::Signal) {
+  mut self.pending_signals.push(signal.copy())
+}
+
+impl Console for World {
+  fn print(mut self, text: StringSlice) {
+    todo
+  }
+
+  fn print_line(mut self, text: StringSlice) {
+    todo
+  }
+
+  fn print_error(mut self, text: StringSlice) {
+    todo
+  }
+
+  fn read_line(mut self) -> Option[String] {
+    todo
+  }
+
+  fn input(mut self) -> console::Input {
+    todo
+  }
+
+  fn output(mut self) -> console::Output {
+    todo
+  }
+
+  fn error_output(mut self) -> console::Output {
+    todo
+  }
+
+  fn terminal(mut self) -> console::Terminal {
+    todo
+  }
+}
+
+impl FileRead for World {
+  fn read(mut self, file: Path) -> Result[List[UInt8], SystemError] {
+    todo
+  }
+
+  fn read_text(mut self, file: Path) -> Result[String, SystemError] {
+    todo
+  }
+
+  fn open(mut self, file: Path) -> Result[files::FileReader, SystemError] {
+    todo
+  }
+
+  fn metadata(mut self, path: Path, follow_links: Bool) -> Result[files::Metadata, SystemError] {
+    todo
+  }
+
+  fn list(mut self, directory: Path) -> Result[List[files::DirectoryEntry], SystemError] {
+    todo
+  }
+
+  fn read_link(mut self, link: Path) -> Result[Path, SystemError] {
+    todo
+  }
+
+  fn resolve(mut self, path: Path) -> Result[Path, SystemError] {
+    todo
+  }
+}
+
+impl FileWrite for World {
+  fn write(mut self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn write_text(mut self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn open(mut self, file: Path, mode: files::WriteMode) -> Result[files::File, SystemError] {
+    todo
+  }
+
+  fn create_directory(mut self, directory: Path) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn remove(mut self, path: Path) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn rename(mut self, from: Path, to: Path) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn link(mut self, target: Path, link: Path, kind: files::LinkKind) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn set_permissions(mut self, path: Path, permissions: files::Permissions) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn set_modified(mut self, path: Path, time: Instant) -> Result[Unit, SystemError] {
+    todo
+  }
+}
+
+impl NetworkClient for World {
+  fn resolve(mut self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
+    todo
+  }
+
+  fn connect(mut self, address: network::SocketAddress, timeout: Option[Duration]) -> Result[network::Connection, SystemError] {
+    todo
+  }
+
+  fn open_datagram(mut self) -> Result[network::DatagramSocket, SystemError] {
+    todo
+  }
+}
+
+impl NetworkServer for World {
+  fn listen(mut self, address: network::SocketAddress) -> Result[network::Listener, SystemError] {
+    todo
+  }
+
+  fn bind_datagram(mut self, address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError] {
+    todo
+  }
+}
+
+impl Handles for World {
+  fn read(mut self, handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn write(mut self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn read_at(
+    mut self,
+    handle: streams::Handle,
+    offset: UInt64,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn write_at(mut self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn seek(mut self, handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError] {
+    todo
+  }
+
+  fn set_length(mut self, handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn synchronize(mut self, handle: streams::Handle) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn metadata(mut self, handle: streams::Handle) -> Result[files::Metadata, SystemError] {
+    todo
+  }
+
+  fn close(mut self, handle: own streams::Handle) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn shut_down(mut self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn set_timeout(
+    mut self,
+    handle: streams::Handle,
+    direction: network::Direction,
+    timeout: Option[Duration],
+  ) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn accept(mut self, listener: streams::Handle) -> Result[network::Accepted, SystemError] {
+    todo
+  }
+
+  fn send_to(
+    mut self,
+    socket: streams::Handle,
+    bytes: Slice[UInt8],
+    address: network::SocketAddress,
+  ) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn receive_from(
+    mut self,
+    socket: streams::Handle,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[network::Datagram, SystemError] {
+    todo
+  }
+
+  fn wait(mut self, process: streams::Handle) -> Result[processes::ExitStatus, SystemError] {
+    todo
+  }
+
+  fn signal(mut self, process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn terminal_size(mut self, terminal: streams::Handle) -> Result[console::Size, SystemError] {
+    todo
+  }
+
+  fn set_raw_mode(mut self, terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError] {
+    todo
+  }
+}
+
+impl Clock for World {
+  fn now(mut self) -> Instant {
+    todo
+  }
+
+  fn monotonic(mut self) -> Duration {
+    todo
+  }
+
+  fn sleep(mut self, duration: Duration) {
+    todo
+  }
+}
+
+impl Random for World {
+  fn next(mut self) -> UInt64 {
+    todo
+  }
+}
+
+impl Environment for World {
+  fn variable(mut self, name: StringSlice) -> Option[String] {
+    todo
+  }
+
+  fn variables(mut self) -> List[environment::Variable] {
+    todo
+  }
+
+  fn current_directory(mut self) -> Result[Path, SystemError] {
+    todo
+  }
+
+  fn platform(mut self) -> environment::Platform {
+    todo
+  }
+
+  fn location(mut self, location: environment::Location) -> Option[Path] {
+    todo
+  }
+
+  fn local_zone(mut self) -> Option[String] {
+    todo
+  }
+
+  fn zone_rules(mut self, name: StringSlice) -> Option[List[UInt8]] {
+    todo
+  }
+}
+
+impl Processes for World {
+  fn run(mut self, command: processes::Command) -> Result[processes::Output, SystemError] {
+    todo
+  }
+
+  fn spawn(mut self, command: processes::Command) -> Result[processes::Child, SystemError] {
+    todo
+  }
+}
+
+impl Signals for World {
+  fn wait(mut self, signals: Slice[processes::Signal]) -> processes::Signal {
+    todo
+  }
+}
+
+impl Tasks for World {
+  fn yield_now(mut self) {
+    todo
+  }
+}
+
+impl Log for World {
+  fn record(mut self, record: log::Record) {
+    todo
+  }
+
+  fn enabled(mut self, level: log::Level) -> Bool {
+    todo
+  }
+}

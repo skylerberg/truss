@@ -1,0 +1,45 @@
+use standard::core
+
+public fn Range[Value: Ordered].is_empty(self) -> Bool
+  cost time finite
+{
+  if self.inclusive { self.start > self.stop } else { self.start >= self.stop }
+}
+
+public fn Range[Value: Ordered].contains(self, value: Value) -> Bool
+  cost time finite
+{
+  self.start <= value && (if self.inclusive { value <= self.stop } else { value < self.stop })
+}
+
+impl Iterable for Range[Value: core::Countable] {
+  type Element = Value
+
+  fn each(self) yields Value
+    ensures self.contains(result)
+    cost time finite
+  {
+    todo
+  }
+}
+
+public fn Range[Value: core::Countable].reversed(self) yields Value
+  ensures self.contains(result)
+  cost time finite
+{
+  todo
+}
+
+public fn Range[Value: core::Countable].step_by(self, step: USize) yields Value
+  requires step > 0
+  ensures self.contains(result)
+  cost time finite
+{
+  todo
+}
+
+public fn Range[Value: core::Countable].length(self) -> Option[USize]
+  cost time O(1)
+{
+  todo
+}

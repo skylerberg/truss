@@ -48,6 +48,11 @@ develop as well as make it easier to bootstrap the compiler in parts.
   - **The build, formatting, the opam file, and the tests are one dune run,**
     so they overlap, and the tests under sanitizers run beside it on a runner
     of their own.
+  - **Solver answers are cached between runs.** Proving the standard
+    library is the most expensive test, and most of its time is the solver.
+    The cache key of an answer is the query text, the solver version, and
+    the step limit. A run restores the cache from `main` and solves only
+    the queries whose text changed. Only pushes to `main` save the cache.
   - **A new push to a pull request cancels the run it replaces.**
 
 ### Documents
@@ -109,6 +114,13 @@ Every stage of stage0 is tested the same way:
 - **Fuzzing and benchmarks are tools, not tests.** They live in
   `stage0/tools/` and are run by hand. Each problem a fuzzer finds becomes a
   focused test of its own.
+- **Tests share one checked standard library.** A test that needs the
+  standard library creates its engine over a frozen base engine that
+  checked the library once for the whole test executable. A test of the
+  code database copies a store that already holds the library's state. A
+  test must not load the library's sources into a new engine: that parses
+  and checks the whole library again, so every such test gets slower each
+  time the library grows.
 - **Every test checks the code database too.** When a test ends, the harness
   computes every result the test's engines hold again, in a new engine with
   the same inputs, and fails the test if one differs. So a query that is not

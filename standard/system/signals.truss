@@ -1,0 +1,9 @@
+use standard::processes
+
+internal type SystemSignals()
+
+impl Signals for SystemSignals {
+  fn wait(self, signals: Slice[processes::Signal]) -> processes::Signal {
+    todo
+  }
+}

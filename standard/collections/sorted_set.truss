@@ -1,0 +1,228 @@
+use standard::collections
+
+public fn collections::SortedSet[Element: Ordered].new() -> collections::SortedSet[Element]
+  ensures result.length() == 0
+  cost time O(1)
+  cost allocations == 0
+{
+  collections::SortedSet(elements: [])
+}
+
+public fn collections::SortedSet[Element: Ordered].collect[Source: Cursor[Element = Element]](
+  source: own Source,
+) -> collections::SortedSet[Element] {
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].length(self) -> USize
+  cost time O(1)
+{
+  self.elements.length()
+}
+
+public fn collections::SortedSet[Element: Ordered].is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
+  cost time O(1)
+{
+  self.length() == 0
+}
+
+public fn collections::SortedSet[Element: Ordered].contains(self, element: Element) -> Bool
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].insert(mut self, element: own Element)
+  ensures self.contains(element)
+  cost amortized time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].insert_new(mut self, element: own Element) -> Bool
+  ensures self.contains(element)
+  ensures result == !old(self.contains(element))
+  cost amortized time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].remove(mut self, element: Element)
+  ensures !self.contains(element)
+  cost time O(log(old(self.length())))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].take(mut self, element: Element) -> Option[Element]
+  ensures !self.contains(element)
+  ensures (result is Some(_)) == old(self.contains(element))
+  cost time O(log(old(self.length())))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].clear(mut self)
+  ensures self.length() == 0
+  cost time O(old(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].first(self) lends Option[Element]
+  ensures (result is None) == (self.length() == 0)
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].last(self) lends Option[Element]
+  ensures (result is None) == (self.length() == 0)
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].pop_first(mut self) -> Option[Element]
+  ensures (result is None) == (old(self.length()) == 0)
+  cost time O(log(old(self.length())))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].pop_last(mut self) -> Option[Element]
+  ensures (result is None) == (old(self.length()) == 0)
+  cost time O(log(old(self.length())))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].at_or_before(self, element: Element) lends Option[Element]
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].at_or_after(self, element: Element) lends Option[Element]
+  cost time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].within(self, range: Range[Element]) yields Element
+  ensures range.contains(result)
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].retain(mut self, keep: (fn(Element) -> Bool cost time finite))
+  ensures self.length() <= old(self.length())
+  cost time O(old(self.length()) * time(keep))
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].extend[Source: Cursor[Element = Element]](
+  mut self,
+  elements: own Source,
+) {
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].is_subset_of(self, other: collections::SortedSet[Element]) -> Bool
+  cost time O(self.length() + other.length())
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].is_superset_of(self, other: collections::SortedSet[Element]) -> Bool
+  cost time O(self.length() + other.length())
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].is_disjoint_from(self, other: collections::SortedSet[Element]) -> Bool
+  cost time O(self.length() + other.length())
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered + Copyable].union(
+  self,
+  other: collections::SortedSet[Element],
+) -> collections::SortedSet[Element]
+  ensures result.length() <= self.length() + other.length()
+  cost time O(self.length() + other.length())
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered + Copyable].intersection(
+  self,
+  other: collections::SortedSet[Element],
+) -> collections::SortedSet[Element]
+  ensures result.length() <= self.length()
+  cost time O(self.length() + other.length())
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered + Copyable].difference(
+  self,
+  other: collections::SortedSet[Element],
+) -> collections::SortedSet[Element]
+  ensures result.length() <= self.length()
+  cost time O(self.length() + other.length())
+{
+  todo
+}
+
+impl Iterable for collections::SortedSet[Element: Ordered] {
+  type Element = Element
+
+  fn each(self) yields Element
+    ensures finished ==> yielded.length() == self.length()
+    cost time O(self.length())
+  {
+    todo
+  }
+}
+
+public fn collections::SortedSet[Element: Ordered].each(own self) yields own Element
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::SortedSet[Element: Ordered].reversed(self) yields Element
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+impl Equal for collections::SortedSet[Element: Ordered] {
+  fn equal(self, other: collections::SortedSet[Element]) -> Bool {
+    todo
+  }
+}
+
+impl Hash for collections::SortedSet[Element: Ordered + Hash] {
+  fn hash(self, hasher: mut Hasher) {
+    todo
+  }
+}
+
+impl Default for collections::SortedSet[Element: Ordered] {
+  fn default() -> collections::SortedSet[Element] {
+    collections::SortedSet.new()
+  }
+}
+
+impl From[List[Element]] for collections::SortedSet[Element: Ordered] {
+  fn from(value: own List[Element]) -> collections::SortedSet[Element] {
+    todo
+  }
+}

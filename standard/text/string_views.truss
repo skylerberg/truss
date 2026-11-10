@@ -1,0 +1,316 @@
+use standard::core
+
+public fn String.bytes(self) -> Slice[UInt8]
+  ensures result.length() == self.length()
+  cost time O(1)
+{
+  self.slice().bytes()
+}
+
+public fn String.is_ascii(self) -> Bool
+  cost time O(self.length())
+{
+  self.slice().is_ascii()
+}
+
+public fn String.is_boundary(self, offset: USize) -> Bool
+  cost time O(1)
+{
+  self.slice().is_boundary(offset)
+}
+
+public fn String.characters(self) yields Character
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn String.characters_with_offsets(self) yields core::Indexed[Character]
+  ensures result.index < self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn String.character_count(self) -> USize
+  ensures result <= self.length()
+  cost time O(self.length())
+{
+  self.slice().character_count()
+}
+
+public fn String.first_character(self) -> Option[Character]
+  ensures (result is None) == self.is_empty()
+  cost time O(1)
+{
+  self.slice().first_character()
+}
+
+public fn String.last_character(self) -> Option[Character]
+  ensures (result is None) == self.is_empty()
+  cost time O(1)
+{
+  self.slice().last_character()
+}
+
+public fn String.graphemes(self) yields StringSlice
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn String.lines(self) yields StringSlice
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn String.substring(self, from: USize, to: USize) -> StringSlice
+  requires from <= to
+  requires to <= self.length()
+  requires self.is_boundary(from)
+  requires self.is_boundary(to)
+  ensures result.length() == to - from
+  cost time O(1)
+{
+  self.slice().substring(from, to)
+}
+
+public fn String.get_substring(self, from: USize, to: USize) -> Option[StringSlice]
+  cost time O(1)
+{
+  self.slice().get_substring(from, to)
+}
+
+public fn String.split_at(self, offset: USize) -> core::Pair[StringSlice, StringSlice]
+  requires offset <= self.length()
+  requires self.is_boundary(offset)
+  ensures result.first.length() == offset
+  ensures result.second.length() == self.length() - offset
+  cost time O(1)
+{
+  self.slice().split_at(offset)
+}
+
+public fn String.contains(self, pattern: StringSlice) -> Bool
+  cost time O(self.length() + pattern.length())
+{
+  self.slice().contains(pattern)
+}
+
+public fn String.find(self, pattern: StringSlice) -> Option[USize]
+  ensures match result {
+    Some(offset) => offset + pattern.length() <= self.length() && self.is_boundary(offset)
+    None => !self.contains(pattern)
+  }
+  cost time O(self.length() + pattern.length())
+{
+  self.slice().find(pattern)
+}
+
+public fn String.find_last(self, pattern: StringSlice) -> Option[USize]
+  ensures match result {
+    Some(offset) => offset + pattern.length() <= self.length() && self.is_boundary(offset)
+    None => !self.contains(pattern)
+  }
+  cost time O(self.length() + pattern.length())
+{
+  self.slice().find_last(pattern)
+}
+
+public fn String.find_character(
+  self,
+  matching: (fn(Character) -> Bool cost time finite),
+) -> Option[USize]
+  ensures match result {
+    Some(offset) => offset < self.length() && self.is_boundary(offset)
+    None => true
+  }
+  cost time O(self.length() * time(matching))
+{
+  self.slice().find_character(matching)
+}
+
+public fn String.occurrences(self, pattern: StringSlice) -> USize
+  requires pattern.length() > 0
+  cost time O(self.length() + pattern.length())
+{
+  self.slice().occurrences(pattern)
+}
+
+public fn String.starts_with(self, prefix: StringSlice) -> Bool
+  cost time O(prefix.length())
+{
+  self.slice().starts_with(prefix)
+}
+
+public fn String.ends_with(self, suffix: StringSlice) -> Bool
+  cost time O(suffix.length())
+{
+  self.slice().ends_with(suffix)
+}
+
+public fn String.strip_prefix(self, prefix: StringSlice) -> Option[StringSlice]
+  ensures (result is Some(_)) == self.starts_with(prefix)
+  cost time O(prefix.length())
+{
+  self.slice().strip_prefix(prefix)
+}
+
+public fn String.strip_suffix(self, suffix: StringSlice) -> Option[StringSlice]
+  ensures (result is Some(_)) == self.ends_with(suffix)
+  cost time O(suffix.length())
+{
+  self.slice().strip_suffix(suffix)
+}
+
+public fn String.trim_start(self) -> StringSlice
+  ensures result.length() <= self.length()
+  cost time O(self.length())
+{
+  self.slice().trim_start()
+}
+
+public fn String.trim_end(self) -> StringSlice
+  ensures result.length() <= self.length()
+  cost time O(self.length())
+{
+  self.slice().trim_end()
+}
+
+public fn String.trim_matching(self, matching: (fn(Character) -> Bool cost time finite)) -> StringSlice
+  ensures result.length() <= self.length()
+  cost time O(self.length() * time(matching))
+{
+  self.slice().trim_matching(matching)
+}
+
+public fn String.split(self, separator: StringSlice) yields StringSlice
+  requires separator.length() > 0
+  cost time O(self.length() + separator.length())
+{
+  todo
+}
+
+public fn String.split_at_most(self, separator: StringSlice, parts: USize) yields StringSlice
+  requires separator.length() > 0
+  requires parts > 0
+  ensures yielded.length() < parts
+  cost time O(self.length() + separator.length())
+{
+  todo
+}
+
+public fn String.split_matching(self, matching: (fn(Character) -> Bool cost time finite)) yields StringSlice
+  cost time O(self.length() * time(matching))
+{
+  todo
+}
+
+public fn String.split_whitespace(self) yields StringSlice
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn String.split_once(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
+  requires separator.length() > 0
+  ensures (result is Some(_)) == self.contains(separator)
+  cost time O(self.length() + separator.length())
+{
+  self.slice().split_once(separator)
+}
+
+public fn String.split_once_last(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
+  requires separator.length() > 0
+  ensures (result is Some(_)) == self.contains(separator)
+  cost time O(self.length() + separator.length())
+{
+  self.slice().split_once_last(separator)
+}
+
+public fn String.replace(self, pattern: StringSlice, replacement: StringSlice) -> String
+  requires pattern.length() > 0
+  cost time O(self.length() + result.length())
+{
+  self.slice().replace(pattern, replacement)
+}
+
+public fn String.replace_first(self, pattern: StringSlice, replacement: StringSlice) -> String
+  requires pattern.length() > 0
+  cost time O(self.length() + replacement.length())
+{
+  self.slice().replace_first(pattern, replacement)
+}
+
+public fn String.repeated(self, times: USize) -> String
+  ensures result.length() == self.length() * times
+  cost time O(self.length() * times)
+{
+  self.slice().repeated(times)
+}
+
+public fn String.reversed(self) -> String
+  ensures result.length() == self.length()
+  cost time O(self.length())
+{
+  self.slice().reversed()
+}
+
+public fn String.to_uppercase(self) -> String
+  cost time O(self.length())
+{
+  self.slice().to_uppercase()
+}
+
+public fn String.to_lowercase(self) -> String
+  cost time O(self.length())
+{
+  self.slice().to_lowercase()
+}
+
+public fn String.to_ascii_uppercase(self) -> String
+  ensures result.length() == self.length()
+  cost time O(self.length())
+{
+  self.slice().to_ascii_uppercase()
+}
+
+public fn String.to_ascii_lowercase(self) -> String
+  ensures result.length() == self.length()
+  cost time O(self.length())
+{
+  self.slice().to_ascii_lowercase()
+}
+
+public fn String.equal_ignoring_ascii_case(self, other: StringSlice) -> Bool
+  cost time O(self.length())
+{
+  self.slice().equal_ignoring_ascii_case(other)
+}
+
+public fn String.pad_start(self, width: USize, fill: Character = Character" ") -> String
+  cost time O(self.length() + width)
+{
+  self.slice().pad_start(width, fill)
+}
+
+public fn String.pad_end(self, width: USize, fill: Character = Character" ") -> String
+  cost time O(self.length() + width)
+{
+  self.slice().pad_end(width, fill)
+}
+
+public fn String.to_bytes(self) -> List[UInt8]
+  ensures result.length() == self.length()
+  cost time O(self.length())
+{
+  self.slice().to_bytes()
+}
+
+public fn String.to_utf16(self) -> List[UInt16]
+  ensures result.length() <= self.length()
+  cost time O(self.length())
+{
+  self.slice().to_utf16()
+}

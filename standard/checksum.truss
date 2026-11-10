@@ -1,0 +1,42 @@
+public fn crc32(bytes: Slice[UInt8]) -> UInt32
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn crc32c(bytes: Slice[UInt8]) -> UInt32
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn adler32(bytes: Slice[UInt8]) -> UInt32
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public opaque type Crc32(state: UInt32)
+  derives Plain
+
+public fn Crc32.new() -> Crc32
+  cost time O(1)
+{
+  Crc32(state: 0)
+}
+
+public fn Crc32.update(mut self, bytes: Slice[UInt8])
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Crc32.finish(self) -> UInt32
+  cost time O(1)
+{
+  todo
+}

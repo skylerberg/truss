@@ -1,0 +1,338 @@
+use standard::console
+use standard::files
+use standard::intrinsic
+use standard::network
+use standard::processes
+
+public opaque type Handle(descriptor: intrinsic::Handle, number: UInt64)
+
+public fn Handle.simulated(number: UInt64) -> Handle
+  ensures result.number() == number
+{
+  Handle(descriptor: intrinsic::handle_from(-1), number: number)
+}
+
+public fn Handle.number(self) -> UInt64
+  cost time O(1)
+{
+  self.number
+}
+
+public type Position =
+  | FromStart(offset: UInt64)
+  | FromCurrent(offset: Int64)
+  | FromEnd(offset: Int64)
+  derives Equal
+
+public trait Reader {
+  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles
+
+  fn read_to_end(mut self, buffer: mut List[UInt8]) -> Result[USize, SystemError]
+    uses Handles
+  {
+    todo
+  }
+
+  fn read_exactly(mut self, buffer: mut List[UInt8], count: USize) -> Result[Unit, SystemError]
+    uses Handles
+  {
+    todo
+  }
+
+  fn read_text(mut self) -> Result[String, SystemError]
+    uses Handles
+  {
+    todo
+  }
+
+  fn skip(mut self, count: UInt64) -> Result[UInt64, SystemError]
+    uses Handles
+  {
+    todo
+  }
+}
+
+public trait Writer {
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+    uses Handles
+
+  fn flush(mut self) -> Result[Unit, SystemError]
+    uses Handles
+
+  fn write_all(mut self, bytes: Slice[UInt8]) -> Result[Unit, SystemError]
+    uses Handles
+  {
+    todo
+  }
+
+  fn write_text(mut self, text: StringSlice) -> Result[Unit, SystemError]
+    uses Handles
+  {
+    todo
+  }
+}
+
+public trait Seek {
+  fn seek(mut self, to: Position) -> Result[UInt64, SystemError]
+    uses Handles
+
+  fn position(mut self) -> Result[UInt64, SystemError]
+    uses Handles
+  {
+    todo
+  }
+}
+
+public opaque type ByteReader(bytes: Slice[UInt8], position: USize)
+
+public fn ByteReader.new(bytes: Slice[UInt8]) -> ByteReader
+  cost time O(1)
+{
+  ByteReader(bytes: bytes, position: 0)
+}
+
+public fn ByteReader.remaining(self) -> Slice[UInt8]
+  cost time O(1)
+{
+  todo
+}
+
+impl Reader for ByteReader {
+  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
+    todo
+  }
+}
+
+public opaque type ByteWriter(bytes: List[UInt8])
+
+public fn ByteWriter.new() -> ByteWriter
+  cost time O(1)
+{
+  ByteWriter(bytes: [])
+}
+
+public fn ByteWriter.written(self) -> Slice[UInt8]
+  cost time O(1)
+{
+  self.bytes.slice()
+}
+
+public fn ByteWriter.finish(own self) -> List[UInt8]
+  cost time O(1)
+{
+  self.bytes
+}
+
+impl Writer for ByteWriter {
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn flush(mut self) -> Result[Unit, SystemError] {
+    Ok(Unit)
+  }
+}
+
+public opaque type BufferedReader[Source: Reader](source: Source, pending: List[UInt8], start: USize, ended: Bool)
+
+public fn BufferedReader[Source: Reader].new(source: own Source, capacity: USize = 65536) -> BufferedReader[Source] {
+  todo
+}
+
+public fn BufferedReader[Source: Reader].read_line(mut self) -> Result[Option[String], SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn BufferedReader[Source: Reader].lines(mut self) yields own Result[String, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn BufferedReader[Source: Reader].read_until(
+  mut self,
+  delimiter: UInt8,
+  buffer: mut List[UInt8],
+) -> Result[USize, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn BufferedReader[Source: Reader].peek(mut self, count: USize) -> Result[Slice[UInt8], SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn BufferedReader[Source: Reader].finish(own self) -> Source {
+  todo
+}
+
+impl Reader for BufferedReader[Source: Reader] {
+  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles
+  {
+    todo
+  }
+}
+
+public opaque type BufferedWriter(pending: List[UInt8], capacity: USize, failed: Option[SystemError])
+
+public fn BufferedWriter.write(mut self, bytes: Slice[UInt8]) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn BufferedWriter.write_text(mut self, text: StringSlice) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn BufferedWriter.write_line(mut self, text: StringSlice) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn BufferedWriter.flush(mut self) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn buffered[Sink: Writer, Output, capability Granted](
+  sink: mut Sink,
+  write: (fn(mut BufferedWriter) -> Result[Output, SystemError] uses Granted),
+  capacity: USize = 65536,
+) -> Result[Output, SystemError]
+  uses Handles, Granted
+{
+  todo
+}
+
+public fn copy[Source: Reader, Sink: Writer](source: mut Source, sink: mut Sink) -> Result[UInt64, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public opaque type Limited[Source: Reader](source: Source, left: UInt64)
+
+public fn Limited[Source: Reader].new(source: own Source, limit: UInt64) -> Limited[Source] {
+  Limited(source: own source, left: limit)
+}
+
+public fn Limited[Source: Reader].finish(own self) -> Source {
+  self.source
+}
+
+impl Reader for Limited[Source: Reader] {
+  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles
+  {
+    todo
+  }
+}
+
+public type NoHandles()
+
+impl Handles for NoHandles {
+  fn read(self, handle: Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn write(self, handle: Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn read_at(
+    self,
+    handle: Handle,
+    offset: UInt64,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[USize, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn write_at(self, handle: Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn seek(self, handle: Handle, to: Position) -> Result[UInt64, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn set_length(self, handle: Handle, length: UInt64) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn synchronize(self, handle: Handle) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn metadata(self, handle: Handle) -> Result[files::Metadata, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn close(self, handle: own Handle) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn shut_down(self, handle: Handle, direction: network::Direction) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn set_timeout(
+    self,
+    handle: Handle,
+    direction: network::Direction,
+    timeout: Option[Duration],
+  ) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn accept(self, listener: Handle) -> Result[network::Accepted, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn send_to(
+    self,
+    socket: Handle,
+    bytes: Slice[UInt8],
+    address: network::SocketAddress,
+  ) -> Result[USize, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn receive_from(
+    self,
+    socket: Handle,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[network::Datagram, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn wait(self, process: Handle) -> Result[processes::ExitStatus, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn signal(self, process: Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn terminal_size(self, terminal: Handle) -> Result[console::Size, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn set_raw_mode(self, terminal: Handle, enabled: Bool) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+}

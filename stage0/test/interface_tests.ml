@@ -198,6 +198,8 @@ let () =
             \  uses Random\n\
              {\n\
             \  fn now(self) -> Instant { todo }\n\
+            \  fn monotonic(self) -> Duration { todo }\n\
+            \  fn sleep(self, duration: Duration) {}\n\
              }\n" );
         ]);
   test "a capability's impl method may repeat its impl's uses" (fun () ->
@@ -213,6 +215,8 @@ let () =
             \  {\n\
             \    todo\n\
             \  }\n\
+            \  fn monotonic(self) -> Duration { todo }\n\
+            \  fn sleep(self, duration: Duration) {}\n\
              }\n" );
         ]);
   test "a capability's impl method cannot add uses of its own" (fun () ->
@@ -224,6 +228,8 @@ let () =
         \  {\n\
         \    todo\n\
         \  }\n\
+        \  fn monotonic(self) -> Duration { todo }\n\
+        \  fn sleep(self, duration: Duration) {}\n\
          }\n"
         "types.impl_uses");
   test "an impl's method names its generic parameters its own way" (fun () ->
@@ -486,6 +492,8 @@ let () =
     \  uses Random\n\
      {\n\
     \  fn now(self) -> Instant { todo }\n\
+    \  fn monotonic(self) -> Duration { todo }\n\
+    \  fn sleep(self, duration: Duration) {}\n\
      }\n"
   in
   let impl_of database type_ wanted : Path.t =
@@ -708,18 +716,23 @@ let () =
       one_diagnostic "type P()\n  derives Iterable\n" "types.not_derivable");
   test "a capability's impl must give every method" (fun () ->
       one_diagnostic
-        "capability Log {\n\
+        "capability Journal {\n\
         \  fn write(text: StringSlice)\n\
         \  fn flush()\n\
          }\n\n\
          type Silent()\n\n\
-         impl Log for Silent {\n\
+         impl Journal for Silent {\n\
         \  fn write(self, text: StringSlice) {}\n\
          }\n"
         "types.missing_member");
   test "a capability's impl takes self or mut self" (fun () ->
       one_diagnostic
-        "type Fixed()\n\nimpl Clock for Fixed {\n  fn now(own self) -> Instant { todo }\n}\n"
+        "type Fixed()\n\n\
+         impl Clock for Fixed {\n\
+        \  fn now(own self) -> Instant { todo }\n\
+        \  fn monotonic(self) -> Duration { todo }\n\
+        \  fn sleep(self, duration: Duration) {}\n\
+         }\n"
         "types.wrong_receiver");
   test "a method's head names every generic parameter of its type" (fun () ->
       one_diagnostic "type Box[Value](value: Value)\n\nfn Box.get(self) -> Int64 { todo }\n"
