@@ -1,5 +1,5 @@
-(* The core form as text, for tests and for looking at what checking
-   built. A local is shown by the name that binds it. *)
+(* Prints the core form as text, for tests and debugging. A local is
+   printed with the name it was declared with. *)
 
 open Core
 module T = Types
@@ -10,8 +10,8 @@ let local (names : names) (found : local) =
   match (found, Hashtbl.find_opt names found) with
   | _, Some name -> name
   | Self, None -> "self"
-  | Bound id, None -> Printf.sprintf "local#%d" id
-  | Made number, None -> Printf.sprintf "made#%d" number
+  | Named id, None -> Printf.sprintf "local#%d" id
+  | Synthetic number, None -> Printf.sprintf "synthetic#%d" number
 
 let mode : T.mode -> string = function Read -> "" | Mut -> "mut " | Own -> "own "
 let list show items = String.concat ", " (List.map show items)
@@ -43,16 +43,14 @@ let rec expression names (node : expression) =
                 Printf.sprintf "%s through %s" (operand value) (callee names display))
           pieces
       ^ ")"
-  | Template { literals; made } ->
-      Printf.sprintf "template(%s) made by %s"
-        (list (Printf.sprintf "%S") literals)
-        (expression made)
+  | Template { literals; call } ->
+      Printf.sprintf "template(%s) call %s" (list (Printf.sprintf "%S") literals) (expression call)
   | Use found -> place found
   | Copy given -> "copy(" ^ operand given ^ ")"
   | Function_value { path; type_arguments = arguments } ->
       "fn " ^ Path.show path ^ type_arguments arguments
   | Constant path -> Path.show path
-  | Generic_value parameter -> parameter.name
+  | Value_parameter parameter -> parameter.name
   | Lambda { parameters; captures; body; _ } ->
       Printf.sprintf "lambda(%s)%s %s"
         (list (pattern names) parameters)
@@ -65,12 +63,12 @@ let rec expression names (node : expression) =
            (fun (name, given) ->
              name ^ ": " ^ match given with Some given -> expression given | None -> "default")
            fields)
-  | Collection { elements; built } ->
-      Printf.sprintf "%s[%s]" (collection built) (list expression elements)
-  | Entries { entries; built } ->
-      Printf.sprintf "%s[%s]" (collection built)
+  | Collection_literal { elements; construction = how } ->
+      Printf.sprintf "%s[%s]" (construction how) (list expression elements)
+  | Map_literal { entries; construction = how } ->
+      Printf.sprintf "%s[%s]" (construction how)
         (list (fun (key, value) -> expression key ^ ": " ^ expression value) entries)
-  | Updated { base; updates } ->
+  | Record_update { base; updates } ->
       Printf.sprintf "%s with (%s)" (expression base)
         (list (fun (path, value) -> String.concat "." path ^ ": " ^ expression value) updates)
   | Slice { base; start; stop; inclusive } ->
@@ -84,12 +82,12 @@ let rec expression names (node : expression) =
   | Compare { comparison = written; left; right } ->
       Printf.sprintf "(%s %s %s)" (expression left) (comparison written) (expression right)
   | Not inner -> "!" ^ expression inner
-  | Both (left, right) -> Printf.sprintf "(%s && %s)" (expression left) (expression right)
-  | Either (left, right) -> Printf.sprintf "(%s || %s)" (expression left) (expression right)
+  | And (left, right) -> Printf.sprintf "(%s && %s)" (expression left) (expression right)
+  | Or (left, right) -> Printf.sprintf "(%s || %s)" (expression left) (expression right)
   | Implies (left, right) -> Printf.sprintf "(%s ==> %s)" (expression left) (expression right)
   | Matches { value; pattern = matched } ->
       Printf.sprintf "(%s is %s)" (operand value) (pattern names matched)
-  | Next cursor -> "next(" ^ place cursor ^ ")"
+  | Cursor_next cursor -> "cursor_next(" ^ place cursor ^ ")"
   | Convert { conversion; value } ->
       Printf.sprintf "%s(%s)"
         (match conversion with
@@ -97,12 +95,12 @@ let rec expression names (node : expression) =
         | To_integer -> "to_integer"
         | From_integer -> "from_integer")
         (expression value)
-  | Any { value; trait; evidence = found } ->
+  | To_any { value; trait; evidence = found } ->
       Printf.sprintf "any %s(%s by %s)" (T.show_trait trait) (expression value) (evidence found)
   | If { condition; then_; else_ } ->
       Printf.sprintf "if %s %s%s" (expression condition) (block names then_)
         (match else_ with Some else_ -> " else " ^ block names else_ | None -> "")
-  | Match { scrutinees; arms; guards_cover } ->
+  | Match { scrutinees; arms; guards_exhaustive } ->
       Printf.sprintf "match %s {%s }%s" (list operand scrutinees)
         (String.concat ""
            (List.map
@@ -112,7 +110,7 @@ let rec expression names (node : expression) =
                   (match arm.guard with Some guard -> " if " ^ expression guard | None -> "")
                   (block names arm.body))
               arms))
-        (if guards_cover then " guards cover" else "")
+        (if guards_exhaustive then " guards exhaustive" else "")
   | Block body -> block names body
   | Provide { implementations; body } ->
       Printf.sprintf "provide %s %s"
@@ -130,7 +128,7 @@ let rec expression names (node : expression) =
   | Echo inner -> "echo " ^ expression inner
   | Result -> "result"
   | Old inner -> "old(" ^ expression inner ^ ")"
-  | Updating -> "updating"
+  | Current_target -> "current_target"
   | Quantified { quantifier; binder = bound; body } ->
       Printf.sprintf "%s %s { %s }"
         (match quantifier with Forall -> "forall" | Exists -> "exists")
@@ -147,12 +145,15 @@ let rec expression names (node : expression) =
   | Finished -> "finished"
   | Identical (left, right) ->
       Printf.sprintf "identical(%s, %s)" (expression left) (expression right)
-  | Measure { function_; arguments } ->
+  | Cost_function { function_; arguments } ->
       Printf.sprintf "%s(%s)"
         (match function_ with Log -> "log" | Power -> "power" | Time -> "time" | Calls -> "calls")
         (list expression arguments)
 
-and collection = function Array -> "array" | Inserted _ -> "inserted" | Modelled -> "modelled"
+and construction = function
+  | Array -> "array"
+  | By_insertion _ -> "by_insertion"
+  | Specification_only -> "specification_only"
 
 and callee names = function
   | Function { path; type_arguments = arguments } -> Path.show path ^ type_arguments arguments
@@ -161,16 +162,16 @@ and callee names = function
         (evidence found)
   | Capability_method { capability; name } -> Path.show capability ^ "." ^ name
   | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.operation_name operation
-  | Through function_ -> "(" ^ operand names function_ ^ ")"
+  | Indirect function_value -> "(" ^ operand names function_value ^ ")"
 
-and call names (made : call) =
-  Printf.sprintf "%s(%s)%s" (callee names made.callee)
+and call names (call : call) =
+  Printf.sprintf "%s(%s)%s" (callee names call.callee)
     (list
        (function
          | Passed { mode = passed; value } -> mode passed ^ operand names value
          | Default -> "default")
-       made.arguments)
-    (match made.lends with
+       call.arguments)
+    (match call.lends with
     | Some Mut -> " lends mut"
     | Some Own -> " lends own"
     | Some Read -> " lends"
@@ -183,7 +184,7 @@ and operand names = function
 and place names = function
   | Local found -> local names found
   | Field { base; field; _ } -> Printf.sprintf "%s.%s" (place names base) field
-  | Lent lending -> "lent " ^ expression names lending
+  | Lent call -> "lent " ^ expression names call
   | Temporary value -> "temporary " ^ expression names value
 
 and block names (body : block) =
@@ -191,30 +192,30 @@ and block names (body : block) =
     List.map (statement names) body.statements
     @ match body.value with Some value -> [ expression names value ] | None -> []
   in
-  Printf.sprintf "{ %s }%s" (String.concat "; " parts) (if body.ends then "" else " never ends")
+  Printf.sprintf "{ %s }%s" (String.concat "; " parts) (if body.diverges then " diverges" else "")
 
 and statement names (node : statement) =
   match node.kind with
-  | Let { pattern = bound; value; otherwise } ->
+  | Let { pattern = bound; value; else_ } ->
       Printf.sprintf "let %s = %s%s" (pattern names bound) (operand names value)
-        (match otherwise with Some otherwise -> " else " ^ block names otherwise | None -> "")
+        (match else_ with Some else_ -> " else " ^ block names else_ | None -> "")
   | Evaluate value -> expression names value
   | Assign { target; value } ->
       Printf.sprintf "%s = %s" (place names target) (expression names value)
-  | Update { target; value } ->
-      Printf.sprintf "update %s = %s" (place names target) (expression names value)
-  | For { pattern = bound; drive = over; clauses; body; parallel } ->
+  | Compound_assign { target; value } ->
+      Printf.sprintf "compound_assign %s = %s" (place names target) (expression names value)
+  | For { pattern = bound; iteration; clauses; body; parallel } ->
       Printf.sprintf "%sfor %s in %s%s %s"
         (if parallel then "parallel " else "")
         (pattern names bound)
-        (match over with
-        | Count { start; stop; inclusive } ->
-            Printf.sprintf "count %s%s%s" (expression names start)
+        (match iteration with
+        | Integer_range { start; stop; inclusive } ->
+            Printf.sprintf "integer_range %s%s%s" (expression names start)
               (if inclusive then "..=" else "..")
               (expression names stop)
-        | Each each -> "each " ^ expression names each
-        | Pull { cursor; next } ->
-            Printf.sprintf "pull %s%s" (place names cursor)
+        | Yielding_call call -> "yielding_call " ^ expression names call
+        | Cursor { cursor; next } ->
+            Printf.sprintf "cursor %s%s" (place names cursor)
               (match next with Some next -> " by " ^ callee names next | None -> ""))
         (loop_clauses names clauses) (block names body)
   | While { condition; clauses; body } ->
@@ -223,11 +224,11 @@ and statement names (node : statement) =
   | Parallel branches ->
       "parallel { " ^ String.concat "; " (List.map (statement names) branches) ^ " }"
   | Proof body -> "proof " ^ block names body
-  | Assert condition -> "assert " ^ clause names condition
+  | Assert found -> "assert " ^ condition names found
   | Yield { mode = lent; part } -> "yield " ^ mode lent ^ operand names part
 
-and clause names (condition : clause) =
-  expression names condition.value ^ if condition.runs then "" else " (not run)"
+and condition names (condition : condition) =
+  expression names condition.value ^ if condition.executable then "" else " (not executable)"
 
 and loop_clauses names clauses =
   String.concat ""
@@ -245,7 +246,7 @@ and cost names (spent : cost) =
     | Time -> "time"
     | Allocations -> "allocations"
     | Allocated_bytes -> "allocated_bytes"
-    | Calls (Through found) -> "calls(" ^ local names found ^ ")"
+    | Calls (Function_parameter found) -> "calls(" ^ local names found ^ ")"
     | Calls (Capability path) -> "calls(" ^ Path.show path ^ ")"
     | Calls (Capability_method (path, method_)) ->
         Printf.sprintf "calls(%s.%s)" (Path.show path) method_)
@@ -257,7 +258,7 @@ and cost names (spent : cost) =
 
 and pattern names (node : pattern) =
   match node.kind with
-  | Anything -> "_"
+  | Wildcard -> "_"
   | Bind { local = bound; mutable_; mode = held; _ } ->
       (if mutable_ then "var " else "") ^ mode held ^ local names bound
   | Variant { variant; fields } -> (
@@ -266,34 +267,34 @@ and pattern names (node : pattern) =
       | fields -> variant ^ "(" ^ pattern_fields names fields ^ ")")
   | Record fields -> "(" ^ pattern_fields names fields ^ ")"
   | Literal value -> expression names value
-  | Within { start; stop; inclusive } ->
+  | Range { start; stop; inclusive } ->
       Printf.sprintf "%s%s%s" (expression names start)
         (if inclusive then "..=" else "..")
         (expression names stop)
-  | Equals { value; _ } -> "equal to " ^ expression names value
+  | Equal_to { value; _ } -> "equal to " ^ expression names value
   | Alternatives alternatives -> String.concat " | " (List.map (pattern names) alternatives)
 
 and pattern_fields names fields =
   list (fun (name, inner) -> name ^ ": " ^ pattern names inner) fields
 
-(* The names of a definition's locals: its parameters and everything a
-   pattern binds. *)
-let names_of (parts : parts) : names =
+(* The names of all locals in a definition: its parameters and every
+   pattern binding. *)
+let names_of (definition : definition) : names =
   let names = Hashtbl.create 16 in
   let parameter (written : parameter) =
     Hashtbl.replace names written.local written.name;
     Option.iter
-      (fun (accepted : accepts) ->
-        List.iter (fun (input, name) -> Hashtbl.replace names input name) accepted.inputs)
-      written.accepts
+      (fun (contract : callback_contract) ->
+        List.iter (fun (input, name) -> Hashtbl.replace names input name) contract.inputs)
+      written.callback_contract
   in
-  (match parts with
+  (match definition with
   | Function { parameters; _ } -> List.iter parameter parameters
   | Trait laws -> List.iter (fun (written : law) -> List.iter parameter written.parameters) laws
-  | Type _ | Constant _ | Test _ | Law_proof _ | Nothing -> ());
-  Core_walk.parts
+  | Type _ | Constant _ | Test _ | Law_proof _ | Empty -> ());
+  Core_walk.definition
     {
-      Core_walk.nothing with
+      Core_walk.ignore_all with
       pattern =
         (fun (node : pattern) ->
           match node.kind with
@@ -306,20 +307,20 @@ let names_of (parts : parts) : names =
               Hashtbl.replace names bound name
           | _ -> ());
     }
-    parts;
+    definition;
   names
 
 let parameter names (written : parameter) =
   Printf.sprintf "%s%s: %s%s" (mode written.mode) written.name (T.show written.type_)
     (match written.default with Some value -> " = " ^ expression names value | None -> "")
 
-let parts (parts : parts) =
-  let names = names_of parts in
+let definition (definition : definition) =
+  let names = names_of definition in
   let lines =
-    match parts with
+    match definition with
     | Function { parameters; contract; body } -> (
         [ "fn(" ^ list (parameter names) parameters ^ ")" ]
-        @ List.map (fun condition -> "requires " ^ clause names condition) contract.requires
+        @ List.map (fun found -> "requires " ^ condition names found) contract.requires
         @ List.map (fun value -> "ensures " ^ expression names value) contract.ensures
         @ (match contract.decreases with
           | [] -> []
@@ -348,8 +349,8 @@ let parts (parts : parts) =
     | Constant value -> [ expression names value ]
     | Test body -> [ "test " ^ block names body ]
     | Law_proof body -> [ "proof " ^ block names body ]
-    | Nothing -> []
+    | Empty -> []
   in
   String.concat "\n" lines
 
-let show (form : t) = parts form.parts
+let show (form : t) = definition form.definition

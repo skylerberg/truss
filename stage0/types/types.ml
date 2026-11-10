@@ -190,7 +190,7 @@ let map_argument_capabilities f = function
   | Capabilities capabilities -> Capabilities (f capabilities)
   | Value _ as value -> value
 
-let unknown_capabilities capabilities =
+let has_capability_variable capabilities =
   List.exists (function Capability_variable _ -> true | _ -> false) capabilities
 
 let rec map f type_ =
@@ -433,12 +433,13 @@ let substitute_signature substitution (signature : signature) =
     uses = substitute_capabilities substitution signature.uses;
   }
 
-let inside ~generics ~uses (signature : signature) =
+let method_in_impl ~impl_generics ~impl_uses (signature : signature) =
   {
     signature with
-    generics = generics @ signature.generics;
+    generics = impl_generics @ signature.generics;
     uses =
-      signature.uses @ List.filter (fun capability -> not (List.mem capability signature.uses)) uses;
+      signature.uses
+      @ List.filter (fun capability -> not (List.mem capability signature.uses)) impl_uses;
   }
 
 let function_type_of (signature : signature) =

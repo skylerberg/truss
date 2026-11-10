@@ -42,7 +42,7 @@ and call_named state env ?expected (value : expression) (callee : expression)
   | Old -> (
       match arguments with
       | [ argument ] ->
-          draft state value (fun () -> Old (built state argument.value));
+          register_expression state value (fun () -> Old (build_expression state argument.value));
           expression state env ?expected argument.value
       | _ ->
           arguments_alone state env arguments
@@ -57,9 +57,9 @@ and call_named state env ?expected (value : expression) (callee : expression)
           let second_type = expression state env ~expected:first_type second.value in
           if not (unify state first_type second_type) then
             mismatch state second.value.span ~expected:first_type ~found:second_type;
-          draft state value (fun () ->
-              let first = built state first.value in
-              Identical (first, built state second.value));
+          register_expression state value (fun () ->
+              let first = build_expression state first.value in
+              Identical (first, build_expression state second.value));
           T.bool
       | _ ->
           report state
@@ -67,13 +67,15 @@ and call_named state env ?expected (value : expression) (callee : expression)
             value.span "`identical` takes two values of one type.";
           arguments_alone state env arguments T.bool)
   | Cost_function function_ ->
-      draft state value (fun () ->
-          Measure
+      register_expression state value (fun () ->
+          Cost_function
             {
               function_ =
                 (match function_ with Log -> Log | Power -> Power | Time -> Time | Calls -> Calls);
               arguments =
-                List.map (fun (argument : argument) -> built state argument.value) arguments;
+                List.map
+                  (fun (argument : argument) -> build_expression state argument.value)
+                  arguments;
             });
       arguments_alone state env arguments T.Integer
   | Definition (Type, path) -> (
@@ -150,7 +152,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                 (Unify.unify_arguments state.unifier head
                    (match type_ with T.Named { arguments; _ } -> arguments | _ -> []));
               (match (expected, instance.signature.output) with
-              | Some expected, Returns output -> hint state output expected
+              | Some expected, Returns output -> unify_as_hint state output expected
               | _ -> ());
               let matched, left_out =
                 match_arguments state value instance.signature.parameters arguments ~record:false
@@ -184,7 +186,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                       let receiver_type = expression state env inner in
                       if inner != receiver.value then begin
                         record state receiver.value receiver_type;
-                        same state receiver.value inner
+                        alias_expression state receiver.value inner
                       end;
                       if not (unify state receiver_type type_) then
                         mismatch state inner.span ~expected:type_ ~found:receiver_type;
@@ -327,7 +329,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
         uses = instance.signature.uses;
         result;
       };
-  Form.draft_call state value;
+  Form.register_call state value;
   resolve_evidence state value self_type reference;
   normalize state result
 
@@ -377,7 +379,7 @@ and capability_call state env (value : expression) capability (member : name) ar
             uses = [ T.Capability capability ];
             result;
           };
-      Form.draft_call state value;
+      Form.register_call state value;
       result
   | None ->
       arguments_alone state env arguments
@@ -550,7 +552,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
             mismatch state receiver.span ~expected:self_type ~found:receiver_type
       | None -> ());
       (match (expected, instance.signature.output) with
-      | Some expected, Returns output -> hint state output expected
+      | Some expected, Returns output -> unify_as_hint state output expected
       | _ -> ());
       let matched, left_out =
         match_arguments state value instance.signature.parameters arguments ~record:false
@@ -663,7 +665,7 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
         uses = instance.signature.uses;
         result;
       };
-  Form.draft_call state value;
+  Form.register_call state value;
   (match receiver_type with
   | T.Any _ -> ()
   | _ -> resolve_evidence state value receiver_type reference);

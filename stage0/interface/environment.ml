@@ -287,7 +287,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
         match definition.kind with
         | Function { signature; _ } | Method_declaration signature ->
             let lowered =
-              T.inside ~generics:within.header_generics ~uses:within.header_uses
+              T.method_in_impl ~impl_generics:within.header_generics ~impl_uses:within.header_uses
                 (Lower.signature context ~owner:path ~head:[] ~self_type:within.self_type signature)
             in
             (* An [impl]'s method ends when its trait's does, since it keeps the

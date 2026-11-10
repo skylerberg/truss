@@ -36,13 +36,13 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Local id -> (
       state.references <- id :: state.references;
       state.tables.meanings.(value.id) <- Some (Local_value id);
-      draft state value (fun () -> Use (Local (Bound id)));
+      register_expression state value (fun () -> Use (Local (Named id)));
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
       | None -> bug "the local `%s` has no type" text)
   | Value_parameter parameter ->
       state.tables.meanings.(value.id) <- Some (Generic_value parameter);
-      draft state value (fun () -> Generic_value parameter);
+      register_expression state value (fun () -> Value_parameter parameter);
       T.builtin USize
   | Type_parameter _ | Capability_parameter _ ->
       error state Not_a_value value.span (Printf.sprintf "`%s` is a type, not a value." text)
@@ -53,13 +53,13 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
           Option.iter (explicit_type_arguments state value instance) type_arguments;
           state.tables.meanings.(value.id) <-
             Some (Global { path; type_arguments = instance.type_arguments });
-          draft state value (fun () -> Form.function_value state value);
+          register_expression state value (fun () -> Form.function_value state value);
           T.Function (T.function_type_of instance.signature)
       | Some (Error report) -> T.Error report
       | None -> bug "`%s` has no signature" (Path.show path))
   | Definition (Constant, path) -> (
       state.tables.meanings.(value.id) <- Some (Global { path; type_arguments = [] });
-      draft state value (fun () -> Constant path);
+      register_expression state value (fun () -> Constant path);
       match Query.demand state.database Environment.constant_type path with
       | Some type_ -> type_
       | None -> bug "the constant `%s` has no type" (Path.show path))
@@ -67,7 +67,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       if Intrinsic.builtin_of_path path = Some Unit then begin
         state.tables.meanings.(value.id) <-
           Some (Variant_value { type_ = T.unit; variant = "Unit" });
-        draft state value (fun () -> Construct { variant = None; fields = [] });
+        register_expression state value (fun () -> Construct { variant = None; fields = [] });
         T.unit
       end
       else
@@ -87,7 +87,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
                 List.find_opt (fun (written : T.field) -> written.field_name = field) fields
               with
               | Some written ->
-                  draft state value (fun () ->
+                  register_expression state value (fun () ->
                       Use (Field { base = Local Self; field; type_ = Form.type_of state value }));
                   written.field_type
               | None -> bug "the field `%s` is not in its record" field)
@@ -95,7 +95,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       | _ -> bug "the field `%s` is named outside its type" field)
   | Result_value -> (
       state.tables.meanings.(value.id) <- Some Specification_value;
-      draft state value (fun () -> Result);
+      register_expression state value (fun () -> Result);
       match env.output with
       | Some output -> output_type output
       | None -> bug "`result` is named where nothing is returned")
@@ -106,7 +106,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Yielded -> (
       (* The parts handed out so far, in order. *)
       state.tables.meanings.(value.id) <- Some Specification_value;
-      draft state value (fun () -> Yielded);
+      register_expression state value (fun () -> Yielded);
       let part =
         match (env.loop_element, env.output) with
         | Some element, _ -> Some element
@@ -118,7 +118,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       | None -> bug "`yielded` is named where nothing is handed out")
   | Finished ->
       state.tables.meanings.(value.id) <- Some Specification_value;
-      draft state value (fun () -> Finished);
+      register_expression state value (fun () -> Finished);
       T.bool
   | Unknown report -> T.Error report
   | Binding | Module _ -> bug "the name `%s` is not resolved" text
@@ -128,7 +128,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
 and variant_value state (value : expression) type_path variant ~arguments =
   let type_ = T.Named { path = type_path; arguments } in
   state.tables.meanings.(value.id) <- Some (Variant_value { type_; variant });
-  draft state value (fun () -> Form.variant_value state value type_path variant);
+  register_expression state value (fun () -> Form.variant_value state value type_path variant);
   match Members.variants state.database type_path arguments with
   | Some variants -> (
       match
@@ -211,7 +211,7 @@ and static_member state (value : expression) type_ (member : name) =
         | Some constant -> (
             state.tables.meanings.(value.id) <-
               Some (Global { path = constant; type_arguments = [] });
-            draft state value (fun () -> Constant constant);
+            register_expression state value (fun () -> Constant constant);
             match Query.demand state.database Environment.constant_type constant with
             | Some type_ -> type_
             | None -> bug "the constant `%s` has no type" (Path.show constant))
@@ -226,7 +226,7 @@ and static_member state (value : expression) type_ (member : name) =
                     | None -> ());
                     state.tables.meanings.(value.id) <-
                       Some (Global { path = method_path; type_arguments = instance.type_arguments });
-                    draft state value (fun () -> Form.function_value state value);
+                    register_expression state value (fun () -> Form.function_value state value);
                     T.Function (T.function_type_of instance.signature)
                 | Some (Error report) -> T.Error report
                 | None -> bug "the method `%s` has no signature" (Path.show method_path))
@@ -278,7 +278,7 @@ and finish_call state (value : expression) callee (instance : instance) argument
   state.tables.calls.(value.id) <-
     Some { callee; arguments; defaults_left_out = left_out; uses = instance.signature.uses; result };
   note_lending state value instance.signature.output;
-  Form.draft_call state value;
+  Form.register_call state value;
   (* A call to a [yields] method outside a [for] loop makes a cursor. *)
   match instance.signature.output with
   | Yields _ -> cursor_type state callee instance
@@ -411,10 +411,11 @@ and trait_candidates state receiver_type name =
                (Query.demand state.database Names.traits_declaring (package, name)))
            (Members.visible_packages state.database state.package))
 
-(* Whether the traits that give a type one name are one family: each is
-   reached from another through what it requires. Only then are their
-   methods versions of one method. Two unrelated traits that share a name
-   stay apart whatever way each takes [self], since otherwise a trait added
+(* Whether the traits that declare a method of the same name are related:
+   each requires, or is required by, another trait in the list. Only then
+   are their methods versions of one method (such as a [self] version and a
+   [mut self] version). Unrelated traits that share a method name stay
+   ambiguous, whatever receiver each method takes. Otherwise a trait added
    later could take over a call on a temporary without an error. *)
 and one_family state (traits : T.trait_reference list) =
   let requires (first : T.trait_reference) (second : T.trait_reference) =

@@ -68,7 +68,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
             uses = function_type.uses;
             result;
           };
-      Form.draft_call ~through:callee state value;
+      Form.register_call ~function_value:callee state value;
       result
   | T.Error _ | T.Hole -> arguments_alone state env arguments callee_type
   | _ ->
@@ -87,7 +87,7 @@ and argument_value state env (value : expression) (parameter : T.parameter_info)
   let found = expression state env ~expected:parameter.type_ inner in
   if inner != value then begin
     record state value found;
-    same state value inner
+    alias_expression state value inner
   end;
   let conversion = coerce state env ~argument:true value ~found ~expected:parameter.type_ in
   check_mode state value parameter found;
@@ -296,7 +296,7 @@ and named_call state env ?expected (value : expression) path (signature : T.sign
   let instance = instantiate state value.span signature in
   explicit_type_arguments state value instance type_arguments;
   (match (expected, instance.signature.output) with
-  | Some expected, Returns output -> hint state output expected
+  | Some expected, Returns output -> unify_as_hint state output expected
   | _ -> ());
   let matched, left_out =
     match_arguments state value instance.signature.parameters arguments ~record:false
@@ -318,7 +318,7 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
     | None -> instantiate_type state value.span type_path
   in
   let type_ = T.Named { path = type_path; arguments = type_arguments } in
-  (match expected with Some expected -> hint state type_ expected | None -> ());
+  (match expected with Some expected -> unify_as_hint state type_ expected | None -> ());
   let fields =
     match variant with
     | None -> (
@@ -381,5 +381,5 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
             uses = [];
             result = type_;
           };
-      Form.draft_call state value;
+      Form.register_call state value;
       type_

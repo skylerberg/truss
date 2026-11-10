@@ -40,7 +40,7 @@ let form database (path : Path.t) : Core.t option =
           let local () : Core.local =
             let local = !made in
             incr made;
-            Made local
+            Synthetic local
           in
           (* The code has no text of its own: every node comes from where the
              type is declared. *)
@@ -48,7 +48,9 @@ let form database (path : Path.t) : Core.t option =
           let node type_ kind : Core.expression = { id = id (); origin; type_; kind } in
           let pattern type_ kind : Core.pattern = { id = id (); origin; type_; kind } in
           let statement kind : Core.statement = { id = id (); origin; kind } in
-          let giving value : Core.block = { statements = []; value = Some value; ends = true } in
+          let giving value : Core.block =
+            { statements = []; value = Some value; diverges = false }
+          in
           let arm found body : Core.arm = { patterns = [ found ]; guard = None; body; origin } in
           let self_type = interface.for_type in
           let bounds (parameter : T.parameter) =
@@ -74,7 +76,7 @@ let form database (path : Path.t) : Core.t option =
                       mode = (match receiver with Mut -> Mut | Own -> Own | _ -> Read);
                       type_;
                       default = None;
-                      accepts = None;
+                      callback_contract = None;
                     };
                   ]
               | Some (Static, _) | None -> [])
@@ -86,7 +88,7 @@ let form database (path : Path.t) : Core.t option =
                     mode = info.mode;
                     type_ = info.type_;
                     default = None;
-                    accepts = None;
+                    callback_contract = None;
                   })
                 signature.parameters
           in
@@ -190,12 +192,13 @@ let form database (path : Path.t) : Core.t option =
                                 let mine = bound Fun.id fields in
                                 arm (binding variant mine) (each (Some variant) index (parts mine)))
                               variants;
-                          guards_cover = false;
+                          guards_exhaustive = false;
                         }))
           in
-          (* What [same] gives of the parts of [other] where it is the
-             variant [self] is, and [otherwise] where it is another. *)
-          let of_other other type_ variant (mine : (T.field * Core.place) list) ~same ~otherwise =
+          (* Matches [other]. If [other] is the same variant as [self], the
+             result is [same] applied to the fields of [other]. If it is a
+             different variant, the result is [different ()]. *)
+          let of_other other type_ variant (mine : (T.field * Core.place) list) ~same ~different =
             match variant with
             | None -> same (record_parts other)
             | Some variant ->
@@ -208,8 +211,8 @@ let form database (path : Path.t) : Core.t option =
                          arm (binding variant theirs) (giving (same (parts theirs)))
                          ::
                          (if alone then []
-                          else [ arm (pattern self_type Anything) (giving (otherwise ())) ]);
-                       guards_cover = false;
+                          else [ arm (pattern self_type Wildcard) (giving (different ())) ]);
+                       guards_exhaustive = false;
                      })
           in
           let bool = T.bool and unit = T.unit in
@@ -228,7 +231,7 @@ let form database (path : Path.t) : Core.t option =
                       in
                       match so_far with
                       | None -> Some this
-                      | Some so_far -> Some (node bool (Both (so_far, this))))
+                      | Some so_far -> Some (node bool (And (so_far, this))))
                     None mine theirs
                   |> function
                   | Some all -> all
@@ -241,7 +244,7 @@ let form database (path : Path.t) : Core.t option =
                           node bool (Matches { value = Place other; pattern = is variant })
                       | _ ->
                           of_other other bool variant mine ~same:(each_equal mine)
-                            ~otherwise:(fun () -> node bool (Boolean false))))
+                            ~different:(fun () -> node bool (Boolean false))))
             | "Hash", "hash" ->
                 let hasher, hasher_type =
                   match List.rev parameters with
@@ -295,7 +298,7 @@ let form database (path : Path.t) : Core.t option =
                                       unit)))
                             mine;
                       value = None;
-                      ends = true;
+                      diverges = false;
                     })
             | "Ordered", "compare" -> (
                 let other = given () in
@@ -334,7 +337,7 @@ let form database (path : Path.t) : Core.t option =
                                              }))
                                        (giving (node result (Use (Local decided))));
                                    ];
-                                 guards_cover = false;
+                                 guards_exhaustive = false;
                                }))
                 in
                 let number = T.builtin UInt32 in
@@ -343,7 +346,7 @@ let form database (path : Path.t) : Core.t option =
                     of_self result (fun variant _ mine ->
                         giving
                           (of_other other result variant mine ~same:(in_turn mine)
-                             ~otherwise:(fun () -> ordering "Equal")))
+                             ~different:(fun () -> ordering "Equal")))
                 | Some variants ->
                     (* The other's variant as a number, which this one's is
                        compared with when the two differ. *)
@@ -359,7 +362,7 @@ let form database (path : Path.t) : Core.t option =
                                    arm (is variant)
                                      (giving (node number (Integer (Z.of_int index)))))
                                  variants;
-                             guards_cover = false;
+                             guards_exhaustive = false;
                            })
                     in
                     let by_number index =
@@ -382,7 +385,7 @@ let form database (path : Path.t) : Core.t option =
                       of_self result (fun variant index mine ->
                           giving
                             (of_other other result variant mine ~same:(in_turn mine)
-                               ~otherwise:(fun () -> by_number index)))
+                               ~different:(fun () -> by_number index)))
                     in
                     {
                       compared with
@@ -401,7 +404,7 @@ let form database (path : Path.t) : Core.t option =
                                           mode = Own;
                                         });
                                  value = Value numbered;
-                                 otherwise = None;
+                                 else_ = None;
                                });
                         ];
                     })
@@ -424,15 +427,15 @@ let form database (path : Path.t) : Core.t option =
           in
           Some
             {
-              parts =
+              definition =
                 Function
                   {
                     parameters;
                     contract = { requires = []; ensures = []; decreases = []; costs = [] };
                     body = Some body;
                   };
-              nodes = !nodes;
-              made = !made;
+              node_count = !nodes;
+              synthetic_local_count = !made;
             }
       | _ -> None)
   | _ -> None
