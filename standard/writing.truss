@@ -1,15 +1,18 @@
 use standard::growth
 use standard::intrinsic
-use standard::system::calls
 
-internal fn byte(output: mut intrinsic::Storage[UInt8], value: UInt8) {
+internal fn byte(output: mut intrinsic::Storage[UInt8], value: UInt8)
+  cost time finite
+{
   if intrinsic::storage_length(output) >= intrinsic::storage_capacity(output) {
     growth::reserve(mut output, additional: 1)
   }
   intrinsic::storage_push(mut output, value: value)
 }
 
-internal fn append(output: mut intrinsic::Storage[UInt8], bytes: intrinsic::View[UInt8]) {
+internal fn append(output: mut intrinsic::Storage[UInt8], bytes: intrinsic::View[UInt8])
+  cost time finite
+{
   let count = intrinsic::view_length(bytes)
   let start = intrinsic::storage_length(output)
   growth::reserve(mut output, additional: count)
@@ -21,7 +24,9 @@ internal fn append(output: mut intrinsic::Storage[UInt8], bytes: intrinsic::View
   }
 }
 
-internal fn code_point(output: mut intrinsic::Storage[UInt8], code: UInt32) {
+internal fn code_point(output: mut intrinsic::Storage[UInt8], code: UInt32)
+  cost time finite
+{
   if code < 128 {
     byte(mut output, value: intrinsic::convert(code))
   } else if code < 2048 {
@@ -69,7 +74,9 @@ internal fn truth(output: mut intrinsic::Storage[UInt8], value: Bool) {
   }
 }
 
-internal fn float64(output: mut intrinsic::Storage[UInt8], value: Float64) {
+internal fn float64(output: mut intrinsic::Storage[UInt8], value: Float64)
+  cost time finite
+{
   shortest_that_reads_back(mut output, value: value, as_float32: false)
 }
 
@@ -77,7 +84,9 @@ internal fn float32(output: mut intrinsic::Storage[UInt8], value: Float32) {
   shortest_that_reads_back(mut output, value: intrinsic::convert(value), as_float32: true)
 }
 
-fn shortest_that_reads_back(output: mut intrinsic::Storage[UInt8], value: Float64, as_float32: Bool) {
+fn shortest_that_reads_back(output: mut intrinsic::Storage[UInt8], value: Float64, as_float32: Bool)
+  cost time finite
+{
   let infinity = intrinsic::from_bits[UInt64, Float64](9218868437227405312)
   if intrinsic::is_nan(value) {
     append(mut output, bytes: "NaN".slice().bytes)
@@ -89,7 +98,9 @@ fn shortest_that_reads_back(output: mut intrinsic::Storage[UInt8], value: Float6
     var digits: Int32 = 1
     var text = with_digits(value, digits: digits)
     while digits < 17 && !reads_back(intrinsic::storage_view(text), value: value, as_float32: as_float32)
-      invariant calls::ends_with_zero_byte(intrinsic::storage_view(text))
+      invariant intrinsic::storage_length(text) > 0
+      invariant intrinsic::storage_model(text)[intrinsic::storage_length(text) - 1] == 0
+      decreases 17 - digits
     {
       digits += 1
       text = with_digits(value, digits: digits)
@@ -110,7 +121,9 @@ fn shortest_that_reads_back(output: mut intrinsic::Storage[UInt8], value: Float6
 }
 
 fn with_digits(value: Float64, digits: Int32) -> intrinsic::Storage[UInt8]
-  ensures calls::ends_with_zero_byte(intrinsic::storage_view(result))
+  ensures intrinsic::storage_length(result) > 0
+  ensures intrinsic::storage_model(result)[intrinsic::storage_length(result) - 1] == 0
+  cost time finite
 {
   var text: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(40)
   let length = intrinsic::libc_snprintf(
@@ -127,7 +140,9 @@ fn with_digits(value: Float64, digits: Int32) -> intrinsic::Storage[UInt8]
 }
 
 fn reads_back(text: intrinsic::View[UInt8], value: Float64, as_float32: Bool) -> Bool
-  requires calls::ends_with_zero_byte(text)
+  requires intrinsic::view_length(text) > 0
+  requires intrinsic::view_model(text)[intrinsic::view_length(text) - 1] == 0
+  cost time finite
 {
   let read = intrinsic::libc_strtod(text)
   if as_float32 {
