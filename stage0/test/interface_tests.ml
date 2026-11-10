@@ -279,6 +279,7 @@ let property name expected text type_ check =
 let option type_ = Types.named (standard [ "option" ] "Option") [ type_ ]
 let list type_ = Types.named (standard [ "list" ] "List") [ type_ ]
 let slice type_ = Types.named (standard [ "list" ] "Slice") [ type_ ]
+let string = Types.named (standard [ "text" ] "String") []
 
 let () =
   property "an integer is Plain" true "" (fun _ -> int64) Interface.Impls.plain;
@@ -319,6 +320,17 @@ let () =
   property "an opaque type that derives Plain is Plain" true
     "public opaque type Token(code: Int64)\n  derives Plain\n"
     (fun _ -> Types.named (app "Token") [])
+    Interface.Impls.plain;
+  property "a generic opaque type is Plain when the fields that hold its argument are" false
+    "public opaque type Box[Value](inner: Value)\n  derives Plain\n"
+    (fun _ -> Types.named (app "Box") [ string ])
+    Interface.Impls.plain;
+  property "an opaque type is Plain whatever an argument that no field holds is" true
+    "public opaque type Id[Entity](value: UInt64)\n  derives Plain\n"
+    (fun _ -> Types.named (app "Id") [ string ])
+    Interface.Impls.plain;
+  property "a Slice is Plain whatever its elements are" true ""
+    (fun _ -> slice string)
     Interface.Impls.plain;
   property "a type defined as todo is not Copyable" false "type Session = todo\n"
     (fun _ -> Types.named (app "Session") [])
