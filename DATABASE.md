@@ -547,8 +547,7 @@ what it read in turn.
   from. Code generation's queries are portable: an instance's LIR, a pulled
   method's version, an instance's own hash and what it refers to, its group,
   its key, and a test's key. A type checker's result is found through the
-  state its worktree starts from, and keeping every result's reads a second
-  time would double what a state takes in the store.
+  state its worktree starts from, so its reads are not kept a second time.
 - **Facts are kept when a state is written,** and by `Engine.record`.
 - **A result whose bytes are not kept is no fact,** since there would be no
   value to give. It is cheap to compute, which is why its bytes are not
@@ -655,8 +654,8 @@ the total written stays a constant multiple of what changed.
 Folding costs the state's size, so no command should wait for it:
 
 - **The background process folds a session while no request is waiting.**
-  A first test run adds half again to a state that only a check made, and
-  the command after it finds the session as it left it.
+  A first test run adds much to a state that only a check made, and the
+  command after it finds the session as it left it.
 - **A command waits for a fold only when the differences have grown to
   twice the whole state,** which happens only if requests never leave the
   process a second to itself.
@@ -716,9 +715,8 @@ them, with sorted indexes like git's pack files:
   two processes both add is in both segments, which is harmless, since its
   name is its hash.
 - **Records are gathered and written together,** a megabyte at a time, and
-  whenever the store is flushed. A first check adds hundreds of thousands of
-  records, and a system call for each would be most of the time adding them
-  takes. A record that is not written yet is read from memory.
+  whenever the store is flushed, so that adding a record is not a system
+  call. A record that is not written yet is read from memory.
 - **A segment is sealed** at 64 MB, and when its process ends or closes the
   store, with an index beside it: its keys sorted, each with its record's
   offset and length, in fixed-width entries. The index is read into memory as
@@ -921,11 +919,10 @@ it exits after three hours without a request, the default of both.
 - **While no request is waiting, the process scans every open worktree each
   second,** and brings each state up to date, so diagnostics are current
   before anyone asks for them, and overlaps are found as work happens.
-- **Scanning is O(files) in stamps,** a few milliseconds for ten thousand
-  files. FSEvents on macOS and inotify on Linux would make it O(change), but
-  OCaml reaches them only through C bindings, which stage0 has none of yet.
-  Since a command scans anyway, adding them changes only how soon the
-  process hears of a change.
+- **Scanning is O(files) in stamps.** FSEvents on macOS and inotify on Linux
+  would make it O(change), but OCaml reaches them only through C bindings,
+  which stage0 has none of yet. Since a command scans anyway, adding them
+  changes only how soon the process hears of a change.
 
 ### Starting a session
 
@@ -1136,9 +1133,9 @@ with the same inputs.
 - **Times.** `stage0/tools/database_timing` makes a package of a given size
   in a store of its own and times a first check, writing the state, opening
   it as a new process does, and three edits, each with what the engine
-  computed and found. The counts of work say whether what is computed
-  follows the change; the times say what it costs, and show what the counts
-  do not, such as work done for each reader of a result.
+  computed and found. It is a tool, run by hand, for work the counts do not
+  show, such as what is done for each reader of a result. No document
+  records what it prints.
 
 ## Testing
 
@@ -1233,7 +1230,6 @@ about a small input.
 - **The rules that span a package.** A package's checks are one result that
   reads every module's declarations, every `impl`, and every generic body of
   the package, so it is computed again when a definition is added or removed
-  and when any of those changes. What it does for each definition is small,
-  so adding a function to a package of eight thousand costs milliseconds,
-  but the cost follows the package. Splitting it into a result for each
-  definition and one for each lookup would make it follow the change.
+  and when any of those changes, and its cost follows the package. Splitting
+  it into a result for each definition and one for each lookup would make it
+  follow the change.

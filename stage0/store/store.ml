@@ -235,9 +235,8 @@ let new_writer t =
   in
   { segment; descriptor; size = String.length header; pending = Buffer.create 4096 }
 
-(* Records are gathered and written to the file together: a build adds
-   hundreds of thousands, and a system call for each would be most of the
-   time adding them takes. *)
+(* Records are gathered and written to the file together, so that adding one
+   is not a system call. *)
 let pending_limit = 1024 * 1024
 
 let drain writer =

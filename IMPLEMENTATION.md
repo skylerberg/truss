@@ -37,6 +37,18 @@ document has no sections that list what changed, what an earlier version
 did, or which review settled what; when the design changes, the document is
 rewritten to describe the new design.
 
+A document records no measurement. A time or a size is true of one commit,
+and a document that states one gives every later change something to measure
+again. What was measured belongs in the commit message or the pull request
+it explains.
+
+### Comments
+
+A comment says what the code cannot: a reason, an invariant, or a trap. One
+that restates the code, labels a section, or retells a document is left
+out. A comment never points at a document, a section of one, or another
+file, since such a pointer goes stale when what it names moves.
+
 ### Testing
 
 Every stage of stage0 is tested the same way:
@@ -129,10 +141,9 @@ The full design is in [TYPECHECKER.md](TYPECHECKER.md). In short:
 - **BLAKE3** for every hash: fingerprints, keys, and the names of values in
   the store. It is implemented in `stage0/blake3` from the specification,
   since `digestif` provides BLAKE2 but not BLAKE3, and tested against the
-  official test vectors. Hashing is the largest single cost of writing a
-  state, so the compression function keeps its sixteen words in local
-  variables and writes each mixing step out, which is what a hash in plain
-  OCaml needs to be fast.
+  official test vectors. The compression function keeps its sixteen words in
+  local variables and writes each mixing step out, which is what a hash in
+  plain OCaml needs to be fast.
 - **A result's fingerprint is the hash of its marshaled bytes,** written
   without sharing, so that the bytes follow from the value and not from
   which of its parts are one block in memory. Marshaled bytes mean something
