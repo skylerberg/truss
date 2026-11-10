@@ -496,8 +496,9 @@ let built_entry body =
   Lir_builder.finish b (Return (Some (Copy (Lir_builder.at result))));
   instance "entry" (Lir_builder.build b ~parameters:[] ~result:(Some (value int32)))
 
-let operate b ?destination ?(type_arguments = [ int32 ]) operation arguments =
-  Intrinsics.lower (shape_env ()) b intrinsic_types operation ~type_arguments arguments ~destination
+let operate b ?destination ?(type_arguments = [ int32 ]) ?value_arguments operation arguments =
+  Intrinsics.lower ?value_arguments (shape_env ()) b intrinsic_types operation ~type_arguments
+    arguments ~destination
     ~site:{ definition = definition "entry"; line = 0; column = 1 }
 
 let () =
@@ -549,6 +550,42 @@ let () =
               emit b (Assign (at sum, Binary (Add, Copy (at sum), Copy (at length32))));
               emit b (Assign (at sum, Binary (Add, Copy (at sum), Copy (at popped))));
               sum);
+        ]);
+  test "an array's elements are moved into new storage, in order" (fun () ->
+      let open Lir_builder in
+      let storage_ty =
+        Ground.Named { path = Intrinsic.builtin_path Storage; arguments = [ Type int32 ] }
+      in
+      let array_ty =
+        Ground.Named
+          { path = Intrinsic.builtin_path Array; arguments = [ Type int32; Value (Z.of_int 3) ] }
+      in
+      expect_status 165
+        [
+          built_entry (fun b ->
+              let array = local b ~name:"array" (value array_ty) in
+              List.iteri
+                (fun index n ->
+                  emit b (Assign (at array / Index (usize index), Use (constant_int32 n))))
+                [ 4; 5; 6 ];
+              let storage = local b ~name:"storage" (value storage_ty) in
+              ignore
+                (operate b ~destination:(at storage)
+                   ~value_arguments:[ Z.of_int 3 ]
+                   Storage_from_array
+                   [ Value (Copy (at array)) ]);
+              let last = local b (value int32) and middle = local b (value int32) in
+              ignore (operate b ~destination:(at last) Storage_pop [ Place (at storage) ]);
+              ignore (operate b ~destination:(at middle) Storage_pop [ Place (at storage) ]);
+              let length = local b (value (named "USize")) in
+              ignore (operate b ~destination:(at length) Storage_length [ Place (at storage) ]);
+              let status = local b (value int32) in
+              emit b (Assign (at status, Convert (Copy (at length), Integer Int32)));
+              emit b (Assign (at status, Binary (Multiply, Copy (at status), constant_int32 100)));
+              emit b (Assign (at last, Binary (Multiply, Copy (at last), constant_int32 10)));
+              emit b (Assign (at status, Binary (Add, Copy (at status), Copy (at last))));
+              emit b (Assign (at status, Binary (Add, Copy (at status), Copy (at middle))));
+              status);
         ]);
   test "static storage given room is copied to the heap, where it can be pushed onto" (fun () ->
       let open Lir_builder in

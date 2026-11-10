@@ -92,6 +92,19 @@ let signature (operation : Intrinsic.operation) : T.signature =
       with_storage ~mode:Mut [ input "index" usize; input ~mode:Own "value" element ]
   | Storage_remove -> with_storage ~mode:Mut ~output:(Returns element) [ input "index" usize ]
   | Storage_swap -> with_storage ~mode:Mut [ input "first" usize; input "second" usize ]
+  | Storage_from_array ->
+      let count = parameter operation "count" in
+      let array =
+        T.Named
+          {
+            path = Intrinsic.builtin_path Array;
+            arguments = [ T.Type element; T.Value (Value_parameter count) ];
+          }
+      in
+      {
+        (make ~output:(Returns (storage element)) [ input ~mode:Own "array" array ]) with
+        generics = [ generic "Element"; { T.generic = count; kind = Value_generic } ];
+      }
   | Storage_at -> with_storage ~output:(Lends (Read, element)) [ input "index" usize ]
   | Storage_at_mut -> with_storage ~mode:Mut ~output:(Lends (Mut, element)) [ input "index" usize ]
   | Storage_view -> with_storage ~output:(Returns (view element)) []
@@ -178,4 +191,5 @@ let cost (operation : Intrinsic.operation) =
       { time = Linear_in 0; allocations = No_allocations }
   | Storage_set_capacity -> { time = Linear_in 0; allocations = Unknown_allocations }
   | Storage_with_capacity -> { time = Constant_time; allocations = One_if_positive 0 }
+  | Storage_from_array -> { time = Constant_time; allocations = Unknown_allocations }
   | Run_test | Libc _ -> { time = Unbounded_time; allocations = Unknown_allocations }

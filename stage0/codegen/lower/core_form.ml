@@ -608,15 +608,15 @@ and field_default st (ty : Ground.ty) ~variant ~field : Core.expression =
 (* Lowers a call of an intrinsic. Returns the place it lends, for one that
    lends. *)
 and intrinsic st operation ~type_arguments (arguments : Core.argument list) ~destination ~site =
-  let type_arguments =
-    List.filter_map
-      (fun argument ->
-        match
-          Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution argument
-        with
-        | Type ty -> Some ty
-        | _ -> None)
+  let ground_arguments =
+    List.map
+      (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
       type_arguments
+  in
+  let type_arguments =
+    List.filter_map (function Ground.Type ty -> Some ty | _ -> None) ground_arguments
+  and value_arguments =
+    List.filter_map (function Ground.Value value -> Some value | _ -> None) ground_arguments
   in
   let arguments =
     List.map
@@ -633,8 +633,8 @@ and intrinsic st operation ~type_arguments (arguments : Core.argument list) ~des
         | Default -> bug "an intrinsic called with an omitted argument")
       arguments
   in
-  Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types operation
-    ~type_arguments arguments ~destination ~site
+  Intrinsics.lower ~checks:st.context.checks ~value_arguments st.context.env st.b st.context.types
+    operation ~type_arguments arguments ~destination ~site
 
 (* The place that a lending call lends. A lending method is inlined up to
    its [yield]; a lending intrinsic gives the place directly. *)

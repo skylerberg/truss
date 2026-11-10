@@ -67,16 +67,12 @@ internal fn Set[Element: Hash + Ordered].empty() -> Set[Element]
   Set(elements: [])
 }
 
-internal fn Set[Element: Hash + Ordered].from_array[count: USize](
-  elements: own Array[Element, count],
-) -> Set[Element]
-  ensures forall index in 0..count => contains_equal(result.model(), value: elements[index])
-  ensures forall value: Element =>
-    result.model().contains(value) ==> exists index in 0..count => elements[index] == value
-  ensures result.length() <= count
-  cost time finite
+public fn Set[Element: Hash + Ordered].with_capacity(capacity: USize) -> Set[Element]
+  ensures result.length() == 0
+  ensures forall value: Element => !result.model().contains(value)
+  cost time O(1)
 {
-  todo
+  Set(elements: List.with_capacity(capacity))
 }
 
 public fn Set[Element: Hash + Ordered].seeded() -> Set[Element]
@@ -131,9 +127,10 @@ public fn Set[Element: Hash + Ordered].clear(mut self)
 }
 
 public fn Set[Element: Hash + Ordered].reserve(mut self, additional: USize)
+  ensures identical(self.model(), old(self.model()))
   ensures self.length() == old(self.length())
 {
-  todo
+  mut self.elements.reserve(additional)
 }
 
 public fn Set[Element: Hash + Ordered].retain(mut self, keep: (fn(Element) -> Bool cost time finite))

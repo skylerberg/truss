@@ -2002,18 +2002,28 @@ decided. The exact syntax for task groups and channels is not yet:
   parameters inside types is left out for now: Rust has worked on it for
   years without settling it, and it can be added later without breaking
   code.
-- **Literal allocation is counted.** A non-empty list or map literal in a
-  function body counts as one allocation in `cost` clauses, and an empty one
-  as none. The compiler may keep a literal that is only read in static
+- **Literal allocation is counted.** A non-empty list literal in a function
+  body counts as one allocation in `cost` clauses, and an empty one as
+  none. The compiler may keep a literal that is only read in static
   memory, but cost clauses don't depend on that. Constants are different:
   they always live in static memory, so reading one costs nothing.
+- **A set or map literal is a sequence of calls.** `[a, b]` as a `Set`
+  means: make an empty set with room for two elements, then `insert` each
+  element in order. A map literal does the same with its entries. The
+  literal costs what those calls cost, in time and in allocations, so a
+  `cost` clause on a function that contains one is checked against the code
+  that runs. The standard library reserves room for every element first,
+  so the literal does not reallocate as it fills.
 - **Constant collections are built while compiling.** The compiler builds a
   `Map` or `Set` constant by running the standard library's own insertion
   code while compiling, so its table is ready in static memory and lookups
   cost what they always cost. Hashing has no random key, so the table comes
   out the same on every build. Constants are read-only places, so the table
   is only ever read; an owned, changeable copy is made with `copy()`.
-- **Duplicate keys in a map literal are a proof obligation.** Letting the last
+- **Duplicate keys in a map literal are a proof obligation.** Each entry of
+  a map literal is inserted by a method whose precondition is that the key
+  is not in the map yet, so the obligation is an ordinary `requires`.
+  Letting the last
   one win would silently hide a mistake.
 - **`Map` and `Set` iterate in insertion order,** like Python's `dict` and
   JavaScript's `Map`. Iteration order never varies from run to run, so tests
