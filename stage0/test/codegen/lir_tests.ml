@@ -370,6 +370,16 @@ let () =
       in
       expect_int ~expected:101 status;
       expect_string ~expected:"panic: boom\n  at test.truss:13:5\n" errors);
+  test "the C checks each type's size and alignment against its layout" (fun () ->
+      let pair_shape = ("Pair", Record [ field "first" int32; field "second" int64 ]) in
+      let holder =
+        instance "holder" (function_ [ local (value pair) ] [ block [] (Return None) ])
+      in
+      let c = Emit_c.file (shape_env ~extra:[ pair_shape ] ()) Development [ (holder, External) ] in
+      let expected =
+        "_Static_assert(sizeof(t_test__Pair) == 16 && _Alignof(t_test__Pair) == 8, \"layout\");"
+      in
+      if not (contains c expected) then fail "no %S in:\n%s" expected c);
   test "emitting the same instances twice gives the same C" (fun () ->
       let instances = [ (bump, Emit_c.External) ] in
       expect_string

@@ -104,6 +104,14 @@ and defines only the small helpers it uses, such as the one that gives a
 float's bits with every NaN made canonical. Every local starts zeroed, which
 the C compiler removes wherever it is overwritten.
 
+The compiler lays every type out itself (see [Data layout](#data-layout)),
+and the C compiler lays each one out again from the `struct` it is given.
+Code generation relies on the two agreeing: the size it allocates for a
+value, and whether a value is passed by address, come from its own layout.
+So each type a file defines is followed by a static assertion of its size
+and alignment, and a layout the C compiler would not make is a C file that
+does not compile, on whatever target that is.
+
 The runtime (see [Program startup and failure](#program-startup-and-failure))
 is the exception. It is one fixed file for each target, compiled once and
 cached, and it includes the system's headers, since its declarations of
