@@ -2309,12 +2309,23 @@ fn total_size(paths: Slice[Path]) -> USize
   record or a sum type of owned data, and never a view or a function. An
   `any Trait` can be sent only when `Trait` requires `Storable`.
 - A channel's methods take `self` read-only, so every branch can use a
-  channel that is declared before the block.
+  channel that is declared before the block. `channel.copy()` is another
+  reference to the same queue.
+- `Channel[Message].new()` makes a channel of capacity 0, which holds no
+  message: `send` returns when another task has received the message.
+- `send` returns `Err(SendError.Closed)` on a closed channel. `receive`
+  returns the messages that a closed channel still holds, and then `None`.
+  `try_receive` never waits: it returns `None` when the channel is empty.
+- In a cancelled task, a `send` that would wait returns
+  `Err(SendError.Cancelled)`, and a `receive` that would wait returns
+  `None`.
 - A task that waits for several kinds of message receives a sum type from
   one channel.
-- `tasks::Limiter` bounds how many tasks do something at once:
+- `tasks::Limiter` bounds how many tasks do something at once.
   `limiter.hold(work)` runs `work` when one of the limiter's permits is
-  free.
+  free, and returns `Some` of its output. In a task that is cancelled
+  while it waits for a permit, `hold` returns `None` and does not run
+  `work`.
 
 ### Shared state
 
@@ -2372,9 +2383,10 @@ same result on every run:
 
 ```truss
 test "two deposits both arrive" {
-  for seed in 0..64 {
+  let seeds: UInt64 = 64
+  for seed in 0..seeds {
     var bank = Bank.new()
-    provide mut bank, tasks::SeededTasks(seed: seed) {
+    provide mut bank, tasks::SeededTasks.new(seed) {
       concurrent {
         Accounts.deposit(alice, amount: 10)
         Accounts.deposit(alice, amount: 5)
