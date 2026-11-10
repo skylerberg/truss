@@ -931,7 +931,8 @@ plus what happens before and after:
   it. `storage_push` takes one step, amortized, paid out of that saving, so
   pushing `count` times costs `O(count + items.length())`. A view, or a
   type whose model is the view it holds, such as a `Slice`, cannot grow,
-  so it holds only the sum of its elements' potentials.
+  so it holds only the sum of its elements' potentials, and so does an
+  `Array`, whose model is its `count` elements.
 - **Potential is counted in a unit of its type's own,** one unknown constant
   for each type with a potential, the same for every method of the type, so
   that potential saved by one method pays for another's work. Since every

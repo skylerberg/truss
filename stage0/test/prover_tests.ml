@@ -2603,6 +2603,38 @@ let () =
       let second = key_of "fn g(total: UInt8) -> UInt8 {\n  total + 1\n}\n" in
       if first <> second || first = "none" then fail "%s and %s" first second)
 
+(* Arrays *)
+
+let () =
+  test "a slice of a whole array is within it" (fun () ->
+      proven
+        "fn f[Element, count: USize](items: mut Array[Element, count])\n\
+        \  ensures items.length() == old(items.length())\n\
+         {\n\
+        \  mut items[..].reverse()\n\
+         }\n");
+  test "a loop that changes an array's elements keeps their potentials" (fun () ->
+      proven
+        "fn reversed[Element, count: USize](items: mut Array[Element, count]) yields mut Element\n\
+        \  cost time O(items.length())\n\
+         {\n\
+        \  var index = items.length()\n\
+        \  while index > 0\n\
+        \    invariant items.length() == old(items.length())\n\
+        \    invariant index <= items.length()\n\
+        \    decreases index\n\
+        \  {\n\
+        \    index -= 1\n\
+        \    yield mut items[index]\n\
+        \  }\n\
+         }\n");
+  test "a slice of an array is within it only as far as its count" (fun () ->
+      not_proven
+        "fn f[Element, count: USize](items: mut Array[Element, count]) {\n\
+        \  mut items[1..].reverse()\n\
+         }\n"
+        "prover.requires")
+
 (* Triggers *)
 
 let triggered fact =
