@@ -164,3 +164,109 @@ test "taking a date apart and making it again gives the same date" {
     days += 7919
   }
 }
+
+test "a date is read from the text it is displayed as" {
+  assert time::Date.parse("2024-03-09") == Ok(date(2024, month: 3, day: 9))
+  assert time::Date.parse("0044-12-25") == Ok(date(44, month: 12, day: 25))
+  assert time::Date.parse("-0044-03-15") == Ok(date(-44, month: 3, day: 15))
+  assert time::Date.parse("12345-01-01") == Ok(date(12345, month: 1, day: 1))
+  assert time::Date.parse("") == Err(time::ParseTimeError.Empty)
+  assert time::Date.parse("2024-02-30") == Err(time::ParseTimeError.OutOfRange)
+  assert time::Date.parse("2023-02-29") == Err(time::ParseTimeError.OutOfRange)
+  assert time::Date.parse("2024-13-01") == Err(time::ParseTimeError.OutOfRange)
+  assert time::Date.parse("9999999-01-01") == Err(time::ParseTimeError.OutOfRange)
+  assert time::Date.parse("2024-3-09") == Err(time::ParseTimeError.Malformed(offset: 6))
+  assert time::Date.parse("24-03-09") == Err(time::ParseTimeError.Malformed(offset: 2))
+  assert time::Date.parse("2024-03-09x") == Err(time::ParseTimeError.Malformed(offset: 10))
+  assert time::Date.parse("2024/03/09") == Err(time::ParseTimeError.Malformed(offset: 4))
+}
+
+fn clock(hour: UInt8, minute: UInt8, second: UInt8, nanosecond: UInt32) -> time::TimeOfDay {
+  match time::TimeOfDay.new(hour, minute: minute, second: second, nanosecond: nanosecond) {
+    Some(found) => found
+    None => time::TimeOfDay.midnight
+  }
+}
+
+test "a time of day is displayed with the fraction it has, and read back" {
+  assert "${clock(9, minute: 5, second: 7, nanosecond: 0)}" == "09:05:07"
+  assert "${clock(23, minute: 59, second: 59, nanosecond: 500000000)}" == "23:59:59.5"
+  assert "${clock(0, minute: 0, second: 0, nanosecond: 1)}" == "00:00:00.000000001"
+  assert "${clock(12, minute: 0, second: 0, nanosecond: 120000)}" == "12:00:00.00012"
+  assert time::TimeOfDay.parse("09:05:07") == Ok(clock(9, minute: 5, second: 7, nanosecond: 0))
+  assert time::TimeOfDay.parse("09:05") == Ok(clock(9, minute: 5, second: 0, nanosecond: 0))
+  assert time::TimeOfDay.parse("23:59:59.5") == Ok(clock(23, minute: 59, second: 59, nanosecond: 500000000))
+  assert time::TimeOfDay.parse("00:00:00.000000001") == Ok(clock(0, minute: 0, second: 0, nanosecond: 1))
+  assert time::TimeOfDay.parse("24:00:00") == Err(time::ParseTimeError.OutOfRange)
+  assert time::TimeOfDay.parse("12:60") == Err(time::ParseTimeError.OutOfRange)
+  assert time::TimeOfDay.parse("12:00:60") == Err(time::ParseTimeError.OutOfRange)
+  assert time::TimeOfDay.parse("1:00") == Err(time::ParseTimeError.Malformed(offset: 1))
+  assert time::TimeOfDay.parse("12:00:00.") == Err(time::ParseTimeError.Malformed(offset: 9))
+  assert time::TimeOfDay.parse("12:00:00.1234567890") == Err(time::ParseTimeError.Malformed(offset: 18))
+  assert time::TimeOfDay.parse("") == Err(time::ParseTimeError.Empty)
+  assert clock(1, minute: 2, second: 3, nanosecond: 4).since_midnight() == time::Duration.nanoseconds(3723000000004)
+}
+
+test "a date and time is displayed with a T between, read back, and moved by a duration" {
+  let moment = date(2024, month: 2, day: 29).at(clock(22, minute: 30, second: 0, nanosecond: 0))
+  assert "${moment}" == "2024-02-29T22:30:00"
+  assert time::DateTime.parse("2024-02-29T22:30:00") == Ok(moment)
+  assert time::DateTime.parse("2024-02-29 22:30:00") == Err(time::ParseTimeError.Malformed(offset: 10))
+  assert time::DateTime.parse("2024-02-29T22:30:00Z") == Err(time::ParseTimeError.Malformed(offset: 19))
+  let next_day = date(2024, month: 3, day: 1).at(clock(0, minute: 30, second: 0, nanosecond: 0))
+  let day_before = date(2024, month: 2, day: 28).at(clock(23, minute: 30, second: 0, nanosecond: 0))
+  let just_after = date(2024, month: 2, day: 29).at(clock(22, minute: 30, second: 0, nanosecond: 1))
+  assert moment.plus(time::Duration.hours(2)) == Some(next_day)
+  assert moment.plus(time::Duration.hours(-23)) == Some(day_before)
+  assert moment.plus(time::Duration.nanoseconds(1)) == Some(just_after)
+  assert moment.plus(time::Duration.maximum) is Some(later) && later.date.year() == 2316
+  assert moment.plus(time::Duration.minimum) is Some(earlier) && earlier.date.year() == 1731
+}
+
+test "an instant is displayed in UTC and read with any offset" {
+  let moment = time::Instant.from_unix_nanoseconds(1700000000123000000)
+  assert "${moment}" == "2023-11-14T22:13:20.123Z"
+  assert "${time::Instant.from_unix_nanoseconds(0)}" == "1970-01-01T00:00:00Z"
+  assert "${time::Instant.from_unix_nanoseconds(-1)}" == "1969-12-31T23:59:59.999999999Z"
+  assert "${time::Instant.from_unix_nanoseconds(Int64.minimum)}" == "1677-09-21T00:12:43.145224192Z"
+  assert "${time::Instant.from_unix_nanoseconds(Int64.maximum)}" == "2262-04-11T23:47:16.854775807Z"
+  assert time::Instant.parse("2023-11-14T22:13:20.123Z") == Ok(moment)
+  assert time::Instant.parse("2023-11-15T00:13:20.123+02:00") == Ok(moment)
+  assert time::Instant.parse("2023-11-14T17:13:20.123-05:00") == Ok(moment)
+  assert time::Instant.parse("1970-01-01T00:00:00z") == Ok(time::Instant.from_unix_nanoseconds(0))
+  assert time::Instant.parse("2262-04-11T23:47:16.854775807Z") == Ok(time::Instant.from_unix_nanoseconds(Int64.maximum))
+  assert time::Instant.parse("1677-09-21T00:12:43.145224192Z") == Ok(time::Instant.from_unix_nanoseconds(Int64.minimum))
+  assert time::Instant.parse("1677-09-20T23:12:43.145224192-01:00") == Ok(time::Instant.from_unix_nanoseconds(Int64.minimum))
+  assert time::Instant.parse("2262-04-12T00:47:16.854775807+01:00") == Ok(time::Instant.from_unix_nanoseconds(Int64.maximum))
+}
+
+test "text that is not an instant says why" {
+  assert time::Instant.parse("") == Err(time::ParseTimeError.Empty)
+  assert time::Instant.parse("2023-11-14T22:13:20") == Err(time::ParseTimeError.Malformed(offset: 19))
+  assert time::Instant.parse("2023-11-14T22:13:20+0200") == Err(time::ParseTimeError.Malformed(offset: 22))
+  assert time::Instant.parse("2023-11-14T22:13:20Zx") == Err(time::ParseTimeError.Malformed(offset: 20))
+  assert time::Instant.parse("2023-11-14T22:13:20+24:00") == Err(time::ParseTimeError.OutOfRange)
+  assert time::Instant.parse("2262-04-11T23:47:16.854775808Z") == Err(time::ParseTimeError.OutOfRange)
+  assert time::Instant.parse("1677-09-21T00:12:43.145224191Z") == Err(time::ParseTimeError.OutOfRange)
+  assert time::Instant.parse("3000-01-01T00:00:00Z") == Err(time::ParseTimeError.OutOfRange)
+}
+
+test "a duration converts to and from seconds as a float" {
+  assert time::Duration.from_seconds(1.5) == Some(time::Duration.milliseconds(1500))
+  assert time::Duration.from_seconds(-0.25) == Some(time::Duration.milliseconds(-250))
+  assert time::Duration.from_seconds(1.0e10) is None
+  assert time::Duration.from_seconds(Float64.not_a_number) is None
+  assert time::Duration.milliseconds(1500).to_seconds() == 1.5
+  assert time::Duration.zero.to_seconds() == 0.0
+}
+
+test "a manual clock moves only when it is told to or sleeps" {
+  provide time::ManualClock.new(time::Instant.from_unix_nanoseconds(1000)) {
+    assert Clock.now() == time::Instant.from_unix_nanoseconds(1000)
+    Clock.sleep(time::Duration.seconds(2))
+    assert Clock.now() == time::Instant.from_unix_nanoseconds(2000001000)
+    assert Clock.monotonic() == time::Duration.seconds(2)
+    Clock.sleep(time::Duration.seconds(-5))
+    assert Clock.monotonic() == time::Duration.seconds(2)
+  }
+}

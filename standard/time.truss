@@ -68,7 +68,12 @@ public fn Duration.days(count: Int64) -> Duration
 public fn Duration.from_seconds(seconds: Float64) -> Option[Duration]
   cost time O(1)
 {
-  todo
+  let nanoseconds = (seconds * 1000000000.0).round()
+  if intrinsic::fits[Float64, Int64](nanoseconds) {
+    Some(Duration(nanoseconds: intrinsic::convert(nanoseconds)))
+  } else {
+    None
+  }
 }
 
 public fn Duration.total_nanoseconds(self) -> Int64
@@ -105,7 +110,7 @@ public fn Duration.subsecond_nanoseconds(self) -> Int32
 public fn Duration.to_seconds(self) -> Float64
   cost time O(1)
 {
-  todo
+  self.nanoseconds.to_float64() / 1000000000.0
 }
 
 public fn Duration.is_zero(self) -> Bool
@@ -322,17 +327,266 @@ impl Subtract[Instant] for Instant {
   }
 }
 
+internal fn Instant.date_time(self) -> DateTime
+  cost time O(1)
+{
+  let days = self.nanoseconds.floor_divide(86400000000000)
+  let rest = self.nanoseconds.floor_modulo(86400000000000)
+  DateTime(
+    date: Date(days_since_epoch: intrinsic::convert(days)),
+    time: TimeOfDay(nanoseconds_since_midnight: intrinsic::convert(rest)),
+  )
+}
+
 impl Display for Instant {
   fn display(self, output: mut TextBuilder) {
-    self.nanoseconds.display(mut output)
+    self.date_time().display(mut output)
+    mut output.write("Z")
   }
+}
+
+internal type Number(value: Int64, end: USize)
+
+internal fn number_at(text: StringSlice, from: USize, most: USize) -> Result[Number, ParseTimeError]
+  requires from <= text.length()
+  requires most <= 9
+  ensures !(result is Ok(number) && (number.end <= from || number.end > text.length() || number.end - from > most))
+  ensures !(result is Ok(number) && (number.value < 0 || number.value > 999999999))
+  cost time O(1)
+{
+  var value: Int64 = 0
+  var index = from
+  while index < text.length() && index - from < most && text.byte(index) >= 48 && text.byte(index) <= 57
+    invariant from <= index
+    invariant index <= text.length()
+    invariant index - from <= most
+    invariant 0 <= value
+    invariant index - from <= 0 ==> value < 1
+    invariant index - from <= 1 ==> value < 10
+    invariant index - from <= 2 ==> value < 100
+    invariant index - from <= 3 ==> value < 1000
+    invariant index - from <= 4 ==> value < 10000
+    invariant index - from <= 5 ==> value < 100000
+    invariant index - from <= 6 ==> value < 1000000
+    invariant index - from <= 7 ==> value < 10000000
+    invariant index - from <= 8 ==> value < 100000000
+    invariant index - from <= 9 ==> value < 1000000000
+    decreases from + most - index
+  {
+    value = value * 10 + intrinsic::convert[UInt8, Int64](text.byte(index) - 48)
+    index += 1
+  }
+  if index == from {
+    return Err(ParseTimeError.Malformed(offset: from))
+  }
+  Ok(Number(value: value, end: index))
+}
+
+internal fn field_at(text: StringSlice, from: USize, width: USize) -> Result[Int64, ParseTimeError]
+  requires from <= text.length()
+  requires 1 <= width && width <= 9
+  ensures !(result is Ok(value) && (value < 0 || value > 999999999 || width > text.length() - from))
+  cost time O(1)
+{
+  let number = number_at(text, from: from, most: width)?
+  if number.end - from != width {
+    return Err(ParseTimeError.Malformed(offset: number.end))
+  }
+  Ok(number.value)
+}
+
+internal fn expect(text: StringSlice, at: USize, byte: UInt8) -> Result[USize, ParseTimeError]
+  requires at <= text.length()
+  ensures !(result is Ok(next) && (next != at + 1 || next > text.length()))
+  cost time O(1)
+{
+  if at < text.length() && text.byte(at) == byte {
+    Ok(at + 1)
+  } else {
+    Err(ParseTimeError.Malformed(offset: at))
+  }
+}
+
+internal type DateRead(date: Date, end: USize)
+
+internal fn date_at(text: StringSlice, from: USize) -> Result[DateRead, ParseTimeError]
+  requires from <= text.length()
+  ensures !(result is Ok(read) && (read.end <= from || read.end > text.length()))
+  cost time O(1)
+{
+  let negative = from < text.length() && text.byte(from) == 45
+  let start = if negative { from + 1 } else { from }
+  let year = number_at(text, from: start, most: 7)?
+  if year.end - start < 4 {
+    return Err(ParseTimeError.Malformed(offset: year.end))
+  }
+  let month_start = expect(text, at: year.end, byte: 45)?
+  let month = field_at(text, from: month_start, width: 2)?
+  let day_start = expect(text, at: month_start + 2, byte: 45)?
+  let day = field_at(text, from: day_start, width: 2)?
+  let signed_year = if negative { -year.value } else { year.value }
+  if signed_year <= -5900000 || signed_year >= 5900000 || month < 1 || month > 12 || day < 1 {
+    return Err(ParseTimeError.OutOfRange)
+  }
+  if day > days_in_month(month, leap: is_leap(signed_year)) {
+    return Err(ParseTimeError.OutOfRange)
+  }
+  match date_of(signed_year, month: month, day: day) {
+    Some(date) => Ok(DateRead(date: date, end: day_start + 2))
+    None => Err(ParseTimeError.OutOfRange)
+  }
+}
+
+internal fn fraction_scale(digits: USize) -> Int64
+  requires 1 <= digits && digits <= 9
+  ensures 1 <= result && result <= 100000000
+  cost time O(1)
+{
+  if digits == 1 {
+    100000000
+  } else if digits == 2 {
+    10000000
+  } else if digits == 3 {
+    1000000
+  } else if digits == 4 {
+    100000
+  } else if digits == 5 {
+    10000
+  } else if digits == 6 {
+    1000
+  } else if digits == 7 {
+    100
+  } else if digits == 8 {
+    10
+  } else {
+    1
+  }
+}
+
+internal type TimeRead(time: TimeOfDay, end: USize)
+
+internal fn time_at(text: StringSlice, from: USize) -> Result[TimeRead, ParseTimeError]
+  requires from <= text.length()
+  ensures !(result is Ok(read) && (read.end <= from || read.end > text.length()))
+  cost time O(1)
+{
+  let hour = field_at(text, from: from, width: 2)?
+  let minute_start = expect(text, at: from + 2, byte: 58)?
+  let minute = field_at(text, from: minute_start, width: 2)?
+  var end = minute_start + 2
+  var second: Int64 = 0
+  var nanosecond: Int64 = 0
+  if end < text.length() && text.byte(end) == 58 {
+    second = field_at(text, from: end + 1, width: 2)?
+    end = end + 3
+    if end < text.length() && text.byte(end) == 46 {
+      let fraction = number_at(text, from: end + 1, most: 9)?
+      nanosecond = fraction.value * fraction_scale(fraction.end - (end + 1))
+      end = fraction.end
+    }
+  }
+  if hour > 23 || minute > 59 || second > 59 || nanosecond > 999999999 {
+    return Err(ParseTimeError.OutOfRange)
+  }
+  match TimeOfDay.new(
+    intrinsic::convert(hour),
+    minute: intrinsic::convert(minute),
+    second: intrinsic::convert(second),
+    nanosecond: intrinsic::convert(nanosecond),
+  ) {
+    Some(time) => Ok(TimeRead(time: time, end: end))
+    None => Err(ParseTimeError.OutOfRange)
+  }
+}
+
+internal type DateTimeRead(date_time: DateTime, end: USize)
+
+internal fn date_time_at(text: StringSlice, from: USize) -> Result[DateTimeRead, ParseTimeError]
+  requires from <= text.length()
+  ensures !(result is Ok(read) && (read.end <= from || read.end > text.length()))
+  cost time O(1)
+{
+  let date = date_at(text, from: from)?
+  let time = time_at(text, from: expect(text, at: date.end, byte: 84)?)?
+  Ok(DateTimeRead(date_time: DateTime(date: date.date, time: time.time), end: time.end))
+}
+
+internal fn offset_at(text: StringSlice, from: USize) -> Result[Int64, ParseTimeError]
+  requires from <= text.length()
+  ensures !(result is Ok(seconds) && (seconds <= -86400 || seconds >= 86400))
+  cost time O(1)
+{
+  if from == text.length() {
+    return Err(ParseTimeError.Malformed(offset: from))
+  }
+  let sign = text.byte(from)
+  if sign == 90 || sign == 122 {
+    if from + 1 != text.length() {
+      return Err(ParseTimeError.Malformed(offset: from + 1))
+    }
+    return Ok(0)
+  }
+  if sign != 43 && sign != 45 {
+    return Err(ParseTimeError.Malformed(offset: from))
+  }
+  let hours = field_at(text, from: from + 1, width: 2)?
+  let minutes_start = expect(text, at: from + 3, byte: 58)?
+  let minutes = field_at(text, from: minutes_start, width: 2)?
+  if minutes_start + 2 != text.length() {
+    return Err(ParseTimeError.Malformed(offset: minutes_start + 2))
+  }
+  if hours > 23 || minutes > 59 {
+    return Err(ParseTimeError.OutOfRange)
+  }
+  let seconds = hours * 3600 + minutes * 60
+  Ok(if sign == 45 { -seconds } else { seconds })
+}
+
+internal fn DateTime.instant(self, offset_seconds: Int64) -> Option[Instant]
+  requires -86400 < offset_seconds && offset_seconds < 86400
+  cost time O(1)
+{
+  let days: Int64 = intrinsic::convert(self.date.days_since_epoch)
+  let within: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
+  let near: Int64 = if days < -2 { -2 } else if days > 2 { 2 } else { days }
+  match (days - near).checked_multiply(86400000000000) {
+    Some(whole) => match whole.checked_add(near * 86400000000000 + within - offset_seconds * 1000000000) {
+      Some(nanoseconds) => Some(Instant(nanoseconds: nanoseconds))
+      None => None
+    }
+    None => None
+  }
+}
+
+internal fn write_fraction(output: mut TextBuilder, nanoseconds: Int64)
+  requires 0 <= nanoseconds && nanoseconds < 1000000000
+{
+  let digits = nanoseconds.format(minimum_digits: 9)
+  let text = digits.slice()
+  var end = text.length()
+  while end > 0 && text.byte(end - 1) == 48
+    invariant end <= text.length()
+    decreases end
+  {
+    end -= 1
+  }
+  mut output.write(text.part(0, to: end))
 }
 
 impl text::Parse for Instant {
   type Error = ParseTimeError
 
-  fn parse(text: StringSlice) -> Result[Instant, ParseTimeError] {
-    todo
+  fn parse(text: StringSlice) -> Result[Instant, ParseTimeError]
+  {
+    if text.length() == 0 {
+      return Err(ParseTimeError.Empty)
+    }
+    let read = date_time_at(text, from: 0)?
+    let offset = offset_at(text, from: read.end)?
+    match read.date_time.instant(offset) {
+      Some(instant) => Ok(instant)
+      None => Err(ParseTimeError.OutOfRange)
+    }
   }
 }
 
@@ -945,8 +1199,16 @@ impl Display for Date {
 impl text::Parse for Date {
   type Error = ParseTimeError
 
-  fn parse(text: StringSlice) -> Result[Date, ParseTimeError] {
-    todo
+  fn parse(text: StringSlice) -> Result[Date, ParseTimeError]
+  {
+    if text.length() == 0 {
+      return Err(ParseTimeError.Empty)
+    }
+    let read = date_at(text, from: 0)?
+    if read.end != text.length() {
+      return Err(ParseTimeError.Malformed(offset: read.end))
+    }
+    Ok(read.date)
   }
 }
 
@@ -990,6 +1252,7 @@ impl core::Countable for Date {
 
 public opaque type TimeOfDay(nanoseconds_since_midnight: UInt64)
   derives Plain, Equal, Hash, Ordered
+  invariant nanoseconds_since_midnight < 86400000000000
 
 public let TimeOfDay.midnight: TimeOfDay = TimeOfDay(nanoseconds_since_midnight: 0)
 
@@ -1039,20 +1302,38 @@ public fn TimeOfDay.nanosecond(self) -> UInt32
 public fn TimeOfDay.since_midnight(self) -> Duration
   cost time O(1)
 {
-  todo
+  Duration(nanoseconds: intrinsic::convert(self.nanoseconds_since_midnight))
 }
 
 impl Display for TimeOfDay {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    write_two_digits(mut output, value: intrinsic::convert(self.hour()))
+    mut output.write(":")
+    write_two_digits(mut output, value: intrinsic::convert(self.minute()))
+    mut output.write(":")
+    write_two_digits(mut output, value: intrinsic::convert(self.second()))
+    let nanosecond = self.nanosecond()
+    if nanosecond != 0 {
+      mut output.write(".")
+      write_fraction(mut output, nanoseconds: intrinsic::convert(nanosecond))
+    }
   }
 }
 
 impl text::Parse for TimeOfDay {
   type Error = ParseTimeError
 
-  fn parse(text: StringSlice) -> Result[TimeOfDay, ParseTimeError] {
-    todo
+  fn parse(text: StringSlice) -> Result[TimeOfDay, ParseTimeError]
+  {
+    if text.length() == 0 {
+      return Err(ParseTimeError.Empty)
+    }
+    let read = time_at(text, from: 0)?
+    if read.end != text.length() {
+      return Err(ParseTimeError.Malformed(offset: read.end))
+    }
+    Ok(read.time)
   }
 }
 
@@ -1062,7 +1343,18 @@ public type DateTime(date: Date, time: TimeOfDay)
 public fn DateTime.plus(self, duration: Duration) -> Option[DateTime]
   cost time O(1)
 {
-  todo
+  let days = duration.nanoseconds.floor_divide(86400000000000)
+  let rest = duration.nanoseconds.floor_modulo(86400000000000)
+  let within: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
+  let total = within + rest
+  let carried: Int64 = if total >= 86400000000000 { 1 } else { 0 }
+  match self.date.plus_days(intrinsic::convert(days + carried)) {
+    Some(date) => Some(DateTime(
+      date: date,
+      time: TimeOfDay(nanoseconds_since_midnight: intrinsic::convert(total - carried * 86400000000000)),
+    ))
+    None => None
+  }
 }
 
 public fn DateTime.format(self, layout: Layout) -> String
@@ -1072,16 +1364,27 @@ public fn DateTime.format(self, layout: Layout) -> String
 }
 
 impl Display for DateTime {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    self.date.display(mut output)
+    mut output.write("T")
+    self.time.display(mut output)
   }
 }
 
 impl text::Parse for DateTime {
   type Error = ParseTimeError
 
-  fn parse(text: StringSlice) -> Result[DateTime, ParseTimeError] {
-    todo
+  fn parse(text: StringSlice) -> Result[DateTime, ParseTimeError]
+  {
+    if text.length() == 0 {
+      return Err(ParseTimeError.Empty)
+    }
+    let read = date_time_at(text, from: 0)?
+    if read.end != text.length() {
+      return Err(ParseTimeError.Malformed(offset: read.end))
+    }
+    Ok(read.date_time)
   }
 }
 
@@ -1253,7 +1556,10 @@ impl Clock for ManualClock {
     self.elapsed
   }
 
-  fn sleep(mut self, duration: Duration) {
-    todo
+  fn sleep(mut self, duration: Duration)
+  {
+    if !duration.is_negative() {
+      mut self.advance(duration)
+    }
   }
 }
