@@ -2009,7 +2009,9 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
   | Intrinsic { operation; type_arguments } ->
       (* Lending a part of a storage changes nothing until the lend ends,
          where what the caller left is written back. *)
-      let frame = if operation = Storage_at_mut then frame else havoc_mut frame in
+      let frame =
+        match operation with Storage_at_mut | Array_at_mut -> frame | _ -> havoc_mut frame
+      in
       let operands = List.map (fun (passed : passed) -> passed.term) values in
       (* What each argument holds after the call: a [mut] one read again. *)
       let changed =
@@ -2030,6 +2032,33 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       let result =
         match (operation, values) with
         | Array_model, [ array ] -> array_model context frame array.type_ array.term
+        | Array_view, [ array ] -> (
+            (* A view of the array's elements. *)
+            match array.type_ with
+            | Named { arguments = T.Type element :: _; _ } ->
+                let view = arrive context frame "view" result_type in
+                assume context frame
+                  (L.equal
+                     (buffer_model context View element view)
+                     (array_model context frame array.type_ array.term));
+                view
+            | _ -> arrive context frame "view" result_type)
+        | Array_at_mut, [ array; index ] -> (
+            (* The element at [index], lent to change until the lend ends,
+               where the array takes back what the borrower left. *)
+            match array.type_ with
+            | Named { arguments = T.Type element :: _; _ } -> (
+                let model = array_model context frame array.type_ array.term in
+                oblige context frame Requires (at frame node)
+                  (Printf.sprintf "`%s` may not be within the array."
+                     (quote frame.source node.origin))
+                  L.(
+                    Apply ("<=", [ int 0; index.term ])
+                    &&& Apply ("<", [ index.term; sequence_length context element model ]));
+                match sequence_at context element model index.term with
+                | Some part -> part
+                | None -> arrive context frame "part" result_type)
+            | _ -> arrive context frame "part" result_type)
         | Storage_from_array, [ array ] -> (
             (* The array's elements, moved into storage with room for exactly
                them. *)
@@ -5555,23 +5584,40 @@ and storage_updated context frame element storage index part =
     T.Named { path = Intrinsic.builtin_path Storage; arguments = [ T.Type element ] }
   in
   let updated = arrive context frame "changed" storage_type in
-  let before = buffer_model context Storage element storage
-  and after = buffer_model context Storage element updated in
+  replaced context frame element
+    ~before:(buffer_model context Storage element storage)
+    ~after:(buffer_model context Storage element updated)
+    index part;
+  assume context frame
+    (L.equal (buffer_capacity context element updated) (buffer_capacity context element storage));
+  updated
+
+(* An array whose element at [index] is [part], and which is otherwise the
+   one it was. *)
+and array_updated context frame (array_type : T.ty) array index part =
+  match array_type with
+  | Named { arguments = T.Type element :: _; _ } ->
+      let updated = arrive context frame "changed" array_type in
+      replaced context frame element
+        ~before:(array_model context frame array_type array)
+        ~after:(array_model context frame array_type updated)
+        index part;
+      updated
+  | _ -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (T.show array_type)))
+
+(* That one sequence is another with the element at [index] replaced by
+   [part]. *)
+and replaced context frame element ~before ~after index part =
   let length sequence = sequence_length context element sequence in
   let at sequence index =
     match sequence_at context element sequence index with
     | Some term -> term
-    | None -> raise (Foreign_unsupported "the elements of a storage")
+    | None -> raise (Foreign_unsupported "the elements of a sequence")
   in
   context.fresh <- context.fresh + 1;
   let k = Printf.sprintf "index.%d" context.fresh in
   assume context frame
-    (L.conjunction
-       [
-         L.equal (length after) (length before);
-         L.equal (at after index) part;
-         L.equal (buffer_capacity context element updated) (buffer_capacity context element storage);
-       ]);
+    (L.conjunction [ L.equal (length after) (length before); L.equal (at after index) part ]);
   assume context frame
     (L.Forall
        ( [ (k, L.Int) ],
@@ -5579,8 +5625,7 @@ and storage_updated context frame element storage index part =
            Apply ("<=", [ int 0; Symbol k ])
            &&& Apply ("<", [ Symbol k; length before ])
            &&& not_ (equal (Symbol k) index)
-           ==> equal (at after (Symbol k)) (at before (Symbol k))) ));
-  updated
+           ==> equal (at after (Symbol k)) (at before (Symbol k))) ))
 
 (* The local or [self] a place is part of, which takes a fresh value when
    a part of it changes in a way the prover does not follow. *)
@@ -5642,6 +5687,21 @@ and store context frame (place : place) new_value =
       let _, index = operand_value context { frame with checking = false } index in
       let frame, buffer = place_value context frame storage in
       store context frame storage (storage_updated context frame element buffer index new_value)
+  | Lent
+      {
+        kind =
+          Call
+            {
+              callee = Intrinsic { operation = Array_at_mut; _ };
+              arguments = [ Passed { value = Place array; _ }; Passed { value = index; _ } ];
+              _;
+            };
+        _;
+      } ->
+      let _, index = operand_value context { frame with checking = false } index in
+      let array_type = place_type context frame array in
+      let frame, before = place_value context frame array in
+      store context frame array (array_updated context frame array_type before index new_value)
   | Lent ({ kind = Call ({ lends = Some T.Mut; _ } as call_); _ } as node) -> (
       match resolved_call ~lent_final:new_value context frame node call_ with
       | Some (after, _) -> after

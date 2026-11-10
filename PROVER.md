@@ -204,6 +204,9 @@ and `reads` clauses):
   a `Sequence` of length `count`. A literal of one is that sequence, with
   its elements in order, built in place, so it allocates nothing. Its `at`
   says the element is the model's, so an index below `count` is within it.
+  `array_view` is a view whose model is the array's, and `array_at_mut`
+  lends the element at an index below `count`, which goes back into the
+  array where the lend ends, as `storage_at_mut`'s does into its storage.
 - **A storage and a view are sequences.** Each is known by its model, a
   `Sequence` of its elements whose length fits a `USize`, which
   `storage_model` and `view_model`, intrinsics for specifications only,
