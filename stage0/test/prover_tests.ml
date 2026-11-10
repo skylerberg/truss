@@ -2278,6 +2278,34 @@ let () =
          \    mut self.bytes.push(bytes[index])\n\
          \  }\n\
           }\n"));
+  let bag =
+    "type Bag[Value](first: Value, second: Value)\n\n\
+     fn Bag[Value].first(mut self) lends mut Value\n\
+    \  cost amortized time O(1)\n\
+     {\n\
+    \  yield mut self.first\n\
+     }\n\n"
+  in
+  test "a method that lends a part mut does not pay for what is done to it" (fun () -> proven bag);
+  test "a caller that raises a lent part's potential pays for it" (fun () ->
+      let found =
+        codes
+          (meter ^ bag
+         ^ "fn raise(bag: mut Bag[Meter], credit: UInt32)\n\
+           \  cost amortized time O(1)\n\
+            {\n\
+           \  mut bag.first().credit = credit\n\
+            }\n")
+      in
+      if found <> [ "prover.cost" ] then fail "%s" (String.concat ", " found));
+  test "a caller that lowers a lent part's potential is paid by it" (fun () ->
+      proven
+        (meter ^ bag
+       ^ "fn spent(bag: mut Bag[Meter])\n\
+         \  cost amortized time O(1)\n\
+          {\n\
+         \  mut bag.first().credit = 0\n\
+          }\n"));
   test "a potential below zero" (fun () ->
       not_proven "type Debt(owed: Int64)\n  cost potential owed\n" "prover.cost");
   test "a potential its invariant keeps at or above zero" (fun () ->
