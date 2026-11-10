@@ -47,7 +47,7 @@ val create :
    is made once. *)
 val compiled : t -> Instance.key -> Lir.compiled
 
-(* How a test ended, as [Startup.tests_calling] names it. *)
+(* How a test ended, as the runner names it. *)
 type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed
 
 (* As the runner names it: ["passed"], ["timed_out"], and so on. *)
@@ -101,6 +101,12 @@ val run_tests :
   time_limit:int ->
   Path.t list ->
   (record list, string) result
+
+(* Builds, at [output], a program that runs tests that are instances made
+   by hand, in order, as [run_tests] builds one of tests in source. It is
+   for testing the runner on what no source compiles to, such as a test
+   that leaves a block allocated. *)
+val build_made_tests : t -> time_limit:int -> Lir.t list -> output:string -> (unit, string) result
 
 (* Each test's key: the hash of the code it can run, as "Test results"
    says, which changes exactly when the test's outcome may. A test that

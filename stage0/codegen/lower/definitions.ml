@@ -262,7 +262,8 @@ let evidence_for (substitution : T.substitution) (uses : T.capability list) =
           match List.assoc_opt p substitution with
           | Some (T.Capabilities set) ->
               List.filter_map (function T.Capability q -> Some q | _ -> None) set
-          | _ -> []))
+          | _ -> [])
+      | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
     uses
   |> List.filter (fun path -> not (Path.equal path panic_path))
   |> List.sort_uniq Path.compare

@@ -10,8 +10,9 @@
    and otherwise on standard error. *)
 
 (* With [tests], the runtime of a test program: it counts the blocks that
-   are allocated and not freed, and has the test runner. A program that is
-   not a test program has neither. *)
+   are allocated and not freed, and holds the program's table of tests,
+   which the runner runs by number. A program that is not a test program has
+   neither. *)
 val runtime : Memory_layout.target -> tests:bool -> string
 
 (* A C [main] that installs the stack-overflow handler, calls the C
@@ -19,12 +20,14 @@ val runtime : Memory_layout.target -> tests:bool -> string
    with the status it returns. *)
 val main_calling : string -> string
 
-(* A C [main] that runs the tests, each a C function [void name(void)], in
-   worker processes, killing any that runs longer than [time_limit]
-   milliseconds. It prints a line as it hands each test to a worker, and
-   each result as soon as its test ends: its blocks, then a line with the
-   test's number in the table, its outcome, and how many microseconds it
-   ran, which ends the record:
+(* A C [main] of a test program: it gives the runtime the table of the
+   tests, each a C function [void name(void)], and calls [runner], the
+   standard library's test runner, with how many there are and the most
+   milliseconds one may run, and exits with the status it returns. The
+   runner runs the tests in worker processes, and prints a line as it hands
+   each test to a worker, and each result as soon as its test ends: its
+   blocks, then a line with the test's number in the table, its outcome, and
+   how many microseconds it ran, which ends the record:
 
    {v
    start 0
@@ -40,7 +43,7 @@ val main_calling : string -> string
    block of the test's echo output, give their length in bytes and then the
    bytes. Results come in the order tests end, which depends on the
    workers. The program exits with 1 if any test did not pass. *)
-val tests_calling : time_limit:int -> string list -> string
+val tests_calling : time_limit:int -> runner:string -> string list -> string
 
 (* A C [main] that installs the stack-overflow handler and calls [entry]
    with the program's arguments, the generated Truss side of startup, and

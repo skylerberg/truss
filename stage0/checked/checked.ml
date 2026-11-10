@@ -36,7 +36,6 @@ type call = {
   arguments : argument list;
   defaults_left_out : string list;
   uses : Types.capability list;
-  capability_arguments : (Types.parameter * Types.capability list) list;
   result : Types.ty;
 }
 

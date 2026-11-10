@@ -50,7 +50,6 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
           arguments;
       defaults_left_out = [];
       uses = [];
-      capability_arguments = [];
       result;
     }
   in

@@ -150,7 +150,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                 (Unify.unify_arguments state.unifier head
                    (match type_ with T.Named { arguments; _ } -> arguments | _ -> []));
               (match (expected, instance.signature.output) with
-              | Some expected, Returns output -> ignore (unify state output expected)
+              | Some expected, Returns output -> hint state output expected
               | _ -> ());
               let matched, left_out =
                 match_arguments state value instance.signature.parameters arguments ~record:false
@@ -325,7 +325,6 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
         arguments = checked;
         defaults_left_out = left_out;
         uses = instance.signature.uses;
-        capability_arguments = [];
         result;
       };
   Form.draft_call state value;
@@ -376,7 +375,6 @@ and capability_call state env (value : expression) capability (member : name) ar
             arguments = checked;
             defaults_left_out = left_out;
             uses = [ T.Capability capability ];
-            capability_arguments = [];
             result;
           };
       Form.draft_call state value;
@@ -551,7 +549,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
             mismatch state receiver.span ~expected:self_type ~found:receiver_type
       | None -> ());
       (match (expected, instance.signature.output) with
-      | Some expected, Returns output -> ignore (unify state output expected)
+      | Some expected, Returns output -> hint state output expected
       | _ -> ());
       let matched, left_out =
         match_arguments state value instance.signature.parameters arguments ~record:false
@@ -589,6 +587,45 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
     (({ owner = trait.trait; name = "Self" } : T.parameter), T.Type receiver_type)
     :: Option.value ~default:[] (T.substitution_of trait_generics trait_arguments)
   in
+  (* An [any] value holds one version of each method, for the type it
+     hides. A method with generic parameters of its own has a version for
+     each set of arguments, and one that takes or returns [Self] names the
+     hidden type, so neither can be called through it. *)
+  (match receiver_type with
+  | T.Any _ ->
+      let self : T.parameter = { owner = trait.trait; name = "Self" } in
+      let names_self type_ =
+        let found = ref false in
+        ignore
+          (T.map
+             (function
+               | T.Projection { base = T.Parameter base; _ } as projected when base = self ->
+                   Some projected
+               | T.Parameter parameter as named when parameter = self ->
+                   found := true;
+                   Some named
+               | _ -> None)
+             type_);
+        !found
+      in
+      let signature = method_.method_signature in
+      if signature.generics <> [] then
+        report state Not_callable value.span
+          (Printf.sprintf
+             "`%s` has generic parameters of its own, so it cannot be called through `%s`: an \
+              `any` value holds one version of each method, and this one has a version for each \
+              set of arguments. Call it on a value whose type is known."
+             method_.method_name (show state receiver_type))
+      else if
+        List.exists (fun (info : T.parameter_info) -> names_self info.type_) signature.parameters
+        || names_self (output_type signature.output)
+      then
+        report state Not_callable value.span
+          (Printf.sprintf
+             "`%s` takes or returns `Self`, which is the type `%s` hides, so it cannot be called \
+              through it. Call it on a value whose type is known."
+             method_.method_name (show state receiver_type))
+  | _ -> ());
   let instance = instantiate state value.span ~extra method_.method_signature in
   explicit_type_arguments state value instance type_arguments;
   let matched, left_out =
@@ -623,7 +660,6 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
         arguments = receiver_argument :: checked;
         defaults_left_out = left_out;
         uses = instance.signature.uses;
-        capability_arguments = [];
         result;
       };
   Form.draft_call state value;

@@ -141,7 +141,7 @@ and variant_value state (value : expression) type_path variant ~arguments =
               inputs = List.map (fun (field : T.field) -> (T.Own, field.field_type)) fields;
               output = Returns type_;
               uses = [];
-              costs = [ { amortized = false; resource = "time"; bound = Order_of } ];
+              costs = [ { amortized = false; resource = Time; bound = Order_of } ];
             }
       | None ->
           error state Unknown_variant value.span
@@ -276,15 +276,7 @@ and explicit_type_arguments ?(head = 0) state (value : expression) instance item
 and finish_call state (value : expression) callee (instance : instance) arguments left_out =
   let result = output_type instance.signature.output in
   state.tables.calls.(value.id) <-
-    Some
-      {
-        callee;
-        arguments;
-        defaults_left_out = left_out;
-        uses = instance.signature.uses;
-        capability_arguments = [];
-        result;
-      };
+    Some { callee; arguments; defaults_left_out = left_out; uses = instance.signature.uses; result };
   note_lending state value instance.signature.output;
   Form.draft_call state value;
   (* A call to a [yields] method outside a [for] loop makes a cursor. *)
@@ -514,7 +506,6 @@ and each_call state (span : span) type_ mode =
                     arguments = [];
                     defaults_left_out = [];
                     uses = instance.signature.uses;
-                    capability_arguments = [];
                     result = element;
                   },
                   element )
@@ -551,7 +542,6 @@ and each_call state (span : span) type_ mode =
                 arguments = [];
                 defaults_left_out = [];
                 uses = instance.signature.uses;
-                capability_arguments = [];
                 result = element;
               },
               element )

@@ -87,6 +87,9 @@ let () =
   test "a function with arguments C passes through ... is declared so" (fun () ->
       expect_string ~expected:"int open(const char *, int, ...);\n"
         (Libc.prototype (Libc.declaration Linux Open)));
+  test "a number whose name in C starts with an underscore is named without it" (fun () ->
+      expect_string ~expected:"libc_sc_nprocessors_onln"
+        (Intrinsic.operation_name (Libc_number Sc_nprocessors_onln)));
   test "storage a function fills is passed mut, and a view it reads is not" (fun () ->
       let modes operation =
         List.map
@@ -213,6 +216,53 @@ let () =
               emit b (Assign (at differ, Binary (Not_equal, Copy (at first), Copy (at second))));
               emit b (Assign (at status, Convert (Copy (at differ), Integer Int32)));
               status);
+        ])
+
+let () =
+  test "nothing after a call of a function that does not return is run" (fun () ->
+      let open Lir_builder in
+      expect_status ~extra 7
+        [
+          built_entry (fun b ->
+              operate b (Libc Exit) [ Value (constant_int32 7) ];
+              let status = local b (value int32) in
+              emit b (Assign (at status, Use (constant_int32 0)));
+              status);
+        ]);
+  test "a pipe's two ends arrive in the arguments named for them, and poll finds what was written"
+    (fun () ->
+      let open Lir_builder in
+      let waited_ty = Storage.of_elements int32 in
+      expect_status ~extra 1
+        [
+          built_entry (fun b ->
+              let read_end = local b (value int32) and write_end = local b (value int32) in
+              operate b (Libc Pipe) [ Place (at read_end); Place (at write_end) ];
+              let view = view_of b "x" in
+              operate b (Libc Write)
+                [ Value (Copy (at write_end)); Place (at view); Value (usize 1) ];
+              let waited = local b (value waited_ty) in
+              operate b ~destination:(at waited) ~type_arguments:[ int32 ] Storage_with_capacity
+                [ Value (usize 2) ];
+              operate b ~type_arguments:[ int32 ] Storage_push
+                [ Place (at waited); Value (Copy (at read_end)) ];
+              let reading = flags b [ Pollin ] in
+              operate b ~type_arguments:[ int32 ] Storage_push
+                [ Place (at waited); Value (Copy (at reading)) ];
+              let ready = local b (value int32) in
+              operate b ~destination:(at ready) (Libc Poll)
+                [ Place (at waited); Value (usize 1); Value (constant_int32 1000) ];
+              (* What was found is the high half of the second number. *)
+              let found = local b (value int32) in
+              emit b
+                (Assign
+                   ( at found,
+                     Binary (Shift_right, Copy (Storage.at (at waited) (usize 1)), constant_int32 16)
+                   ));
+              emit b (Assign (at found, Binary (Bit_and, Copy (at found), Copy (at reading))));
+              emit b (Assign (at ready, Binary (Multiply, Copy (at ready), Copy (at found))));
+              free b (at waited);
+              ready);
         ])
 
 (* With the standard library's own types, whose drop code generation makes. *)

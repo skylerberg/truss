@@ -125,7 +125,6 @@ let form database (path : Path.t) : Core.t option =
                    arguments;
                    lends = None;
                    uses = [];
-                   capability_arguments = [];
                  })
           in
           let read place : Core.argument = Passed { mode = Read; value = Place place } in
@@ -281,7 +280,6 @@ let form database (path : Path.t) : Core.t option =
                                  ];
                                lends = None;
                                uses = [];
-                               capability_arguments = [];
                              })))
                 in
                 of_self unit (fun variant index mine ->

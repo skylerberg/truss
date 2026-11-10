@@ -33,8 +33,19 @@ and function_type = {
 }
 
 and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
-and capability = Capability of Path.t | Capability_parameter of parameter
-and cost = { amortized : bool; resource : string; bound : cost_bound }
+
+and capability =
+  | Capability of Path.t
+  | Capability_parameter of parameter
+  | Capability_variable of int
+
+and cost = { amortized : bool; resource : resource; bound : cost_bound }
+
+and resource =
+  | Time
+  | Allocations
+  | Allocated_bytes
+  | Calls of { capability : Path.t; method_ : string option }
 
 (* A function type's parameters have no names, so its bounds are
    constants: the number, when it is written as one. *)
@@ -137,6 +148,51 @@ and substitute_function substitution (function_type : function_type) =
     costs = function_type.costs;
   }
 
+(* A type with every set of capabilities in it rewritten: the [uses] of
+   each function type and each capability argument, at any depth. *)
+let rec map_capabilities f type_ =
+  let argument = function
+    | Type type_ -> Type (map_capabilities f type_)
+    | Capabilities capabilities -> Capabilities (f capabilities)
+    | Value _ as value -> value
+  in
+  let trait (reference : trait_reference) =
+    {
+      reference with
+      trait_arguments = List.map argument reference.trait_arguments;
+      associated =
+        List.map (fun (name, type_) -> (name, map_capabilities f type_)) reference.associated;
+    }
+  in
+  match type_ with
+  | Named { path; arguments } -> Named { path; arguments = List.map argument arguments }
+  | Projection { base; trait = reference; name } ->
+      Projection { base = map_capabilities f base; trait = trait reference; name }
+  | Function function_type ->
+      Function
+        {
+          function_type with
+          inputs =
+            List.map (fun (mode, type_) -> (mode, map_capabilities f type_)) function_type.inputs;
+          output =
+            (match function_type.output with
+            | Returns type_ -> Returns (map_capabilities f type_)
+            | Yields (mode, type_) -> Yields (mode, map_capabilities f type_)
+            | Lends (mode, type_) -> Lends (mode, map_capabilities f type_));
+          uses = f function_type.uses;
+        }
+  | Any reference -> Any (trait reference)
+  | Cursor { method_; arguments } -> Cursor { method_; arguments = List.map argument arguments }
+  | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_
+
+let map_argument_capabilities f = function
+  | Type type_ -> Type (map_capabilities f type_)
+  | Capabilities capabilities -> Capabilities (f capabilities)
+  | Value _ as value -> value
+
+let unknown_capabilities capabilities =
+  List.exists (function Capability_variable _ -> true | _ -> false) capabilities
+
 let rec map f type_ =
   match f type_ with
   | Some replacement -> replacement
@@ -193,7 +249,7 @@ and trait_unsolved trait =
   || List.exists (fun (_, type_) -> contains_unsolved type_) trait.associated
 
 let terminates (function_type : function_type) =
-  List.exists (fun (cost : cost) -> cost.resource = "time") function_type.costs
+  List.exists (fun (cost : cost) -> cost.resource = Time) function_type.costs
 
 let same_clauses (left : function_type) (right : function_type) =
   List.sort_uniq compare left.uses = List.sort_uniq compare right.uses
@@ -223,6 +279,14 @@ let costs_imply ~(given : cost list) ~(wanted : cost list) =
 
 let path_name = function Path.Top { name; _ } -> name | path -> Path.show path
 
+let show_resource = function
+  | Time -> "time"
+  | Allocations -> "allocations"
+  | Allocated_bytes -> "allocated_bytes"
+  | Calls { capability; method_ } ->
+      Printf.sprintf "calls(%s%s)" (path_name capability)
+        (match method_ with Some method_ -> "." ^ method_ | None -> "")
+
 let rec show = function
   | Named { path; arguments = [] } -> path_name path
   | Named { path; arguments } ->
@@ -251,7 +315,9 @@ and show_argument = function
       ^ String.concat ", "
           (List.map
              (function
-               | Capability path -> path_name path | Capability_parameter { name; _ } -> name)
+               | Capability path -> path_name path
+               | Capability_parameter { name; _ } -> name
+               | Capability_variable _ -> "_")
              capabilities)
       ^ "}"
 
@@ -278,7 +344,10 @@ and show_function (function_type : function_type) =
   let base = Printf.sprintf "fn(%s)%s" inputs output in
   let uses =
     List.map
-      (function Capability path -> path_name path | Capability_parameter { name; _ } -> name)
+      (function
+        | Capability path -> path_name path
+        | Capability_parameter { name; _ } -> name
+        | Capability_variable _ -> "_")
       function_type.uses
   in
   let costs =
@@ -293,7 +362,7 @@ and show_function (function_type : function_type) =
           | Exactly_cost (Some value) -> "== " ^ Z.to_string value
           | Exactly_cost None -> "== ..."
         in
-        "cost " ^ cost.resource ^ " " ^ bound)
+        "cost " ^ show_resource cost.resource ^ " " ^ bound)
       function_type.costs
   in
   match (uses, costs) with
@@ -386,8 +455,7 @@ let function_type_of (signature : signature) =
     output = signature.output;
     uses = signature.uses;
     costs =
-      (if signature.terminates then
-         [ { amortized = false; resource = "time"; bound = Finite_cost } ]
+      (if signature.terminates then [ { amortized = false; resource = Time; bound = Finite_cost } ]
        else []);
   }
 

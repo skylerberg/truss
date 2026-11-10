@@ -23,14 +23,7 @@ type result = {
 }
 
 let no_output : env =
-  {
-    output = None;
-    specification = false;
-    self = None;
-    self_mode = T.Read;
-    loop_element = None;
-    own = [];
-  }
+  { output = None; specification = false; self = None; self_mode = T.Read; loop_element = None }
 
 (* A body: each statement settles its own types, and the last is checked
    against the result type. *)
@@ -96,6 +89,10 @@ let clause_expressions (clauses : clause list) =
 let check_clauses state env (clauses : clause list) =
   let env = { env with specification = true } in
   List.iter
+    (fun (clause : clause) ->
+      match clause.kind with Cost { resource; _ } -> check_resource state resource | _ -> ())
+    clauses;
+  List.iter
     (fun ((value : expression), kind) ->
       in_statement state env value.span (fun () ->
           match kind with
@@ -153,18 +150,6 @@ let check_defaults state env (written : parameter list) (signature : T.signature
 
 (* The core form of a definition's parts *)
 
-let core_cost state ({ amortized; resource; bound } : cost) : Core.cost =
-  {
-    amortized;
-    resource;
-    bound =
-      (match bound with
-      | Finite -> Finite
-      | Big_o value -> Order_of (built state value)
-      | At_most value -> At_most (built state value)
-      | Exactly value -> Exactly (built state value));
-  }
-
 let core_contract state (clauses : clause list) : Core.contract =
   let each choose = List.concat_map (fun (clause : clause) -> choose clause.kind) clauses in
   let requires =
@@ -182,7 +167,13 @@ let core_contract state (clauses : clause list) : Core.contract =
     requires;
     ensures;
     decreases;
-    costs = each (function Cost cost -> [ core_cost state cost ] | _ -> []);
+    costs =
+      List.filter_map
+        (fun (clause : clause) ->
+          match clause.kind with
+          | Cost cost -> Some (Form.cost state ~origin:clause.id cost)
+          | _ -> None)
+        clauses;
   }
 
 (* The parameters as the body names them: [self] first when there is one,
@@ -252,7 +243,6 @@ let check_function state ~broken_body (written : signature) (body_block : block 
       self = Option.map snd signature.receiver;
       self_mode = self_mode signature;
       loop_element = None;
-      own = T.capability_parameters signature.generics;
     }
   in
   declare_parameters state written.parameters signature;
@@ -505,7 +495,7 @@ let finalize (state : state) =
         | Intrinsic intrinsic ->
             Intrinsic { intrinsic with type_arguments = List.map argument intrinsic.type_arguments }
         | other -> other);
-      capability_arguments = written.capability_arguments;
+      uses = final_capabilities state written.uses;
       result = final written.result;
     }
   in
@@ -581,7 +571,8 @@ let check database (key : Names.key) =
           binding_spans;
           lambdas = [];
           unsolved = None;
-          widened = Hashtbl.create 4;
+          within = [];
+          capabilities = None;
           evidence = [];
         }
       in
@@ -626,16 +617,54 @@ let check database (key : Names.key) =
         && decided state.tables.types && decided state.tables.local_types
         && decided state.tables.pattern_types
       in
+      let build () : Core.t =
+        state.form.next <- 0;
+        state.form.made <- 0;
+        let parts = match state.form.parts with Some build -> build () | None -> Core.Nothing in
+        { parts; nodes = state.form.next; made = state.form.made }
+      in
       (* What code may call is checked on the form, where every call is a
-         node. A definition that fails it has no form to give out. *)
+         node, and that is where the unknown sets of capabilities are
+         solved: what each must hold is what the calls need. One with no
+         form to solve it on is empty. *)
+      let form = if whole then Some (build ()) else None in
+      (match form with
+      | Some form -> Capabilities.check state lowered form
+      | None -> state.capabilities <- Some (Hashtbl.create 1));
+      (* What they were solved as is written into every type: those of the
+         tables, and those of the form, which is built again from them. A
+         definition that failed the check has no form to give out. *)
+      let unknown_sets = state.unifier.unknown_sets > 0 in
+      if unknown_sets then finalize state;
       let core : Core.t option =
-        if whole then begin
-          let parts = match state.form.parts with Some build -> build () | None -> Core.Nothing in
-          let form : Core.t = { parts; nodes = state.form.next; made = state.form.made } in
-          Capabilities.check state lowered form;
-          if state.diagnostics = [] then Some form else None
-        end
-        else None
+        match form with
+        | Some form when state.diagnostics = [] ->
+            let form = if unknown_sets then build () else form in
+            Core_walk.parts
+              {
+                Core_walk.nothing with
+                expression =
+                  (fun (node : Core.expression) ->
+                    match node.kind with
+                    | Provide { implementations; _ } ->
+                        state.tables.provides.(node.origin) <-
+                          Some
+                            {
+                              implementations =
+                                List.map
+                                  (fun (implementation : Core.implementation) ->
+                                    ( implementation.origin,
+                                      List.map
+                                        (fun ({ capability; impl; arguments } : Core.provided) :
+                                             C.provided -> { capability; impl; arguments })
+                                        implementation.provides ))
+                                  implementations;
+                            }
+                    | _ -> ());
+              }
+              form.parts;
+            Some form
+        | _ -> None
       in
       Some
         {

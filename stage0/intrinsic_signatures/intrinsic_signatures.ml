@@ -124,6 +124,9 @@ let signature (operation : Intrinsic.operation) : T.signature =
       make ~output:(Returns (T.builtin Handle)) [ input "descriptor" (T.builtin Int32) ]
   | Handle_descriptor ->
       make ~output:(Returns (T.builtin Int32)) [ input "handle" (T.builtin Handle) ]
+  | Run_test -> make [ input "index" (T.builtin UInt32) ]
+  | Report_tests_to -> make [ input "descriptor" (T.builtin Int32) ]
+  | Live_blocks -> make ~output:(Returns usize) []
   | Libc function_ ->
       let { Libc.parameters; result } = Libc.signature function_ in
       let found = match result with Text -> [ input ~mode:Mut "found" bool ] | _ -> [] in
@@ -132,13 +135,15 @@ let signature (operation : Intrinsic.operation) : T.signature =
           (Returns
              (match result with
              | Returns scalar | Points_at scalar -> libc_scalar scalar
-             | Text -> view (T.builtin UInt8)))
+             | Text -> view (T.builtin UInt8)
+             | Never -> T.Never))
         (List.concat_map
            (fun (name, (passes : Libc.passes)) ->
              match passes with
              | Value scalar -> [ input name (libc_scalar scalar) ]
              | Elements scalar -> [ input name (view (libc_scalar scalar)) ]
-             | Room scalar -> [ input ~mode:Mut name (storage (libc_scalar scalar)) ]
+             | Room scalar | Elements_to_change scalar ->
+                 [ input ~mode:Mut name (storage (libc_scalar scalar)) ]
              | Written (scalar, names) ->
                  List.map (fun name -> input ~mode:Mut name (libc_scalar scalar)) names
              | Always _ | Environment -> [])
@@ -164,9 +169,9 @@ let cost (operation : Intrinsic.operation) =
   | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
   | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
   | View_slice | View_address | Storage_model | View_model | Crash | Storage_lengthen | Storage_push
-  | Handle_from | Handle_descriptor | Libc_number _ ->
+  | Handle_from | Handle_descriptor | Report_tests_to | Live_blocks | Libc_number _ ->
       { time = Constant_time; allocation_free = true }
   | Compare_bytes | Storage_remove | Storage_insert ->
       { time = Linear_in 0; allocation_free = true }
   | Storage_set_capacity -> { time = Linear_in 0; allocation_free = false }
-  | Storage_with_capacity | Libc _ -> { time = Unbounded_time; allocation_free = false }
+  | Storage_with_capacity | Run_test | Libc _ -> { time = Unbounded_time; allocation_free = false }

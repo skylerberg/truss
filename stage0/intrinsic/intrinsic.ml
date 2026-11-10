@@ -152,6 +152,9 @@ type operation =
   | Crash
   | Handle_from
   | Handle_descriptor
+  | Run_test
+  | Report_tests_to
+  | Live_blocks
   | Libc of Libc.function_
   | Libc_number of Libc.number
 
@@ -221,6 +224,9 @@ let operations =
     Crash;
     Handle_from;
     Handle_descriptor;
+    Run_test;
+    Report_tests_to;
+    Live_blocks;
   ]
   @ List.map (fun function_ -> Libc function_) Libc.functions
   @ List.map (fun number -> Libc_number number) Libc.numbers
@@ -290,8 +296,15 @@ let operation_name = function
   | Crash -> "crash"
   | Handle_from -> "handle_from"
   | Handle_descriptor -> "handle_descriptor"
+  | Run_test -> "run_test"
+  | Report_tests_to -> "report_tests_to"
+  | Live_blocks -> "live_blocks"
   | Libc function_ -> "libc_" ^ Libc.function_name function_
-  | Libc_number number -> "libc_" ^ String.lowercase_ascii (Libc.number_name number)
+  | Libc_number number ->
+      (* A name does not start with an underscore, as some of C's do. *)
+      let name = Libc.number_name number in
+      let from = if String.starts_with ~prefix:"_" name then 1 else 0 in
+      "libc_" ^ String.lowercase_ascii (String.sub name from (String.length name - from))
 
 let operation_path operation = Path.Top { module_; name = operation_name operation }
 

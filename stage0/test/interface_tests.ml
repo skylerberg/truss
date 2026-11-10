@@ -541,6 +541,28 @@ let () =
       let signature = at database (Types.named (app "FixedClock") []) clock "now" in
       match signature.uses with [ Capability _ ] -> () | uses -> fail "%d uses" (List.length uses))
 
+(* Law proofs *)
+
+let () =
+  let monoid =
+    "trait Joined {\n\
+    \  fn join(self, other: Self) -> Self\n\n\
+    \  law associative(first: Self, second: Self, third: Self) {\n\
+    \    true\n\
+    \  }\n\
+     }\n\n\
+     type Meters(value: Int64)\n\n\
+     type Feet(value: Int64)\n\n\
+     impl Joined for Meters {\n\
+    \  fn join(self, other: Meters) -> Meters { todo }\n\
+     }\n\n"
+  in
+  test "a law's proof is of a law its trait has, kept by a type that implements the trait"
+    (fun () ->
+      no_diagnostics [ ("app::main", monoid ^ "proof Joined.associative for Meters {\n}\n") ];
+      one_diagnostic (monoid ^ "proof Joined.commutative for Meters {\n}\n") "types.unknown_member";
+      one_diagnostic (monoid ^ "proof Joined.associative for Feet {\n}\n") "types.no_impl")
+
 (* Real implementations *)
 
 let () =

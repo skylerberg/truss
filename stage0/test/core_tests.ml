@@ -317,21 +317,28 @@ let () =
 (* Capabilities *)
 
 let () =
-  test "a call holds what each capability parameter of what it calls stands for" (fun () ->
+  let apply =
+    "fn apply[capability Granted](run: (fn() uses Granted))\n\
+    \  uses Granted\n\
+     {\n\
+    \  run()\n\
+     }\n\n\
+     fn shout()\n\
+    \  uses Console\n\
+     {\n\
+    \  Console.print_line(\"named\")\n\
+     }\n\n"
+  in
+  builds "a capability parameter is the set that what is passed for it uses"
+    (apply ^ "fn g()\n  uses Console\n{\n  apply(fn() { Console.print_line(\"inside\") })\n}\n")
+    "{ app::main::apply[{Console}](lambda() { standard::capabilities::Console.print_line(view \
+     through standard::text::String.slice(\"inside\")) }) }";
+  builds "a function passed for a capability parameter is passed as it is"
+    (apply ^ "fn g()\n  uses Console\n{\n  apply(shout)\n}\n")
+    "{ app::main::apply[{Console}](fn app::main::shout) }";
+  test "what a call needs and what a lambda is hold the set, not the parameter" (fun () ->
       let text =
-        "fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))\n\
-        \  uses Granted\n\
-         {\n\
-        \  visit(count)\n\
-         }\n\n\
-         fn g()\n\
-        \  uses Clock\n\
-         {\n\
-        \  for_each(3, visit: fn(step) {\n\
-        \    let _ = Clock.now()\n\
-        \    let _ = step\n\
-        \  })\n\
-         }\n"
+        apply ^ "fn g()\n  uses Console\n{\n  apply(fn() { Console.print_line(\"inside\") })\n}\n"
       in
       let database = setup [ ("app::main", text) ] in
       let found = ref [] in
@@ -347,20 +354,56 @@ let () =
                     expression =
                       (fun (node : Core.expression) ->
                         match node.kind with
-                        | Call { callee = Function { path; _ }; capability_arguments; uses; _ }
-                          when Path.show path = "app::main::for_each" ->
-                            found :=
-                              List.map
-                                (fun ((parameter : Types.parameter), solved) ->
-                                  Printf.sprintf "%s = %d, uses %d" parameter.name
-                                    (List.length solved) (List.length uses))
-                                capability_arguments
+                        | Call { callee = Function { path; _ }; uses; _ }
+                          when Path.show path = "app::main::apply" ->
+                            found := ("needs " ^ Types.show_argument (Capabilities uses)) :: !found
+                        | Lambda _ -> found := Types.show node.type_ :: !found
                         | _ -> ());
                   }
                   form.parts
             | None -> fail "no form")
         (Query.demand database Resolve.Names.declarations (module_of "app::main"));
-      if !found <> [ "Granted = 1, uses 1" ] then fail "found [%s]" (String.concat "; " !found))
+      if List.sort compare !found <> [ "(fn() uses Console)"; "needs {Console}" ] then
+        fail "found [%s]" (String.concat "; " !found));
+  test "a capability parameter in a result is the set of each call" (fun () ->
+      let text =
+        "fn later[capability Granted](run: (fn() uses Granted)) -> (fn() uses Granted) {\n\
+        \  run\n\
+         }\n\n\
+         fn g()\n\
+        \  uses Console, Clock\n\
+         {\n\
+        \  let first = later(fn() { Console.print_line(\"x\") })\n\
+        \  let second = later(fn() {\n\
+        \    let _ = Clock.now()\n\
+        \  })\n\
+        \  first()\n\
+        \  second()\n\
+         }\n"
+      in
+      let database = setup [ ("app::main", text) ] in
+      let found = ref [] in
+      List.iter
+        (fun (declaration : Resolve.Names.declaration) ->
+          let key = Resolve.Names.key_of declaration in
+          if Path.show key.path = "app::main::g" then
+            match Query.demand database Infer.core key with
+            | Some form ->
+                Core_walk.parts
+                  {
+                    Core_walk.nothing with
+                    pattern =
+                      (fun (node : Core.pattern) ->
+                        match node.kind with
+                        | Bind { name; _ } ->
+                            found := (name ^ ": " ^ Types.show node.type_) :: !found
+                        | _ -> ());
+                  }
+                  form.parts
+            | None -> fail "no form")
+        (Query.demand database Resolve.Names.declarations (module_of "app::main"));
+      if List.sort compare !found <> [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
+      then fail "found [%s]" (String.concat "; " !found))
 
 (* Where a node came from *)
 
@@ -402,7 +445,22 @@ let () =
           | _ -> fail "no form")
         (Query.demand database Resolve.Names.declarations (module_of "app::main")))
 
-(* Every form of the standard library holds together. *)
+let () =
+  shows "a cost clause says what it counts"
+    "fn g(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
+    \  uses Clock\n\
+    \  cost calls(visit) == items.length()\n\
+    \  cost calls(Clock.now) <= 1\n\
+    \  cost time O(items.length() * time(visit))\n\
+     {\n\
+     }\n"
+    "fn(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
+     cost calls(visit) == standard::list::List.length[Int64](place items)\n\
+     cost calls(standard::capabilities::Clock.now) <= 1\n\
+     cost time O(multiply(to_integer(standard::list::List.length[Int64](place items)), time(visit)))\n\
+     {  }"
+
+(* Every form of the standard library holds to what a form promises. *)
 
 let () =
   let database = setup [] in
@@ -411,70 +469,7 @@ let () =
     (fun ((module_ : Path.module_), _) ->
       test
         (Printf.sprintf "%s's core forms hold together" (Path.show_module module_))
-        (fun () ->
-          List.iter
-            (fun (declaration : Resolve.Names.declaration) ->
-              let key = Resolve.Names.key_of declaration in
-              match Query.demand database Infer.core key with
-              | None -> ()
-              | Some form ->
-                  incr forms;
-                  let seen = Hashtbl.create 64 in
-                  let wrong format =
-                    Printf.ksprintf
-                      (fun message -> fail "%s: %s" (Resolve.Names.show_key key) message)
-                      format
-                  in
-                  let once id =
-                    if id < 0 || id >= form.nodes then wrong "the id %d is out of range" id;
-                    if Hashtbl.mem seen id then wrong "the id %d is used twice" id;
-                    Hashtbl.replace seen id ()
-                  in
-                  let decided what (type_ : Types.ty) =
-                    if Types.contains_unsolved type_ then
-                      wrong "%s has the type `%s`" what (Types.show type_)
-                  in
-                  let rec place (found : Core.place) =
-                    match found with
-                    | Lent { kind = Call { lends = Some _; _ }; _ } | Local _ | Temporary _ -> ()
-                    | Lent _ -> wrong "a lent part is not a call that lends"
-                    | Field { base; _ } -> place base
-                  in
-                  Core_walk.parts
-                    {
-                      expression =
-                        (fun (node : Core.expression) ->
-                          once node.id;
-                          decided "an expression" node.type_;
-                          match node.kind with
-                          | Use found | Next found -> place found
-                          | Call { arguments; _ } ->
-                              List.iter
-                                (function
-                                  | Core.Passed { mode = Mut; value = Value { kind = Slice _; _ } }
-                                    ->
-                                      ()
-                                  | Core.Passed { mode = Mut; value = Value _ } ->
-                                      wrong "a value is passed where a place is changed"
-                                  | Passed { mode = Own; value = Place _ } ->
-                                      wrong "a place is passed where a value is taken"
-                                  | _ -> ())
-                                arguments
-                          | _ -> ());
-                      statement =
-                        (fun (node : Core.statement) ->
-                          once node.id;
-                          match node.kind with
-                          | Assign { target; _ } | Update { target; _ } -> place target
-                          | _ -> ());
-                      pattern =
-                        (fun (node : Core.pattern) ->
-                          once node.id;
-                          decided "a pattern" node.type_);
-                      callee = ignore;
-                    }
-                    form.parts)
-            (Query.demand database Resolve.Names.declarations module_)))
+        (fun () -> forms := !forms + forms_hold database module_))
     Standard_library.modules;
   test "the standard library has core forms" (fun () ->
       if !forms < 500 then fail "only %d of its definitions have one" !forms)
@@ -606,5 +601,81 @@ let () =
                       fail "`%s`, `%s`: %s" (Path.show impl) name (Compiler_bug.to_string bug))
                 interface.impl_methods)
         derived)
+
+(* The form at a path *)
+
+let () =
+  let text =
+    "trait Described {\n\
+    \  fn describe(self) -> Int64\n\n\
+    \  fn twice(self) -> Int64 {\n\
+    \    self.describe() + self.describe()\n\
+    \  }\n\
+     }\n\n\
+     type Both[Value](first: Value, second: Value)\n\
+    \  derives Equal\n\n\
+     impl Described for Both[Value: Described] {\n\
+    \  fn describe(self) -> Int64 {\n\
+    \    self.first.describe()\n\
+    \  }\n\
+     }\n"
+  in
+  let both : Path.t = Top { module_ = module_of "app::main"; name = "Both" } in
+  let described : Types.trait_reference =
+    {
+      trait = Top { module_ = module_of "app::main"; name = "Described" };
+      trait_arguments = [];
+      associated = [];
+    }
+  in
+  let at name =
+    let database = setup [ ("app::main", text) ] in
+    let parameter : Types.parameter = { owner = both; name = "Value" } in
+    let bounds (found : Types.parameter) = if found = parameter then [ described ] else [] in
+    let owner =
+      match
+        Interface.Impls.implements database ~bounds
+          (Types.named both [ Types.Parameter parameter ])
+          described
+      with
+      | Some (From_impl { impl; _ }) -> impl
+      | _ -> failwith "no impl"
+    in
+    match Query.demand database Infer.core_at (Method { owner; name; receiver = Read }) with
+    | Some (form, substitution) ->
+        ( List.hd (List.rev (String.split_on_char '\n' (Core_print.show form))),
+          List.map
+            (fun ((parameter : Types.parameter), argument) ->
+              parameter.name ^ " = " ^ Types.show_argument argument)
+            substitution )
+    | None -> failwith "no form"
+  in
+  test "a method an impl writes has its own form" (fun () ->
+      match at "describe" with
+      | "{ Described.describe for Value by a bound(place self.first) }", [] -> ()
+      | found, _ -> fail "found %s" found);
+  test "a method an impl leaves to its trait has the trait's form, with what Self is" (fun () ->
+      match at "twice" with
+      | ( "{ add(Described.describe for Self by a bound(place self), Described.describe for Self \
+           by a bound(place self)) }",
+          [ "Self = Both[Value]" ] ) ->
+          ()
+      | found, substitution -> fail "found %s with [%s]" found (String.concat "; " substitution));
+  test "a method a derived impl gives has the form made from the type" (fun () ->
+      let database = setup [ ("app::main", text) ] in
+      let owner : Path.t =
+        Derived
+          {
+            type_ = both;
+            trait = Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Equal" };
+          }
+      in
+      match
+        ( Query.demand database Infer.core_at (Method { owner; name = "equal"; receiver = Read }),
+          Query.demand database Infer.core_at
+            (Method { owner; name = "not_equal"; receiver = Read }) )
+      with
+      | Some (_, []), Some (_, [ _ ]) -> ()
+      | _ -> fail "the derived method and the one left to the trait are not both found")
 
 let () = finish ()

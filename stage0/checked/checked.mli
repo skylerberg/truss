@@ -1,8 +1,9 @@
 (** The checked form of a definition: what the prover and code generation read.
 
     It is a set of dense tables keyed by the tree's node ids, so it never copies the tree. Every
-    type in it is solved: no [Variable] or [Literal] remains. A [Hole] stays where a [todo]'s type
-    was never decided. A local is named by the id of the name that binds it. *)
+    type in it is solved: no [Variable] or [Literal] remains, and no unknown set of capabilities. A
+    [Hole] stays where a [todo]'s type was never decided. A local is named by the id of the name
+    that binds it. *)
 
 type local = Syntax.id
 
@@ -59,8 +60,6 @@ type call = {
       (** The parameters with defaults that were not passed, in order. *)
   uses : Types.capability list;
       (** The capabilities the call needs, with capability parameters substituted. *)
-  capability_arguments : (Types.parameter * Types.capability list) list;
-      (** Each capability parameter, solved. *)
   result : Types.ty;
       (** What the callee gives. For an operator that tests what its call gives, as [<] tests the
           [Ordering] of [compare] and [!=] the [Bool] of [equal], it is not the operator's own type.

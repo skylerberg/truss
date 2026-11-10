@@ -242,8 +242,16 @@ and loop_clauses names clauses =
        clauses)
 
 and cost names (spent : cost) =
-  Printf.sprintf "cost%s %s"
+  Printf.sprintf "cost%s %s %s"
     (if spent.amortized then " amortized" else "")
+    (match spent.resource with
+    | Time -> "time"
+    | Allocations -> "allocations"
+    | Allocated_bytes -> "allocated_bytes"
+    | Calls (Through found) -> "calls(" ^ local names found ^ ")"
+    | Calls (Capability path) -> "calls(" ^ Path.show path ^ ")"
+    | Calls (Capability_method (path, method_)) ->
+        Printf.sprintf "calls(%s.%s)" (Path.show path) method_)
     (match spent.bound with
     | Finite -> "finite"
     | Order_of value -> "O(" ^ expression names value ^ ")"

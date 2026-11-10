@@ -2144,10 +2144,10 @@ and lambda context frame (written : expression) (parameters : pattern list) body
         in
         let resource : Costs.resource option =
           match cost.resource with
-          | "time" -> Some Time
-          | "allocations" -> Some Allocations
-          | "allocated_bytes" -> Some Allocated_bytes
-          | _ -> None
+          | T.Time -> Some Time
+          | T.Allocations -> Some Allocations
+          | T.Allocated_bytes -> Some Allocated_bytes
+          | T.Calls _ -> None
         in
         match (resource, counting) with
         | Some resource, Some counting ->
@@ -2688,7 +2688,7 @@ and measure_type element : T.function_type =
     inputs = [ (T.Read, element) ];
     output = Returns T.Integer;
     uses = [];
-    costs = [ { amortized = false; resource = "time"; bound = Finite_cost } ];
+    costs = [ { amortized = false; resource = T.Time; bound = Finite_cost } ];
   }
 
 and sequence_at context element term index =
@@ -3684,10 +3684,10 @@ and parameter_type context frame (call_ : C.call) index =
 and keeps_cost context path (contract : contract) (asked : T.cost) =
   let resource : resource option =
     match asked.resource with
-    | "time" -> Some Time
-    | "allocations" -> Some Allocations
-    | "allocated_bytes" -> Some Allocated_bytes
-    | _ -> None
+    | T.Time -> Some Time
+    | T.Allocations -> Some Allocations
+    | T.Allocated_bytes -> Some Allocated_bytes
+    | T.Calls _ -> None
   in
   let constant (value : expression) = match value.kind with Integer k -> Some k | _ -> None in
   match (resource, asked.bound) with
@@ -4789,10 +4789,7 @@ and call_reaches context (call_ : C.call) values (target : Costs.target) =
       List.exists
         (function
           | T.Capability used -> Path.equal used path
-          | T.Capability_parameter parameter -> (
-              match List.assoc_opt parameter call_.capability_arguments with
-              | Some given -> List.mem (T.Capability path) given
-              | None -> true))
+          | T.Capability_parameter _ | T.Capability_variable _ -> true)
         call_.uses
 
 and lambda_captures_target context lambda target =
@@ -4821,8 +4818,8 @@ and function_value_amount context frame (function_type : T.function_type) callee
   in
   match counter.resource with
   | Time -> time_of context frame (T.Function function_type) callee_term
-  | Allocations -> by_clause "allocations"
-  | Allocated_bytes -> by_clause "allocated_bytes"
+  | Allocations -> by_clause T.Allocations
+  | Allocated_bytes -> by_clause T.Allocated_bytes
   | Calls (Through term) ->
       if callee_term = term then L.int 1
       else if lambda_captures_target context callee_term term then
@@ -4831,7 +4828,9 @@ and function_value_amount context frame (function_type : T.function_type) callee
   | Calls (Capability path | Capability_method (path, _)) ->
       if
         List.exists
-          (function T.Capability used -> Path.equal used path | T.Capability_parameter _ -> true)
+          (function
+            | T.Capability used -> Path.equal used path
+            | T.Capability_parameter _ | T.Capability_variable _ -> true)
           function_type.uses
       then unknown_amount context frame counter
       else Costs.zero
@@ -5142,7 +5141,7 @@ and time_of context frame (ty : T.ty) term =
   fact context frame (L.Apply ("<=", [ L.int 1; time ]));
   (match ty with
   | T.Function { costs; _ }
-    when List.exists (fun (cost : T.cost) -> cost.resource = "time" && cost.bound = Order_of) costs
+    when List.exists (fun (cost : T.cost) -> cost.resource = T.Time && cost.bound = Order_of) costs
     ->
       fact context frame (L.equal time (L.int 1))
   | _ -> ());
@@ -6668,7 +6667,6 @@ and own_cursor_loop context frame (written : statement) pattern iterable clauses
       arguments = [ argument ];
       defaults_left_out = [];
       uses = [];
-      capability_arguments = [];
       result = option_type;
     }
   in

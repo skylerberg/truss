@@ -354,7 +354,8 @@ same there and goes no further:
 | `impl` | Its *interface*: generic parameters, the trait, the type, `uses`, and each method's signature | Nothing |
 | A method written inside a trait, an `impl`, or a capability | Its signature, as a function's, read with what the one it is inside says of `Self`, its associated types, and its generic parameters | Its body, if it has one, and its clauses |
 | Constant | Its type, and its value where the checker needs one | Its expression |
-| Test, theorem, law proof | Nothing | Its body |
+| Test, theorem | Nothing | Its body |
+| Law proof | What it is of: the trait, the law, and the type | Its body |
 
 - **Type checking a caller reads only the callee's signature.** Changing a
   body, a default, or an `ensures` type-checks that definition again and no
@@ -401,9 +402,13 @@ and function_type = {
   exists only in specifications.
 - **Types are nominal.** Two `Named` types are equal when they name the same
   definition with equal arguments. Function types are compared by
-  structure. Value arguments are compared by value, after constants are
-  worked out, so `Array[UInt8, digest_size]` equals `Array[UInt8, 32]` when
-  `digest_size` is 32.
+  structure, what each cost clause counts included: a `calls` clause of a
+  function type counts the calls of a capability or of one of its methods,
+  which is part of the type, so `(fn() cost calls(FileRead) <= 1)` is not a
+  `(fn() cost calls(Clock) <= 1)`. A type cannot name a parameter, whose
+  calls a function's own clauses count. Value arguments are compared by
+  value, after constants are worked out, so `Array[UInt8, digest_size]`
+  equals `Array[UInt8, 32]` when `digest_size` is 32.
 - **Associated types are normalized** whenever their base is known. With no
   blanket `impl`s, `Projection { base = Named ...; ... }` has at most one
   `impl` to look in. A projection on a generic parameter stays a projection,
@@ -465,9 +470,10 @@ inside a type argument, so `List[fn(Item)]` and
 
 - **Every capability the function uses must be one the expected type
   lists.** A function that `uses Clock` is never a `fn()`, in an argument,
-  a `let`, a `return`, a field, or an assignment. The one exception is a
-  capability parameter, described in
-  [What code may call](#what-code-may-call).
+  a `let`, a `return`, a field, or an assignment. Where the expected type
+  lists a capability parameter of what is being called or built, the
+  parameter comes to stand for what the function uses, as
+  [What code may call](#what-code-may-call) describes.
 - **Costs are weaker when the types' constants show it:** an exact count is
   within any bound it does not exceed, a count is `O(...)`, and every bound
   is `finite`. A named function's type has `time finite` exactly when the
@@ -581,9 +587,9 @@ the definition's interface: the types of its parameters and result, its
   before it in scope, as SYNTAX.md describes. `requires`, `ensures`, and
   `decreases` are specifications (see [Specifications](#specifications)).
   `uses` names capabilities or capability parameters. Each `cost` clause's
-  bound is an `Integer` expression; `calls(target)` names a function
-  parameter, a capability method, or a capability; and `time(visit)` names a
-  function parameter.
+  bound is an `Integer` expression; `calls(target)` names a parameter that
+  is a function, a capability, or a method the capability has, and anything
+  else is an error; and `time(visit)` names a function parameter.
 - **`lends` and `yields`** state how the method gives out parts of `self`:
   `lends` exactly once, `yields` any number of times. A lent part stays with
   `self`, so `lends` takes no mode or `mut`, and `lends own` is an error.
@@ -666,6 +672,8 @@ checked apart, and neither waits on the other:
   calls a capability holds the capability alone, so a method there has no
   `uses` of its own to add. A trait `impl`'s methods can use only what the
   trait's methods declare. Implementing `Panic` is an error.
+- **A law's proof** names a law its trait has and a type that implements
+  the trait.
 - **Methods that replace a provided method** must have its exact signature,
   and the provided method must be pure, have a `time` clause, and change
   none of its arguments, which is what lets its body be its definition.
@@ -1240,9 +1248,9 @@ call the implementation itself, so it still needs the capability among the
 The check runs on [the core form](#the-core-form), where every call the
 code makes is a node, however it was written. So a `for` loop over a value
 needs what the value's `each` uses, as the call written out would, and so
-does what a piece of a string is displayed by. A definition with an error
-has no form, and is not checked for what it may call until the error is
-gone.
+does what a piece of a string is displayed by. A definition with an error,
+or with a `todo` whose type nothing fixes, has no form, and is not checked
+for what it may call until it has one.
 
 - **A capability call,** such as `Clock.now()`, needs its capability
   available.
@@ -1250,21 +1258,36 @@ gone.
   its capability parameters are substituted, to be available.
 - **A call through a function value** needs the capabilities of the value's
   type.
-- **A lambda's `uses` are inferred** from its body: the capabilities it
-  calls. They must be within the `uses` of the function type it is checked
-  against.
-- **A capability parameter of what a call calls,** a function or a trait's
-  method, **is solved** as the union of what is passed for it: what each
-  lambda and each function that meets a function type listing the parameter
-  uses beyond what the type lists, wherever in the call's arguments it is,
-  in parentheses or at the end of a branch as well. That set must then be
-  available at the call. So
-  `for_each(3, visit: tick)` needs `Clock` when `tick` uses it and `visit`
-  is a `(fn(Int64) uses Granted)`.
+- **A lambda's body may use what the lambda's type lists,** which is the
+  function type the lambda is checked against.
+- **A capability parameter stands for a set of capabilities, which is
+  solved wherever its function, method, or type is used.** A call of
+  `for_each[capability Granted]` has a set of its own for `Granted`, as it
+  has a type of its own for a type parameter, and so has a value of a type
+  that has one. The set is in every type that got it from there: the
+  function type a lambda is checked against, the type of what the call
+  gives, the type of a local that holds it. It is the least set that holds
+  what must be within it: what each function that meets such a type uses
+  beyond what the type lists, and what a lambda's body needs beyond what
+  its type lists. So `for_each(3, visit: tick)` needs `Clock` when `tick`
+  uses it and `visit` is a `(fn(Int64) uses Granted)`, and after
+  `let kept = later(tick)`, where `later` gives back the function it is
+  given, `kept` is a `(fn() -> Instant uses Clock)`, and calling it needs
+  `Clock`.
+- **The sets are solved once the whole definition is checked,** since what
+  must be within one can be anywhere in it: a `var` that holds what a call
+  gave may be assigned another function later. Until then a set is an
+  unknown in the types that hold it, which decides nothing else about them.
+  Where a type that holds one meets a type that lists capabilities, the set
+  must turn out to be within those, or, where the two types must be the
+  same, to be those. Every type the checker gives out has each set in
+  place of its unknown, and each call's type arguments have the set where
+  the capability parameter is.
 - **A function's own capability parameter stands for itself** throughout its
   body. Inside `for_each`, a `(fn(Int64) uses Granted)` takes only functions
-  that use `Granted` or nothing, and a call of `for_each` by itself passes
-  `Granted` on as it is.
+  that use `Granted` or nothing. A call of `for_each` by itself is a call
+  like any other, with a set of its own, which is `Granted` when it passes
+  on the function it was given.
 - **What states and does not run** has no capabilities at all, not even
   `Panic`, since what it means must be a value: a contract's clauses, what
   a function-typed parameter requires, a loop's clauses, a type's invariant
@@ -1514,9 +1537,9 @@ needs to work anything out from the syntax tree again:
 - **every move,** whole and partial, which `Ownership`'s result for the
   definition holds beside the checked form, since it is found after it
 - **each call of a lending method,** with how the part it gives is lent
-- **the capability set** at each call, the capability parameters solved, and
-  the evidence each `provide` builds, for each capability its
-  implementations implement
+- **the capability set** at each call, with each capability parameter of
+  what is called solved among the call's type arguments, and the evidence
+  each `provide` builds, for each capability its implementations implement
 - **obligations** that the type checker created, as described next
 
 It is canonical, so that two checks of the same definition give equal
@@ -1589,9 +1612,9 @@ expression, statement, or pattern is, and builds the form once the
 definition has checked: only then is every type final, and every choice a
 statement settles at its end, such as the `impl` an operator means.
 [What code may call](#what-code-may-call) is checked on the form before it
-is given out, which sets on each call what the call needs and what each
-capability parameter of what it calls stands for there, and on each
-`provide` what its implementations provide.
+is given out, and that is where each unknown set of capabilities is solved,
+since only the form has every call. Where a definition has such sets, the
+form is then built again, from types that hold what they were solved as.
 
 A method a derived `impl` gives is written nowhere, so its form is made
 from the type's shape, as the body the method would have if it were
@@ -1616,6 +1639,12 @@ parameter. The form is made once for a method, whatever it is compiled
 for. A method the trait itself gives a body, such as `not_equal`, has the
 trait's form, as in any `impl` that leaves it to the trait, and a type
 that is still `todo` has none.
+
+So the form of a function or a method is found by its path, for every path
+that code is compiled or proven at: a written one has its own, a method a
+derived `impl` gives has the one made from the type, and a method an `impl`
+leaves to its trait has the trait's, together with what `Self` and the
+trait's parameters stand for at that `impl`.
 
 ### Obligations the type checker creates
 
@@ -1815,14 +1844,6 @@ that call and the contract a loop over it has are then the list's own.
   is type-checked with the body, and the prover reads it from the callee's
   tree, so a change to a callee's body reaches its callers' proofs, which
   then find each query's answer kept by the query's text.
-- **The target of a `calls(...)` cost in a function type.** A function
-  type's cost keeps its resource by name, so `cost calls(FileRead) <= 1` and
-  `cost calls(Clock) <= 1` are one type.
-- **A capability parameter in a result.** A function type that a signature
-  returns may list the signature's capability parameter, and a call does not
-  replace it by what the call solved, so such a result can be called only
-  inside the function it came from. A generic type's capability arguments
-  are not worked out either: they are equal only as written.
 - **Checked forms stored in a specified encoding.** They are kept as OCaml's
   marshaled values, as DATABASE.md describes.
 - **A shape that ignores the order of fields.** DESIGN.md says reordering a

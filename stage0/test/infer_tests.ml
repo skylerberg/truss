@@ -1089,6 +1089,62 @@ let () =
          \  let _ = fits\n\
           }\n")
         "types.unsatisfied_bound");
+  test "function types that count the calls of different capabilities are different types"
+    (fun () ->
+      let lists counted =
+        "fn take(runs: List[(fn() uses Clock, Console cost calls(Console) <= 1)]) {}\n\n\
+         fn f(runs: List[(fn() uses Clock, Console cost calls(" ^ counted
+        ^ ") <= 1)]) {\n  take(runs)\n}\n"
+      in
+      fine (lists "Console");
+      one_diagnostic (lists "Clock") "types.mismatch";
+      one_diagnostic (lists "Console.print_line") "types.mismatch");
+  test "what a function type's calls counts is a capability, or one of its methods" (fun () ->
+      one_diagnostic "type Point(x: Int64)\n\nfn f(run: (fn() cost calls(Point) <= 1)) {}\n"
+        "types.not_a_capability";
+      one_diagnostic "fn f(run: (fn() uses Clock cost calls(Clock.later) <= 1)) {}\n"
+        "types.unknown_member";
+      one_diagnostic "fn f(visit: fn(), run: (fn() cost calls(visit) <= 1)) {}\n"
+        "types.not_a_capability");
+  test "what a clause's calls counts is a function parameter, a capability, or its method"
+    (fun () ->
+      let clause counted =
+        "type Point(x: Int64)\n\n\
+         fn f(count: Int64, visit: (fn() cost time finite))\n\
+        \  uses Clock\n\
+        \  cost calls(" ^ counted ^ ") <= 1\n{\n  todo\n}\n"
+      in
+      fine (clause "visit");
+      fine (clause "Clock");
+      fine (clause "Clock.now");
+      one_diagnostic (clause "count") "types.not_callable";
+      one_diagnostic (clause "Point") "types.not_a_capability";
+      one_diagnostic (clause "Clock.later") "types.unknown_member");
+  test "a method with generic parameters of its own cannot be called through any" (fun () ->
+      one_diagnostic
+        "trait Visitor {\n\
+        \  fn visit[Other](self, other: Other) -> Int64\n\
+         }\n\n\
+         fn f(visitor: any Visitor) -> Int64 {\n\
+        \  visitor.visit(3)\n\
+         }\n"
+        "types.not_callable");
+  test "a method that takes or returns Self cannot be called through any" (fun () ->
+      one_diagnostic
+        "trait Joined {\n\
+        \  fn join(self, other: Self) -> Int64\n\
+         }\n\n\
+         fn f(first: any Joined, second: any Joined) -> Int64 {\n\
+        \  first.join(second)\n\
+         }\n"
+        "types.not_callable");
+  test "a method that names an associated type can be called through any" (fun () ->
+      fine
+        (source
+       ^ "fn f(numbers: own Numbers) -> Int64 {\n\
+         \  let source: any Source[Item = Int64] = any numbers\n\
+         \  source.first()\n\
+          }\n"));
   test "`any value` must give the associated types its type fixes" (fun () ->
       one_diagnostic
         (source

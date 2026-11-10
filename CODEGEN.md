@@ -116,9 +116,11 @@ The runtime (see [Program startup and failure](#program-startup-and-failure))
 is the exception. It is one fixed file for each target, compiled once and
 cached, and it includes the system's headers, since its declarations of
 signals and alternate stacks differ between systems and parsing them costs
-nothing on an edit. A test program's runtime is a second such file: it adds
-the test runner and the count of blocks a test must free, which a program
-that ships has no use for.
+nothing on an edit. It holds what must not be Truss: the handler for a
+stack that ran out, failing, which builds its text in a fixed buffer so
+that it never allocates, and allocation. A test program's runtime is a
+second such file: it adds the count of blocks a test must free and the
+table of the program's tests, which a program that ships has no use for.
 
 Generated code has no undefined behavior, even if the prover were wrong
 about an overflow or a shift:
@@ -1002,6 +1004,7 @@ until both handle it.
 | Storage | empty, with a capacity, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view |
 | Views | length, lend an element, slice |
 | Operating system | the C library's functions and numbers, a handle from a descriptor and its descriptor, the address of a view, crash |
+| A test program | run a test by its number, have failures reported to a descriptor, how many blocks are allocated and not freed |
 
 `Intrinsics` writes every operation into the caller's LIR, never as a call:
 numbers as primitive operations, and storage and views as a few statements
@@ -1044,7 +1047,7 @@ reaches it:
 |---|---|
 | A number | Its value, converted to the parameter's C type |
 | A `View` | The address of its elements, which the function only reads |
-| A `mut Storage` | The address after its last element, for a function that fills room the storage has beyond its length |
+| A `mut Storage` | The address after its last element, for a function that fills room the storage has beyond its length; or, where the row says so, the address of its first element, for a function that reads the elements the storage has and changes some |
 | Several `mut` numbers of one type | The address of a structure of them, which the function writes; each number then goes to its argument |
 
 Truss has no pointer type, so memory crosses to C only as a view, as
@@ -1062,10 +1065,18 @@ of a program to run, is a `View[USize]` that Truss fills with
 nothing turns a number back into an address.
 
 A function's result is a number; the number at the address it returns,
-which is how `errno` is reached; or text, the bytes at the address it
+which is how `errno` is reached; text, the bytes at the address it
 returns up to a zero byte, as a view, with a `mut Bool` that says whether
 it returned an address at all, which is how `getenv` says a variable is
-unset.
+unset; or nothing ever, for `_exit`, which Truss calls
+`libc_exit_at_once`, since a name does not start with an underscore.
+
+A structure whose numbers are not of one type is storage of a number that
+several of them make. `poll` takes `pollfd`s, each a descriptor and two
+numbers of half its size, as a `Storage[Int32]` with two elements for
+each: the descriptor, and what to wait for in the low half of the next
+with what was found in the high half. The table's check holds the
+structure to that, byte order included.
 
 A call is written into the caller's LIR as a call of the C function
 itself, given each argument converted to its parameter's C type, and the C
@@ -1221,12 +1232,20 @@ is read back as a constant's value is. Its results are kept the same way.
 ### The test program
 
 A test run builds one program containing every test that must run, their
-instances, and a generated `main` that hands a table of the tests to the
-runner in the runtime. The runner starts one worker process per core by
+instances, the standard library's test runner, and a generated `main` that
+gives the runtime a table of the tests and calls the runner with how many
+there are. The runner is Truss, written on the C library's `fork`, `pipe`,
+`poll`, `kill`, and `waitpid`. It starts one worker process per core by
 forking itself after startup, so workers share its loaded code. It sends
-each worker a test to run, over a pipe, and gets back, on another pipe,
-records of the test's end and of its `echo` output. A test that returns has
-passed.
+each worker the number of a test to run, over a pipe, and gets back, on
+another pipe, records of the test's end and of its `echo` output: a
+record is its kind, the length of its text, and the text. A worker runs a
+test by its number through the runtime's table. A test that returns has
+passed, and its worker writes the record that says so.
+
+The runtime writes the other records. A worker tells it which descriptor
+is its pipe, and from then on failing writes a record there where another
+program writes to standard error.
 
 A worker whose test fails an `assert`, panics, overflows its stack, runs out
 of memory, or reaches a `todo` reports why and ends; one that dies without
@@ -1237,9 +1256,10 @@ an early return could not. The runner kills a worker whose test exceeds the
 project's time limit.
 
 A test must free every block it allocates. A test program's runtime counts
-the blocks that are allocated and not yet freed, and a test that ends with
-more than it started with panics with a compiler-bug message saying how
-many it left.
+the blocks that are allocated and not yet freed, a worker reads the count
+before and after each test, and a test that ends with more than it started
+with is reported as a panic with a compiler-bug message saying how many it
+left.
 Truss has no garbage collector and no way to leak a value on purpose, so a
 leak is a bug in code generation, most likely in drop elaboration. Every
 test that compiles Truss is therefore also a check of its drops.
@@ -1471,9 +1491,6 @@ a command line can hold.
 - **Checkers shipped compiled.** The standard library's are to ship already
   compiled with the toolchain, for each host and both widths of `USize`, and
   a dependency's to be compiled once per version.
-- **The test runner in Truss.** It is the one part of the C runtime that
-  is to be Truss in the standard library, on the C library's functions,
-  leaving the runtime only startup, failing, and allocation.
 - **A float's text without the C library.** DESIGN.md has it written in
   Truss so that it is the same on every system. The loop is Truss; the
   digits are `snprintf`'s and the check `strtod`'s.
