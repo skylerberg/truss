@@ -984,6 +984,11 @@ sanitized runs, test the trusted base against real executions.
   storage; and `Index` on a `List`
   or a `Slice`, whose `requires` the trait does not state. Until it all
   proves, `truss build` keeps the run-time checks.
+- **A trait's provided methods proven on their own.** A provided body is
+  proven only where an `impl` replaces it, which shows its result is the
+  body's. A body that every `impl` keeps is not proven against the trait's
+  clauses: it is to be proven once, with `Self` a type parameter bounded by
+  the trait.
 - **Contracts for the intrinsic module's floats and system calls.** Only
   the integer operations, storage, views, and reading and writing bytes
   have meanings. A call of any other intrinsic gives a value known only by
