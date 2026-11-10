@@ -1,3 +1,5 @@
+use standard::hex
+use standard::intrinsic
 use standard::text
 
 public opaque type Uuid(high: UInt64, low: UInt64)
@@ -11,21 +13,34 @@ public type ParseError =
   derives Equal
 
 impl Display for ParseError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      InvalidLength => mut output.write("a UUID is 32 hexadecimal digits, or 36 characters with its hyphens")
+      InvalidCharacter(offset) => {
+        mut output.write("the text is not a UUID at offset ")
+        offset.display(mut output)
+      }
+    }
   }
 }
 
 public fn random() -> Uuid
   uses Random
 {
-  todo
+  let high = (Random.next() & 0xffff_ffff_ffff_0fff) | 0x4000
+  let low = (Random.next() & 0x3fff_ffff_ffff_ffff) | 0x8000_0000_0000_0000
+  Uuid(high: high, low: low)
 }
 
 public fn time_ordered() -> Uuid
   uses Random, Clock
 {
-  todo
+  let now = Clock.now().unix_milliseconds()
+  let milliseconds: UInt64 = if now < 0 { 0 } else { intrinsic::convert(now) }
+  let high = ((milliseconds % 0x1_0000_0000_0000) << 16) | 0x7000 | (Random.next() & 0x0fff)
+  let low = (Random.next() & 0x3fff_ffff_ffff_ffff) | 0x8000_0000_0000_0000
+  Uuid(high: high, low: low)
 }
 
 public fn from_name(namespace: Uuid, name: Slice[UInt8]) -> Uuid
@@ -37,20 +52,28 @@ public fn from_name(namespace: Uuid, name: Slice[UInt8]) -> Uuid
 public fn Uuid.from_bytes(bytes: Array[UInt8, 16]) -> Uuid
   cost time O(1)
 {
-  todo
+  Uuid(
+    high: UInt64.from_big_endian_bytes([bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]]),
+    low: UInt64.from_big_endian_bytes([bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]]),
+  )
 }
 
 public fn Uuid.bytes(self) -> Array[UInt8, 16]
   cost time O(1)
 {
-  todo
+  let high = self.high.to_big_endian_bytes()
+  let low = self.low.to_big_endian_bytes()
+  [
+    high[0], high[1], high[2], high[3], high[4], high[5], high[6], high[7],
+    low[0], low[1], low[2], low[3], low[4], low[5], low[6], low[7],
+  ]
 }
 
 public fn Uuid.version(self) -> UInt8
   ensures result < 16
   cost time O(1)
 {
-  todo
+  intrinsic::convert((self.high >> 12) % 16)
 }
 
 public fn Uuid.is_nil(self) -> Bool
@@ -60,15 +83,77 @@ public fn Uuid.is_nil(self) -> Bool
 }
 
 impl Display for Uuid {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    let bytes = self.bytes()
+    let digits = hex::encode(bytes[..])
+    let text = digits.slice()
+    mut output.write(text.part(0, to: 8))
+    mut output.write("-")
+    mut output.write(text.part(8, to: 12))
+    mut output.write("-")
+    mut output.write(text.part(12, to: 16))
+    mut output.write("-")
+    mut output.write(text.part(16, to: 20))
+    mut output.write("-")
+    mut output.write(text.part(20, to: 32))
   }
+}
+
+internal fn digit_value(byte: UInt8) -> UInt64
+  ensures result <= 16
+  cost time O(1)
+{
+  if byte >= 48 && byte <= 57 {
+    intrinsic::convert(byte - 48)
+  } else if byte >= 97 && byte <= 102 {
+    intrinsic::convert(byte - 87)
+  } else if byte >= 65 && byte <= 70 {
+    intrinsic::convert(byte - 55)
+  } else {
+    16
+  }
+}
+
+internal fn is_hyphen_place(index: USize) -> Bool
+  cost time O(1)
+{
+  index == 8 || index == 13 || index == 18 || index == 23
 }
 
 impl text::Parse for Uuid {
   type Error = ParseError
 
-  fn parse(text: StringSlice) -> Result[Uuid, ParseError] {
-    todo
+  fn parse(text: StringSlice) -> Result[Uuid, ParseError]
+  {
+    let hyphenated = text.length() == 36
+    if !hyphenated && text.length() != 32 {
+      return Err(ParseError.InvalidLength)
+    }
+    var high: UInt64 = 0
+    var low: UInt64 = 0
+    var digits: USize = 0
+    for index in 0..text.length()
+      invariant digits <= yielded.length()
+    {
+      let byte = text.byte(index)
+      if hyphenated && is_hyphen_place(index) {
+        if byte != 45 {
+          return Err(ParseError.InvalidCharacter(offset: index))
+        }
+      } else {
+        let value = digit_value(byte)
+        if value == 16 {
+          return Err(ParseError.InvalidCharacter(offset: index))
+        }
+        if digits < 16 {
+          high = (high << 4) | value
+        } else {
+          low = (low << 4) | value
+        }
+        digits += 1
+      }
+    }
+    Ok(Uuid(high: high, low: low))
   }
 }

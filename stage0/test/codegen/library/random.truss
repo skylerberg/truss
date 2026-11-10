@@ -1,0 +1,172 @@
+use standard::random
+use standard::uuid
+
+fn same_bytes(found: Slice[UInt8], expected: Slice[UInt8]) -> Bool {
+  if found.length() != expected.length() {
+    return false
+  }
+  for index in 0..found.length() {
+    if found[index] != expected[index] {
+      return false
+    }
+  }
+  true
+}
+
+fn same_indexes(found: Slice[USize], expected: Slice[USize]) -> Bool {
+  if found.length() != expected.length() {
+    return false
+  }
+  for index in 0..found.length() {
+    if found[index] != expected[index] {
+      return false
+    }
+  }
+  true
+}
+
+test "a seeded generator gives the same numbers every time" {
+  var generator = random::Generator.seeded(0)
+  assert mut generator.next() == 11091344671253066420
+  assert mut generator.next() == 13793997310169335082
+  assert mut generator.next() == 1900383378846508768
+  var again = random::Generator.seeded(0)
+  assert mut again.next() == 11091344671253066420
+  var other = random::Generator.seeded(9)
+  assert mut other.next() == 47656050712223840
+}
+
+test "a number below a bound is spread evenly and stays below it" {
+  var generator = random::Generator.seeded(42)
+  let expected: List[UInt64] = [2, 2, 9, 3, 6, 4, 4, 7, 8, 5, 9, 3]
+  for index in 0..expected.length() {
+    assert mut generator.below(10) == expected[index]
+  }
+  var edges = random::Generator.seeded(42)
+  assert mut edges.below(1) == 0
+  assert mut edges.below(UInt64.maximum) == 6990951692964543102
+}
+
+test "an integer in a range, an index, and a choice stay within what they are given" {
+  var generator = random::Generator.seeded(7)
+  let expected: List[Int64] = [-1, -1, 3, -1, -1, -4, 1, 1]
+  for index in 0..expected.length() {
+    assert mut generator.integer(-5..5) == expected[index]
+  }
+  var whole = random::Generator.seeded(1)
+  let anywhere = mut whole.integer(Int64.minimum..=Int64.maximum)
+  assert anywhere == -5480124913605472059
+  assert mut whole.integer(3..=3) == 3
+  assert mut whole.index(1) == 0
+  let items: List[Int64] = [10, 20, 30]
+  assert mut whole.choose(items) is Some(chosen) && chosen < 3
+  let none: List[Int64] = []
+  assert mut whole.choose(none) is None
+}
+
+test "a unit float is at least zero and below one" {
+  var generator = random::Generator.seeded(7)
+  assert mut generator.unit() == 0.7005764821796896
+  assert mut generator.unit() == 0.2787512294737843
+  assert mut generator.unit() == 0.8396274618764198
+  let between = mut generator.fraction(10.0, high: 20.0)
+  assert between >= 10.0 && between < 20.0
+  assert mut generator.chance(1.0)
+  assert !mut generator.chance(0.0)
+}
+
+test "a buffer is filled and a slice is shuffled from the generator's numbers" {
+  var generator = random::Generator.seeded(3)
+  var buffer: List[UInt8] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  mut generator.fill(mut buffer)
+  assert same_bytes(buffer, expected: [192, 140, 102, 229, 218, 171, 205, 176, 238, 100, 24])
+  var shuffler = random::Generator.seeded(5)
+  var items: List[USize] = [0, 1, 2, 3, 4, 5, 6, 7]
+  mut shuffler.shuffle(mut items)
+  assert same_indexes(items, expected: [5, 2, 4, 7, 3, 6, 0, 1])
+  var empty: List[USize] = []
+  mut shuffler.shuffle(mut empty)
+  assert empty.length() == 0
+}
+
+test "a split generator goes on from here, and the first jumps far ahead" {
+  var generator = random::Generator.seeded(9)
+  var branch = mut generator.split()
+  assert mut branch.next() == 47656050712223840
+  assert mut branch.next() == 4639160090213153785
+  assert mut generator.next() == 6433469579811067086
+  assert mut generator.next() == 7028240683198899737
+}
+
+test "the capability gives bytes and numbers below a bound" {
+  provide random::SeededRandom.new(3) {
+    let found = random::bytes(11)
+    assert same_bytes(found, expected: [192, 140, 102, 229, 218, 171, 205, 176, 238, 100, 24])
+    assert random::bytes(0).length() == 0
+  }
+  provide random::SeededRandom.new(42) {
+    assert random::below(10) == 2
+    assert random::below(10) == 2
+    assert random::below(10) == 9
+    var generator = random::Generator.new()
+    assert mut generator.below(100) < 100
+  }
+}
+
+type FixedClock(milliseconds: Int64)
+
+impl Clock for FixedClock {
+  fn now(self) -> Instant {
+    match Instant.from_unix_milliseconds(self.milliseconds) {
+      Some(instant) => instant
+      None => Instant.from_unix_nanoseconds(0)
+    }
+  }
+
+  fn monotonic(self) -> Duration {
+    Duration.milliseconds(0)
+  }
+
+  fn sleep(mut self, duration: Duration) {
+    self.milliseconds += duration.total_milliseconds()
+  }
+}
+
+test "a random UUID and a time-ordered UUID say their version" {
+  provide random::SeededRandom.new(7) {
+    let made = uuid::random()
+    assert made.version() == 4
+    assert "${made}" == "b358faf7-4ef9-465a-875c-3d964f482cd2"
+    assert !made.is_nil()
+  }
+  provide random::SeededRandom.new(7) {
+    provide FixedClock(milliseconds: 1700000000000) {
+      let made = uuid::time_ordered()
+      assert made.version() == 7
+      assert "${made}" == "018bcfe5-6800-765a-875c-3d964f482cd2"
+    }
+  }
+}
+
+test "a UUID is sixteen bytes, displayed in five groups" {
+  let bytes: Array[UInt8, 16] = [0, 17, 34, 51, 68, 85, 102, 119, 136, 153, 170, 187, 204, 221, 238, 255]
+  let made = uuid::Uuid.from_bytes(bytes)
+  assert "${made}" == "00112233-4455-6677-8899-aabbccddeeff"
+  assert same_bytes(made.bytes()[..], expected: bytes[..])
+  assert made.version() == 6
+  assert "${uuid::Uuid.nil}" == "00000000-0000-0000-0000-000000000000"
+  assert uuid::Uuid.nil.is_nil()
+}
+
+test "a UUID is read with its hyphens or without, in either case" {
+  let expected = uuid::Uuid.from_bytes([0, 17, 34, 51, 68, 85, 102, 119, 136, 153, 170, 187, 204, 221, 238, 255])
+  assert uuid::Uuid.parse("00112233-4455-6677-8899-aabbccddeeff") == Ok(expected)
+  assert uuid::Uuid.parse("00112233445566778899AABBCCDDEEFF") == Ok(expected)
+  assert uuid::Uuid.parse("00112233-4455-6677-8899-aabbccddeef") == Err(uuid::ParseError.InvalidLength)
+  assert uuid::Uuid.parse("") == Err(uuid::ParseError.InvalidLength)
+  assert uuid::Uuid.parse("00112233-4455-6677-8899-aabbccddeefg") == Err(uuid::ParseError.InvalidCharacter(offset: 35))
+  assert uuid::Uuid.parse("00112233+4455-6677-8899-aabbccddeeff") == Err(uuid::ParseError.InvalidCharacter(offset: 8))
+  assert uuid::Uuid.parse("0011223-34455-6677-8899-aabbccddeeff") == Err(uuid::ParseError.InvalidCharacter(offset: 7))
+  assert uuid::Uuid.parse("0011223344556677-899AABBCCDDEEFF") == Err(uuid::ParseError.InvalidCharacter(offset: 16))
+  assert "${uuid::ParseError.InvalidCharacter(offset: 8)}" == "the text is not a UUID at offset 8"
+}

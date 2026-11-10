@@ -1,66 +1,154 @@
+use standard::intrinsic
+
 public opaque type Generator(state: Array[UInt64, 4])
   derives Plain
+
+internal fn mixed(state: UInt64) -> UInt64
+  cost time O(1)
+{
+  let first = (state ^ (state >> 30)).wrapping_multiply(0xbf58476d1ce4e5b9)
+  let second = (first ^ (first >> 27)).wrapping_multiply(0x94d049bb133111eb)
+  second ^ (second >> 31)
+}
+
+internal fn rejected_below(bound: UInt64) -> UInt64
+  requires bound > 0
+  ensures result < bound
+  cost time O(1)
+{
+  (UInt64.maximum - bound + 1) % bound
+}
+
+internal fn distance(from: Int64, to: Int64) -> UInt64
+  requires from <= to
+  ensures result == to - from
+  cost time O(1)
+{
+  to.to_unsigned_bits().wrapping_subtract(from.to_unsigned_bits())
+}
+
+internal fn offset_from(start: Int64, offset: UInt64) -> Int64
+  requires start + offset <= Int64.maximum
+  ensures result == start + offset
+  cost time O(1)
+{
+  start.to_unsigned_bits().wrapping_add(offset).to_signed_bits()
+}
+
+internal fn Generator.jump(mut self)
+  cost time O(1)
+{
+  let masks: Array[UInt64, 4] = [0x180ec6d33cfd0aba, 0xd5a61266f0c9392c, 0xa9582618e03fc9aa, 0x39abdc4529b1661c]
+  var jumped: Array[UInt64, 4] = [0, 0, 0, 0]
+  let words: USize = 4
+  let bits: USize = 64
+  for word in 0..words {
+    for bit in 0..bits {
+      if (masks[word] >> bit) % 2 == 1 {
+        jumped[0] = jumped[0] ^ self.state[0]
+        jumped[1] = jumped[1] ^ self.state[1]
+        jumped[2] = jumped[2] ^ self.state[2]
+        jumped[3] = jumped[3] ^ self.state[3]
+      }
+      let _ = mut self.next()
+    }
+  }
+  self.state = jumped
+}
 
 public fn Generator.seeded(seed: UInt64) -> Generator
   cost time O(1)
 {
-  todo
+  let first = seed.wrapping_add(0x9e3779b97f4a7c15)
+  let second = first.wrapping_add(0x9e3779b97f4a7c15)
+  let third = second.wrapping_add(0x9e3779b97f4a7c15)
+  let fourth = third.wrapping_add(0x9e3779b97f4a7c15)
+  Generator(state: [mixed(first), mixed(second), mixed(third), mixed(fourth)])
 }
 
 public fn Generator.new() -> Generator
   uses Random
 {
-  todo
+  let state: Array[UInt64, 4] = [Random.next(), Random.next(), Random.next(), Random.next()]
+  if state[0] == 0 && state[1] == 0 && state[2] == 0 && state[3] == 0 {
+    Generator.seeded(0)
+  } else {
+    Generator(state: state)
+  }
 }
 
 public fn Generator.next(mut self) -> UInt64
   cost time O(1)
 {
-  todo
+  let result = self.state[1].wrapping_multiply(5).rotate_left(7).wrapping_multiply(9)
+  let shifted = self.state[1] << 17
+  self.state[2] = self.state[2] ^ self.state[0]
+  self.state[3] = self.state[3] ^ self.state[1]
+  self.state[1] = self.state[1] ^ self.state[2]
+  self.state[0] = self.state[0] ^ self.state[3]
+  self.state[2] = self.state[2] ^ shifted
+  self.state[3] = self.state[3].rotate_left(45)
+  result
 }
 
 public fn Generator.split(mut self) -> Generator
   cost time O(1)
 {
-  todo
+  let branch = Generator(state: self.state)
+  mut self.jump()
+  branch
 }
 
 public fn Generator.below(mut self, bound: UInt64) -> UInt64
   requires bound > 0
   ensures result < bound
-  cost time finite
+  cost time O(1)
 {
-  todo
+  let rejected = rejected_below(bound)
+  let attempts: USize = 64
+  for _ in 0..attempts {
+    let value = mut self.next()
+    if value >= rejected {
+      return value % bound
+    }
+  }
+  mut self.next() % bound
 }
 
 public fn Generator.integer(mut self, range: Range[Int64]) -> Int64
   requires !range.is_empty()
   ensures range.contains(result)
-  cost time finite
+  cost time O(1)
 {
-  todo
+  let last = if range.inclusive { range.stop } else { range.stop - 1 }
+  let span = distance(range.start, to: last)
+  if span == UInt64.maximum {
+    return mut self.next().to_signed_bits()
+  }
+  offset_from(range.start, offset: mut self.below(span + 1))
 }
 
 public fn Generator.index(mut self, length: USize) -> USize
   requires length > 0
   ensures result < length
-  cost time finite
+  cost time O(1)
 {
-  todo
+  intrinsic::convert(mut self.below(intrinsic::convert(length)))
 }
 
 public fn Generator.unit(mut self) -> Float64
   ensures 0.0 <= result && result < 1.0
   cost time O(1)
 {
-  todo
+  let value = (mut self.next() >> 11).to_float64() * 1.1102230246251565e-16
+  if value >= 0.0 && value < 1.0 { value } else { 0.0 }
 }
 
 public fn Generator.fraction(mut self, low: Float64, high: Float64) -> Float64
   requires low < high
   cost time O(1)
 {
-  todo
+  low + (high - low) * mut self.unit()
 }
 
 public fn Generator.normal(mut self, mean: Float64 = 0.0, deviation: Float64 = 1.0) -> Float64
@@ -74,21 +162,39 @@ public fn Generator.chance(mut self, probability: Float64) -> Bool
   requires 0.0 <= probability && probability <= 1.0
   cost time O(1)
 {
-  todo
+  mut self.unit() < probability
 }
 
 public fn Generator.fill(mut self, buffer: mut Slice[UInt8])
   ensures buffer.length() == old(buffer.length())
   cost time O(buffer.length())
 {
-  todo
+  var word: UInt64 = 0
+  for index in 0..buffer.length()
+    invariant buffer.length() == old(buffer.length())
+  {
+    if index % 8 == 0 {
+      word = mut self.next()
+    }
+    buffer[index] = intrinsic::convert(word % 256)
+    word = word / 256
+  }
 }
 
 public fn Generator.shuffle[Element](mut self, items: mut Slice[Element])
   ensures items.length() == old(items.length())
   cost time O(items.length())
 {
-  todo
+  var remaining = items.length()
+  while remaining > 1
+    invariant items.length() == old(items.length())
+    invariant remaining <= items.length()
+    decreases remaining
+  {
+    let chosen = mut self.index(remaining)
+    remaining -= 1
+    mut items.swap(chosen, second: remaining)
+  }
 }
 
 public fn Generator.choose[Element](mut self, items: Slice[Element]) -> Option[USize]
@@ -96,9 +202,9 @@ public fn Generator.choose[Element](mut self, items: Slice[Element]) -> Option[U
     Some(index) => index < items.length()
     None => items.length() == 0
   }
-  cost time finite
+  cost time O(1)
 {
-  todo
+  if items.length() == 0 { None } else { Some(mut self.index(items.length())) }
 }
 
 public fn Generator.sample(mut self, population: USize, count: USize) -> List[USize]
@@ -113,7 +219,19 @@ public fn bytes(count: USize) -> List[UInt8]
   uses Random
   ensures result.length() == count
 {
-  todo
+  var output: List[UInt8] = []
+  mut output.reserve(count)
+  var word: UInt64 = 0
+  for index in 0..count
+    invariant output.length() == yielded.length()
+  {
+    if index % 8 == 0 {
+      word = Random.next()
+    }
+    mut output.push(intrinsic::convert(word % 256))
+    word = word / 256
+  }
+  output
 }
 
 public fn below(bound: UInt64) -> UInt64
@@ -121,7 +239,15 @@ public fn below(bound: UInt64) -> UInt64
   requires bound > 0
   ensures result < bound
 {
-  todo
+  let rejected = rejected_below(bound)
+  let attempts: USize = 64
+  for _ in 0..attempts {
+    let value = Random.next()
+    if value >= rejected {
+      return value % bound
+    }
+  }
+  Random.next() % bound
 }
 
 public type SeededRandom(generator: Generator)
