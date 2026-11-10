@@ -1,8 +1,9 @@
 (* Whether a release of a package keeps what the release before it offered,
-   read from the two releases' public definitions, as DESIGN.md's "Versions"
-   has the registry check it. The types of a signature are compared as the
-   checker worked them out, and a contract as it is written: a `requires`
-   may lose clauses, an `ensures` and a cost may gain them. *)
+   read from the two releases' public definitions. The types of a signature
+   are compared as the checker worked them out, and a contract as it is
+   written: a `requires` may lose clauses, an `ensures` and a cost may gain
+   them. Whether a yielding method can be pulled is the one thing read from
+   a body. *)
 
 open Syntax
 module T = Types
@@ -103,6 +104,27 @@ let signature ~(before : T.signature) ~(after : T.signature) =
       (if fewer <> [] then [ Grows "uses fewer capabilities" ] else []);
       (if gained_default then [ Grows "has a default it did not" ] else []);
     ]
+
+(* How far a yielding method can be pulled as a cursor: for every element,
+   for one that copies implicitly, or not at all. A user that pulls it
+   relies on that, though it is worked out from the method's body. *)
+let pulled database path (signature : T.signature) =
+  match (Query.demand database Ownership.pullable path, signature.output) with
+  | Pullable, _ -> 2
+  | Yields_places, Yields (_, element)
+    when Interface.Impls.plain database ~bounds:(fun _ -> []) element ->
+      2
+  | Yields_places, _ -> 1
+  | (Yields_mut | Recursive), _ -> 0
+
+let pulling ~before ~after path (old_signature : T.signature) (new_signature : T.signature) =
+  match (old_signature.output, new_signature.output) with
+  | Yields _, Yields _ ->
+      let was = pulled before path old_signature and is = pulled after path new_signature in
+      if is < was then [ Breaks "can no longer be pulled as it could" ]
+      else if is > was then [ Grows "can be pulled where it could not" ]
+      else []
+  | _ -> []
 
 let clauses_of (definition : definition option) =
   match definition with
@@ -289,6 +311,7 @@ let compare ~before ~after package =
                   signature ~before:old_signature ~after:new_signature
                   @ contract ~before:(clauses_of before_definition)
                       ~after:(clauses_of after_definition)
+                  @ pulling ~before ~after path old_signature new_signature
               | Some (Type_interface old_type), Some (Type_interface new_type) ->
                   type_ ~before:old_type ~after:new_type ~before_definition ~after_definition
               | Some (Trait_interface old_trait), Some (Trait_interface new_trait) ->

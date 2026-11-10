@@ -5,9 +5,9 @@ val skipped : string -> bool
     [_build], and [node_modules]. *)
 
 val hash : (string * string) list -> string
-(** The hash of a package's files, each a path and its bytes, as SYNTAX.md's "The lock file" defines
-    it: the BLAKE3 hash of a line for each file, in order of path, with the path, a space, and the
-    BLAKE3 hash of the file's bytes. It is 64 hexadecimal digits. *)
+(** The hash of a package's files, each a path and its bytes: the BLAKE3 hash of a line for each
+    file, in order of path, with the path, a space, and the BLAKE3 hash of the file's bytes. It is
+    64 hexadecimal digits. *)
 
 val is_hash : string -> bool
 

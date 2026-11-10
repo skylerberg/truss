@@ -1,6 +1,5 @@
-(** Choosing the versions of a build, as DESIGN.md's "Choosing versions" decides: for each registry
-    package, the highest version that the project's lock file or the record of any package of the
-    build names. *)
+(** Choosing the versions of a build: for each registry package, the highest version that the
+    project's lock file or the record of any package of the build names. *)
 
 type package = {
   name : string;

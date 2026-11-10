@@ -683,7 +683,7 @@ The comparison is of every public definition and every `impl`:
 | Of | Breaks | Offers more |
 |---|---|---|
 | Any public definition | It is gone, moved, or no longer public | It is new |
-| A function, method, or theorem | Other generic parameters, parameters, or result; a capability more in `uses`; a `requires` clause more; an `ensures` or `cost` clause fewer; a `time` clause gone; a default gone | A capability fewer; a `requires` clause fewer; an `ensures` or `cost` clause more; a default more |
+| A function, method, or theorem | Other generic parameters, parameters, or result; a capability more in `uses`; a `requires` clause more; an `ensures` or `cost` clause fewer; a `time` clause gone; a default gone; a yielding method that could be pulled and no longer can | A capability fewer; a `requires` clause fewer; an `ensures` or `cost` clause more; a default more; a yielding method that can be pulled where it could not |
 | A type that shows its fields | Other fields, variants, or invariant; `opaque` added; a derived trait fewer | A derived trait more |
 | An opaque type | Other generic parameters; a derived trait fewer | `opaque` taken away; a derived trait more |
 | A trait or capability | Other generic parameters, required traits, associated types, or laws; a method gone or changed as a function's may not; a method more without a body | A method more with a body |
@@ -780,8 +780,6 @@ It is left out of each command's help.
   clauses as they are written: one that is reworded breaks, and one whose
   words are the same and whose meaning changed, because a private
   definition it names did, is not seen.
-- **A method that could be pulled and no longer can,** which DESIGN.md
-  counts as breaking.
 - **The registry checking a release itself.** `truss publish` checks the
   package where it is run and writes to the registry's directory.
 - **A registry that is not a directory.** DESIGN.md's registry is served

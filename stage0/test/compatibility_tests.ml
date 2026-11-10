@@ -87,6 +87,22 @@ let () =
           "breaks: lib::shapes::area no longer promises to end";
           "breaks: lib::shapes::area no longer promises a cost it did";
         ]);
+  test "a yielding method that could be pulled and no longer can breaks" (fun () ->
+      let tree each =
+        "public type Tree =\n\
+        \  | Leaf\n\
+        \  | indirect Node(left: Tree, value: Int64, right: Tree)\n\n\
+         public fn Tree.each(self) yields Int64 {\n\
+        \  match self {\n\
+        \    Leaf => {}\n\
+        \    Node(left, value, right) => {\n" ^ each ^ "    }\n  }\n}\n"
+      in
+      let own = tree "      yield value\n"
+      and through =
+        tree "      for item in left.each() {\n        yield item\n      }\n      yield value\n"
+      in
+      expect own through [ "breaks: lib::shapes::Tree.each can no longer be pulled as it could" ];
+      expect through own [ "grows: lib::shapes::Tree.each can be pulled where it could not" ]);
   test "a type that shows its fields keeps them" (fun () ->
       let square = "public type Square(side: Int64)\n" in
       expect square "public type Square(side: Int64, depth: Int64)\n"
