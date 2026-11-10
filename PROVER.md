@@ -202,7 +202,9 @@ and `reads` clauses):
   compiler makes it do: `storage_push` appends, `storage_insert` shifts
   what follows, `view_slice` is a run of its view, and reading bytes
   appends what it says it read. An operation that stops the program on a
-  bad index says what holds when it returns.
+  bad index says what holds when it returns. A part `storage_at_mut` lends
+  changes nothing until the lend ends, where the storage takes back what
+  the caller left in it.
 - **Bitwise operations get a second encoding.** On integers, `&`, `|`, `^`,
   `~`, and shifts are functions the solver knows only by a few facts, such
   as `0 <= a & b <= a` for unsigned values. That proves the bounds most bit
@@ -449,10 +451,11 @@ call uses the capability method's contract.
 ### Lending and yielding methods
 
 - **In the method's own body,** each `yield` asserts the clauses that
-  mention `result`, with the part as `result`. For a `mut` part, the part's
-  place then takes a fresh value that meets the part's type invariant,
-  since the caller may have changed it, and the part is appended to
-  `yielded`. In a yielding method, each `yield` also asserts the clauses
+  mention `result`, with the part as `result`. For a `mut` part, the part
+  then takes a fresh value that meets its type invariant, since the caller
+  may have changed it, which is stored back into its place, through a
+  collection's `lends mut` index for an element, and the part is appended
+  to `yielded`. In a yielding method, each `yield` also asserts the clauses
   that hold where the method ends, with `finished` false, and the invariant
   of `self`, since a loop may stop there. At the end of the body, those
   clauses are asserted with `finished` true.
@@ -978,9 +981,7 @@ sanitized runs, test the trusted base against real executions.
 - **The rest of the standard library proven.** The standard library's
   test lists what does not prove yet: `Map` and `Set`, whose models over
   their sorted lists need a way to make a finite set or map from a
-  sequence; `List`'s `mut` index and its `each(mut self)`, which need a
-  part lent `mut` by an intrinsic to be written back when the lend ends;
-  `List.push`, whose `amortized` bound needs the cost of growing a
+  sequence; `List.push`, whose `amortized` bound needs the cost of growing a
   storage; and `Index` on a `List`
   or a `Slice`, whose `requires` the trait does not state. Until it all
   proves, `truss build` keeps the run-time checks.

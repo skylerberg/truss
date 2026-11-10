@@ -120,8 +120,13 @@ public fn List[Element].each(self) yields Element
 }
 
 public fn List[Element].each(mut self) yields mut Element {
-  for index in 0..self.length() {
+  var index: USize = 0
+  while index < self.length()
+    invariant self.length() == old(self.length())
+    invariant index <= self.length()
+  {
     yield mut self[index]
+    index += 1
   }
 }
 

@@ -1969,7 +1969,9 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
         (Path.Method { owner = capability; name; receiver = Static })
         (capability_contract context.database capability name)
   | Intrinsic { operation; type_arguments } ->
-      let frame = havoc_mut frame in
+      (* Lending a part of a storage changes nothing until the lend ends,
+         where what the caller left is written back. *)
+      let frame = if operation = Storage_at_mut then frame else havoc_mut frame in
       let frame = spend context frame (step_amount context frame call_ values) in
       let in_order =
         List.sort
@@ -2010,8 +2012,8 @@ and intrinsic context frame (operation : Intrinsic.operation) types operands ~ch
   match (operation, types) with
   | ( ( Storage_model | View_model | Storage_empty | Storage_with_capacity | Storage_length
       | Storage_capacity | Storage_reserve | Storage_push | Storage_pop | Storage_insert
-      | Storage_remove | Storage_swap | Storage_at | Storage_view | View_length | View_at
-      | View_slice ),
+      | Storage_remove | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length
+      | View_at | View_slice ),
       element :: _ ) ->
       buffer_operation context frame operation element operands ~changed known
   | (Read_bytes | Handle_read | Write_bytes | Handle_write), _ ->
@@ -4848,7 +4850,7 @@ and buffer_operation context frame (operation : Intrinsic.operation) element ope
              ==> equal (at after (Symbol k)) (at before (Symbol k))));
       assume context frame (each_sum (fun sum _ -> L.equal (sum after) (sum before)));
       known
-  | Storage_at, [ buffer; index ] ->
+  | (Storage_at | Storage_at_mut), [ buffer; index ] ->
       assume context frame (in_bounds index (storage buffer));
       at (storage buffer) index
   | View_at, [ buffer; index ] ->
@@ -5678,11 +5680,18 @@ and handing_out context frame (written : statement) handed =
       in
       show each ~at:frame ~result:(Some part) ~yielded:before ~finished:None
         ~when_:"for the part handed out here";
+      (* What the caller leaves in a part lent [mut] is stored back where it
+         came from: a place, or the storage an intrinsic lent it from. *)
       let frame, part_after =
-        match handed.kind with
-        | Mode (Mut, place) ->
-            let frame = havoc_root context frame place in
-            value context frame place
+        match (handed.kind, storage_lend context frame handed) with
+        | Mode (Mut, place), _ ->
+            let part_after = arrive context frame "lent" part_type in
+            (store context frame place part_after, part_after)
+        | _, Some (place, element, index) ->
+            let part_after = arrive context frame "lent" part_type in
+            let frame, storage = value context frame place in
+            let updated = storage_updated context frame element storage index part_after in
+            (store context frame place updated, part_after)
         | _ -> (frame, part)
       in
       let after = appended context frame part_type before part_after in
@@ -5698,6 +5707,56 @@ and handing_out context frame (written : statement) handed =
       end;
       Some frame
   | _ -> unsupported written.span "`yield` outside a lending or yielding method's body"
+
+(* A part lent [mut] by [storage_at_mut]: the storage's place, its element
+   type, and the index. *)
+and storage_lend context frame (handed : expression) =
+  match (handed.kind, frame.source.checked.calls.(handed.id)) with
+  | ( Call (_, arguments),
+      Some { callee = Intrinsic { operation = Storage_at_mut; type_arguments }; _ } ) -> (
+      let element =
+        match type_arguments with
+        | T.Type element :: _ -> Some (substituted frame element)
+        | _ -> None
+      in
+      match (arguments, element) with
+      | [ storage; index ], Some element ->
+          let place =
+            match storage.value.kind with Mode (_, inner) -> inner | _ -> storage.value
+          in
+          let index = snd (value context { frame with checking = false } index.value) in
+          Some (place, element, index)
+      | _ -> None)
+  | _ -> None
+
+(* A storage whose element at [index] is [part], and which is otherwise the
+   one it was. *)
+and storage_updated context frame element storage index part =
+  let storage_type =
+    T.Named { path = Intrinsic.builtin_path Storage; arguments = [ T.Type element ] }
+  in
+  let updated = arrive context frame "changed" storage_type in
+  let before = buffer_model context Storage element storage
+  and after = buffer_model context Storage element updated in
+  let length sequence = sequence_length context element sequence in
+  let at sequence index =
+    match sequence_at context element sequence index with
+    | Some term -> term
+    | None -> raise (Foreign_unsupported "the elements of a storage")
+  in
+  context.fresh <- context.fresh + 1;
+  let k = Printf.sprintf "index.%d" context.fresh in
+  assume context frame
+    (L.conjunction [ L.equal (length after) (length before); L.equal (at after index) part ]);
+  assume context frame
+    (L.Forall
+       ( [ (k, L.Int) ],
+         L.(
+           Apply ("<=", [ int 0; Symbol k ])
+           &&& Apply ("<", [ Symbol k; length before ])
+           &&& not_ (equal (Symbol k) index)
+           ==> equal (at after (Symbol k)) (at before (Symbol k))) ));
+  updated
 
 (* The local or [self] a place is part of. *)
 and root_of (place : expression) =
