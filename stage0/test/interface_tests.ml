@@ -219,7 +219,7 @@ let () =
             \  fn sleep(self, duration: Duration) {}\n\
              }\n" );
         ]);
-  test "a capability's impl method cannot add uses of its own" (fun () ->
+  test "a method of a capability's impl cannot declare `uses`" (fun () ->
       one_diagnostic
         "type FixedClock(time: Instant)\n\n\
          impl Clock for FixedClock {\n\
@@ -232,7 +232,7 @@ let () =
         \  fn sleep(self, duration: Duration) {}\n\
          }\n"
         "types.impl_uses");
-  test "an impl's method names its generic parameters its own way" (fun () ->
+  test "an impl's method can rename its generic parameters" (fun () ->
       no_diagnostics
         [
           ( "app::main",
@@ -545,7 +545,7 @@ let () =
       match (signature.generics, signature.receiver, signature.parameters) with
       | [ _ ], Some (Read, self), [ other ] when Types.equal self other.type_ -> ()
       | _ -> fail "generics: %s" (generics signature));
-  test "a capability's impl method uses what its impl uses" (fun () ->
+  test "a method of a capability's impl uses the impl's capabilities" (fun () ->
       let database = setup [ ("app::main", text) ] in
       let clock : Types.trait_reference =
         { trait = standard [ "capabilities" ] "Clock"; trait_arguments = []; associated = [] }
@@ -569,8 +569,7 @@ let () =
     \  fn join(self, other: Meters) -> Meters { todo }\n\
      }\n\n"
   in
-  test "a law's proof is of a law its trait has, kept by a type that implements the trait"
-    (fun () ->
+  test "a law's proof names a law of its trait and a type that implements the trait" (fun () ->
       no_diagnostics [ ("app::main", monoid ^ "proof Joined.associative for Meters {\n}\n") ];
       one_diagnostic (monoid ^ "proof Joined.commutative for Meters {\n}\n") "types.unknown_member";
       one_diagnostic (monoid ^ "proof Joined.associative for Feet {\n}\n") "types.no_impl")
@@ -691,7 +690,7 @@ let () =
           ( "app::main",
             "trait Keyed {\n  type Key: Hash + Ordered\n  fn keys(self) -> Set[Self.Key]\n}\n" );
         ]);
-  test "Self in what a trait requires stands for the bounded type" (fun () ->
+  test "Self in a required trait is substituted by the bounded type" (fun () ->
       no_diagnostics
         [
           ( "app::main",
