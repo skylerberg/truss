@@ -99,15 +99,19 @@ and operand =
           a mutable view of part of a place. As the scrutinee of a [match], [is], or [let], the
           pattern's bindings own the parts of the value: every binding has the mode [Own]. *)
 
-(** A memory location. Every place has a type: [Local], [Constant], and [Field] carry it, and a
-    [Lent] or [Temporary] place has the type of its expression. [Core_walk.place_type] returns it.
-*)
+(** A memory location.
+
+    Every place has a type. [Local], [Constant], and [Field] carry it, and a [Lent] or [Temporary]
+    place has the type of its expression. [Core_walk.place_type] returns it.
+
+    Every place has an origin: the id of the syntax node of the place as it is written. A place is
+    not a node, so it has no id of its own. [Core_walk.place_origin] returns the origin. *)
 and place =
-  | Local of { local : local; type_ : Types.ty }
-  | Constant of { path : Path.t; type_ : Types.ty }
+  | Local of { local : local; type_ : Types.ty; origin : origin }
+  | Constant of { path : Path.t; type_ : Types.ty; origin : origin }
       (** The static data of a constant. It is read-only. A constant used as a value is a {!Use} of
           this place. *)
-  | Field of { base : place; field : string; type_ : Types.ty }
+  | Field of { base : place; field : string; type_ : Types.ty; origin : origin }
       (** A field of a record. [type_] is the field's type. The fields of a sum type's variant are
           never places of this kind: they are only reachable through pattern bindings. *)
   | Lent of expression

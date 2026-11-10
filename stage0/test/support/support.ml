@@ -159,7 +159,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
     form.definition;
   let rec place (found : Core.place) =
     match found with
-    | Local { local; type_ = used } -> (
+    | Local { local; type_ = used; _ } -> (
         type_ "a local" used;
         match Hashtbl.find_opt local_types local with
         | Some bound when not (T.equal bound used) ->
@@ -225,7 +225,8 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           | Lambda { result; captures; _ } ->
               type_ "a lambda's result" result;
               List.iter
-                (fun ({ local; type_ } : Core.capture) -> place (Local { local; type_ }))
+                (fun ({ local; type_ } : Core.capture) ->
+                  place (Local { local; type_; origin = node.origin }))
                 captures
           | To_any { trait = reference; _ } -> trait "a conversion to `any`" reference
           | Provide { implementations; _ } ->

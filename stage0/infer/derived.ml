@@ -94,7 +94,7 @@ let form database (path : Path.t) : Core.t option =
           in
           let given () : Core.place =
             match List.filter (fun (p : Core.parameter) -> p.local <> Self) parameters with
-            | [ parameter ] -> Local { local = parameter.local; type_ = parameter.type_ }
+            | [ parameter ] -> Local { local = parameter.local; type_ = parameter.type_; origin }
             | _ -> bug "`%s` takes one value beside its own" (Path.show path)
           in
           (* A method of [wanted] on a value of [of_type], by the [impl] the
@@ -150,7 +150,8 @@ let form database (path : Path.t) : Core.t option =
           let record_parts base =
             List.map
               (fun (field : T.field) ->
-                (field, Core.Field { base; field = field.field_name; type_ = field.field_type }))
+                ( field,
+                  Core.Field { base; field = field.field_name; type_ = field.field_type; origin } ))
               (record_fields ())
           in
           (* A variant's fields are reached by a pattern that binds each,
@@ -175,10 +176,10 @@ let form database (path : Path.t) : Core.t option =
           let parts bound =
             List.map
               (fun ((field : T.field), local, _) ->
-                (field, Core.Local { local; type_ = field.field_type }))
+                (field, Core.Local { local; type_ = field.field_type; origin }))
               bound
           in
-          let self_place : Core.place = Local { local = Self; type_ = self_type } in
+          let self_place : Core.place = Local { local = Self; type_ = self_type; origin } in
           let is variant : Core.pattern = pattern self_type (Variant { variant; fields = [] }) in
           (* What [each] gives of the parts of [self]: of a record's fields,
              or of the fields of the variant it is, by an arm for each. *)
@@ -255,7 +256,7 @@ let form database (path : Path.t) : Core.t option =
                 let hasher, hasher_type =
                   match List.rev parameters with
                   | ({ local; type_; _ } : Core.parameter) :: _ ->
-                      (Core.Local { local; type_ }, type_)
+                      (Core.Local { local; type_; origin }, type_)
                   | [] -> bug "`hash` takes a hasher"
                 in
                 let hasher_path =
@@ -344,7 +345,8 @@ let form database (path : Path.t) : Core.t option =
                                              }))
                                        (giving
                                           (node result
-                                             (Use (Local { local = decided; type_ = result }))));
+                                             (Use
+                                                (Local { local = decided; type_ = result; origin }))));
                                    ];
                                  guards_exhaustive = false;
                                }))
@@ -385,7 +387,8 @@ let form database (path : Path.t) : Core.t option =
                                       comparison = Less;
                                       left = node number (Integer (Z.of_int index));
                                       right =
-                                        node number (Use (Local { local = theirs; type_ = number }));
+                                        node number
+                                          (Use (Local { local = theirs; type_ = number; origin }));
                                     });
                              then_ = giving (ordering "Less");
                              else_ = Some (giving (ordering "Greater"));

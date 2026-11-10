@@ -251,7 +251,10 @@ let variant_value state (value : expression) type_path variant : Core.kind =
                                 ( field.field_name,
                                   Some
                                     (synthetic_expression state ~origin:value.id field.field_type
-                                       (Core.Use (Local { local; type_ = field.field_type }))) ))
+                                       (Core.Use
+                                          (Local
+                                             { local; type_ = field.field_type; origin = value.id })))
+                                ))
                               fields;
                         }));
               diverges = false;
@@ -266,14 +269,15 @@ let local_type state (id : id) =
   | None -> bug "a local has no recorded type"
 
 (* The place of a parameter or a pattern binding, by the id of the name
-   that declares it. *)
-let named_local state (id : id) : Core.place =
-  Local { local = Named id; type_ = local_type state id }
+   that declares it. [origin] is the expression that names it. *)
+let named_local state ~origin (id : id) : Core.place =
+  Local { local = Named id; type_ = local_type state id; origin }
 
 (* A use of a parameter or a pattern binding. A local whose type is a hole
    is never bound, so a use of it is a [Todo]. *)
-let local_use state (id : id) : Core.kind =
-  if was_hole state (fun tables -> tables.local_types) id then Todo else Use (named_local state id)
+let local_use state ~origin (id : id) : Core.kind =
+  if was_hole state (fun tables -> tables.local_types) id then Todo
+  else Use (named_local state ~origin id)
 
 let self_type state (env : env) =
   match env.self with
@@ -281,12 +285,13 @@ let self_type state (env : env) =
   | None -> bug "`self` is used outside a method"
 
 (* The place of [self]. *)
-let self_local state (env : env) : Core.place = Local { local = Self; type_ = self_type state env }
+let self_local state (env : env) ~origin : Core.place =
+  Local { local = Self; type_ = self_type state env; origin }
 
 (* The place of a constant's static data. *)
-let constant_place state (path : Path.t) : Core.place =
+let constant_place state ~origin (path : Path.t) : Core.place =
   match Query.demand state.database Environment.constant_type path with
-  | Some type_ -> Constant { path; type_ }
+  | Some type_ -> Constant { path; type_; origin }
   | None -> bug "the constant `%s` has no type" (Path.show path)
 
 (* A range expression used as a value: a [Construct] of the [Range]
@@ -439,7 +444,10 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
              (intrinsic Storage_push T.unit
                 [
                   Passed
-                    { mode = Mut; value = Place (Local { local = storage; type_ = storage_type }) };
+                    {
+                      mode = Mut;
+                      value = Place (Local { local = storage; type_ = storage_type; origin });
+                    };
                   Passed { mode = Own; value = Value element };
                 ])))
       elements
@@ -467,7 +475,7 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
                           value =
                             Value
                               (make storage_type
-                                 (Use (Local { local = storage; type_ = storage_type })));
+                                 (Use (Local { local = storage; type_ = storage_type; origin })));
                         };
                     ];
                   lends = None;
@@ -580,7 +588,7 @@ let equal_to_pattern state ~origin type_ (value : Core.kind) : Core.pattern_kind
 (* A constant used as a pattern, or as a bound of a range pattern. *)
 let pattern_constant state (id : id) : Core.kind =
   match state.tables.patterns.(id) with
-  | Some (Constant_pattern path) -> Use (constant_place state path)
+  | Some (Constant_pattern path) -> Use (constant_place state ~origin:id path)
   | _ -> bug "a pattern names a constant that was not recorded"
 
 (* A literal used as a pattern, or as a bound of a range pattern. *)
@@ -918,7 +926,8 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) : Core
       List.map
         (fun ((field : T.field), local) ->
           ( field.field_name,
-            make field.field_type (Core.Use (Local { local; type_ = field.field_type })) ))
+            make field.field_type
+              (Core.Use (Local { local; type_ = field.field_type; origin = value.id })) ))
         fields )
   in
   let success_pattern, success_fields = bind_fields success in
