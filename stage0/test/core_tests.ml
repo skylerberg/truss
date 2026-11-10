@@ -167,6 +167,24 @@ let () =
       }\n")
     "{ match place shape { Circle(radius: radius) => { radius } Square(side: side) if (side > 2) \
      => { side } _ => { 0 } } }";
+  expect_body "a `match` or `is` on a value binds `own`, even if the receiver of the call is marked"
+    "type Queue(items: List[Int64])\n\n\
+     fn Queue.take(mut self) -> Option[List[Int64]] {\n\
+    \  todo\n\
+     }\n\n\
+     fn g(queue: mut Queue) -> USize {\n\
+    \  if mut queue.take() is Some(first) {\n\
+    \    return first.length()\n\
+    \  }\n\
+    \  match mut queue.take() {\n\
+    \    Some(second) => second.length()\n\
+    \    None => 0\n\
+    \  }\n\
+     }\n"
+    "{ if (app::main::Queue.take(mut self)(mut place queue) is Some(value: own first)) { return \
+     standard::list::List.length[Int64](place first) } diverges; match app::main::Queue.take(mut \
+     self)(mut place queue) { Some(value: own second) => { \
+     standard::list::List.length[Int64](place second) } None => { 0 } } }";
   expect_body "`is` becomes a Matches, and a block that returns diverges"
     (shape
    ^ "fn g(shape: Shape) -> Int64 {\n  if shape is Circle(radius) { return radius }\n  0\n}\n")
@@ -254,9 +272,9 @@ let () =
     \  for value in count_to(2) {}\n\
     \  for value in first {}\n\
      }\n"
-    "{ let var own first = app::main::count_to(3); while (cursor_next(first) is Some(value: left)) \
-     { let _ = place left }; for value in yielding_call app::main::count_to(2) {  }; for value in \
-     cursor first {  } }";
+    "{ let var own first = app::main::count_to(3); while (cursor_next(first) is Some(value: own \
+     left)) { let _ = place left }; for value in yielding_call app::main::count_to(2) {  }; for \
+     value in cursor first {  } }";
   expect_body "a conversion to `any` records the impl, and a method call on `any` is dynamic"
     "trait Source {\n\
     \  type Item\n\

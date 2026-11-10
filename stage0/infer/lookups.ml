@@ -59,7 +59,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       | None -> bug "`%s` has no signature" (Path.show path))
   | Definition (Constant, path) -> (
       state.tables.meanings.(value.id) <- Some (Global { path; type_arguments = [] });
-      register_expression state value (fun () -> Constant path);
+      register_expression state value (fun () -> Use (Constant path));
       match Query.demand state.database Environment.constant_type path with
       | Some type_ -> type_
       | None -> bug "the constant `%s` has no type" (Path.show path))
@@ -211,7 +211,7 @@ and static_member state (value : expression) type_ (member : name) =
         | Some constant -> (
             state.tables.meanings.(value.id) <-
               Some (Global { path = constant; type_arguments = [] });
-            register_expression state value (fun () -> Constant constant);
+            register_expression state value (fun () -> Use (Constant constant));
             match Query.demand state.database Environment.constant_type constant with
             | Some type_ -> type_
             | None -> bug "the constant `%s` has no type" (Path.show constant))

@@ -87,6 +87,7 @@ let evidence : Core.evidence -> C.evidence = function
 let rec place st (found : Core.place) : Lir.place =
   match found with
   | Local local -> local_place st local
+  | Constant path -> Matching.static_constant st path
   | Field { base; field; _ } -> place st base / Field field
   | Temporary value -> value_place st value
   | Lent _ -> not_ported "a part that a call lends"
@@ -121,7 +122,6 @@ and into st (value : Core.expression) (destination : Lir.place) =
       let built = temporary st storage_ty in
       emit st.b (Assign (built, storage));
       assign (Build { ty; variant = None; fields = [ (field, Move built) ] })
-  | Constant path -> take st (Matching.static_constant st path) ty ~destination
   | Construct { variant; fields } ->
       let fields =
         List.map

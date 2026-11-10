@@ -548,7 +548,7 @@ let equal_to_pattern state ~origin type_ (value : Core.kind) : Core.pattern_kind
 (* A constant used as a pattern, or as a bound of a range pattern. *)
 let pattern_constant state (id : id) : Core.kind =
   match state.tables.patterns.(id) with
-  | Some (Constant_pattern path) -> Constant path
+  | Some (Constant_pattern path) -> Use (Constant path)
   | _ -> bug "a pattern names a constant that was not recorded"
 
 (* A literal used as a pattern, or as a bound of a range pattern. *)

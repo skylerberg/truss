@@ -49,7 +49,6 @@ let rec expression names (node : expression) =
   | Copy given -> "copy(" ^ operand given ^ ")"
   | Function_value { path; type_arguments = arguments } ->
       "fn " ^ Path.show path ^ type_arguments arguments
-  | Constant path -> Path.show path
   | Value_parameter parameter -> parameter.name
   | Lambda { parameters; captures; body; _ } ->
       Printf.sprintf "lambda(%s)%s %s"
@@ -183,6 +182,7 @@ and operand names = function
 
 and place names = function
   | Local found -> local names found
+  | Constant path -> Path.show path
   | Field { base; field; _ } -> Printf.sprintf "%s.%s" (place names base) field
   | Lent call -> "lent " ^ expression names call
   | Temporary value -> "temporary " ^ expression names value

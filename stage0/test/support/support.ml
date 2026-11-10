@@ -43,6 +43,13 @@ let checked ~check database name =
    - the expression of a [Lent] place is a call of a lending method;
    - a [mut] parameter receives a place or a slice, and an [own] parameter
      receives a value;
+   - a place that is assigned, passed [mut], or advanced as a cursor is
+     mutable: it is not a constant, and every [Lent] place in it is lent
+     [mut];
+   - a [let], [match], or [is] on a value binds every name [own];
+   - a [let] that binds a mutable local receives a value;
+   - the alternatives of a pattern bind the same locals, with the same
+     types and modes;
    - a [Yielding_call] is a call of a yielding method. *)
 let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   let module T = Types in
@@ -125,11 +132,39 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   in
   let rec place (found : Core.place) =
     match found with
-    | Lent { kind = Call { lends = Some _; _ }; _ } | Local _ | Temporary _ -> ()
+    | Lent { kind = Call { lends = Some _; _ }; _ } | Local _ | Constant _ | Temporary _ -> ()
     | Lent _ -> wrong "a `Lent` place is not a call of a lending method"
     | Field { base; type_ = field; _ } ->
         type_ "a field" field;
         place base
+  in
+  let operand (found : Core.operand) =
+    match found with Place found -> place found | Value _ -> ()
+  in
+  let rec mutable_place what (found : Core.place) =
+    place found;
+    match found with
+    | Local _ | Temporary _ -> ()
+    | Constant path -> wrong "%s mutates the constant `%s`" what (Path.show path)
+    | Field { base; _ } -> mutable_place what base
+    | Lent { kind = Call { lends = Some Mut; _ }; _ } -> ()
+    | Lent _ -> wrong "%s mutates a place that is lent read-only" what
+  in
+  let rec bindings (pattern : Core.pattern) : (Core.local * T.ty * T.mode) list =
+    match pattern.kind with
+    | Bind { local; mode; _ } -> [ (local, pattern.type_, mode) ]
+    | Variant { fields; _ } | Record fields ->
+        List.concat_map (fun (_, inner) -> bindings inner) fields
+    | Alternatives (first :: _) -> bindings first
+    | Alternatives [] | Wildcard | Literal _ | Range _ | Equal_to _ -> []
+  in
+  let binds_own what (value : Core.operand) (pattern : Core.pattern) =
+    operand value;
+    match value with
+    | Value _ ->
+        if List.exists (fun (_, _, mode) -> mode <> T.Own) (bindings pattern) then
+          wrong "%s on a value binds a name that is not `own`" what
+    | Place _ -> ()
   in
   Core_walk.definition
     {
@@ -138,7 +173,17 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           unique node.id;
           type_ "an expression" node.type_;
           match node.kind with
-          | Use found | Cursor_next found -> place found
+          | Use found -> place found
+          | Cursor_next cursor -> mutable_place "a `Cursor_next`" cursor
+          | Slice { base; _ } -> place base
+          | Matches { value; pattern } -> binds_own "an `is`" value pattern
+          | Match { scrutinees; arms; _ } ->
+              List.iter
+                (fun (arm : Core.arm) ->
+                  if List.length arm.patterns <> List.length scrutinees then
+                    wrong "a `match` arm does not have one pattern per scrutinee";
+                  List.iter2 (binds_own "a `match`") scrutinees arm.patterns)
+                arms
           | Function_value { type_arguments; _ } ->
               List.iter (argument "a function value's type argument") type_arguments
           | Value_parameter named -> parameter "a value" named
@@ -147,26 +192,44 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           | Provide { implementations; _ } ->
               List.iter
                 (fun (implementation : Core.implementation) ->
-                  type_ "an implementation" implementation.type_)
+                  type_ "an implementation" implementation.type_;
+                  match (implementation.mode, implementation.value) with
+                  | Mut, Place found -> mutable_place "a `provide`" found
+                  | _, value -> operand value)
                 implementations
           | Call call ->
               callee call.callee;
               capabilities "a call's `uses`" call.uses;
+              (match call.callee with Indirect function_value -> operand function_value | _ -> ());
               List.iter
                 (function
-                  | Core.Passed { mode = Mut; value = Value { kind = Slice _; _ } } -> ()
+                  | Core.Passed { mode = Mut; value = Value { kind = Slice { base; _ }; _ } } ->
+                      mutable_place "a slice passed `mut`" base
                   | Core.Passed { mode = Mut; value = Value _ } ->
                       wrong "a `mut` parameter receives a value that is not a slice"
+                  | Passed { mode = Mut; value = Place found } ->
+                      mutable_place "a `mut` argument" found
                   | Passed { mode = Own; value = Place _ } ->
                       wrong "an `own` parameter receives a place"
-                  | _ -> ())
+                  | Passed { value; _ } -> operand value
+                  | Default -> ())
                 call.arguments
           | _ -> ());
       statement =
         (fun (node : Core.statement) ->
           unique node.id;
           match node.kind with
-          | Assign { target; _ } | Compound_assign { target; _ } -> place target
+          | Assign { target; _ } | Compound_assign { target; _ } ->
+              mutable_place "an assignment" target
+          | Let { pattern; value; _ } -> (
+              binds_own "a `let`" value pattern;
+              match (pattern.kind, value) with
+              | Bind { mutable_ = true; _ }, Place _ ->
+                  wrong "a `let` that binds a mutable local receives a place"
+              | _ -> ())
+          | Yield { mode = Mut; part = Place found } -> mutable_place "a `yield mut`" found
+          | Yield { part; _ } -> operand part
+          | For { iteration = Cursor { cursor; _ }; _ } -> mutable_place "a `for` loop" cursor
           | For { iteration = Yielding_call { kind = Call { callee; _ }; _ }; _ } -> (
               let output =
                 match callee with
@@ -188,7 +251,14 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
       pattern =
         (fun (node : Core.pattern) ->
           unique node.id;
-          type_ "a pattern" node.type_);
+          type_ "a pattern" node.type_;
+          match node.kind with
+          | Alternatives (first :: rest) ->
+              let bound alternative = List.sort compare (bindings alternative) in
+              let expected = bound first in
+              if List.exists (fun alternative -> bound alternative <> expected) rest then
+                wrong "the alternatives of a pattern do not bind the same locals"
+          | _ -> ());
       callee;
     }
     form.definition

@@ -101,6 +101,9 @@ and operand =
 (** A memory location. *)
 and place =
   | Local of local
+  | Constant of Path.t
+      (** The static data of a constant. It is read-only. A constant used as a value is a {!Use} of
+          this place. *)
   | Field of { base : place; field : string; type_ : Types.ty }
       (** A field of a record. [type_] is the field's type. The fields of a sum type's variant are
           never places of this kind: they are only reachable through pattern bindings. *)
@@ -144,7 +147,6 @@ and kind =
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
       (** A reference to a named function or method, used as a value. A variant constructor used as
           a function is desugared to a {!Lambda}. *)
-  | Constant of Path.t
   | Value_parameter of Types.parameter  (** A use of a [USize] generic parameter as a value. *)
   | Lambda of {
       parameters : pattern list;
@@ -362,7 +364,8 @@ and pattern_kind =
           ignored. *)
   | Record of (string * pattern) list
   | Literal of expression
-      (** An {!Integer} or {!Boolean} literal, compared with built-in equality. *)
+      (** An {!Integer} or {!Boolean} literal, or a constant of a built-in type. The scrutinee is
+          compared with it by built-in equality. *)
   | Range of { start : expression; stop : expression; inclusive : bool }
       (** A range of literals or constants. *)
   | Equal_to of { value : expression; equal : callee }

@@ -1072,13 +1072,36 @@ let rec lent state (value : expression) : T.mode option =
   | Mode (_, inner) when Option.is_some (marked_call state inner) -> lent state inner
   | _ -> None
 
-(* Whether a value is borrowed where it is: a place, or a part that is
-   lent. What binds it views it, and what matches it binds views of its
-   parts. *)
-let borrowed state (value : expression) = is_place state value || Option.is_some (lent state value)
+(* Whether an expression is a slice, such as [items[1..3]]. A slice is
+   written like an index, but it is a value: a view of part of its base. *)
+let rec is_slice (value : expression) =
+  match value.kind with
+  | Bracket (_, [ Item { kind = Range _; _ } ]) -> true
+  | Parenthesized inner | Mode (_, inner) -> is_slice inner
+  | _ -> false
 
-(* A place that is assigned or lent [mut]: each index on its way is the
-   [mut] version of [at], which lends its element [mut]. *)
+(* Whether a [let], [match], or [is] borrows the expression: it denotes a
+   place, or a part that a lending call lends. The bindings then borrow
+   parts of that place. A slice is a value, so it is not borrowed. *)
+let borrowed state (value : expression) =
+  (is_place state value || Option.is_some (lent state value)) && not (is_slice value)
+
+(* The mode with which the bindings of a pattern hold the parts of the
+   scrutinee of a [match] or an [is]. A scrutinee marked [own] or [mut]
+   gives that mode. An unmarked place or lent part is borrowed, so the
+   bindings are [Read]. Any other scrutinee is a value that the match
+   consumes, so the bindings are [Own]. A mark that belongs to the receiver
+   of a method call, as in [mut cursor.next()], is not a mark on the
+   scrutinee. *)
+let scrutinee_mode state (scrutinee : expression) : T.mode =
+  match scrutinee.kind with
+  | Mode (Own, inner) when Option.is_none (marked_call state inner) -> Own
+  | Mode (Mut, inner) when Option.is_none (marked_call state inner) && not (is_slice inner) -> Mut
+  | _ -> if borrowed state scrutinee then Read else Own
+
+(* Marks a place as mutated: it is assigned, passed [mut], or lent [mut].
+   Every index expression in the place then uses the [mut self] version of
+   [at], which lends its element [mut]. *)
 let rec mutable_place state (value : expression) =
   match value.kind with
   | Member (base, _) | Parenthesized base | Mode (_, base) -> mutable_place state base

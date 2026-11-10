@@ -122,11 +122,12 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | Binary { operator; left; right; _ } -> binary state env ?expected value operator left right
   | Is { value = tested; pattern = written; _ } ->
       let tested_type = expression state env tested in
-      pattern state env written tested_type ~mode:T.Read;
+      let mode = scrutinee_mode state tested in
+      pattern state env written tested_type ~mode;
       register_expression state value (fun () ->
           Matches
             {
-              value = Form.operand Read (build_expression state tested);
+              value = Form.operand mode (build_expression state tested);
               pattern = build_pattern state written;
             });
       T.bool

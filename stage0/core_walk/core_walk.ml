@@ -21,7 +21,7 @@ type visit = {
 let ignore_all = { expression = ignore; statement = ignore; pattern = ignore; callee = ignore }
 
 let rec place visit = function
-  | Local _ -> ()
+  | Local _ | Constant _ -> ()
   | Field { base; _ } -> place visit base
   | Lent call -> visit.expression call
   | Temporary value -> visit.expression value
@@ -52,8 +52,8 @@ let loop_clause visit = function
 
 let expression_children visit (node : expression) =
   match node.kind with
-  | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Constant _ | Value_parameter _
-  | Break | Continue | Todo | Unreachable | Result | Current_target | Yielded | Finished ->
+  | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Break
+  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Finished ->
       ()
   | Interpolated { pieces; builder_new; builder_write; builder_finish } ->
       visit.callee builder_new;
