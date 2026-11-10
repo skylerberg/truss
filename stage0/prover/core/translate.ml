@@ -1364,6 +1364,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       extensional context frame (type_of context frame first) first_value second_value;
       Some (frame, L.equal first_value second_value)
   | Cost_function { function_; arguments } -> cost_function context frame node function_ arguments
+  | Method_time _ -> unsupported (at frame node) "the time of a method of a type parameter"
 
 (* The right side of [&&], [||], or [==>], which runs only where [runs]
    holds. One that changes a local, as a call with a [mut] argument does,

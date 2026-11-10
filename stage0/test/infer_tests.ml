@@ -292,6 +292,10 @@ let () =
          fn f() -> USize {\n\
         \  greet() + greet(\"you\")\n\
          }\n");
+  test "`time` of a method that no bound of the type parameter declares is an error" (fun () ->
+      one_diagnostic
+        "fn f[Element: Equal](item: Element)\n  cost time O(time(Element.compare))\n{\n}\n"
+        "types.unknown_member");
   test "a let cannot be assigned" (fun () ->
       one_diagnostic "fn f() {\n  let count = 0\n  count = 1\n}\n" "types.not_assignable");
   List.iter
