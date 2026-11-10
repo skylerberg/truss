@@ -210,28 +210,34 @@ let example : Path.module_ = { package = "example"; modules = [ "main" ] }
    that it is read and checked once and not for each test. *)
 let checked_standard = lazy (Database.standard_base ())
 
-(* A module of Truss source with the standard library, which must check
-   cleanly, ready to compile. *)
-let load text =
+(* The modules of a package named [example], of Truss source, with the
+   standard library, ready to compile. Each must check cleanly. *)
+let load_modules modules =
   let database = Engine.context (Engine.create ~bases:[ Lazy.force checked_standard ] ()) in
-  Database.load_package (Engine.of_context database) ~name:"example" ~dependencies:[]
-    [ (example, text) ];
-  let source = (Query.demand database Workspace.file example).source in
-  (match Type_checker.diagnostics database example with
-  | [] -> ()
-  | diagnostics ->
-      fail "the source has diagnostics:\n%s"
-        (String.concat "" (List.map (Diagnostic.render source) diagnostics)));
+  Database.load_package (Engine.of_context database) ~name:"example" ~dependencies:[] modules;
+  List.iter
+    (fun (module_, _) ->
+      let source = (Query.demand database Workspace.file module_).source in
+      match Type_checker.diagnostics database module_ with
+      | [] -> ()
+      | diagnostics ->
+          fail "the source has diagnostics:\n%s"
+            (String.concat "" (List.map (Diagnostic.render source) diagnostics)))
+    modules;
   ( database,
     Compile.create
       ~want:(Database.want_in (Engine.of_context database))
       database target_64 (Lazy.force compiler) (Lazy.force cache) settings )
 
+let load text = load_modules [ (example, text) ]
+
 (* The paths of a module's tests, in order. *)
-let tests_of database =
+let tests_in database module_ =
   List.filter_map
     (fun (d : Resolve.Names.declaration) -> match d.path with Test _ -> Some d.path | _ -> None)
-    (Query.demand database Resolve.Names.declarations example)
+    (Query.demand database Resolve.Names.declarations module_)
+
+let tests_of database = tests_in database example
 
 (* Compiles a module of Truss source with the standard library, runs its
    tests, and returns the runner's output. *)

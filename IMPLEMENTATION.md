@@ -121,6 +121,13 @@ Every stage of stage0 is tested the same way:
   test must not load the library's sources into a new engine: that parses
   and checks the whole library again, so every such test gets slower each
   time the library grows.
+- **The standard library's own tests are written in Truss.** Each file of
+  `stage0/test/codegen/library/` is a module of tests for one module of the
+  library, named after it. `library_tests` builds every file's tests into
+  one program and runs it, so a new test adds its own code to that build
+  and no build of its own. A test of what a library function returns goes
+  there. A test written in OCaml that compiles a program of its own is for
+  the compiler: a diagnostic, generated code, or a whole program's output.
 - **Every test checks the code database too.** When a test ends, the harness
   computes every result the test's engines hold again, in a new engine with
   the same inputs, and fails the test if one differs. So a query that is not

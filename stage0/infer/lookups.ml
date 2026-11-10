@@ -1,6 +1,6 @@
-(* Lookups that the expression checker makes: names, fields, and members;
-   trait methods and the [impl]s that provide them; the [each] method of a
-   collection; and the final record of a call. *)
+(* What checking an expression looks up without checking another: names,
+   fields, and members; traits' methods and the [impl]s that answer them; a
+   collection's [each]; and finishing a call's record. *)
 
 open Syntax
 module T = Types
@@ -12,16 +12,15 @@ module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
 
-(* One version of a method: a method of the type, or a trait method. *)
+(* One version of a method: a type's own, or a trait's. *)
 type version = Own_version of Path.t | Trait_version of T.trait_reference * T.trait_method
 
-(* The version of a method that a receiver selects: the version its mark
-   names, or the read-only version if it has no mark. *)
+(* The version a call's receiver asks for: the one its mark names, and the
+   read-only one when it has none. *)
 let marked_receiver (receiver : expression) : Path.receiver =
   match receiver.kind with Mode (Mut, _) -> Mut | Mode (Own, _) -> Own | _ -> Read
 
-(* Checks a value of type [found] against an expected type, and records the
-   conversion. *)
+(* An expression's value where a type is expected of it. *)
 let rec coerce state env ?argument (value : expression) ~found ~expected =
   convert state env ?argument ~expression:value.id value.span ~found ~expected
 
@@ -30,7 +29,7 @@ and literal_type state ~expected kind =
   | Some expected when Unify.literal_fits kind expected -> expected
   | _ -> Unify.fresh_literal state.unifier kind
 
-(* The type of a name used as a value, by what the name resolves to. *)
+(* What a name is as a value, by what it means. *)
 and named state env (value : expression) ({ name; target; type_arguments } : Resolve.head) =
   let text = name.text in
   match target with
@@ -132,8 +131,8 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Unknown report -> T.Error report
   | Binding | Module _ -> bug "the name `%s` is not resolved" text
 
-(* A variant used as a value. A variant without fields is a value. A variant
-   with fields is a function that constructs it. *)
+(* A variant used as a value: one with no fields is a value, and one with
+   fields is a function that builds it. *)
 and variant_value state (value : expression) type_path variant ~arguments =
   let type_ = T.Named { path = type_path; arguments } in
   state.tables.meanings.(value.id) <- Some (Variant_value { type_; variant });
@@ -209,8 +208,8 @@ and field state (value : expression) base_type (member : name) =
               else unknown []))
   | _ -> unknown []
 
-(* [Type.name] used as a value: a variant, a constant of the type, or a
-   method as a function value. *)
+(* [Type.name] read as a value: a variant, a constant under the type, or a
+   method as a function. *)
 and static_member state (value : expression) type_ (member : name) =
   match type_ with
   | T.Named { path; arguments } ->
@@ -249,9 +248,9 @@ and static_member state (value : expression) type_ (member : name) =
       error state Unknown_member member.span
         (Printf.sprintf "`%s` has no member `%s`." (show state type_) member.text)
 
-(* Explicit type arguments are for the function's own generic parameters, in
-   order, after the parameters of a method's type. There must be exactly one
-   for each parameter, of the parameter's kind. *)
+(* Explicit type arguments give the function's own generic parameters, in
+   order, after those of a method's type head: exactly one for each, of its
+   kind. *)
 and explicit_type_arguments ?(head = 0) state (value : expression) instance items =
   if items <> [] then begin
     let given =
@@ -289,7 +288,7 @@ and finish_call state (value : expression) callee (instance : instance) argument
     Some { callee; arguments; defaults_left_out = left_out; uses = instance.signature.uses; result };
   note_lending state value instance.signature.output;
   Form.register_call state value;
-  (* A call of a yielding method outside a [for] loop creates a cursor. *)
+  (* A call to a [yields] method outside a [for] loop makes a cursor. *)
   match instance.signature.output with
   | Yields _ -> cursor_type state callee instance
   | _ -> result
@@ -310,8 +309,8 @@ and check_specification_call state env (value : expression) (signature : T.signa
     report state Specification_only value.span
       "This function mentions `Integer`, so it can be called only in specifications."
 
-(* Whether a type could implement a trait for some type arguments of the
-   trait. The call's arguments determine them later. *)
+(* Whether a type could implement a trait, with fresh arguments for the
+   trait's own parameters, which the call's arguments then decide. *)
 and could_implement state type_ trait =
   let arguments =
     match Query.demand state.database Environment.trait_interface trait with
@@ -339,9 +338,8 @@ and trait_static_method state path name receiver =
         (Query.demand state.database Names.traits_declaring (package, name)))
     (Members.visible_packages state.database state.package)
 
-(* Finds the [impl] that a trait method call resolves to. The search is
-   deferred until the types are inferred, which may be at the end of the
-   statement. *)
+(* The [impl] a trait method call means is found once its types are known,
+   which may be at the end of the statement. *)
 and resolve_evidence state (value : expression) self_type (reference : T.trait_reference) =
   defer state (fun () ->
       let self_type = zonk state self_type
@@ -374,8 +372,7 @@ and resolve_evidence state (value : expression) self_type (reference : T.trait_r
         true
       end)
 
-(* The traits that declare a method with the given name and that the type
-   could implement. *)
+(* The traits that give a type a method with a name. *)
 and trait_candidates state receiver_type name =
   let with_method (trait : T.trait_reference) =
     match
@@ -446,11 +443,11 @@ and one_family state (traits : T.trait_reference list) =
   in
   match traits with [] -> true | first :: rest -> grow [ first ] rest
 
-(* The versions of a method name on a type, by receiver mode: the methods of
-   the type together with the methods of the related traits that declare the
-   name. [Error] with the traits if they are not related. If the type and a
-   trait both declare a version with the same receiver, the type's version
-   is used; the clash is reported at the [impl]. *)
+(* The versions of a name on a type, by how each takes [self]: the type's
+   own methods and those of the one family of traits that gives it the
+   name, together. The traits themselves, when they are not one family. A
+   type's own version stands where a trait gives the same one, since that
+   clash is reported where the [impl] is. *)
 and versions state receiver_type name :
     ((Path.receiver * version) list, T.trait_reference list) Result.t =
   let candidates = trait_candidates state receiver_type name in
@@ -562,7 +559,6 @@ and each_call state (span : span) type_ mode =
       | _ -> None)
   | None -> None
 
-(* The type that the [each] method of a value yields for a loop with the
-   given mode. *)
+(* What a value's [each] yields for a loop's mode. *)
 and yielded state (span : span) type_ mode =
   Option.map (fun ((_ : C.call), element) -> element) (each_call state span type_ mode)
