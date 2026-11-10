@@ -19,7 +19,7 @@ let gives (trait : Path.t) name =
         [ ("Equal", "equal"); ("Hash", "hash"); ("Ordered", "compare"); ("Default", "default") ]
   | _ -> false
 
-let core database (path : Path.t) : Core.t option =
+let form database (path : Path.t) : Core.t option =
   match path with
   | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when gives trait name
     -> (
@@ -28,6 +28,8 @@ let core database (path : Path.t) : Core.t option =
           Query.demand database Environment.type_interface type_,
           Impls.signature database path )
       with
+      (* A type still to be written has nothing to derive from yet. *)
+      | _, Some { shape = Todo_type; _ }, _ -> None
       | Some interface, Some { shape; _ }, Some signature ->
           let nodes = ref 0 and made = ref 0 in
           let id () =
@@ -47,6 +49,7 @@ let core database (path : Path.t) : Core.t option =
           let pattern type_ kind : Core.pattern = { id = id (); origin; type_; kind } in
           let statement kind : Core.statement = { id = id (); origin; kind } in
           let giving value : Core.block = { statements = []; value = Some value; ends = true } in
+          let arm found body : Core.arm = { patterns = [ found ]; guard = None; body; origin } in
           let self_type = interface.for_type in
           let bounds (parameter : T.parameter) =
             List.concat_map
@@ -126,9 +129,6 @@ let core database (path : Path.t) : Core.t option =
                  })
           in
           let read place : Core.argument = Passed { mode = Read; value = Place place } in
-          let field_of base variant (field : T.field) : Core.place =
-            Field { base; variant; field = field.field_name; type_ = field.field_type }
-          in
           let variants =
             match shape with
             | Sum variants ->
@@ -141,33 +141,77 @@ let core database (path : Path.t) : Core.t option =
             | Todo_type | Builtin_type _ | Error_shape _ ->
                 bug "`%s` is derived for a type with no fields" (Path.show trait)
           in
+          let alone = match variants with Some [ _ ] -> true | _ -> false in
           let record_fields () =
             match shape with Record fields -> fields | _ -> bug "a record's fields of a sum type"
           in
+          (* A record's fields, each where it is in the record at [base]. *)
+          let record_parts base =
+            List.map
+              (fun (field : T.field) ->
+                (field, Core.Field { base; field = field.field_name; type_ = field.field_type }))
+              (record_fields ())
+          in
+          (* A variant's fields are reached by a pattern that binds each,
+             lent from the value matched. *)
+          let bound named (fields : T.field list) =
+            List.map (fun (field : T.field) -> (field, local (), named field.field_name)) fields
+          in
+          let binding variant bound : Core.pattern =
+            pattern self_type
+              (Variant
+                 {
+                   variant;
+                   fields =
+                     List.map
+                       (fun ((field : T.field), local, name) ->
+                         ( field.field_name,
+                           pattern field.field_type
+                             (Bind { local; name; mutable_ = false; mode = Read }) ))
+                       bound;
+                 })
+          in
+          let parts bound = List.map (fun (field, local, _) -> (field, Core.Local local)) bound in
           let is variant : Core.pattern = pattern self_type (Variant { variant; fields = [] }) in
-          (* One arm for each variant of the value at [place], or [each] of a
-             record's fields alone. *)
-          let by_variant type_ place (each : string option -> int -> T.field list -> Core.block) =
+          (* What [each] gives of the parts of [self]: of a record's fields,
+             or of the fields of the variant it is, by an arm for each. *)
+          let of_self type_
+              (each : string option -> int -> (T.field * Core.place) list -> Core.block) =
             match variants with
-            | None -> each None 0 (record_fields ())
+            | None -> each None 0 (record_parts (Local Self))
             | Some variants ->
                 giving
                   (node type_
                      (Match
                         {
-                          scrutinees = [ Place place ];
+                          scrutinees = [ Place (Local Self) ];
                           arms =
                             List.mapi
-                              (fun index (variant, fields) : Core.arm ->
-                                {
-                                  patterns = [ is variant ];
-                                  guard = None;
-                                  body = each (Some variant) index fields;
-                                  origin;
-                                })
+                              (fun index (variant, fields) ->
+                                let mine = bound Fun.id fields in
+                                arm (binding variant mine) (each (Some variant) index (parts mine)))
                               variants;
                           guards_cover = false;
                         }))
+          in
+          (* What [same] gives of the parts of [other] where it is the
+             variant [self] is, and [otherwise] where it is another. *)
+          let of_other other type_ variant (mine : (T.field * Core.place) list) ~same ~otherwise =
+            match variant with
+            | None -> same (record_parts other)
+            | Some variant ->
+                let theirs = bound (fun name -> "other_" ^ name) (List.map fst mine) in
+                node type_
+                  (Match
+                     {
+                       scrutinees = [ Place other ];
+                       arms =
+                         arm (binding variant theirs) (giving (same (parts theirs)))
+                         ::
+                         (if alone then []
+                          else [ arm (pattern self_type Anything) (giving (otherwise ())) ]);
+                       guards_cover = false;
+                     })
           in
           let bool = T.bool and unit = T.unit in
           let trait_name = match trait with Top { name; _ } -> name | _ -> Path.show trait in
@@ -175,31 +219,30 @@ let core database (path : Path.t) : Core.t option =
             match (trait_name, name) with
             | "Equal", "equal" ->
                 let other = given () in
-                by_variant bool (Local Self) (fun variant _ fields ->
-                    let equal (field : T.field) =
-                      method_of trait "equal" Read field.field_type
-                        [
-                          read (field_of (Local Self) variant field);
-                          read (field_of other variant field);
-                        ]
-                        bool
-                    in
-                    let same_variant =
-                      Option.map
-                        (fun variant ->
-                          node bool (Matches { value = Place other; pattern = is variant }))
-                        variant
-                    in
-                    let all =
-                      List.fold_left
-                        (fun so_far field ->
-                          let this = equal field in
-                          match so_far with
-                          | None -> Some this
-                          | Some so_far -> Some (node bool (Both (so_far, this))))
-                        same_variant fields
-                    in
-                    giving (match all with Some all -> all | None -> node bool (Boolean true)))
+                let each_equal mine theirs =
+                  List.fold_left2
+                    (fun so_far ((field : T.field), mine) (_, theirs) ->
+                      let this =
+                        method_of trait "equal" Read field.field_type
+                          [ read mine; read theirs ]
+                          bool
+                      in
+                      match so_far with
+                      | None -> Some this
+                      | Some so_far -> Some (node bool (Both (so_far, this))))
+                    None mine theirs
+                  |> function
+                  | Some all -> all
+                  | None -> node bool (Boolean true)
+                in
+                of_self bool (fun variant _ mine ->
+                    giving
+                      (match (variant, mine) with
+                      | Some variant, [] ->
+                          node bool (Matches { value = Place other; pattern = is variant })
+                      | _ ->
+                          of_other other bool variant mine ~same:(each_equal mine)
+                            ~otherwise:(fun () -> node bool (Boolean false))))
             | "Hash", "hash" ->
                 let hasher, hasher_type =
                   match List.rev parameters with
@@ -241,18 +284,18 @@ let core database (path : Path.t) : Core.t option =
                                capability_arguments = [];
                              })))
                 in
-                by_variant unit (Local Self) (fun variant index fields ->
+                of_self unit (fun variant index mine ->
                     {
                       statements =
                         (if variant = None then [] else [ write index ])
                         @ List.map
-                            (fun (field : T.field) ->
+                            (fun ((field : T.field), mine) ->
                               statement
                                 (Evaluate
                                    (method_of trait "hash" Read field.field_type
-                                      [ read (field_of (Local Self) variant field); changed ]
+                                      [ read mine; changed ]
                                       unit)))
-                            fields;
+                            mine;
                       value = None;
                       ends = true;
                     })
@@ -260,16 +303,13 @@ let core database (path : Path.t) : Core.t option =
                 let other = given () in
                 let ordering name = node result (Construct { variant = Some name; fields = [] }) in
                 (* Field by field: the first that is not equal decides. *)
-                let rec by_fields variant (fields : T.field list) =
-                  match fields with
-                  | [] -> ordering "Equal"
-                  | field :: rest -> (
+                let rec in_turn mine theirs =
+                  match (mine, theirs) with
+                  | [], _ | _, [] -> ordering "Equal"
+                  | ((field : T.field), mine) :: rest, (_, theirs) :: rest_of_theirs -> (
                       let compared =
                         method_of trait "compare" Read field.field_type
-                          [
-                            read (field_of (Local Self) variant field);
-                            read (field_of other variant field);
-                          ]
+                          [ read mine; read theirs ]
                           result
                       in
                       match rest with
@@ -282,39 +322,30 @@ let core database (path : Path.t) : Core.t option =
                                  scrutinees = [ Value compared ];
                                  arms =
                                    [
-                                     {
-                                       patterns =
-                                         [
-                                           pattern result
-                                             (Variant { variant = "Equal"; fields = [] });
-                                         ];
-                                       guard = None;
-                                       body = giving (by_fields variant rest);
-                                       origin;
-                                     };
-                                     {
-                                       patterns =
-                                         [
-                                           pattern result
-                                             (Bind
-                                                {
-                                                  local = decided;
-                                                  name = "decided";
-                                                  mutable_ = false;
-                                                  mode = Own;
-                                                });
-                                         ];
-                                       guard = None;
-                                       body = giving (node result (Use (Local decided)));
-                                       origin;
-                                     };
+                                     arm
+                                       (pattern result (Variant { variant = "Equal"; fields = [] }))
+                                       (giving (in_turn rest rest_of_theirs));
+                                     arm
+                                       (pattern result
+                                          (Bind
+                                             {
+                                               local = decided;
+                                               name = "decided";
+                                               mutable_ = false;
+                                               mode = Own;
+                                             }))
+                                       (giving (node result (Use (Local decided))));
                                    ];
                                  guards_cover = false;
                                }))
                 in
                 let number = T.builtin UInt32 in
                 match variants with
-                | None -> giving (by_fields None (record_fields ()))
+                | None | Some [ _ ] ->
+                    of_self result (fun variant _ mine ->
+                        giving
+                          (of_other other result variant mine ~same:(in_turn mine)
+                             ~otherwise:(fun () -> ordering "Equal")))
                 | Some variants ->
                     (* The other's variant as a number, which this one's is
                        compared with when the two differ. *)
@@ -326,55 +357,37 @@ let core database (path : Path.t) : Core.t option =
                              scrutinees = [ Place other ];
                              arms =
                                List.mapi
-                                 (fun index (variant, _) : Core.arm ->
-                                   {
-                                     patterns = [ is variant ];
-                                     guard = None;
-                                     body = giving (node number (Integer (Z.of_int index)));
-                                     origin;
-                                   })
+                                 (fun index (variant, _) ->
+                                   arm (is variant)
+                                     (giving (node number (Integer (Z.of_int index)))))
                                  variants;
                              guards_cover = false;
                            })
                     in
-                    let arm index (variant, fields) : Core.arm =
-                      let same =
-                        node bool (Matches { value = Place other; pattern = is variant })
-                      in
-                      let before =
-                        node bool
-                          (Compare
-                             {
-                               comparison = Less;
-                               left = node number (Integer (Z.of_int index));
-                               right = node number (Use (Local theirs));
-                             })
-                      in
-                      let by_number =
-                        node result
-                          (If
-                             {
-                               condition = before;
-                               then_ = giving (ordering "Less");
-                               else_ = Some (giving (ordering "Greater"));
-                             })
-                      in
-                      {
-                        patterns = [ is variant ];
-                        guard = None;
-                        body =
+                    let by_number index =
+                      node result
+                        (If
+                           {
+                             condition =
+                               node bool
+                                 (Compare
+                                    {
+                                      comparison = Less;
+                                      left = node number (Integer (Z.of_int index));
+                                      right = node number (Use (Local theirs));
+                                    });
+                             then_ = giving (ordering "Less");
+                             else_ = Some (giving (ordering "Greater"));
+                           })
+                    in
+                    let compared =
+                      of_self result (fun variant index mine ->
                           giving
-                            (node result
-                               (If
-                                  {
-                                    condition = same;
-                                    then_ = giving (by_fields (Some variant) fields);
-                                    else_ = Some (giving by_number);
-                                  }));
-                        origin;
-                      }
+                            (of_other other result variant mine ~same:(in_turn mine)
+                               ~otherwise:(fun () -> by_number index)))
                     in
                     {
+                      compared with
                       statements =
                         [
                           statement
@@ -393,16 +406,6 @@ let core database (path : Path.t) : Core.t option =
                                  otherwise = None;
                                });
                         ];
-                      value =
-                        Some
-                          (node result
-                             (Match
-                                {
-                                  scrutinees = [ Place (Local Self) ];
-                                  arms = List.mapi arm variants;
-                                  guards_cover = false;
-                                }));
-                      ends = true;
                     })
             | "Default", "default" ->
                 giving
@@ -435,3 +438,7 @@ let core database (path : Path.t) : Core.t option =
             }
       | _ -> None)
   | _ -> None
+
+(* The form of a method a derived [impl] gives, by the method's path, made
+   once however many of its instances are compiled. *)
+let core = Query.query ~name:"derived" ~phase:Bodies ~show:Path.show form

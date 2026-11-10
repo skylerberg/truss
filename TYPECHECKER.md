@@ -1605,10 +1605,15 @@ written:
   field that is not equal decides.
 - **`default`** builds the record of each field's default.
 
-Each field's method is a call of the trait's method on the field's type,
-with the `impl` the type has, or a bound where the type is a parameter. A
-method the trait itself gives a body, such as `not_equal`, has the trait's
-form, as in any `impl` that leaves it to the trait.
+A sum's method matches on `self`, and on the other value inside each arm,
+with patterns that bind each variant's fields, as a person would write it:
+a part of a sum is reached only through a pattern, in a derived method as
+anywhere. Each field's method is a call of the trait's method on the
+field's type, with the `impl` the type has, or a bound where the type is a
+parameter. The form is made once for a method, whatever it is compiled
+for. A method the trait itself gives a body, such as `not_equal`, has the
+trait's form, as in any `impl` that leaves it to the trait, and a type
+that is still `todo` has none.
 
 ### Obligations the type checker creates
 

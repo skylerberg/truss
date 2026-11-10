@@ -496,7 +496,7 @@ let derived text type_name trait name receiver =
         receiver;
       }
   in
-  match Infer.derived database path with
+  match Query.demand database Infer.derived path with
   | Some form -> Core_print.show form
   | None -> failwith "the derived method has no core form"
 
@@ -517,39 +517,57 @@ let () =
      { (Equal.equal for Int64 by standard::numbers::signed::impl Equal for Int64(place self.first, \
      place other.first) && Equal.equal for Second by a bound(place self.second, place \
      other.second)) }";
-  derives "a sum's derived equal tests the variant and then each field" light "Light" "Equal"
-    "equal" Read
+  derives "a sum's derived equal binds each variant's fields, and is false of another variant" light
+    "Light" "Equal" "equal" Read
     "fn(self: Light, other: Light)\n\
-     { match place self { Off => { (place other is Off) } Dim => { ((place other is Dim) && \
-     Equal.equal for Int64 by standard::numbers::signed::impl Equal for Int64(place \
-     self.Dim.level, place other.Dim.level)) } On => { (place other is On) } } }";
+     { match place self { Off => { (place other is Off) } Dim(level: level) => { match place other \
+     { Dim(level: other_level) => { Equal.equal for Int64 by standard::numbers::signed::impl Equal \
+     for Int64(place level, place other_level) } _ => { false } } } On => { (place other is On) } \
+     } }";
   derives "a derived hash writes the variant's number and then each field" light "Light" "Hash"
     "hash" Read
     "fn(self: Light, mut hasher: Hasher)\n\
      { match place self { Off => { standard::core::Hasher.write(mut self)(mut place hasher, 0) } \
-     Dim => { standard::core::Hasher.write(mut self)(mut place hasher, 1); Hash.hash for Int64 by \
-     standard::numbers::signed::impl Hash for Int64(place self.Dim.level, mut place hasher) } On \
-     => { standard::core::Hasher.write(mut self)(mut place hasher, 2) } } }";
+     Dim(level: level) => { standard::core::Hasher.write(mut self)(mut place hasher, 1); Hash.hash \
+     for Int64 by standard::numbers::signed::impl Hash for Int64(place level, mut place hasher) } \
+     On => { standard::core::Hasher.write(mut self)(mut place hasher, 2) } } }";
   derives "a record's derived compare goes on to the next field only where one is equal" pair "Pair"
     "Ordered" "compare" Read
     "fn(self: Pair[Second], other: Pair[Second])\n\
      { match Ordered.compare for Int64 by standard::numbers::signed::impl Ordered for Int64(place \
      self.first, place other.first) { Equal => { Ordered.compare for Second by a bound(place \
      self.second, place other.second) } own decided => { decided } } }";
-  derives "a sum's derived compare orders by variant, then by field" light "Light" "Ordered"
-    "compare" Read
+  derives "a sum's derived compare orders by variant, then by the fields a variant binds" light
+    "Light" "Ordered" "compare" Read
     "fn(self: Light, other: Light)\n\
      { let own theirs = match place other { Off => { 0 } Dim => { 1 } On => { 2 } }; match place \
-     self { Off => { if (place other is Off) { Ordering.Equal() } else { if (0 < theirs) { \
-     Ordering.Less() } else { Ordering.Greater() } } } Dim => { if (place other is Dim) { \
-     Ordered.compare for Int64 by standard::numbers::signed::impl Ordered for Int64(place \
-     self.Dim.level, place other.Dim.level) } else { if (1 < theirs) { Ordering.Less() } else { \
-     Ordering.Greater() } } } On => { if (place other is On) { Ordering.Equal() } else { if (2 < \
-     theirs) { Ordering.Less() } else { Ordering.Greater() } } } } }";
+     self { Off => { match place other { Off => { Ordering.Equal() } _ => { if (0 < theirs) { \
+     Ordering.Less() } else { Ordering.Greater() } } } } Dim(level: level) => { match place other \
+     { Dim(level: other_level) => { Ordered.compare for Int64 by standard::numbers::signed::impl \
+     Ordered for Int64(place level, place other_level) } _ => { if (1 < theirs) { Ordering.Less() \
+     } else { Ordering.Greater() } } } } On => { match place other { On => { Ordering.Equal() } _ \
+     => { if (2 < theirs) { Ordering.Less() } else { Ordering.Greater() } } } } } }";
   derives "a derived default is each field's" pair "Pair" "Default" "default" Static
     "fn()\n\
      { Pair[Second](first: Default.default for Int64 by standard::numbers::signed::impl Default \
      for Int64(), second: Default.default for Second by a bound()) }";
+  test "a type still to be written has no derived form" (fun () ->
+      let database = setup [ ("app::main", "type Later = todo\n  derives Equal\n") ] in
+      let path : Path.t =
+        Method
+          {
+            owner =
+              Derived
+                {
+                  type_ = Top { module_ = module_of "app::main"; name = "Later" };
+                  trait =
+                    Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Equal" };
+                };
+            name = "equal";
+            receiver = Read;
+          }
+      in
+      if Query.demand database Infer.derived path <> None then fail "it has a form");
   test "every method a derived impl in the standard library gives has a core form" (fun () ->
       let database = setup [] in
       let derived =
@@ -577,7 +595,9 @@ let () =
               in
               List.iter
                 (fun (name, receiver, _) ->
-                  match Infer.derived database (Method { owner = impl; name; receiver }) with
+                  match
+                    Query.demand database Infer.derived (Method { owner = impl; name; receiver })
+                  with
                   | Some _ -> ()
                   | None ->
                       if not (List.mem name provided) then

@@ -11,7 +11,7 @@ type result = Body.result = {
 
 let checked = Body.checked
 
-(* The core form of a method of a derived [impl], by its path. *)
+(* The core form of a method a derived [impl] gives, by the method's path. *)
 let derived = Derived.core
 let diagnostics = Body.diagnostics
 
