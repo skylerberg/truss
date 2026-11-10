@@ -249,7 +249,7 @@ let written_code context key ~path ~type_arguments : Lir.t * string option =
       (body st)
   in
   let from_core =
-    match demand context Infer.core_at path with
+    match demand context Infer.core_of_path path with
     | Some (form, _) -> lowered (fun st -> Core_form.body st form)
     | None -> Error "a definition with no core form"
   in

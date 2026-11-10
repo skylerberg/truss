@@ -1,6 +1,6 @@
-(* The core form's nodes for what checking records of a call: its callee,
-   its arguments in the callee's order, and the nodes a call turns out to
-   be. *)
+(* Builds core form nodes from the tables the type checker records
+   ([Checked]). The checker's other modules call these functions when they
+   register how the core node of a syntax node is built. *)
 
 open Syntax
 module T = Types
@@ -9,26 +9,27 @@ module Impls = Interface.Impls
 module Properties = Interface.Properties
 open State
 
-let node state (id : id) : Core.expression =
-  match state.form.expressions.(id) with
+let build_expression_by_id state (id : id) : Core.expression =
+  match state.form.expression_builders.(id) with
   | Some build -> build ()
-  | None -> bug "an expression of a call has no node in the core form"
+  | None -> bug "a call's argument has no core node"
 
-(* What a parameter is given: a place where it only borrows one, and a value
-   otherwise. *)
+(* The operand for a parameter with the given mode. A [Read] or [Mut]
+   parameter borrows a place, so it receives the place itself. In every
+   other case the parameter receives a value. *)
 let operand (mode : T.mode) (node : Core.expression) : Core.operand =
   match (mode, node.kind) with (Read | Mut), Use place -> Place place | _ -> Value node
 
-let recorded state (id : id) : C.call =
+let checked_call state (id : id) : C.call =
   match state.tables.calls.(id) with
   | Some call -> call
-  | None -> bug "a call of the core form was not recorded"
+  | None -> bug "the checker recorded no call for a call node"
 
 let evidence : C.evidence -> Core.evidence = function
   | Impl { impl; arguments } -> Impl { impl; arguments }
   | Bound -> Bound
   | Dynamic -> Dynamic
-  | Built_in -> bug "a method the compiler implements is called as another is"
+  | Built_in -> bug "a built-in method has no core evidence"
 
 let callee (callee : C.callee) : Core.callee =
   match callee with
@@ -37,11 +38,10 @@ let callee (callee : C.callee) : Core.callee =
       Trait_method { trait; name; receiver; self_type; type_arguments; evidence = evidence found }
   | Capability_method { capability; name } -> Capability_method { capability; name }
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
-  | Constructor _ | Function_value | Built_in_operator ->
-      bug "what is called is not something the core form calls"
+  | Constructor _ | Function_value | Built_in_operator -> bug "this callee has no core callee"
 
-(* One argument for each parameter, in the callee's order: the parameters
-   that nothing was passed for take their defaults. *)
+(* One argument per parameter, in parameter order. A parameter with no
+   argument is [Default]. *)
 let arguments state (call : C.call) : Core.argument list =
   List.init
     (List.length call.arguments + List.length call.defaults_left_out)
@@ -51,25 +51,27 @@ let arguments state (call : C.call) : Core.argument list =
       with
       | Some argument ->
           Core.Passed
-            { mode = argument.mode; value = operand argument.mode (node state argument.expression) }
+            {
+              mode = argument.mode;
+              value = operand argument.mode (build_expression_by_id state argument.expression);
+            }
       | None -> Default)
 
-let call_of state ~lends ?through (call : C.call) : Core.call =
+(* [function_value] is the callee expression of an indirect call. *)
+let core_call state ~lends ?function_value (call : C.call) : Core.call =
   {
     callee =
-      (match (call.callee, through) with
-      | Function_value, Some function_ -> Through (operand Read function_)
-      | found, _ -> callee found);
+      (match (call.callee, function_value) with
+      | Function_value, Some function_value -> Indirect (operand Read function_value)
+      | direct, _ -> callee direct);
     arguments = arguments state call;
     lends;
     uses = call.uses;
   }
 
-let call state (id : id) : Core.call =
-  call_of state ~lends:state.tables.lends.(id) (recorded state id)
-
-(* The traits whose methods on a built-in number are the operation itself. *)
-let arithmetic : (string * string * Intrinsic.operation) list =
+(* The operator traits, each with its method and the built-in operation
+   that the method is for a built-in number type. *)
+let arithmetic_traits : (string * string * Intrinsic.operation) list =
   [
     ("Add", "add", Add);
     ("Subtract", "subtract", Subtract);
@@ -79,32 +81,36 @@ let arithmetic : (string * string * Intrinsic.operation) list =
     ("Negate", "negate", Negate);
   ]
 
-let number type_ = T.is_integer_type type_ || T.is_float_type type_
-let built_in_value type_ = number type_ || T.is_builtin Bool type_ || T.is_builtin Character type_
+let is_number type_ = T.is_integer_type type_ || T.is_float_type type_
 
-(* The operation a trait's method is on a built-in number: [left + right]
-   and [left.add(right)] alike. *)
-let operation (trait : T.trait_reference) name self_type =
+(* Whether values of the type are compared with built-in equality. *)
+let is_built_in_scalar type_ =
+  is_number type_ || T.is_builtin Bool type_ || T.is_builtin Character type_
+
+(* The built-in operation that a trait method call is, if the receiver is a
+   built-in number: [left.add(right)] is [Add], the same as [left + right]. *)
+let built_in_operation (trait : T.trait_reference) name self_type =
   if
-    number self_type
+    is_number self_type
     && List.for_all (fun argument -> argument = T.Type self_type) trait.trait_arguments
   then
     List.find_map
       (fun (trait_name, method_, operation) ->
         if method_ = name && Path.equal trait.trait (core trait_name) then Some operation else None)
-      arithmetic
+      arithmetic_traits
   else None
 
-let values state (call : C.call) =
+(* The call's argument expressions, in parameter order. *)
+let argument_expressions state (call : C.call) =
   List.map
-    (fun (argument : C.argument) -> node state argument.expression)
+    (fun (argument : C.argument) -> build_expression_by_id state argument.expression)
     (List.sort
        (fun (left : C.argument) (right : C.argument) -> compare left.parameter right.parameter)
        call.arguments)
 
-(* The fields of the record or the variant a constructor builds, in the
-   order they are declared. *)
-let constructed state type_ variant type_arguments =
+(* The fields of a record type, or of one variant of a sum type, in
+   declaration order. *)
+let constructor_fields state type_ variant type_arguments =
   let fields =
     match variant with
     | None -> Members.fields state.database type_ type_arguments
@@ -116,36 +122,41 @@ let constructed state type_ variant type_arguments =
   in
   match fields with
   | Some fields -> fields
-  | None -> bug "`%s` is built and has no fields" (Path.show type_)
+  | None -> bug "`%s` is constructed but has no fields" (Path.show type_)
 
-(* What a recorded call is as a node: a call, the part a lending call
-   lends, a value built, or an operation that needs no call. *)
-let call_kind ?lends ?through state (value : expression) : Core.kind =
-  let recorded = recorded state value.id in
+(* The core node for a call expression. Most calls become a [Call]. A call
+   of a lending method becomes a [Use] of the [Lent] place. A constructor
+   becomes a [Construct]. A call of a built-in method becomes a [Copy], a
+   [Cursor_next], an [Operator], or a [Compare].
+
+   [lends] overrides the mode the checker recorded for a lending call.
+   [function_value] is the callee expression of an indirect call. *)
+let kind_of_call ?lends ?function_value state (value : expression) : Core.kind =
+  let recorded = checked_call state value.id in
   let lends = match lends with Some lends -> Some lends | None -> state.tables.lends.(value.id) in
   match recorded.callee with
   | Trait_method { trait; evidence = Built_in; _ }
     when Path.equal trait.trait Properties.copyable_trait -> (
       match recorded.arguments with
-      | [ receiver ] -> Copy (operand Read (node state receiver.expression))
-      | _ -> bug "a copy of other than one value")
+      | [ receiver ] -> Copy (operand Read (build_expression_by_id state receiver.expression))
+      | _ -> bug "`copy` does not have exactly one argument")
   | Trait_method { trait; evidence = Built_in; _ } when Path.equal trait.trait Impls.cursor_trait
     -> (
       match recorded.arguments with
-      | [ receiver ] -> Next (place_of (node state receiver.expression))
-      | _ -> bug "a cursor is pulled with arguments")
-  | Trait_method { trait; name; self_type; _ } when Option.is_some (operation trait name self_type)
-    ->
+      | [ receiver ] -> Cursor_next (place_of (build_expression_by_id state receiver.expression))
+      | _ -> bug "`next` does not have exactly one argument")
+  | Trait_method { trait; name; self_type; _ }
+    when Option.is_some (built_in_operation trait name self_type) ->
       Operator
         {
-          operation = Option.get (operation trait name self_type);
-          arguments = values state recorded;
+          operation = Option.get (built_in_operation trait name self_type);
+          arguments = argument_expressions state recorded;
         }
   | Trait_method { trait; name = "equal"; self_type; _ }
-    when built_in_value self_type && Path.equal trait.trait (core "Equal") -> (
-      match values state recorded with
+    when is_built_in_scalar self_type && Path.equal trait.trait (core "Equal") -> (
+      match argument_expressions state recorded with
       | [ left; right ] -> Compare { comparison = Equal; left; right }
-      | _ -> bug "`equal` of other than two values")
+      | _ -> bug "`equal` does not have exactly two arguments")
   | Constructor { type_; variant; type_arguments } ->
       Construct
         {
@@ -155,33 +166,35 @@ let call_kind ?lends ?through state (value : expression) : Core.kind =
               (fun index (field : T.field) ->
                 ( field.field_name,
                   Option.map
-                    (fun (argument : C.argument) -> node state argument.expression)
+                    (fun (argument : C.argument) ->
+                      build_expression_by_id state argument.expression)
                     (List.find_opt
                        (fun (argument : C.argument) -> argument.parameter = index)
                        recorded.arguments) ))
-              (constructed state type_ variant type_arguments);
+              (constructor_fields state type_ variant type_arguments);
         }
   | Built_in_operator -> bug "an operator is recorded as a call"
   | Function_value | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> (
-      let through = Option.map (built state) through in
-      let made = Core.Call (call_of state ~lends ?through recorded) in
+      let function_value = Option.map (build_expression state) function_value in
+      let call = Core.Call (core_call state ~lends ?function_value recorded) in
       match lends with
-      | Some _ -> Use (Lent (make state ~origin:value.id recorded.result made))
-      | None -> made)
+      | Some _ -> Use (Lent (synthetic_expression state ~origin:value.id recorded.result call))
+      | None -> call)
 
-let draft_call ?through state (value : expression) =
-  draft state value (fun () -> call_kind ?through state value)
+let register_call ?function_value state (value : expression) =
+  register_expression state value (fun () -> kind_of_call ?function_value state value)
 
-(* An index is the part its [at] lends, read-only or to change, as the
-   version of [at] that was chosen takes [self]. *)
-let draft_index state (value : expression) =
-  draft state value (fun () ->
-      match (recorded state value.id).callee with
-      | Trait_method { receiver = Mut; _ } -> call_kind ~lends:Mut state value
-      | _ -> call_kind ~lends:Read state value)
+(* An index expression is a call of [Index.at], which lends. It lends
+   mutably if the checker chose the [mut self] version of [at]. *)
+let register_index state (value : expression) =
+  register_expression state value (fun () ->
+      match (checked_call state value.id).callee with
+      | Trait_method { receiver = Mut; _ } -> kind_of_call ~lends:Mut state value
+      | _ -> kind_of_call ~lends:Read state value)
 
-(* A literal's node, with the value its type settled. *)
-let literal state (id : id) : Core.kind =
+(* The node for a numeric literal, with the value the checker computed for
+   the literal's inferred type. *)
+let numeric_literal state (id : id) : Core.kind =
   match state.tables.literals.(id) with
   | Some (Integer_value number) -> Integer number
   | Some (Float_value number) -> Float number
@@ -190,24 +203,25 @@ let literal state (id : id) : Core.kind =
 let type_of state (value : expression) =
   match state.tables.types.(value.id) with
   | Some type_ -> type_
-  | None -> bug "`%s` has a node and no type" (source state value.span)
+  | None -> bug "`%s` has a core node but no recorded type" (source state value.span)
 
-(* A named function or method as a value, with the type arguments its use
-   settled. *)
+(* A named function or method used as a value, with its inferred type
+   arguments. *)
 let function_value state (value : expression) : Core.kind =
   match state.tables.meanings.(value.id) with
   | Some (Global { path; type_arguments }) -> Function_value { path; type_arguments }
   | _ -> bug "`%s` is not recorded as a function" (source state value.span)
 
-(* A variant named as a value: the value itself when it has no fields, and
-   otherwise a function that builds it from them. *)
+(* A variant constructor used as a value. A variant without fields is the
+   constructed value. A variant with fields is a lambda that takes the
+   fields and constructs the variant. *)
 let variant_value state (value : expression) type_path variant : Core.kind =
   match type_of state value with
-  | T.Function { output = Returns (T.Named { arguments; _ } as built); _ } ->
+  | T.Function { output = Returns (T.Named { arguments; _ } as variant_type); _ } ->
       let fields =
         List.map
-          (fun (field : T.field) -> (field, made_local state))
-          (constructed state type_path (Some variant) arguments)
+          (fun (field : T.field) -> (field, fresh_synthetic_local state))
+          (constructor_fields state type_path (Some variant) arguments)
       in
       Lambda
         {
@@ -215,7 +229,7 @@ let variant_value state (value : expression) type_path variant : Core.kind =
             List.map
               (fun ((field : T.field), local) : Core.pattern ->
                 {
-                  id = next_id state;
+                  id = fresh_node_id state;
                   origin = value.id;
                   type_ = field.field_type;
                   kind = Bind { local; name = field.field_name; mutable_ = false; mode = Own };
@@ -227,7 +241,7 @@ let variant_value state (value : expression) type_path variant : Core.kind =
               statements = [];
               value =
                 Some
-                  (make state ~origin:value.id built
+                  (synthetic_expression state ~origin:value.id variant_type
                      (Construct
                         {
                           variant = Some variant;
@@ -236,45 +250,44 @@ let variant_value state (value : expression) type_path variant : Core.kind =
                               (fun ((field : T.field), local) ->
                                 ( field.field_name,
                                   Some
-                                    (make state ~origin:value.id field.field_type
+                                    (synthetic_expression state ~origin:value.id field.field_type
                                        (Core.Use (Local local))) ))
                               fields;
                         }));
-              ends = true;
+              diverges = false;
             };
-          result = built;
+          result = variant_type;
         }
   | _ -> Construct { variant = Some variant; fields = [] }
 
 let local_type state (id : id) =
   match state.tables.local_types.(id) with
   | Some type_ -> type_
-  | None -> bug "a local of the core form has no type"
+  | None -> bug "a local has no recorded type"
 
-(* A range written as a value: the range type's record, built from its
-   ends. *)
-let range state (value : expression) start stop ~inclusive : Core.kind =
+(* A range expression used as a value: a [Construct] of the [Range]
+   record. *)
+let range_record state (value : expression) start stop ~inclusive : Core.kind =
   match (start, stop, type_of state value) with
   | Some start, Some stop, T.Named { path; arguments } ->
-      let start = built state start in
-      let stop = built state stop in
-      let inclusive = make state ~origin:value.id T.bool (Core.Boolean inclusive) in
+      let start = build_expression state start in
+      let stop = build_expression state stop in
+      let inclusive = synthetic_expression state ~origin:value.id T.bool (Core.Boolean inclusive) in
       Construct
         {
           variant = None;
           fields =
             List.map2
               (fun (field : T.field) given -> (field.field_name, Some given))
-              (constructed state path None arguments)
+              (constructor_fields state path None arguments)
               [ start; stop; inclusive ];
         }
-  | _ -> bug "a range with an end left out is a value only where it slices"
+  | _ -> bug "a range without both bounds is valid only inside a slice"
 
-(* The capabilities a type implements, each with the [impl] that provides
-   it, its generic arguments, and its interface. An [impl] lives with its
-   type or its capability, so it is in the type's package, this one, or the
-   standard library, where the capabilities a dependency could not see are
-   not. *)
+(* The capabilities that a type implements, each with its [impl] and the
+   [impl]'s interface. An [impl] is declared in the package of its type or
+   of its capability. The search covers the type's package, the current
+   package, and the standard library. *)
 let capability_impls (state : state) (type_ : T.ty) =
   match type_ with
   | T.Named { path; _ } ->
@@ -294,40 +307,41 @@ let capability_impls (state : state) (type_ : T.ty) =
            (List.sort_uniq compare [ Path.package path; state.package; "standard" ]))
   | _ -> []
 
-(* What a [provide] gives its body: each implementation, as the place it
-   is or the value it makes, with what its type provides. *)
+(* A [provide] block. Each implementation is a place or a value, with the
+   capabilities that its type implements. *)
 let provide state (implementations : expression list) (body : block) : Core.kind =
   let implementations =
     List.map
       (fun (implementation : expression) : Core.implementation ->
         let mode : T.mode = match implementation.kind with Mode (Mut, _) -> Mut | _ -> Read in
-        let given = built state implementation in
+        let node = build_expression state implementation in
         {
           origin = implementation.id;
           mode;
-          value = operand mode given;
-          type_ = given.type_;
-          provides = List.map fst (capability_impls state given.type_);
+          value = operand mode node;
+          type_ = node.type_;
+          provides = List.map fst (capability_impls state node.type_);
         })
       implementations
   in
-  Provide { implementations; body = built_block state body }
+  Provide { implementations; body = build_block state body }
 
 (* Strings *)
 
-let text name : Path.t = standard [ "text" ] name
+let text_path name : Path.t = standard [ "text" ] name
 
 let builder_method name receiver : Core.callee =
-  Function { path = Method { owner = text "TextBuilder"; name; receiver }; type_arguments = [] }
+  Function
+    { path = Method { owner = text_path "TextBuilder"; name; receiver }; type_arguments = [] }
 
-let template_record state (literal : string_literal) =
+let checked_template state (literal : string_literal) =
   match state.tables.templates.(literal.id) with
-  | Some recorded -> recorded
-  | None -> bug "a string has no record of its parts"
+  | Some template -> template
+  | None -> bug "the checker recorded no template for a string literal"
 
-(* A plain string: its text when nothing is interpolated, and otherwise the
-   pieces it is written out from. *)
-let interpolated state (literal : string_literal) : Core.kind =
+(* An untagged string literal: a [String] if it has no interpolation, and
+   an [Interpolated] if it has. *)
+let untagged_string state (literal : string_literal) : Core.kind =
   match literal.rest with
   | [] -> String literal.first.value
   | rest ->
@@ -339,30 +353,31 @@ let interpolated state (literal : string_literal) : Core.kind =
         @ List.concat
             (List.map2
                (fun (part, after) (conversion : C.call option) ->
-                 let value = operand Read (built state part) in
+                 let value = operand Read (build_expression state part) in
                  match conversion with
                  | Some call ->
                      Core.Displayed { value; display = callee call.callee } :: piece after
                  | None -> bug "an interpolated value has no `display`")
-               rest (template_record state literal).part_conversions)
+               rest (checked_template state literal).part_conversions)
       in
       Interpolated
         {
           pieces;
-          start = builder_method "new" Static;
-          write = builder_method "write" Mut;
-          finish = builder_method "finish" Own;
+          builder_new = builder_method "new" Static;
+          builder_write = builder_method "write" Mut;
+          builder_finish = builder_method "finish" Own;
         }
 
-(* A list of some elements: a storage with room for them, each pushed onto
-   it, made into the list. *)
-let list state ~origin (element : T.ty) (elements : Core.expression list) : Core.kind =
-  let make = make state ~origin in
-  let statement kind : Core.statement = { id = next_id state; origin; kind } in
+(* A list literal, desugared to a block: allocate storage with capacity for
+   the elements, push each element, and convert the storage to a list with
+   [List.from_storage]. *)
+let list_literal state ~origin (element : T.ty) (elements : Core.expression list) : Core.kind =
+  let make = synthetic_expression state ~origin in
+  let statement kind : Core.statement = { id = fresh_node_id state; origin; kind } in
   let storage_type =
     T.Named { path = Intrinsic.builtin_path Storage; arguments = [ T.Type element ] }
   in
-  let storage = made_local state in
+  let storage = fresh_synthetic_local state in
   let intrinsic operation type_ arguments =
     make type_
       (Call
@@ -373,14 +388,14 @@ let list state ~origin (element : T.ty) (elements : Core.expression list) : Core
            uses = [];
          })
   in
-  let room = make (T.builtin USize) (Integer (Z.of_int (List.length elements))) in
-  let bound =
+  let capacity = make (T.builtin USize) (Integer (Z.of_int (List.length elements))) in
+  let let_storage =
     statement
       (Let
          {
            pattern =
              {
-               id = next_id state;
+               id = fresh_node_id state;
                origin;
                type_ = storage_type;
                kind = Bind { local = storage; name = "storage"; mutable_ = true; mode = Own };
@@ -388,11 +403,11 @@ let list state ~origin (element : T.ty) (elements : Core.expression list) : Core
            value =
              Value
                (intrinsic Storage_with_capacity storage_type
-                  [ Passed { mode = Read; value = Value room } ]);
-           otherwise = None;
+                  [ Passed { mode = Read; value = Value capacity } ]);
+           else_ = None;
          })
   in
-  let pushed =
+  let pushes =
     List.map
       (fun element ->
         statement
@@ -406,7 +421,7 @@ let list state ~origin (element : T.ty) (elements : Core.expression list) : Core
   in
   Block
     {
-      statements = bound :: pushed;
+      statements = let_storage :: pushes;
       value =
         Some
           (make (T.named list_path [ element ])
@@ -426,19 +441,20 @@ let list state ~origin (element : T.ty) (elements : Core.expression list) : Core
                   lends = None;
                   uses = [];
                 }));
-      ends = true;
+      diverges = false;
     }
 
-(* A tagged string: the tag's [from_template], given the template that
-   holds its texts and its parts, each already the tag's part. *)
-let template state (value : expression) (literal : string_literal) ~(part : T.ty) : Core.kind =
-  let recorded = template_record state literal in
+(* A tagged string, desugared to a call of the tag type's [from_template]
+   with a [Template] record. The record holds the literal text segments and
+   the interpolated values, each converted to the tag's [Part] type. *)
+let tagged_string state (value : expression) (literal : string_literal) ~(part : T.ty) : Core.kind =
+  let recorded = checked_template state literal in
   let from_template =
     match recorded.from_template with
     | Some call -> call
     | None -> bug "a tagged string has no `from_template`"
   in
-  let make = make state ~origin:value.id in
+  let make = synthetic_expression state ~origin:value.id in
   let record path arguments given =
     Core.Construct
       {
@@ -446,19 +462,19 @@ let template state (value : expression) (literal : string_literal) ~(part : T.ty
         fields =
           List.map2
             (fun (field : T.field) given -> (field.field_name, Some given))
-            (constructed state path None arguments)
+            (constructor_fields state path None arguments)
             given;
       }
   in
   let list element elements =
-    make (T.named list_path [ element ]) (list state ~origin:value.id element elements)
+    make (T.named list_path [ element ]) (list_literal state ~origin:value.id element elements)
   in
-  let literal_type = T.named (text "Literal") [] in
+  let literal_type = T.named (text_path "Literal") [] in
   let texts =
     List.map
       (fun (written : Syntax.text) ->
         make literal_type
-          (record (text "Literal") []
+          (record (text_path "Literal") []
              [ make (T.named string_slice_path []) (String written.value) ]))
       (literal.first :: List.map snd literal.rest)
   in
@@ -467,15 +483,16 @@ let template state (value : expression) (literal : string_literal) ~(part : T.ty
       (fun ((written : expression), _) (conversion : C.call option) ->
         match conversion with
         | Some call ->
-            State.make state ~origin:written.id call.result (Call (call_of state ~lends:None call))
-        | None -> built state written)
+            synthetic_expression state ~origin:written.id call.result
+              (Call (core_call state ~lends:None call))
+        | None -> build_expression state written)
       literal.rest recorded.part_conversions
   in
   let texts = list literal_type texts in
   let template =
     make
-      (T.named (text "Template") [ part ])
-      (record (text "Template") [ T.Type part ] [ texts; list part parts ])
+      (T.named (text_path "Template") [ part ])
+      (record (text_path "Template") [ T.Type part ] [ texts; list part parts ])
   in
   Template
     {
@@ -483,7 +500,7 @@ let template state (value : expression) (literal : string_literal) ~(part : T.ty
         List.map
           (fun (written : Syntax.text) -> written.value)
           (literal.first :: List.map snd literal.rest);
-      made =
+      call =
         make from_template.result
           (Call
              {
@@ -499,18 +516,19 @@ let template state (value : expression) (literal : string_literal) ~(part : T.ty
 let pattern_type state (id : id) =
   match state.tables.pattern_types.(id) with
   | Some type_ -> type_
-  | None -> bug "a pattern of the core form has no type"
+  | None -> bug "a pattern has no recorded type"
 
-(* A value a pattern compares what it matches with: as built-in values, or
-   with the type's [Equal], which matching it agrees with. *)
-let equals state ~origin type_ (value : Core.kind) : Core.pattern_kind =
-  let value = make state ~origin type_ value in
-  if built_in_value type_ then Literal value
+(* A pattern that compares the scrutinee with a value: a [Literal] for a
+   type with built-in equality, and an [Equal_to] that calls the type's
+   [Equal.equal] for any other type. *)
+let equal_to_pattern state ~origin type_ (value : Core.kind) : Core.pattern_kind =
+  let value = synthetic_expression state ~origin type_ value in
+  if is_built_in_scalar type_ then Literal value
   else
     let equal = trait_reference (core "Equal") in
     match implements state type_ equal with
     | Some found ->
-        Equals
+        Equal_to
           {
             value;
             equal =
@@ -524,15 +542,16 @@ let equals state ~origin type_ (value : Core.kind) : Core.pattern_kind =
                   evidence = evidence (evidence_of found);
                 };
           }
-    | None -> bug "a pattern compares values of `%s`, which has no `Equal`" (T.show type_)
+    | None ->
+        bug "a pattern compares values of `%s`, which does not implement `Equal`" (T.show type_)
 
-(* A constant in a pattern, or at an end of a range. *)
+(* A constant used as a pattern, or as a bound of a range pattern. *)
 let pattern_constant state (id : id) : Core.kind =
   match state.tables.patterns.(id) with
   | Some (Constant_pattern path) -> Constant path
   | _ -> bug "a pattern names a constant that was not recorded"
 
-(* A literal in a pattern, or at an end of a range. *)
+(* A literal used as a pattern, or as a bound of a range pattern. *)
 let pattern_literal state (id : id) (written : Syntax.literal) : Core.kind =
   match (written, state.tables.literals.(id)) with
   | _, Some (Integer_value number) -> Integer number
@@ -541,21 +560,24 @@ let pattern_literal state (id : id) (written : Syntax.literal) : Core.kind =
   | Literal_string text, _ -> String text.first.value
   | Literal_integer _, _ -> bug "an integer pattern has no value"
 
-(* The fields a pattern looks at, in the order their type declares them. *)
+(* The fields a pattern matches, in declaration order. *)
 let pattern_fields state (fields : T.field list) (matched : (string * pattern) list) =
   List.filter_map
     (fun (field : T.field) ->
       Option.map
-        (fun written -> (field.field_name, built_pattern state written))
+        (fun written -> (field.field_name, build_pattern state written))
         (List.assoc_opt field.field_name matched))
     fields
 
 (* Operators *)
 
-(* A built-in integer where a specification works on [Integer]s. *)
-let as_integer state (node : Core.expression) : Core.expression =
+(* Converts a built-in integer to [Integer]. An expression of any other
+   type is returned unchanged. *)
+let to_integer state (node : Core.expression) : Core.expression =
   if node.type_ = T.Integer || not (T.is_integer_type node.type_) then node
-  else make state ~origin:node.origin T.Integer (Convert { conversion = To_integer; value = node })
+  else
+    synthetic_expression state ~origin:node.origin T.Integer
+      (Convert { conversion = To_integer; value = node })
 
 let operation_of : binary -> Intrinsic.operation = function
   | Add -> Add
@@ -569,18 +591,18 @@ let operation_of : binary -> Intrinsic.operation = function
   | Shift_left -> Shift_left
   | Shift_right -> Shift_right
   | Equal | Not_equal | Less | Less_equal | Greater | Greater_equal | And | Or | Implies ->
-      bug "an operator that is no operation"
+      bug "this operator is not an arithmetic operation"
 
-(* An operator on values of built-in types, or of types a [todo] left
-   undecided. Where a specification's arithmetic is on [Integer]s, its
-   built-in operands become [Integer]s first. *)
+(* An arithmetic operator on built-in types, or on a hole left by a
+   [todo]. If the result type is [Integer], which happens only in a
+   specification, built-in integer operands are converted to [Integer]. *)
 let operator state (value : expression) operation (operands : expression list) : Core.kind =
-  let arguments = List.map (built state) operands in
+  let arguments = List.map (build_expression state) operands in
   Operator
     {
       operation;
       arguments =
-        (if type_of state value = T.Integer then List.map (as_integer state) arguments
+        (if type_of state value = T.Integer then List.map (to_integer state) arguments
          else arguments);
     }
 
@@ -591,30 +613,34 @@ let comparison_of : binary -> Core.comparison = function
   | Less_equal -> Less_equal
   | Greater -> Greater
   | Greater_equal -> Greater_equal
-  | _ -> bug "an operator that is no comparison"
+  | _ -> bug "this operator is not a comparison"
 
-(* A comparison with no call: of two values of one built-in type, or in a
-   specification of two integers by value, which are then [Integer]s. *)
-let compare_values state operator (left : expression) (right : expression) : Core.kind =
-  let left = built state left in
-  let right = built state right in
+(* A comparison of two values of the same built-in type. In a
+   specification the operands can be integers of different types; both are
+   then converted to [Integer]. *)
+let built_in_comparison state operator (left : expression) (right : expression) : Core.kind =
+  let left = build_expression state left in
+  let right = build_expression state right in
   let left, right =
     if T.equal left.type_ right.type_ then (left, right)
-    else (as_integer state left, as_integer state right)
+    else (to_integer state left, to_integer state right)
   in
   Compare { comparison = comparison_of operator; left; right }
 
-(* A comparison of values that are not built in: [equal], or [compare]
-   and a test of the [Ordering] it gives. *)
+(* A comparison that the checker resolved to a trait method. [==] is a
+   call of [equal], and [!=] is its negation. An ordering operator is a
+   call of [compare] followed by a test of the resulting [Ordering]:
+   [left < right] is [compare(left, right) is Less]. *)
 let comparison state (value : expression) operator (left : expression) (right : expression) :
     Core.kind =
-  let recorded = recorded state value.id in
+  let recorded = checked_call state value.id in
   match recorded.callee with
-  | Trait_method { self_type; _ } when built_in_value self_type ->
-      compare_values state operator left right
+  | Trait_method { self_type; _ } when is_built_in_scalar self_type ->
+      built_in_comparison state operator left right
   | _ -> (
       let call =
-        make state ~origin:value.id recorded.result (Call (call_of state ~lends:None recorded))
+        synthetic_expression state ~origin:value.id recorded.result
+          (Call (core_call state ~lends:None recorded))
       in
       let is variant : Core.kind =
         Matches
@@ -622,14 +648,14 @@ let comparison state (value : expression) operator (left : expression) (right : 
             value = Value call;
             pattern =
               {
-                id = next_id state;
+                id = fresh_node_id state;
                 origin = value.id;
                 type_ = recorded.result;
                 kind = Variant { variant; fields = [] };
               };
           }
       in
-      let not_ kind : Core.kind = Not (make state ~origin:value.id T.bool kind) in
+      let not_ kind : Core.kind = Not (synthetic_expression state ~origin:value.id T.bool kind) in
       match operator with
       | Equal -> call.kind
       | Not_equal -> Not call
@@ -637,15 +663,16 @@ let comparison state (value : expression) operator (left : expression) (right : 
       | Less_equal -> not_ (is "Greater")
       | Greater -> is "Greater"
       | Greater_equal -> not_ (is "Less")
-      | _ -> bug "an operator that is no comparison")
+      | _ -> bug "this operator is not a comparison")
 
-(* Whether a condition can be checked when the program runs: nothing in it
-   is only for specifications. That is no quantifier, no [Integer], no value
-   that only a specification has, and no function for specifications only. *)
-let runs state (condition : Core.expression) =
-  let runs = ref true in
-  let specification_only (called : Core.callee) =
-    match called with
+(* Whether a condition can be evaluated at run time. It cannot if it
+   contains a quantifier, a value of type [Integer], a specification-only
+   expression such as [old] or [result], or a call of a specification-only
+   function. *)
+let is_executable state (condition : Core.expression) =
+  let executable = ref true in
+  let specification_only (callee : Core.callee) =
+    match callee with
     | Function { path; _ } -> (
         match function_signature state path with
         | Some (Ok signature) -> signature.specification_only
@@ -655,38 +682,39 @@ let runs state (condition : Core.expression) =
           (fun (method_ : T.trait_method) ->
             method_.method_receiver = receiver && method_.method_signature.specification_only)
           (Members.trait_methods state.database trait.trait name)
-    | Capability_method _ | Intrinsic _ | Through _ -> false
+    | Capability_method _ | Intrinsic _ | Indirect _ -> false
   in
   Core_walk.expression
     {
-      Core_walk.nothing with
+      Core_walk.ignore_all with
       expression =
         (fun (node : Core.expression) ->
-          if node.type_ = T.Integer then runs := false;
+          if node.type_ = T.Integer then executable := false;
           match node.kind with
-          | Quantified _ | Result | Old _ | Yielded | Finished | Identical _ | Measure _
+          | Quantified _ | Result | Old _ | Yielded | Finished | Identical _ | Cost_function _
           | Convert { conversion = To_integer | From_integer; _ } ->
-              runs := false
-          | Call { callee; _ } -> if specification_only callee then runs := false
+              executable := false
+          | Call { callee; _ } -> if specification_only callee then executable := false
           | _ -> ());
     }
     condition;
-  !runs
+  !executable
 
-(* A compound assignment: what its target takes, in which [Updating] is
-   what the target holds before. The operator's call was recorded under the
-   statement, with the target as its first argument. *)
-let update state (written : statement) (target : expression) (value : expression) operator :
-    Core.statement_kind =
-  let place = place_of (built state target) in
+(* A compound assignment. Its [value] computes the new value from
+   [Current_target] (the target's value before the assignment) and the
+   right-hand side. If the operator is a trait method, the checker recorded
+   the call under the statement's id. *)
+let compound_assign state (written : statement) (target : expression) (value : expression) operator
+    : Core.statement_kind =
+  let place = place_of (build_expression state target) in
   let target_type = type_of state target in
-  let updating = make state ~origin:written.id target_type Core.Updating in
-  let given = built state value in
+  let current = synthetic_expression state ~origin:written.id target_type Core.Current_target in
+  let right = build_expression state value in
   let kind : Core.kind =
     match state.tables.calls.(written.id) with
     | Some ({ callee = Trait_method { trait; name; self_type; _ }; _ } as recorded) -> (
-        match operation trait name self_type with
-        | Some operation -> Operator { operation; arguments = [ updating; given ] }
+        match built_in_operation trait name self_type with
+        | Some operation -> Operator { operation; arguments = [ current; right ] }
         | None ->
             let mode index =
               match
@@ -702,43 +730,44 @@ let update state (written : statement) (target : expression) (value : expression
                 callee = callee recorded.callee;
                 arguments =
                   [
-                    Passed { mode = mode 0; value = Value updating };
-                    Passed { mode = mode 1; value = operand (mode 1) given };
+                    Passed { mode = mode 0; value = Value current };
+                    Passed { mode = mode 1; value = operand (mode 1) right };
                   ];
                 lends = None;
                 uses = recorded.uses;
               })
-    | Some _ -> bug "a compound assignment calls what is not an operator"
-    | None -> Operator { operation = operation_of operator; arguments = [ updating; given ] }
+    | Some _ -> bug "a compound assignment's call is not a trait method call"
+    | None -> Operator { operation = operation_of operator; arguments = [ current; right ] }
   in
-  Update { target = place; value = make state ~origin:written.id target_type kind }
+  Compound_assign
+    { target = place; value = synthetic_expression state ~origin:written.id target_type kind }
 
-(* The cursor a call of a yielding method makes. *)
-let cursor (call : C.call) : T.ty =
+(* The cursor type that a call of a yielding method returns. *)
+let cursor_type (call : C.call) : T.ty =
   match call.callee with
   | Function { path; type_arguments } -> T.Cursor { method_ = path; arguments = type_arguments }
   | Trait_method { trait; name; receiver; type_arguments; _ } ->
       T.Cursor
         { method_ = Method { owner = trait.trait; name; receiver }; arguments = type_arguments }
-  | _ -> bug "a loop goes over a call of what is not a method"
+  | _ -> bug "a loop iterates over a call that cannot yield"
 
-(* What a [for] loop goes over. *)
-let drive state (written : statement) (iterable : expression) : Core.drive =
+(* What a [for] loop iterates over. *)
+let iteration state (written : statement) (iterable : expression) : Core.iteration =
   match (state.tables.loops.(written.id), iterable.kind) with
   | Some (Integer_range { inclusive; _ }), Range { start = Some start; stop = Some stop; _ } ->
-      let start = built state start in
-      Count { start; stop = built state stop; inclusive }
+      let start = build_expression state start in
+      Integer_range { start; stop = build_expression state stop; inclusive }
   | Some (Yielding { call; mode }), _ -> (
       match (State.called iterable, type_of state iterable) with
       (* The iterable is itself a call of a yielding method, which makes a
          cursor: the loop iterates over that call. *)
-      | Some written_call, T.Cursor _ -> Each (built state written_call)
+      | Some written_call, T.Cursor _ -> Yielding_call (build_expression state written_call)
       | _ ->
           (* The iterable is a value, even if a call computes it: the loop
              calls the value's [each]. *)
-          let receiver = built state iterable in
-          Each
-            (make state ~origin:iterable.id (cursor call)
+          let receiver = build_expression state iterable in
+          Yielding_call
+            (synthetic_expression state ~origin:iterable.id (cursor_type call)
                (Call
                   {
                     callee = callee call.callee;
@@ -764,17 +793,19 @@ let drive state (written : statement) (iterable : expression) : Core.drive =
                        type_arguments = [];
                        evidence = evidence (evidence_of found);
                      })
-            | None -> bug "a loop pulls `%s`, which is no cursor" (T.show cursor))
+            | None ->
+                bug "a loop iterates over `%s`, which does not implement `Cursor`" (T.show cursor))
       in
-      Pull { cursor = place_of (built state iterable); next }
-  | _ -> bug "a `for` loop has no record of what it goes over"
+      Cursor { cursor = place_of (build_expression state iterable); next }
+  | _ -> bug "the checker recorded no iteration for a `for` loop"
 
-(* What a cost clause counts, with what its [calls] names resolved. *)
+(* The resource a cost clause counts, with the names in [calls(...)]
+   resolved. *)
 let resource state (written : Syntax.resource) : Core.resource =
   let capability (path : path_type) =
     match State.target state path.path.last with
     | Some (Definition (Capability, capability)) -> capability
-    | _ -> bug "`calls` names what is not a capability"
+    | _ -> bug "`calls` names something that is not a capability"
   in
   match written with
   | Time -> Time
@@ -782,7 +813,7 @@ let resource state (written : Syntax.resource) : Core.resource =
   | Allocated_bytes -> Allocated_bytes
   | Calls (Call_parameter name) -> (
       match State.target state name with
-      | Some (Local id) -> Calls (Through (Bound id))
+      | Some (Local id) -> Calls (Function_parameter (Named id))
       | _ -> bug "`calls(%s)` names no parameter" name.text)
   | Calls (Call_capability path) -> Calls (Capability (capability path))
   | Calls (Call_method (path, method_)) -> Calls (Capability_method (capability path, method_.text))
@@ -795,22 +826,23 @@ let cost state ~origin ({ amortized; resource = written; bound } : Syntax.cost) 
     bound =
       (match bound with
       | Finite -> Finite
-      | Big_o value -> Order_of (built state value)
-      | At_most value -> At_most (built state value)
-      | Exactly value -> Exactly (built state value));
+      | Big_o value -> Order_of (build_expression state value)
+      | At_most value -> At_most (build_expression state value)
+      | Exactly value -> Exactly (build_expression state value));
   }
 
 let loop_clause state (clause : loop_clause) : Core.loop_clause =
   match clause.kind with
-  | Invariant value -> Invariant (built state value)
-  | Loop_decreases measures -> Decreases (List.map (built state) measures)
+  | Invariant value -> Invariant (build_expression state value)
+  | Loop_decreases measures -> Decreases (List.map (build_expression state) measures)
   | Loop_cost written -> Cost (cost state ~origin:clause.id written)
 
-(* [?]: the value when there is one, and otherwise the function returns
-   what there is in its place. Which variant holds the value is the first
-   the type declares. *)
+(* [inner?], desugared to a match. The first variant of the operand's type
+   is the success variant: its arm evaluates to the variant's field. The
+   second is the failure variant: its arm returns the failure variant of
+   the function's result type, with the same fields. *)
 let try_ state (value : expression) (inner : expression) ~(output : T.ty) : Core.kind =
-  let found = built state inner in
+  let scrutinee = build_expression state inner in
   let variants (type_ : T.ty) =
     match type_ with
     | T.Named { path; arguments } -> (
@@ -819,19 +851,21 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) : Core
         | _ -> bug "`?` on `%s`" (T.show type_))
     | _ -> bug "`?` on `%s`" (T.show type_)
   in
-  let success, failure = variants found.type_ in
-  let _, returned = variants output in
-  let make = make state ~origin:value.id in
-  let bind (variant : T.variant) : Core.pattern * (string * Core.expression) list =
+  let success, failure = variants scrutinee.type_ in
+  let _, returned_failure = variants output in
+  let make = synthetic_expression state ~origin:value.id in
+  (* A pattern that binds every field of [variant] to a synthetic local,
+     and an expression that reads each of those locals. *)
+  let bind_fields (variant : T.variant) : Core.pattern * (string * Core.expression) list =
     let fields =
       List.map
-        (fun (field : T.field) -> (field, made_local state))
+        (fun (field : T.field) -> (field, fresh_synthetic_local state))
         (Option.value ~default:[] variant.fields)
     in
     ( {
-        id = next_id state;
+        id = fresh_node_id state;
         origin = value.id;
-        type_ = found.type_;
+        type_ = scrutinee.type_;
         kind =
           Variant
             {
@@ -841,7 +875,7 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) : Core
                   (fun ((field : T.field), local) : (string * Core.pattern) ->
                     ( field.field_name,
                       {
-                        id = next_id state;
+                        id = fresh_node_id state;
                         origin = value.id;
                         type_ = field.field_type;
                         kind = Bind { local; name = field.field_name; mutable_ = false; mode = Own };
@@ -854,19 +888,19 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) : Core
           (field.field_name, make field.field_type (Core.Use (Local local))))
         fields )
   in
-  let success_pattern, given = bind success in
-  let failure_pattern, failed = bind failure in
+  let success_pattern, success_fields = bind_fields success in
+  let failure_pattern, failure_fields = bind_fields failure in
   let arm patterns body : Core.arm = { patterns; guard = None; body; origin = value.id } in
   Match
     {
-      scrutinees = [ Value found ];
+      scrutinees = [ Value scrutinee ];
       arms =
         [
           arm [ success_pattern ]
             {
               statements = [];
-              value = (match given with [ (_, given) ] -> Some given | _ -> None);
-              ends = true;
+              value = (match success_fields with [ (_, field) ] -> Some field | _ -> None);
+              diverges = false;
             };
           arm [ failure_pattern ]
             {
@@ -879,39 +913,39 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) : Core
                            (make output
                               (Construct
                                  {
-                                   variant = Some returned.variant_name;
+                                   variant = Some returned_failure.variant_name;
                                    fields =
                                      List.map2
-                                       (fun (field : T.field) (_, given) ->
-                                         (field.field_name, Some given))
-                                       (Option.value ~default:[] returned.fields)
-                                       failed;
+                                       (fun (field : T.field) (_, field_value) ->
+                                         (field.field_name, Some field_value))
+                                       (Option.value ~default:[] returned_failure.fields)
+                                       failure_fields;
                                  })))));
-              ends = false;
+              diverges = true;
             };
         ];
-      guards_cover = false;
+      guards_exhaustive = false;
     }
 
-(* How a collection literal of a type is built. *)
-let collection (type_ : T.ty) : Core.collection =
+(* How a collection literal of the given type is constructed. *)
+let construction_of_type (type_ : T.ty) : Core.construction =
   match type_ with
   | T.Named { path; _ } when Intrinsic.builtin_of_path path = Some Array -> Array
   | T.Named { path; arguments } when Path.equal path set_path || Path.equal path map_path ->
       let method_ name receiver : Core.callee =
         Function { path = Method { owner = path; name; receiver }; type_arguments = arguments }
       in
-      Inserted { empty = method_ "empty" Static; insert = method_ "insert" Mut }
+      By_insertion { empty = method_ "empty" Static; insert = method_ "insert" Mut }
   | T.Named { path; _ }
     when Path.equal path sequence_path || Path.equal path finite_set_path
          || Path.equal path finite_map_path ->
-      Modelled
+      Specification_only
   | _ -> bug "a collection literal of type `%s`" (T.show type_)
 
-(* A collection literal: a list is built from its elements, and any other
-   is a node that says how it is built. *)
+(* A collection literal. A list literal is desugared to calls. Any other
+   collection is a [Collection_literal] node. *)
 let collection_literal state (value : expression) (elements : Core.expression list) : Core.kind =
   match type_of state value with
   | T.Named { path; arguments = [ T.Type element ] } when Path.equal path list_path ->
-      list state ~origin:value.id element elements
-  | type_ -> Collection { elements; built = collection type_ }
+      list_literal state ~origin:value.id element elements
+  | type_ -> Collection_literal { elements; construction = construction_of_type type_ }

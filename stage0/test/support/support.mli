@@ -15,18 +15,19 @@ val standard : Engine.t Lazy.t
 val parse_errors : Query.context -> Path.module_ -> string list
 val codes : Diagnostic.t list -> string list
 
-val form_holds : Query.context -> Resolve.Names.key -> Core.t -> unit
-(** Fails the running test if a definition's core form breaks what every core form promises its
-    readers: an id of its own for each node, every type decided, no generic parameter of another
-    definition, places that are what they say, and arguments that fit their parameters' modes. *)
+val check_core_invariants : Query.context -> Resolve.Names.key -> Core.t -> unit
+(** Fails the running test if a definition's core form breaks an invariant of the core form: node
+    ids are unique, every type is fully inferred, no generic parameter of a callee appears, every
+    [Lent] place is a call of a lending method, and every argument fits its parameter's mode. *)
 
-val forms_hold : Query.context -> Path.module_ -> int
-(** {!form_holds} for every definition of a module that has a core form, and how many do. *)
+val check_module_core_invariants : Query.context -> Path.module_ -> int
+(** Runs {!check_core_invariants} on every definition of a module that has a core form. Returns the
+    number of such definitions. *)
 
 val no_diagnostics :
   check:(Query.context -> Path.module_ -> Diagnostic.t list) -> (string * string) list -> unit
-(** Fails the running test if any given module has a diagnostic, or does not parse, or has a
-    definition whose core form does not hold to what {!form_holds} checks. *)
+(** Fails the running test if a given module does not parse, has a diagnostic, or has a definition
+    whose core form fails {!check_core_invariants}. *)
 
 val one_diagnostic :
   check:(Query.context -> Path.module_ -> Diagnostic.t list) ->

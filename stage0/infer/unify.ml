@@ -6,8 +6,8 @@ type t = {
   mutable next : int;
   types : (int, T.ty) Hashtbl.t;  (** What each solved type variable or literal is. *)
   values : (int, T.value) Hashtbl.t;  (** What each solved value variable is. *)
-  mutable unknown_sets : int;  (** How many unknown sets of capabilities were made. *)
-  mutable agreements : (T.capability list * T.capability list) list;
+  mutable capability_variable_count : int;  (** The number of capability variables created. *)
+  mutable deferred_capability_equalities : (T.capability list * T.capability list) list;
       (** Sets of capabilities that two types unified hold in the same place, of which one is not
           known yet: they must turn out the same. *)
 }
@@ -17,8 +17,8 @@ let create () =
     next = 0;
     types = Hashtbl.create 16;
     values = Hashtbl.create 4;
-    unknown_sets = 0;
-    agreements = [];
+    capability_variable_count = 0;
+    deferred_capability_equalities = [];
   }
 
 let fresh unifier =
@@ -33,22 +33,26 @@ let fresh_value unifier =
   unifier.next <- unifier.next + 1;
   T.Value_variable unifier.next
 
-(* An unknown set of capabilities: what a capability parameter stands for
-   where its function or type is used, which is the least set that what is
-   passed for it uses. No statement works it out: it is known once the
-   whole definition is checked. *)
-let fresh_capabilities unifier =
-  unifier.unknown_sets <- unifier.unknown_sets + 1;
-  [ T.Capability_variable unifier.unknown_sets ]
+(* A fresh capability variable, as a one-element capability set. It
+   stands for the argument of a capability parameter at one use of a
+   generic function or type. It is solved after the whole definition is
+   checked, not per statement: its solution is the smallest set that
+   satisfies every subset constraint on it. *)
+let fresh_capability_variable unifier =
+  unifier.capability_variable_count <- unifier.capability_variable_count + 1;
+  [ T.Capability_variable unifier.capability_variable_count ]
 
-(* Whether two sets of capabilities are one. Where either holds an unknown,
-   that is noted, to be held once the unknowns are solved. *)
-let same_capabilities unifier left right =
+(* Unifies two capability sets. Sets without capability variables unify
+   only if they are equal. If either set has a capability variable, the
+   equality is deferred until the variables are solved, and unification
+   succeeds for now. *)
+let unify_capabilities unifier left right =
   let left = List.sort_uniq compare left and right = List.sort_uniq compare right in
   left = right
-  || (T.unknown_capabilities left || T.unknown_capabilities right)
+  || (T.has_capability_variable left || T.has_capability_variable right)
      && begin
-       unifier.agreements <- (left, right) :: unifier.agreements;
+       unifier.deferred_capability_equalities <-
+         (left, right) :: unifier.deferred_capability_equalities;
        true
      end
 
@@ -221,7 +225,7 @@ let rec unify unifier (left : T.ty) (right : T.ty) =
              left_mode = right_mode && unify unifier left right)
            left.inputs right.inputs
       && unify_result unifier left.output right.output
-      && same_capabilities unifier left.uses right.uses
+      && unify_capabilities unifier left.uses right.uses
   | Any left, Any right -> unify_trait unifier left right
   | Projection left, Projection right ->
       left.name = right.name
@@ -250,7 +254,7 @@ and unify_arguments unifier left right =
          | T.Type left, T.Type right -> unify unifier left right
          | T.Value left, T.Value right -> unify_value unifier left right
          | T.Type (T.Error _), _ | _, T.Type (T.Error _) -> true
-         | T.Capabilities left, T.Capabilities right -> same_capabilities unifier left right
+         | T.Capabilities left, T.Capabilities right -> unify_capabilities unifier left right
          | _ -> false)
        left right
 

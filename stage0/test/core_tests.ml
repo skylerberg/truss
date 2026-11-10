@@ -1,11 +1,11 @@
-(* The tests of the core form: what checking builds for each construct,
-   shown as text. *)
+(* Tests of the core form. Most tests check a program and compare its
+   printed core form with the expected text. *)
 
 open Harness
 open Support
 
-(* The core form of the definition named [name] in a file of its own. *)
-let form text name =
+(* The printed core form of the definition [name] of the program [text]. *)
+let printed_definition text name =
   let database = setup [ ("app::main", text) ] in
   let module_ = module_of "app::main" in
   (match
@@ -30,18 +30,21 @@ let form text name =
   | Some form -> Core_print.show form
   | None -> failwith (Printf.sprintf "`%s` has no core form" name)
 
-(* The body of a function's form: its last line. *)
-let body text name =
-  match List.rev (String.split_on_char '\n' (form text name)) with last :: _ -> last | [] -> ""
+(* The printed body of the function [name]: the last line of its printed
+   core form. *)
+let printed_body text name =
+  match List.rev (String.split_on_char '\n' (printed_definition text name)) with
+  | last :: _ -> last
+  | [] -> ""
 
-let shows what text expected =
+let expect_definition what text expected =
   test what (fun () ->
-      let found = form text "g" in
+      let found = printed_definition text "g" in
       if found <> expected then fail "found:\n%s" found)
 
-let builds what text expected =
+let expect_body what text expected =
   test what (fun () ->
-      let found = body text "g" in
+      let found = printed_body text "g" in
       if found <> expected then fail "found:\n%s" found)
 
 let meters =
@@ -59,25 +62,24 @@ let shape =
 (* Operators *)
 
 let () =
-  builds "arithmetic on built-in numbers is the operation, however it is written"
+  expect_body "an operator and a method call on built-in integers both become an Operator"
     "fn g(left: Int64, right: Int64) -> Int64 {\n  left + right.multiply(2)\n}\n"
     "{ add(left, multiply(right, 2)) }";
-  builds "a comparison of built-in values is a comparison"
+  expect_body "a comparison of built-in integers becomes a Compare"
     "fn g(left: Int64, right: Int64) -> Bool {\n  left <= right && left != 0\n}\n"
     "{ ((left <= right) && (left != 0)) }";
-  builds "an ordering of other values tests what compare gives, and != is not equal"
+  expect_body
+    "`<=` on a user type tests the result of `compare`, and `!=` negates a call of `equal`"
     (meters
    ^ "fn g(first: Meters, second: Meters) -> Bool {\n  first <= second || first != second\n}\n")
     "{ (!(Ordered.compare for Meters by app::main::impl Ordered for Meters(place first, place \
      second) is Greater) || !Equal.equal for Meters by app::main::impl Equal for Meters(place \
      first, place second)) }";
-  builds "a compound assignment updates its target once"
+  expect_body "a compound assignment evaluates its target once"
     "fn g(items: mut List[Int64]) {\n  items[0] += 2\n}\n"
-    "{ update lent Index.at for List[Int64] by standard::list::impl Index for List[Element](mut \
-     place items, 0) lends mut = add(updating, 2) }";
-  builds "a specification's arithmetic is on integers"
-    "fn g(count: Int64) -> Int64\n  ensures result + 1 > count\n{\n  count\n}\n" "{ count }";
-  shows "a specification's operands become integers"
+    "{ compound_assign lent Index.at for List[Int64] by standard::list::impl Index for \
+     List[Element](mut place items, 0) lends mut = add(current_target, 2) }";
+  expect_definition "arithmetic in a specification converts its operands to Integer"
     "fn g(count: Int64) -> Int64\n  ensures result + 1 > count\n{\n  count\n}\n"
     "fn(count: Int64)\n\
      ensures (add(to_integer(result), to_integer(1)) > to_integer(count))\n\
@@ -86,29 +88,29 @@ let () =
 (* Calls *)
 
 let () =
-  builds "a call lists an argument for each parameter, in order"
+  expect_body "a call has one argument per parameter, in parameter order"
     "fn connect(host: Int64, port: UInt16 = 443, secure: Bool = true) {}\n\n\
      fn g() {\n\
     \  connect(1, secure: false)\n\
      }\n"
     "{ app::main::connect(1, default, false) }";
-  builds "a place is lent to a parameter that borrows, and its value given to one that owns"
+  expect_body "a read-only parameter receives a place, and an `own` parameter receives a value"
     "fn keep(items: own List[Int64], limit: Int64) {}\n\n\
      fn g(items: List[Int64], limit: Int64) {\n\
     \  keep(own items, limit)\n\
      }\n"
     "{ app::main::keep(own items, place limit) }";
-  builds "a method call has its receiver first"
+  expect_body "the first argument of a method call is the receiver"
     "fn g(items: mut List[Int64]) -> USize {\n  mut items.push(4)\n  items.length()\n}\n"
     "{ standard::list::List.push(mut self)[Int64](mut place items, own 4); \
      standard::list::List.length[Int64](place items) }";
-  builds "an owned collection is viewed where its view is expected"
+  expect_body "a String passed as a StringSlice becomes a call of `slice`"
     "fn greet(text: StringSlice) {}\n\nfn g(name: String) {\n  greet(name)\n}\n"
     "{ app::main::greet(standard::text::String.slice(place name)) }";
-  builds "a capability's method, and the compiler's copy"
+  expect_body "a capability method call, and a built-in copy"
     "fn g(count: Int64) -> Int64\n  uses Clock\n{\n  let _ = Clock.now()\n  count.copy()\n}\n"
     "{ let _ = standard::capabilities::Clock.now(); copy(place count) }";
-  builds "a lambda has its parameters and what it captures"
+  expect_body "a lambda lists its parameters and its captures"
     "fn g(items: List[Int64], step: Int64) -> List[Int64] {\n\
     \  items.map(fn(item) { item + step })\n\
      }\n"
@@ -118,43 +120,43 @@ let () =
 (* Values *)
 
 let () =
-  builds "a record is built with every field, and a default where none is given"
+  expect_body "a constructor lists every field, and marks an omitted field as default"
     (shape ^ "fn g() -> Shape {\n  Shape.Square(side: 2)\n}\n")
     "{ Shape.Square(side: 2, label: default) }";
-  builds "a range written as a value is its record" "fn g() -> Range[Int64] {\n  1..5\n}\n"
+  expect_body "a range expression becomes a Range record" "fn g() -> Range[Int64] {\n  1..5\n}\n"
     "{ Range[Int64](start: 1, stop: 5, inclusive: false) }";
-  builds "an interpolated string is its pieces, each with its display"
+  expect_body "an interpolated string lists its pieces, each with its `display` method"
     "fn g(name: String, count: Int64) -> String {\n  \"${name}: ${count}\"\n}\n"
     "{ interpolated(place name through Display.display for String by standard::text::impl Display \
      for String, \": \", place count through Display.display for Int64 by \
      standard::numbers::signed::impl Display for Int64) }";
-  builds "a list literal, a slice, and an index"
+  expect_body "a list literal, a slice, and an index"
     "fn g() -> Int64 {\n  let numbers = [1, 2, 3]\n  let _ = numbers[1..]\n  numbers[0]\n}\n"
     "{ let own numbers = { let var own storage = intrinsic::storage_with_capacity(3); \
      intrinsic::storage_push(mut place storage, own 1); intrinsic::storage_push(mut place storage, \
      own 2); intrinsic::storage_push(mut place storage, own 3); \
      standard::list::List.from_storage[Int64](own storage) }; let _ = numbers[1..]; lent Index.at \
      for List[Int64] by standard::list::impl Index for List[Element](place numbers, 0) lends }";
-  builds "`with` names the fields it replaces, and its shorthand the local"
+  expect_body "a record update lists the replaced fields, and expands the shorthand"
     "type Config(port: Int64, host: String)\n\n\
      fn g(config: Config, port: Int64) -> Config {\n\
     \  config with (port)\n\
      }\n"
     "{ config with (port: port) }"
 
-(* Control *)
+(* Control flow *)
 
 let () =
-  builds "`?` is a match that gives the value or returns what there is in its place"
+  expect_body "`?` becomes a match that returns the error"
     "fn parse(text: String) -> Result[Int64, String] { todo }\n\n\
      fn g(text: String) -> Result[Int64, String] {\n\
     \  let value = parse(text)?\n\
     \  Ok(value)\n\
      }\n"
     "{ let own value = match app::main::parse(place text) { Ok(value: own value) => { value } \
-     Err(error: own error) => { return Result[Int64, String].Err(error: error) } never ends }; \
+     Err(error: own error) => { return Result[Int64, String].Err(error: error) } diverges }; \
      Result[Int64, String].Ok(value: value) }";
-  builds "a match binds the parts of a place where they are"
+  expect_body "a match on a place borrows the place"
     (shape
    ^ "fn g(shape: Shape) -> Int64 {\n\
      \  match shape {\n\
@@ -165,11 +167,12 @@ let () =
       }\n")
     "{ match place shape { Circle(radius: radius) => { radius } Square(side: side) if (side > 2) \
      => { side } _ => { 0 } } }";
-  builds "`is` matches, and a branch that returns never ends"
+  expect_body "`is` becomes a Matches, and a block that returns diverges"
     (shape
    ^ "fn g(shape: Shape) -> Int64 {\n  if shape is Circle(radius) { return radius }\n  0\n}\n")
-    "{ if (place shape is Circle(radius: radius)) { return radius } never ends; 0 }";
-  builds "a loop over a value calls its each, and one over a range counts"
+    "{ if (place shape is Circle(radius: radius)) { return radius } diverges; 0 }";
+  expect_body
+    "a `for` loop over a collection calls `each`, and one over a range is an Integer_range"
     "fn g(items: List[Int64]) -> Int64 {\n\
     \  var total = 0\n\
     \  for item in items {\n\
@@ -181,12 +184,12 @@ let () =
     \  }\n\
     \  total\n\
      }\n"
-    "{ let var own total = 0; for item in each standard::list::List.each[Int64](place items) { \
-     update total = add(updating, item) }; for step in count 0..=total {  }; while (total < 3) { \
-     update total = add(updating, 1) }; total }"
+    "{ let var own total = 0; for item in yielding_call standard::list::List.each[Int64](place \
+     items) { compound_assign total = add(current_target, item) }; for step in integer_range \
+     0..=total {  }; while (total < 3) { compound_assign total = add(current_target, 1) }; total }"
 
 let () =
-  builds "a loop over the result of a call iterates over the result's `each`"
+  expect_body "a `for` loop over the result of a call calls `each` on the result"
     "fn make() -> List[Int64] {\n\
     \  todo\n\
      }\n\n\
@@ -195,13 +198,13 @@ let () =
     \    let _ = item\n\
     \  }\n\
      }\n"
-    "{ for item in each standard::list::List.each[Int64](app::main::make()) { let _ = place item } \
-     }"
+    "{ for item in yielding_call standard::list::List.each[Int64](app::main::make()) { let _ = \
+     place item } }"
 
 (* Specifications *)
 
 let () =
-  shows "a condition says whether it runs"
+  expect_definition "a `requires` clause with a quantifier is not executable"
     "fn g(items: List[Int64], limit: Int64) -> Int64\n\
     \  requires limit > 0\n\
     \  requires forall index in 0..items.length() => items[index] < limit\n\
@@ -216,14 +219,14 @@ let () =
      requires (limit > 0)\n\
      requires forall index in 0..standard::list::List.length[Int64](place items) { (lent Index.at \
      for List[Int64] by standard::list::impl Index for List[Element](place items, place index) \
-     lends < limit) } (not run)\n\
+     lends < limit) } (not executable)\n\
      ensures (result >= 0)\n\
      { proof { assert (limit > 0) }; limit }"
 
-(* Less common forms *)
+(* Other constructs *)
 
 let () =
-  builds "a tagged string is its from_template, given the template"
+  expect_body "a tagged string becomes a call of `from_template`"
     "type Shout(text: String)\n\n\
      impl FromTemplate for Shout {\n\
     \  type Part = String\n\n\
@@ -232,14 +235,14 @@ let () =
      fn g(name: own String) -> Shout {\n\
     \  Shout\"hey ${own name}!\"\n\
      }\n"
-    "{ template(\"hey \", \"!\") made by FromTemplate.from_template for Shout by app::main::impl \
+    "{ template(\"hey \", \"!\") call FromTemplate.from_template for Shout by app::main::impl \
      FromTemplate for Shout(own Template[String](literals: { let var own storage = \
      intrinsic::storage_with_capacity(2); intrinsic::storage_push(mut place storage, own \
      Literal(text: \"hey \")); intrinsic::storage_push(mut place storage, own Literal(text: \
      \"!\")); standard::list::List.from_storage[Literal](own storage) }, parts: { let var own \
      storage = intrinsic::storage_with_capacity(1); intrinsic::storage_push(mut place storage, own \
      name); standard::list::List.from_storage[String](own storage) })) }";
-  builds "a cursor is pulled, by a loop or by hand"
+  expect_body "a cursor is advanced by a `for` loop or by a call of `next`"
     "fn count_to(limit: Int64) yields Int64 {\n\
     \  yield limit\n\
      }\n\n\
@@ -251,10 +254,10 @@ let () =
     \  for value in count_to(2) {}\n\
     \  for value in first {}\n\
      }\n"
-    "{ let var own first = app::main::count_to(3); while (next(first) is Some(value: left)) { let \
-     _ = place left }; for value in each app::main::count_to(2) {  }; for value in pull first {  } \
-     }";
-  builds "`any` holds how its trait is implemented, and a call through it is dynamic"
+    "{ let var own first = app::main::count_to(3); while (cursor_next(first) is Some(value: left)) \
+     { let _ = place left }; for value in yielding_call app::main::count_to(2) {  }; for value in \
+     cursor first {  } }";
+  expect_body "a conversion to `any` records the impl, and a method call on `any` is dynamic"
     "trait Source {\n\
     \  type Item\n\
     \  fn first(self) -> Self.Item\n\
@@ -272,7 +275,7 @@ let () =
      }\n"
     "{ let own source = any Source[Item = Int64](numbers by app::main::impl Source for Numbers); \
      Source[Item = Int64].first for any Source[Item = Int64] by any(place source) }";
-  builds "a part lent to change is a place, reached through the mut index"
+  expect_body "the result of a `lends mut` method is a place that can be assigned"
     "type Cell(state: Int64)\n\n\
      type Grid(cells: List[Cell])\n\n\
      fn Grid.cell(mut self, index: USize) lends mut Cell {\n\
@@ -282,9 +285,9 @@ let () =
     \  mut grid.cell(0).state = 4\n\
      }\n"
     "{ lent app::main::Grid.cell(mut self)(mut place grid, 0) lends mut.state = 4 }";
-  test "a method that lends to change yields the place it changes" (fun () ->
+  test "a `lends mut` method yields a mutable place" (fun () ->
       let found =
-        body
+        printed_body
           "type Cell(state: Int64)\n\n\
            type Grid(cells: List[Cell])\n\n\
            fn Grid.cell(mut self, index: USize) lends mut Cell {\n\
@@ -297,7 +300,7 @@ let () =
         <> "{ yield mut place lent Index.at for List[Cell] by standard::list::impl Index for \
             List[Element](mut place self.cells, place index) lends mut }"
       then fail "found:\n%s" found);
-  builds "patterns compare with constants, ranges, and strings"
+  expect_body "patterns of constants, ranges, and strings"
     "let limit: Int64 = 10\n\n\
      fn g(count: Int64, name: String) -> Int64 {\n\
     \  let size = match count {\n\
@@ -313,7 +316,7 @@ let () =
      }\n"
     "{ let own size = match place count { app::main::limit => { 1 } 0..5 => { 2 } 7 | 8 => { 3 } _ \
      => { 4 } }; match place name { equal to \"yes\" => { size } _ => { 0 } } }";
-  shows "a quantifier over a type, and old"
+  expect_definition "a quantifier over a type, and old"
     "fn g(count: Int64) -> Bool\n\
     \  ensures result == (forall value: Int64 => value + 0 == value)\n\
     \  ensures old(count) == count\n\
@@ -327,7 +330,7 @@ let () =
      { true }"
 
 let () =
-  builds "part of a place is changed through a slice of it"
+  expect_body "a `mut` parameter receives a slice of a place"
     "fn sort_part(part: mut Slice[Int64]) {}\n\n\
      fn g(items: mut List[Int64]) {\n\
     \  sort_part(mut items[..2])\n\
@@ -349,14 +352,15 @@ let () =
     \  Console.print_line(\"named\")\n\
      }\n\n"
   in
-  builds "a capability parameter is the set that what is passed for it uses"
+  expect_body "a capability parameter is inferred as the set of capabilities the argument uses"
     (apply ^ "fn g()\n  uses Console\n{\n  apply(fn() { Console.print_line(\"inside\") })\n}\n")
     "{ app::main::apply[{Console}](lambda() { \
      standard::capabilities::Console.print_line(standard::text::String.slice(\"inside\")) }) }";
-  builds "a function passed for a capability parameter is passed as it is"
+  expect_body "a named function passed for a capability-generic parameter is a Function_value"
     (apply ^ "fn g()\n  uses Console\n{\n  apply(shout)\n}\n")
     "{ app::main::apply[{Console}](fn app::main::shout) }";
-  test "what a call needs and what a lambda is hold the set, not the parameter" (fun () ->
+  test "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
+    (fun () ->
       let text =
         apply ^ "fn g()\n  uses Console\n{\n  apply(fn() { Console.print_line(\"inside\") })\n}\n"
       in
@@ -368,9 +372,9 @@ let () =
           if Path.show key.path = "app::main::g" then
             match Query.demand database Infer.core key with
             | Some form ->
-                Core_walk.parts
+                Core_walk.definition
                   {
-                    Core_walk.nothing with
+                    Core_walk.ignore_all with
                     expression =
                       (fun (node : Core.expression) ->
                         match node.kind with
@@ -380,12 +384,12 @@ let () =
                         | Lambda _ -> found := Types.show node.type_ :: !found
                         | _ -> ());
                   }
-                  form.parts
-            | None -> fail "no form")
+                  form.definition
+            | None -> fail "no core form")
         (Query.demand database Resolve.Names.declarations (module_of "app::main"));
       if List.sort compare !found <> [ "(fn() uses Console)"; "needs {Console}" ] then
         fail "found [%s]" (String.concat "; " !found));
-  test "a capability parameter in a result is the set of each call" (fun () ->
+  test "a capability parameter in a result type is inferred separately for each call" (fun () ->
       let text =
         "fn later[capability Granted](run: (fn() uses Granted)) -> (fn() uses Granted) {\n\
         \  run\n\
@@ -409,9 +413,9 @@ let () =
           if Path.show key.path = "app::main::g" then
             match Query.demand database Infer.core key with
             | Some form ->
-                Core_walk.parts
+                Core_walk.definition
                   {
-                    Core_walk.nothing with
+                    Core_walk.ignore_all with
                     pattern =
                       (fun (node : Core.pattern) ->
                         match node.kind with
@@ -419,16 +423,16 @@ let () =
                             found := (name ^ ": " ^ Types.show node.type_) :: !found
                         | _ -> ());
                   }
-                  form.parts
-            | None -> fail "no form")
+                  form.definition
+            | None -> fail "no core form")
         (Query.demand database Resolve.Names.declarations (module_of "app::main"));
       if List.sort compare !found <> [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
       then fail "found [%s]" (String.concat "; " !found))
 
-(* Where a node came from *)
+(* Origins *)
 
 let () =
-  test "a node's origin finds the source it came from" (fun () ->
+  test "a node's origin gives its source span" (fun () ->
       let text =
         "fn g(items: List[Int64]) -> Int64 {\n\
         \  var total = 0\n\
@@ -449,24 +453,24 @@ let () =
           with
           | Some form, Some spans, Some written ->
               let found = ref [] in
-              Core_walk.parts
+              Core_walk.definition
                 {
-                  Core_walk.nothing with
+                  Core_walk.ignore_all with
                   statement =
                     (fun (node : Core.statement) ->
                       match node.kind with
-                      | Update _ ->
+                      | Compound_assign _ ->
                           let span = spans.(node.origin) in
                           found := String.sub written span.start (span.stop - span.start) :: !found
                       | _ -> ());
                 }
-                form.parts;
+                form.definition;
               if !found <> [ "total += item" ] then fail "found [%s]" (String.concat "; " !found)
-          | _ -> fail "no form")
+          | _ -> fail "no core form")
         (Query.demand database Resolve.Names.declarations (module_of "app::main")))
 
 let () =
-  shows "a cost clause says what it counts"
+  expect_definition "a cost clause names its resource"
     "fn g(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
     \  uses Clock\n\
     \  cost calls(visit) == items.length()\n\
@@ -494,16 +498,16 @@ let () =
               Query.demand database Resolve.Names.spans key,
               Query.demand database Resolve.Names.text key )
           with
-          | ( Some { parts = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
+          | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
               Some spans,
               Some written ) ->
               let span = spans.(cost.origin) in
               let quoted = String.sub written span.start (span.stop - span.start) in
               if quoted <> "cost time O(items.length())" then fail "found `%s`" quoted
-          | _ -> fail "no form with one cost")
+          | _ -> fail "no core form with exactly one cost")
         (Query.demand database Resolve.Names.declarations (module_of "app::main")))
 
-(* Every form of the standard library holds to what a form promises. *)
+(* The standard library's core forms satisfy the invariants. *)
 
 let () =
   let database = setup [] in
@@ -511,15 +515,15 @@ let () =
   List.iter
     (fun ((module_ : Path.module_), _) ->
       test
-        (Printf.sprintf "%s's core forms hold together" (Path.show_module module_))
-        (fun () -> forms := !forms + forms_hold database module_))
+        (Printf.sprintf "%s's core forms satisfy the invariants" (Path.show_module module_))
+        (fun () -> forms := !forms + check_module_core_invariants database module_))
     Standard_library.modules;
   test "the standard library has core forms" (fun () ->
       if !forms < 500 then fail "only %d of its definitions have one" !forms)
 
 (* Derived methods *)
 
-let derived text type_name trait name receiver =
+let printed_derived text type_name trait name receiver =
   let database = setup [ ("app::main", text) ] in
   let path : Path.t =
     Method
@@ -538,9 +542,9 @@ let derived text type_name trait name receiver =
   | Some form -> Core_print.show form
   | None -> failwith "the derived method has no core form"
 
-let derives what text type_name trait name receiver expected =
+let expect_derived what text type_name trait name receiver expected =
   test what (fun () ->
-      let found = derived text type_name trait name receiver in
+      let found = printed_derived text type_name trait name receiver in
       if found <> expected then fail "found:\n%s" found)
 
 let pair =
@@ -550,32 +554,35 @@ let light =
   "type Light =\n  | Off\n  | Dim(level: Int64)\n  | On\n  derives Equal, Hash, Ordered\n\n"
 
 let () =
-  derives "a record's derived equal compares each field" pair "Pair" "Equal" "equal" Read
+  expect_derived "a record's derived equal compares each field" pair "Pair" "Equal" "equal" Read
     "fn(self: Pair[Second], other: Pair[Second])\n\
      { (Equal.equal for Int64 by standard::numbers::signed::impl Equal for Int64(place self.first, \
      place other.first) && Equal.equal for Second by a bound(place self.second, place \
      other.second)) }";
-  derives "a sum's derived equal binds each variant's fields, and is false of another variant" light
-    "Light" "Equal" "equal" Read
+  expect_derived
+    "a sum type's derived equal compares the fields of matching variants, and is false for \
+     different variants"
+    light "Light" "Equal" "equal" Read
     "fn(self: Light, other: Light)\n\
      { match place self { Off => { (place other is Off) } Dim(level: level) => { match place other \
      { Dim(level: other_level) => { Equal.equal for Int64 by standard::numbers::signed::impl Equal \
      for Int64(place level, place other_level) } _ => { false } } } On => { (place other is On) } \
      } }";
-  derives "a derived hash writes the variant's number and then each field" light "Light" "Hash"
-    "hash" Read
+  expect_derived "a derived hash writes the variant's index and then each field" light "Light"
+    "Hash" "hash" Read
     "fn(self: Light, mut hasher: Hasher)\n\
      { match place self { Off => { standard::core::Hasher.write(mut self)(mut place hasher, 0) } \
      Dim(level: level) => { standard::core::Hasher.write(mut self)(mut place hasher, 1); Hash.hash \
      for Int64 by standard::numbers::signed::impl Hash for Int64(place level, mut place hasher) } \
      On => { standard::core::Hasher.write(mut self)(mut place hasher, 2) } } }";
-  derives "a record's derived compare goes on to the next field only where one is equal" pair "Pair"
-    "Ordered" "compare" Read
+  expect_derived
+    "a record's derived compare compares the next field only if the previous fields are equal" pair
+    "Pair" "Ordered" "compare" Read
     "fn(self: Pair[Second], other: Pair[Second])\n\
      { match Ordered.compare for Int64 by standard::numbers::signed::impl Ordered for Int64(place \
      self.first, place other.first) { Equal => { Ordered.compare for Second by a bound(place \
      self.second, place other.second) } own decided => { decided } } }";
-  derives "a sum's derived compare orders by variant, then by the fields a variant binds" light
+  expect_derived "a sum type's derived compare orders by variant index, then by fields" light
     "Light" "Ordered" "compare" Read
     "fn(self: Light, other: Light)\n\
      { let own theirs = match place other { Off => { 0 } Dim => { 1 } On => { 2 } }; match place \
@@ -585,11 +592,12 @@ let () =
      Ordered for Int64(place level, place other_level) } _ => { if (1 < theirs) { Ordering.Less() \
      } else { Ordering.Greater() } } } } On => { match place other { On => { Ordering.Equal() } _ \
      => { if (2 < theirs) { Ordering.Less() } else { Ordering.Greater() } } } } } }";
-  derives "a derived default is each field's" pair "Pair" "Default" "default" Static
+  expect_derived "a derived default calls `default` for each field" pair "Pair" "Default" "default"
+    Static
     "fn()\n\
      { Pair[Second](first: Default.default for Int64 by standard::numbers::signed::impl Default \
      for Int64(), second: Default.default for Second by a bound()) }";
-  test "a type still to be written has no derived form" (fun () ->
+  test "a `todo` type has no derived core form" (fun () ->
       let database = setup [ ("app::main", "type Later = todo\n  derives Equal\n") ] in
       let path : Path.t =
         Method
@@ -605,8 +613,8 @@ let () =
             receiver = Read;
           }
       in
-      if Query.demand database Infer.derived path <> None then fail "it has a form");
-  test "every method a derived impl in the standard library gives has a core form" (fun () ->
+      if Query.demand database Infer.derived path <> None then fail "it has a core form");
+  test "every method of a derived impl in the standard library has a core form" (fun () ->
       let database = setup [] in
       let derived =
         List.filter_map
@@ -645,7 +653,7 @@ let () =
                 interface.impl_methods)
         derived)
 
-(* The form at a path *)
+(* [Infer.core_of_path] *)
 
 let () =
   let text =
@@ -671,7 +679,7 @@ let () =
       associated = [];
     }
   in
-  let at name =
+  let core_of_method name =
     let database = setup [ ("app::main", text) ] in
     let parameter : Types.parameter = { owner = both; name = "Value" } in
     let bounds (found : Types.parameter) = if found = parameter then [ described ] else [] in
@@ -684,27 +692,29 @@ let () =
       | Some (From_impl { impl; _ }) -> impl
       | _ -> failwith "no impl"
     in
-    match Query.demand database Infer.core_at (Method { owner; name; receiver = Read }) with
+    match Query.demand database Infer.core_of_path (Method { owner; name; receiver = Read }) with
     | Some (form, substitution) ->
         ( List.hd (List.rev (String.split_on_char '\n' (Core_print.show form))),
           List.map
             (fun ((parameter : Types.parameter), argument) ->
               parameter.name ^ " = " ^ Types.show_argument argument)
             substitution )
-    | None -> failwith "no form"
+    | None -> failwith "no core form"
   in
-  test "a method an impl writes has its own form" (fun () ->
-      match at "describe" with
+  test "a method defined in an impl has its own core form" (fun () ->
+      match core_of_method "describe" with
       | "{ Described.describe for Value by a bound(place self.first) }", [] -> ()
       | found, _ -> fail "found %s" found);
-  test "a method an impl leaves to its trait has the trait's form, with what Self is" (fun () ->
-      match at "twice" with
+  test
+    "a method inherited from a trait has the default method's core form and a substitution for Self"
+    (fun () ->
+      match core_of_method "twice" with
       | ( "{ add(Described.describe for Self by a bound(place self), Described.describe for Self \
            by a bound(place self)) }",
           [ "Self = Both[Value]" ] ) ->
           ()
       | found, substitution -> fail "found %s with [%s]" found (String.concat "; " substitution));
-  test "a method a derived impl gives has the form made from the type" (fun () ->
+  test "a method of a derived impl has the generated core form" (fun () ->
       let database = setup [ ("app::main", text) ] in
       let owner : Path.t =
         Derived
@@ -714,11 +724,13 @@ let () =
           }
       in
       match
-        ( Query.demand database Infer.core_at (Method { owner; name = "equal"; receiver = Read }),
-          Query.demand database Infer.core_at
+        ( Query.demand database Infer.core_of_path
+            (Method { owner; name = "equal"; receiver = Read }),
+          Query.demand database Infer.core_of_path
             (Method { owner; name = "not_equal"; receiver = Read }) )
       with
       | Some (_, []), Some (_, [ _ ]) -> ()
-      | _ -> fail "the derived method and the one left to the trait are not both found")
+      | _ ->
+          fail "expected the derived method with no substitution and the inherited method with one")
 
 let () = finish ()

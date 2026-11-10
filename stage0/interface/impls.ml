@@ -131,7 +131,7 @@ let derived_interface database ~type_ ~trait =
               (fun (method_ : T.trait_method) ->
                 ( method_.method_name,
                   method_.method_receiver,
-                  T.inside ~generics:impl_generics ~uses:[]
+                  T.method_in_impl ~impl_generics ~impl_uses:[]
                     (T.substitute_signature self method_.method_signature) ))
               trait_interface.methods;
           impl_broken = false;
@@ -167,7 +167,7 @@ let signature database (path : Path.t) =
       | Some impl, Some substitution ->
           Option.map
             (fun declared ->
-              T.inside ~generics:impl.impl_generics ~uses:impl.impl_uses
+              T.method_in_impl ~impl_generics:impl.impl_generics ~impl_uses:impl.impl_uses
                 (T.substitute_signature substitution declared))
             (Query.demand database Environment.signature
                (Method { owner = impl.implements.trait; name; receiver }))

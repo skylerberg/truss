@@ -33,20 +33,18 @@ let checked ~check database name =
   | errors -> fail "the test input does not parse: %s" (String.concat " " errors));
   check database module_
 
-(* What every core form holds to, so that a stage that reads one looks
-   nothing up again and meets nothing the checker left undone:
+(* Fails the test if a core form breaks one of the invariants every core
+   form has:
 
-   - each node has an id of its own, within the form's count;
-   - every type is decided, with no unknown type and no unknown set of
-     capabilities;
-   - a generic parameter named anywhere is the definition's own, or one of
-     what the definition is written inside: never the parameter of what is
-     called, which a call replaces;
-   - a place that is a lent part is a call that lends;
-   - a parameter that changes its argument is given a place, or the slice
-     through which part of one is changed, and one that takes its argument
-     is given a value. *)
-let form_holds database (key : Resolve.Names.key) (form : Core.t) =
+   - node ids are unique and less than [node_count];
+   - no type contains an inference variable, a hole, or an error;
+   - every generic parameter that appears is declared by the definition
+     or by its enclosing type, trait, or impl, and never by a callee;
+   - the expression of a [Lent] place is a call of a lending method;
+   - a [mut] parameter receives a place or a slice, and an [own] parameter
+     receives a value;
+   - a [Yielding_call] is a call of a yielding method. *)
+let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   let module T = Types in
   let wrong format =
     Printf.ksprintf (fun message -> fail "%s: %s" (Resolve.Names.show_key key) message) format
@@ -71,14 +69,13 @@ let form_holds database (key : Resolve.Names.key) (form : Core.t) =
   in
   let parameter what (found : T.parameter) =
     if not (List.mem found own) then
-      wrong "%s names `%s` of `%s`, a parameter of another definition" what found.name
-        (Path.show found.owner)
+      wrong "%s mentions `%s`, a generic parameter of `%s`" what found.name (Path.show found.owner)
   in
   let capabilities what =
     List.iter (function
       | T.Capability _ -> ()
       | T.Capability_parameter found -> parameter what found
-      | T.Capability_variable _ -> wrong "%s holds an unknown set of capabilities" what)
+      | T.Capability_variable _ -> wrong "%s contains a capability inference variable" what)
   in
   let rec type_ what (found : T.ty) =
     match found with
@@ -94,25 +91,25 @@ let form_holds database (key : Resolve.Names.key) (form : Core.t) =
     | Any reference -> trait what reference
     | Never | Integer -> ()
     | Variable _ | Literal _ | Hole | Error _ ->
-        wrong "%s has the type `%s`, which is not decided" what (T.show found)
+        wrong "%s has the type `%s`, which is not fully inferred" what (T.show found)
   and argument what = function
     | T.Type given -> type_ what given
     | T.Value (Value_parameter named) -> parameter what named
     | T.Value (Known _) -> ()
-    | T.Value (Value_variable _) -> wrong "%s has a value that is not decided" what
+    | T.Value (Value_variable _) -> wrong "%s contains a value inference variable" what
     | T.Capabilities set -> capabilities what set
   and trait what (reference : T.trait_reference) =
     List.iter (argument what) reference.trait_arguments;
     List.iter (fun (_, given) -> type_ what given) reference.associated
   in
   let seen = Hashtbl.create 64 in
-  let once id =
-    if id < 0 || id >= form.nodes then wrong "the id %d is out of range" id;
-    if Hashtbl.mem seen id then wrong "the id %d is used twice" id;
+  let unique id =
+    if id < 0 || id >= form.node_count then wrong "the node id %d is out of range" id;
+    if Hashtbl.mem seen id then wrong "the node id %d is used twice" id;
     Hashtbl.replace seen id ()
   in
-  let callee (called : Core.callee) =
-    match called with
+  let callee (callee : Core.callee) =
+    match callee with
     | Function { type_arguments; _ } -> List.iter (argument "a call's type argument") type_arguments
     | Trait_method { trait = reference; self_type; type_arguments; evidence; _ } -> (
         trait "a call's trait" reference;
@@ -120,59 +117,59 @@ let form_holds database (key : Resolve.Names.key) (form : Core.t) =
         List.iter (argument "a call's type argument") type_arguments;
         match evidence with
         | Impl { arguments; _ } ->
-            List.iter (fun (_, given) -> argument "what an `impl` is found with" given) arguments
+            List.iter (fun (_, given) -> argument "an `impl`'s type argument" given) arguments
         | Bound | Dynamic -> ())
     | Intrinsic { type_arguments; _ } ->
         List.iter (argument "an intrinsic's type argument") type_arguments
-    | Capability_method _ | Through _ -> ()
+    | Capability_method _ | Indirect _ -> ()
   in
   let rec place (found : Core.place) =
     match found with
     | Lent { kind = Call { lends = Some _; _ }; _ } | Local _ | Temporary _ -> ()
-    | Lent _ -> wrong "a lent part is not a call that lends"
+    | Lent _ -> wrong "a `Lent` place is not a call of a lending method"
     | Field { base; type_ = field; _ } ->
         type_ "a field" field;
         place base
   in
-  Core_walk.parts
+  Core_walk.definition
     {
       expression =
         (fun (node : Core.expression) ->
-          once node.id;
+          unique node.id;
           type_ "an expression" node.type_;
           match node.kind with
-          | Use found | Next found -> place found
+          | Use found | Cursor_next found -> place found
           | Function_value { type_arguments; _ } ->
               List.iter (argument "a function value's type argument") type_arguments
-          | Generic_value named -> parameter "a value" named
-          | Lambda { result; _ } -> type_ "what a lambda gives" result
-          | Any { trait = reference; _ } -> trait "an `any`" reference
+          | Value_parameter named -> parameter "a value" named
+          | Lambda { result; _ } -> type_ "a lambda's result" result
+          | To_any { trait = reference; _ } -> trait "a conversion to `any`" reference
           | Provide { implementations; _ } ->
               List.iter
                 (fun (implementation : Core.implementation) ->
                   type_ "an implementation" implementation.type_)
                 implementations
-          | Call { callee = called; arguments; uses; _ } ->
-              callee called;
-              capabilities "what a call needs" uses;
+          | Call call ->
+              callee call.callee;
+              capabilities "a call's `uses`" call.uses;
               List.iter
                 (function
                   | Core.Passed { mode = Mut; value = Value { kind = Slice _; _ } } -> ()
                   | Core.Passed { mode = Mut; value = Value _ } ->
-                      wrong "a value is passed where a place is changed"
+                      wrong "a `mut` parameter receives a value that is not a slice"
                   | Passed { mode = Own; value = Place _ } ->
-                      wrong "a place is passed where a value is taken"
+                      wrong "an `own` parameter receives a place"
                   | _ -> ())
-                arguments
+                call.arguments
           | _ -> ());
       statement =
         (fun (node : Core.statement) ->
-          once node.id;
+          unique node.id;
           match node.kind with
-          | Assign { target; _ } | Update { target; _ } -> place target
-          | For { drive = Each { kind = Call { callee = called; _ }; _ }; _ } -> (
+          | Assign { target; _ } | Compound_assign { target; _ } -> place target
+          | For { iteration = Yielding_call { kind = Call { callee; _ }; _ }; _ } -> (
               let output =
-                match called with
+                match callee with
                 | Function { path; _ } ->
                     Option.map
                       (fun (signature : T.signature) -> signature.output)
@@ -181,37 +178,37 @@ let form_holds database (key : Resolve.Names.key) (form : Core.t) =
                     Option.map
                       (fun (method_ : T.trait_method) -> method_.method_signature.output)
                       (Infer.Members.trait_method database reference.trait name receiver)
-                | Capability_method _ | Intrinsic _ | Through _ -> None
+                | Capability_method _ | Intrinsic _ | Indirect _ -> None
               in
               match output with
               | Some (Yields _) -> ()
-              | _ -> wrong "a `for` loop iterates over a call of a method that does not yield")
-          | For { drive = Each _; _ } -> wrong "a `for` loop iterates over what is not a call"
+              | _ -> wrong "a `Yielding_call` calls a method that does not yield")
+          | For { iteration = Yielding_call _; _ } -> wrong "a `Yielding_call` is not a call"
           | _ -> ());
       pattern =
         (fun (node : Core.pattern) ->
-          once node.id;
+          unique node.id;
           type_ "a pattern" node.type_);
       callee;
     }
-    form.parts
+    form.definition
 
-(* Every core form a module's definitions have holds to what a form
-   promises. *)
-let forms_hold database (module_ : Path.module_) =
+(* Checks the core form of every definition in a module. Returns how many
+   definitions had one. *)
+let check_module_core_invariants database (module_ : Path.module_) =
   List.fold_left
     (fun count (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.key_of declaration in
       match Query.demand database Infer.core key with
       | Some form ->
-          form_holds database key form;
+          check_core_invariants database key form;
           count + 1
       | None -> count)
     0
     (Query.demand database Resolve.Names.declarations module_)
 
-(* A program a test accepts has no diagnostics, and each form its
-   definitions have holds to what a form promises. *)
+(* Fails the test unless every file checks without a diagnostic and every
+   core form satisfies [check_core_invariants]. *)
 let no_diagnostics ~check files =
   let database = setup files in
   List.iter
@@ -224,7 +221,7 @@ let no_diagnostics ~check files =
                (List.map
                   (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code ^ " " ^ d.message)
                   found)));
-      ignore (forms_hold database (module_of name)))
+      ignore (check_module_core_invariants database (module_of name)))
     files
 
 let one_diagnostic ~check ?(others = []) ?fixed text code =
