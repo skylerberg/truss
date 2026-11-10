@@ -417,6 +417,15 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                  fields = [ ("descriptor", value 0) ];
                })
       | Handle_descriptor -> set (Use (Copy (read (argument 0) / Field "descriptor")))
+      | Handle_release ->
+          (* The handle is moved into a local that nothing drops, so its
+             descriptor stays open. *)
+          let released =
+            local b ~borrowed:true
+              (Value (Named { path = Intrinsic.builtin_path Handle; arguments = [] }))
+          in
+          emit b (Assign (at released, Use (value 0)));
+          set (Use (Copy (at released / Field "descriptor")))
       | Run_test -> call Run_test [ value 0 ]
       | Report_tests_to -> call Report_tests_to [ value 0 ]
       | Live_blocks -> call ?result:destination Live_blocks []

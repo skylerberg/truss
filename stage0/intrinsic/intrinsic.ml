@@ -153,6 +153,7 @@ type operation =
   | Crash
   | Handle_from
   | Handle_descriptor
+  | Handle_release
   | Run_test
   | Report_tests_to
   | Live_blocks
@@ -226,6 +227,7 @@ let operations =
     Crash;
     Handle_from;
     Handle_descriptor;
+    Handle_release;
     Run_test;
     Report_tests_to;
     Live_blocks;
@@ -299,6 +301,7 @@ let operation_name = function
   | Crash -> "crash"
   | Handle_from -> "handle_from"
   | Handle_descriptor -> "handle_descriptor"
+  | Handle_release -> "handle_release"
   | Run_test -> "run_test"
   | Report_tests_to -> "report_tests_to"
   | Live_blocks -> "live_blocks"

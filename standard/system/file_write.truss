@@ -1,5 +1,5 @@
 use standard::files
-use standard::streams
+use standard::intrinsic
 use standard::system::handles
 
 internal type SystemFileWrite()
@@ -16,15 +16,14 @@ impl FileWrite for SystemFileWrite {
   }
 
   fn open(self, file: Path, mode: files::WriteMode) -> Result[files::File, SystemError] {
-    match mode {
-      Replace => {
-        let descriptor = handles::open_to_write_from_empty(file)?
-        Ok(files::File(handle: streams::Handle(descriptor: own descriptor, number: 0)))
-      }
-      Append => todo
-      CreateNew => todo
-      Update => todo
+    let write_only_made_if_missing = intrinsic::libc_o_wronly() | intrinsic::libc_o_creat()
+    let flags = match mode {
+      Replace => write_only_made_if_missing | intrinsic::libc_o_trunc()
+      Append => write_only_made_if_missing | intrinsic::libc_o_append()
+      CreateNew => write_only_made_if_missing | intrinsic::libc_o_excl()
+      Update => intrinsic::libc_o_rdwr() | intrinsic::libc_o_creat()
     }
+    Ok(files::File(handle: handles::open_with(file, flags: flags)?))
   }
 
   fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
