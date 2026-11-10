@@ -395,42 +395,40 @@ fn hand_out(workers: mut List[Worker], next: USize, tests: USize) -> USize
   handed
 }
 
-fn wait_for_reports(workers: List[Worker], longest: UInt64) -> Result[intrinsic::Storage[Int32], Int32] {
+fn descriptors_to_wait_for(workers: List[Worker]) -> intrinsic::Storage[Int32]
+  ensures intrinsic::storage_length(result) == workers.length() * 2
+{
   let width = workers.length()
-  let now = microseconds()
-  var timeout: Int32 = -1
   var waited_for: intrinsic::Storage[Int32] = intrinsic::storage_empty()
-  for index in 0..width {
+  for index in 0..width
+    invariant intrinsic::storage_length(waited_for) == yielded.length() * 2
+  {
     let process = workers[index].process
     let reports = workers[index].reports
-    let running = workers[index].running
     if process >= 0 {
       growth::push(mut waited_for, value: reports)
     } else {
       growth::push(mut waited_for, value: -1)
     }
     growth::push(mut waited_for, value: intrinsic::libc_pollin())
+  }
+  waited_for
+}
+
+fn milliseconds_until_a_limit(workers: List[Worker], longest: UInt64) -> Int32 {
+  let now = microseconds()
+  var soonest: Int32 = -1
+  for index in 0..workers.length() {
+    let process = workers[index].process
+    let running = workers[index].running
     if process >= 0 && running {
       let left = workers[index].milliseconds_left(now, longest: longest)
-      if timeout < 0 || left < timeout {
-        timeout = left
+      if soonest < 0 || left < soonest {
+        soonest = left
       }
     }
   }
-  let ready = intrinsic::libc_poll(mut waited_for, count: width, timeout: timeout)
-  if ready < 0 && !calls::interrupted_by_signal() {
-    Err(intrinsic::libc_errno())
-  } else {
-    Ok(own waited_for)
-  }
-}
-
-fn found_for(waited_for: intrinsic::View[Int32], worker: USize) -> Int32 {
-  if worker < intrinsic::view_length(waited_for) / 2 {
-    (intrinsic::view_at(waited_for, index: worker * 2 + 1) >> 16) & 65535
-  } else {
-    0
-  }
+  soonest
 }
 
 fn read_what_came(
@@ -439,6 +437,7 @@ fn read_what_came(
   longest: UInt64,
   failed: mut Bool,
 )
+  requires intrinsic::view_length(waited_for) == workers.length() * 2
   ensures workers.length() == old(workers.length())
 {
   let width = workers.length()
@@ -447,7 +446,7 @@ fn read_what_came(
   {
     let process = workers[index].process
     if process >= 0 {
-      let found = found_for(waited_for, worker: index)
+      let found = (intrinsic::view_at(waited_for, index: index * 2 + 1) >> 16) & 65535
       var alive = true
       if (found & (intrinsic::libc_pollin() | intrinsic::libc_pollhup())) != 0 {
         alive = mut workers[index].read_reports(mut failed)
@@ -498,13 +497,16 @@ internal fn run(count: UInt32, time_limit: UInt32) -> Int32 {
   var waiting = true
   while waiting && (next < tests || any_running(workers)) {
     next = hand_out(mut workers, next: next, tests: tests)
-    match wait_for_reports(workers, longest: longest) {
-      Ok(waited_for) => {
-        read_what_came(mut workers, waited_for: intrinsic::storage_view(waited_for), longest: longest, failed: mut failed)
-      }
-      Err(_) => {
-        waiting = false
-      }
+    var waited_for = descriptors_to_wait_for(workers)
+    let ready = intrinsic::libc_poll(
+      mut waited_for,
+      count: workers.length(),
+      timeout: milliseconds_until_a_limit(workers, longest: longest),
+    )
+    if ready < 0 && !calls::interrupted_by_signal() {
+      waiting = false
+    } else {
+      read_what_came(mut workers, waited_for: intrinsic::storage_view(waited_for), longest: longest, failed: mut failed)
     }
   }
   leave_all(mut workers)

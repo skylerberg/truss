@@ -16,6 +16,18 @@ expression, the exact method, variant, field, `impl`, or associated type
 each name means, the mode of every argument, and which places each statement
 moves. Every proof obligation has been discharged by then.
 
+Lowering reads a body from its core form, which TYPECHECKER.md describes: a
+tree in which a call names what it calls and lists an argument for each
+parameter in the callee's order, each a place that is lent or a value that
+is taken, an operator is the operation or the call it means, and every type
+is decided. Of a body read that way lowering asks nothing again. It reads
+so each body that holds only calls, operators, comparisons, conditions,
+`if`, a `let` of a name, assignment, `return`, `assert`, literals,
+constants, and records and variants built with every field given. A body
+that holds anything else is lowered whole from the syntax tree and the
+checked form's tables, as every function's parameters and `requires`
+clauses are.
+
 Code generation:
 
 - finds the instances the program needs: each definition with its type
@@ -1495,6 +1507,14 @@ a command line can hold.
 - **A float's text without the C library.** DESIGN.md has it written in
   Truss so that it is the same on every system. The loop is Truss; the
   digits are `snprintf`'s and the check `strtod`'s.
+- **Every body from its core form.** A body with a loop, a `match` or
+  another test against a pattern, a part that a call lends, a call through
+  a function value or of a capability's method, a lambda, a collection
+  literal, an interpolated or tagged string, a conversion, or a field left
+  to its default is lowered from the syntax tree, as are parameters and
+  `requires` clauses. Once each is lowered from the core form, lowering
+  reads nothing else, and what works a call's meaning out again from the
+  tree goes.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.
