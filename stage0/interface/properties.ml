@@ -166,6 +166,11 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (ty
   | T.Named { path; arguments } -> (
       match (Intrinsic.builtin_of_path path, property) with
       | Some Storage, Plain | Some View, View | Some Handle, (Copyable | Plain) -> None
+      (* Every copy of a [Shared] refers to one value, so copying it copies
+         no value. It holds a view only if its value does. *)
+      | Some Shared, Copyable -> Some []
+      | Some Shared, Plain -> None
+      | Some Shared, View -> each (type_arguments arguments)
       | Some (Storage | Array), _ -> each (type_arguments arguments)
       | Some _, _ -> Some []
       | None, _ -> (

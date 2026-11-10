@@ -56,6 +56,7 @@ let generics_of =
       match Intrinsic.builtin_of_path path with
       | Some Array -> Some [ ("Element", Type_kind); ("count", Value_kind) ]
       | Some (Storage | View) -> Some [ ("Element", Type_kind) ]
+      | Some Shared -> Some [ ("Value", Type_kind) ]
       | Some _ -> Some []
       | None -> (
           match definition database path with

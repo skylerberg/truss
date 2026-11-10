@@ -22,6 +22,7 @@ type builtin =
   | Storage
   | View
   | Handle
+  | Shared
 
 let builtins =
   [
@@ -46,6 +47,7 @@ let builtins =
     Storage;
     View;
     Handle;
+    Shared;
   ]
 
 let builtin_name = function
@@ -70,6 +72,7 @@ let builtin_name = function
   | Storage -> "Storage"
   | View -> "View"
   | Handle -> "Handle"
+  | Shared -> "Shared"
 
 let builtin_path builtin = Path.Top { module_; name = builtin_name builtin }
 
@@ -175,6 +178,9 @@ type operation =
   | Coroutine_resume
   | Coroutine_suspend
   | Tasks_spawn
+  | Shared_new
+  | Shared_update
+  | Shared_key
   | System_is_os of Libc.os
   | System_is_architecture of Libc.architecture
   | Libc of Libc.function_
@@ -267,6 +273,9 @@ let operations =
     Coroutine_resume;
     Coroutine_suspend;
     Tasks_spawn;
+    Shared_new;
+    Shared_update;
+    Shared_key;
   ]
   @ List.map (fun os -> System_is_os os) Libc.oses
   @ List.map (fun architecture -> System_is_architecture architecture) Libc.architectures
@@ -359,6 +368,9 @@ let operation_name = function
   | Coroutine_resume -> "coroutine_resume"
   | Coroutine_suspend -> "coroutine_suspend"
   | Tasks_spawn -> "tasks_spawn"
+  | Shared_new -> "shared_new"
+  | Shared_update -> "shared_update"
+  | Shared_key -> "shared_key"
   | System_is_os Linux -> "system_is_linux"
   | System_is_os Macos -> "system_is_macos"
   | System_is_architecture X86_64 -> "system_is_x86_64"
@@ -372,7 +384,11 @@ let operation_name = function
       "libc_" ^ String.lowercase_ascii (String.sub name from (String.length name - from))
 
 let operation_path operation = Path.Top { module_; name = operation_name operation }
-let uses (_ : operation) : Path.t list = []
+
+let uses : operation -> Path.t list = function
+  | Shared_update | Shared_key ->
+      [ Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Tasks" } ]
+  | _ -> []
 
 let operation_of_path = function
   | Path.Top { module_ = m; name } when m = module_ ->

@@ -15,6 +15,7 @@
   libc_tests
   parallel_tests
   concurrent_tests
+  shared_tests
   core_form_tests
   library_tests)
  (modules
@@ -34,6 +35,7 @@
   libc_tests
   parallel_tests
   concurrent_tests
+  shared_tests
   core_form_tests
   library_tests)
  (libraries

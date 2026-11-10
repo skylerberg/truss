@@ -12,6 +12,9 @@ type kind =
   | Shape of Memory_layout.shape
   | Storage of Ground.ty
   | Handle  (** An operating system's descriptor, in a [descriptor] field, closed when dropped *)
+  | Shared of Ground.ty
+      (** A reference to a reference-counted heap block that holds a value of the type. The [value]
+          field is the address of the value in the block. *)
 
 (* How a type's debug output is written: from its structure, as Truss would
    build it, such as [Point(x: 1.0, y: 2.0)] or [Some(3)]; as quoted text,

@@ -136,7 +136,7 @@ let file env build ?(data = []) ?(tables = []) (instances : (Lir.t * linkage) li
         match key with
         | Type ty -> Some (Memory_layout.of_type env ty)
         | Block (ty, variant) -> Some (Memory_layout.block env ty variant)
-        | Code _ | Environment _ -> None
+        | Code _ | Environment _ | Evidence _ -> None
       in
       Option.iter
         (fun (layout : Memory_layout.t) ->

@@ -2078,11 +2078,14 @@ effect: code that does it declares `uses Tasks`.
   trait does not require `Storable`, so they are view types too (see
   [Views](#views)). A message is a record or a sum type of owned data, or
   an `any` of a trait that requires `Storable`.
-  A channel is a token, as a file handle is: the queue is held by whatever
-  provides `Tasks`, so a channel's methods take `self` read-only and every
-  branch can use the one channel. A task that waits for several kinds of
-  message receives one sum type from one channel, as an Erlang process
-  reads one mailbox.
+  A channel is a reference to its queue. `channel.copy()` makes another
+  reference to the same queue, and the queue is freed when the last
+  reference is dropped, so a channel can be stored in a record or held by
+  a capability implementation that outlives the function that made it. A
+  channel's methods take `self` read-only, so every branch can also use
+  one channel that is declared before the block. A task that waits for
+  several kinds of message receives one sum type from one channel, as an
+  Erlang process reads one mailbox.
 - **How many tasks run at once is bounded by a value, not by syntax.** A
   `tasks::Limiter` holds a number of permits, and `limiter.hold(work)`
   runs `work` once it has one. This is Kotlin's `Semaphore.withPermit` and
@@ -2130,13 +2133,17 @@ effect: code that does it declares `uses Tasks`.
   and stays possible, but every use of the state then switches tasks twice
   and waits behind every other use. Erlang added shared tables and atomic
   counters for that reason.
-- **A cell with a pure update may be added.** One implementation makes all
-  of its calls wait for each other, which is too coarse for a cache in
-  many parts that tasks should use at once. A cell that holds a value, and
-  whose one method runs a pure function on it while no other task can,
-  allows that, as Clojure's atoms do. A pure function cannot wait, use
-  another cell, or do I/O, so such updates cannot deadlock. It is added
-  when a program needs it.
+- **A cell with a pure update is what a channel is built on.** The cell,
+  `intrinsic::Shared`, holds a value behind a reference count and a mutex.
+  Its one operation runs a pure function on the value while it holds the
+  mutex, as an update of a Clojure atom does. A pure function cannot wait,
+  use another cell, or do I/O, so two updates cannot deadlock, and no task
+  holds the mutex across a call that can wait. Updating a cell requires
+  `Tasks`, because which task updates first differs from run to run. Only
+  the standard library can name the cell, and a channel's queue is one. A
+  public cell, for state that one implementation's mutual exclusion is too
+  coarse for, such as a cache in many parts, is added when a program needs
+  it.
 - **Data races cannot happen, and waiting forever can.** A task can wait
   for a message that no task will send. Go, Rust, and Erlang do not rule
   that out either.

@@ -79,6 +79,22 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
         "t_runtime_tasks_spawn(%s, (void (*)(void *, uint64_t))%s.f_code, (void \
          *)%s.f_environment, %s)"
         (argument 0) (argument 1) (argument 1) (argument 2)
+  | (Shared_allocate | Shared_retain | Shared_release | Shared_free | Shared_lock | Shared_unlock)
+    as shared ->
+      (* Declared in the C files that call them, so that the C of every
+         other instance stays the same. *)
+      let symbol, result, parameters =
+        match shared with
+        | Shared_allocate ->
+            ("t_runtime_shared_allocate", "void *", "t_usize size, t_usize alignment")
+        | Shared_retain -> ("t_runtime_shared_retain", "void ", "void *value")
+        | Shared_release -> ("t_runtime_shared_release", "uint8_t ", "void *value")
+        | Shared_free -> ("t_runtime_shared_free", "void ", "void *value")
+        | Shared_lock -> ("t_runtime_shared_lock", "void ", "void *value")
+        | _ -> ("t_runtime_shared_unlock", "void ", "void *value")
+      in
+      declare_prototype context symbol (Printf.sprintf "%s%s(%s);\n" result symbol parameters);
+      symbol ^ "(" ^ all ^ ")"
   | Report_tests_to -> "t_runtime_report_tests_to(" ^ all ^ ")"
   | Live_blocks -> "t_runtime_live_blocks()"
   | Environment ->

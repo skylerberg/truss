@@ -487,6 +487,21 @@ let builtin_shape builtin : T.type_interface =
     | Array ->
         [ { generic = element; kind = Type_generic [] }; { generic = count; kind = Value_generic } ]
     | Storage | View -> [ { generic = element; kind = Type_generic [] } ]
+    | Shared ->
+        let storable : T.trait_reference =
+          {
+            trait =
+              Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Storable" };
+            trait_arguments = [];
+            associated = [];
+          }
+        in
+        [
+          {
+            generic = { owner = Intrinsic.builtin_path builtin; name = "Value" };
+            kind = Type_generic [ storable ];
+          };
+        ]
     | _ -> []
   in
   { type_generics; shape = Builtin_type builtin; opaque = true; derives = [] }
