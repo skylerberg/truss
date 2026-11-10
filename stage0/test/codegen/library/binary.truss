@@ -1,0 +1,172 @@
+use standard::binary
+
+test "a decoder reads integers in either byte order and moves past them" {
+  let bytes: List[UInt8] = [1, 2, 3, 4, 5, 6, 7, 8, 255, 254]
+  var decoder = binary::Decoder.new(bytes)
+  assert decoder.position() == 0
+  assert mut decoder.uint16() == Ok(258)
+  assert mut decoder.uint16(order: binary::ByteOrder.LittleEndian) == Ok(1027)
+  assert decoder.position() == 4
+  assert mut decoder.uint32() == Ok(84281096)
+  assert mut decoder.int8() == Ok(-1)
+  assert mut decoder.uint8() == Ok(254)
+  assert decoder.is_at_end()
+}
+
+test "a decoder reads signed and 64-bit integers" {
+  let bytes: List[UInt8] = [255, 255, 255, 255, 255, 255, 255, 254, 1, 0, 0, 0, 0, 0, 0, 128, 128, 0, 254, 255, 255, 255]
+  var decoder = binary::Decoder.new(bytes)
+  assert mut decoder.int64() == Ok(-2)
+  assert mut decoder.uint64(order: binary::ByteOrder.LittleEndian) == Ok(9223372036854775809)
+  assert mut decoder.int16() == Ok(-32768)
+  assert mut decoder.int32(order: binary::ByteOrder.LittleEndian) == Ok(-2)
+  assert decoder.is_at_end()
+}
+
+test "a decoder reads floats from their bits" {
+  let bytes: List[UInt8] = [63, 192, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192]
+  var decoder = binary::Decoder.new(bytes)
+  assert mut decoder.float32() is Ok(single) && single == 1.5
+  assert mut decoder.float64(order: binary::ByteOrder.LittleEndian) is Ok(double) && double == -2.0
+  assert decoder.is_at_end()
+}
+
+test "reading past the end says how much was needed and reads nothing" {
+  let bytes: List[UInt8] = [1, 2, 3]
+  var decoder = binary::Decoder.new(bytes)
+  assert mut decoder.uint32() == Err(binary::DecodeError.UnexpectedEnd(needed: 4, available: 3))
+  assert decoder.position() == 0
+  assert mut decoder.skip(2) == Ok(Unit)
+  assert decoder.remaining().length() == 1
+  assert mut decoder.skip(2) == Err(binary::DecodeError.UnexpectedEnd(needed: 2, available: 1))
+  assert mut decoder.bytes(1) is Ok(taken) && taken.length() == 1 && taken[0] == 3
+  assert decoder.is_at_end()
+  assert mut decoder.uint8() == Err(binary::DecodeError.UnexpectedEnd(needed: 1, available: 0))
+  assert "${binary::DecodeError.UnexpectedEnd(needed: 4, available: 3)}" == "the bytes end: 4 needed, 3 left"
+}
+
+fn variable(bytes: Slice[UInt8]) -> Result[UInt64, binary::DecodeError] {
+  var decoder = binary::Decoder.new(bytes)
+  mut decoder.variable_uint64()
+}
+
+fn signed(bytes: Slice[UInt8]) -> Result[Int64, binary::DecodeError] {
+  var decoder = binary::Decoder.new(bytes)
+  mut decoder.variable_int64()
+}
+
+test "a variable-length integer is seven bits to a byte, the low bits first" {
+  let zero: List[UInt8] = [0]
+  let small: List[UInt8] = [127]
+  let two_bytes: List[UInt8] = [128, 1]
+  let three_hundred: List[UInt8] = [172, 2]
+  let largest: List[UInt8] = [255, 255, 255, 255, 255, 255, 255, 255, 255, 1]
+  assert variable(zero) == Ok(0)
+  assert variable(small) == Ok(127)
+  assert variable(two_bytes) == Ok(128)
+  assert variable(three_hundred) == Ok(300)
+  assert variable(largest) == Ok(UInt64.maximum)
+}
+
+test "a variable-length integer that does not fit or does not end is an error" {
+  let too_large: List[UInt8] = [255, 255, 255, 255, 255, 255, 255, 255, 255, 2]
+  let too_long: List[UInt8] = [128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 0]
+  let unfinished: List[UInt8] = [128]
+  assert variable(too_large) == Err(binary::DecodeError.Overlong)
+  assert variable(too_long) == Err(binary::DecodeError.Overlong)
+  assert variable(unfinished) == Err(binary::DecodeError.UnexpectedEnd(needed: 1, available: 0))
+  assert "${binary::DecodeError.Overlong}" == "the variable-length integer does not fit in 64 bits"
+}
+
+test "a signed variable-length integer folds the sign into the low bit" {
+  let zero: List[UInt8] = [0]
+  let minus_one: List[UInt8] = [1]
+  let one: List[UInt8] = [2]
+  let minus_two: List[UInt8] = [3]
+  let least: List[UInt8] = [255, 255, 255, 255, 255, 255, 255, 255, 255, 1]
+  let greatest: List[UInt8] = [254, 255, 255, 255, 255, 255, 255, 255, 255, 1]
+  assert signed(zero) == Ok(0)
+  assert signed(minus_one) == Ok(-1)
+  assert signed(one) == Ok(1)
+  assert signed(minus_two) == Ok(-2)
+  assert signed(least) == Ok(Int64.minimum)
+  assert signed(greatest) == Ok(Int64.maximum)
+}
+
+fn same_bytes(found: Slice[UInt8], expected: Slice[UInt8]) -> Bool {
+  if found.length() != expected.length() {
+    return false
+  }
+  for index in 0..found.length() {
+    if found[index] != expected[index] {
+      return false
+    }
+  }
+  true
+}
+
+test "an encoder writes integers in either byte order" {
+  var encoder = binary::Encoder.new()
+  mut encoder.uint16(258)
+  mut encoder.uint16(1027, order: binary::ByteOrder.LittleEndian)
+  mut encoder.uint32(84281096)
+  mut encoder.int8(-1)
+  mut encoder.uint8(254)
+  assert encoder.length() == 10
+  assert same_bytes(encoder.written(), expected: [1, 2, 3, 4, 5, 6, 7, 8, 255, 254])
+}
+
+test "an encoder appends to bytes it is given, and gives them all back" {
+  let start: List[UInt8] = [9]
+  var encoder = binary::Encoder.onto(own start)
+  mut encoder.bytes([7, 8])
+  mut encoder.int16(-2, order: binary::ByteOrder.LittleEndian)
+  mut encoder.bytes([])
+  let finished = own encoder.finish()
+  assert same_bytes(finished, expected: [9, 7, 8, 254, 255])
+}
+
+test "what an encoder writes, a decoder reads back" {
+  var encoder = binary::Encoder.new()
+  mut encoder.int64(Int64.minimum)
+  mut encoder.uint64(UInt64.maximum, order: binary::ByteOrder.LittleEndian)
+  mut encoder.int32(-123456789)
+  mut encoder.float32(1.5)
+  mut encoder.float64(-0.1, order: binary::ByteOrder.LittleEndian)
+  mut encoder.variable_uint64(300)
+  mut encoder.variable_int64(-300)
+  var decoder = binary::Decoder.new(encoder.written())
+  assert mut decoder.int64() == Ok(Int64.minimum)
+  assert mut decoder.uint64(order: binary::ByteOrder.LittleEndian) == Ok(UInt64.maximum)
+  assert mut decoder.int32() == Ok(-123456789)
+  assert mut decoder.float32() is Ok(single) && single == 1.5
+  assert mut decoder.float64(order: binary::ByteOrder.LittleEndian) is Ok(double) && double == -0.1
+  assert mut decoder.variable_uint64() == Ok(300)
+  assert mut decoder.variable_int64() == Ok(-300)
+  assert decoder.is_at_end()
+}
+
+fn written_variable(value: UInt64) -> List[UInt8] {
+  var encoder = binary::Encoder.new()
+  mut encoder.variable_uint64(value)
+  own encoder.finish()
+}
+
+fn written_signed(value: Int64) -> List[UInt8] {
+  var encoder = binary::Encoder.new()
+  mut encoder.variable_int64(value)
+  own encoder.finish()
+}
+
+test "a variable-length integer is written in as few bytes as hold it" {
+  assert same_bytes(written_variable(0), expected: [0])
+  assert same_bytes(written_variable(127), expected: [127])
+  assert same_bytes(written_variable(128), expected: [128, 1])
+  assert same_bytes(written_variable(300), expected: [172, 2])
+  assert same_bytes(written_variable(UInt64.maximum), expected: [255, 255, 255, 255, 255, 255, 255, 255, 255, 1])
+  assert same_bytes(written_signed(0), expected: [0])
+  assert same_bytes(written_signed(-1), expected: [1])
+  assert same_bytes(written_signed(1), expected: [2])
+  assert same_bytes(written_signed(Int64.minimum), expected: [255, 255, 255, 255, 255, 255, 255, 255, 255, 1])
+  assert same_bytes(written_signed(Int64.maximum), expected: [254, 255, 255, 255, 255, 255, 255, 255, 255, 1])
+}
