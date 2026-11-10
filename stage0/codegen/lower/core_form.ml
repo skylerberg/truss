@@ -253,7 +253,7 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
       | Some _ -> not_ported "an operation that lends"
       | None -> ())
   | Capability_method _ -> not_ported "a call of a capability's method"
-  | Value _ -> not_ported "a call through a function value"
+  | Through _ -> not_ported "a call through a function value"
 
 and return_ st (returned : Core.expression option) =
   (match st.frame.exit with
