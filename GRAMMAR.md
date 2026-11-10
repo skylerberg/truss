@@ -635,7 +635,8 @@ is decided by the next token.
 Besides a whole `file`, the grammar has an entry point for each kind of piece
 the documents' examples are made of: a `use` line, a definition, a function's
 signature without a body, and a statement. The tests check every example
-against it, piece by piece (see [PARSER.md](PARSER.md#testing)).
+against it, piece by piece, and check the parser against it (see
+[PARSER.md](PARSER.md#recursive-descent-with-no-backtracking)).
 
 ## What the grammar leaves to later stages
 

@@ -161,8 +161,7 @@ type cost = { constant_time : bool; allocation_free : bool }
 (* What each operation costs, as the prover trusts it: arithmetic and
    reading or swapping in place take a fixed number of steps and allocate
    nothing; anything that grows storage, copies a run of bytes, or reaches
-   the system may do more, and is known by no bound. See PROVER.md, "The
-   trusted base". *)
+   the system may do more, and is known by no bound. *)
 let cost (operation : Intrinsic.operation) =
   match operation with
   | Add | Subtract | Multiply | Divide | Remainder | Negate | Wrapping_add | Wrapping_subtract

@@ -2,7 +2,9 @@
 
 This document describes how Truss code is written. For what the code means
 (capabilities, costs, memory, failure, and so on), see [DESIGN.md](DESIGN.md).
-Nothing is built yet. This is the design agreed so far.
+It describes the language, not a compiler: what stage0 builds of it is in
+the documents of stage0's stages, which
+[IMPLEMENTATION.md](IMPLEMENTATION.md) lists.
 
 ## Guiding ideas
 
