@@ -147,6 +147,17 @@ let impl_interface database (path : Path.t) =
   | Derived { type_; trait } -> derived_interface database ~type_ ~trait
   | _ -> Query.demand database Environment.impl_interface path
 
+(* What a trait's [Self] and parameters stand for in an [impl] of it, in
+   terms of the [impl]'s own generic parameters. A method the trait gives a
+   body is read with this for an [impl] that leaves the method to it, and so
+   are the trait's clauses that an [impl]'s method keeps. *)
+let trait_substitution database (impl : Path.t) =
+  Option.bind (impl_interface database impl) (fun (interface : T.impl_interface) ->
+      Option.map
+        (fun trait ->
+          Properties.trait_substitution trait ~self:interface.for_type interface.implements)
+        (Query.demand database Environment.trait_interface interface.implements.trait))
+
 (* Matching *)
 
 let open_type = function T.Error _ | T.Variable _ | T.Hole -> true | _ -> false

@@ -19,6 +19,7 @@ type occurrence = {
 let declared_name (definition : Syntax.definition) : Syntax.name option =
   match definition.kind with
   | Function { signature = { name = Plain_name name | Member_name (_, name); _ }; _ }
+  | Method_declaration { name = Plain_name name | Member_name (_, name); _ }
   | Constant { name = Plain_name name | Member_name (_, name); _ }
   | Type_definition { name; _ }
   | Trait { name; _ }

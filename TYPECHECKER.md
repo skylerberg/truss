@@ -127,6 +127,11 @@ binding, each pattern's variants, and so on.
 - **An id means something only within its definition.** A result never
   names a node in another definition. It names the definition, by path, as
   every reference across definitions does.
+- **A method is a definition wherever it is written.** One written inside a
+  trait, an `impl`, or a capability has its own tree, its own ids, and its
+  own results, exactly as one written `fn Type.name` has, so editing one
+  method of an `impl` checks only that method again. Its path names what it
+  is written inside, its own name, and how it takes `self`.
 - **A generic parameter is named by what declares it and its name,** not by
   a node. Resolution records a use of `Element` as the parameter `Element` of
   `List.push`, or of the `impl` the method is in, which is the same pair a
@@ -260,14 +265,16 @@ parser keeps:
   for each part that failed, and its signature as written when every
   diagnostic lies in its body.
 - **The members of a trait, an `impl`, or a capability recover one by one.**
-  A broken member is an `Error` member, or a method whose own signature or
-  body holds the diagnostic. The members around it are as written.
+  A broken associated type or law is an `Error` member, and the members
+  around it are as written. A method is a definition of its own, so what
+  breaks in it is its own.
 - **Nodes built for a habit** lie in the same signature or body as the
   habit's diagnostic.
 
 **A part is broken only when its tree differs from its source.** The unit is
 one signature, one body, or one type's definition, whether of a definition or
-of a member. The parser lists, on each definition, the spans where it built a
+of a member that a trait or an `impl` holds itself, an associated type or a
+law. The parser lists, on each definition, the spans where it built a
 tree that is not the source as written: where it built an `Error` node or a
 node for a habit, or consumed a closer the lexer inserted. A part is broken
 when one of its definition's recovered spans lies in the part's span: a
@@ -301,8 +308,10 @@ The type checker uses that as follows:
   A broken member of a trait, an `impl`, or a capability affects only that
   member: a trait with one broken method keeps every other method's
   interface, so uses of those are checked as usual, and only uses of the
-  broken method get `Error`. Since nodes built for a habit lie in a broken
-  part, no invented code is ever checked.
+  broken method get `Error`. Nothing written inside a trait, an `impl`, or
+  a capability whose own header is broken is checked, since what it is
+  inside is not known. Since nodes built for a habit lie in a broken part,
+  no invented code is ever checked.
 - **Everything is accepted of an `Error` interface or shape, silently.** A
   call to such a function takes any arguments and has type `Error`. Building
   such a type, reading its fields, matching on it, and looking up its
@@ -334,8 +343,9 @@ same there and goes no further:
 |---|---|---|
 | Function or method | Its *signature*: generic parameters and bounds, the receiver, parameter names, types, and modes, which parameters have defaults, the result or `yields` or `lends` form, `uses`, and whether it has a `time` clause | Its body, each default, and its `requires`, `ensures`, `decreases`, and `cost` clauses |
 | Type | Its *shape*: generic parameters, fields and variants with their types, which fields have defaults, `indirect` marks, `opaque`, and `derives` | Its invariants, its potential, and its fields' defaults |
-| Trait | Its *interface*: parameters, required traits, associated types, and each member's signature | Its provided methods' bodies, and its laws |
-| `impl` | Its *interface*: generic parameters, the trait, the type, `uses`, and each method's signature | Each method's body |
+| Trait | Its *interface*: parameters, required traits, associated types, and each method's signature | Its laws |
+| `impl` | Its *interface*: generic parameters, the trait, the type, `uses`, and each method's signature | Nothing |
+| A method written inside a trait, an `impl`, or a capability | Its signature, as a function's, read with what the one it is inside says of `Self`, its associated types, and its generic parameters | Its body, if it has one, and its clauses |
 | Constant | Its type, and its value where the checker needs one | Its expression |
 | Test, theorem, law proof | Nothing | Its body |
 
@@ -594,6 +604,23 @@ the definition's interface: the types of its parameters and result, its
   copied and is not a view, until it is defined.
 
 ### Traits, `impl`s, and capabilities
+
+A trait, an `impl`, or a capability and the methods written inside it are
+checked apart, and neither waits on the other:
+
+- **Its header is its own.** Lowering it gives its generic parameters and
+  their bounds, what `Self` is, the associated types, and for an `impl` its
+  trait, its type, and its `uses`. This reads only its own tree.
+- **Each method is lowered with that header,** which is what `Self`, its
+  associated types, and the generic parameters around the method mean, and
+  gives a signature as any function's.
+- **Its interface is put together** from the header and the signature of
+  each method written inside it. A trait's method is provided when it has a
+  body, and one whose own signature is broken is listed as broken.
+- **Each method is checked against what it is inside as a definition of its
+  own:** an `impl`'s against the method its trait declares, and a trait's
+  against the traits it requires. The `impl` itself is checked for what it
+  must give and does not.
 
 - **A trait's members** are checked like functions, with `Self` standing for
   the implementing type and `Self.Name` for its associated types. A trait

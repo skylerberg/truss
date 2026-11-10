@@ -118,8 +118,8 @@ let check database (key : Resolve.Names.key) =
           marks = Hashtbl.create 8;
         }
       in
-      (* A function's, an [impl]'s, or a trait's method with a body: each
-         with the signature its parameters' modes come from. *)
+      (* A function or a method with a body, with the signature its
+         parameters' modes come from. *)
       let method_body (written : signature) lowered (body : block) =
         enter context written lowered;
         let state = new_state context in
@@ -129,13 +129,6 @@ let check database (key : Resolve.Names.key) =
         | Some (Lends _) -> lends_count context body ~report_span:(name_of written).span
         | _ -> ()
       in
-      let find_method methods (written : signature) =
-        List.find_map
-          (fun (name, receiver, signature) ->
-            if name = (name_of written).text && receiver = receiver_of written then Some signature
-            else None)
-          methods
-      in
       if Option.is_some (Infer.clean database key) then begin
         prepare context;
         (match (definition.kind, lowered.interface) with
@@ -144,34 +137,6 @@ let check database (key : Resolve.Names.key) =
         | Function { body; signature = written }, _ -> method_body written None body
         | (Test { body; _ } | Theorem { body; _ } | Law_proof { body; _ }), _ ->
             ignore (block (new_state context) (Some []) body)
-        | Impl { members; _ }, interface ->
-            let methods =
-              match interface with Impl_interface impl -> impl.impl_methods | _ -> []
-            in
-            List.iter
-              (fun (line : impl_member line) ->
-                match line.kind with
-                | Impl_method { body; signature = written } ->
-                    method_body written (find_method methods written) body
-                | _ -> ())
-              members
-        | Trait { members; _ }, interface ->
-            let methods =
-              match interface with
-              | Trait_interface trait ->
-                  List.map
-                    (fun (method_ : T.trait_method) ->
-                      (method_.method_name, method_.method_receiver, method_.method_signature))
-                    trait.methods
-              | _ -> []
-            in
-            List.iter
-              (fun (line : trait_member line) ->
-                match line.kind with
-                | Trait_method { body = Some body; signature = written } ->
-                    method_body written (find_method methods written) body
-                | _ -> ())
-              members
         | _ -> ());
         check_pulls context
       end;

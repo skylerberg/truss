@@ -68,6 +68,8 @@ let test_key path = Instance.Code { path; type_arguments = [] }
 type code = {
   definition_key : Names.key;  (** The definition whose tree and checked form hold the body *)
   anchor : Path.t;  (** The definition positions in the body are relative to *)
+  within : Path.t option;
+      (** The [impl] this is a method of, whether the [impl] writes it or leaves it to its trait *)
   text : string;  (** The definition's source text, for positions and messages *)
   checked : C.t;
   parameters : S.parameter list;
@@ -92,6 +94,7 @@ let unwritten ~definition_key ~anchor ~substitution ~result =
   {
     definition_key;
     anchor;
+    within = None;
     text = "";
     checked = Checked.create 0;
     parameters = [];
@@ -116,17 +119,6 @@ let checked_of context key =
   | None -> bug "no checked form for %s" (Names.show_key key)
 
 let text_of context key = match demand context Names.text key with Some text -> text | None -> ""
-
-let receiver_of (parameters : S.parameter list) : Path.receiver =
-  match parameters with
-  | { kind = Self_parameter None; _ } :: _ -> Read
-  | { kind = Self_parameter (Some Mut); _ } :: _ -> Mut
-  | { kind = Self_parameter (Some Own); _ } :: _ -> Own
-  | _ -> Static
-
-let name_of (signature : S.signature) =
-  match signature.name with Plain_name name -> name.text | Member_name (_, name) -> name.text
-
 let back = Monomorphic.back
 let back_argument = Monomorphic.back_argument
 let bind = Monomorphic.substitution
@@ -136,18 +128,12 @@ let impl_interface context impl =
   | Some i -> i
   | None -> bug "no interface for %s" (Path.show impl)
 
-(* What an [impl]'s [Self] and its trait's parameters stand for. *)
-let self_substitution context (impl : T.impl_interface) =
-  let trait = impl.implements.trait in
-  let trait_interface =
-    match demand context Environment.trait_interface trait with
-    | Some i -> i
-    | None -> bug "no interface for %s" (Path.show trait)
-  in
-  ({ T.owner = trait; name = "Self" }, T.Type impl.for_type)
-  :: List.map2
-       (fun (generic : T.generic) argument -> (generic.generic, argument))
-       trait_interface.trait_generics impl.implements.trait_arguments
+(* What an [impl]'s [Self] and its trait's parameters stand for, in terms of
+   the [impl]'s own generic parameters. *)
+let trait_substitution context impl =
+  match Interface.Impls.trait_substitution context.database impl with
+  | Some substitution -> substitution
+  | None -> bug "no trait for %s" (Path.show impl)
 
 let rec signature_of context (path : Path.t) =
   match demand context Environment.signature path with
@@ -181,8 +167,7 @@ let rec signature_of context (path : Path.t) =
           let impl = impl_interface context owner in
           let trait = impl.implements.trait in
           let trait_signature = signature_of context (Method { owner = trait; name; receiver }) in
-          let substitution = self_substitution context impl in
-          let substitute = T.substitute substitution in
+          let substitute = T.substitute (trait_substitution context owner) in
           let result : T.result -> T.result = function
             | Returns ty -> Returns (substitute ty)
             | Yields (m, ty) -> Yields (m, substitute ty)
@@ -222,14 +207,22 @@ let parameter_types (signature : T.signature) (parameters : S.parameter list) =
       (fun (info : T.parameter_info) parameter -> (info.mode, info.type_, parameter))
       signature.parameters written
 
+(* A function written in source at a path: its definition's key, its
+   signature, and its body. Each method of an [impl] or a trait is one. *)
+let written context path =
+  match Interface.Summary.definition context.database path with
+  | Some (key, { kind = Function { signature; body }; _ }) -> Some (key, signature, body)
+  | _ -> None
+
 let code_of context (path : Path.t) type_arguments : code =
-  let function_code ~definition_key ~anchor ~checked ~(signature : S.signature) ~body ~interface
-      ~substitution =
+  let function_code ~anchor ~within (key, (signature : S.signature), body) ~interface ~substitution
+      =
     {
-      definition_key;
+      definition_key = key;
       anchor;
-      text = text_of context definition_key;
-      checked;
+      within;
+      text = text_of context key;
+      checked = checked_of context key;
       parameters = signature.parameters;
       body;
       result = interface.T.output;
@@ -250,120 +243,54 @@ let code_of context (path : Path.t) type_arguments : code =
       match demand context Names.definition key with
       | Some { kind = Test { body; _ }; _ } ->
           {
-            definition_key = key;
-            anchor = path;
+            (unwritten ~definition_key:key ~anchor:path ~substitution:[] ~result:(Returns T.unit)) with
             text = text_of context key;
             checked = checked_of context key;
-            parameters = [];
             body;
-            result = Returns T.unit;
-            parameter_types = [];
-            substitution = [];
-            uses = [];
             real =
               (match demand context Environment.interface path with
               | Some (Test_interface uses) ->
                   List.filter_map (function T.Capability path -> Some path | _ -> None) uses
               | _ -> []);
-            has_defaults = false;
-            requires = [];
           }
       | _ -> bug "%s is not a test" (Path.show path))
-  | Method { owner = (Impl _ | Derived _) as impl; name; receiver } -> (
+  | Top _ | Method _ -> (
       let interface = signature_of context path in
       let substitution = bind interface.generics type_arguments in
-      let written =
-        match impl with
-        | Derived _ -> None
-        | _ -> (
-            let impl_key = key_of context impl in
-            match demand context Names.definition impl_key with
-            | Some { kind = Impl { members; _ }; _ } ->
-                List.find_map
-                  (fun (member : S.impl_member S.line) ->
-                    match member.kind with
-                    | Impl_method { signature; body }
-                      when name_of signature = name && receiver_of signature.parameters = receiver
-                      ->
-                        Some (signature, body)
-                    | _ -> None)
-                  members
-            | _ -> bug "%s is not an impl" (Path.show impl))
+      let within =
+        match path with
+        | Method { owner = (Impl _ | Derived _) as impl; _ } -> Some impl
+        | _ -> None
       in
-      match written with
-      | Some (signature, body) ->
-          let impl_key = key_of context impl in
-          function_code ~definition_key:impl_key ~anchor:impl ~checked:(checked_of context impl_key)
-            ~signature ~body ~interface ~substitution
-      | None -> (
-          (* A method the trait provides, compiled for this [impl]: the
-             trait's body, with [Self] and the trait's parameters standing
-             for what the [impl] gives them. *)
-          let impl_interface =
-            match Interface.Impls.impl_interface context.database impl with
-            | Some i -> i
-            | None -> bug "no interface for %s" (Path.show impl)
-          in
-          let trait = impl_interface.implements.trait in
-          let trait_key = key_of context trait in
-          let trait_interface =
-            match demand context Environment.trait_interface trait with
-            | Some i -> i
-            | None -> bug "no interface for %s" (Path.show trait)
-          in
-          let impl_substitution =
-            List.filteri (fun i _ -> i < List.length impl_interface.impl_generics) substitution
-          in
-          let self_substitution =
-            ( { T.owner = trait; name = "Self" },
-              T.Type (T.substitute impl_substitution impl_interface.for_type) )
-            :: List.map2
-                 (fun (generic : T.generic) argument ->
-                   (generic.generic, T.substitute_argument impl_substitution argument))
-                 trait_interface.trait_generics impl_interface.implements.trait_arguments
-          in
-          match demand context Names.definition trait_key with
-          | Some { kind = Trait { members; _ }; _ } -> (
-              let provided =
-                List.find_map
-                  (fun (member : S.trait_member S.line) ->
-                    match member.kind with
-                    | Trait_method { signature; body = Some body }
-                      when name_of signature = name && receiver_of signature.parameters = receiver
-                      ->
-                        Some (signature, body)
-                    | _ -> None)
-                  members
+      match (written context path, path) with
+      | Some code, _ -> function_code ~anchor:path ~within code ~interface ~substitution
+      | None, Method { owner = (Impl _ | Derived _) as impl; name; receiver } -> (
+          (* A method the [impl] leaves to its trait: the trait's own code,
+             read with what the trait's [Self] and parameters stand for in
+             the [impl], at this instance's arguments for the [impl]'s
+             parameters, which come first. *)
+          let trait = (impl_interface context impl).implements.trait in
+          let provided = Path.Method { owner = trait; name; receiver } in
+          match written context provided with
+          | Some code ->
+              let trait_signature = signature_of context provided in
+              let count = List.length (impl_interface context impl).impl_generics in
+              let of_impl = List.filteri (fun i _ -> i < count) substitution in
+              let of_trait =
+                List.map
+                  (fun (parameter, argument) -> (parameter, T.substitute_argument of_impl argument))
+                  (trait_substitution context impl)
               in
-              match provided with
-              | Some (signature, body) ->
-                  let trait_method = Path.Method { owner = trait; name; receiver } in
-                  let trait_signature = signature_of context trait_method in
-                  let own =
-                    List.filteri
-                      (fun i _ -> i >= List.length impl_interface.impl_generics)
-                      type_arguments
-                  in
-                  let own_generics =
-                    List.filter
-                      (fun (generic : T.generic) -> not (Path.equal generic.generic.owner trait))
-                      trait_signature.generics
-                  in
-                  function_code ~definition_key:trait_key ~anchor:trait
-                    ~checked:(checked_of context trait_key) ~signature ~body
-                    ~interface:trait_signature
-                    ~substitution:(self_substitution @ bind own_generics own @ substitution)
-              | None -> bug "%s neither writes nor is given %s" (Path.show impl) name)
-          | _ -> bug "%s is not a trait" (Path.show trait)))
-  | Top _ | Method _ -> (
-      let key = key_of context path in
-      let interface = signature_of context path in
-      match demand context Names.definition key with
-      | Some { kind = Function { signature; body }; _ } ->
-          function_code ~definition_key:key ~anchor:path ~checked:(checked_of context key)
-            ~signature ~body ~interface
-            ~substitution:(bind interface.generics type_arguments)
-      | _ -> bug "%s is not a function" (Path.show path))
+              let own_generics =
+                List.filter
+                  (fun (generic : T.generic) -> not (Path.equal generic.generic.owner trait))
+                  trait_signature.generics
+              in
+              let own = List.filteri (fun i _ -> i >= count) type_arguments in
+              function_code ~anchor:provided ~within code ~interface:trait_signature
+                ~substitution:(of_trait @ bind own_generics own @ substitution)
+          | None -> bug "%s neither writes nor is given %s" (Path.show impl) name)
+      | None, _ -> bug "%s is not a function" (Path.show path))
   | Member_constant _ | Impl _ | Derived _ | Law_proof _ -> bug "%s is not code" (Path.show path)
 
 (* The C signature of a function from its interface, after substitution:
