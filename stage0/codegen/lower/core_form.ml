@@ -538,6 +538,16 @@ and argument_place st (argument : Core.argument) =
   | Passed { mode; value } -> (mode, ground st (operand_type value), operand_place st value)
   | Default -> bug "an omitted argument in a call that has no defaults"
 
+(* A loop over the cursor of a yielding method's call: the pulled method's
+   [next] is called until it gives [None]. *)
+and pull_cursor st (yielding : Ground.yielding) cursor ~pattern ~body =
+  pull_loop st
+    ~option:(cursor_result st.context yielding)
+    ~call_next:(fun destination -> call_next st yielding cursor destination)
+    ~body:(fun value ->
+      match_patterns st [ (pattern, value) ] ~failed:(block st.b);
+      block_into st body None)
+
 (* The type that the current frame's method yields. *)
 and yielded_type_of_frame st =
   match st.frame.code.result with
@@ -873,9 +883,7 @@ and statement st (node : Core.statement) =
                   let cursor = boxed_cursor st yielding in
                   call_into st iterated call cursor;
                   own_in_scope st cursor;
-                  pull_loop st yielding cursor ~body:(fun value ->
-                      match_patterns st [ (pattern, value) ] ~failed:(block st.b);
-                      block_into st body None))
+                  pull_cursor st yielding cursor ~pattern ~body)
           | Some (path, type_arguments) ->
               (match (signature_of st.context path).output with
               | Yields _ -> ()
@@ -909,15 +917,17 @@ and statement st (node : Core.statement) =
       | For { iteration = Yielding_call _; _ } -> bug "a loop over what is not a call"
       | For { pattern; iteration = Cursor { cursor; next = None }; body; _ } -> (
           match ground st (Core_walk.place_type cursor) with
-          | Cursor yielding ->
-              pull_loop st yielding (place st cursor) ~body:(fun value ->
-                  match_patterns st [ (pattern, value) ] ~failed:(block st.b);
-                  block_into st body None)
+          | Cursor yielding -> pull_cursor st yielding (place st cursor) ~pattern ~body
           | cursor_ty -> bug "a loop over %s, which is not a cursor" (Ground.to_string cursor_ty))
-      | For { iteration = Cursor { next = Some _; _ }; _ } ->
-          Compiler_bug.unsupported
-            ~at:(at_site (site_of st node.origin))
-            "a loop over a value of a type that implements `Cursor`"
+      | For { pattern; iteration = Cursor { cursor; next = Some next }; body; _ } ->
+          (* A value of a type that implements [Cursor]: its own [next] is
+             called until it gives [None]. *)
+          let cursor = place st cursor in
+          pull_loop st ~option:(result_type st next)
+            ~call_next:(fun destination -> call_with_places st next [ cursor ] ~destination)
+            ~body:(fun value ->
+              match_patterns st [ (pattern, value) ] ~failed:(block st.b);
+              block_into st body None)
       | Yield { part; _ } -> (
           match st.frame.on_yield with
           | Some on_yield ->
