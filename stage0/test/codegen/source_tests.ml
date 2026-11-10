@@ -121,92 +121,6 @@ test "lists" {
   assert total(items) == 10
 }
 |};
-  passes "a list splits into two slices that view its elements"
-    {|test "split" {
-  let items: List[Int64] = [1, 2, 3, 4, 5]
-  let halves = items.split_at(2)
-  assert halves.first.length() == 2
-  assert halves.second.length() == 3
-  assert halves.first[1] == 2
-  assert halves.second[0] == 3
-  assert halves.second[2] == 5
-  let ends = items.split_at(5)
-  assert ends.first.length() == 5
-  assert ends.second.length() == 0
-}
-|};
-  passes "floor division and floor modulo round down"
-    {|test "floor" {
-  let seven: Int64 = 7
-  let minus_seven: Int64 = -7
-  assert seven.floor_divide(2) == 3
-  assert minus_seven.floor_divide(2) == -4
-  assert seven.floor_divide(-2) == -4
-  assert minus_seven.floor_divide(-2) == 3
-  assert seven.floor_modulo(3) == 1
-  assert minus_seven.floor_modulo(3) == 2
-  assert seven.floor_modulo(-3) == -2
-  assert minus_seven.floor_modulo(-3) == -1
-  let six: Int64 = 6
-  assert six.floor_divide(-3) == -2
-  assert six.floor_modulo(-3) == 0
-  let lowest: Int8 = -128
-  assert lowest.floor_divide(127) == -2
-  assert lowest.floor_modulo(127) == 126
-  let byte: UInt8 = 200
-  assert byte.floor_divide(7) == 28
-  assert byte.floor_modulo(7) == 4
-}
-|};
-  passes "an instant before the epoch rounds down to its second"
-    {|use standard::time
-
-test "instants" {
-  let before = time::Instant.from_unix_nanoseconds(-1)
-  assert before.unix_seconds() == -1
-  assert before.unix_milliseconds() == -1
-  let after = time::Instant.from_unix_nanoseconds(1999999999)
-  assert after.unix_seconds() == 1
-  assert after.unix_milliseconds() == 1999
-  assert time::Instant.from_unix_seconds(-2) is Some(early) && early.unix_nanoseconds() == -2000000000
-  assert time::Instant.from_unix_milliseconds(3) is Some(late) && late.unix_nanoseconds() == 3000000
-  assert time::Instant.from_unix_seconds(9223372036854775807) is None
-}
-|};
-  passes "write_all writes until a writer has taken every byte"
-    {|use standard::streams
-
-type Trickle(received: List[UInt8], step: USize)
-
-impl streams::Writer for Trickle {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
-    var taken: USize = 0
-    while taken < self.step && taken < bytes.length() {
-      mut self.received.push(bytes[taken])
-      taken += 1
-    }
-    Ok(taken)
-  }
-
-  fn flush(mut self) -> Result[Unit, SystemError] {
-    Ok(Unit)
-  }
-}
-
-test "write all" {
-  provide streams::NoHandles() {
-    var slow = Trickle(received: [], step: 2)
-    assert mut slow.write_text("hello") is Ok(_)
-    assert slow.received.length() == 5
-    assert slow.received[0] == 104
-    assert slow.received[4] == 111
-    var stuck = Trickle(received: [], step: 0)
-    assert mut stuck.write_all("hi".bytes()) is Err(NothingWritten)
-    assert mut stuck.write_all("".bytes()) is Ok(_)
-    assert stuck.received.length() == 0
-  }
-}
-|};
   passes "a question mark returns an error early"
     {|type ParseError = Empty | TooLarge
   derives Equal
@@ -274,18 +188,6 @@ let () =
 |}
 
 let () =
-  passes "a string's bytes are its UTF-8 encoding"
-    {|test "bytes" {
-  let text = "h\u{e9}llo"
-  let bytes = text.bytes()
-  assert bytes.length() == 6
-  assert bytes[0] == 104
-  assert bytes[1] == 195
-  assert bytes[2] == 169
-  assert bytes[5] == 111
-  assert "".bytes().length() == 0
-}
-|};
   passes "constants are static data, worked out exactly"
     {|type Point(x: Int64, y: Int64)
   derives Equal

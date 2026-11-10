@@ -13,7 +13,8 @@
   failure_tests
   owning_tests
   libc_tests
-  core_form_tests)
+  core_form_tests
+  library_tests)
  (modules
   codegen_support
   layout_tests
@@ -29,7 +30,8 @@
   failure_tests
   owning_tests
   libc_tests
-  core_form_tests)
+  core_form_tests
+  library_tests)
  (libraries
   harness
   compiler_bug
@@ -76,4 +78,5 @@
   solver
   documents)
  (deps
-  (glob_files %{workspace_root}/*.md)))
+  (glob_files %{workspace_root}/*.md)
+  (glob_files library/*.truss)))

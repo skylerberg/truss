@@ -1,0 +1,16 @@
+use standard::time
+
+test "an instant before the epoch rounds down to its second" {
+  let before = time::Instant.from_unix_nanoseconds(-1)
+  assert before.unix_seconds() == -1
+  assert before.unix_milliseconds() == -1
+  let after = time::Instant.from_unix_nanoseconds(1999999999)
+  assert after.unix_seconds() == 1
+  assert after.unix_milliseconds() == 1999
+}
+
+test "an instant is made from seconds and milliseconds, unless they do not fit" {
+  assert time::Instant.from_unix_seconds(-2) is Some(early) && early.unix_nanoseconds() == -2000000000
+  assert time::Instant.from_unix_milliseconds(3) is Some(late) && late.unix_nanoseconds() == 3000000
+  assert time::Instant.from_unix_seconds(9223372036854775807) is None
+}
