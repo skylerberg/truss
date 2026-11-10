@@ -267,15 +267,12 @@ and try_ st (inner : S.expression) destination =
    allocates. *)
 and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block) destination =
   if st.pulling then unsupported st e.span "a lambda in a yielding method that is pulled";
-  let f =
+  let function_type =
     match type_of st e.id with Function f -> f | ty -> bug "a lambda of %s" (Ground.to_string ty)
   in
-  let captures = Option.value st.frame.code.checked.captures.(e.id) ~default:[] in
-  let index = List.length !(st.nested) in
-  st.nested := !(st.nested) @ [ None ];
-  let captured =
-    List.mapi
-      (fun i local ->
+  let captures =
+    List.map
+      (fun local ->
         let place =
           match Hashtbl.find_opt st.frame.bindings local with
           | Some p -> p
@@ -286,76 +283,20 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
           | Some ty -> ground st ty
           | None -> bug "a capture with no type"
         in
-        (Printf.sprintf "capture%d" i, local, place, ty))
-      captures
+        (local, place, ty))
+      (Option.value st.frame.code.checked.captures.(e.id) ~default:[])
   in
-  let environment =
-    List.map
-      (fun (name, _, _, ty) -> (name, Lir.Pointer { target = Value ty; writable = false }))
-      captured
-  in
-  (* The caller fills in the environment and makes the value. *)
-  let environment_local = at (local st.b (Environment index)) in
-  List.iter
-    (fun (name, _, place, _) ->
-      emit st.b (Assign (environment_local / Field name, Use (Address { place; writable = false }))))
-    captured;
-  emit st.b
-    (Assign
-       ( destination,
-         Function_value
-           {
-             code = Nested index;
-             environment = Some (Address { place = environment_local; writable = false });
-           } ));
-  (* The lambda itself: it is given its environment, then what its type
-     takes, then the evidence for what its type uses, passed by whoever
-     calls it, which is the only evidence its code can reach. *)
-  let inner =
-    enter st.context ~pulling:st.pulling ~nested:st.nested
-      {
-        st.frame with
-        bindings = Hashtbl.copy st.frame.bindings;
-        synthetic = Hashtbl.copy st.frame.synthetic;
-        on_yield = None;
-        exit = None;
-        (* What the lambda returns, which a [?] in it returns early. *)
-        code =
-          (match raw_type_of st e.id with
-          | Some (T.Function f) -> { st.frame.code with result = f.output }
-          | _ -> st.frame.code);
-      }
-  in
-  let b = inner.b in
-  let environment_parameter = local b ~name:"environment" (Raw (Nullable_pointer Opaque)) in
-  let result_ty = match f.result with Returns ty -> ty | _ -> bug "a lambda that yields" in
-  result_slot inner (Convention.result st.context.env result_ty);
-  let taken =
-    List.map
-      (fun ((mode : Ground.mode), ty) -> (parameter inner ~owned:(mode = Own) mode ty, mode, ty))
-      f.parameters
-  in
-  let evidence = evidence_parameters inner f.uses in
-  let environment_pointer = local b (Pointer { target = Environment index; writable = false }) in
-  start b (block b);
-  emit b (Assign (at environment_pointer, Use (Copy (at environment_parameter))));
-  List.iter
-    (fun (name, local, _, _) ->
-      Hashtbl.replace inner.frame.bindings local
-        { Lir.root = Local environment_pointer; projections = [ Deref; Field name; Deref ] })
-    captured;
-  List.iter2
-    (fun (pattern : S.pattern) ((_, place), (mode : Ground.mode), ty) ->
-      bind_pattern inner pattern place ty ~owned:(mode = Own))
-    parameters taken;
-  block_into inner body (result_place inner);
-  let function_ =
-    finish_function inner ~first:[ environment_parameter ]
-      ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken @ evidence)
-      ()
-  in
-  st.nested :=
-    List.mapi (fun i f -> if i = index then Some { function_ with environment } else f) !(st.nested)
+  nested_function st ~function_type
+    ~output:(match raw_type_of st e.id with Some (T.Function f) -> Some f.output | _ -> None)
+    ~captures
+    ~bind_capture:(fun inner local place -> Hashtbl.replace inner.frame.bindings local place)
+    ~body:(fun inner taken ->
+      List.iter2
+        (fun (pattern : S.pattern) (place, (mode : Ground.mode), ty) ->
+          bind_pattern inner pattern place ty ~owned:(mode = Own))
+        parameters taken;
+      block_into inner body (result_place inner))
+    destination
 
 (* [base with (field: value)]: the base as an owned value, then each field
    written in place, which costs one write per field. *)

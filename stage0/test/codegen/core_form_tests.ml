@@ -782,4 +782,123 @@ test "function values" {
 }
 |}
 
+let () =
+  lowers "a lambda that captures a local and one that captures self, called through a value"
+    ~tests:true
+    [ ("apply", []); ("add_all", []); ("longest_over", []) ]
+    {|type Scale(factor: Int64)
+
+fn Scale.scaled(self, items: List[Int64]) -> List[Int64] {
+  items.map(fn(item) { item * self.factor })
+}
+
+fn apply(transform: fn(Int64) -> Int64, value: Int64) -> Int64 {
+  transform(value)
+}
+
+fn add_all(items: List[Int64], amount: Int64) -> List[Int64] {
+  items.map(fn(item) { item + amount })
+}
+
+fn longest_over(names: List[String], least: USize) -> USize {
+  var most = least
+  let lengths = names.map(fn(name) { name.length() })
+  for length in lengths {
+    if length > most {
+      most = length
+    }
+  }
+  most
+}
+
+test "lambdas" {
+  assert add_all([1, 2, 3], amount: 10) == [11, 12, 13]
+  assert Scale(factor: 3).scaled([1, 2]) == [3, 6]
+  let offset = 5
+  assert apply(fn(value) { value - offset }, value: 12) == 7
+  assert longest_over(["a", "abc"], least: 2) == 3
+}
+|};
+  lowers "a method called through an any value" ~tests:true
+    [ ("total", []); ("names", []) ]
+    {|trait Shape {
+  fn area(self) -> Int64
+  fn name(self) -> String
+}
+
+type Square(side: Int64)
+
+type Rectangle(width: Int64, height: Int64)
+
+impl Shape for Square {
+  fn area(self) -> Int64 {
+    self.side * self.side
+  }
+
+  fn name(self) -> String {
+    "square ${self.side}"
+  }
+}
+
+impl Shape for Rectangle {
+  fn area(self) -> Int64 {
+    self.width * self.height
+  }
+
+  fn name(self) -> String {
+    "rectangle ${self.width}x${self.height}"
+  }
+}
+
+fn total(shapes: List[any Shape]) -> Int64 {
+  var sum = 0
+  for shape in shapes {
+    sum += shape.area()
+  }
+  sum
+}
+
+fn names(shapes: List[any Shape]) -> List[String] {
+  var found: List[String] = []
+  for shape in shapes {
+    mut found.push(shape.name())
+  }
+  found
+}
+
+test "shapes" {
+  let shapes: List[any Shape] = [any Square(side: 3), any Rectangle(width: 2, height: 5)]
+  assert total(shapes) == 19
+  assert names(shapes) == ["square 3", "rectangle 2x5"]
+}
+|};
+  lowers "next on a cursor and a loop over the rest of it" ~tests:true ~pulled:[ "numbers" ]
+    [ ("first_and_rest", []) ]
+    {|fn numbers(limit: Int64) yields Int64 {
+  var next = 1
+  while next <= limit {
+    yield next
+    next += 1
+  }
+}
+
+fn first_and_rest(limit: Int64) -> Int64 {
+  var cursor = numbers(limit)
+  let first = match mut cursor.next() {
+    Some(number) => number
+    None => 0
+  }
+  var rest = 0
+  for number in mut cursor {
+    rest += number
+  }
+  first * 100 + rest
+}
+
+test "cursors" {
+  assert first_and_rest(4) == 109
+  assert first_and_rest(0) == 0
+}
+|}
+
 let () = Harness.finish ()

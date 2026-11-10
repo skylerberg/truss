@@ -36,14 +36,11 @@ let bind_local st (local : Core.local) place =
   match local with
   | Named id -> Hashtbl.replace st.frame.bindings id place
   | Synthetic number -> Hashtbl.replace st.frame.synthetic number place
-  | Self -> bug "a pattern that binds self"
+  | Self -> st.frame.self_place <- Some place
 
-(* Descriptions of the node kinds that are not handled yet. *)
-let expression_kind : Core.kind -> string = function
-  | Lambda _ -> "a lambda"
-  | Slice _ -> "a slice"
-  | Cursor_next _ -> "a cursor's next value"
-  | _ -> "a specification-only expression"
+let operand_type : Core.operand -> T.ty = function
+  | Place place -> Core_walk.place_type place
+  | Value value -> value.type_
 
 let binary : Core.comparison -> Lir.binary = function
   | Equal -> Equal
@@ -56,7 +53,7 @@ let binary : Core.comparison -> Lir.binary = function
 let evidence : Core.evidence -> C.evidence = function
   | Impl { impl; arguments } -> Impl { impl; arguments }
   | Bound -> Bound
-  | Dynamic -> unhandled "a call through an any value"
+  | Dynamic -> Dynamic
 
 (* Patterns *)
 
@@ -372,7 +369,40 @@ and into st (value : Core.expression) (destination : Lir.place) =
   | Echo inner ->
       into st inner destination;
       Values.echo st destination ty (spans st).(value.origin)
-  | kind -> unhandled (expression_kind kind)
+  | Cursor_next cursor -> (
+      match ground st (Core_walk.place_type cursor) with
+      | Cursor yielding -> call_next st yielding (place st cursor) destination
+      | cursor_ty -> bug "next on %s, which is not a cursor" (Ground.to_string cursor_ty))
+  | Lambda { parameters; captures; body; _ } ->
+      if st.pulling then
+        Compiler_bug.unsupported
+          ~at:(at_site (site_of st value.origin))
+          "a lambda in a yielding method that is pulled";
+      let function_type =
+        match ty with Function f -> f | _ -> bug "a lambda of %s" (Ground.to_string ty)
+      in
+      nested_function st ~function_type
+        ~output:(match value.type_ with T.Function f -> Some f.output | _ -> None)
+        ~captures:
+          (List.map
+             (fun (capture : Core.capture) ->
+               (capture.local, local_place st capture.local, ground st capture.type_))
+             captures)
+        ~bind_capture:bind_local
+        ~body:(fun inner taken ->
+          List.iter2
+            (fun pattern (place, _, _) ->
+              match_patterns inner [ (pattern, place) ] ~failed:(block inner.b))
+            parameters taken;
+          block_into inner body (result_place inner))
+        destination
+  | Slice _ ->
+      Compiler_bug.unsupported
+        ~at:(at_site (site_of st value.origin))
+        "a slice of a range of elements, such as `items[1..3]`"
+  | Implies _ | Result | Old _ | Quantified _ | Yielded | Finished | Identical _ | Cost_function _
+    ->
+      bug "a specification-only expression in code that runs"
 
 (* Evaluates a call's arguments, one for each of the callee's parameters, in
    order. An argument that is a place is passed where it is, and a value is
@@ -420,6 +450,7 @@ and resolve_callee st (callee : Core.callee) : (Path.t * Ground.argument list) o
           List.map
             (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
             type_arguments )
+  | Trait_method { evidence = Dynamic; _ } -> None
   | Trait_method { trait; name; receiver; self_type; type_arguments; evidence = core_evidence } -> (
       match
         trait_method_key st ~trait ~name ~receiver ~self_type ~type_arguments
@@ -487,7 +518,34 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
              });
         if not lir_signature.returns then unreachable_block st
       end
-  | None, _ -> unhandled "a call through a function value"
+  | None, Trait_method { trait; name; _ } -> (
+      (* Through an [any] value, which is the receiver. *)
+      match List.map (argument_place st) call.arguments with
+      | (_, _, any) :: arguments ->
+          call_through_any st ~trait:trait.trait ~name ~any ~arguments destination
+      | [] -> bug "a call through any with no receiver")
+  | None, Indirect function_value ->
+      let function_type =
+        match ground st (operand_type function_value) with
+        | Function f -> f
+        | callee_ty -> bug "a call of %s" (Ground.to_string callee_ty)
+      in
+      let value = operand_place st function_value in
+      call_indirect st ~function_type ~value
+        (List.map
+           (fun argument ->
+             let _, _, place = argument_place st argument in
+             place)
+           call.arguments)
+        destination
+  | None, Function _ -> bug "a function that does not resolve"
+
+(* An argument's mode, type, and place, for a call whose callee has no
+   signature to read the parameter's type from. *)
+and argument_place st (argument : Core.argument) =
+  match argument with
+  | Passed { mode; value } -> (mode, ground st (operand_type value), operand_place st value)
+  | Default -> bug "an omitted argument in a call that has no defaults"
 
 (* The type that the current frame's method yields. *)
 and yielded_type_of_frame st =
@@ -658,18 +716,7 @@ and branch st (condition : Core.expression) ~yes ~no =
       branch st right ~yes ~no
   | Not inner -> branch st inner ~yes:no ~no:yes
   | Matches { value; pattern } ->
-      (* The names that an [is] test binds can alias parts of the tested
-         value, so a value that is not a place is stored in the same scope
-         as the names. *)
-      let scrutinee =
-        match value with
-        | Place source -> place st source
-        | Value value ->
-            let kept = binding st (ground st value.type_) in
-            into st value kept;
-            kept
-      in
-      match_patterns st [ (pattern, scrutinee) ] ~failed:no;
+      match_patterns st [ (pattern, operand_place st value) ] ~failed:no;
       finish st.b (Goto yes)
   | _ ->
       let value = operand st condition in
@@ -870,7 +917,17 @@ and statement st (node : Core.statement) =
               finish st.b (Goto after);
               start st.b after)
       | For { iteration = Yielding_call _; _ } -> bug "a loop over what is not a call"
-      | For { iteration = Cursor _; _ } -> unhandled "a loop over a cursor"
+      | For { pattern; iteration = Cursor { cursor; next = None }; body; _ } -> (
+          match ground st (Core_walk.place_type cursor) with
+          | Cursor yielding ->
+              pull_loop st yielding (place st cursor) ~body:(fun value ->
+                  match_patterns st [ (pattern, value) ] ~failed:(block st.b);
+                  block_into st body None)
+          | cursor_ty -> bug "a loop over %s, which is not a cursor" (Ground.to_string cursor_ty))
+      | For { iteration = Cursor { next = Some _; _ }; _ } ->
+          Compiler_bug.unsupported
+            ~at:(at_site (site_of st node.origin))
+            "a loop over a value of a type that implements `Cursor`"
       | Yield { part; _ } -> (
           match st.frame.on_yield with
           | Some on_yield ->

@@ -436,30 +436,11 @@ and call_with ?evaluated st (call_ : C.call) ~(expressions : S.expression list)
           ~arguments:(with_placeholders st signature substitution in_order)
           ~mask ~destination
     | Trait_method { trait; name; evidence = Dynamic; _ } -> (
-        (* Through an [any] value: the entry in its table. *)
-        let slot, signature = dynamic_slot st.context trait.trait name in
-        let lir_signature, result = any_entry_signature st.context signature in
         match in_order with
         | (_, _, _, any) :: rest ->
-            let passed = List.filter_map (fun (_, mode, ty, place) -> pass st mode ty place) rest in
-            let evidence = List.map (evidence_of st) (evidence_for [] signature.uses) in
-            let target =
-              Lir.Table_call
-                {
-                  table = Copy (any / Field "vtable");
-                  value = Copy (any / Field "value");
-                  slot;
-                  signature = lir_signature;
-                }
-            in
-            emit st.b
-              (Call
-                 {
-                   target;
-                   arguments = passed @ evidence;
-                   result = Convention.destination result destination;
-                 });
-            if not lir_signature.returns then unreachable_block st
+            call_through_any st ~trait:trait.trait ~name ~any
+              ~arguments:(List.map (fun (_, mode, ty, place) -> (mode, ty, place)) rest)
+              destination
         | [] -> bug "a call through any with no receiver")
     | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } ->
         let key = trait_method_key st ~trait ~name ~receiver ~self_type ~type_arguments ~evidence in
@@ -666,38 +647,19 @@ and call_function_value st ~(callee : S.expression) ~(arguments : S.argument lis
     | ty -> bug "a call of %s" (Ground.to_string ty)
   in
   let value = expression st callee in
-  let signature = Convention.function_value st.context.env f in
-  let passed =
-    List.concat
-      (List.map2
-         (fun ((mode : Ground.mode), ty) (argument : S.argument) ->
-           let types_mode : T.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
-           let place =
-             match (place_expression st argument.value, mode) with
-             | Some place, Own ->
-                 let moved = temporary st ty in
-                 emit st.b (Assign (moved, Use (owned st place ty)));
-                 moved
-             | Some place, _ -> place
-             | None, _ -> expression st argument.value
-           in
-           Option.to_list (pass st types_mode ty place))
-         f.parameters arguments)
-    (* Then the evidence for what the function value uses. *)
-    @ List.map (evidence_of st) f.uses
+  let places =
+    List.map2
+      (fun ((mode : Ground.mode), ty) (argument : S.argument) ->
+        match (place_expression st argument.value, mode) with
+        | Some place, Own ->
+            let moved = temporary st ty in
+            emit st.b (Assign (moved, Use (owned st place ty)));
+            moved
+        | Some place, _ -> place
+        | None, _ -> expression st argument.value)
+      f.parameters arguments
   in
-  let target = Lir.Indirect { value = Copy value; signature } in
-  match f.result with
-  | Returns ty ->
-      emit st.b
-        (Call
-           {
-             target;
-             arguments = passed;
-             result = Convention.(destination (result st.context.env ty)) destination;
-           });
-      if ty = Never then unreachable_block st
-  | Yields _ | Lends _ -> bug "a function value that yields"
+  call_indirect st ~function_type:f ~value places destination
 
 (* In a checked build, tests each [requires] clause on entry to the code,
    with its parameters bound, and panics with the clause's text when one

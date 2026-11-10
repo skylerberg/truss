@@ -222,6 +222,137 @@ let cursor_into st ~path ~type_arguments ~(signature : T.signature) ~substitutio
              fields = (Convention.cursor_state, Constant (Integer (UInt32, Z.zero))) :: fields;
            } ))
 
+(* Writes a lambda's function value to [destination], and lowers the lambda
+   as a nested function of the instance. The enclosing function fills an
+   environment with a pointer to each captured variable, given as its key,
+   its place, and its type. In the lambda's own state, [bind_capture] binds
+   each captured variable to the place the environment gives it, and [body]
+   lowers the body, given the place, the mode, and the type of each
+   parameter. The lambda is given its environment, then what its type
+   takes, then the evidence for what its type uses, which whoever calls it
+   passes: that is the only evidence its code can reach. [output] is what
+   the lambda returns, which a [?] in it returns early. *)
+let nested_function st ~(function_type : Ground.function_type) ~(output : T.result option)
+    ~(captures : ('key * Lir.place * Ground.ty) list)
+    ~(bind_capture : state -> 'key -> Lir.place -> unit)
+    ~(body : state -> (Lir.place * Ground.mode * Ground.ty) list -> unit) destination =
+  let index = List.length !(st.nested) in
+  st.nested := !(st.nested) @ [ None ];
+  let captured =
+    List.mapi (fun i (key, place, ty) -> (Printf.sprintf "capture%d" i, key, place, ty)) captures
+  in
+  let environment =
+    List.map
+      (fun (name, _, _, ty) -> (name, Lir.Pointer { target = Value ty; writable = false }))
+      captured
+  in
+  let environment_local = at (local st.b (Environment index)) in
+  List.iter
+    (fun (name, _, place, _) ->
+      emit st.b (Assign (environment_local / Field name, Use (Address { place; writable = false }))))
+    captured;
+  emit st.b
+    (Assign
+       ( destination,
+         Function_value
+           {
+             code = Nested index;
+             environment = Some (Address { place = environment_local; writable = false });
+           } ));
+  let inner =
+    enter st.context ~pulling:st.pulling ~nested:st.nested
+      {
+        st.frame with
+        bindings = Hashtbl.copy st.frame.bindings;
+        synthetic = Hashtbl.copy st.frame.synthetic;
+        on_yield = None;
+        exit = None;
+        code =
+          (match output with
+          | Some output -> { st.frame.code with result = output }
+          | None -> st.frame.code);
+      }
+  in
+  let b = inner.b in
+  let environment_parameter = local b ~name:"environment" (Raw (Nullable_pointer Opaque)) in
+  let result_ty =
+    match function_type.result with Returns ty -> ty | _ -> bug "a lambda that yields"
+  in
+  result_slot inner (Convention.result st.context.env result_ty);
+  let taken =
+    List.map
+      (fun ((mode : Ground.mode), ty) -> (parameter inner ~owned:(mode = Own) mode ty, mode, ty))
+      function_type.parameters
+  in
+  let evidence = evidence_parameters inner function_type.uses in
+  let environment_pointer = local b (Pointer { target = Environment index; writable = false }) in
+  start b (block b);
+  emit b (Assign (at environment_pointer, Use (Copy (at environment_parameter))));
+  List.iter
+    (fun (name, key, _, _) ->
+      bind_capture inner key
+        { Lir.root = Local environment_pointer; projections = [ Deref; Field name; Deref ] })
+    captured;
+  body inner (List.map (fun ((_, place), mode, ty) -> (place, mode, ty)) taken);
+  let function_ =
+    finish_function inner ~first:[ environment_parameter ]
+      ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken @ evidence)
+      ()
+  in
+  st.nested :=
+    List.mapi (fun i f -> if i = index then Some { function_ with environment } else f) !(st.nested)
+
+(* Calls a function value with arguments that are already in places, one for
+   each parameter of its type, and the evidence for what its type uses. *)
+let call_indirect st ~(function_type : Ground.function_type) ~(value : Lir.place)
+    (places : Lir.place list) destination =
+  let passed =
+    List.concat
+      (List.map2
+         (fun ((mode : Ground.mode), ty) place ->
+           let mode : T.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
+           Option.to_list (pass st mode ty place))
+         function_type.parameters places)
+    @ List.map (evidence_of st) function_type.uses
+  in
+  let target =
+    Lir.Indirect
+      { value = Copy value; signature = Convention.function_value st.context.env function_type }
+  in
+  match function_type.result with
+  | Returns ty ->
+      emit st.b
+        (Call
+           {
+             target;
+             arguments = passed;
+             result = Convention.(destination (result st.context.env ty)) destination;
+           });
+      if ty = Never then unreachable_block st
+  | Yields _ | Lends _ -> bug "a function value that yields"
+
+(* Calls a method through an [any] value: the entry in its table, given the
+   value's pointer, then the arguments, then the evidence the method uses. *)
+let call_through_any st ~trait ~name ~(any : Lir.place)
+    ~(arguments : (T.mode * Ground.ty * Lir.place) list) destination =
+  let slot, signature = dynamic_slot st.context trait name in
+  let lir_signature, result = any_entry_signature st.context signature in
+  let passed = List.filter_map (fun (mode, ty, place) -> pass st mode ty place) arguments in
+  let evidence = List.map (evidence_of st) (evidence_for [] signature.uses) in
+  let target =
+    Lir.Table_call
+      {
+        table = Copy (any / Field "vtable");
+        value = Copy (any / Field "value");
+        slot;
+        signature = lir_signature;
+      }
+  in
+  emit st.b
+    (Call
+       { target; arguments = passed @ evidence; result = Convention.destination result destination });
+  if not lir_signature.returns then unreachable_block st
+
 (* Writes an [any] value to [destination]: the value at [value], moved into
    a heap block of its own, with the method table of its type's [impl]. *)
 let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lir.place) destination =
