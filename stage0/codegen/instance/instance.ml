@@ -186,7 +186,7 @@ let rec mangle = function
   | Copy ty -> marker "Copy" ^ mangle_ty ty
   | Debug ty -> marker "Debug" ^ mangle_ty ty
   | Encode ty -> marker "Encode" ^ mangle_ty ty
-  | Any_drop ty -> marker "Any_drop" ^ mangle_ty ty
+  | Any_drop ty -> marker "AnyDrop" ^ mangle_ty ty
   | Evaluator p -> marker "Evaluator" ^ path p
   | Template_check { from_template; texts } ->
       marker "Check" ^ path from_template

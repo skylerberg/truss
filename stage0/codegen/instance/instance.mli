@@ -1,7 +1,6 @@
 (* Instances: one copy of a definition's code, for one set of type arguments
    and capability sets. *)
 
-(** A named function used as a function value: it takes the environment and ignores it *)
 type key =
   | Code of { path : Path.t; type_arguments : Ground.argument list }
       (** A function, a method, or a method of an [impl], whether written, derived, or provided by
@@ -26,6 +25,7 @@ type key =
       (** The state machine of a pulled yielding method. Its drop is the [Drop] of its cursor type.
       *)
   | Adapter of { function_ : key; ty : Ground.function_type }
+      (** A named function used as a function value: it takes the environment and ignores it *)
   | Entry of key
       (** The entry for an [impl]'s method of a capability: takes the evidence, then calls the
           method on its implementation with the evidence that implementation captured *)

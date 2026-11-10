@@ -69,44 +69,45 @@ and ground_function context substitution (f : Types.function_type) : Ground.func
 let usize = builtin USize
 let types_mode : Ground.mode -> Types.mode = function Read -> Read | Mut -> Mut | Own -> Own
 
-(* The substitution of a type's generic parameters by its arguments, which
-   are ground, written back as the checker's types so the checker's own
-   substitution applies them. *)
+(* A ground type, written back as the checker's, so that the checker's own
+   substitution and its lookups apply to it. *)
+let rec back : Ground.ty -> Types.ty = function
+  | Named { path; arguments } -> Named { path; arguments = List.map back_argument arguments }
+  | Never -> Never
+  | Function f ->
+      Function
+        {
+          inputs = List.map (fun (m, ty) -> (types_mode m, back ty)) f.parameters;
+          output =
+            (match f.result with
+            | Returns ty -> Returns (back ty)
+            | Yields (m, ty) -> Yields (types_mode m, back ty)
+            | Lends (m, ty) -> Lends (types_mode m, back ty));
+          uses = List.map (fun path -> Types.Capability path) f.uses;
+          costs = [];
+        }
+  | Any { trait; arguments; associated } ->
+      Any
+        {
+          trait;
+          trait_arguments = List.map back_argument arguments;
+          associated = List.map (fun (name, ty) -> (name, back ty)) associated;
+        }
+  | Cursor { method_; type_arguments } ->
+      Cursor { method_; arguments = List.map back_argument type_arguments }
+
+and back_argument : Ground.argument -> Types.argument = function
+  | Type ty -> Type (back ty)
+  | Value v -> Value (Known v)
+  | Capabilities set -> Capabilities (List.map (fun path -> Types.Capability path) set)
+
+(* The substitution of generic parameters by their arguments, which are
+   ground. *)
 let substitution (generics : Types.generic list) arguments =
   if List.length generics <> List.length arguments then
-    bug "a type with the wrong number of arguments";
+    bug "%d generic parameters for %d arguments" (List.length generics) (List.length arguments);
   List.map2
-    (fun (generic : Types.generic) (argument : Ground.argument) ->
-      let rec back : Ground.ty -> Types.ty = function
-        | Named { path; arguments } -> Named { path; arguments = List.map back_argument arguments }
-        | Never -> Never
-        | Function f ->
-            Function
-              {
-                inputs = List.map (fun (m, ty) -> (types_mode m, back ty)) f.parameters;
-                output =
-                  (match f.result with
-                  | Returns ty -> Returns (back ty)
-                  | Yields (m, ty) -> Yields (types_mode m, back ty)
-                  | Lends (m, ty) -> Lends (types_mode m, back ty));
-                uses = List.map (fun path -> Types.Capability path) f.uses;
-                costs = [];
-              }
-        | Any { trait; arguments; associated } ->
-            Any
-              {
-                trait;
-                trait_arguments = List.map back_argument arguments;
-                associated = List.map (fun (name, ty) -> (name, back ty)) associated;
-              }
-        | Cursor { method_; type_arguments } ->
-            Cursor { method_; arguments = List.map back_argument type_arguments }
-      and back_argument : Ground.argument -> Types.argument = function
-        | Type ty -> Type (back ty)
-        | Value v -> Value (Known v)
-        | Capabilities set -> Capabilities (List.map (fun path -> Types.Capability path) set)
-      in
-      (generic.generic, back_argument argument))
+    (fun (generic : Types.generic) argument -> (generic.generic, back_argument argument))
     generics arguments
 
 let fields context substitution (fields : Types.field list) =
