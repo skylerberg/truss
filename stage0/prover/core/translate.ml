@@ -2299,6 +2299,15 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
             (float_fits target value);
           L.Apply ("to_int", [ truncated value ])
       | _ -> known)
+  | Convert, [ source; target ] when bounds source <> None && float_format target <> None -> (
+      (* An integer becomes the float nearest it, ties to even, as the
+         compiled cast rounds: exactly it, where the float can hold it. *)
+      match (operands, float_format target) with
+      | [ value ], Some (exponent, significand) ->
+          L.Apply
+            ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
+              [ L.Apply ("RNE", []); L.Apply ("to_real", [ value ]) ] )
+      | _ -> known)
   | Convert, [ _; target ] when T.is_builtin Character target -> (
       (* A [Character] is made from an integer only when the integer is a
          Unicode scalar value, which the conversion does not check. *)
