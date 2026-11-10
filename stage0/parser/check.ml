@@ -152,12 +152,13 @@ and statement cursor context (statement : statement) =
       Option.iter (types cursor context) annotation;
       expression cursor context value;
       Option.iter (block cursor context) else_
-  | For { parallel; iterable; clauses; body; _ } ->
+  | For { mode; iterable; clauses; body; _ } ->
       expression cursor context iterable;
       loop_clauses cursor context clauses;
       let body_context =
-        if parallel then { context with loop = Parallel_body; parallel = true }
-        else { context with loop = Inside }
+        match mode with
+        | Parallel_loop -> { context with loop = Parallel_body; parallel = true }
+        | Sequential | Concurrent_loop -> { context with loop = Inside }
       in
       block cursor body_context body
   | While { condition; clauses; body } ->
@@ -167,6 +168,7 @@ and statement cursor context (statement : statement) =
   | Parallel body ->
       let loop = match context.loop with Outside -> Outside | _ -> Branch in
       block cursor { context with parallel = true; loop } body
+  | Concurrent body -> block cursor context body
   | Proof body ->
       if not context.function_body then
         report cursor Misplaced_proof statement.span

@@ -3,8 +3,8 @@
    excerpts: they use names defined elsewhere, show a definition of the
    standard library's, or redefine a prelude name to show how it is written.
    Those diagnostics say the block is an excerpt, and such a block is
-   skipped. Every other block is a whole program and must check cleanly and
-   prove. *)
+   skipped, as is one that uses what stage0 has not built. Every other block
+   is a whole program and must check cleanly and prove. *)
 
 open Harness
 
@@ -20,9 +20,11 @@ let markdown_files =
   |> List.filter (fun name -> Filename.check_suffix name ".md")
   |> List.sort compare
 
-(* The codes that mean the block needs context it does not have. *)
+(* The codes that mean the block needs context it does not have, or a
+   construct that is not built. *)
 let excerpt_codes =
   [
+    "types.not_built";
     "resolve.unknown_name";
     "resolve.unknown_module";
     "resolve.hides_name";

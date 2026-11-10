@@ -26,7 +26,7 @@ let begins_expression = function
 (* Whether a token can start a statement that is not an expression, or an
    expression. *)
 let begins_statement = function
-  | Keyword (Let | Var | For | While | Parallel | Proof | Assert | Yield) -> true
+  | Keyword (Let | Var | For | While | Parallel | Concurrent | Proof | Assert | Yield) -> true
   | kind -> begins_expression kind
 
 let mode cursor =

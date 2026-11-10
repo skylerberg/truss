@@ -286,6 +286,15 @@ let () =
   test "return in a lambda inside a branch" (fun () ->
       statement "parallel {\n  f(fn() { return })\n}"
         "(parallel (block (call f (fn () (block (return))))))");
+  test "return, ?, and break leaving a concurrent block or loop" (fun () ->
+      statement "concurrent {\n  return\n  let y = f(x)?\n}"
+        "(concurrent (block (return) (let y (? (call f x)))))";
+      statement "concurrent for x in s {\n  if a { break } else { continue }\n}"
+        "(concurrent-for x s (block (if a (block break) (block continue))))";
+      statement "while a {\n  concurrent {\n    break\n  }\n}"
+        "(while a (block (concurrent (block break))))");
+  test "return leaving a parallel block inside a concurrent one" (fun () ->
+      body_error "concurrent {\n  parallel {\n    return\n  }\n}" ~code:Leaves_parallel ~at:"return");
   test "echo in a specification" (fun () ->
       error "fn f(x: Int64) requires echo x > 0 {}" ~code:Echo_in_specification ~at:"echo");
   test "a statement rule applies in every block" (fun () ->

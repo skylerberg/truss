@@ -229,7 +229,7 @@ and statement cursor : statement =
       finish (binding cursor ~mutable_:true)
   | Keyword For ->
       Cursor.advance cursor;
-      finish (for_loop cursor ~parallel:false)
+      finish (for_loop cursor ~mode:Sequential)
   | Keyword While ->
       Cursor.advance cursor;
       let condition = expression cursor in
@@ -237,8 +237,12 @@ and statement cursor : statement =
       finish (While { condition; clauses; body = body cursor })
   | Keyword Parallel ->
       Cursor.advance cursor;
-      if Cursor.accept_keyword cursor For then finish (for_loop cursor ~parallel:true)
+      if Cursor.accept_keyword cursor For then finish (for_loop cursor ~mode:Parallel_loop)
       else finish (Parallel (body cursor))
+  | Keyword Concurrent ->
+      Cursor.advance cursor;
+      if Cursor.accept_keyword cursor For then finish (for_loop cursor ~mode:Concurrent_loop)
+      else finish (Concurrent (body cursor))
   | Keyword Proof ->
       Cursor.advance cursor;
       finish (Proof (body cursor))
@@ -291,7 +295,7 @@ and binding cursor ~mutable_ =
   in
   Let { mutable_; pattern; annotation; value; else_ }
 
-and for_loop cursor ~parallel =
+and for_loop cursor ~mode =
   let pattern = Parse_pattern.pattern cursor in
   Cursor.expect_keyword cursor In;
   let iterable = expression cursor in
@@ -305,7 +309,7 @@ and for_loop cursor ~parallel =
       raise Cursor.Failed
   | _ -> ());
   let clauses = loop_clauses cursor in
-  For { parallel; pattern; iterable; clauses; body = body cursor }
+  For { mode; pattern; iterable; clauses; body = body cursor }
 
 (* [invariant] and [cost] may repeat; [decreases] appears at most once. *)
 and loop_clauses cursor =

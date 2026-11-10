@@ -358,7 +358,8 @@ are only for brackets.
 ### Statements
 
 A statement is chosen by its first token: `let`, `var`, `for`, `while`,
-`parallel`, `proof`, `assert`, and `yield` each start their own form, and any
+`parallel`, `concurrent`, `proof`, `assert`, and `yield` each start their
+own form, and any
 other token starts an expression, which may be followed by `=` or a compound
 assignment. A `match` arm's body uses the same function.
 
@@ -430,7 +431,8 @@ branch, and a method that yields or lends. It reports:
 - `yield` outside a method whose signature `yields` or `lends`
 - `break` and `continue` outside a loop, or inside a lambda in that loop
 - `return`, `break`, `continue`, and `?` that would leave a `parallel` block,
-  and `break`, `return`, and `?` in a `parallel for`
+  and `break`, `return`, and `?` in a `parallel for`. A `concurrent` block
+  or loop may be left early, so nothing is reported there.
 - `echo` inside a specification, which never runs
 - a parameter named `result`, or, in a lending or yielding method, `yielded`
   or `finished`

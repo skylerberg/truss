@@ -771,9 +771,10 @@ and statement state scope (statement_ : statement) =
       List.iter (loop_clause state scope) clauses;
       block state inner body;
       scope
-  | Parallel body ->
+  | Parallel body | Concurrent body ->
       (* Each branch sees only what is in scope before the block; what the
          branches bind is in scope after it. *)
+      let word = match statement_.kind with Concurrent _ -> "concurrent" | _ -> "parallel" in
       List.fold_left
         (fun (after : scope) (branch : statement) ->
           let branch_scope = statement state scope branch in
@@ -787,9 +788,9 @@ and statement state scope (statement_ : statement) =
               if String_map.mem key after.values then
                 report state Hides_name branch.span
                   (Printf.sprintf
-                     "Another branch of this `parallel` block already binds `%s`, and a name \
-                      cannot hide another. Choose another name."
-                     key))
+                     "Another branch of this `%s` block already binds `%s`, and a name cannot hide \
+                      another. Choose another name."
+                     word key))
             bound;
           { after with values = String_map.union (fun _ left _ -> Some left) after.values bound })
         scope body.statements

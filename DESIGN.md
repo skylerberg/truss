@@ -1924,62 +1924,193 @@ gives the same result as running its parts one after another.
 - **No capabilities inside.** A capability implementation can hold state, so
   two branches calling it would race, and the order of their calls would vary
   from run to run. Leaving capabilities out keeps the result fixed, and the
-  only exception is `Panic`.
+  only exception is `Panic`. Code whose parts use capabilities at the same
+  time is concurrent, and is written with `concurrent` (see
+  [Concurrency](#concurrency)).
 - **No `uses` needed.** A function that uses `parallel` is still pure, and
   tests that run it can still be cached.
 - **Proofs and costs work as for sequential code.** Branches are disjoint, so
   their order can't matter, and the prover treats them as running in order.
   `time` measures total work, so a `parallel` block costs the sum of its
-  branches. A separate measure for elapsed time on many cores may be added
-  later.
+  branches.
+- **`span` is to measure the work that cannot be done at once.** A
+  `parallel` block's span is the largest of its branches' spans, where its
+  `time` is their sum, and the span of code with no `parallel` in it is its
+  time. On `p` cores a function finishes in time proportional to
+  `time / p + span`, the bound a scheduler that steals work meets. So a
+  signature with `cost time O(n)` and `cost span O(log(n))` promises that
+  the function gets faster with each core it is given. This is the
+  work-span model of Cilk and NESL, and of textbooks on parallel
+  algorithms. `span` joins the grammar with the first function of the
+  standard library that states it.
+- **The result does not depend on the machine.** Where a computation is
+  split into branches is decided by its input, never by the number of
+  cores. A parallel sum of floats therefore groups its additions the same
+  way on every machine and gives the same bits, so a cached test result
+  holds everywhere.
+- **Branches run on a pool of threads that steal work.** The pool has one
+  thread for each core. A thread with nothing to do takes a branch that
+  another thread has not started, as in Cilk, Rust's rayon, Go's
+  scheduler, and Java's fork-join pool. The pool starts the first time a
+  program runs code at once, so a program that never does has no thread
+  but its own.
+- **Tests run branches in order.** The test runner already runs one test on
+  each core, so a test gains nothing from more threads. In order, a check
+  that fails is the same check on every run.
 - **Panics end the program, as anywhere else.** If more than one branch could
   panic, which message is printed may vary.
-- **Simple to compile.** A compiler may run `parallel` code sequentially and
-  still be correct, which is what stage0 can do. Later compilers can use a
-  thread pool built on the threads in libc.
-- **Early exit is not allowed.** Leaving with `return` or `?` would raise the
-  question of what happens to branches that are still running. Branches return
-  values instead, and the code after the block decides what to do with them.
+- **Early exit is not allowed.** A branch uses no capabilities, so it cannot
+  be asked to stop. Leaving with `return` or `?` would have to abandon the
+  other branches partway, or wait for work whose result is thrown away.
+  Branches return values instead, and the code after the block decides what
+  to do with them.
 
 The design follows Rust's scoped threads and rayon, Swift's `async let`, and
 Hylo, which also uses mutable value semantics.
 
 ## Concurrency
 
-Concurrency means handling many things that spend their time waiting, such as a
-server's connections. It is nondeterministic by nature, since requests can
-arrive in any order, so it goes through capabilities. The direction is
-decided. The exact syntax for task groups and channels is not yet:
+Concurrency means doing several things whose order is not fixed, such as
+serving a server's connections, or waiting for a reply and a timer at once.
+What such code does can depend on what happens first, so concurrency is an
+effect: code that does it declares `uses Tasks`.
 
-- **Blocking calls, no async.** Code waits by calling a capability method that
-  returns when the result is ready, as in Go. There is no `async` or `await`,
-  so functions are not split into two kinds that can't easily call each other.
-  This fits the rule that a capability method always returns.
-- **A `Tasks` capability starts concurrent tasks.** In stage0 its real
-  implementation can use operating system threads. A later one can use
-  lightweight tasks without any code changing, because code only sees the
-  capability.
-- **A task gets its data as an owned argument.** `spawn` takes a function and
-  a value to hand over to it, as in `spawn(handle, input: own connection)`,
-  the way pthreads and Zig pass a function and its argument. So no closure
-  ever needs to own what it captures. The function may still read data from
-  around its task group, because tasks cannot outlive the group.
-- **Tests stay deterministic.** A test provides a `Tasks` implementation that
-  runs tasks in an order chosen by a seed. A race then becomes a repeatable
-  test failure instead of a rare, flaky one. This is how FoundationDB tests its
-  database.
-- **Tasks live inside a task group.** A task cannot outlive the group that
-  started it, as with Trio's nurseries and Swift's task groups. A task can
-  therefore read data from the code around the group without lifetimes.
-- **No shared mutable memory.** User code has no mutexes or atomics. A task can
-  be given owned data. When several tasks need the same state, one task owns it
-  and the others send it owned messages through channels. A mutex could be
-  added later as a separate, clearly marked capability if performance requires
-  it.
-- **Tasks get capabilities through their function type**, the same way
-  callbacks do. Calls into one implementation never overlap, because the
-  runtime has them take turns. A stateful fake in a test stays consistent
-  without any locking in user code.
+- **`concurrent` runs its branches as tasks.** A `concurrent` block runs
+  each of its statements as a task and ends when every one has ended. A
+  `concurrent for` runs each iteration as a task. They are written as
+  `parallel` and `parallel for` are, and differ in one way: a branch may
+  use the capabilities of the code around it, which is why the function
+  needs `Tasks`.
+- **No data races, by the same rule as `parallel`.** Any branch may read any
+  place, and a place that one branch changes cannot be used by another. A
+  branch hands its result to the code after the block through a `let`, or
+  through its own element of the collection it loops over.
+- **A task never outlives the block that started it,** as with Trio's
+  nurseries, Kotlin's `coroutineScope`, Swift's task groups, and Java's
+  `StructuredTaskScope`. This is what lets a branch read the places around
+  it without lifetimes, and use the capabilities provided around it, whose
+  implementations are the enclosing code's variables. A task started with
+  Go's `go` can outlive everything it was given, so in Truss it could be
+  given neither.
+- **It is a construct, not a function that is passed a function.** A
+  `spawn(work)` would have to keep `work` until the task runs, and only a
+  function that captures nothing can be kept (see [Closures](#closures)).
+  Such a task could read nothing around it, and would hand its result back
+  through a handle for the caller to join. A branch needs no handle and no
+  join, and the one rule about places covers it.
+- **Blocking calls, no async.** Code waits by calling a capability method
+  that returns when the result is ready, as in Go, Java's virtual threads,
+  and Zig's `Io` interface. There is no `async` or `await`. `uses` already
+  separates the code that can wait from the code that cannot, and a second
+  mark for the same fact would split functions into two kinds that can't
+  easily call each other. This fits the rule that a capability method
+  always returns.
+- **How a task waits can change without any code changing.** Truss has no
+  foreign code, so every call that waits is in the standard library's real
+  capability implementations. They can give each task a thread of the
+  operating system, or run many tasks on the pool's few threads and switch
+  between them where a task waits, and no caller can tell which. Go and
+  Java cannot switch away from a task that waits inside foreign code.
+- **Leaving early cancels the other branches.** A `?`, `return`, or `break`
+  that leaves a `concurrent` block or loop cancels every other branch,
+  waits for each to end, and then leaves. The first branch to leave decides
+  where control goes and with what value; a later one's is dropped. Kotlin,
+  Swift, Trio, and Java's scopes cancel sibling tasks the same way.
+- **Cancellation is an error value.** In a cancelled task, a capability
+  call that would wait returns at once with the value that says it did not
+  finish: `SystemError.Cancelled` where it returns a `Result`, and `None`
+  where it returns an `Option`. `?` carries that out like any other error,
+  so a cancelled task ends by returning, along a path that is written in
+  its code. `Tasks.cancelled()` tells a loop that calls nothing that waits.
+  This is Go's `Context` without the parameter, since whatever provides
+  `Tasks` knows which task is calling. Trio and Kotlin raise an exception
+  at the call instead, and Rust drops a future at whichever `await` it had
+  reached, which abandons a computation partway. Truss has neither
+  exceptions nor abandoned computations (see
+  [Capabilities](#capabilities)).
+- **A time limit and a race are ordinary code.** `tasks::within(limit,
+  work)` runs `work` in one branch and a timer in another, and each branch
+  returns from `within` when it finishes, which cancels the other. Nothing
+  like Go's `select` is needed for either.
+- **A channel is how one task waits for another.** A `Channel[Message]` is
+  a queue with a fixed capacity: `send` waits while it is full, `receive`
+  waits while it is empty, and `close` ends the loops of the tasks that
+  receive from it. A message is owned, so sending one moves it and copies
+  nothing, and it is never a view, since what it views could be gone
+  before it is received. A channel is a token, as a file handle is: the
+  queue is held by whatever provides `Tasks`, so a channel's methods take
+  `self` read-only and every branch can use the one channel. A task that
+  waits for several kinds of message receives one sum type from one
+  channel, as an Erlang process reads one mailbox.
+- **How many tasks run at once is bounded by a value, not by syntax.** A
+  `tasks::Limiter` holds a number of permits, and `limiter.hold(work)`
+  runs `work` once it has one. This is Kotlin's `Semaphore.withPermit` and
+  Trio's `CapacityLimiter`, and it is written with a channel of permits, as
+  in Go.
+- **State that tasks share lives in a capability implementation.** Whatever
+  changes lives in a variable, a parameter, or a capability implementation
+  (see [Memory](#memory)), and two tasks cannot share a variable that
+  either changes. So state that several tasks change is an
+  implementation's: a table of sessions is a type that holds a `Map` and
+  implements a `Sessions` capability, provided `mut` around the code that
+  serves requests. `uses Sessions` then marks every function that can touch
+  the table.
+- **Calls into a `mut` implementation take turns.** Where the code inside a
+  `provide mut` can use `Tasks`, each call of the implementation's methods
+  runs from start to end before the next begins, and a task that calls
+  meanwhile waits. This is a monitor: Ada's protected objects, Java's
+  `synchronized` methods, and an Erlang `gen_server` work the same way. A
+  check and the change that depends on it therefore go in one method.
+  Within a call nothing else changes the state, and between two calls
+  anything may. An implementation provided without `mut` is only read, so
+  calls into it need no turns.
+- **Proofs already allow for it.** The prover never models an
+  implementation's state: a capability call gives a value of which only
+  the method's `ensures` is known. No proof ever assumed that the state
+  stays the same from one call to the next, so every proof still holds when
+  other tasks' calls come between.
+- **Turns cannot deadlock on each other.** An implementation's methods can
+  call only capabilities provided outside it, so tasks always take turns
+  from the innermost implementation outward, and no two wait for each
+  other's. One rule keeps this true: an implementation whose calls take
+  turns has no method that takes a function with a `uses` clause, since
+  that function could call an implementation further in.
+- **Turns cost nothing where there are no tasks.** Whether the code inside
+  a `provide mut` can use `Tasks` is known where the `provide` is written,
+  from the signatures of what it calls. Only such a `provide` makes calls
+  take turns.
+- **A mutex is not a value.** Rust's `Mutex` and Go's `sync.Mutex` change
+  what a read-only place holds, which mutable value semantics rules out,
+  and two tasks that take two of them in different orders deadlock. A task
+  that owns the state and answers messages, as in Erlang, needs nothing new
+  and stays possible, but every use of the state then switches tasks twice
+  and waits behind every other use. Erlang added shared tables and atomic
+  counters for that reason.
+- **A cell with a pure update may be added.** One implementation makes all
+  of its calls wait for each other, which is too coarse for a cache in
+  many parts that tasks should use at once. A cell that holds a value, and
+  whose one method runs a pure function on it while no other task can,
+  allows that, as Clojure's atoms do. A pure function cannot wait, use
+  another cell, or do I/O, so such updates cannot deadlock. It is added
+  when a program needs it.
+- **Data races cannot happen, and waiting forever can.** A task can wait
+  for a message that no task will send. Go, Rust, and Erlang do not rule
+  that out either.
+- **Tests stay deterministic.** A test provides a `Tasks` implementation
+  that runs one task at a time and chooses by a seed which runs next. It
+  switches tasks only at capability calls. Tasks share no memory that
+  changes, so nothing a task does between two capability calls is visible
+  to another, and the orders of those calls are all the orders there are. A
+  race is then a failure that one seed repeats, not a rare, flaky one.
+  FoundationDB, TigerBeetle, and AWS's Shuttle test this way.
+- **A test's clock moves when every task waits.** Time then jumps to the
+  next timer, as in Go's `testing/synctest` and Trio's test clock. A test
+  of a timeout takes no real time, and its result can be cached.
+- **A test in which no task can go on fails,** and reports what each task
+  was waiting for.
+- **Tasks and `parallel` branches run on one pool.** A program has one set
+  of threads, as Go and Java have, so code that computes and code that
+  waits do not compete with two pools for the same cores.
 - **Waiting may never end.** A function that waits on a channel cannot be
   proven to terminate, so it has no `time` clause.
 

@@ -8,6 +8,7 @@ type keyword =
   | Assert
   | Break
   | Capability
+  | Concurrent
   | Continue
   | Cost
   | Decreases
@@ -186,6 +187,7 @@ let keywords =
     ("assert", Assert);
     ("break", Break);
     ("capability", Capability);
+    ("concurrent", Concurrent);
     ("continue", Continue);
     ("cost", Cost);
     ("decreases", Decreases);
