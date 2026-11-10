@@ -33,6 +33,18 @@ val solve_ahead : ?running:running -> Query.context -> Solver.t -> Path.module_ 
     calls it once with all of them, which keeps every core busy where one module's queries are few.
 *)
 
+type state = {
+  code : Diagnostic.Code.prover;
+  span : Diagnostic.span;  (** In the file's offsets. *)
+  shows : string;  (** What the obligation is to show, as its diagnostic first says it. *)
+  failure : Diagnostic.t option;  (** Why it was not shown, or [None] where it was. *)
+}
+(** An obligation's state, as a language server shows it at its position. *)
+
+val states : ?running:running -> Query.context -> Solver.t -> Path.module_ -> state list
+(** Every obligation of a file's definitions, shown or not, and every definition the prover could
+    not read, in the file's offsets and in order. *)
+
 val diagnostics : ?running:running -> Query.context -> Solver.t -> Path.module_ -> Diagnostic.t list
 (** Every obligation of a file's definitions that the solver could not prove, and every definition
     the prover could not read, in the file's offsets and in order. [running] runs compiled code, as

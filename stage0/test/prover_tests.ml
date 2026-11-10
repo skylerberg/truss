@@ -2357,6 +2357,22 @@ let () =
            }\n"
       in
       if not (contains text "`at` is") then fail "%s" text);
+  test "a file's proof states list what proves as well as what does not" (fun () ->
+      let database =
+        Support.setup
+          [
+            ( "app::main",
+              "fn f(items: List[Int64], index: USize) -> Int64\n\
+              \  requires index < items.length()\n\
+               {\n\
+              \  items[index] + items[0]\n\
+               }\n" );
+          ]
+      in
+      let states = Prover.states database solver (Support.module_of "app::main") in
+      let failed = List.filter (fun (state : Prover.state) -> state.failure <> None) states in
+      if List.length failed <> 1 || List.length states < 2 then
+        fail "%d states, %d failed" (List.length states) (List.length failed));
   test "the same failure on another path is reported once" (fun () ->
       let found =
         codes
