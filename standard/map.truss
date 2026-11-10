@@ -44,6 +44,7 @@ public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: 
   ensures forall other: Key =>
     !(other == key) && old(self.model()).contains_key(other) ==>
       identical(self.model().get(other), old(self.model()).get(other))
+  cost time finite
 {
   let position = self.entries.partition_point(fn(entry) { entry.key < key })
   proof {
@@ -122,7 +123,11 @@ public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: 
   }
 }
 
-internal fn Map[Key: Hash + Ordered, Value].empty() -> Map[Key, Value] {
+internal fn Map[Key: Hash + Ordered, Value].empty() -> Map[Key, Value]
+  ensures result.length() == 0
+  ensures forall key: Key => !result.model().contains_key(key)
+  cost time O(1)
+{
   Map(entries: [])
 }
 
