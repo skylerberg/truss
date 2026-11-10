@@ -668,6 +668,53 @@ let () =
       expect_status ~anchors 46 (made [ 40; 5; 6 ]);
       (* A storage of another length stops a checked build. *)
       expect_status ~anchors 101 (made [ 40; 5 ]));
+  test "a float fits an integer type where the whole number it is cut down to does" (fun () ->
+      let open Lir_builder in
+      (* Each case is a bit of the status, set where the answer is the one
+         expected. *)
+      let all_right cases =
+        expect_status
+          ((1 lsl List.length cases) - 1)
+          [
+            built_entry (fun b ->
+                let status = local b (value int32) in
+                emit b (Assign (at status, Use (constant_int32 0)));
+                List.iteri
+                  (fun index (float, target, expected) ->
+                    let fits = local b (Raw Bool) in
+                    ignore
+                      (operate b ~destination:(at fits) ~type_arguments:[ float64; target ] Fits
+                         [ Value (Constant (Float64 (Int64.bits_of_float float))) ]);
+                    let right = local b (Raw Bool) in
+                    emit b
+                      (Assign (at right, Binary (Equal, Copy (at fits), Constant (Bool expected))));
+                    let bit = local b (value int32) in
+                    emit b (Assign (at bit, Convert (Copy (at right), Integer Int32)));
+                    emit b
+                      (Assign (at bit, Binary (Shift_left, Copy (at bit), constant_int32 index)));
+                    emit b (Assign (at status, Binary (Bit_or, Copy (at status), Copy (at bit)))))
+                  cases;
+                status);
+          ]
+      in
+      all_right
+        [
+          (9223372036854774784., int64, true);
+          (9223372036854775808., int64, false);
+          (-9223372036854775808., int64, true);
+          (-9223372036854777856., int64, false);
+          (Float.nan, int64, false);
+          (Float.infinity, int64, false);
+          (Float.neg_infinity, int64, false);
+        ];
+      all_right
+        [
+          (255.9, uint8, true);
+          (256., uint8, false);
+          (-0.5, uint8, true);
+          (-1., uint8, false);
+          (0., uint8, true);
+        ]);
   test "static storage given room is copied to the heap, where it can be pushed onto" (fun () ->
       let open Lir_builder in
       let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
