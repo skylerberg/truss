@@ -813,6 +813,34 @@ let () =
          \  }\n\
          \  seen\n\
           }\n"));
+  test "a loop over a type's own cursor calls its next" (fun () ->
+      proven
+        "type Countdown(left: UInt8)\n\n\
+         impl Cursor for Countdown {\n\
+        \  type Element = UInt8\n\n\
+        \  fn next(mut self) -> Option[UInt8]\n\
+        \    ensures result != None ==> self.left < old(self.left)\n\
+        \    ensures result != None ==> result == Some(self.left)\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    if self.left == 0 { None } else {\n\
+        \      self.left -= 1\n\
+        \      Some(self.left)\n\
+        \    }\n\
+        \  }\n\
+         }\n\n\
+         fn f(start: Countdown) -> UInt8\n\
+        \  cost time finite\n\
+         {\n\
+        \  var left = start\n\
+        \  var last: UInt8 = 0\n\
+        \  for value in left\n\
+        \    decreases left.left\n\
+        \  {\n\
+        \    last = value\n\
+        \  }\n\
+        \  last\n\
+         }\n");
   test "assigning an element changes only that element" (fun () ->
       proven
         "fn f(items: mut List[Int64])\n\
@@ -1402,6 +1430,33 @@ let () =
         \  }\n\
          }\n"
         "prover.disjoint")
+
+(* Where paths join *)
+
+let () =
+  test "self changed on one path is joined with the other" (fun () ->
+      not_proven
+        "type Box(value: Int64)\n\n\
+         fn Box.set(mut self, flag: Bool)\n\
+        \  ensures self.value == old(self.value)\n\
+         {\n\
+        \  if flag {\n\
+        \    self.value = 1\n\
+        \  }\n\
+         }\n"
+        "prover.ensures");
+  test "what a method hands out on one path is joined with the other" (fun () ->
+      not_proven
+        "type Maybe(present: Bool)\n\n\
+         fn Maybe.each(self) yields Int64\n\
+        \  ensures yielded.length() == 0\n\
+        \  cost time finite\n\
+         {\n\
+        \  if self.present {\n\
+        \    yield 1\n\
+        \  }\n\
+         }\n"
+        "prover.ensures")
 
 (* What a loop changes *)
 
@@ -2033,20 +2088,12 @@ let () =
 let () =
   test "a construct the prover cannot read yet" (fun () ->
       not_proven
-        "type Countdown(left: UInt8)\n\n\
-         impl Cursor for Countdown {\n\
-        \  type Element = UInt8\n\n\
-        \  fn next(mut self) -> Option[UInt8] {\n\
-        \    if self.left == 0 { None } else {\n\
-        \      self.left -= 1\n\
-        \      Some(self.left)\n\
-        \    }\n\
-        \  }\n\
-         }\n\n\
-         fn f(countdown: Countdown) {\n\
-        \  var left = countdown\n\
-        \  for value in left {\n\
-        \    let _ = value\n\
+        "type Side =\n\
+        \  | Left(value: Int64)\n\
+        \  | Right(value: Int64)\n\n\
+         fn f(side: Side) -> Int64 {\n\
+        \  match side {\n\
+        \    Left(value) | Right(value) => value\n\
         \  }\n\
          }\n"
         "prover.unsupported");

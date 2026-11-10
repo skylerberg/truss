@@ -957,7 +957,10 @@ It proves, with one canonical, numbered, hashed query per obligation:
   clauses for each part, or `None` once it has ended, as [Lending and
   yielding methods](#lending-and-yielding-methods) describes, and a `for`
   loop over a cursor pulls it so, with `yielded` everything the cursor
-  has handed out. A loop over a type's own `Cursor` is not read yet.
+  has handed out. A loop over a value of a type's own `Cursor` calls its
+  `next` by the `impl`'s contract until `None`, and, since such a cursor
+  promises no end, needs a `decreases` clause in a function that must end,
+  which each iteration, its pull included, decreases.
 - functional bodies as definitions: a pure function with a `time` clause
   and a functional body is unfolded once at each call, where its
   `requires` holds, unless its body reads what the prover cannot
@@ -1093,8 +1096,8 @@ A call whose callee's contract it cannot read, such as one with errors,
 gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
-definition that uses anything else, such as a loop over a type's own
-`Cursor`, is reported as
+definition that uses anything else, such as alternatives in a pattern
+that bind names, is reported as
 `prover.unsupported` with what stopped it, and none of its obligations
 count as proven.
 

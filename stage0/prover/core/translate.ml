@@ -593,7 +593,39 @@ let join context ?value_type frames =
         | Some ty -> define "value" (sort_of context ty) (fun _ value -> value)
         | None -> None
       in
-      Some ({ merged with locals; spent }, value)
+      (* [self] and what a lending or yielding method has handed out change
+         along paths too, like locals. *)
+      let self =
+        match first.self_type with
+        | Some ty -> (
+            match define "self" (sort_of context ty) (fun frame _ -> frame.self) with
+            | Some joined -> Some joined
+            | None -> first.self)
+        | None -> first.self
+      in
+      let handed_out =
+        match context.hands_out with
+        | Some (part, _) -> (
+            match
+              define "parts"
+                (sort_of context
+                   (T.Named
+                      {
+                        path =
+                          Top
+                            {
+                              module_ = { package = "standard"; modules = [ "specification" ] };
+                              name = "Sequence";
+                            };
+                        arguments = [ T.Type part ];
+                      }))
+                (fun frame _ -> frame.handed_out)
+            with
+            | Some joined -> Some joined
+            | None -> first.handed_out)
+        | None -> first.handed_out
+      in
+      Some ({ merged with locals; spent; self; handed_out }, value)
 
 let join_frames context frames =
   Option.map fst (join context (List.map (fun frame -> (frame, None)) frames))
@@ -5403,7 +5435,10 @@ and for_ context frame (written : statement) pattern iterable clauses body =
   | Some (Pulled { cursor = T.Cursor { method_; _ } as cursor_type }), _, _ ->
       pulled_loop context frame written pattern iterable clauses body
         ~cursor_type:(substituted frame cursor_type) ~method_
-  | _ -> unsupported written.span "a `for` loop over a cursor of a type's own `Cursor`"
+  | Some (Pulled { cursor = cursor_type }), _, _ ->
+      own_cursor_loop context frame written pattern iterable clauses body
+        ~cursor_type:(substituted frame cursor_type)
+  | _ -> unsupported written.span "this `for` loop"
 
 (* A [for] loop over a yielding method: each element is a fresh value
    that meets the method's clauses for each part, and the loop ends when
@@ -5559,12 +5594,142 @@ and pulled_loop context frame (written : statement) pattern iterable clauses bod
         advance = (fun (frame : frame) -> { frame with locals = Ids.add id later frame.locals });
       })
 
+(* A [for] loop over a value of a type's own [Cursor]: each iteration
+   calls its [next] by the [impl]'s contract, and the loop ends at [None].
+   Such a cursor promises no end, so in a function that must end, the loop
+   needs a [decreases] clause, which each iteration decreases. *)
+and own_cursor_loop context frame (written : statement) pattern iterable clauses body ~cursor_type =
+  let frame, _ = value context frame iterable in
+  let id =
+    match place_local frame (root_of iterable) with
+    | Some (id, _) -> id
+    | None -> unsupported iterable.span "a loop over a cursor that is not in a local"
+  in
+  let element_type =
+    match Option.map (substituted frame) frame.source.checked.pattern_types.(pattern.id) with
+    | Some ty -> ty
+    | None -> unsupported pattern.span "a loop variable without a type"
+  in
+  let impl =
+    match concrete_impl context cursor_trait cursor_type with
+    | Some impl -> impl
+    | None ->
+        unsupported iterable.span "a loop over `%s`, whose `Cursor` the prover cannot find"
+          (T.show cursor_type)
+  in
+  let evidence = C.Impl { impl; arguments = [] } in
+  let trait : T.trait_reference =
+    { trait = cursor_trait; trait_arguments = []; associated = [ ("Element", element_type) ] }
+  in
+  let contract =
+    match method_contract context.database trait "next" Mut evidence with
+    | Some contract -> contract
+    | None ->
+        unsupported iterable.span "a loop over `%s`, whose `next` the prover cannot read"
+          (T.show cursor_type)
+  in
+  let path = Path.Method { owner = impl; name = "next"; receiver = Mut } in
+  let option_type = T.Named { path = option_path; arguments = [ T.Type element_type ] } in
+  let argument : C.argument =
+    { expression = iterable.id; parameter = 0; mode = T.Mut; conversion = None }
+  in
+  let call_ : C.call =
+    {
+      callee =
+        Trait_method
+          {
+            trait;
+            name = "next";
+            receiver = Mut;
+            self_type = cursor_type;
+            type_arguments = [];
+            evidence;
+          };
+      arguments = [ argument ];
+      defaults_left_out = [];
+      uses = [];
+      capability_arguments = [];
+      result = option_type;
+    }
+  in
+  let measures =
+    List.find_map
+      (fun (clause : loop_clause) ->
+        match clause.kind with Loop_decreases measures -> Some measures | _ -> None)
+      clauses
+  in
+  if context.terminates && not (signature_terminates context path) then
+    oblige context frame Termination written.span
+      (Printf.sprintf "This loop may not end: `%s`'s `next` has no `time` clause."
+         (T.show cursor_type))
+      (L.Boolean false);
+  if context.terminates && measures = None then
+    oblige context frame Termination written.span
+      "This loop may not end: a cursor of a type's own promises no end, so give the loop a \
+       `decreases` clause."
+      (L.Boolean false);
+  let measured (at : frame) =
+    Option.map
+      (List.map (fun measure -> snd (value context { at with checking = false } measure)))
+      measures
+  in
+  let in_body = changed_places frame body in
+  let changed =
+    { in_body with changed_locals = List.sort_uniq compare (id :: in_body.changed_locals) }
+  in
+  receiving_loop context frame written pattern clauses body ~element_type ~changed
+    ~each_iteration:(fun ~head ~ends ->
+      (* The pull is part of the iteration, so the measure is compared from
+         the head, before it. *)
+      if context.terminates then
+        match measured head with
+        | Some before ->
+            List.iter
+              (fun (end_ : frame) ->
+                match measured end_ with
+                | Some after ->
+                    oblige context end_ Termination written.span
+                      "This loop's measure may not decrease." (smaller before after)
+                | None -> ())
+              ends
+        | None -> ())
+    ~start:(fun head -> some_parts context head element_type)
+    ~receive:(fun head before ->
+      let cursor = Ids.find id head.locals in
+      let havoc_mut (frame : frame) =
+        { frame with locals = Ids.add id (arrive context frame "changed" cursor_type) frame.locals }
+      in
+      let after, pulled =
+        contract_call ~lent_final:None context head iterable call_ path contract
+          [ (argument, iterable, cursor) ]
+          ~havoc_mut
+          ~substitution_of:(fun _ ->
+            [ ({ T.owner = cursor_trait; name = "Self" }, T.Type cursor_type) ])
+          ~instance:("[" ^ type_key cursor_type ^ "]")
+      in
+      let another = L.Apply (L.tester (constructor_name option_type (Some "Some")), [ pulled ]) in
+      let element = L.Apply (selector_name option_type (Some "Some") "value", [ pulled ]) in
+      let inside = restrict after another in
+      assume_valid context inside element_type element;
+      {
+        another;
+        element;
+        through = appended context inside element_type before element;
+        advance =
+          (fun (frame : frame) ->
+            {
+              frame with
+              locals = Ids.add id (Ids.find id after.locals) frame.locals;
+              spent = after.spent;
+            });
+      })
+
 (* A [for] loop that receives parts one at a time: from a yielding method
    it calls, or from a cursor it pulls. [start] is what was received before
    an iteration, at the head, and [receive] is what an iteration receives,
    having assumed what the method says of it. *)
-and receiving_loop context frame (written : statement) pattern clauses body ~element_type ~changed
-    ~start ~receive =
+and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (written : statement)
+    pattern clauses body ~element_type ~changed ~start ~receive =
   let entry = { frame with yielded = Some (empty_parts context frame element_type) } in
   check_invariants context entry clauses ~when_:"on entry to the loop";
   let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
@@ -5593,6 +5758,7 @@ and receiving_loop context frame (written : statement) pattern clauses body ~ele
   in
   let finished = block_value context inside body in
   let ends = (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues in
+  each_iteration ~head ~ends;
   let with_through (f : frame) = { f with loop = frame.loop; yielded = Some through } in
   loop_iterations context written head costs ~mark
     ~facts:(facts_since context facts_mark @ [ inside.condition ])
