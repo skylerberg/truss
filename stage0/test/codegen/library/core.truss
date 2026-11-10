@@ -1,0 +1,78 @@
+use standard::core
+
+test "an integer steps forward and back by a count, unless it would leave its type" {
+  let start: Int8 = -100
+  assert start.advanced(by: 5) == Some(-95)
+  assert start.advanced(by: 227) == Some(127)
+  assert start.advanced(by: 228) is None
+  assert start.advanced(by: 0) == Some(-100)
+  assert Int8.minimum.advanced(by: 255) == Some(127)
+  assert Int8.minimum.advanced(by: 256) is None
+  let high: Int8 = 100
+  assert high.retreated(by: 228) == Some(-128)
+  assert high.retreated(by: 229) is None
+  assert Int8.maximum.retreated(by: 255) == Some(-128)
+  let byte: UInt8 = 250
+  assert byte.advanced(by: 5) == Some(255)
+  assert byte.advanced(by: 6) is None
+  assert byte.retreated(by: 250) == Some(0)
+  assert byte.retreated(by: 251) is None
+  let wide: Int64 = -5
+  assert wide.advanced(by: 10) == Some(5)
+  assert Int64.minimum.advanced(by: USize.maximum) == Some(Int64.maximum)
+  assert Int64.maximum.retreated(by: USize.maximum) == Some(Int64.minimum)
+}
+
+test "the steps between two integers are counted, forward only" {
+  let low: Int8 = -128
+  assert low.steps_to(127) == Some(255)
+  assert low.steps_to(-128) == Some(0)
+  let high: Int8 = 127
+  assert high.steps_to(-128) is None
+  let byte: UInt8 = 3
+  assert byte.steps_to(10) == Some(7)
+  assert byte.steps_to(2) is None
+  assert Int64.minimum.steps_to(Int64.maximum) == Some(USize.maximum)
+}
+
+test "a collection folds, counts, and maps its elements" {
+  let items: List[Int64] = [1, 2, 3, 4]
+  assert items.fold(0, combine: fn(total, item) { total + item }) == 10
+  assert items.fold(1, combine: fn(total, item) { total * item }) == 24
+  assert items.count(fn(item) { item % 2 == 0 }) == 2
+  assert items.count(fn(item) { item > 9 }) == 0
+  let halves = items.filter_map(fn(item) { if item % 2 == 0 { Some(item / 2) } else { None } })
+  assert halves.length() == 2
+  assert halves[0] == 1
+  assert halves[1] == 2
+  let repeated = items.flat_map(fn(item) { [item, item] })
+  assert repeated.length() == 8
+  assert repeated[0] == 1
+  assert repeated[1] == 1
+  assert repeated[7] == 4
+  let none: List[Int64] = []
+  assert none.fold(7, combine: fn(total, item) { total + item }) == 7
+  assert none.flat_map(fn(item) { [item] }).length() == 0
+}
+
+test "the errors of parsing and converting say what went wrong" {
+  assert "${core::ParseIntegerError.Empty}" == "the text has no digits"
+  assert "${core::ParseIntegerError.InvalidDigit(offset: 3)}" == "the byte at offset 3 is not a digit"
+  assert "${core::ParseIntegerError.OutOfRange}" == "the number does not fit the type"
+  assert "${core::ParseFloatError.Invalid(offset: 0)}" == "the byte at offset 0 is not part of a number"
+  assert "${core::ConversionError()}" == "the value does not fit the type"
+}
+
+test "take empties an option and replace fills it, each giving what was there" {
+  var held: Option[String] = Some("a${1}")
+  let taken = mut held.take()
+  assert held is None
+  assert taken == Some("a1")
+  assert mut held.take() is None
+  let previous = mut held.replace("b${2}")
+  assert previous is None
+  assert held == Some("b2")
+  let replaced = mut held.replace("c${3}")
+  assert replaced == Some("b2")
+  assert held == Some("c3")
+}
