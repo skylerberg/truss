@@ -376,8 +376,8 @@ and into st (value : Core.expression) (destination : Lir.place) =
           block_into inner body (result_place inner))
         destination
   | Slice { call; _ } -> into st call destination
-  | Implies _ | Result | Old _ | Quantified _ | Yielded | Finished | Identical _ | Cost_function _
-  | Method_time _ ->
+  | Implies _ | Result | Old _ | Quantified _ | Yielded | Finished | Identical _
+  | Specification_function _ | Method_time _ ->
       bug "a specification-only expression in code that runs"
 
 (* Evaluates a call's arguments, one for each of the callee's parameters, in

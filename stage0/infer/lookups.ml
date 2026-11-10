@@ -108,7 +108,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       match env.output with
       | Some output -> output_type output
       | None -> bug "`result` is named where nothing is returned")
-  | Old | Identical | Cost_function _ ->
+  | Old | Identical | Specification_function _ ->
       state.tables.meanings.(value.id) <- Some Specification_value;
       error state Not_a_value value.span
         (Printf.sprintf "`%s` is applied to what it is about, as in `%s(...)`." text text)

@@ -116,7 +116,7 @@ let expression_children visit (node : expression) =
       List.iter
         (function Passed { value; _ } -> operand visit value | Default -> ())
         call.arguments
-  | Operator { arguments; _ } | Cost_function { arguments; _ } ->
+  | Operator { arguments; _ } | Specification_function { arguments; _ } ->
       List.iter visit.expression arguments
   | Compare { left; right; _ }
   | And (left, right)

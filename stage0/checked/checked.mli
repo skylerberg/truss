@@ -76,7 +76,7 @@ type meaning =
       (** A variant with no fields, or one used as a function. *)
   | Type_name of Types.ty  (** A type before a [.], such as [Shape] in [Shape.Circle]. *)
   | Generic_value of Types.parameter  (** A [USize] generic parameter. *)
-  | Specification_value  (** [result], [old], or a cost function. *)
+  | Specification_value  (** [result], [old], or a specification function. *)
 
 type literal =
   | Integer_value of Z.t

@@ -250,16 +250,17 @@ and kind =
   | Yielded  (** [yielded]: the sequence of values a yielding method has yielded so far. *)
   | Finished  (** [finished]: whether a yielding method has returned. *)
   | Identical of expression * expression  (** [identical(first, second)] *)
-  | Cost_function of { function_ : cost_function; arguments : expression list }
-      (** A cost function inside a [cost] bound: [log(count)], [power(base, exponent)],
-          [time(visit)], or [calls(visit)]. *)
+  | Specification_function of { function_ : specification_function; arguments : expression list }
+      (** A function that only a specification can call. [log(count)] and [power(base, exponent)]
+          are on [Integer], in any specification. [time(visit)] and [calls(visit)] are inside a
+          [cost] bound only. *)
   | Method_time of callee
       (** [time(Element.equal)] inside a [cost] bound: a bound on the time of any one call of a
           method of a trait that bounds a type parameter. The callee is a {!Trait_method} whose
           [self_type] is the type parameter and whose evidence is [Bound]. *)
 
 and capture = { local : local; type_ : Types.ty }
-and cost_function = Log | Power | Time | Calls
+and specification_function = Log | Power | Time | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
 
 (** One piece of an interpolated string. *)
