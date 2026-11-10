@@ -191,7 +191,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                       if not (unify state receiver_type type_) then
                         mismatch state inner.span ~expected:type_ ~found:receiver_type;
                       let mode : T.mode = match wanted with Mut -> Mut | Own -> Own | _ -> Read in
-                      check_mode state receiver.value
+                      check_mode state env receiver.value
                         { name = "self"; mode; type_; has_default = false }
                         receiver_type;
                       method_with_receiver state env ?expected value ~receiver:receiver.value
@@ -425,7 +425,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
     in
     (* A [mut self] method mutates its receiver, so every index expression
        in the receiver must use the [mut self] version of [at]. *)
-    (match chosen with Some (Path.Mut, _) -> mutable_place state base | _ -> ());
+    (match chosen with Some (Path.Mut, _) -> mutate state env ~by:Mut_mark base | _ -> ());
     chosen
   in
   let wrong_receiver versions =

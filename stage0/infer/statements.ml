@@ -81,8 +81,7 @@ and statement state env (written : statement) ~last : unit =
       binding_pattern state env written_pattern type_ ~mutable_ ~mode
   | Assignment { target = written_target; operator; value } -> (
       let target_type = expression state env written_target in
-      check_assignable state env written_target;
-      mutable_place state written_target;
+      mutate state env ~by:Assignment written_target;
       match operator with
       | Assign ->
           register_statement state written (fun () ->
@@ -180,13 +179,14 @@ and statement state env (written : statement) ~last : unit =
          loop variable's type comes from the header alone. *)
       let loop_element = ref None in
       in_statement state env iterable.span (fun () ->
-          let element = loop_iterable state env written ~mode inner in
+          let element, variable_mode = loop_iterable state env written ~mode inner in
           loop_element := Some element;
           (if inner != iterable then
              match state.tables.types.(inner.id) with
              | Some type_ -> record state iterable type_
              | None -> ());
-          binding_pattern state env written_pattern element ~mutable_:false ~mode);
+          if mode = T.Mut then mutate state env ~by:Mut_mark inner;
+          binding_pattern state env written_pattern element ~mutable_:false ~mode:variable_mode);
       List.iter
         (loop_clause state { env with loop_element = Option.map (resolve state) !loop_element })
         clauses;
@@ -239,7 +239,7 @@ and statement state env (written : statement) ~last : unit =
           (* A part given out to change is reached through the [mut] version
              of each index on the way to it. *)
           (match env.output with
-          | Some (Yields (Mut, _) | Lends (Mut, _)) -> mutable_place state inner
+          | Some (Yields (Mut, _) | Lends (Mut, _)) -> mutate state env ~by:Mut_mark inner
           | _ -> ());
           register_statement state written (fun () ->
               let mode =
@@ -275,6 +275,8 @@ and loop_clause state env (clause : loop_clause) =
 
 (* What a [for] loop drives: a range of built-in integers, a call to a
    [yields] method, a cursor, or the [each] method of the loop's mode. *)
+(* Checks the iterable of a [for] loop. Returns the type of the loop
+   variable and its mode. *)
 and loop_iterable state env (written : statement) ~mode (iterable : expression) =
   match iterable.kind with
   | Range { start = Some _; stop = Some _; inclusive; _ } -> (
@@ -293,7 +295,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
                        (T.show element));
                 true
               end);
-          element
+          (element, mode)
       | _ -> bug "a range is not of the range type")
   | _ -> (
       let type_ = normalize state (expression state env iterable) in
@@ -301,85 +303,35 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
         Option.bind (called iterable) (fun (inner : expression) -> state.tables.calls.(inner.id))
       in
       match (type_, call) with
-      | T.Cursor _, Some call ->
-          (* A call to a [yields] method drives the loop directly, with its
-             mark, as in [for x in mut items.each()]. What the call gives is
-             what it yields. *)
+      | T.Cursor { method_; _ }, Some call ->
+          (* The iterable is a call of a yielding method, as in
+             [for x in mut items.each()]. The loop iterates over that call.
+             The loop variable has the mode that the method yields with. *)
           state.tables.loops.(written.id) <- Some (Yielding { call; mode });
-          call.result
-      | T.Error _, _ | T.Hole, _ -> type_
+          let yields =
+            match function_signature state method_ with
+            | Some (Ok { output = Yields (yields, _); _ }) -> yields
+            | _ -> mode
+          in
+          (call.result, yields)
+      | T.Error _, _ | T.Hole, _ -> (type_, mode)
       | _ -> (
           match each_call state iterable.span type_ mode with
           | Some (call, element) ->
               state.tables.loops.(written.id) <- Some (Yielding { call; mode });
-              element
+              (element, mode)
           | None -> (
               let cursor = trait_reference (core "Cursor") in
               match implements state type_ cursor with
               | Some _ ->
                   state.tables.loops.(written.id) <- Some (Pulled { cursor = type_ });
-                  associated state type_ cursor "Element" ~at:iterable.span
+                  (associated state type_ cursor "Element" ~at:iterable.span, mode)
               | None ->
-                  error state Not_indexable iterable.span
-                    (Printf.sprintf
-                       "`%s` has no `each` that takes %s, so a `for` loop cannot go over it this \
-                        way."
-                       (T.show type_)
-                       (Path.show_receiver
-                          (match mode with T.Read -> Read | Mut -> Mut | Own -> Own))))))
-
-(* An assignment's left side must be a place that may change. *)
-and check_assignable state env (written : expression) =
-  let rec root (value : expression) =
-    match value.kind with
-    | Name path -> (
-        match target state path.last with
-        | Some (Local id) -> (
-            let captured =
-              match (state.lambdas, Hashtbl.find_opt state.binding_spans id) with
-              | (lambda : span) :: _, Some (binding : span) ->
-                  binding.start < lambda.start || binding.start >= lambda.stop
-              | _ -> false
-            in
-            match Hashtbl.find_opt state.locals id with
-            | _ when captured -> `Captured path.last.text
-            | Some local ->
-                if local.mutable_ || local.mode = Mut then `Ok else `Fixed path.last.text
-            | None -> `Ok)
-        | Some (Definition _) -> `Fixed path.last.text
-        | _ -> `Ok)
-    | Self_value -> if env.self_mode = T.Mut then `Ok else `Fixed "self"
-    | Member (base, _) -> root base
-    | Bracket (base, _) -> root base
-    | Parenthesized inner -> root inner
-    | Mode (Mut, inner) when Option.is_some (marked_call state inner) -> root inner
-    | Call _ -> (
-        (* A part that is lent [mut] may change; one lent read-only may not. *)
-        match lent state value with
-        | Some T.Mut -> `Ok
-        | Some _ -> `Lent
-        | None -> `Not_a_place)
-    | _ -> `Not_a_place
-  in
-  match root written with
-  | `Ok -> ()
-  | `Captured name ->
-      report state Not_assignable written.span
-        (Printf.sprintf
-           "A lambda cannot change what it captures, and `%s` is from outside it. Return the new \
-            value instead, or use a loop."
-           name)
-  | `Fixed name ->
-      report state Not_assignable written.span
-        (Printf.sprintf
-           "`%s` cannot change here: only a `var`, a `mut` parameter, or `mut self`, and their \
-            parts, can be assigned."
-           name)
-  | `Lent ->
-      report state Not_assignable written.span
-        ~fixes:[ fix "Mark it `mut`." [ insert written.span.start "mut " ] ]
-        "This part is lent read-only, so it cannot change. Mark the place it is lent from `mut`, \
-         so that it is lent `mut`."
-  | `Not_a_place ->
-      report state Not_assignable written.span
-        "Only a place, such as a variable, a field, or an element, can be assigned."
+                  ( error state Not_indexable iterable.span
+                      (Printf.sprintf
+                         "`%s` has no `each` that takes %s, so a `for` loop cannot go over it this \
+                          way."
+                         (T.show type_)
+                         (Path.show_receiver
+                            (match mode with T.Read -> Read | Mut -> Mut | Own -> Own))),
+                    mode ))))

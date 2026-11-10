@@ -315,6 +315,11 @@ let () =
      }\n"
     "{ app::main::Worker.reset(mut self)(mut place lent Index.at for List[Worker] by \
      standard::list::impl Index for List[Element](mut place workers, place index) lends mut) }";
+  expect_body "a `for` loop over a `mut` element indexes with the `mut self` version of `at`"
+    "fn g(rows: mut List[List[Int64]]) {\n  for cell in mut rows[0] {\n    cell = 0\n  }\n}\n"
+    "{ for mut cell in yielding_call standard::list::List.each(mut self)[Int64](mut place lent \
+     Index.at for List[List[Int64]] by standard::list::impl Index for List[Element](mut place \
+     rows, 0) lends mut) { cell = 0 } }";
   test "a `lends mut` method yields a mutable place" (fun () ->
       let found =
         printed_body

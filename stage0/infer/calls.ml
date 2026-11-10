@@ -90,7 +90,7 @@ and argument_value state env (value : expression) (parameter : T.parameter_info)
     alias_expression state value inner
   end;
   let conversion = coerce state env ~argument:true value ~found ~expected:parameter.type_ in
-  check_mode state value parameter found;
+  check_mode state env value parameter found;
   conversion
 
 (* Matches arguments to parameters: a label, a bare name that matches a
