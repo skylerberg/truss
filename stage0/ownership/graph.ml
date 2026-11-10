@@ -541,8 +541,17 @@ and arms_ builder frontier scrutinees (arms : Core.arm list) ~body =
     (fun (arm : Core.arm) ->
       let bound = List.concat_map pattern_locals arm.patterns in
       let frontier = binds builder frontier bound scrutinees arm.origin in
+      (* If a guard is false, the arms after it are tried against the same
+         scrutinees. So what the scrutinees refer to is lent while a guard
+         is evaluated, and the guard cannot change it. *)
       let frontier =
-        match arm.guard with Some guard -> expression builder frontier guard | None -> frontier
+        match arm.guard with
+        | Some guard ->
+            let added = reserve builder (List.concat_map (pending builder) scrutinees) in
+            let frontier = expression builder frontier guard in
+            release builder added;
+            frontier
+        | None -> frontier
       in
       emit builder (body frontier arm.body) (Ends bound) arm.origin)
     arms
