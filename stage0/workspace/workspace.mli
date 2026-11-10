@@ -1,5 +1,4 @@
-(** The inputs of a build, and the queries that parse them. See TYPECHECKER.md, "One definition at a
-    time, through queries".
+(** The inputs of a build, and the queries that parse them.
 
     The driver sets each package, with its manifest and the modules it has, and the text of each
     module's file. Everything else is a query, so changing one file re-parses that file alone, and a
@@ -15,7 +14,7 @@ type package = {
   modules : Path.module_ list;
   usize_bits : int;
       (** 64 when the manifest says the package runs only on 64-bit targets, and 32 otherwise, so
-          that its code holds for both widths of [USize]. See DESIGN.md, "Integers". *)
+          that its code holds for both widths of [USize]. *)
 }
 
 val packages : (string, package) Query.input

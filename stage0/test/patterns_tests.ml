@@ -1,5 +1,4 @@
-(* The tests of exhaustiveness and reachability. See TYPECHECKER.md,
-   "Exhaustiveness and reachability". *)
+(* The tests of exhaustiveness and reachability. *)
 
 open Harness
 open Support

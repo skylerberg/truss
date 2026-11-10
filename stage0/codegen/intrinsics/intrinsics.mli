@@ -1,5 +1,4 @@
-(* Lowering the operations of [standard::intrinsic]. See CODEGEN.md, "The
-   system interface".
+(* Lowering the operations of [standard::intrinsic].
 
    Every operation is written into the caller's LIR, never called: the
    arithmetic as primitive operations, which the C compiler sees whole, and

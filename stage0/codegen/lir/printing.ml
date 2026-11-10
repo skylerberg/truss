@@ -1,4 +1,4 @@
-(* The LIR as text, for reading and for tests. See lir.mli. *)
+(* The LIR as text, for reading and for tests. *)
 
 open Ir
 

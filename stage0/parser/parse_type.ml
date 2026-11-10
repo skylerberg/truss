@@ -1,5 +1,5 @@
-(* Types, generic parameters and bounds, and clauses. See PARSER.md and
-   GRAMMAR.md. A clause holds expressions, which [Parse_hooks] reaches. *)
+(* Types, generic parameters and bounds, and clauses. A clause holds
+   expressions, which [Parse_hooks] reaches. *)
 
 open Token
 open Syntax

@@ -1,5 +1,4 @@
-(** Which parts of a definition the parser built as written. See TYPECHECKER.md, "Broken
-    definitions".
+(** Which parts of a definition the parser built as written.
 
     A part is one signature, one body, or one type's definition, of a definition or of a member of a
     trait, an [impl], or a capability. It is broken when one of the definition's recovered spans

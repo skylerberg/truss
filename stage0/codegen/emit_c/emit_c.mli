@@ -1,4 +1,4 @@
-(* The LIR as C. See CODEGEN.md, "The C that is emitted".
+(* The LIR as C.
 
    A file declares everything it uses itself and includes no header: the
    fixed-width integers, every type its code names, the prototype of every

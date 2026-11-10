@@ -1,5 +1,5 @@
 (* The C that every program links with: the runtime's few functions, and
-   the generated [main]. See CODEGEN.md, "Program startup and failure".
+   the generated [main].
 
    The runtime is one fixed file per target, compiled once and cached, so
    unlike generated code it includes the system's headers: its declarations

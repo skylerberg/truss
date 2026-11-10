@@ -1,5 +1,5 @@
 (* What lowering reads: its context, and the code, the signature, and the
-   tables of the instance being lowered. See lower.ml. *)
+   tables of the instance being lowered. *)
 
 module S = Syntax
 module C = Checked

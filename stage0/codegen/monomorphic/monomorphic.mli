@@ -1,5 +1,5 @@
 (* From the type checker's types to code generation's ground types and
-   shapes. See CODEGEN.md, "Instances" and "Data layout".
+   shapes.
 
    An instance's code is lowered with its type arguments substituted, so
    every type in it must come out ground: no generic parameter, no

@@ -1,6 +1,6 @@
 (* A call: which callee it names, and the calls of types' own methods,
    traits' methods, written in full or through a receiver, and
-   capabilities'. See TYPECHECKER.md, "Members" and "Modes at calls". *)
+   capabilities'. *)
 
 open Syntax
 module T = Types

@@ -1,4 +1,4 @@
-(** The tokens the lexer produces. See LEXER.md, "Tokens". *)
+(** The tokens the lexer produces. *)
 
 type span = Source.span = private { start : int; stop : int }
 

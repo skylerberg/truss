@@ -1,6 +1,5 @@
 (* A worktree on disk: the packages in it, the modules of each, and the
-   metadata that tells whether a file changed without reading it. See
-   DATABASE.md, "Watching files". *)
+   metadata that tells whether a file changed without reading it. *)
 
 type stamp = { size : int; modified : float; inode : int }
 

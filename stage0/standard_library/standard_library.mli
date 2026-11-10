@@ -1,5 +1,4 @@
-(** The standard library's source, which ships inside the compiler. See TYPECHECKER.md, "The
-    prelude". *)
+(** The standard library's source, which ships inside the compiler. *)
 
 val package : string
 

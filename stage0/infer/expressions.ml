@@ -1,5 +1,4 @@
-(* Checking bodies: bidirectional, one statement at a time. See
-   TYPECHECKER.md, "Checking bodies" and "Patterns".
+(* Checking bodies: bidirectional, one statement at a time.
 
    An expression is either checked against an expected type, which flows
    in from annotations, parameters, and operators, or has its type

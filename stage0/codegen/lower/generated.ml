@@ -1,6 +1,6 @@
 (* Instances lowering makes rather than finds in source: capability
    entries and tables, the real implementations' evidence, the program's
-   main, adapters, and [any] entries and tables. See lower.ml. *)
+   main, adapters, and [any] entries and tables. *)
 
 open Definitions
 open Lowering

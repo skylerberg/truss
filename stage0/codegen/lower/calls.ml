@@ -1,6 +1,6 @@
 (* Calls: what a call reaches, its arguments evaluated and passed, inlined
    lending and yielding methods, defaults, and the [requires] checks of a
-   checked build. See lower.ml. *)
+   checked build. *)
 
 open Definitions
 open Lowering

@@ -1,5 +1,5 @@
 (* [truss new]: a directory with a manifest naming the package and a
-   [main.truss] with an empty [main]. See CLI.md, "Making a package". *)
+   [main.truss] with an empty [main]. *)
 
 (* A package's name is the first part of every module path, so it must be
    a [lower_snake_case] name: lowercase letters and digits in words joined

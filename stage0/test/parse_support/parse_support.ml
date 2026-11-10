@@ -1,6 +1,5 @@
 (* What the parser's tests share: parsing a text, and asserting what it
-   gives, a tree, statements, or one diagnostic with its fixes. See
-   PARSER.md, "Testing". *)
+   gives, a tree, statements, or one diagnostic with its fixes. *)
 
 open Harness
 

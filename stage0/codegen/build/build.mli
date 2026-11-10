@@ -1,5 +1,5 @@
 (* Turning LIR into a program: emitting C, compiling it to object files
-   through a cache, and linking. See CODEGEN.md, "Building".
+   through a cache, and linking.
 
    An object file is keyed by its C text, the C compiler's identity, and the
    flags, so a file whose C came out the same compiles nothing, and a new

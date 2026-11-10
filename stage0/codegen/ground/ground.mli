@@ -1,5 +1,5 @@
 (* Ground types: fully monomorphic types, as code generation sees them after
-   every type argument is substituted. See CODEGEN.md, "Instances".
+   every type argument is substituted.
 
    The type checker's [Types.ty] also has generic parameters, projections,
    inference variables, literals, holes, and [Error]. None of them can reach

@@ -1,4 +1,4 @@
-(** Name resolution. See TYPECHECKER.md, "Name resolution".
+(** Name resolution.
 
     Resolution turns a definition's tree into its resolved form: tables, keyed by the tree's node
     ids, of what every name refers to and how each [name[...]] reads. The tree is unchanged. A
@@ -42,7 +42,7 @@ type resolved = {
   brackets : bracket option array;  (** By the id of each [Bracket] expression. *)
   holes : (Syntax.id * (string * value) list) list;
       (** Each [todo], by its id, in the order of the walk, with the values in scope there, by name
-          in order, as SYNTAX.md's "Unfinished code" lists them for a hole. *)
+          in order. *)
   diagnostics : Diagnostic.t list;  (** Relative to the definition. *)
 }
 

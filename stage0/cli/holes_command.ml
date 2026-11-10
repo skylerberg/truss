@@ -1,6 +1,5 @@
 (* [truss holes]: every [todo], with the type it must have, the names in
-   scope there, and what it blocks. See CLI.md, "truss holes", and
-   DESIGN.md, "Unfinished code". *)
+   scope there, and what it blocks. *)
 
 module Names = Resolve.Names
 

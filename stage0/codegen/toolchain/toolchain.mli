@@ -1,5 +1,4 @@
-(* Finding the C compiler, knowing exactly which one it is, and running it.
-   See CODEGEN.md, "The C that is emitted" and "Building". *)
+(* Finding the C compiler, knowing exactly which one it is, and running it. *)
 
 type t = {
   compiler : string;  (** The path or name it is run by *)

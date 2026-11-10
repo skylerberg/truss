@@ -1,5 +1,4 @@
-(* Resolving the names of one definition. See TYPECHECKER.md, "Name
-   resolution".
+(* Resolving the names of one definition.
 
    The walk keeps a scope of what each name means at each point, and records
    in tables keyed by node id what each name refers to and how each

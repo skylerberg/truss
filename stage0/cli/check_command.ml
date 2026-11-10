@@ -1,5 +1,5 @@
 (* [truss check]: every diagnostic in the package, and with [--fix], the
-   fixes that have no alternative applied. See CLI.md, "Checking". *)
+   fixes that have no alternative applied. *)
 
 (* The fixes of one round in one file: each diagnostic's only fix, leaving
    out any whose edits overlap an earlier one's, since applying both could
@@ -69,8 +69,7 @@ let fix (project : Project.t) =
   round 1 []
 
 (* A check also lists where this worktree's changes meet those of other
-   open worktrees of the repository, as DATABASE.md's "Parallel work" asks.
-   Overlaps are not diagnostics: nothing is wrong with either worktree's
+   open worktrees of the repository. Overlaps are not diagnostics: nothing is wrong with either worktree's
    code, so they do not change the exit status. *)
 let run ~directory ~fix:fixing ~json =
   let project = Project.load directory in

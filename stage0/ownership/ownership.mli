@@ -1,5 +1,4 @@
-(** Moves, loans, and views, within each function. See TYPECHECKER.md, "Ownership: moves, loans, and
-    views". *)
+(** Moves, loans, and views, within each function. *)
 
 type result = {
   diagnostics : Diagnostic.t list;  (** In the definition's own offsets. *)

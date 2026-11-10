@@ -1,5 +1,5 @@
 (* Expressions: the place an expression names or a temporary holding its
-   value, and an expression written into a destination. See lower.ml. *)
+   value, and an expression written into a destination. *)
 
 open Definitions
 open Lowering

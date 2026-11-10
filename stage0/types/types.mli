@@ -1,5 +1,4 @@
-(** Types, and the interfaces of definitions. See TYPECHECKER.md, "Types" and "Checking signatures
-    and definitions".
+(** Types, and the interfaces of definitions.
 
     This library is shared by the type checker, the prover, and code generation, which depend on it
     without depending on the checker. *)

@@ -1,5 +1,4 @@
-(** Exhaustiveness and reachability of patterns. See TYPECHECKER.md, "Exhaustiveness and
-    reachability". *)
+(** Exhaustiveness and reachability of patterns. *)
 
 val definition_diagnostics : (Resolve.Names.key, Diagnostic.t list) Query.query
 (** A definition's pattern errors, in its own offsets: arms not covered, unreachable arms and

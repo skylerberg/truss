@@ -1,5 +1,5 @@
 (* Blocks and statements: [let], assignment, loops and what drives them,
-   and what a block's value is. See TYPECHECKER.md, "Statements and blocks". *)
+   and what a block's value is. *)
 
 open Syntax
 module T = Types

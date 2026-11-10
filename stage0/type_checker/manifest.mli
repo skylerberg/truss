@@ -1,5 +1,4 @@
-(** Reading a package's [truss.toml]: the subset of TOML a manifest uses. See SYNTAX.md, "Package
-    manifest". *)
+(** Reading a package's [truss.toml]: the subset of TOML a manifest uses. *)
 
 type t = {
   name : string;

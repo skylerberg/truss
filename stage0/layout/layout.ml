@@ -1,7 +1,7 @@
 (* Inserts NEWLINE tokens and matches brackets, pulling raw tokens one at a
-   time. See LEXER.md, "Layout".
+   time.
 
-   The line-break rule is GRAMMAR.md's, which is Scala's: outside ( and [, a
+   The line-break rule is Scala's: outside ( and [, a
    line break becomes a NEWLINE when the token before it can end a statement
    and the token after it can begin one. *)
 
@@ -13,7 +13,7 @@ let can_end = function
   | Keyword (True | False | Self_value | Self_type | Todo | Unreachable | Break | Continue | Return)
     ->
       true
-  (* GRAMMAR.md leaves out the foreign tokens, which no rule accepts. Treating
+  (* No grammar rule accepts the foreign tokens. Treating
      `++` and `--` as both ending and beginning a statement keeps `i++` on a
      line of its own apart from its neighbors, so the parser can report it
      and go on. *)

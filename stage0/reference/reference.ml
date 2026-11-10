@@ -1,6 +1,6 @@
 (* The reference parser: GRAMMAR.md's grammar, built by Menhir from
    grammar/truss.mly, which the tests and the fuzzer check the hand-written
-   parser against. See PARSER.md, "Testing". It is built only for them. *)
+   parser against. It is built only for them. *)
 
 open Token
 

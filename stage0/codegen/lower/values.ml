@@ -1,5 +1,5 @@
 (* Values: literals, templates, collections, [provide], [?], lambdas,
-   [with], interpolation, [any], and [echo]. See lower.ml. *)
+   [with], interpolation, [any], and [echo]. *)
 
 open Definitions
 open Lowering
@@ -23,7 +23,7 @@ let rec negated_literal st ty (inner : S.expression) =
   | Float_value value -> constant_of st ty (Float_value (Float.neg value))
 
 (* A [[...]] literal: an [Array], filled in place, or a [List], with storage
-   of exactly its length, which costs the one allocation DESIGN.md counts. *)
+   of exactly its length, in one allocation. *)
 and list_into st (ty : Ground.ty) (elements : S.expression list) destination ~span =
   match ty with
   | Named

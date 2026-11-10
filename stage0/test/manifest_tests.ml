@@ -1,4 +1,4 @@
-(* The tests of reading truss.toml. See SYNTAX.md, "Package manifest". *)
+(* The tests of reading truss.toml. *)
 
 open Harness
 module Manifest = Type_checker.Manifest

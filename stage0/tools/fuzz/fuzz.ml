@@ -1,6 +1,6 @@
 (* Fuzzing the lexer. This is a tool, not a test: run it by hand to look for
    inputs that break the lexer, and turn each one it finds into a focused
-   test. See IMPLEMENTATION.md, "Testing".
+   test.
 
      dune exec stage0/tools/fuzz/fuzz.exe -- [--seed N] [--count N] FILE...
 

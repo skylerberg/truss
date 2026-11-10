@@ -1,4 +1,4 @@
-(** The parser's entry point. See PARSER.md.
+(** The parser's entry point.
 
     A file's tokens are split into pieces, its [use] lines and its definitions, and each piece is
     parsed on its own, from its own slice of the tokens. Its tree depends only on its own tokens,
@@ -33,7 +33,7 @@ val parse : Source.t -> Token.t array -> Syntax.file * Diagnostic.t list
 (** A whole file, with its diagnostics in the file's offsets, in order of position. *)
 
 val spelled_words : string list
-(** The names the parser recognizes by their spelling, in [cost] clauses. GRAMMAR.md lists them. *)
+(** The names the parser recognizes by their spelling, in [cost] clauses. *)
 
 (** {1 The documents' examples}
 

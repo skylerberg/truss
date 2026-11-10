@@ -1,6 +1,6 @@
 (* Calls and the evidence they need: what a trait method reaches, how each
    argument is passed, capabilities' and [any] values' tables, and calling
-   an instance; with literals and the standard types lowering builds. See lower.ml. *)
+   an instance; with literals and the standard types lowering builds. *)
 
 open Definitions
 open Lowering

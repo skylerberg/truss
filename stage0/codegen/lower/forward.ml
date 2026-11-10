@@ -1,7 +1,7 @@
 (* Forward references that tie lowering's mutually recursive parts
    together: [Calls], [Values], and [Matching] call through them to the
    parts after them, [Expressions] and [Statements], which [Lower] sets
-   them to. See lower.ml. *)
+   them to. *)
 
 open Lowering
 module S = Syntax

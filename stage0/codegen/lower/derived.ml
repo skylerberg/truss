@@ -1,5 +1,5 @@
 (* Derived implementations of Equal, Ordered, Hash, and Default, from a
-   type's shape. See lower.ml. *)
+   type's shape. *)
 
 open Definitions
 open Lowering

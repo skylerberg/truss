@@ -1,6 +1,6 @@
 (* A file's context, and the C types and definitions of what it names:
    structs, unions, function types, and environments, each defined once and
-   before what uses it. See emit_c.ml. *)
+   before what uses it. *)
 
 open C_runtime
 

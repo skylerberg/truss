@@ -146,7 +146,7 @@ let () =
   emit_ranges "xid_start" (property_ranges "DerivedCoreProperties.txt" "XID_Start");
   emit_ranges "xid_continue" (property_ranges "DerivedCoreProperties.txt" "XID_Continue");
 
-  (* Forbidden characters, as GRAMMAR.md lists them: Bidi_Control; Cc except
+  (* Forbidden characters: Bidi_Control; Cc except
      tab, line feed, and carriage return, which the scanner handles itself;
      and Default_Ignorable_Code_Point except the joiners and the variation
      selectors. *)

@@ -1,4 +1,4 @@
-(* Code as C: intrinsics, calls, statements, terminators, and functions. See emit_c.ml. *)
+(* Code as C: intrinsics, calls, statements, terminators, and functions. *)
 
 open C_runtime
 open C_types

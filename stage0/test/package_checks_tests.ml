@@ -1,5 +1,4 @@
-(* The tests of the checks across a package. See TYPECHECKER.md, "Traits
-   and impls across a package" and "Recursive types". *)
+(* The tests of the checks across a package. *)
 
 open Harness
 open Support

@@ -1,6 +1,5 @@
 (* The command line's tests. Each gives a small package or input and states
-   one fact about what a command makes of it. See CLI.md and
-   IMPLEMENTATION.md, "Testing". *)
+   one fact about what a command makes of it. *)
 
 open Cli
 

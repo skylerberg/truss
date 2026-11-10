@@ -1,5 +1,4 @@
-(* The table from definitions to files and lines. See CODEGEN.md,
-   "Positions".
+(* The table from definitions to files and lines.
 
    Generated code reports a position as its definition's anchor and a line
    and column within the definition, so a definition's C never changes when
