@@ -1,20 +1,20 @@
-(* What a constant's value and a default may be: an expression worked out
-   when compiling, which every build works out alike.
+(* Checks constant expressions: the value of a constant, and a default. The
+   compiler evaluates a constant expression, and every build gets the same
+   value.
 
-   It is made of literals, operators on built-in numbers and [Bool], other
-   constants, and records, variants, and collections built of such parts. It
-   calls no function, so it uses no capability and always ends, and it names
-   nothing but definitions. The check reads the checked form, where a call
-   says what it calls and a name what it means, and not how the expression
-   is spelled. *)
+   A constant expression is made of literals, operators on built-in numbers
+   and [Bool], other constants, and records, variants, and collections of
+   these. It calls no function, so it uses no capability and always
+   terminates, and it names only definitions. The check reads the checked
+   tables, which say what each call calls and what each name refers to, not
+   the spelling of the expression. *)
 
 open Syntax
 module T = Types
 open State
 open Pattern_typing
 
-(* The first part of an expression that a constant expression cannot
-   have. *)
+(* The first sub-expression that is not allowed in a constant expression. *)
 let rec offending state (value : expression) : expression option =
   let first = List.find_map (offending state) in
   let built_in (operand : expression) =
@@ -46,10 +46,9 @@ let rec offending state (value : expression) : expression option =
   | Map entries -> first (List.concat_map (fun (key, item) -> [ key; item ]) entries)
   | _ -> Some value
 
-(* Integer arithmetic the checker can work out must stay within its type and
-   divide by nothing that is zero, since what would stop the program where
-   it runs is an error where it is written. A negated literal is checked
-   as a literal. *)
+(* Integer arithmetic that the checker can evaluate must not overflow its
+   type or divide by zero. What would stop the program at run time is an
+   error at compile time here. A negated literal is checked as a literal. *)
 let rec check_arithmetic state (value : expression) =
   let worked_out part =
     Interface.Constants.expression state.database ~visiting:[] state.resolved part
@@ -69,8 +68,8 @@ let rec check_arithmetic state (value : expression) =
   | _ -> ());
   Syntax_walk.expression_parts ~expression:(check_arithmetic state) ~statement:ignore value
 
-(* A constant's value, or a default when [default], which has been checked
-   against its type. *)
+(* Checks the value of a constant, or a default if [default] is true. The
+   expression has already been checked against its type. *)
 let check state ~default (value : expression) =
   (match offending state value with
   | Some part ->

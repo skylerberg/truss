@@ -1,5 +1,5 @@
-(* Blocks and statements: [let], assignment, loops and what drives them,
-   and what a block's value is. *)
+(* Checks blocks and statements: [let], assignment, loops and what they
+   iterate over, and the value of a block. *)
 
 open Syntax
 module T = Types
@@ -14,8 +14,8 @@ open Lookups
 open Pattern_typing
 open Operators
 
-(* A block used as a value: its last expression is checked against the
-   block's expected type, in the enclosing statement. *)
+(* A block used as a value. Its last expression is checked against the
+   expected type of the block, as part of the enclosing statement. *)
 let rec block_value state env ?expected (written : block) =
   let rec go = function
     | [] -> T.unit
@@ -31,8 +31,8 @@ let rec block_value state env ?expected (written : block) =
   in
   go written.statements
 
-(* A statement. A statement that is not the last of its block must have
-   type [Unit] or [Never]: any other value is unused. *)
+(* Checks a statement. A statement that is not the last of its block must
+   have type [Unit] or [Never]: a value of any other type would be unused. *)
 and statement state env (written : statement) ~last : unit =
   match written.kind with
   | Expression value ->
@@ -177,8 +177,9 @@ and statement state env (written : statement) ~last : unit =
         | Mode (Own, inner) when Option.is_none (marked_call state inner) -> (T.Own, inner)
         | _ -> (T.Read, iterable)
       in
-      (* The loop's header settles its own types before the body, so the
-         loop variable's type comes from the header alone. *)
+      (* The types in the loop's header are inferred before the body is
+         checked, so the type of the loop variable depends only on the
+         header. *)
       let loop_element = ref None in
       in_statement state env iterable.span (fun () ->
           let element, variable_mode = loop_iterable state env written ~mode inner in
@@ -238,8 +239,8 @@ and statement state env (written : statement) ~last : unit =
           in
           let found = expression state env ~expected:element inner in
           if inner != value then record state value found;
-          (* A part given out to change is reached through the [mut] version
-             of each index on the way to it. *)
+          (* A part that is yielded or lent [mut] is mutated, so the index
+             expressions in it use the [mut self] version of [at]. *)
           (match env.output with
           | Some (Yields (Mut, _) | Lends (Mut, _)) -> mutate state env ~by:Mut_mark inner
           | _ -> ());
@@ -275,8 +276,9 @@ and loop_clause state env (clause : loop_clause) =
       | Big_o value | At_most value | Exactly value -> ignore (expression state env value)
       | Finite -> ())
 
-(* What a [for] loop drives: a range of built-in integers, a call to a
-   [yields] method, a cursor, or the [each] method of the loop's mode. *)
+(* What a [for] loop iterates over: a range of built-in integers, a call of
+   a yielding method, a cursor, or the [each] method that the loop's mode
+   selects. *)
 (* Checks the iterable of a [for] loop. Returns the type of the loop
    variable and its mode. *)
 and loop_iterable state env (written : statement) ~mode (iterable : expression) =
