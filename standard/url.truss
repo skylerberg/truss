@@ -273,7 +273,7 @@ internal fn parse_host(text: StringSlice, from: USize, to: USize) -> Result[Host
   cost time O(to - from)
 {
   let name = text.part(from, to: to)
-  match network::address_of(name) {
+  match network::parse_address(name) {
     Ok(address) => {
       if address is Version4(_) {
         return Ok(Host.Address(address))
@@ -311,7 +311,7 @@ internal fn parse_authority(text: StringSlice, from: USize, to: USize) -> Result
     if close == to {
       return Err(ParseError.InvalidHost)
     }
-    match network::address_of(text.part(start + 1, to: close)) {
+    match network::parse_address(text.part(start + 1, to: close)) {
       Ok(address) => {
         if address is Version4(_) {
           return Err(ParseError.InvalidHost)

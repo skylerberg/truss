@@ -260,6 +260,218 @@ void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usiz
 
 let threads =
   {|
+/* The alternate signal stack that the runtime installed on a thread it
+   created: the stack's memory, and the alternate stack that the thread
+   had before. */
+struct t_thread_signal_stack {
+  void *memory;
+  stack_t previous;
+};
+
+/* Installs an alternate signal stack on the calling thread, so that the
+   handler of a stack overflow can run. */
+static void t_thread_signal_stack_install(struct t_thread_signal_stack *installed) {
+  stack_t stack;
+  memset(&stack, 0, sizeof stack);
+  installed->memory = malloc(65536);
+  if (installed->memory == NULL) return;
+  stack.ss_sp = installed->memory;
+  stack.ss_size = 65536;
+  if (sigaltstack(&stack, &installed->previous) != 0) {
+    free(installed->memory);
+    installed->memory = NULL;
+  }
+}
+
+/* Restores the alternate signal stack that the thread had before and
+   frees the installed one. A thread calls this before it exits.
+   AddressSanitizer unmaps the alternate stack that it finds at thread
+   exit, and aborts if that stack is not the one it installed. */
+static void t_thread_signal_stack_remove(struct t_thread_signal_stack *installed) {
+  if (installed->memory == NULL) return;
+  sigaltstack(&installed->previous, NULL);
+  free(installed->memory);
+}
+
+/* The attributes of a thread that the runtime creates: a stack as large as
+   the main thread's, so that the recursion depth limit is the same on
+   every thread. */
+static void t_thread_attributes(pthread_attr_t *attributes) {
+  struct rlimit limit;
+  size_t stack = (size_t)8 << 20;
+  if (getrlimit(RLIMIT_STACK, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY &&
+      limit.rlim_cur >= ((rlim_t)1 << 16) && limit.rlim_cur <= ((rlim_t)1 << 30))
+    stack = (size_t)limit.rlim_cur;
+  pthread_attr_init(attributes);
+  pthread_attr_setstacksize(attributes, stack);
+}
+
+/* Coroutines.
+
+   A coroutine is a function call with its own stack. It runs only between
+   a resume and its next suspend. A scheduler that runs one task at a
+   time, such as a test's, runs each task as a coroutine: it resumes the
+   task it chose, and a task that must block suspends.
+
+   Each coroutine is a thread. [running] says whether the coroutine or its
+   resumer runs, and the other one blocks on [switched] until [running]
+   changes. Exactly one of the two runs at any time, so the data they
+   share needs no other lock. */
+struct t_coroutine {
+  pthread_t thread;
+  pthread_mutex_t lock;
+  pthread_cond_t switched;
+  int running;
+  int finished;
+  void (*code)(void *environment, uint64_t item);
+  void *environment;
+  uint64_t item;
+};
+
+static _Thread_local struct t_coroutine *t_coroutine_self;
+
+static void t_coroutine_switch(struct t_coroutine *coroutine, int to_coroutine) {
+  coroutine->running = to_coroutine;
+  pthread_cond_broadcast(&coroutine->switched);
+  while (coroutine->running == to_coroutine && !coroutine->finished)
+    pthread_cond_wait(&coroutine->switched, &coroutine->lock);
+}
+
+static void *t_coroutine_main(void *argument) {
+  struct t_coroutine *coroutine = argument;
+  t_coroutine_self = coroutine;
+  struct t_thread_signal_stack signal_stack;
+  t_thread_signal_stack_install(&signal_stack);
+  pthread_mutex_lock(&coroutine->lock);
+  while (!coroutine->running) pthread_cond_wait(&coroutine->switched, &coroutine->lock);
+  pthread_mutex_unlock(&coroutine->lock);
+  coroutine->code(coroutine->environment, coroutine->item);
+  t_thread_signal_stack_remove(&signal_stack);
+  pthread_mutex_lock(&coroutine->lock);
+  coroutine->finished = 1;
+  coroutine->running = 0;
+  pthread_cond_broadcast(&coroutine->switched);
+  pthread_mutex_unlock(&coroutine->lock);
+  return NULL;
+}
+
+t_usize t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void *environment,
+                               uint64_t item) {
+  struct t_coroutine *coroutine = malloc(sizeof *coroutine);
+  if (coroutine == NULL) t_out_of_memory();
+  pthread_mutex_init(&coroutine->lock, NULL);
+  pthread_cond_init(&coroutine->switched, NULL);
+  coroutine->running = 0;
+  coroutine->finished = 0;
+  coroutine->code = code;
+  coroutine->environment = environment;
+  coroutine->item = item;
+  pthread_attr_t attributes;
+  t_thread_attributes(&attributes);
+  int failed = pthread_create(&coroutine->thread, &attributes, t_coroutine_main, coroutine);
+  pthread_attr_destroy(&attributes);
+  if (failed) t_out_of_memory();
+  return (t_usize)coroutine;
+}
+
+/* Runs a coroutine until it suspends or its function returns. Returns 1 if
+   it suspended. Returns 0 if its function returned, and frees the
+   coroutine. */
+uint8_t t_runtime_coroutine_resume(t_usize handle) {
+  struct t_coroutine *coroutine = (struct t_coroutine *)handle;
+  pthread_mutex_lock(&coroutine->lock);
+  t_coroutine_switch(coroutine, 1);
+  int finished = coroutine->finished;
+  pthread_mutex_unlock(&coroutine->lock);
+  if (!finished) return 1;
+  pthread_join(coroutine->thread, NULL);
+  pthread_mutex_destroy(&coroutine->lock);
+  pthread_cond_destroy(&coroutine->switched);
+  free(coroutine);
+  return 0;
+}
+
+/* Called in a coroutine. Switches to the code that resumed the coroutine,
+   and returns when the coroutine is resumed again. */
+void t_runtime_coroutine_suspend(void) {
+  struct t_coroutine *coroutine = t_coroutine_self;
+  if (coroutine == NULL) t_runtime_compiler_bug();
+  pthread_mutex_lock(&coroutine->lock);
+  t_coroutine_switch(coroutine, 0);
+  pthread_mutex_unlock(&coroutine->lock);
+}
+
+/* Tasks.
+
+   Tasks do not have their own threads yet. [t_runtime_tasks_spawn] calls
+   the task's function and returns when it returns, so the tasks of a
+   group run sequentially. That is correct for tasks that never block on
+   one another. A task that waits on a key would deadlock, because the
+   task that would wake it cannot run, so [t_runtime_tasks_wait] panics. */
+struct t_group {
+  int cancelled;
+};
+
+uint64_t t_runtime_tasks_open(void) {
+  struct t_group *group = malloc(sizeof *group);
+  if (group == NULL) t_out_of_memory();
+  group->cancelled = 0;
+  return (uint64_t)(uintptr_t)group;
+}
+
+uint8_t t_runtime_tasks_spawn(uint64_t handle, void (*code)(void *environment, uint64_t item),
+                              void *environment, uint64_t item) {
+  struct t_group *group = (struct t_group *)(uintptr_t)handle;
+  if (group->cancelled) return 0;
+  code(environment, item);
+  return 1;
+}
+
+int32_t t_runtime_tasks_join(uint64_t handle) {
+  free((struct t_group *)(uintptr_t)handle);
+  return 0;
+}
+
+int32_t t_runtime_tasks_cancel(uint64_t handle) {
+  struct t_group *group = (struct t_group *)(uintptr_t)handle;
+  if (group->cancelled) return 0;
+  group->cancelled = 1;
+  return 1;
+}
+
+int32_t t_runtime_tasks_cancelled(void) { return 0; }
+
+uint64_t t_runtime_tasks_watch(uint64_t key) {
+  (void)key;
+  return 0;
+}
+
+int32_t t_runtime_tasks_wait(uint64_t key, uint64_t ticket) {
+  (void)key;
+  (void)ticket;
+  pthread_mutex_lock(&t_text_lock);
+  t_text_length = 0;
+  t_text_string("deadlock: a task waited for another task, which cannot run until this one ends");
+  t_end(t_panicked, "panic: ", 101);
+}
+
+int32_t t_runtime_tasks_wake(uint64_t key) {
+  (void)key;
+  return 0;
+}
+
+int32_t t_runtime_tasks_lock(uint64_t mutex) {
+  (void)mutex;
+  return 0;
+}
+
+int32_t t_runtime_tasks_unlock(uint64_t mutex) {
+  (void)mutex;
+  return 0;
+}
+
+int32_t t_runtime_tasks_yield(void) { return 0; }
+
 struct t_branch {
   void (*run)(void *environment);
   void *environment;
@@ -442,8 +654,6 @@ static void t_wait_for(struct t_worker *self, struct t_job *job) {
   }
 }
 
-static void t_thread_stack(void);
-
 static void *t_worker_main(void *argument) {
   struct t_worker *self = argument;
   t_self = self;
@@ -456,7 +666,9 @@ static void *t_worker_main(void *argument) {
   sigdelset(&all, SIGFPE);
   sigdelset(&all, SIGILL);
   pthread_sigmask(SIG_SETMASK, &all, NULL);
-  t_thread_stack();
+  /* A worker never exits, so its alternate signal stack is never removed. */
+  struct t_thread_signal_stack signal_stack;
+  t_thread_signal_stack_install(&signal_stack);
   unsigned idle = 0;
   for (;;) {
     struct t_job *job = t_find(self);
@@ -486,15 +698,8 @@ static void t_pool_start(void) {
   t_worker_count = (size_t)count;
   if (count == 1) return;
   t_self = &t_workers[0];
-  /* A branch may recurse as deeply on any thread as on the first. */
-  struct rlimit limit;
-  size_t stack = (size_t)8 << 20;
-  if (getrlimit(RLIMIT_STACK, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY &&
-      limit.rlim_cur >= ((rlim_t)1 << 16) && limit.rlim_cur <= ((rlim_t)1 << 30))
-    stack = (size_t)limit.rlim_cur;
   pthread_attr_t attributes;
-  pthread_attr_init(&attributes);
-  pthread_attr_setstacksize(&attributes, stack);
+  t_thread_attributes(&attributes);
   pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
   for (long index = 1; index < count; index++) {
     pthread_t thread;
@@ -585,17 +790,6 @@ void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, ui
                               void *environment, uint64_t first, uint64_t last) {
   struct t_range whole = {body, environment, first, last, ((last - first) >> 8) + 1};
   t_range_run(&whole);
-}
-
-/* A thread's own stack for the handler of a stack overflow, as the first
-   thread has. */
-static void t_thread_stack(void) {
-  stack_t stack;
-  memset(&stack, 0, sizeof stack);
-  stack.ss_sp = malloc(65536);
-  if (stack.ss_sp == NULL) return;
-  stack.ss_size = 65536;
-  sigaltstack(&stack, NULL);
 }
 
 #endif

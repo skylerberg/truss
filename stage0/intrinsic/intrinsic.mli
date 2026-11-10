@@ -171,6 +171,23 @@ type operation =
           environment the process was started with, [NAME=value], as a view, with [found] false
           where the environment has no entry there. It counts from the first entry each time, so it
           never reads past the last. *)
+  | Coroutine_start
+      (** [coroutine_start(work: own fn(UInt64), item: UInt64) -> USize]: creates a suspended
+          coroutine that will call [work(item)] on its own stack, and returns its handle. A
+          scheduler that runs one task at a time, such as a test's, runs each task as a coroutine.
+      *)
+  | Coroutine_resume
+      (** [coroutine_resume(coroutine) -> Bool]: runs the coroutine until it suspends or its
+          function returns. Returns true if it suspended. Returns false if its function returned,
+          which also frees the coroutine. *)
+  | Coroutine_suspend
+      (** [coroutine_suspend()]: called in a coroutine. Switches to the code that resumed the
+          coroutine, and returns when the coroutine is resumed again. *)
+  | Tasks_spawn
+      (** [tasks_spawn(group, work: own fn(UInt64), item: UInt64) -> Bool]: spawns a runtime task
+          that calls [work(item)], and returns true. If the group is already cancelled, spawns
+          nothing and returns false. The runtime's other task functions take only integers, so they
+          are rows of the C library's table. *)
   | System_is_os of Libc.os
       (** [system_is_linux()], [system_is_macos()]: whether the program is built for that operating
           system, which lowering knows *)
@@ -185,3 +202,9 @@ val operations : operation list
 val operation_name : operation -> string
 val operation_path : operation -> Path.t
 val operation_of_path : Path.t -> operation option
+
+val uses : operation -> Path.t list
+(** The capabilities that a call of the operation requires. An intrinsic takes no evidence, so only
+    the capability check reads this. The check allows the call where each capability is available,
+    and in the body of a method of a capability's [impl]. Every operation returns the empty list for
+    now. *)

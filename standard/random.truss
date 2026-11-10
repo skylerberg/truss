@@ -3,7 +3,7 @@ use standard::intrinsic
 public opaque type Generator(state: Array[UInt64, 4])
   derives Plain
 
-internal fn mixed(state: UInt64) -> UInt64
+internal fn splitmix64(state: UInt64) -> UInt64
   cost time O(1)
 {
   let first = (state ^ (state >> 30)).wrapping_multiply(0xbf58476d1ce4e5b9)
@@ -11,7 +11,7 @@ internal fn mixed(state: UInt64) -> UInt64
   second ^ (second >> 31)
 }
 
-internal fn rejected_below(bound: UInt64) -> UInt64
+internal fn rejection_threshold(bound: UInt64) -> UInt64
   requires bound > 0
   ensures result < bound
   cost time O(1)
@@ -19,7 +19,7 @@ internal fn rejected_below(bound: UInt64) -> UInt64
   (UInt64.maximum - bound + 1) % bound
 }
 
-internal fn distance(from: Int64, to: Int64) -> UInt64
+internal fn range_width(from: Int64, to: Int64) -> UInt64
   requires from <= to
   ensures result == to - from
   cost time O(1)
@@ -27,7 +27,7 @@ internal fn distance(from: Int64, to: Int64) -> UInt64
   to.to_unsigned_bits().wrapping_subtract(from.to_unsigned_bits())
 }
 
-internal fn offset_from(start: Int64, offset: UInt64) -> Int64
+internal fn add_offset(start: Int64, offset: UInt64) -> Int64
   requires start + offset <= Int64.maximum
   ensures result == start + offset
   cost time O(1)
@@ -63,7 +63,7 @@ public fn Generator.seeded(seed: UInt64) -> Generator
   let second = first.wrapping_add(0x9e3779b97f4a7c15)
   let third = second.wrapping_add(0x9e3779b97f4a7c15)
   let fourth = third.wrapping_add(0x9e3779b97f4a7c15)
-  Generator(state: [mixed(first), mixed(second), mixed(third), mixed(fourth)])
+  Generator(state: [splitmix64(first), splitmix64(second), splitmix64(third), splitmix64(fourth)])
 }
 
 public fn Generator.new() -> Generator
@@ -104,7 +104,7 @@ public fn Generator.below(mut self, bound: UInt64) -> UInt64
   ensures result < bound
   cost time O(1)
 {
-  let rejected = rejected_below(bound)
+  let rejected = rejection_threshold(bound)
   let attempts: USize = 64
   for _ in 0..attempts {
     let value = mut self.next()
@@ -121,11 +121,11 @@ public fn Generator.integer(mut self, range: Range[Int64]) -> Int64
   cost time O(1)
 {
   let last = if range.inclusive { range.stop } else { range.stop - 1 }
-  let span = distance(range.start, to: last)
+  let span = range_width(range.start, to: last)
   if span == UInt64.maximum {
     return mut self.next().to_signed_bits()
   }
-  offset_from(range.start, offset: mut self.below(span + 1))
+  add_offset(range.start, offset: mut self.below(span + 1))
 }
 
 public fn Generator.index(mut self, length: USize) -> USize
@@ -239,7 +239,7 @@ public fn below(bound: UInt64) -> UInt64
   requires bound > 0
   ensures result < bound
 {
-  let rejected = rejected_below(bound)
+  let rejected = rejection_threshold(bound)
   let attempts: USize = 64
   for _ in 0..attempts {
     let value = Random.next()

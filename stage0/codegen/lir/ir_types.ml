@@ -123,6 +123,16 @@ type intrinsic =
   | Evidence_fill
       (** [(evidence's address, implementation, table, captured evidence...)]: fills evidence a
           [provide] builds *)
+  | Coroutine_start
+      (** [(function value, item: UInt64) -> USize]: creates a suspended coroutine that will call
+          the function with the item on its own stack, and returns its handle *)
+  | Coroutine_resume
+      (** [(coroutine: USize) -> Bool]: runs the coroutine until it suspends, and returns true, or
+          until its function returns, and then frees the coroutine and returns false *)
+  | Coroutine_suspend  (** [()]: in a coroutine, switches to the code that resumed it *)
+  | Tasks_spawn
+      (** [(group: UInt64, function value, item: UInt64) -> Bool]: spawns a runtime task that calls
+          the function with the item, and returns true. Returns false if the group is cancelled. *)
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
@@ -176,6 +186,12 @@ type region =
       (** Once for each part of a range of [UInt64] indexes. The two locals hold the first and the
           last index of the part the region is to cover, and where the region is reached they hold
           the whole range's. *)
+  | Task of { function_value : local; item : local }
+      (** As a task, once each time control reaches the region. Outlining assigns the nested
+          function made from the region to [function_value], a local whose type is a function that
+          takes a [UInt64]. The code after the region spawns it. [item] is a [UInt64] local that the
+          region reads: it is the nested function's argument, and the code before the region assigns
+          it the value that the task is spawned with. *)
 
 type statement =
   | Assign of place * rvalue

@@ -96,14 +96,14 @@ internal fn longest_zero_run(octets: Array[UInt8, 16]) -> ZeroRun
   best
 }
 
-internal fn is_mapped(octets: Array[UInt8, 16]) -> Bool
+internal fn is_ipv4_mapped(octets: Array[UInt8, 16]) -> Bool
   cost time O(1)
 {
   (forall index in 0..10 => octets[index] == 0) && octets[10] == 255 && octets[11] == 255
 }
 
 internal fn write_groups(output: mut TextBuilder, octets: Array[UInt8, 16]) {
-  if is_mapped(octets) {
+  if is_ipv4_mapped(octets) {
     mut output.write("::ffff:")
     write_dotted(mut output, first: octets[12], second: octets[13], third: octets[14], fourth: octets[15])
     return
@@ -138,9 +138,9 @@ impl Display for IpAddress {
   }
 }
 
-internal type Octet(value: UInt8, end: USize)
+internal type ParsedOctet(value: UInt8, end: USize)
 
-internal fn octet_at(text: StringSlice, from: USize) -> Result[Octet, AddressError]
+internal fn parse_octet(text: StringSlice, from: USize) -> Result[ParsedOctet, AddressError]
   requires from <= text.length()
   ensures !(result is Ok(octet) && (octet.end <= from || octet.end > text.length()))
   ensures !(result is Err(error) && error.offset > text.length())
@@ -164,10 +164,10 @@ internal fn octet_at(text: StringSlice, from: USize) -> Result[Octet, AddressErr
   if index == from || value > 255 || (index - from > 1 && text.byte(from) == 48) {
     return Err(AddressError(offset: from))
   }
-  Ok(Octet(value: intrinsic::convert(value), end: index))
+  Ok(ParsedOctet(value: intrinsic::convert(value), end: index))
 }
 
-internal fn after(text: StringSlice, from: USize, byte: UInt8) -> Result[USize, AddressError]
+internal fn expect_byte(text: StringSlice, from: USize, byte: UInt8) -> Result[USize, AddressError]
   requires from <= text.length()
   ensures !(result is Ok(next) && (next != from + 1 || next > text.length()))
   ensures !(result is Err(error) && error.offset > text.length())
@@ -180,22 +180,22 @@ internal fn after(text: StringSlice, from: USize, byte: UInt8) -> Result[USize, 
   }
 }
 
-internal type Quad(octets: Array[UInt8, 4], end: USize)
+internal type ParsedQuad(octets: Array[UInt8, 4], end: USize)
 
-internal fn quad_at(text: StringSlice, from: USize) -> Result[Quad, AddressError]
+internal fn parse_dotted_quad(text: StringSlice, from: USize) -> Result[ParsedQuad, AddressError]
   requires from <= text.length()
   ensures !(result is Ok(quad) && (quad.end <= from || quad.end > text.length()))
   ensures !(result is Err(error) && error.offset > text.length())
   cost time O(1)
 {
-  let first = octet_at(text, from: from)?
-  let second = octet_at(text, from: after(text, from: first.end, byte: 46)?)?
-  let third = octet_at(text, from: after(text, from: second.end, byte: 46)?)?
-  let fourth = octet_at(text, from: after(text, from: third.end, byte: 46)?)?
-  Ok(Quad(octets: [first.value, second.value, third.value, fourth.value], end: fourth.end))
+  let first = parse_octet(text, from: from)?
+  let second = parse_octet(text, from: expect_byte(text, from: first.end, byte: 46)?)?
+  let third = parse_octet(text, from: expect_byte(text, from: second.end, byte: 46)?)?
+  let fourth = parse_octet(text, from: expect_byte(text, from: third.end, byte: 46)?)?
+  Ok(ParsedQuad(octets: [first.value, second.value, third.value, fourth.value], end: fourth.end))
 }
 
-internal fn dotted_at(text: StringSlice, from: USize) -> Bool
+internal fn is_dotted_quad_at(text: StringSlice, from: USize) -> Bool
   requires from <= text.length()
   cost time O(1)
 {
@@ -228,7 +228,7 @@ internal fn hexadecimal_value(byte: UInt8) -> UInt16
 
 internal type Group(value: UInt16, end: USize)
 
-internal fn group_at(text: StringSlice, from: USize) -> Result[Group, AddressError]
+internal fn parse_group(text: StringSlice, from: USize) -> Result[Group, AddressError]
   requires from <= text.length()
   ensures !(result is Ok(found) && (found.end <= from || found.end > text.length()))
   ensures !(result is Err(error) && error.offset > text.length())
@@ -255,56 +255,56 @@ internal fn group_at(text: StringSlice, from: USize) -> Result[Group, AddressErr
   Ok(Group(value: value, end: index))
 }
 
-internal type Reading(groups: Array[UInt16, 8], count: USize, gap: USize, index: USize, pending: Bool)
+internal type Ipv6Parser(groups: Array[UInt16, 8], count: USize, gap: USize, index: USize, pending: Bool)
 
-internal fn Reading.holds(self, text: StringSlice) -> Bool
+internal fn Ipv6Parser.holds(self, text: StringSlice) -> Bool
   cost time O(1)
 {
   self.count <= 8 && (self.gap == 9 || self.gap <= self.count) && self.index <= text.length()
 }
 
-internal fn Reading.with_quad(self, text: StringSlice) -> Result[Reading, AddressError]
+internal fn Ipv6Parser.with_quad(self, text: StringSlice) -> Result[Ipv6Parser, AddressError]
   requires self.holds(text)
   requires self.count <= 6
   ensures !(result is Ok(next) && !(next.holds(text) && next.index > self.index))
   ensures !(result is Err(error) && error.offset > text.length())
   cost time O(1)
 {
-  let quad = quad_at(text, from: self.index)?
+  let quad = parse_dotted_quad(text, from: self.index)?
   var groups = self.groups
   groups[self.count] = intrinsic::convert[UInt8, UInt16](quad.octets[0]) * 256 + intrinsic::convert[UInt8, UInt16](quad.octets[1])
   groups[self.count + 1] = intrinsic::convert[UInt8, UInt16](quad.octets[2]) * 256 + intrinsic::convert[UInt8, UInt16](quad.octets[3])
   if quad.end != text.length() {
     return Err(AddressError(offset: quad.end))
   }
-  Ok(Reading(groups: groups, count: self.count + 2, gap: self.gap, index: quad.end, pending: false))
+  Ok(Ipv6Parser(groups: groups, count: self.count + 2, gap: self.gap, index: quad.end, pending: false))
 }
 
-internal fn Reading.with_group(self, text: StringSlice) -> Result[Reading, AddressError]
+internal fn Ipv6Parser.with_group(self, text: StringSlice) -> Result[Ipv6Parser, AddressError]
   requires self.holds(text)
   requires self.count <= 7
   ensures !(result is Ok(next) && !(next.holds(text) && next.index > self.index))
   ensures !(result is Err(error) && error.offset > text.length())
   cost time O(1)
 {
-  let found = group_at(text, from: self.index)?
+  let found = parse_group(text, from: self.index)?
   var groups = self.groups
   groups[self.count] = found.value
   let count = self.count + 1
   if found.end == text.length() {
-    return Ok(Reading(groups: groups, count: count, gap: self.gap, index: found.end, pending: false))
+    return Ok(Ipv6Parser(groups: groups, count: count, gap: self.gap, index: found.end, pending: false))
   }
-  let colon = after(text, from: found.end, byte: 58)?
+  let colon = expect_byte(text, from: found.end, byte: 58)?
   if colon < text.length() && text.byte(colon) == 58 {
     if self.gap != 9 {
       return Err(AddressError(offset: colon))
     }
-    return Ok(Reading(groups: groups, count: count, gap: count, index: colon + 1, pending: false))
+    return Ok(Ipv6Parser(groups: groups, count: count, gap: count, index: colon + 1, pending: false))
   }
-  Ok(Reading(groups: groups, count: count, gap: self.gap, index: colon, pending: true))
+  Ok(Ipv6Parser(groups: groups, count: count, gap: self.gap, index: colon, pending: true))
 }
 
-internal fn Reading.next(self, text: StringSlice) -> Result[Reading, AddressError]
+internal fn Ipv6Parser.next(self, text: StringSlice) -> Result[Ipv6Parser, AddressError]
   requires self.holds(text)
   ensures !(result is Ok(next) && !(next.holds(text) && next.index > self.index))
   ensures !(result is Err(error) && error.offset > text.length())
@@ -312,14 +312,14 @@ internal fn Reading.next(self, text: StringSlice) -> Result[Reading, AddressErro
 {
   if self.count == 8 {
     Err(AddressError(offset: self.index))
-  } else if self.count <= 6 && dotted_at(text, from: self.index) {
+  } else if self.count <= 6 && is_dotted_quad_at(text, from: self.index) {
     self.with_quad(text)
   } else {
     self.with_group(text)
   }
 }
 
-internal fn Reading.octets(self) -> Option[Array[UInt8, 16]]
+internal fn Ipv6Parser.octets(self) -> Option[Array[UInt8, 16]]
   requires self.count <= 8
   requires self.gap == 9 || self.gap <= self.count
   cost time O(1)
@@ -342,12 +342,12 @@ internal fn Reading.octets(self) -> Option[Array[UInt8, 16]]
   Some(octets)
 }
 
-internal fn groups_address(text: StringSlice) -> Result[IpAddress, AddressError]
+internal fn address_from_groups(text: StringSlice) -> Result[IpAddress, AddressError]
   ensures !(result is Err(error) && error.offset > text.length())
   cost time O(text.length())
 {
   let starts_with_gap = text.length() >= 2 && text.byte(0) == 58 && text.byte(1) == 58
-  var reading = Reading(
+  var reading = Ipv6Parser(
     groups: [0, 0, 0, 0, 0, 0, 0, 0],
     count: 0,
     gap: if starts_with_gap { 0 } else { 9 },
@@ -367,18 +367,18 @@ internal fn groups_address(text: StringSlice) -> Result[IpAddress, AddressError]
   }
 }
 
-internal fn address_of(text: StringSlice) -> Result[IpAddress, AddressError]
+internal fn parse_address(text: StringSlice) -> Result[IpAddress, AddressError]
   ensures !(result is Err(error) && error.offset > text.length())
   cost time O(text.length())
 {
-  if dotted_at(text, from: 0) {
-    let quad = quad_at(text, from: 0)?
+  if is_dotted_quad_at(text, from: 0) {
+    let quad = parse_dotted_quad(text, from: 0)?
     if quad.end != text.length() {
       return Err(AddressError(offset: quad.end))
     }
     Ok(IpAddress.Version4(quad.octets))
   } else {
-    groups_address(text)
+    address_from_groups(text)
   }
 }
 
@@ -388,13 +388,13 @@ internal fn address_within(text: StringSlice, from: USize, to: USize) -> Result[
   ensures !(result is Err(error) && error.offset > text.length())
   cost time O(text.length())
 {
-  match address_of(text.part(from, to: to)) {
+  match parse_address(text.part(from, to: to)) {
     Ok(address) => Ok(address)
     Err(error) => Err(AddressError(offset: from + error.offset))
   }
 }
 
-internal fn number_at(text: StringSlice, from: USize, limit: UInt32) -> Result[UInt32, AddressError]
+internal fn parse_number(text: StringSlice, from: USize, limit: UInt32) -> Result[UInt32, AddressError]
   requires from <= text.length()
   requires limit <= 65535
   ensures !(result is Ok(value) && value > limit)
@@ -427,7 +427,7 @@ internal fn number_at(text: StringSlice, from: USize, limit: UInt32) -> Result[U
   Ok(value)
 }
 
-internal fn position_of(text: StringSlice, byte: UInt8) -> USize
+internal fn find_byte(text: StringSlice, byte: UInt8) -> USize
   ensures result <= text.length()
   ensures result == text.length() || text.byte(result) == byte
   cost time O(text.length())
@@ -449,7 +449,7 @@ impl text::Parse for IpAddress {
   fn parse(text: StringSlice) -> Result[IpAddress, AddressError]
     ensures !(result is Err(error) && error.offset > text.length())
   {
-    address_of(text)
+    parse_address(text)
   }
 }
 
@@ -479,7 +479,7 @@ impl text::Parse for SocketAddress {
     ensures !(result is Err(error) && error.offset > text.length())
   {
     let bracketed = text.length() > 0 && text.byte(0) == 91
-    let close = position_of(text, byte: if bracketed { 93 } else { 58 })
+    let close = find_byte(text, byte: if bracketed { 93 } else { 58 })
     if close == text.length() {
       return Err(AddressError(offset: close))
     }
@@ -487,8 +487,8 @@ impl text::Parse for SocketAddress {
     if bracketed != (address is Version6(_)) {
       return Err(AddressError(offset: 0))
     }
-    let colon = if bracketed { after(text, from: close + 1, byte: 58)? } else { close + 1 }
-    let port = number_at(text, from: colon, limit: 65535)?
+    let colon = if bracketed { expect_byte(text, from: close + 1, byte: 58)? } else { close + 1 }
+    let port = parse_number(text, from: colon, limit: 65535)?
     Ok(SocketAddress(address: address, port: intrinsic::convert(port)))
   }
 }
@@ -507,7 +507,7 @@ impl Display for AddressError {
 public opaque type IpNetwork(address: IpAddress, prefix_length: UInt8)
   derives Plain, Equal, Hash
 
-internal fn masked(octet: UInt8, index: USize, prefix_length: UInt8) -> UInt8
+internal fn mask_octet(octet: UInt8, index: USize, prefix_length: UInt8) -> UInt8
   requires index < 16
   cost time O(1)
 {
@@ -533,7 +533,7 @@ public fn IpNetwork.new(address: IpAddress, prefix_length: UInt8) -> Option[IpNe
       var kept = octets
       let count: USize = 4
       for index in 0..count {
-        kept[index] = masked(octets[index], index: index, prefix_length: prefix_length)
+        kept[index] = mask_octet(octets[index], index: index, prefix_length: prefix_length)
       }
       Some(IpNetwork(address: IpAddress.Version4(kept), prefix_length: prefix_length))
     }
@@ -544,7 +544,7 @@ public fn IpNetwork.new(address: IpAddress, prefix_length: UInt8) -> Option[IpNe
       var kept = octets
       let count: USize = 16
       for index in 0..count {
-        kept[index] = masked(octets[index], index: index, prefix_length: prefix_length)
+        kept[index] = mask_octet(octets[index], index: index, prefix_length: prefix_length)
       }
       Some(IpNetwork(address: IpAddress.Version6(kept), prefix_length: prefix_length))
     }
@@ -566,12 +566,12 @@ impl text::Parse for IpNetwork {
   fn parse(text: StringSlice) -> Result[IpNetwork, AddressError]
     ensures !(result is Err(error) && error.offset > text.length())
   {
-    let slash = position_of(text, byte: 47)
+    let slash = find_byte(text, byte: 47)
     if slash == text.length() {
       return Err(AddressError(offset: slash))
     }
     let address = address_within(text, from: 0, to: slash)?
-    let length = number_at(text, from: slash + 1, limit: 128)?
+    let length = parse_number(text, from: slash + 1, limit: 128)?
     match IpNetwork.new(address, prefix_length: intrinsic::convert(length)) {
       Some(network) => Ok(network)
       None => Err(AddressError(offset: slash + 1))
