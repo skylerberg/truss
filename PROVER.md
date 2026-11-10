@@ -981,7 +981,7 @@ sanitized runs, test the trusted base against real executions.
   sequence; `List`'s `mut` index and its `each(mut self)`, which need a
   part lent `mut` by an intrinsic to be written back when the lend ends;
   `List.push`, whose `amortized` bound needs the cost of growing a
-  storage; `partition_point`'s logarithmic bound; and `Index` on a `List`
+  storage; and `Index` on a `List`
   or a `Slice`, whose `requires` the trait does not state. Until it all
   proves, `truss build` keeps the run-time checks.
 - **Contracts for the intrinsic module's floats and system calls.** Only

@@ -80,6 +80,7 @@ public fn List[Element].partition_point(self, before: (fn(Element) -> Bool cost 
     invariant low <= high
     invariant high <= self.length()
     decreases high - low
+    cost time O((log(self.length()) - log(high - low)) * time(before))
   {
     let middle = low + (high - low) / 2
     if before(self[middle]) {
