@@ -49,17 +49,24 @@ public fn Int8.saturating_multiply(self, other: Int8) -> Int8
 public fn Int8.floor_divide(self, divisor: Int8) -> Int8
   requires divisor != 0
   requires self != Int8.minimum || divisor != -1
+  ensures divisor > 0 ==> result * divisor <= self && self < (result + 1) * divisor
+  ensures divisor < 0 ==> result * divisor >= self && self > (result + 1) * divisor
   cost time O(1)
 {
-  todo
+  let quotient = self / divisor
+  if self % divisor != 0 && (self < 0) != (divisor < 0) { quotient - 1 } else { quotient }
 }
 
 public fn Int8.floor_modulo(self, divisor: Int8) -> Int8
   requires divisor != 0
   requires self != Int8.minimum || divisor != -1
+  ensures divisor > 0 ==> 0 <= result && result < divisor
+  ensures divisor < 0 ==> divisor < result && result <= 0
+  ensures result == self - self.floor_divide(divisor) * divisor
   cost time O(1)
 {
-  todo
+  let remainder = self % divisor
+  if remainder != 0 && (remainder < 0) != (divisor < 0) { remainder + divisor } else { remainder }
 }
 
 public fn Int8.absolute_difference(self, other: Int8) -> UInt8
@@ -252,17 +259,24 @@ public fn Int16.saturating_multiply(self, other: Int16) -> Int16
 public fn Int16.floor_divide(self, divisor: Int16) -> Int16
   requires divisor != 0
   requires self != Int16.minimum || divisor != -1
+  ensures divisor > 0 ==> result * divisor <= self && self < (result + 1) * divisor
+  ensures divisor < 0 ==> result * divisor >= self && self > (result + 1) * divisor
   cost time O(1)
 {
-  todo
+  let quotient = self / divisor
+  if self % divisor != 0 && (self < 0) != (divisor < 0) { quotient - 1 } else { quotient }
 }
 
 public fn Int16.floor_modulo(self, divisor: Int16) -> Int16
   requires divisor != 0
   requires self != Int16.minimum || divisor != -1
+  ensures divisor > 0 ==> 0 <= result && result < divisor
+  ensures divisor < 0 ==> divisor < result && result <= 0
+  ensures result == self - self.floor_divide(divisor) * divisor
   cost time O(1)
 {
-  todo
+  let remainder = self % divisor
+  if remainder != 0 && (remainder < 0) != (divisor < 0) { remainder + divisor } else { remainder }
 }
 
 public fn Int16.absolute_difference(self, other: Int16) -> UInt16
@@ -455,17 +469,24 @@ public fn Int32.saturating_multiply(self, other: Int32) -> Int32
 public fn Int32.floor_divide(self, divisor: Int32) -> Int32
   requires divisor != 0
   requires self != Int32.minimum || divisor != -1
+  ensures divisor > 0 ==> result * divisor <= self && self < (result + 1) * divisor
+  ensures divisor < 0 ==> result * divisor >= self && self > (result + 1) * divisor
   cost time O(1)
 {
-  todo
+  let quotient = self / divisor
+  if self % divisor != 0 && (self < 0) != (divisor < 0) { quotient - 1 } else { quotient }
 }
 
 public fn Int32.floor_modulo(self, divisor: Int32) -> Int32
   requires divisor != 0
   requires self != Int32.minimum || divisor != -1
+  ensures divisor > 0 ==> 0 <= result && result < divisor
+  ensures divisor < 0 ==> divisor < result && result <= 0
+  ensures result == self - self.floor_divide(divisor) * divisor
   cost time O(1)
 {
-  todo
+  let remainder = self % divisor
+  if remainder != 0 && (remainder < 0) != (divisor < 0) { remainder + divisor } else { remainder }
 }
 
 public fn Int32.absolute_difference(self, other: Int32) -> UInt32
@@ -658,17 +679,24 @@ public fn Int64.saturating_multiply(self, other: Int64) -> Int64
 public fn Int64.floor_divide(self, divisor: Int64) -> Int64
   requires divisor != 0
   requires self != Int64.minimum || divisor != -1
+  ensures divisor > 0 ==> result * divisor <= self && self < (result + 1) * divisor
+  ensures divisor < 0 ==> result * divisor >= self && self > (result + 1) * divisor
   cost time O(1)
 {
-  todo
+  let quotient = self / divisor
+  if self % divisor != 0 && (self < 0) != (divisor < 0) { quotient - 1 } else { quotient }
 }
 
 public fn Int64.floor_modulo(self, divisor: Int64) -> Int64
   requires divisor != 0
   requires self != Int64.minimum || divisor != -1
+  ensures divisor > 0 ==> 0 <= result && result < divisor
+  ensures divisor < 0 ==> divisor < result && result <= 0
+  ensures result == self - self.floor_divide(divisor) * divisor
   cost time O(1)
 {
-  todo
+  let remainder = self % divisor
+  if remainder != 0 && (remainder < 0) != (divisor < 0) { remainder + divisor } else { remainder }
 }
 
 public fn Int64.absolute_difference(self, other: Int64) -> UInt64
@@ -861,17 +889,24 @@ public fn ISize.saturating_multiply(self, other: ISize) -> ISize
 public fn ISize.floor_divide(self, divisor: ISize) -> ISize
   requires divisor != 0
   requires self != ISize.minimum || divisor != -1
+  ensures divisor > 0 ==> result * divisor <= self && self < (result + 1) * divisor
+  ensures divisor < 0 ==> result * divisor >= self && self > (result + 1) * divisor
   cost time O(1)
 {
-  todo
+  let quotient = self / divisor
+  if self % divisor != 0 && (self < 0) != (divisor < 0) { quotient - 1 } else { quotient }
 }
 
 public fn ISize.floor_modulo(self, divisor: ISize) -> ISize
   requires divisor != 0
   requires self != ISize.minimum || divisor != -1
+  ensures divisor > 0 ==> 0 <= result && result < divisor
+  ensures divisor < 0 ==> divisor < result && result <= 0
+  ensures result == self - self.floor_divide(divisor) * divisor
   cost time O(1)
 {
-  todo
+  let remainder = self % divisor
+  if remainder != 0 && (remainder < 0) != (divisor < 0) { remainder + divisor } else { remainder }
 }
 
 public fn ISize.absolute_difference(self, other: ISize) -> USize
@@ -1063,16 +1098,18 @@ public fn UInt8.saturating_multiply(self, other: UInt8) -> UInt8
 
 public fn UInt8.floor_divide(self, divisor: UInt8) -> UInt8
   requires divisor != 0
+  ensures result == self / divisor
   cost time O(1)
 {
-  todo
+  self / divisor
 }
 
 public fn UInt8.floor_modulo(self, divisor: UInt8) -> UInt8
   requires divisor != 0
+  ensures result == self % divisor
   cost time O(1)
 {
-  todo
+  self % divisor
 }
 
 public fn UInt8.absolute_difference(self, other: UInt8) -> UInt8
@@ -1242,16 +1279,18 @@ public fn UInt16.saturating_multiply(self, other: UInt16) -> UInt16
 
 public fn UInt16.floor_divide(self, divisor: UInt16) -> UInt16
   requires divisor != 0
+  ensures result == self / divisor
   cost time O(1)
 {
-  todo
+  self / divisor
 }
 
 public fn UInt16.floor_modulo(self, divisor: UInt16) -> UInt16
   requires divisor != 0
+  ensures result == self % divisor
   cost time O(1)
 {
-  todo
+  self % divisor
 }
 
 public fn UInt16.absolute_difference(self, other: UInt16) -> UInt16
@@ -1421,16 +1460,18 @@ public fn UInt32.saturating_multiply(self, other: UInt32) -> UInt32
 
 public fn UInt32.floor_divide(self, divisor: UInt32) -> UInt32
   requires divisor != 0
+  ensures result == self / divisor
   cost time O(1)
 {
-  todo
+  self / divisor
 }
 
 public fn UInt32.floor_modulo(self, divisor: UInt32) -> UInt32
   requires divisor != 0
+  ensures result == self % divisor
   cost time O(1)
 {
-  todo
+  self % divisor
 }
 
 public fn UInt32.absolute_difference(self, other: UInt32) -> UInt32
@@ -1600,16 +1641,18 @@ public fn UInt64.saturating_multiply(self, other: UInt64) -> UInt64
 
 public fn UInt64.floor_divide(self, divisor: UInt64) -> UInt64
   requires divisor != 0
+  ensures result == self / divisor
   cost time O(1)
 {
-  todo
+  self / divisor
 }
 
 public fn UInt64.floor_modulo(self, divisor: UInt64) -> UInt64
   requires divisor != 0
+  ensures result == self % divisor
   cost time O(1)
 {
-  todo
+  self % divisor
 }
 
 public fn UInt64.absolute_difference(self, other: UInt64) -> UInt64
@@ -1779,16 +1822,18 @@ public fn USize.saturating_multiply(self, other: USize) -> USize
 
 public fn USize.floor_divide(self, divisor: USize) -> USize
   requires divisor != 0
+  ensures result == self / divisor
   cost time O(1)
 {
-  todo
+  self / divisor
 }
 
 public fn USize.floor_modulo(self, divisor: USize) -> USize
   requires divisor != 0
+  ensures result == self % divisor
   cost time O(1)
 {
-  todo
+  self % divisor
 }
 
 public fn USize.absolute_difference(self, other: USize) -> USize
