@@ -538,6 +538,104 @@ fn main(arguments: List[String]) -> ExitCode
         errors)
 
 let () =
+  test "a program runs others: their status, output, variables, directory, and a signal" (fun () ->
+      let status, output, _ =
+        run_main
+          {|use standard::processes
+
+fn say(text: String) uses Console {
+  Console.print_line(text.slice())
+}
+
+fn shown(status: processes::ExitStatus) -> String {
+  match status {
+    Exited(code) => "exited ${code}"
+    Signaled(signal) => if signal == processes::Signal.Terminate {
+      "ended by terminate".copy()
+    } else {
+      "ended by another signal".copy()
+    }
+  }
+}
+
+fn show(label: String, bytes: List[UInt8])
+  uses Console, Handles
+{
+  Console.print(label.slice())
+  var out = Console.output()
+  let _ = mut out.write(bytes.slice())
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes, Handles
+{
+  let quiet = processes::Command.new("sh").argument("-c").argument("exit 3")
+  if Processes.run(quiet) is Ok(output) {
+    say("run ${shown(output.status)}, output ${output.output.length()}")
+  }
+  let loud = processes::Command.new("sh")
+    .argument("-c")
+    .argument("echo out; echo err >&2; echo $TRUSS_SPAWNED; pwd")
+    .variable("TRUSS_SPAWNED", value: "first")
+    .variable("TRUSS_SPAWNED", value: "second")
+    .directory(Path.new("/"))
+    .output(processes::Redirect.Capture)
+    .error_output(processes::Redirect.Capture)
+  if Processes.run(loud) is Ok(output) {
+    show("captured ", bytes: output.output)
+    show("and ", bytes: output.error_output)
+  }
+  let bare = processes::Command.new("sh")
+    .argument("-c")
+    .argument("echo home=$HOME.")
+    .without_inherited_variables()
+    .variable("PATH", value: "/usr/bin:/bin")
+    .output(processes::Redirect.Capture)
+  if Processes.run(bare) is Ok(output) {
+    show("without variables ", bytes: output.output)
+  }
+  if Processes.run(processes::Command.new("no-such-program-anywhere")) is Err(NotFound) {
+    say("not found")
+  }
+  if Processes.spawn(processes::Command.new("sleep").argument("30")) is Ok(started) {
+    var sleeper = own started
+    say("sleeping ${sleeper.identifier() > 1}")
+    if mut sleeper.signal(processes::Signal.Terminate) is Ok(_) && mut sleeper.wait() is Ok(status) {
+      say("sleep ${shown(status)}")
+    }
+  }
+  let discarded = processes::Command.new("sh")
+    .argument("-c")
+    .argument("echo unseen; cat")
+    .input(processes::Redirect.Discard)
+    .output(processes::Redirect.Discard)
+  if Processes.run(discarded) is Ok(output) {
+    say("discarded ${shown(output.status)}")
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               "run exited 3, output 0";
+               "captured out";
+               "second";
+               "/";
+               "and err";
+               "without variables home=.";
+               "not found";
+               "sleeping true";
+               "sleep ended by terminate";
+               "discarded exited 0";
+               "";
+             ])
+        output)
+
+let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"
     (fun () ->
       let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in

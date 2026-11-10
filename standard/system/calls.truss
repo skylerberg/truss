@@ -214,7 +214,7 @@ internal fn number_at(bytes: intrinsic::View[UInt8], offset: USize, size: USize)
   value
 }
 
-fn done(outcome: Int32) -> Result[Unit, Int32] {
+internal fn done(outcome: Int32) -> Result[Unit, Int32] {
   if outcome < 0 { Err(intrinsic::libc_errno()) } else { Ok(Unit) }
 }
 
@@ -352,6 +352,21 @@ internal fn open_file(path: intrinsic::View[UInt8], flags: Int32) -> Result[intr
   } else {
     Ok(intrinsic::handle_from(descriptor))
   }
+}
+
+internal fn close_descriptor(descriptor: Int32) {
+  if descriptor >= 0 {
+    let _ = intrinsic::libc_close(descriptor)
+  }
+}
+
+internal fn wait_for(process: Int32) -> Result[Int32, Int32] {
+  var status: Int32 = 0
+  var waited = intrinsic::libc_waitpid(process, status: mut status, options: 0)
+  while waited < 0 && interrupted_by_signal() {
+    waited = intrinsic::libc_waitpid(process, status: mut status, options: 0)
+  }
+  if waited < 0 { Err(intrinsic::libc_errno()) } else { Ok(status) }
 }
 
 internal fn current_directory() -> Result[intrinsic::Storage[UInt8], Int32] {

@@ -2235,7 +2235,7 @@ and libc_call context frame ~(node : expression) (function_ : Libc.function_) op
         match passes with
         | Value _ | Elements _ | Room _ | Elements_to_change _ -> [ (name, Some passes) ]
         | Written (_, names) -> List.map (fun name -> (name, None)) names
-        | Always _ | Fixed _ | Environment -> [])
+        | Always _ | Fixed _ -> [])
       parameters
   in
   let value_of name =
