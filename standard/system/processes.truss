@@ -11,7 +11,9 @@ impl Processes for SystemProcesses {
     var texts: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
     var starts: intrinsic::Storage[USize] = intrinsic::storage_empty()
     handles::with_file_error(add_ended_with_zero_byte(command.program.slice().bytes, texts: mut texts, starts: mut starts))?
-    for argument in command.arguments {
+    for argument in command.arguments
+      invariant calls::ends_with_zero_byte(intrinsic::storage_view(texts))
+    {
       handles::with_file_error(add_ended_with_zero_byte(argument.slice().bytes, texts: mut texts, starts: mut starts))?
     }
     let first = intrinsic::view_address(intrinsic::storage_view(texts))
@@ -61,7 +63,12 @@ fn add_ended_with_zero_byte(
   bytes: intrinsic::View[UInt8],
   texts: mut intrinsic::Storage[UInt8],
   starts: mut intrinsic::Storage[USize],
-) -> Result[Unit, Int32] {
+) -> Result[Unit, Int32]
+  ensures match result {
+    Ok(_) => calls::ends_with_zero_byte(intrinsic::storage_view(texts))
+    Err(_) => true
+  }
+{
   growth::push(mut starts, value: intrinsic::storage_length(texts))
   let start = intrinsic::storage_length(texts)
   let length = intrinsic::view_length(bytes)

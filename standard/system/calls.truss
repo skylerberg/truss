@@ -164,6 +164,8 @@ internal fn status_of_descriptor(descriptor: Int32) -> Result[intrinsic::Storage
 }
 
 fn status_into(name: intrinsic::View[UInt8], follow_links: Bool, status: mut intrinsic::Storage[UInt8]) -> Int32
+  requires ends_with_zero_byte(name)
+  requires intrinsic::storage_length(status) + intrinsic::libc_stat_size() <= intrinsic::storage_capacity(status)
   ensures intrinsic::storage_length(status) == old(intrinsic::storage_length(status))
   ensures intrinsic::storage_capacity(status) == old(intrinsic::storage_capacity(status))
 {
@@ -277,9 +279,6 @@ internal fn read_link(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage
     return Err(intrinsic::libc_errno())
   }
   let length: USize = intrinsic::convert(got)
-  if length > room {
-    return Err(intrinsic::libc_eio())
-  }
   intrinsic::storage_lengthen(mut target, by: length)
   Ok(own target)
 }
@@ -311,7 +310,20 @@ internal fn sleep(seconds: Int64, nanoseconds: Int64) {
   }
 }
 
-internal fn ended_with_zero_byte(bytes: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32] {
+internal fn ends_with_zero_byte(bytes: intrinsic::View[UInt8]) -> Bool
+  ensures result == (intrinsic::view_length(bytes) > 0
+    && intrinsic::view_model(bytes)[intrinsic::view_length(bytes) - 1] == 0)
+{
+  let length = intrinsic::view_length(bytes)
+  length > 0 && intrinsic::view_at(bytes, index: length - 1) == 0
+}
+
+internal fn ended_with_zero_byte(bytes: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32]
+  ensures match result {
+    Ok(text) => ends_with_zero_byte(intrinsic::storage_view(text))
+    Err(_) => true
+  }
+{
   let length = intrinsic::view_length(bytes)
   var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length + 1)
   for index in 0..length
