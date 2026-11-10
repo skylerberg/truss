@@ -243,6 +243,23 @@ let () =
 
 let () =
   let codes_of text = codes (check (setup [ ("app::main", text) ]) (module_of "app::main")) in
+  test "a generic parameter that is a value covers nothing else" (fun () ->
+      one_diagnostic
+        "fn f[limit: USize](count: USize) -> Bool {\n  match count {\n    limit => true\n  }\n}\n"
+        "patterns.not_covered");
+  test "a record constant covers the record it is" (fun () ->
+      one_diagnostic
+        "type Point(x: Int64, y: Bool)\n\
+        \  derives Equal\n\n\
+         let origin: Point = Point(x: 0, y: false)\n\n\
+         fn f(point: Point) -> Bool {\n\
+        \  match point {\n\
+        \    origin => true\n\
+        \    (x: 0, y: false) => false\n\
+        \    _ => false\n\
+        \  }\n\
+         }\n"
+        "patterns.unreachable_arm");
   test "a match on a type that failed to parse reports nothing more" (fun () ->
       match
         codes_of
