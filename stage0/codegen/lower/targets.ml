@@ -226,20 +226,24 @@ let constant_of st ty (literal : C.literal) : Lir.operand =
   | Float_value value, Float32 -> Constant (Float32 (Int32.bits_of_float value))
   | _ -> bug "a literal of type %s" (Ground.to_string ty)
 
-(* A string literal's [String]: its bytes as static data, with capacity
-   0. *)
-let string_value st ty text =
-  match Monomorphic.shape st.context.monomorphic ty with
-  | Record [ (field, Typed storage) ] ->
-      ( field,
-        storage,
-        Storage.static storage ~elements:(Constant (Bytes text))
-          ~length:(usize (String.length text)) )
-  | _ -> bug "%s is not a record of storage" (Ground.to_string ty)
-
-(* A view, of a view type, of a literal's bytes, which are static. *)
-let text_view view text =
-  Storage.view view ~elements:(Constant (Bytes text)) ~length:(usize (String.length text))
+(* Writes a string literal to [destination]. Its bytes are static data: a
+   [String] holds them as storage with capacity 0, and a [StringSlice] views
+   them. *)
+let string_literal st (ty : Ground.ty) text ~(destination : Lir.place) =
+  let length = usize (String.length text) in
+  let build field operand =
+    emit st.b (Assign (destination, Build { ty; variant = None; fields = [ (field, operand) ] }))
+  in
+  match (ty, Monomorphic.shape st.context.monomorphic ty) with
+  | Named { path = Top { name = "String"; _ }; _ }, Record [ (field, Typed storage) ] ->
+      let bytes = temporary st storage in
+      emit st.b (Assign (bytes, Storage.static storage ~elements:(Constant (Bytes text)) ~length));
+      build field (Move bytes)
+  | _, Record [ (field, Typed view) ] ->
+      let bytes = temporary st view in
+      emit st.b (Assign (bytes, Storage.view view ~elements:(Constant (Bytes text)) ~length));
+      build field (Copy bytes)
+  | _ -> bug "a string literal of type %s" (Ground.to_string ty)
 
 (* What a yielding method yields, in an instance. *)
 let cursor_element context (yielding : Ground.yielding) =

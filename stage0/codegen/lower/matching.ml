@@ -17,20 +17,7 @@ let rec static_constant st path : Lir.place =
 (* A [String] or [StringSlice] of a literal's text, in a new local. *)
 and string_place st ty text =
   let place = temporary st ty in
-  (match ty with
-  | Named { path = Top { name = "String"; _ }; _ } ->
-      let field, storage_ty, storage = string_value st ty text in
-      let built = temporary st storage_ty in
-      emit st.b (Assign (built, storage));
-      emit st.b (Assign (place, Build { ty; variant = None; fields = [ (field, Move built) ] }))
-  | _ -> (
-      match Monomorphic.shape st.context.monomorphic ty with
-      | Record [ (field, Typed view) ] ->
-          let bytes = temporary st view in
-          emit st.b (Assign (bytes, text_view view text));
-          emit st.b
-            (Assign (place, Build { ty; variant = None; fields = [ (field, Lir.Copy bytes) ] }))
-      | _ -> bug "a string pattern on %s" (Ground.to_string ty)));
+  string_literal st ty text ~destination:place;
   place
 
 (* The fields of a record or a variant, in declaration order, which a
@@ -179,8 +166,10 @@ and bind_pattern ?(changed = false) st (pattern : S.pattern) place ty ~owned =
           end
           else Hashtbl.replace st.frame.bindings name.id place)
   | Wildcard | Literal _ | Pattern_range _ | Qualified_constant _ -> ()
-  | Alternatives (first :: _) -> bind_pattern ~changed st first place ty ~owned
-  | Alternatives [] -> ()
+  | Alternatives alternatives ->
+      if List.exists (binds_name st) alternatives then
+        unsupported st pattern.span
+          "alternatives that bind a name, in a body that is lowered from the syntax tree"
   | Variant { name; fields } ->
       List.iter
         (fun (field, pattern, field_ty) ->
@@ -196,3 +185,22 @@ and bind_pattern ?(changed = false) st (pattern : S.pattern) place ty ~owned =
   | Pattern_error -> bug "a pattern that did not parse"
 
 and owned_operand st place ty = owned st place ty
+
+and binds_name st (pattern : S.pattern) =
+  let in_fields fields =
+    List.exists
+      (fun (field : S.pattern_field) ->
+        match field.kind with
+        | Named_field (_, inner) | Field inner -> binds_name st inner
+        | Rest -> false)
+      fields
+  in
+  match pattern.kind with
+  | Binding_or_constant _ -> (
+      match st.frame.code.checked.patterns.(pattern.id) with
+      | Some (Constant_pattern _) -> false
+      | _ -> true)
+  | Alternatives alternatives -> List.exists (binds_name st) alternatives
+  | Variant { fields; _ } -> in_fields (Option.value fields ~default:[])
+  | Record fields -> in_fields fields
+  | Wildcard | Literal _ | Pattern_range _ | Qualified_constant _ | Pattern_error -> false

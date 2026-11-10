@@ -155,7 +155,7 @@ and inline st path type_arguments ~arguments ~call_site ~on_yield =
     {
       code;
       bindings = Hashtbl.create 16;
-      made = Hashtbl.create 4;
+      synthetic = Hashtbl.create 4;
       self_place = None;
       on_yield = Some on_yield;
       inlined = path :: caller.inlined;
@@ -612,7 +612,13 @@ and field_defaults st ty variant left_out =
       }
     in
     st.frame <-
-      { caller with code; bindings = Hashtbl.create 1; made = Hashtbl.create 1; self_place = None };
+      {
+        caller with
+        code;
+        bindings = Hashtbl.create 1;
+        synthetic = Hashtbl.create 1;
+        self_place = None;
+      };
     let values =
       List.map
         (fun name ->

@@ -35,8 +35,8 @@ type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; b
 type frame = {
   code : code;
   bindings : (S.id, Lir.place) Hashtbl.t;
-  made : (int, Lir.place) Hashtbl.t;
-      (** The locals the type checker made, which no name in the source binds *)
+  synthetic : (int, Lir.place) Hashtbl.t;
+      (** The places of the core form's synthetic locals, by number *)
   mutable self_place : Lir.place option;
   on_yield : (Lir.place -> resume:Lir.block -> stop:Lir.block -> unit) option;
       (** In an inlined lending or yielding method, what a [yield] of a place does *)
@@ -58,6 +58,8 @@ type state = {
   mutable result : result_slot;
   nested : Lir.function_ option list ref;  (** The instance's lambdas, in order *)
   mutable evidence : (Path.t * Lir.operand) list;  (** The evidence for each capability available *)
+  mutable compound_target : Lir.place option;
+      (** The target of the compound assignment whose new value is being lowered *)
   pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
 }
 
@@ -66,7 +68,7 @@ let frame_of code ~inlined =
   {
     code;
     bindings = Hashtbl.create 16;
-    made = Hashtbl.create 4;
+    synthetic = Hashtbl.create 4;
     self_place = None;
     on_yield = None;
     inlined;
@@ -85,6 +87,7 @@ let enter context ?(pulling = false) ?(nested = ref []) frame =
     result = No_result;
     nested;
     evidence = [];
+    compound_target = None;
     pulling;
   }
 
