@@ -24,12 +24,25 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
   | None -> ());
   let recurse = pattern_with state env ~mutable_ ~mode in
   let unknown type_ = unknown_pattern state env written type_ ~mutable_ ~mode in
+  let binds id (bound : name) =
+    draft_pattern state written (fun () ->
+        Bind { local = Bound id; name = bound.text; mutable_; mode })
+  in
+  let constant () =
+    draft_pattern state written (fun () ->
+        Form.equals state ~origin:written.id
+          (Form.pattern_type state written.id)
+          (Form.pattern_constant state written.id))
+  in
   match written.kind with
-  | Wildcard | Pattern_error -> ()
+  | Wildcard | Pattern_error -> draft_pattern state written (fun () -> Anything)
   | Binding_or_constant bound -> (
       match target state bound with
-      | Some Binding -> declare state bound type_ ~mutable_ ~mode
+      | Some Binding ->
+          binds bound.id bound;
+          declare state bound type_ ~mutable_ ~mode
       | Some (Local id) -> (
+          binds id bound;
           (* A later alternative's name binds what the first one's does, with
              the same type. *)
           match Hashtbl.find_opt state.locals id with
@@ -42,14 +55,34 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                      bound.text (show state local.type_) (show state type_))
           | None -> ())
       | Some (Definition (Constant, path)) ->
+          constant ();
           constant_pattern state written.id written.span path type_
-      | Some (Value_parameter _) ->
+      | Some (Value_parameter parameter) ->
+          draft_pattern state written (fun () ->
+              Literal (make state ~origin:written.id (T.builtin USize) (Generic_value parameter)));
           if not (unify state (T.builtin USize) type_) then
             mismatch state written.span ~expected:type_ ~found:(T.builtin USize)
       | _ -> ())
-  | Qualified_constant constant -> qualified_constant state written.id written.span constant type_
-  | Literal literal -> literal_pattern state written.id written.span literal type_
-  | Pattern_range { start; stop; _ } -> (
+  | Qualified_constant written_constant ->
+      constant ();
+      qualified_constant state written.id written.span written_constant type_
+  | Literal literal ->
+      draft_pattern state written (fun () ->
+          Form.equals state ~origin:written.id
+            (Form.pattern_type state written.id)
+            (Form.pattern_literal state written.id literal));
+      literal_pattern state written.id written.span literal type_
+  | Pattern_range { start; stop; inclusive } -> (
+      draft_pattern state written (fun () ->
+          let end_ (written_end : range_end) =
+            make state ~origin:written_end.id
+              (Form.pattern_type state written.id)
+              (match written_end.kind with
+              | End_literal literal -> Form.pattern_literal state written_end.id literal
+              | End_constant _ | End_name _ -> Form.pattern_constant state written_end.id)
+          in
+          let start = end_ start in
+          Within { start; stop = end_ stop; inclusive });
       (* Only integers and characters are ordered so that a range of them
          can be matched; a range of anything else is one error, and its ends
          are not checked against the type. *)
@@ -97,9 +130,17 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                            "`%s` has fields, so its pattern names them, or writes `(..)`."
                            variant.variant_name)
                   | _ -> ());
-                  pattern_fields state env written
-                    (Option.value ~default:[] variant.fields)
-                    (Option.value ~default:[] fields) ~mutable_ ~mode
+                  let declared = Option.value ~default:[] variant.fields in
+                  let matched =
+                    pattern_fields state env written declared (Option.value ~default:[] fields)
+                      ~mutable_ ~mode
+                  in
+                  draft_pattern state written (fun () ->
+                      Variant
+                        {
+                          variant = variant.variant_name;
+                          fields = Form.pattern_fields state declared matched;
+                        })
               | None ->
                   unknown
                   @@ error state Unknown_variant variant_name.last.span
@@ -141,7 +182,9 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                   (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
                      (T.show type_));
               state.tables.patterns.(written.id) <- Some (Record_pattern { type_ });
-              pattern_fields state env written record_fields fields ~mutable_ ~mode
+              let matched = pattern_fields state env written record_fields fields ~mutable_ ~mode in
+              draft_pattern state written (fun () ->
+                  Record (Form.pattern_fields state record_fields matched))
           | None -> (
               match Members.broken state.database path with
               | Some report -> unknown (T.Error report)
@@ -155,7 +198,9 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
             (error state Not_a_record written.span
                (Printf.sprintf "`%s` is not a record." (show state type_))))
   | Alternatives alternatives ->
-      List.iter (fun alternative -> recurse alternative type_) alternatives
+      List.iter (fun alternative -> recurse alternative type_) alternatives;
+      draft_pattern state written (fun () ->
+          Alternatives (List.map (built_pattern state) alternatives))
 
 and pattern_fields state env (written : pattern) (fields : T.field list)
     (written_fields : pattern_field list) ~mutable_ ~mode =
@@ -194,15 +239,17 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
                 (String.concat ", "
                    (List.map (fun (declared : T.field) -> "`" ^ declared.field_name ^ "`") missing))
                 (if List.length missing = 1 then "it" else "them")));
-  List.iter
+  List.filter_map
     (fun (field : pattern_field) ->
       match field.kind with
-      | Rest -> ()
+      | Rest -> None
       | Named_field (name, inner) -> (
           match
             List.find_opt (fun (declared : T.field) -> declared.field_name = name.text) fields
           with
-          | Some declared -> pattern_with state env inner declared.field_type ~mutable_ ~mode
+          | Some declared ->
+              pattern_with state env inner declared.field_type ~mutable_ ~mode;
+              Some (declared.field_name, inner)
           | None ->
               pattern_with state env inner ~mutable_ ~mode
               @@ error state Unknown_member name.span
@@ -218,15 +265,17 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
                              [ replace name.span candidate ];
                          ]
                      | None -> [])
-                   (Printf.sprintf "There is no field `%s` here." name.text))
+                   (Printf.sprintf "There is no field `%s` here." name.text);
+              None)
       | Field inner -> (
           let named =
             Option.bind (bare_name inner) (fun name ->
                 List.find_opt (fun (declared : T.field) -> declared.field_name = name) fields)
           in
           match (named, fields) with
-          | Some declared, _ -> pattern_with state env inner declared.field_type ~mutable_ ~mode
-          | None, [ only ] -> pattern_with state env inner only.field_type ~mutable_ ~mode
+          | Some declared, _ | None, [ declared ] ->
+              pattern_with state env inner declared.field_type ~mutable_ ~mode;
+              Some (declared.field_name, inner)
           | None, _ ->
               let names =
                 String.concat ", "
@@ -237,13 +286,15 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
                    (Printf.sprintf
                       "A bare pattern must name a field, since this has %d fields: %s. Truss has \
                        no tuples, so fields match by name."
-                      (List.length fields) names))))
+                      (List.length fields) names));
+              None))
     written_fields
 
 (* A pattern that cannot be matched against its type still binds its names,
    each as unknown as what the pattern matches, so that no use of one is
-   without a type. *)
+   without a type. What it matches is as unknown to it. *)
 and unknown_pattern state env (written : pattern) unknown ~mutable_ ~mode =
+  state.tables.pattern_types.(written.id) <- Some unknown;
   match written.kind with
   | Variant { fields = Some fields; _ } | Record fields ->
       List.iter

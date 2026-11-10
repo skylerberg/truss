@@ -14,7 +14,7 @@ open Lookups
 open Pattern_typing
 open Statements
 
-let rec string_literal state env ?expected (literal : string_literal) =
+let rec string_literal state env ?expected (value : expression) (literal : string_literal) =
   let parts = List.map (fun (part, _) -> (part, expression state env part)) literal.rest in
   let template : C.template =
     {
@@ -56,6 +56,7 @@ let rec string_literal state env ?expected (literal : string_literal) =
   in
   match literal.tag with
   | None ->
+      draft state value (fun () -> Form.interpolated state literal);
       (* Each part of a plain string is written out with its [Display]. *)
       List.iteri
         (fun index ((part : expression), part_type) ->
@@ -87,6 +88,11 @@ let rec string_literal state env ?expected (literal : string_literal) =
           | Some expected -> ignore (unify state tag_type expected)
           | None -> ());
           let template_trait = trait_reference (standard [ "text" ] "FromTemplate") in
+          let part_type = ref None in
+          draft state value (fun () ->
+              match !part_type with
+              | Some part -> Form.template state value literal ~part:(final state part)
+              | None -> bug "a tagged string's part type was not worked out");
           defer state (fun () ->
               let tag_type = normalize state tag_type in
               if T.contains_unsolved tag_type then false
@@ -106,6 +112,7 @@ let rec string_literal state env ?expected (literal : string_literal) =
                             }
                     | None -> ());
                     let part = associated state tag_type template_trait "Part" ~at:literal.span in
+                    part_type := Some part;
                     (* Each part becomes the tag's [Part] through [From], chosen by
                        the part's type. *)
                     List.iteri
@@ -160,9 +167,15 @@ and list_literal state env ?expected (value : expression) items =
         (element, fun element -> T.Named { path = list_path; arguments = [ T.Type element ] })
   in
   List.iter (fun item -> check state env item element) items;
+  draft state value (fun () ->
+      Collection
+        {
+          elements = List.map (built state) items;
+          built = Form.collection (Form.type_of state value);
+        });
   make element
 
-and map_literal state env ?expected (_ : expression) entries =
+and map_literal state env ?expected (value : expression) entries =
   let key, value_type =
     match Option.map (normalize state) expected with
     | Some (T.Named { path; arguments = [ T.Type key; T.Type value_type ] })
@@ -180,6 +193,17 @@ and map_literal state env ?expected (_ : expression) entries =
       check state env entry_key key;
       check state env entry_value value_type)
     entries;
+  draft state value (fun () ->
+      Entries
+        {
+          entries =
+            List.map
+              (fun (entry_key, entry_value) ->
+                let entry_key = built state entry_key in
+                (entry_key, built state entry_value))
+              entries;
+          built = Form.collection (Form.type_of state value);
+        });
   T.Named { path = map_type; arguments = [ T.Type key; T.Type value_type ] }
 
 (* Lambdas: their types come only from where they are used. *)
@@ -241,11 +265,42 @@ and lambda state env ?expected (value : expression) parameters body =
       [] read
   in
   state.tables.captures.(value.id) <- Some captures;
+  draft state value (fun () ->
+      let parameters = List.map (built_pattern state) parameters in
+      Lambda
+        {
+          parameters;
+          captures =
+            List.map
+              (fun id : Core.local -> if id = state.definition.id then Self else Bound id)
+              captures;
+          body = built_block state body;
+          result =
+            (match Form.type_of state value with
+            | T.Function function_type -> output_type function_type.output
+            | type_ -> bug "a lambda of type `%s`" (T.show type_));
+        });
   result
 
-and if_ state env ?expected (test : expression) then_ else_ =
+and if_ state env ?expected (value : expression) (test : expression) then_ else_ =
   let condition_type = in_statement state env test.span (fun () -> expression state env test) in
   ignore (coerce state env test ~found:condition_type ~expected:T.bool);
+  draft state value (fun () ->
+      let condition = built state test in
+      let then_ = built_block state then_ in
+      If
+        {
+          condition;
+          then_;
+          else_ =
+            Option.map
+              (function
+                | Else block -> built_block state block
+                | Else_if branch ->
+                    let branch = built state branch in
+                    { Core.statements = []; value = Some branch; ends = branch.type_ <> T.Never })
+              else_;
+        });
   match else_ with
   | None ->
       let then_type = block_value state env ~expected:T.unit then_ in
@@ -297,13 +352,15 @@ and join state env ~expected branches =
 and match_ state env ?expected (value : expression) scrutinees arms =
   (* When the guards cover everything, the [match] ends with
      [_ => unreachable], which the prover shows is never reached. *)
-  (match List.rev arms with
-  | { patterns; guard = None; body = { kind = Expression { kind = Unreachable; _ }; _ }; _ }
-    :: earlier
-    when List.for_all (fun (written : pattern) -> written.kind = Wildcard) patterns
-         && List.exists (fun (arm : arm) -> Option.is_some arm.guard) earlier ->
-      state.obligations <- Guards_cover { match_ = value.id } :: state.obligations
-  | _ -> ());
+  let guards_cover =
+    match List.rev arms with
+    | { patterns; guard = None; body = { kind = Expression { kind = Unreachable; _ }; _ }; _ }
+      :: earlier ->
+        List.for_all (fun (written : pattern) -> written.kind = Wildcard) patterns
+        && List.exists (fun (arm : arm) -> Option.is_some arm.guard) earlier
+    | _ -> false
+  in
+  if guards_cover then state.obligations <- Guards_cover { match_ = value.id } :: state.obligations;
   (* The values a [match] matches settle before its arms, as a header. *)
   let types =
     List.map
@@ -317,6 +374,31 @@ and match_ state env ?expected (value : expression) scrutinees arms =
     | Mode (Mut, _) -> T.Mut
     | _ -> if borrowed state scrutinee then T.Read else T.Own
   in
+  draft state value (fun () ->
+      let scrutinees =
+        List.map
+          (fun scrutinee -> Form.operand (mode_of scrutinee) (built state scrutinee))
+          scrutinees
+      in
+      Match
+        {
+          scrutinees;
+          arms =
+            List.map
+              (fun (arm : arm) : Core.arm ->
+                let patterns = List.map (built_pattern state) arm.patterns in
+                let guard = Option.map (built state) arm.guard in
+                {
+                  patterns;
+                  guard;
+                  body =
+                    built_block state
+                      { statements = [ arm.body ]; span = arm.body.span; id = arm.body.id };
+                  origin = arm.id;
+                })
+              arms;
+          guards_cover;
+        });
   let branch_types =
     List.map
       (fun (arm : arm) ->

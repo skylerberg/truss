@@ -8,6 +8,8 @@
   intrinsic_signatures
   types
   checked
+  core
+  core_walk
   workspace
   syntax
   resolve

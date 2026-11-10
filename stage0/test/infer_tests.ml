@@ -141,6 +141,8 @@ let () =
           | Some _ -> fail "`%s` is another call" written
           | None -> fail "`%s` has no call" written)
         [ "first < second"; "second < third"; "first < third" ]);
+  test "an operand may be what an operator's method gives" (fun () ->
+      fine "fn f(left: Int64, right: Int64) -> Int64 {\n  left + right.multiply(2)\n}\n");
   test "a type without the operator's trait is an error" (fun () ->
       one_diagnostic "type Point(x: Int64)\n\nfn f(point: Point) -> Point {\n  point + point\n}\n"
         "types.no_impl")

@@ -130,7 +130,7 @@ and kind =
       (** A map literal. *)
   | Updated of { base : expression; updates : (string list * expression) list }
       (** [base with (...)]: the record with the field at each path replaced. *)
-  | Slice of { base : place; start : expression option; stop : expression option }
+  | Slice of { base : place; start : expression option; stop : expression option; inclusive : bool }
       (** [items[start..stop]]: a view of part of a list, a slice, or an array. *)
   (* Calls and operations *)
   | Call of call
@@ -168,7 +168,7 @@ and kind =
   | Return of expression option
   | Break
   | Continue
-  | Todo  (** Its type is [Hole] where nothing decided it. *)
+  | Todo
   | Unreachable
   | Echo of expression
   (* Specifications *)
@@ -230,7 +230,7 @@ and provided = { capability : Path.t; impl : Path.t; arguments : Types.substitut
 
 and block = {
   statements : statement list;
-  value : expression option;  (** What the block gives, when it gives more than [Unit]. *)
+  value : expression option;  (** The expression the block ends with, whose value is its own. *)
   ends : bool;  (** Whether what follows the block can be reached from inside it. *)
 }
 
@@ -340,13 +340,11 @@ type parts =
   | Law_proof of block
   | Nothing  (** An [impl] or a capability, which holds only its methods. *)
 
-(** Two parts of one collection lent side by side, which the prover shows do not overlap. Every
-    other obligation is a node: [From_integer], [Widen], and a [Match] whose guards must cover. *)
-type obligation = Disjoint of { first : id; second : id }
-
 type t = {
   parts : parts;
   nodes : int;  (** One more than the largest id. *)
   made : int;  (** How many locals the checker made. *)
-  obligations : obligation list;
 }
+(** A definition's core form. What the type checker obliges the prover to show is in its nodes: a
+    [From_integer] must fit, a [Widen]'s costs must imply, and the guards of a [Match] that says so
+    must cover. *)
