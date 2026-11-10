@@ -100,14 +100,6 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Crash ->
       make ~output:(Returns T.Never)
         [ input "message" (T.Named { path = text "StringSlice"; arguments = [] }) ]
-  | Read_bytes ->
-      make
-        ~output:(Returns (T.builtin ISize))
-        [
-          input "descriptor" (T.builtin Int32);
-          input ~mode:Mut "buffer" (storage (T.builtin UInt8));
-          input "count" usize;
-        ]
   | Write_float ->
       make ~generics:[ "Value" ]
         [ input ~mode:Mut "buffer" (storage (T.builtin UInt8)); input "value" value ]
@@ -164,6 +156,6 @@ let cost (operation : Intrinsic.operation) =
   | View_slice | Crash | Storage_lengthen | Handle_from | Handle_descriptor | Libc_number _ ->
       { constant_time = true; allocation_free = true }
   | Compare_bytes | Storage_remove -> { constant_time = false; allocation_free = true }
-  | Storage_with_capacity | Storage_reserve | Storage_push | Storage_insert | Read_bytes
-  | Write_float | Environment_variable | Run_process | Libc _ ->
+  | Storage_with_capacity | Storage_reserve | Storage_push | Storage_insert | Write_float
+  | Environment_variable | Run_process | Libc _ ->
       { constant_time = false; allocation_free = false }

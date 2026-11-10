@@ -211,27 +211,9 @@ and provide st (e : S.expression) implementations body destination =
                   | None -> bug "an unbound parameter of %s" (Path.show provided.impl))
                 interface.impl_generics
             in
-            let outer =
-              List.map
-                (fun capability ->
-                  match List.find_opt (fun (path, _) -> Path.equal path capability) around with
-                  | Some (_, operand) -> operand
-                  | None -> bug "no evidence for %s here" (Path.show capability))
-                (evidence_for [] interface.impl_uses)
-            in
-            let slot = local st.b (Evidence (List.length outer)) in
-            emit st.b
-              (Call
-                 {
-                   target = Intrinsic Evidence_fill;
-                   arguments =
-                     Address { place = at slot; writable = true }
-                     :: pointer
-                     :: Constant (Symbol_address (Table { impl = provided.impl; type_arguments }))
-                     :: outer;
-                   result = Discarded;
-                 });
-            (provided.capability, Lir.Address { place = at slot; writable = false }))
+            ( provided.capability,
+              implementation_evidence st ~impl:provided.impl ~type_arguments ~implementation:pointer
+            ))
           (provided_by implementation))
       implementations
   in

@@ -60,9 +60,6 @@ val table : context -> Instance.key -> Lir.table
 (* The table of an [any] value of a type and trait. *)
 val any_table : context -> Instance.key -> Lir.table
 
-(* The evidence for the real implementation of a standard capability. *)
-val real_evidence : context -> Path.t -> Lir.evidence
-
 (* The key of a test's instance. *)
 val test_key : Path.t -> Instance.key
 

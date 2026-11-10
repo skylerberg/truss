@@ -110,7 +110,6 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
       code (Lower.template_check context key ~from_template ~texts)
   | Any_table _ -> Compiled (Table (Lower.any_table context key))
   | Table _ -> Compiled (Table (Lower.table context key))
-  | Real_evidence capability -> Compiled (Evidence (Lower.real_evidence context capability))
 
 (* What an instance compiles to, or for a constant whose value does not
    fold, that its evaluator is to be run, which no query can do, since

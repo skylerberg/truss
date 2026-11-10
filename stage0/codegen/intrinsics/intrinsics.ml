@@ -3,7 +3,7 @@ open Lir_builder
 let bug format = Compiler_bug.bug ~stage:"Intrinsics" format
 
 type argument = Place of Lir.place | Value of Lir.operand
-type types = { usize : Ground.ty; isize : Ground.ty; string_slice : Ground.ty }
+type types = { usize : Ground.ty; string_slice : Ground.ty }
 
 let operand = function Place place -> Lir.Copy place | Value operand -> operand
 let place = function Place place -> place | Value _ -> bug "an operation on storage given a value"
@@ -45,7 +45,7 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
      operations, which take none. *)
   let element () =
     match operation with
-    | Intrinsic.Read_bytes | Write_float | Environment_variable ->
+    | Intrinsic.Write_float | Environment_variable ->
         Ground.Named { path = Intrinsic.builtin_path UInt8; arguments = [] }
     | _ -> type_argument 0
   in
@@ -372,30 +372,6 @@ let lower ?(checks = false) env b types operation ~type_arguments arguments ~des
                  site;
                });
           start b (block b)
-      | Read_bytes ->
-          let storage = place (argument 1) in
-          let count = value 2 in
-          let wanted = usize_local "wanted" in
-          emit b (Assign (at wanted, Binary (Add, length storage, count)));
-          grow_when Greater storage (Copy (at wanted));
-          let got = local b ~name:"got" (Value types.isize) in
-          call ~result:(at got) System_read
-            [
-              value 0;
-              Address { place = element_at storage (length storage); writable = true };
-              count;
-            ];
-          let read_some = local b (Raw Bool) in
-          emit b
-            (Assign
-               (at read_some, Binary (Greater, Copy (at got), Constant (Integer (ISize, Z.zero)))));
-          when_ b
-            (Copy (at read_some))
-            (fun () ->
-              let count = usize_local "count" in
-              emit b (Assign (at count, Convert (Copy (at got), Integer USize)));
-              add_to_length storage (Copy (at count)));
-          set (Use (Copy (at got)))
       | Write_float ->
           let storage = place (argument 0) in
           let wanted = usize_local "wanted" in

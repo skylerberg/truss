@@ -152,24 +152,40 @@ let real_implementation (capability : Path.t) : Path.t =
       name = Printf.sprintf "%s for System%s" name name;
     }
 
-(* The evidence of the real implementation of each capability, for code the
-   runtime runs with the world's: [main], and an external test. *)
-let real_evidence_of context ~user capabilities =
+(* The real implementation of each capability, for code the runtime runs
+   with the world's: [main], and an external test. Each is a value the code
+   owns, with evidence on the stack pointing at it. One that holds something,
+   as [SystemConsole] holds the input it has read and not yet given, is made
+   by its type's [new]. *)
+let real_implementations st ~user capabilities =
   List.map
     (fun capability ->
-      if Interface.Impls.impl_interface context.database (real_implementation capability) = None
-      then
-        Compiler_bug.unsupported "%s uses %s, which has no real implementation" user
-          (Ground.path_name capability);
-      (capability, Lir.Constant (Symbol_address (Real_evidence capability))))
+      let impl = real_implementation capability in
+      let ty =
+        match Interface.Impls.impl_interface st.context.database impl with
+        | Some interface -> Monomorphic.ground st.context.monomorphic [] interface.for_type
+        | None ->
+            Compiler_bug.unsupported "%s uses %s, which has no real implementation" user
+              (Ground.path_name capability)
+      in
+      let implementation =
+        if zero_size st ty then Lir.Constant Null
+        else begin
+          let value = binding st ty in
+          let made : Path.t =
+            match ty with
+            | Named { path; _ } -> Method { owner = path; name = "new"; receiver = Static }
+            | _ -> bug "%s implements %s" (Ground.to_string ty) (Path.show capability)
+          in
+          call_instance st
+            (Code { path = made; type_arguments = [] })
+            ~signature:(signature_of st.context made) ~substitution:[] ~arguments:[] ~mask:0
+            ~destination:value;
+          Address { place = value; writable = true }
+        end
+      in
+      (capability, implementation_evidence st ~impl ~type_arguments:[] ~implementation))
     capabilities
-
-let real_evidence _context (capability : Path.t) : Lir.evidence =
-  {
-    evidence_key = Real_evidence capability;
-    table = Table { impl = real_implementation capability; type_arguments = [] };
-    outer = [];
-  }
 
 (* The C [main]'s Truss side: the program's arguments as a [List] of
    [String]s, whose bytes are the arguments' own, so they are never copied
@@ -244,7 +260,7 @@ let program_main context (key : Instance.key) main_path : Lir.t =
   emit b (Assign (at index, Binary (Add, Copy (at index), Constant (Integer (Int32, Z.one)))));
   finish b (Goto test);
   start b after;
-  st.evidence <- real_evidence_of context ~user:"main" (evidence_for [] signature.uses);
+  st.evidence <- real_implementations st ~user:"main" (evidence_for [] signature.uses);
   let exit_ty =
     match signature.output with
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty

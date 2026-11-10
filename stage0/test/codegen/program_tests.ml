@@ -277,6 +277,53 @@ let () =
       expect_int ~expected:3 status;
       expect_string ~expected:"0: first\n1: second \xef\xbf\xbd line\n2: last\n" output)
 
+let () =
+  test "a line longer than a block is read whole, and what follows it is kept" (fun () ->
+      let long = String.make 150_000 'x' in
+      let status, output, _ =
+        run_main
+          ~input:(long ^ "\nshort\n" ^ long)
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  while Console.read_line() is Some(line) {
+    Console.print_line("${line.length()}")
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"150000\n5\n150000\n" output);
+  test "the console a program is given is a value its start owns and drops" (fun () ->
+      let _, compile =
+        load {|fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  ExitCode(0)
+}
+|}
+      in
+      match Compile.compiled compile (Program_main (Top { module_ = example; name = "main" })) with
+      | Code instance ->
+          let console local =
+            match instance.main.locals.(local).ty with
+            | Value (Named { path = Top { name = "SystemConsole"; _ }; _ }) -> true
+            | _ -> false
+          in
+          let dropped =
+            Array.exists
+              (fun (block : Lir.basic_block) ->
+                List.exists
+                  (function
+                    | Lir.Drop { root = Local local; projections = [] } -> console local
+                    | _ -> false)
+                  block.statements)
+              instance.main.blocks
+          in
+          if not dropped then fail "no drop of the console:\n%s" (Lir.to_string instance)
+      | _ -> fail "expected code")
+
 (* The documents' examples: in every block that checks cleanly, each
    function that is not generic, and not only for specifications, lowers, and each test passes or reaches a
    [todo]. Most blocks are excerpts, which do not check alone. *)

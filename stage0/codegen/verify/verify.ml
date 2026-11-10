@@ -160,14 +160,10 @@ let links env ~find (compiled : Lir.compiled) =
     | _ -> bug "the address of %s, which is not %s" (Instance.to_string key) what
   in
   let is_table = function Lir.Table _ -> true | _ -> false
-  and is_evidence = function Lir.Evidence _ -> true | _ -> false
   and is_data = function Lir.Data _ -> true | _ -> false in
   match compiled with
   | Data _ -> ()
   | Table table -> List.iter (fun (key, signature) -> has key signature) table.entries
-  | Evidence evidence ->
-      reaches evidence.table ~is:is_table "a table";
-      List.iter (fun key -> reaches key ~is:is_evidence "evidence") evidence.outer
   | Code instance ->
       each_function instance (fun _ f ->
           let type_of place = Lir.place_type env ~environment:(environment instance) f place in
@@ -182,7 +178,8 @@ let links env ~find (compiled : Lir.compiled) =
                 (function
                 | Constant (Symbol_address ((Table _ | Any_table _) as key)) ->
                     reaches key ~is:is_table "a table"
-                | Constant (Symbol_address key) -> reaches key ~is:is_evidence "evidence"
+                | Constant (Symbol_address key) ->
+                    bug "the address of %s, which is not a table" (Instance.to_string key)
                 | _ -> ());
             }
           in

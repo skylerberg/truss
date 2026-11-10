@@ -951,10 +951,15 @@ behind most capabilities.
 ### `main` and the real implementations
 
 The standard library implements each standard capability for real with an
-ordinary type, such as a system clock and the real file system. The
-generated startup code builds the evidence for exactly the capabilities in
-`main`'s `uses` clause and passes it in. An external test gets its declared
-capabilities the same way.
+ordinary type, such as a system clock and the real file system: the
+capability's `System` type, as `SystemConsole` is `Console`'s. The
+generated startup code makes a value of the type for exactly the
+capabilities in `main`'s `uses` clause, with evidence on the stack
+pointing at each, as a `provide mut` would. A type that holds something is
+made by its `new`: `SystemConsole` holds the input it has read and not yet
+given out. The values are `main`'s caller's, and are dropped when `main`
+returns. An external test gets its declared capabilities the same way, as
+values of its own.
 
 ### Tasks
 
@@ -983,7 +988,7 @@ until both handle it.
 | Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits`, `from_bits` |
 | Storage | empty, with a capacity, length, capacity, reserve, push, pop, insert, remove, swap, lend an element, view |
 | Views | length, lend an element, slice |
-| Operating system | the C library's functions and numbers, a handle from a descriptor and its descriptor, crash; and, until they are Truss, reading standard input, an environment variable, and running a program |
+| Operating system | the C library's functions and numbers, a handle from a descriptor and its descriptor, crash; and, until they are Truss, an environment variable and running a program |
 
 `Intrinsics` writes every operation into the caller's LIR, never as a call:
 numbers as primitive operations, and storage and views as a few statements
@@ -1069,9 +1074,11 @@ on after a signal interrupts a call; and turning an error number into a
 `FileError`. `SystemFileRead`, `SystemFileWrite`, `FileReader`, and
 `FileWriter` are written on those, `SystemConsole` writes with them,
 `SystemClock` reads `clock_gettime`, and `SystemRandom` reads
-`getentropy`. `SystemConsole` reads standard input, `SystemEnvironment` a
-variable, and `SystemProcesses` runs a program found on the `PATH` and
-waits for it, through functions of the runtime still. `SystemTasks.yield_now`
+`getentropy`. `SystemConsole` and `FileReader` each hold a reader of
+lines, which reads a block at a time and keeps what it has not given out.
+`SystemEnvironment` reads a variable, and `SystemProcesses` runs a program
+found on the `PATH` and waits for it, through functions of the runtime
+still. `SystemTasks.yield_now`
 does nothing, since tasks run one after another. `NetworkClient` and
 `NetworkServer` have no real implementation, and a `main` that uses one is
 refused with a message saying so. A handle's is the only drop that does more
@@ -1090,10 +1097,8 @@ The C `main` of a program is generated:
    in C. Each `String`'s storage points at the argument itself, with
    capacity 0, so it is never copied, unless it holds bad UTF-8, which a
    copy replaces with U+FFFD.
-3. Build the evidence for `main`'s `uses` clause: static evidence for the
-   standard library's real implementation of each capability, its
-   `System` type, such as `SystemConsole`, whose table of entries is static
-   data too.
+3. Make the standard library's real implementation of each capability in
+   `main`'s `uses` clause, and evidence for each on the stack.
 4. Call Truss's `main` and return its `ExitCode` as the process's status.
 
 Failures end the process without running anything else:
@@ -1326,7 +1331,7 @@ Everything a build links is checked together before any C is emitted:
 - each call names its callee with the signature the callee has, as does
   each entry of a table and each named function used as a value
 - a drop reaches a drop function
-- each address of static evidence, of a table, or of a constant reaches one
+- each address of a table or of a constant reaches one
 - what an instance compiles to is the instance that was asked for
 
 ## Building
@@ -1439,9 +1444,8 @@ a command line can hold.
 - **Checkers shipped compiled.** The standard library's are to ship already
   compiled with the toolchain, for each host and both widths of `USize`, and
   a dependency's to be compiled once per version.
-- **The rest of the runtime in Truss.** Reading standard input, whose
-  buffer is the runtime's, an environment variable, running a program, a
-  float's text, storage's growth, debug output, and the test runner are
+- **The rest of the runtime in Truss.** An environment variable, running
+  a program, the program's arguments as UTF-8, a float's text, storage's growth, debug output, and the test runner are
   functions of the C runtime. Each is to be Truss in the standard library
   on the C library's functions, leaving the runtime only startup, failing,
   and allocation.

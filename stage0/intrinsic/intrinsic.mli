@@ -108,7 +108,6 @@ type operation =
   | View_at
   | View_slice
   | Crash
-  | Read_bytes
   | Write_float  (** [(buffer, value)]: appends the shortest decimal that reads back as the float *)
   | Handle_from
       (** [(descriptor) -> Handle]: owns a descriptor that is open, which dropping it closes *)
