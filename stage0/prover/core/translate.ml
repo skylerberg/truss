@@ -461,6 +461,11 @@ let float_literal (exponent, significand) value =
    and ordered after every number, and otherwise IEEE's, so [-0.0 == 0.0]. *)
 let float_operation name left right = L.Apply (name, [ L.Apply ("RNE", []); left; right ])
 let is_nan value = L.Apply ("fp.isNaN", [ value ])
+
+(* A float cut toward zero, as a real number. *)
+let truncated value =
+  L.Apply ("fp.to_real", [ L.Apply ("fp.roundToIntegral", [ L.Apply ("RTZ", []); value ]) ])
+
 let float_equal left right = L.(Apply ("fp.eq", [ left; right ]) ||| (is_nan left &&& is_nan right))
 
 let float_less left right =
@@ -2282,6 +2287,18 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
       buffer_operation context frame ~node operation (T.builtin UInt8) operands ~changed known
   | Libc function_, _ -> libc_call context frame ~node function_ operands ~changed known
   | Libc_number number, _ -> libc_number context frame number
+  | Convert, [ source; target ] when float_format source <> None && bounds target <> None -> (
+      (* A float becomes an integer by being cut toward zero, which must be
+         a number in the target's range: the conversion does not check. *)
+      match operands with
+      | [ value ] ->
+          oblige context frame Requires (at frame node)
+            (Printf.sprintf
+               "`%s` may not fit `%s`: it must be a number that, cut toward zero, is in its range."
+               (quote frame.source node.origin) (T.show target))
+            (float_fits target value);
+          L.Apply ("to_int", [ truncated value ])
+      | _ -> known)
   | Convert, [ _; target ] when T.is_builtin Character target -> (
       (* A [Character] is made from an integer only when the integer is a
          Unicode scalar value, which the conversion does not check. *)
@@ -2403,6 +2420,19 @@ and libc_number context frame (number : Libc.number) =
     (in_range (T.builtin (Intrinsic.libc_builtin (Libc.number_type number))) term);
   term
 
+(* Whether a float is a number that, cut toward zero, is in an integer
+   type's range. *)
+and float_fits target value =
+  match bounds target with
+  | Some (low, high) ->
+      let cut = truncated value in
+      L.(
+        not_ (is_nan value)
+        &&& not_ (Apply ("fp.isInfinite", [ value ]))
+        &&& Apply ("<=", [ Integer low; cut ])
+        &&& Apply ("<=", [ cut; Integer high ]))
+  | None -> L.Boolean false
+
 and integer_intrinsic context frame (operation : Intrinsic.operation) types operands known =
   let integer = match types with ty :: _ -> bounds ty | [] -> None in
   let exact operation left right =
@@ -2442,6 +2472,9 @@ and integer_intrinsic context frame (operation : Intrinsic.operation) types oper
   | Equal, Some _, _, [ left; right ] -> L.equal left right
   | Less, Some _, _, [ left; right ] -> L.Apply ("<", [ left; right ])
   | Fits, Some _, [ _; target ], [ value ] when bounds target <> None -> in_range target value
+  | Fits, None, [ source; target ], [ value ]
+    when float_format source <> None && bounds target <> None ->
+      float_fits target value
   | Convert, Some _, [ _; target ], [ value ] when bounds target <> None ->
       assume context frame L.(in_range target value ==> equal known value);
       known

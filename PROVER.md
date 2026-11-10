@@ -195,7 +195,10 @@ and `reads` clauses):
   a zero divisor gives the exact result when it returns, wrapping
   arithmetic gives the exact result brought into range by a remainder,
   and the overflow tests, the comparisons, `fits`, and `convert` of a
-  value that fits are exact. The standard library's integer methods each
+  value that fits are exact. A float's `fits` an integer type when it is a
+  number that, cut toward zero, is in the type's range, and its `convert`
+  to one must fit, since the compiled cast is undefined otherwise, and is
+  the float cut toward zero. The standard library's integer methods each
   have a `time` clause, so `wrapping_add`, `saturating_add`,
   `checked_add`, `try_from`, and the rest are definitions their callers
   unfold.
@@ -1154,8 +1157,9 @@ sanitized runs, test the trusted base against real executions.
 ## Not built
 
 - **Contracts for the intrinsic module's floats and system calls.** Only
-  the integer operations, storage, views, and what a C function keeps of
-  the storages it is lent have meanings. A call of any other intrinsic, and
+  the integer operations, float arithmetic and comparisons, a float's
+  `fits` and `convert` to an integer, storage, views, and what a C
+  function keeps of the storages it is lent have meanings. A call of any other intrinsic, and
   what a C function returns beyond the counts `read`, `write`, and
   `snprintf` give, is known only by its type, and what the standard library states no contract for, such as
   the `ieee_` comparisons, is known only by its type.
