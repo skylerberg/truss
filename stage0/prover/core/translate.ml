@@ -1138,10 +1138,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
   | Copy operand -> Some (operand_value context frame operand)
   | Function_value { path; type_arguments } ->
       Some (frame, global_value context frame node path type_arguments)
-  | Value_parameter parameter ->
-      let symbol = Printf.sprintf "generic.%s.%s" (Path.show parameter.owner) parameter.name in
-      declare context (L.Constant (symbol, Int));
-      Some (frame, L.Symbol symbol)
+  | Value_parameter parameter -> Some (frame, value_term context frame (Value_parameter parameter))
   | Lambda { parameters; body; captures; _ } ->
       Some (lambda context frame node parameters captures body ~facts:(fun _ -> []))
   | Construct { variant; fields } -> Some (construct context frame node variant fields)
@@ -1660,6 +1657,47 @@ and quantified context frame (node : expression) (quantifier : Syntax.quantifier
               | None -> unsupported span "a quantifier over `%s`" (T.show collection_type))
           | None -> unsupported span "a quantifier over `%s`" (T.show collection_type)))
 
+(* A [USize] generic argument's value: a number, or what the parameter
+   stands for here, or the parameter itself, a constant the solver knows
+   nothing more of. *)
+and value_term context frame (value : T.value) =
+  match value with
+  | Known number -> L.Integer number
+  | Value_parameter parameter -> (
+      match List.assoc_opt parameter frame.substitution with
+      | Some (T.Value given) when given <> Value_parameter parameter ->
+          value_term context frame given
+      | _ ->
+          let symbol = Printf.sprintf "generic.%s.%s" (Path.show parameter.owner) parameter.name in
+          declare context (L.Constant (symbol, Int));
+          assume context frame (in_range (T.builtin USize) (L.Symbol symbol));
+          L.Symbol symbol)
+  | Value_variable _ -> raise (Foreign_unsupported "an unsolved size")
+
+(* The value of an intrinsic's [USize] generic argument, by the generic's
+   name. *)
+and generic_argument context frame (operation : Intrinsic.operation) type_arguments name =
+  let generics = (Intrinsic_signatures.signature operation).generics in
+  List.find_map
+    (fun ((generic : T.generic), argument) ->
+      match argument with
+      | T.Value value when generic.generic.name = name -> Some (value_term context frame value)
+      | _ -> None)
+    (try List.combine generics type_arguments with Invalid_argument _ -> [])
+
+(* An array's elements: a sequence as long as its type says. *)
+and array_model context frame (ty : T.ty) term =
+  match ty with
+  | Named { arguments = [ T.Type element; T.Value count ]; _ } ->
+      let symbol = "model." ^ type_key ty in
+      declare context
+        (L.Function (symbol, [ sort_of context ty ], sort_of context (sequence_type element)));
+      let sequence = L.Apply (symbol, [ term ]) in
+      assume context frame
+        (L.equal (sequence_length context element sequence) (value_term context frame count));
+      sequence
+  | _ -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (T.show ty)))
+
 (* Calls *)
 
 (* A call's arguments, as its callee is given them, in its order: each
@@ -1989,7 +2027,26 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
           (function T.Type ty -> Some (substituted context frame ty) | _ -> None)
           type_arguments
       in
-      let result = intrinsic context frame ~node operation types operands ~changed result_type in
+      let result =
+        match (operation, values) with
+        | Array_model, [ array ] -> array_model context frame array.type_ array.term
+        | Storage_from_array, [ array ] -> (
+            (* The array's elements, moved into storage with room for exactly
+               them. *)
+            match array.type_ with
+            | Named { arguments = [ T.Type element; T.Value count ]; _ } ->
+                let storage = arrive context frame "storage" result_type in
+                let elements = buffer_model context Storage element storage in
+                let count = value_term context frame count in
+                assume context frame
+                  L.(
+                    equal elements (array_model context frame array.type_ array.term)
+                    &&& equal (sequence_length context element elements) count
+                    &&& equal (buffer_capacity context element storage) count);
+                storage
+            | _ -> arrive context frame "storage" result_type)
+        | _ -> intrinsic context frame ~node operation types operands ~changed result_type
+      in
       let frame = spend context frame (step_amount context frame call_ values) in
       Some (frame, result)
 
@@ -2065,14 +2122,14 @@ and libc_call context frame ~(node : expression) (function_ : Libc.function_) op
       ("<=", [ L.Apply ("+", [ length byte buffer; count ]); buffer_capacity context byte buffer ])
   in
   (match (function_, operands) with
-  | Write, [ _; bytes; count ] ->
+  | (Write | Pwrite), _ :: bytes :: count :: _ ->
       (* It reads at most [count] of the view's bytes, and writes at most
          as many. *)
       needs
         (L.Apply
            ("<=", [ count; sequence_length context byte (buffer_model context View byte bytes) ]));
       assume context frame (L.Apply ("<=", [ known; count ]))
-  | Read, [ _; buffer; count ] ->
+  | (Read | Pread), _ :: buffer :: count :: _ ->
       (* It fills at most [count] bytes of the room after the storage's
          elements, which are the storage's only once [storage_lengthen]
          says so. *)
@@ -2760,9 +2817,10 @@ and finite_set_path : Path.t =
 and finite_map_path : Path.t =
   Top { module_ = { package = "standard"; modules = [ "specification" ] }; name = "FiniteMap" }
 
-(* A [List], a [Sequence], or a set written out: a value whose sequence,
-   the list's model or the sequence itself, has the elements in order, or
-   whose set has them. A non-empty list is one allocation. *)
+(* An array, a [Sequence], or a [FiniteSet] written out: a value whose
+   model has the elements in order, or whose set has them. None of them
+   allocates: an array is built in place, and the others are only in
+   specifications. *)
 and list_literal context frame (node : expression) items =
   let ty = type_of context frame node in
   let span = at frame node in
@@ -2785,19 +2843,6 @@ and list_literal context frame (node : expression) items =
         match set_of context frame ty ~element values with
         | Some literal -> literal
         | None -> unsupported span "a literal of `%s`" (T.show ty))
-  in
-  let allocates =
-    items <> []
-    && match ty with Named { path; _ } -> not (Path.equal path sequence_path) | _ -> false
-  in
-  let frame =
-    spend context frame (fun (counter : Costs.counter) ->
-        match (counter.resource, counter.counting) with
-        | Allocations, _ when allocates -> L.int 1
-        | Allocated_bytes, Units when allocates -> L.int 1
-        | Allocated_bytes, (At_most | Exactly) when allocates ->
-            unknown_amount context frame counter
-        | _ -> Costs.zero)
   in
   (frame, literal)
 
@@ -2948,11 +2993,7 @@ and sequence_of context frame (ty : T.ty) ~element values =
   let sequence =
     match ty with
     | Named { path; _ } when Path.equal path sequence_path -> Some made
-    | Named
-        {
-          path = Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" };
-          _;
-        } ->
+    | Named { path; _ } when Intrinsic.builtin_of_path path = Some Array ->
         model_of context ty made ~element
     | _ -> None
   in
@@ -2973,16 +3014,10 @@ and sequence_of context frame (ty : T.ty) ~element values =
 (* A [Set] or a [FiniteSet] of these elements: one that contains each of
    them and nothing else, so no more of them than were written. *)
 and set_of context frame (ty : T.ty) ~element values =
-  let set_path : Path.t =
-    Top { module_ = { package = "standard"; modules = [ "set" ] }; name = "Set" }
-  in
   let finite = T.Named { path = finite_set_path; arguments = [ T.Type element ] } in
   let made = arrive context frame "literal" ty in
   let model =
-    match ty with
-    | Named { path; _ } when Path.equal path finite_set_path -> Some made
-    | Named { path; _ } when Path.equal path set_path -> model_as context ty made ~model:finite
-    | _ -> None
+    match ty with Named { path; _ } when Path.equal path finite_set_path -> Some made | _ -> None
   in
   Option.map
     (fun model ->
@@ -3004,14 +3039,10 @@ and set_of context frame (ty : T.ty) ~element values =
       made)
     model
 
-(* A [Map] or a [FiniteMap] written out: each key with its value, and no
-   other keys. Its keys must be distinct. A non-empty map is one
-   allocation. *)
+(* A specification's [FiniteMap] written out: each key with its value, and
+   no other keys. Its keys must be distinct. *)
 and map_literal context frame (node : expression) entries =
   let ty = type_of context frame node in
-  let map_path : Path.t =
-    Top { module_ = { package = "standard"; modules = [ "map" ] }; name = "Map" }
-  in
   let key_type, value_type =
     match ty with
     | Named { arguments = [ T.Type key; T.Type value_type ]; _ } -> (key, value_type)
@@ -3043,10 +3074,6 @@ and map_literal context frame (node : expression) entries =
   let model =
     match ty with
     | Named { path; _ } when Path.equal path finite_map_path -> made
-    | Named { path; _ } when Path.equal path map_path -> (
-        match model_as context ty made ~model:finite with
-        | Some model -> model
-        | None -> unsupported (at frame node) "a literal of `%s`" (T.show ty))
     | _ -> unsupported (at frame node) "a literal of `%s`" (T.show ty)
   in
   assume_valid context frame ty made;
@@ -3067,15 +3094,6 @@ and map_literal context frame (node : expression) entries =
            (L.disjunction (List.map (fun (_, key, _) -> L.equal (L.Symbol each) key) terms)) ));
   assume context frame
     (L.equal (finite_function context finite "size" L.Int [] model) (L.int (List.length terms)));
-  let frame =
-    spend context frame (fun (counter : Costs.counter) ->
-        match (counter.resource, counter.counting) with
-        | Allocations, _ when entries <> [] -> L.int 1
-        | Allocated_bytes, Units when entries <> [] -> L.int 1
-        | Allocated_bytes, (At_most | Exactly) when entries <> [] ->
-            unknown_amount context frame counter
-        | _ -> Costs.zero)
-  in
   (frame, made)
 
 (* Text as a value whose model is its UTF-8 bytes. *)
@@ -4776,7 +4794,7 @@ and construct_amount context frame (ty : T.ty) variant (counter : Costs.counter)
 (* What a call whose contract is not read spends. *)
 and step_amount context frame (call_ : call) (values : passed list) (counter : Costs.counter) =
   match call_.callee with
-  | Intrinsic { operation; _ } -> (
+  | Intrinsic { operation; type_arguments } -> (
       let cost = Intrinsic_signatures.cost operation in
       match counter.resource with
       | Time -> (
@@ -4798,10 +4816,18 @@ and step_amount context frame (call_ : call) (values : passed list) (counter : C
       | Allocations | Allocated_bytes -> (
           match (cost.allocations, counter.resource, counter.counting) with
           | No_allocations, _, _ -> Costs.zero
-          | One_if_positive position, resource, counting -> (
-              match List.find_opt (fun (passed : passed) -> passed.position = position) values with
-              | Some passed when resource = Allocations || counting = Units ->
-                  L.ite (L.Apply (">", [ passed.term; L.int 0 ])) (L.int 1) (L.int 0)
+          | One_if_positive amount, resource, counting -> (
+              let given =
+                match amount with
+                | Argument position ->
+                    Option.map
+                      (fun (passed : passed) -> passed.term)
+                      (List.find_opt (fun (passed : passed) -> passed.position = position) values)
+                | Generic name -> generic_argument context frame operation type_arguments name
+              in
+              match given with
+              | Some given when resource = Allocations || counting = Units ->
+                  L.ite (L.Apply (">", [ given; L.int 0 ])) (L.int 1) (L.int 0)
               | _ -> unknown_amount context frame counter)
           | Unknown_allocations, _, _ -> unknown_amount context frame counter)
       | Calls _ -> Costs.zero)

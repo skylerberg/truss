@@ -116,6 +116,7 @@ type operation =
   | View_slice
   | Storage_model  (** [(storage) -> Sequence]: its elements, in specifications only *)
   | View_model  (** [(view) -> Sequence]: its elements, in specifications only *)
+  | Array_model  (** [(array) -> Sequence]: its elements, in specifications only *)
   | View_address
       (** [(view) -> USize]: the address of a view's elements as a number, for the lists of
           addresses that some functions of the C library take *)

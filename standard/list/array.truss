@@ -1,3 +1,5 @@
+use standard::intrinsic
+
 public fn Array[Element: Copyable, count: USize].filled(value: Element) -> Array[Element, count]
   cost time O(count)
   cost allocations == 0
@@ -23,7 +25,7 @@ public fn Array[Element, count: USize].length(self) -> USize
 }
 
 public fn Array[Element, count: USize].slice(self) -> Slice[Element]
-  ensures result.length() == count
+  ensures identical(result.model(), self.model())
   cost time O(1)
 {
   todo
@@ -33,9 +35,21 @@ internal fn Array[Element, count: USize].slice_range(self, start: USize, stop: U
   requires start <= stop
   requires stop <= count
   ensures result.length() == stop - start
+  ensures forall index in 0..result.length() =>
+    identical(result.model()[index], self.model()[start + index])
   cost time O(1)
 {
-  todo
+  self.slice().slice_range(start, stop: stop)
+}
+
+impl Model for Array[Element, count: USize] {
+  type Value = Sequence[Element]
+
+  fn model(self) -> Sequence[Element]
+    cost time finite
+  {
+    intrinsic::array_model(self)
+  }
 }
 
 impl Index for Array[Element, count: USize] {
@@ -50,6 +64,7 @@ impl Index for Array[Element, count: USize] {
 
   fn at(self, key: USize) lends Element
     requires key < count
+    ensures identical(result, self.model()[key])
     cost time O(1)
   {
     todo
@@ -57,6 +72,8 @@ impl Index for Array[Element, count: USize] {
 
   fn at(mut self, key: USize) lends mut Element
     requires key < count
+    ensures identical(result, old(self.model())[key])
+    ensures identical(self.model(), old(self.model()).update(key, value: yielded[0]))
     cost time O(1)
   {
     todo
