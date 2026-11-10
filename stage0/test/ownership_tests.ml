@@ -243,32 +243,31 @@ let () =
   let accepted name body = test name (fun () -> fine (helpers ^ body)) in
   rejected "a lambda that captures a parameter cannot be returned"
     "fn adder(amount: Int64) -> fn(Int64) -> Int64 {\n  fn(value) { value + amount }\n}\n"
-    "ownership.returns_local_view";
+    "ownership.view_escapes";
   rejected "a lambda that captures a local cannot be returned"
     "fn adder(amount: Int64) -> fn(Int64) -> Int64 {\n\
     \  let extra = amount\n\
     \  fn(value) { value + extra }\n\
      }\n"
-    "ownership.returns_local_view";
+    "ownership.view_escapes";
   rejected "a lambda that captures cannot be returned through a name"
     "fn adder(amount: Int64) -> fn(Int64) -> Int64 {\n\
     \  let add: fn(Int64) -> Int64 = fn(value) { value + amount }\n\
     \  add\n\
      }\n"
-    "ownership.returns_local_view";
+    "ownership.view_escapes";
   rejected "a record that holds a lambda that captures cannot be returned"
     "fn build(amount: Int64) -> Handlers {\n  Handlers(first: fn(value) { value + amount })\n}\n"
-    "ownership.returns_local_view";
+    "ownership.view_escapes";
   rejected "a lambda that captures cannot be put in what the caller keeps"
     "fn keep(handlers: mut Handlers, amount: Int64) {\n\
     \  handlers.first = fn(value) { value + amount }\n\
      }\n"
-    "ownership.stores_local_view";
+    "ownership.view_escapes";
   rejected "a lambda that captures cannot be given to an `own` parameter"
-    "fn give(amount: Int64) {\n  take(fn(value) { value + amount })\n}\n"
-    "ownership.stores_local_view";
+    "fn give(amount: Int64) {\n  take(fn(value) { value + amount })\n}\n" "ownership.view_escapes";
   rejected "a function value that is not owned cannot be given to an `own` parameter"
-    "fn relay(handler: fn(Int64) -> Int64) {\n  take(handler)\n}\n" "ownership.stores_local_view";
+    "fn relay(handler: fn(Int64) -> Int64) {\n  take(handler)\n}\n" "ownership.view_escapes";
   accepted "a function that captures nothing can be returned, kept, and given up"
     "fn plain() -> fn(Int64) -> Int64 {\n\
     \  fn(value) { double(value) }\n\
@@ -333,7 +332,7 @@ let () =
     "ownership.changed_while_viewed";
   rejected "a reference into a parameter that the function owns cannot be returned"
     "fn f(labeled: own Labeled) -> StringSlice {\n  labeled.name.slice()\n}\n"
-    "ownership.returns_local_view";
+    "ownership.view_escapes";
   accepted "a view taken out of a parameter that the function owns can be returned"
     "fn f(labeled: own Labeled) -> Slice[Int64] {\n  labeled.view\n}\n";
   rejected "an `any` that holds a view of a local cannot be returned"
@@ -341,7 +340,7 @@ let () =
     \  let items: List[Int64] = [1, 2, 3]\n\
     \  any Window(view: items[..])\n\
      }\n"
-    "ownership.returns_local_view";
+    "ownership.view_escapes";
   rejected "what an `any` views cannot change while the `any` is in use"
     "fn f(items: mut List[Int64]) -> USize {\n\
     \  let runner: any Runner = any Window(view: items[..])\n\
@@ -356,7 +355,7 @@ let () =
     \  let add: fn(Int64) -> Int64 = fn(value) { value + amount }\n\
     \  add\n\
      }\n"
-    "ownership.returns_local_view";
+    "ownership.view_escapes";
   rejected "the value of an `if` views what its branches' values view"
     "fn f(items: mut List[Int64], first: Bool) -> USize {\n\
     \  let part = if first { items[..1] } else { items[1..] }\n\
@@ -390,7 +389,7 @@ let () =
     \  let part = if first { items[..1] } else { items[1..] }\n\
     \  part\n\
      }\n"
-    "ownership.returns_local_view";
+    "ownership.view_escapes";
   rejected "a copy of a view views what the view does"
     "fn f(items: mut List[Int64]) -> USize {\n\
     \  let all = items[..]\n\
@@ -467,13 +466,13 @@ let () =
     \  let scratch: List[Int64] = [1, 2, 3]\n\
     \  yield scratch[..]\n\
      }\n"
-    "ownership.returns_local_view";
+    "ownership.view_escapes";
   rejected "a lending method cannot lend a view of its local"
     "fn Reader.window(self) lends Slice[Int64] {\n\
     \  let scratch: List[Int64] = [1, 2, 3]\n\
     \  yield scratch[..]\n\
      }\n"
-    "ownership.returns_local_view";
+    "ownership.view_escapes";
   accepted "a method can yield a view of `self`, and lend a local itself"
     "fn Reader.windows(self) yields Slice[Int64] {\n\
     \  yield self.buffer[..1]\n\
@@ -604,7 +603,7 @@ let () =
         \  }\n\
         \  length\n\
          }\n"
-        "ownership.parallel_conflict");
+        "ownership.data_race");
   test "two branches of a `parallel` block can read through views of one place" (fun () ->
       fine
         "fn f(items: List[Int64]) -> USize {\n\
@@ -715,7 +714,7 @@ let () =
     \    self.kept\n\
     \  }\n\
      }\n"
-    "ownership.stores_local_view";
+    "ownership.view_crosses_capability";
   rejected "a capability's method cannot return a view of the implementation's own parts"
     "type Lines(text: String)\n\n\
      impl Journal for Lines {\n\
@@ -726,7 +725,7 @@ let () =
     \    self.text.slice()\n\
     \  }\n\
      }\n"
-    "ownership.returns_local_view";
+    "ownership.view_crosses_capability";
   test "an implementation can keep a copy and return a view that it was built with" (fun () ->
       fine
         (journal
@@ -788,7 +787,7 @@ let () =
         \    None => None\n\
         \  }\n\
          }\n"
-        "ownership.returns_local_view");
+        "ownership.view_escapes");
   test "a place cannot change while a view of what a `match` on it binds is in use" (fun () ->
       one_diagnostic
         "fn f() -> USize {\n\
@@ -816,9 +815,12 @@ let () =
      }\n\n\
      fn keep(items: own List[Int64]) {}\n\n"
   in
-  let rejected name body code = test name (fun () -> one_diagnostic (helpers ^ body) code) in
+  let rejected ?says name body code =
+    test name (fun () -> one_diagnostic ?says (helpers ^ body) code)
+  in
   let accepted name body = test name (fun () -> fine (helpers ^ body)) in
   rejected "one branch of a `concurrent` block cannot change a place that another uses"
+    ~says:"`concurrent` block"
     "fn f(items: mut List[Int64]) -> USize\n\
     \  uses Tasks\n\
      {\n\
@@ -828,8 +830,9 @@ let () =
     \  }\n\
     \  length\n\
      }\n"
-    "ownership.parallel_conflict";
+    "ownership.data_race";
   rejected "an iteration of a `concurrent for` changes only its own element and locals"
+    ~says:"`concurrent for`"
     "fn f(items: List[Int64], total: mut Int64)\n\
     \  uses Tasks\n\
      {\n\
@@ -837,7 +840,7 @@ let () =
     \    total = item\n\
     \  }\n\
      }\n"
-    "ownership.parallel_conflict";
+    "ownership.data_race";
   rejected "a branch puts back what it takes out of a place that is lent `mut`"
     "fn f(holder: mut Holder) -> Result[USize, USize]\n\
     \  uses Tasks, Clock\n\
@@ -849,7 +852,7 @@ let () =
     \  holder.items = own taken\n\
     \  Ok(waited)\n\
      }\n"
-    "ownership.field_not_restored";
+    "ownership.not_reinitialized";
   accepted "a branch may take a value out of a place that is lent `mut` and put one back"
     "fn f(holder: mut Holder) -> Result[USize, USize]\n\
     \  uses Tasks, Clock\n\
@@ -875,7 +878,7 @@ let () =
     \  holder.items = own taken\n\
     \  Ok(first + second)\n\
      }\n"
-    "ownership.field_not_restored"
+    "ownership.not_reinitialized"
 
 (* Guards *)
 
@@ -1043,7 +1046,7 @@ let () =
          fn f(config: mut Config) {\n\
         \  take(own config.name)\n\
          }\n"
-        "ownership.field_not_restored");
+        "ownership.not_reinitialized");
   test "a name that a value is moved into does not view the place it came from" (fun () ->
       fine
         "fn f(first: own List[Int64]) -> List[Int64] {\n\
@@ -1064,7 +1067,7 @@ let () =
       }\n";
    rejected "a field moved out of `mut self` must be put back"
      "fn Holder.take_items(mut self) -> List[Int64] {\n  let taken = own self.items\n  taken\n}\n"
-     "ownership.field_not_restored";
+     "ownership.not_reinitialized";
    accepted "a place lent `mut` can be moved out whole and put back"
      "fn take[Value](slot: mut Option[Value]) -> Option[Value] {\n\
      \  let taken = own slot\n\
@@ -1078,7 +1081,7 @@ let () =
       }\n";
    rejected "a place lent `mut` that is moved out whole must be put back"
      "fn f(holder: mut Holder) -> Holder {\n  let taken = own holder\n  taken\n}\n"
-     "ownership.field_not_restored";
+     "ownership.not_reinitialized";
    rejected "a place lent `mut` must be put back on every path"
      "fn f(holder: mut Holder, keep: Bool) -> List[Int64] {\n\
      \  let taken = own holder.items\n\
@@ -1087,7 +1090,7 @@ let () =
      \  }\n\
      \  taken\n\
       }\n"
-     "ownership.field_not_restored";
+     "ownership.not_reinitialized";
    rejected "a place lent `mut` cannot be used while it is moved out"
      "fn f(holder: mut Holder) -> USize {\n\
      \  let taken = own holder\n\
@@ -1112,7 +1115,7 @@ let () =
      \  }\n\
      \  total\n\
       }\n"
-     "ownership.field_not_restored";
+     "ownership.not_reinitialized";
    rejected "what is moved out of a `mut` binding of a `match` must be put back in the arm"
      "fn f(slot: mut Option[Holder]) -> USize {\n\
      \  match mut slot {\n\
@@ -1123,7 +1126,7 @@ let () =
      \    None => 0\n\
      \  }\n\
       }\n"
-     "ownership.field_not_restored";
+     "ownership.not_reinitialized";
    rejected "a yielding method cannot yield while a place of its caller is moved out"
      "fn Holder.each_item(mut self) yields mut Int64 {\n\
      \  var items = own self.items\n\
@@ -1132,7 +1135,7 @@ let () =
      \  }\n\
      \  self.items = own items\n\
       }\n"
-     "ownership.field_not_restored";
+     "ownership.not_reinitialized";
    accepted "a lending method can yield while a place of its caller is moved out"
      "fn Holder.lend_items(mut self) lends mut List[Int64] {\n\
      \  var items = own self.items\n\
@@ -1168,7 +1171,7 @@ let () =
   test "a function cannot return a view of its own local" (fun () ->
       one_diagnostic
         "fn f() -> Slice[Int64] {\n  let items: List[Int64] = [1, 2, 3]\n  items[0..2]\n}\n"
-        "ownership.returns_local_view");
+        "ownership.view_escapes");
   test "a function cannot return a view of its local nested in a type nested in itself" (fun () ->
       one_diagnostic
         "type Holder[Value](value: Value)\n\n\
@@ -1176,7 +1179,7 @@ let () =
         \  let items: List[Int64] = [1, 2, 3]\n\
         \  Holder(Holder(items[0..2]))\n\
          }\n"
-        "ownership.returns_local_view");
+        "ownership.view_escapes");
   test "a function cannot return a view of its local kept as an associated type" (fun () ->
       one_diagnostic
         "trait Shown {\n\
@@ -1195,7 +1198,7 @@ let () =
         \  let numbers = Numbers([1, 2, 3])\n\
         \  Kept(numbers.part())\n\
          }\n"
-        "ownership.returns_local_view");
+        "ownership.view_escapes");
   test "a function can return a view of its parameter" (fun () ->
       fine "fn f(items: List[Int64]) -> Slice[Int64] {\n  items[0..2]\n}\n");
   test "a var needs an owned value, with fixes that give up or copy the place" (fun () ->
@@ -1278,7 +1281,7 @@ let () =
         \  }\n\
         \  seen\n\
          }\n"
-        "ownership.parallel_conflict")
+        "ownership.data_race")
 
 (* Methods *)
 
@@ -1350,7 +1353,7 @@ let () =
         \    mut total.push(item)\n\
         \  }\n\
          }\n"
-        "ownership.parallel_conflict");
+        "ownership.data_race");
   test "a parallel for cannot assign a place from outside it, even inside a branch" (fun () ->
       one_diagnostic
         "fn f(ready: Bool) {\n\
@@ -1361,7 +1364,7 @@ let () =
         \    }\n\
         \  }\n\
          }\n"
-        "ownership.parallel_conflict");
+        "ownership.data_race");
   test "a parallel for may change its own element and locals" (fun () ->
       fine
         "fn f(items: mut List[Int64]) {\n\
@@ -1878,7 +1881,7 @@ let () =
         \  let local: List[Int64] = [1, 2, 3]\n\
         \  mut kept.push(local[0..2])\n\
          }\n"
-        "ownership.stores_local_view");
+        "ownership.view_escapes");
   test "a mut parameter can be given a view that the function was given" (fun () ->
       fine
         "fn f(kept: mut List[Slice[Int64]], source: Slice[Int64]) {\n\
@@ -1889,7 +1892,7 @@ let () =
         "fn f(kept: mut List[Slice[Int64]], source: List[Int64]) {\n\
         \  mut kept.push(source[0..2])\n\
          }\n"
-        "ownership.stores_local_view");
+        "ownership.view_escapes");
   test "what a mut parameter views cannot be changed in the rest of the function" (fun () ->
       one_diagnostic
         "fn f(kept: mut List[Slice[Int64]], source: mut Slice[Int64]) {\n\
@@ -1904,21 +1907,21 @@ let () =
          \  let local: List[Int64] = [1, 2, 3]\n\
          \  self.view = local[0..1]\n\
           }\n")
-        "ownership.stores_local_view");
+        "ownership.view_escapes");
   test "a mut self method can put a view that it was given in self" (fun () ->
       fine
         (window ^ "fn Window.widen(mut self, data: Slice[Int64]) {\n  self.view = data[0..2]\n}\n"));
   test "a mut self method cannot put a view of a parameter that is only lent in self" (fun () ->
       one_diagnostic
         (window ^ "fn Window.widen(mut self, data: List[Int64]) {\n  self.view = data[0..2]\n}\n")
-        "ownership.stores_local_view");
+        "ownership.view_escapes");
   test "a mut self method cannot put a view of a part of self in self" (fun () ->
       one_diagnostic
         "type Cached(items: List[Int64], recent: Slice[Int64])\n\n\
          fn Cached.refresh(mut self) {\n\
         \  self.recent = self.items[0..1]\n\
          }\n"
-        "ownership.stores_local_view");
+        "ownership.self_referential");
   test "a view that a mut self method was given is viewed by what it was called on" (fun () ->
       one_diagnostic
         (window
@@ -1948,7 +1951,7 @@ let () =
         "ownership.changed_while_viewed");
   test "a function cannot return a view of a parameter it owns" (fun () ->
       one_diagnostic "fn f(data: own List[Int64]) -> Slice[Int64] {\n  data[0..1]\n}\n"
-        "ownership.returns_local_view");
+        "ownership.view_escapes");
   test "a function can return a view it was given to own" (fun () ->
       fine "fn f(view: own Slice[Int64]) -> Slice[Int64] {\n  view\n}\n");
   test "a function can return a local that views its parameter" (fun () ->
@@ -1969,6 +1972,6 @@ let () =
         \  let part = items[0..2]\n\
         \  part\n\
          }\n"
-        "ownership.returns_local_view")
+        "ownership.view_escapes")
 
 let () = finish ()

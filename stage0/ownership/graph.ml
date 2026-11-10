@@ -98,12 +98,19 @@ type point = {
   mutable successors : int list;
 }
 
+type simultaneous_block = { keyword : string; branches : range list }
+(** A [parallel] or [concurrent] block, whose branches run at the same time. [keyword] is the one it
+    is written with. *)
+
+type simultaneous_loop = { keyword : string; body : range; bound : Core.local list }
+(** A [parallel for] or [concurrent for], whose iterations run at the same time: the points of its
+    body and the locals that its pattern binds. *)
+
 type t = {
   points : point array;
   entries : int list;  (** The [Enter] points: the definition's body first, then each lambda. *)
-  parallel_blocks : range list list;  (** For each [parallel] block, the points of each branch. *)
-  parallel_loops : (range * Core.local list) list;
-      (** For each [parallel for], the points of its body and the locals that its pattern binds. *)
+  simultaneous_blocks : simultaneous_block list;
+  simultaneous_loops : simultaneous_loop list;
 }
 
 type builder = {
@@ -115,8 +122,8 @@ type builder = {
           that [continue] it. *)
   mutable captured : Core.local list;  (** The captures of the enclosing lambdas. *)
   mutable loans : loan list;
-  mutable parallel_blocks : range list list;
-  mutable parallel_loops : (range * Core.local list) list;
+  mutable simultaneous_blocks : simultaneous_block list;
+  mutable simultaneous_loops : simultaneous_loop list;
   plain : T.ty -> bool;
   is_view : T.ty -> bool;
 }
@@ -511,7 +518,7 @@ and quantified builder frontier (node : Core.expression) (binder : Core.binder)
   let run frontier (pattern : Core.pattern) ~views ~held =
     loop builder frontier ~bound:(pattern_locals pattern) ~views ~held ~condition:None
       { statements = []; value = Some body; diverges = false }
-      node.origin ~parallel:false
+      node.origin ~simultaneous:None
   in
   match binder with
   | Over_type _ | Over_collection _ -> frontier
@@ -873,10 +880,14 @@ and statement_kind builder frontier (node : Core.statement) =
       in
       loop builder frontier ~bound:(pattern_locals pattern) ~views ~held ~condition:None body
         node.origin
-        ~parallel:(match node.kind with For { mode; _ } -> mode <> Sequential | _ -> false)
+        ~simultaneous:
+          (match node.kind with
+          | For { mode = Parallel_loop; _ } -> Some "parallel"
+          | For { mode = Concurrent_loop; _ } -> Some "concurrent"
+          | _ -> None)
   | While { condition; body; _ } ->
       loop builder frontier ~bound:[] ~views:[] ~held:None ~condition:(Some condition) body
-        node.origin ~parallel:false
+        node.origin ~simultaneous:None
   | Parallel branches | Concurrent branches ->
       let concurrent = match node.kind with Concurrent _ -> true | _ -> false in
       let frontier, ranges =
@@ -892,7 +903,9 @@ and statement_kind builder frontier (node : Core.statement) =
             (frontier, { first; limit } :: ranges))
           (frontier, []) branches
       in
-      builder.parallel_blocks <- List.rev ranges :: builder.parallel_blocks;
+      builder.simultaneous_blocks <-
+        { keyword = (if concurrent then "concurrent" else "parallel"); branches = List.rev ranges }
+        :: builder.simultaneous_blocks;
       frontier
   | Proof _ -> frontier
   | Assert { value; _ } -> expression builder frontier value
@@ -978,7 +991,7 @@ and let_ builder frontier (node : Core.statement) (pattern : Core.pattern) (valu
    evaluates its condition after the head, as a statement of its own. The
    loop ends from the head or the condition, and from every [break]. A
    loop over a place lends the place for the body. *)
-and loop builder frontier ~bound ~views ~held ~condition ~parallel (body : Core.block) origin =
+and loop builder frontier ~bound ~views ~held ~condition ~simultaneous (body : Core.block) origin =
   match frontier with
   | [] -> []
   | _ ->
@@ -1008,9 +1021,12 @@ and loop builder frontier ~bound ~views ~held ~condition ~parallel (body : Core.
       in
       let first = builder.count in
       let body_end = block builder entered body in
-      if parallel then
-        builder.parallel_loops <-
-          ({ first; limit = builder.count }, bound) :: builder.parallel_loops;
+      Option.iter
+        (fun keyword ->
+          builder.simultaneous_loops <-
+            { keyword; body = { first; limit = builder.count }; bound }
+            :: builder.simultaneous_loops)
+        simultaneous;
       builder.loans <- loans;
       builder.loops <- List.tl builder.loops;
       link builder (body_end @ !continues) head;
@@ -1036,8 +1052,8 @@ let of_definition ~plain ~is_view (definition : Core.definition) : t option =
           loops = [];
           captured = [];
           loans = [];
-          parallel_blocks = [];
-          parallel_loops = [];
+          simultaneous_blocks = [];
+          simultaneous_loops = [];
           plain;
           is_view;
         }
@@ -1054,7 +1070,7 @@ let of_definition ~plain ~is_view (definition : Core.definition) : t option =
       {
         points = Array.init builder.count (Hashtbl.find builder.table);
         entries = entry :: List.rev builder.entries;
-        parallel_blocks = List.rev builder.parallel_blocks;
-        parallel_loops = List.rev builder.parallel_loops;
+        simultaneous_blocks = List.rev builder.simultaneous_blocks;
+        simultaneous_loops = List.rev builder.simultaneous_loops;
       })
     body

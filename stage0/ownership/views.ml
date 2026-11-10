@@ -376,12 +376,12 @@ let check context (graph : Graph.t) =
               (resolve context before.(index) views)
           with
           | Some { place = { root = Environment; _ }; _ } ->
-              report context Stores_local_view at
+              report context View_escapes at
                 "This lambda captures, and an `own` parameter may keep the function it is given \
                  after this function returns. Only a function that captures nothing can be given \
                  to an `own` parameter."
           | Some viewed ->
-              report context Stores_local_view at
+              report context View_escapes at
                 (Printf.sprintf
                    "`%s` is not owned here, so it may be a lambda that captures, and an `own` \
                     parameter may keep the function it is given. Only a function that captures \
@@ -393,13 +393,13 @@ let check context (graph : Graph.t) =
             List.find_opt (ends_with_function context) (resolve context before.(index) views)
           with
           | Some { place = { root = Environment; _ }; _ } ->
-              report context Returns_local_view at
+              report context View_escapes at
                 "This returns a lambda that captures. What a lambda captures is kept in the \
                  function that the lambda is written in, so the lambda would outlive it. Only a \
                  function that captures nothing can be returned. Return a record that holds what \
                  the lambda needs instead, with a method that does the work."
           | Some local ->
-              report context Returns_local_view at
+              report context View_escapes at
                 (Printf.sprintf
                    "This returns a view of `%s`, which is local to the function, so it would \
                     outlive it. A function returns views only of its parameters."
@@ -414,7 +414,7 @@ let check context (graph : Graph.t) =
                      (fun (view : view) -> view.place.root = Local Self && not view.taken)
                      (resolve context before.(index) views)
               then
-                report context Returns_local_view at
+                report context View_crosses_capability at
                   "This returns a view of a part of an implementation of a capability. Code that \
                    calls the capability cannot see its implementation, and the next call could \
                    change that part. Return a copy instead.")
@@ -445,7 +445,7 @@ let check context (graph : Graph.t) =
             in
             match List.find_opt (ends_with_function context) resolved with
             | Some { place = { root = Environment; _ }; _ } ->
-                report context Stores_local_view at
+                report context View_escapes at
                   (Printf.sprintf
                      "This puts a lambda that captures in `%s`, which the caller keeps. What a \
                       lambda captures is kept in the function that the lambda is written in, so \
@@ -453,7 +453,7 @@ let check context (graph : Graph.t) =
                       kept."
                      (show_root context place.root))
             | Some local ->
-                report context Stores_local_view at
+                report context View_escapes at
                   (Printf.sprintf
                      "This puts a view of `%s` in `%s`, which the caller keeps, so the view would \
                       outlive `%s`. What the caller keeps views only what reached the function \
@@ -468,14 +468,14 @@ let check context (graph : Graph.t) =
                     List.find_opt only_lent resolved )
                 with
                 | Some given, _, _ ->
-                    report context Stores_local_view at
+                    report context View_crosses_capability at
                       (Printf.sprintf
                          "This keeps a view of `%s` in an implementation of a capability. Code \
                           that calls the capability cannot see its implementation, so it could \
                           change or drop what is viewed. Keep a copy instead."
                          (show_root context given.place.root))
                 | None, Some _, _ ->
-                    report context Stores_local_view at
+                    report context Self_referential at
                       (Printf.sprintf
                          "This puts a view of a part of `%s` in `%s` itself. A value cannot hold a \
                           view of its own parts: the caller would not know that changing the part \
@@ -483,7 +483,7 @@ let check context (graph : Graph.t) =
                          (show_root context place.root) (show_root context place.root))
                 | None, None, Some lent ->
                     let lent = show_root context lent.place.root in
-                    report context Stores_local_view at
+                    report context View_escapes at
                       (Printf.sprintf
                          "This puts a view of `%s` in `%s`, which the caller keeps, but `%s` is \
                           only lent to this function. A function keeps only the views that it is \
@@ -535,12 +535,12 @@ let check context (graph : Graph.t) =
             List.find_opt (ends_with_function context) (resolve context before.(index) views)
           with
           | Some { place = { root = Environment; _ }; _ } ->
-              report context Returns_local_view at
+              report context View_escapes at
                 "This yields a lambda that captures. What a lambda captures is kept in the method \
                  that the lambda is written in, and the caller may keep what it is given. Only a \
                  function that captures nothing can be yielded."
           | Some local ->
-              report context Returns_local_view at
+              report context View_escapes at
                 (Printf.sprintf
                    "This yields a view of `%s`, which is local to the method. The caller may keep \
                     a view that it is given, so a method yields views only of what reached it \
@@ -550,7 +550,7 @@ let check context (graph : Graph.t) =
           | None -> ())
       | Enter | Take_lent _ | Bind _ | Ends _ | Task_end _ | Exit | Hold _ -> ())
     graph.points;
-  (* What a stretch of code changes and uses, for [parallel]. *)
+  (* What a stretch of code changes and uses. *)
   let effects (range : range) =
     let changes = ref [] and uses = ref [] in
     for index = range.first to range.limit - 1 do
@@ -579,11 +579,12 @@ let check context (graph : Graph.t) =
     done;
     (!changes, !uses)
   in
-  (* The branches of a [parallel] block run at the same time. A place that
-     one branch changes must not overlap a place that another branch uses.
-     Two elements of one collection may be different: the prover decides. *)
+  (* The branches of a [parallel] or [concurrent] block run at the same
+     time. A place that one branch changes must not overlap a place that
+     another branch uses. Two elements of one collection may be different:
+     the prover decides. *)
   List.iter
-    (fun branches ->
+    (fun ({ keyword; branches } : simultaneous_block) ->
       let branches = List.map effects branches in
       List.iteri
         (fun index (changes, _) ->
@@ -594,11 +595,10 @@ let check context (graph : Graph.t) =
                 List.iter
                   (fun (place, origin) ->
                     if List.exists (fun other -> Place.overlap other place = Overlap) used then
-                      report context Parallel_conflict (span context origin)
+                      report context Data_race (span context origin)
                         (Printf.sprintf
-                           "One branch of this `parallel` block changes `%s`, which another branch \
-                            uses."
-                           (show context place));
+                           "One branch of this `%s` block changes `%s`, which another branch uses."
+                           keyword (show context place));
                     if other > index then
                       List.iter
                         (fun other ->
@@ -623,13 +623,14 @@ let check context (graph : Graph.t) =
                     other_changes))
             branches)
         branches)
-    graph.parallel_blocks;
-  (* Each iteration of a [parallel for] runs at the same time as the
-     others, so the body may change only what belongs to one iteration: the
-     locals that the pattern binds and the locals bound in the body. *)
+    graph.simultaneous_blocks;
+  (* Each iteration of a [parallel for] or [concurrent for] runs at the same
+     time as the others, so the body may change only what belongs to one
+     iteration: the locals that the pattern binds and the locals bound in
+     the body. *)
   List.iter
-    (fun ((range : range), own) ->
-      let bound = ref own in
+    (fun ({ keyword; body = range; bound } : simultaneous_loop) ->
+      let bound = ref bound in
       for index = range.first to range.limit - 1 do
         match graph.points.(index).action with Bind locals -> bound := locals @ !bound | _ -> ()
       done;
@@ -641,7 +642,8 @@ let check context (graph : Graph.t) =
             | Local local -> not (List.mem local !bound)
           in
           if outside then
-            report context Parallel_conflict (span context origin)
-              "A `parallel for` may change only its own element and its own locals.")
+            report context Data_race (span context origin)
+              (Printf.sprintf "A `%s for` may change only its own element and its own locals."
+                 keyword))
         (fst (effects range)))
-    graph.parallel_loops
+    graph.simultaneous_loops

@@ -33,8 +33,10 @@ val one_diagnostic :
   check:(Query.context -> Path.module_ -> Diagnostic.t list) ->
   ?others:(string * string) list ->
   ?fixed:string ->
+  ?says:string ->
   string ->
   string ->
   unit
 (** [one_diagnostic ~check text code]: [app::main], with [text], has exactly one diagnostic, with
-    [code]. With [~fixed], its first fix gives that text, which then has no diagnostic. *)
+    [code]. With [~fixed], its first fix gives that text, which then has no diagnostic. With
+    [~says], its message contains that text. *)
