@@ -194,7 +194,15 @@ public fn Array[Element, count: USize].reversed(self) yields Element
   ensures finished ==> yielded.length() == self.length()
   cost time O(self.length())
 {
-  todo
+  var index = self.length()
+  while index > 0
+    invariant index <= self.length()
+    invariant yielded.length() == self.length() - index
+    decreases index
+  {
+    index -= 1
+    yield self[index]
+  }
 }
 
 public fn Array[Element, count: USize].reversed(mut self) yields mut Element
@@ -208,7 +216,9 @@ public fn Array[Element, count: USize].windows(self, size: USize) yields Slice[E
   ensures result.length() == size
   cost time O(self.length())
 {
-  todo
+  for window in self.slice().windows(size) {
+    yield window
+  }
 }
 
 public fn Array[Element, count: USize].chunks(self, size: USize) yields Slice[Element]
@@ -216,7 +226,9 @@ public fn Array[Element, count: USize].chunks(self, size: USize) yields Slice[El
   ensures result.length() <= size
   cost time O(self.length())
 {
-  todo
+  for chunk in self.slice().chunks(size) {
+    yield chunk
+  }
 }
 
 public fn Array[Element: Equal, count: USize].split(self, separator: Element) yields Slice[Element]

@@ -198,7 +198,15 @@ public fn Slice[Element].reversed(self) yields Element
   ensures finished ==> yielded.length() == self.length()
   cost time O(self.length())
 {
-  todo
+  var index = self.length()
+  while index > 0
+    invariant index <= self.length()
+    invariant yielded.length() == self.length() - index
+    decreases index
+  {
+    index -= 1
+    yield self[index]
+  }
 }
 
 public fn Slice[Element].reversed(mut self) yields mut Element
@@ -210,17 +218,36 @@ public fn Slice[Element].reversed(mut self) yields mut Element
 public fn Slice[Element].windows(self, size: USize) yields Slice[Element]
   requires size > 0
   ensures result.length() == size
+  ensures yielded.length() <= self.length()
   cost time O(self.length())
 {
-  todo
+  var start: USize = 0
+  while size <= self.length() - start
+    invariant start <= self.length()
+    invariant yielded.length() == start
+    decreases self.length() - start
+  {
+    yield self.slice_range(start, stop: start + size)
+    start += 1
+  }
 }
 
 public fn Slice[Element].chunks(self, size: USize) yields Slice[Element]
   requires size > 0
   ensures result.length() <= size
+  ensures yielded.length() <= self.length()
   cost time O(self.length())
 {
-  todo
+  var start: USize = 0
+  while start < self.length()
+    invariant start <= self.length()
+    invariant yielded.length() <= start
+    decreases self.length() - start
+  {
+    let stop = if size < self.length() - start { start + size } else { self.length() }
+    yield self.slice_range(start, stop: stop)
+    start = stop
+  }
 }
 
 public fn Slice[Element: Equal].split(self, separator: Element) yields Slice[Element]
