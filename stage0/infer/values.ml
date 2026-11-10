@@ -80,7 +80,9 @@ let rec string_literal state env ?expected (literal : string_literal) =
   | Some tag -> (
       match target state tag.last with
       | Some (Definition (Type, tag_path)) ->
-          let tag_type = T.Named { path = tag_path; arguments = fresh_arguments state tag_path } in
+          let tag_type =
+            T.Named { path = tag_path; arguments = instantiate_type state tag.last.span tag_path }
+          in
           (match expected with
           | Some expected -> ignore (unify state tag_type expected)
           | None -> ());
@@ -337,7 +339,7 @@ and element_of_collection state env (collection : expression) =
   | T.Named { path; arguments = [ T.Type element ] } when Path.equal path range_path -> element
   | T.Error _ | T.Hole -> collection_type
   | _ -> (
-      match yielded state collection_type T.Read with
+      match yielded state collection.span collection_type T.Read with
       | Some element -> element
       | None ->
           error state Not_indexable collection.span

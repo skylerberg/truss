@@ -284,7 +284,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
           call.result
       | T.Error _, _ | T.Hole, _ -> type_
       | _ -> (
-          match each_call state type_ mode with
+          match each_call state iterable.span type_ mode with
           | Some (call, element) ->
               state.tables.loops.(written.id) <- Some (Yielding { call; mode });
               element

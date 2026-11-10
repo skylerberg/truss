@@ -300,11 +300,7 @@ and structural ?(seen = []) state (type_ : T.ty) =
                 interface.derives
             in
             let substitution =
-              try
-                List.combine
-                  (List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics)
-                  arguments
-              with Invalid_argument _ -> []
+              Option.value ~default:[] (T.substitution_of interface.type_generics arguments)
             in
             let fields_structural (fields : T.field list) =
               List.for_all

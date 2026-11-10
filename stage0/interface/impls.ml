@@ -210,15 +210,10 @@ let cursor_trait : Path.t =
    with the method's type arguments. *)
 let cursor_element database (method_ : Path.t) arguments =
   match Query.demand database Environment.signature method_ with
-  | Some signature when List.length signature.generics = List.length arguments -> (
-      let substitution =
-        List.combine
-          (List.map (fun (generic : T.generic) -> generic.generic) signature.generics)
-          arguments
-      in
-      match signature.output with
-      | Yields (_, element) -> Some (T.substitute substitution element)
-      | _ -> None)
+  | Some ({ output = Yields (_, element); _ } as signature) ->
+      Option.map
+        (fun substitution -> T.substitute substitution element)
+        (T.substitution_of signature.generics arguments)
   | _ -> None
 
 let copyable_path = Properties.copyable_trait
@@ -227,6 +222,17 @@ let plain_path = Properties.plain_trait
 (* The bounds in scope where a question is asked: each generic parameter's
    bounds, as the definition asking declares them. *)
 type bounds = T.parameter -> T.trait_reference list
+
+(* What a definition's bounds ask of what stands for its generic
+   parameters: each type, with a bound it must meet. *)
+let required (generics : T.generic list) (substitution : T.substitution) =
+  List.concat_map
+    (fun (generic : T.generic) ->
+      match (generic.kind, List.assoc_opt generic.generic substitution) with
+      | Type_generic generic_bounds, Some (T.Type argument) ->
+          List.map (fun bound -> (argument, T.substitute_trait substitution bound)) generic_bounds
+      | _ -> [])
+    generics
 
 (* The evidence that a type implements a trait. Without [conditions] it is
    the [impl] that answers for the type, whether or not the bounds on its
@@ -346,21 +352,10 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
                         let conditions_hold =
                           (not conditions)
                           || List.for_all
-                               (fun (generic : T.generic) ->
-                                 match generic.kind with
-                                 | Type_generic generic_bounds -> (
-                                     match List.assoc_opt generic.generic substitution with
-                                     | Some (T.Type argument) ->
-                                         List.for_all
-                                           (fun bound ->
-                                             Option.is_some
-                                               (implements database ~bounds ~depth:(depth + 1)
-                                                  argument
-                                                  (T.substitute_trait substitution bound)))
-                                           generic_bounds
-                                     | _ -> true)
-                                 | Value_generic | Capability_generic -> true)
-                               impl.impl_generics
+                               (fun (argument, bound) ->
+                                 Option.is_some
+                                   (implements database ~bounds ~depth:(depth + 1) argument bound))
+                               (required impl.impl_generics substitution)
                         in
                         if conditions_hold && associated_match ~base:None associated then
                           Some (From_impl { impl = impl_path; substitution })

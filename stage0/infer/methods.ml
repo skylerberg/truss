@@ -125,7 +125,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           | Some method_path -> (
               match function_signature state method_path with
               | Some (Ok signature) ->
-                  let instance = instantiate state ~span:value.span signature in
+                  let instance = instantiate state value.span signature in
                   (* The type's arguments, as written or inferred, are the
                      head's generic arguments. *)
                   let head =
@@ -239,11 +239,9 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
   in
   let extra =
     (({ owner = trait.trait; name = "Self" } : T.parameter), T.Type self_type)
-    :: List.combine
-         (List.map (fun (generic : T.generic) -> generic.generic) trait_generics)
-         trait_arguments
+    :: Option.value ~default:[] (T.substitution_of trait_generics trait_arguments)
   in
-  let instance = instantiate state ~span:value.span ~extra method_.method_signature in
+  let instance = instantiate state value.span ~extra method_.method_signature in
   let parameters = instance.signature.parameters in
   let receiver_argument, receiver_offset, parameters, arguments =
     match instance.signature.receiver with
@@ -315,7 +313,7 @@ and trait_call_in_full state env (value : expression) trait ~trait_arguments (me
 and capability_call state env (value : expression) capability (member : name) arguments =
   match Members.trait_methods state.database capability member.text with
   | method_ :: _ ->
-      let instance = instantiate state method_.method_signature in
+      let instance = instantiate state value.span method_.method_signature in
       let matched, left_out =
         match_arguments state value instance.signature.parameters arguments ~record:false
       in
@@ -517,7 +515,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
   | None -> bug "the method `%s` has no signature" (Path.show method_path)
   | Some (Error report) -> arguments_alone state env arguments (T.Error report)
   | Some (Ok signature) ->
-      let instance = instantiate state ~span:value.span signature in
+      let instance = instantiate state value.span signature in
       explicit_type_arguments
         ~head:
           (match receiver_type with T.Named { arguments; _ } -> List.length arguments | _ -> 0)
@@ -564,11 +562,9 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
   in
   let extra =
     (({ owner = trait.trait; name = "Self" } : T.parameter), T.Type receiver_type)
-    :: List.combine
-         (List.map (fun (generic : T.generic) -> generic.generic) trait_generics)
-         trait_arguments
+    :: Option.value ~default:[] (T.substitution_of trait_generics trait_arguments)
   in
-  let instance = instantiate state ~span:value.span ~extra method_.method_signature in
+  let instance = instantiate state value.span ~extra method_.method_signature in
   explicit_type_arguments state value instance type_arguments;
   let matched, left_out =
     match_arguments state value instance.signature.parameters arguments ~record:false

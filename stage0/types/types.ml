@@ -283,6 +283,12 @@ and show_function (function_type : function_type) =
 
 type generic_kind = Type_generic of trait_reference list | Value_generic | Capability_generic
 type generic = { generic : parameter; kind : generic_kind }
+
+let substitution_of (generics : generic list) arguments : substitution option =
+  if List.length generics = List.length arguments then
+    Some (List.combine (List.map (fun generic -> generic.generic) generics) arguments)
+  else None
+
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
 type signature = {

@@ -757,9 +757,24 @@ worked out from how the body uses it.
 
 **Generic arguments** are inference variables, solved from the arguments
 and from the expected type, so `let digest: Array[UInt8, 32] = Array.filled(0)`
-takes its length from the annotation. Bounds are checked once the
-statement's variables are solved. Explicit type arguments, as in
+takes its length from the annotation. Explicit type arguments, as in
 `parse[Int64](text)`, are unified first.
+
+**Bounds are held wherever generic parameters are filled in,** whether the
+arguments are written or worked out: at a call, where a function or a
+method is used as a value, where a `for` loop calls `each`, and where a
+generic type is named or a value of one is built, so `Holder(5)` is an
+error when `Holder[Value: Shape]` and `Int64` is no `Shape`. Each bound is
+checked once the statement has worked out the type it is on:
+
+- **The type must implement the trait.**
+- **Each associated type the bound fixes must equal the one the `impl`
+  gives.** The two are unified, so the bound can be what works a type out:
+  with `fn first_of[Input: Source[Item = Output], Output](input: Input) -> Output`,
+  the call `first_of(numbers)` takes `Output` from `Numbers`'s `Item`.
+- **A statement reports a bound once,** however many of its parts need it.
+  `Holder[Int64].area(Holder(5))` names `Holder[Int64]` twice and calls a
+  method that needs `Int64: Shape`, and is one error.
 
 **An `impl` is never chosen from the expected type.** A trait method's
 `impl` is chosen by `Self` and by the trait's type arguments, and those come

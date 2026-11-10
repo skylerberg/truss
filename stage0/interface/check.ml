@@ -41,32 +41,24 @@ let unmet_bounds database ~bounds named =
     (fun ((span : span), (type_ : T.ty)) ->
       match type_ with
       | Named { path; arguments } -> (
-          match Query.demand database Environment.type_interface path with
-          | Some interface when List.length interface.type_generics = List.length arguments ->
-              let substitution =
-                List.combine
-                  (List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics)
-                  arguments
-              in
-              List.concat
-                (List.map2
-                   (fun (generic : T.generic) argument ->
-                     match (generic.kind, argument) with
-                     | Type_generic generic_bounds, T.Type argument ->
-                         List.filter_map
-                           (fun bound ->
-                             let bound = T.substitute_trait substitution bound in
-                             if Option.is_none (Impls.implements database ~bounds argument bound)
-                             then
-                               Some
-                                 ( span,
-                                   Printf.sprintf "`%s` needs `%s: %s`, which does not hold here."
-                                     (T.show type_) (T.show argument) (T.show_trait bound) )
-                             else None)
-                           generic_bounds
-                     | _ -> [])
-                   interface.type_generics arguments)
-          | _ -> [])
+          match
+            Option.bind (Query.demand database Environment.type_interface path)
+              (fun (interface : T.type_interface) ->
+                Option.map
+                  (Impls.required interface.type_generics)
+                  (T.substitution_of interface.type_generics arguments))
+          with
+          | Some required ->
+              List.filter_map
+                (fun (argument, bound) ->
+                  if Option.is_none (Impls.implements database ~bounds argument bound) then
+                    Some
+                      ( span,
+                        Printf.sprintf "`%s` needs `%s: %s`, which does not hold here."
+                          (T.show type_) (T.show argument) (T.show_trait bound) )
+                  else None)
+                required
+          | None -> [])
       | _ -> [])
     named
 
@@ -525,14 +517,8 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
     match Query.demand database Environment.trait_interface impl.implements.trait with
     | None -> ()
     | Some trait ->
-        let substitution : T.substitution =
-          (({ owner = impl.implements.trait; name = "Self" } : T.parameter), T.Type impl.for_type)
-          ::
-          (if List.length trait.trait_generics = List.length impl.implements.trait_arguments then
-             List.combine
-               (List.map (fun (generic : T.generic) -> generic.generic) trait.trait_generics)
-               impl.implements.trait_arguments
-           else [])
+        let substitution =
+          Properties.trait_substitution trait ~self:impl.for_type impl.implements
         in
         (* An associated type the trait declares and this [impl] does not
            give is reported once, here, and is an error wherever a method's
