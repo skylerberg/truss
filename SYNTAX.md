@@ -2229,22 +2229,28 @@ The body may read any place but may only change its own element and its
 own variables. `break` leaves the loop and cancels the iterations that are
 still running, and `continue` ends one iteration.
 
-An iteration keeps running after the loop has gone on to the next value.
-So it cannot borrow a place that the iterated method lends only until the
-method resumes:
+An iteration keeps running after the loop has gone on to the next value,
+so what it is given must stay valid until the loop ends:
 
-- A loop over a range, over a cursor, or over a method that `yields own`
-  values works with any element type. Each task owns its value.
-- A loop over a method that yields read-only values works when the element
-  type is `Plain`. Each task gets a copy.
-- A loop over a method that lends its elements, read-only or `mut`, works
-  when the method's body is one `for` over a range whose body is one
-  `yield`, as the `each(mut self)` methods of `List`, `Slice`, and `Array`
-  are. Each task then runs one iteration of that loop and borrows its own
-  element.
+- A range, a cursor, and a method that `yields own` values give each task
+  a value of its own.
+- A method that yields read-only values may lend a place inside a
+  parameter that it takes read-only, such as `yield self[index]` in the
+  `each(self)` of a `List`. The method cannot change that parameter, so
+  each task borrows its element for the whole loop. `concurrent for item
+  in items` works this way for any element type.
+- A method may yield a value that it computes for the `yield`. The task
+  owns it.
+- A `Plain` value may be yielded from any place. The task gets a copy.
+- A method that yields `mut` access works when its body is one `for` over
+  a range whose body is one `yield`, as the `each(mut self)` methods of
+  `List`, `Slice`, and `Array` are. Each task then runs one iteration of
+  that loop and changes its own element.
 
-Any other `concurrent for` is rejected, because the method could change or
-free an element while a task still uses it.
+Any other `concurrent for` is rejected with
+`ownership.task_outlives_yield`. A place in a local of the method or in a
+`mut` parameter, and a view of one, could change or be freed when the
+method resumes, while a task still uses it.
 
 `yield` is not allowed in a `concurrent` block or a `concurrent for`. The
 caller's loop body would run as a task, and it is checked as sequential
