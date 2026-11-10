@@ -2342,6 +2342,30 @@ let () =
         \  tree is Leaf\n\
          }\n")
 
+(* Concurrent code *)
+
+let early_return ensures =
+  "fn f(first: mut Int64, second: mut Int64) -> Int64\n  requires second < 100\n" ^ ensures
+  ^ "  uses Tasks\n{\n  concurrent {\n    return 0\n    second += 1\n  }\n}\n"
+
+let () =
+  test "an early exit from a concurrent block waits for the other branches" (fun () ->
+      proven (early_return "  ensures second == old(second) + 1\n"));
+  test "an early exit from a concurrent block sees the other branches' changes" (fun () ->
+      not_proven (early_return "  ensures second == old(second)\n") "prover.ensures");
+  test "a concurrent block with no early exit is read as its branches in order" (fun () ->
+      proven
+        "fn f(first: mut Int64, second: mut Int64)\n\
+        \  requires first < 100 && second < 100\n\
+        \  ensures first == old(first) + 1 && second == old(second) + 1\n\
+        \  uses Tasks\n\
+         {\n\
+        \  concurrent {\n\
+        \    first += 1\n\
+        \    second += 1\n\
+        \  }\n\
+         }\n")
+
 (* Diagnostics *)
 
 let () =
