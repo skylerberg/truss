@@ -1160,6 +1160,27 @@ save(own config)
 After `own config.name`, the other fields of `config` can still be used, but
 `config` as a whole cannot, until `config.name` is given a new value.
 
+A place that is lent `mut` can be moved out of in the same way, as long as it
+is given a new value before it goes back to its owner. This is how a function
+takes what a `mut` place holds and leaves something else there:
+
+```truss
+fn Option[Value].take(mut self) -> Option[Value] {
+  let taken = own self
+  self = None
+  taken
+}
+```
+
+- **What can be moved out** is the whole place or a field of it. The place
+  can be a `mut` parameter, `mut self`, the variable of a `mut` loop, a `mut`
+  binding of a `match`, or a lambda's `mut` parameter.
+- **It must be assigned again on every path** before the function returns,
+  `return` and `?` included, before the loop's iteration or the `match` arm
+  ends, and in a yielding method before each `yield`.
+- **Until then the place cannot be used.** It cannot be read or passed to a
+  call, so nothing sees it empty.
+
 ### Views
 
 A read-only name can refer to the original value instead of a copy. This
@@ -1582,9 +1603,12 @@ mut scores.update_each(fn(score) { score = score / 2 })
 - A parameter can be a pattern that matches every value, such as
   `(value, ..)`, or `_` for a parameter that is not used.
 - A lambda can read local variables, but cannot change them. A lambda that
-  reads local variables can be bound with `let` and passed later in the same
-  function, but it cannot be stored in a field, a `var`, or a collection, or
-  returned.
+  reads local variables can be bound with `let`, held in a local record or
+  list, and passed to a function-typed parameter. It cannot be returned,
+  alone or inside another value, stored in a place the caller keeps, or
+  given to an `own` function-typed parameter, because it would outlive the
+  variables it reads. A named function, and a lambda that reads no local
+  variable, can be returned, stored, and given up freely.
 - A lambda's capabilities are inferred from its body. A lambda that calls
   `Clock.now()` can only be passed where a function type with `uses Clock`
   is expected.

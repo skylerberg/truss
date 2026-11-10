@@ -901,6 +901,33 @@ Where nothing is left, as for an index into a `List`, whose method ends at
 its `yield` owning nothing, the method simply ends there and the lend costs
 nothing.
 
+A lending method may have a `yield` on each of several paths, as
+`Slice.get` yields `Some(self[index])` or `None`. Each `yield` then stores
+the address of what it lends and its own number, and the caller reads
+through the address. As the caller's scope ends, the code goes on from the
+`yield` that was reached, by its number. A value the method makes to lend,
+such as that `None`, is built in one place that the caller's statement
+owns, so that it is dropped once whichever `yield` made it.
+
+A method may yield a value built around places it lends:
+`yield Some(self[index])`, or `yield Indexed(index: index, value: mut
+self[index])`. The core form marks each such field as a place.
+
+- **Lent to be read,** the value holds a copy of each place's bytes and
+  owns nothing. No Truss value depends on its own address, and the places
+  cannot change while they are lent, so the copy is as good as the place.
+  Nothing drops it.
+- **Lent to be changed,** each place's value is moved into the built
+  value, and the scope around the `yield` moves each back as it ends, on
+  every way out of it: the end of the caller's statement or loop body, a
+  `break`, a `return`, a `?`. While the caller has the value it owns what
+  it holds, so a field the caller replaces is dropped first, as in any
+  value, and what goes back is what the caller left.
+
+Where such a method is pulled, which only a loop over a method that is
+already inlined around it does, `next` gives a value that owns a copy of
+each place.
+
 A lending method with no `yield`, such as one whose body is `todo`, never
 returns. Its body is inlined as usual, and the caller's code after the call
 is unreachable.
@@ -1679,8 +1706,9 @@ a command line can hold.
   through the same `each` a `for` loop calls, that stops at the first
   element that decides the answer: `forall` at the first false body,
   `exists` at the first true one.
-- **A lending method with more than one `yield`,** one on each of several
-  paths, and one that lends through a call to itself.
+- **A lending method that lends through a call to itself.**
+- **A cursor over a method that lends places to be changed.** `next` would
+  have to hand out a value it takes back.
 - **A lambda in a yielding method that is pulled,** and in a pulled method
   a default for a parameter that is passed by address or is a view.
 - **A range without both of its ends, as a value.**

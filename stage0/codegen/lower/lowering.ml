@@ -6,9 +6,15 @@ open Lir_builder
 
 (* Lowering one function *)
 
-(* What leaving a scope does: drop what a place still owns, or free the
-   heap block a pointer points at, once what is in it has been dropped. *)
-type cleanup = Drop_value of Lir.place | Free_pointed of Lir.place | Finish_lend of lend
+(* What leaving a scope does: drop what a place still owns, free the heap
+   block a pointer points at, once what is in it has been dropped, give a
+   place back the value that was lent out of it to be changed, or let a
+   lending method go on. *)
+type cleanup =
+  | Drop_value of Lir.place
+  | Free_pointed of Lir.place
+  | Give_back of { lent : Lir.place; source : Lir.place; ty : Ground.ty }
+  | Finish_lend of lend
 
 (* A lending call whose method has more to do once it has lent its part. The
    method's body is written into the caller up to its [yield]; the rest of
@@ -40,6 +46,9 @@ type frame = {
   mutable self_place : Lir.place option;
   on_yield : (Lir.place -> resume:Lir.block -> stop:Lir.block -> unit) option;
       (** In an inlined lending or yielding method, what a [yield] of a place does *)
+  yield_into : Lir.place option;
+      (** In an inlined lending method with a [yield] on each of several paths, where a value the
+          method makes to lend is put, so that one owner drops it whichever [yield] is reached *)
   inlined : Path.t list;  (** The methods inlined around this frame, to refuse recursion *)
   exit : (Lir.block * int) option;
       (** In an inlined method, where its [return] goes and how many scopes that keeps *)
@@ -71,6 +80,7 @@ let frame_of code ~inlined =
     synthetic = Hashtbl.create 4;
     self_place = None;
     on_yield = None;
+    yield_into = None;
     inlined;
     exit = None;
   }
@@ -221,6 +231,8 @@ let drop_scope st (scope : scope) =
       | Free_pointed pointer ->
           emit st.b
             (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded })
+      | Give_back { lent; source; ty } ->
+          emit st.b (Assign (source, Use (if trivial st ty then Copy lent else Move lent)))
       | Finish_lend lend ->
           (* The method goes on from its [yield] now, and comes back here. *)
           let way = block st.b in

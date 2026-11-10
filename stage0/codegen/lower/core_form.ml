@@ -177,8 +177,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
           (fun (name, (field : Core.operand option)) ->
             match field with
             | Some (Value field) -> (name, owned st (value_place st field) (ground st field.type_))
-            | Some (Place _) ->
-                Compiler_bug.unsupported "a yielded value with a field that is a lent place"
+            | Some (Place _) -> bug "a field that is a lent place, in a value that is not yielded"
             | None ->
                 (* The default is written in the type's definition, so it is
                    lowered in that definition's frame. *)
@@ -580,6 +579,88 @@ and pull_cursor st (yielding : Ground.yielding) cursor ~pattern ~body =
       match_patterns st [ (pattern, value) ] ~failed:(block st.b);
       block_into st body None)
 
+(* The value a method yields with places lent into it.
+
+   Lent to be read, it holds the bytes of each place and owns nothing, so
+   nothing drops it, and the places keep their values.
+
+   Lent to be changed, each place's value is moved into it, and the scope
+   around moves each back as it ends, on every way out. So while the caller
+   has it, it owns what it holds: a field the caller replaces is dropped
+   first, as in any value, and what goes back is whatever the caller left. *)
+and lending st (mode : T.mode) (built : Core.expression) : Lir.place =
+  let changed = mode = Mut in
+  let lent = at (local st.b ~borrowed:(not changed) (Value (ground st built.type_))) in
+  (* Once each place has its value back, what is left owns nothing, and
+     this drop, which comes after them, says so. *)
+  if changed then begin
+    let scope = innermost_scope st in
+    scope.owned <- Drop_value lent :: scope.owned
+  end;
+  let taken source ty ~from =
+    if changed then begin
+      let scope = innermost_scope st in
+      scope.owned <- Give_back { lent = from; source; ty } :: scope.owned;
+      owned st source ty
+    end
+    else Lir.Copy source
+  in
+  construct_lending st built ~borrowed:(not changed) ~lent:taken ~destination:lent ~within:lent;
+  lent
+
+(* For a cursor, whose caller keeps what [next] gives it: the value with a
+   copy of each place in place of the place, which it owns. *)
+and copied st (built : Core.expression) : Lir.place =
+  let copy = temporary st (ground st built.type_) in
+  let copy_of source ty ~from:_ =
+    let made = temporary st ty in
+    Glue.copy_into st.context.glue st.b ~destination:made ~source ty;
+    owned st made ty
+  in
+  construct_lending st built ~borrowed:false ~lent:copy_of ~destination:copy ~within:copy;
+  copy
+
+(* Builds a construct that has places for fields, at any depth, into
+   [destination]. [lent] gives the operand for a place of a type, and is
+   told where the field will be within the outermost value, [within]. A
+   construct inside another is built in a local of its own, which owns
+   nothing where [borrowed]. *)
+and construct_lending st (built : Core.expression) ~borrowed ~lent ~destination ~within =
+  match built.kind with
+  | Construct { variant; fields } ->
+      let ty = ground st built.type_ in
+      let part name : Lir.projection =
+        match variant with
+        | Some variant -> Variant_field { variant; field = name }
+        | None -> Field name
+      in
+      let fields =
+        List.map
+          (fun (name, (field : Core.operand option)) ->
+            match field with
+            | Some (Place source) ->
+                ( name,
+                  lent
+                    (snapshot st (place st source))
+                    (ground st (Core_walk.place_type source))
+                    ~from:(within / part name) )
+            | Some (Value ({ kind = Construct _; _ } as nested))
+              when Core_walk.lent_places (Value nested) <> [] ->
+                let ty = ground st nested.type_ in
+                let inner = at (local st.b ~borrowed (Value ty)) in
+                construct_lending st nested ~borrowed ~lent ~destination:inner
+                  ~within:(within / part name);
+                (name, if borrowed then Lir.Copy inner else owned st inner ty)
+            | Some (Value value) -> (name, owned st (value_place st value) (ground st value.type_))
+            | None ->
+                let default = field_default st ty ~variant ~field:name in
+                in_type_definition st ty (fun () ->
+                    (name, owned st (value_place st default) (ground st default.type_))))
+          fields
+      in
+      emit st.b (Assign (destination, Build { ty; variant; fields }))
+  | _ -> bug "a value that lends places and is no construct"
+
 (* The type that the current frame's method yields. *)
 and yielded_type_of_frame st =
   match st.frame.code.result with
@@ -960,10 +1041,23 @@ and statement st (node : Core.statement) =
             ~body:(fun value ->
               match_patterns st [ (pattern, value) ] ~failed:(block st.b);
               block_into st body None)
-      | Yield { part; _ } -> (
+      | Yield { mode; part } -> (
+          let lends =
+            match part with
+            | Value ({ kind = Construct _; _ } as built) when Core_walk.lent_places part <> [] ->
+                Some built
+            | _ -> None
+          in
           match st.frame.on_yield with
           | Some on_yield ->
-              let place = operand_place st part in
+              let place =
+                match (lends, part, st.frame.yield_into) with
+                | Some built, _, _ -> lending st mode built
+                | None, Value value, Some slot ->
+                    into st value slot;
+                    slot
+                | None, _, _ -> operand_place st part
+              in
               let resume = block st.b and stop = block st.b in
               on_yield place ~resume ~stop;
               (* On the [stop] path the loop is leaving, so the method drops
@@ -982,10 +1076,15 @@ and statement st (node : Core.statement) =
                  method made, or a copy of a place it yields. *)
               let ty = yielded_type_of_frame st in
               let value =
-                match part with
-                | Value value -> value_place st value
-                | Place source when trivial st ty -> place st source
-                | Place source ->
+                match (lends, part) with
+                | Some _, _ when mode = Mut ->
+                    Compiler_bug.unsupported
+                      ~at:(at_site (site_of st node.origin))
+                      "a cursor over a method that lends places to be changed"
+                | Some built, _ -> copied st built
+                | None, Value value -> value_place st value
+                | None, Place source when trivial st ty -> place st source
+                | None, Place source ->
                     let copy = temporary st ty in
                     Glue.copy_into st.context.glue st.b ~destination:copy ~source:(place st source)
                       ty;
@@ -1147,7 +1246,7 @@ and match_ st ~(scrutinees : Core.operand list) ~(arms : Core.arm list) destinat
    [arguments], each by its parameter's index. Each [yield] in the method
    calls [on_yield]. A parameter with no argument takes its default,
    evaluated here. *)
-and inline st path type_arguments ~arguments ~call_site ~on_yield =
+and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
   if List.exists (Path.equal path) st.frame.inlined then
     Compiler_bug.unsupported ~at:(at_site call_site) "%s, which lends through a call to itself"
       (Path.show path);
@@ -1161,6 +1260,7 @@ and inline st path type_arguments ~arguments ~call_site ~on_yield =
       synthetic = Hashtbl.create 4;
       self_place = None;
       on_yield = Some on_yield;
+      yield_into;
       inlined = path :: caller.inlined;
       exit = Some (exit, List.length st.scopes);
     };
@@ -1193,26 +1293,64 @@ and inline st path type_arguments ~arguments ~call_site ~on_yield =
    as for an index into a [List], the method ends at its [yield]. *)
 and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
   let _, _, body = body_of st.context path in
-  if Method_yields.count body > 1 then
-    Compiler_bug.unsupported ~at:(at_site call_site) "%s, a lending method with more than one yield"
-      (Path.show path);
+  let several = Method_yields.count body > 1 in
   let depth = List.length st.scopes in
   let goes_on = block st.b in
-  let lent = ref None and waits = ref None in
-  inline st path type_arguments ~arguments ~call_site ~on_yield:(fun place ~resume ~stop:_ ->
-      lent := Some place;
+  (* A method with a [yield] on each of several paths lends whichever it
+     reaches, so the caller reads through the address of what was lent,
+     and the method goes on from the [yield] it reached. *)
+  let ty = yielded_type st path type_arguments in
+  let through =
+    if several && not (zero_size st ty) then
+      let writable =
+        match (signature_of st.context path).output with Lends (Mut, _) -> true | _ -> false
+      in
+      Some (local st.b (Pointer { target = Value ty; writable }), writable)
+    else None
+  in
+  let reached = local st.b (Raw (Integer UInt32)) in
+  let lent = ref None and waiting = ref [] in
+  (* A value the method makes to lend is the caller's statement's to drop,
+     after the method has gone on, whichever [yield] made it. *)
+  let yield_into = if several then Some (temporary st ty) else None in
+  inline ?yield_into st path type_arguments ~arguments ~call_site
+    ~on_yield:(fun place ~resume ~stop:_ ->
+      (match through with
+      | Some (pointer, writable) ->
+          emit st.b (Assign (at pointer, Use (Address { place; writable })));
+          lent := Some (at pointer / Deref)
+      | None -> lent := Some place);
       let owns_nothing =
         List.for_all
           (fun (scope : scope) -> scope.owned = [])
           (List.filteri (fun i _ -> List.length st.scopes - i > depth) st.scopes)
       in
-      if Method_yields.each_is_last body && owns_nothing then finish st.b (Goto resume)
+      if (not several) && Method_yields.each_is_last body && owns_nothing then
+        finish st.b (Goto resume)
       else begin
-        waits := Some resume;
+        emit st.b
+          (Assign (at reached, Use (Constant (Integer (UInt32, Z.of_int (List.length !waiting))))));
+        waiting := resume :: !waiting;
         finish st.b (Goto goes_on)
       end);
-  (match !waits with
-  | Some resume ->
+  (match List.rev !waiting with
+  | [] -> ()
+  | resumes ->
+      let resume =
+        match resumes with
+        | [ only ] -> only
+        | _ ->
+            let chosen = block st.b in
+            aside st.b chosen (fun () ->
+                finish st.b
+                  (Switch
+                     {
+                       value = Copy (at reached);
+                       cases = List.mapi (fun index resume -> (Z.of_int index, resume)) resumes;
+                       default = None;
+                     }));
+            chosen
+      in
       let scope = innermost_scope st in
       scope.owned <-
         Finish_lend
@@ -1223,14 +1361,13 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
             ways = [];
           }
         :: scope.owned;
-      start st.b goes_on
-  | None -> ());
+      start st.b goes_on);
   match !lent with
   | Some place -> place
   | None when Method_yields.count body = 0 ->
       (* The method has no [yield], so it never returns, and the code after
          the call never runs. The place is never read. *)
-      temporary st (yielded_type st path type_arguments)
+      temporary st ty
   | None -> bug "a lending method that lends nothing"
 
 (* In a checked build, tests each [requires] clause that can run, on entry to
