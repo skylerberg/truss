@@ -1,5 +1,5 @@
 (* The [truss] command line: its commands and arguments, and where each
-   command runs. See CLI.md.
+   command runs.
 
    A command that reads code runs where its worktree's session is: in the
    background process, which keeps sessions between commands and starts

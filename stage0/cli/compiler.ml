@@ -1,5 +1,4 @@
-(* Code generation as the commands that build use it. See CODEGEN.md, "C
-   files and optimization". *)
+(* Code generation as the commands that build use it. *)
 
 type build = Development | Release
 

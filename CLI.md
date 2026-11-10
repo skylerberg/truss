@@ -64,11 +64,12 @@ the commands will do with proofs is stated where it matters.
 | `truss lsp` | Runs the language server on standard input and output (not built yet) |
 | `truss clean` | Stops the background process and deletes the store |
 
-`truss --version` prints the version of each stage that has one: the hash
-format, code generation, and the Unicode tables. Those are the versions in
-cache keys, so a report of a stale result can say which stage it came from.
+`truss --version` prints the version of each stage that has one: code
+generation and the Unicode tables. Those are the versions in exact keys, so a
+report of a stale result can say which stage it came from. Every other
+result is kept under the compiler's identity, the hash of its executable.
 The parser, the type checker, and the prover, with its solver, are to have
-their own as DESIGN.md's "Incremental builds" asks.
+versions of their own as DESIGN.md's "Incremental builds" asks.
 
 ### Finding the packages
 
@@ -495,12 +496,12 @@ rename weather::forecast::parse read`, or a full path that keeps the
 definition in its module and a method with its type. Renaming a module, as
 in `truss rename weather::forecast weather::outlook`, moves its file, and
 every `use` of it and every full path to it changes. Renaming a field or a
-variant is not built yet. The rename is made in a fork of the worktree's
-session and checked there first, which checks again only what the rename
-changes; it is refused, changing nothing, if it would cause any
-diagnostic, such as for a name that is taken, breaks a naming rule, or
-would hide another, which are the diagnostics a hand-made rename would
-cause. A worktree that already has diagnostics is refused too, since its
+variant is not built yet. The rename is made in a trial, a state that
+starts from the worktree's session and holds only what the rename changes,
+and is checked there first; it is refused, changing nothing, if it would
+cause any diagnostic, such as for a name that is taken, breaks a naming
+rule, or would hide another, which are the diagnostics a hand-made rename
+would cause. A worktree that already has diagnostics is refused too, since its
 references are found through checked code. References in packages outside
 the worktree cannot be changed, so renaming a public definition changes the
 package's public interface, which `truss impact` reports like any other
@@ -561,8 +562,8 @@ describes, and the command line is its client:
 
 Sessions, test results, object files, and programs built to run are kept in
 the code database's store, under `$TRUSS_CACHE`, or else
-`$XDG_CACHE_HOME/truss`, or else `~/.cache/truss`, as DATABASE.md's
-"Content hashes and the store" describes. Every entry is named by a key of
+`$XDG_CACHE_HOME/truss`, or else `~/.cache/truss`, as DATABASE.md's "The
+store" describes. Every entry is named by a key of
 what it was made from, so entries never go stale, the store collects old
 entries itself to keep within its budget, and nothing in it is ever needed
 for a correct answer. **`truss clean`** stops the background process and

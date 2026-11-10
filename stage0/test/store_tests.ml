@@ -1,5 +1,5 @@
 (* The tests of the store, and of the states and facts the engine keeps in
-   it. See DATABASE.md, "The store" and "Facts". *)
+   it. *)
 
 open Harness
 
@@ -55,6 +55,7 @@ let () =
       let second = Store.open_ directory in
       let name = Store.put first "shared" in
       Store.flush first;
+      Store.refresh second;
       if Store.get second name <> Some "shared" then fail "not seen");
   test "a damaged record is missing" (fun () ->
       let directory = fresh_directory () in
@@ -137,17 +138,18 @@ let () =
 let version = "test"
 let value_input = Query.input ~name:"saved_value" ~show:(fun () -> "") ()
 
-let unit_query name ?saved ?(phase = Query.Syntax) compute =
-  Query.query ~name ~phase ?saved ~show:(fun () -> "") compute
+let unit_query name ?saved ?portable ?(phase = Query.Syntax) compute =
+  Query.query ~name ~phase ?saved ?portable ~show:(fun () -> "") compute
 
 let doubled =
-  unit_query "saved_doubled" ~saved:true (fun database () -> 2 * Query.get database value_input ())
+  unit_query "saved_doubled" ~saved:true ~portable:true (fun database () ->
+      2 * Query.get database value_input ())
 
 let through_unsaved =
   unit_query "unsaved_middle" (fun database () -> Query.get database value_input () + 1)
 
 let reads_through =
-  unit_query "saved_reads_through" ~saved:true ~phase:Bodies (fun database () ->
+  unit_query "saved_reads_through" ~saved:true ~portable:true ~phase:Bodies (fun database () ->
       Query.demand database through_unsaved () * 10)
 
 let other_input = Query.input ~name:"saved_other" ~show:(fun () -> "") ()
@@ -290,6 +292,59 @@ let () =
       let value = Engine.get engine reads_through () in
       if value <> 100 then fail "result %d after the change" value)
 
+(* Fingerprints follow from what a value is, not from how it lies in memory *)
+
+let pair_input = Query.input ~name:"saved_pair" ~show:(fun () -> "") ()
+
+let pair_length =
+  unit_query "saved_pair_length" ~saved:true ~portable:true (fun database () ->
+      let left, right = Query.get database pair_input () in
+      String.length left + String.length right)
+
+let left_text =
+  unit_query "saved_left_text" ~saved:true (fun database () ->
+      fst (Query.get database pair_input ()))
+
+let right_text =
+  unit_query "saved_right_text" ~saved:true (fun database () ->
+      snd (Query.get database pair_input ()))
+
+let both_texts =
+  unit_query "unsaved_both_texts" ~phase:Declarations (fun database () ->
+      (Query.demand database left_text (), Query.demand database right_text ()))
+
+let reads_both =
+  unit_query "saved_reads_both" ~saved:true ~phase:Bodies (fun database () ->
+      let left, right = Query.demand database both_texts () in
+      String.length left + String.length right)
+
+let () =
+  test "a fact is found by an equal value whose parts are not the same blocks" (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let first = attached store in
+      let shared = String.make 3 'a' in
+      Engine.set first pair_input () (shared, shared);
+      ignore (Engine.get first pair_length ());
+      Engine.record first;
+      let second = attached store in
+      Engine.set second pair_input () (String.make 3 'a', String.make 3 'a');
+      ignore (Engine.get second pair_length ());
+      if (Engine.counters second).adopted <> 1 then fail "not found as a fact");
+  test "a result that is not kept comes out the same when an opened state computes it again"
+    (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let engine = attached store in
+      (* Both halves are one block here, and two when each is read back. *)
+      let shared = String.make 3 'a' in
+      Engine.set engine pair_input () (shared, shared);
+      ignore (Engine.get engine reads_both ());
+      let again = opened store (Engine.write engine) in
+      ignore (Engine.get again both_texts ());
+      let counters = Engine.counters again in
+      if counters.computed <> 1 then fail "computed %d results" counters.computed;
+      if counters.changed <> 0 then fail "%d results changed" counters.changed;
+      if counters.marked <> 0 then fail "marked %d results" counters.marked)
+
 (* What fuzzing the engine found *)
 
 let switch_input = Query.input ~name:"saved_switch" ~show:(fun () -> "") ()
@@ -358,7 +413,27 @@ let () =
       if Engine.get engine doubled () <> 8 then fail "another result after going back";
       let again = opened store (Engine.write engine) in
       let value = Engine.get again doubled () in
-      if value <> 8 then fail "read the earlier difference's result: %d" value)
+      if value <> 8 then fail "read the earlier difference's result: %d" value);
+  test "a result a request kept after it was written is current in a state opened later" (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let engine = attached store in
+      Engine.set engine switch_input () false;
+      Engine.set engine value_input () 1;
+      ignore (Engine.get engine top ());
+      ignore (Engine.write engine);
+      (* The leaf is new in a difference, and only [top] reads it. *)
+      Engine.set engine switch_input () true;
+      ignore (Engine.get engine top ());
+      ignore (Engine.write engine);
+      (* A request keeps it, and then nothing reads it. *)
+      ignore (Engine.get engine leaf ());
+      Engine.set engine switch_input () false;
+      ignore (Engine.get engine top ());
+      let again = opened store (Engine.write engine) in
+      Engine.set again value_input () 5;
+      let last = opened store (Engine.write again) in
+      let value = Engine.get last leaf () in
+      if value <> 5 then fail "the leaf of an earlier state: %d" value)
 
 let layer_value = Query.input ~name:"layer_input" ~show:(fun () -> "") ()
 let own_value = Query.input ~name:"own_input" ~show:(fun () -> "") ()

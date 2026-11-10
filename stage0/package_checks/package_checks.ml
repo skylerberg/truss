@@ -1,9 +1,8 @@
 (* The checks that look at more than one definition of a package: where an
    [impl] may live, overlapping [impl]s, a type's method sharing a name
    with a trait's, recursive types without [indirect], instantiation
-   cycles, and tests with one name. See TYPECHECKER.md, "Traits and impls
-   across a package" and "Recursive types". Packages cannot depend on each
-   other in a cycle, so every cycle these find is within one package. *)
+   cycles, and tests with one name. Packages cannot depend on each other in
+   a cycle, so every cycle these find is within one package. *)
 
 open Syntax
 module T = Types

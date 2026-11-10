@@ -1,6 +1,5 @@
 (* Finding the [impl] of a trait for a type, and normalizing associated
-   types. See TYPECHECKER.md, "Finding an impl" and "Traits and impls across
-   a package".
+   types.
 
    An [impl] lives in the package of its trait, of its type, or of the
    outermost type of one of the trait's arguments, so finding one looks in

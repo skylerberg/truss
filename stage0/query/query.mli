@@ -1,5 +1,5 @@
 (** What a compiler stage sees of the code database: declaring inputs and queries, and reading them
-    while a query runs. See DATABASE.md, "The interfaces".
+    while a query runs.
 
     A query is a pure function of what it reads through its context. The database records each read,
     and when something changes, computes again only the results that read what really changed,
@@ -51,15 +51,19 @@ val query :
   show:('key -> string) ->
   phase:phase ->
   ?saved:bool ->
+  ?portable:bool ->
   ?equal:('value -> 'value -> bool) ->
   ?about:('key -> subject option) ->
   (context -> 'key -> 'value) ->
   ('key, 'value) query
-(** A query of a phase, computed by the function. With [~saved:true] its results are saved with a
-    state and kept as facts, so another state or process finds them done; its keys and values must
-    then hold no functions. [equal] decides whether a result came out the same, and defaults to
-    structural equality, so a value must not hold functions unless [equal] is given. Reading a query
-    of a later phase raises [Invalid_argument]. *)
+(** A query of a phase, computed by the function. With [~saved:true] its results' bytes are kept in
+    the store, and each is a fact that a state finds once it has held a result of the same key; its
+    keys and values must then hold no functions. With [~portable:true] a state that has never held
+    one finds it too, which suits results that many states come to need without starting from one
+    another, such as what an instance of the standard library compiles to. [equal] decides whether a
+    result came out the same, and defaults to structural equality, so a value must not hold
+    functions unless [equal] is given. Reading a query of a later phase raises [Invalid_argument].
+*)
 
 val get : context -> ('key, 'value) input -> 'key -> 'value
 (** An input's value. Raises [Not_found] if it is not set; either answer is read. *)

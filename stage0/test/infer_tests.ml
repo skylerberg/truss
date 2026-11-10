@@ -1,6 +1,5 @@
 (* The tests of checking bodies. Each gives a small definition and states
-   one fact: a diagnostic with its fix, or one fact about the checked form.
-   See TYPECHECKER.md, "Checking bodies" and "Testing". *)
+   one fact: a diagnostic with its fix, or one fact about the checked form. *)
 
 open Harness
 open Support

@@ -1,5 +1,3 @@
-(* The database's view of the engine. See engine.mli. *)
-
 type t = Incremental.t
 
 let create = Incremental.create

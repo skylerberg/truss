@@ -1,8 +1,6 @@
 (* The tests of the code database's sessions: what a session finds, what a
    restart or a new worktree computes again, what reads what, comparing
-   with a commit, overlaps between worktrees, and the background process.
-   See DATABASE.md, "Sessions" and "Parallel work". What the command line
-   shows of these is tested in [stage0/test/cli]. *)
+   with a commit, overlaps between worktrees, and the background process. *)
 
 open Harness
 

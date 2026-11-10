@@ -1,8 +1,7 @@
 (* The values of integer constants, worked out exactly where the checker
    needs them: a [USize] in a type argument, as in [Array[UInt8, size]].
-   See TYPECHECKER.md, "Constants". Every other constant is built by code
-   generation. Constants that refer to each other in a cycle have no
-   value. *)
+   Every other constant is built by code generation. Constants that refer to
+   each other in a cycle have no value. *)
 
 open Syntax
 

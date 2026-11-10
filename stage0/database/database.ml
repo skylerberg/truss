@@ -1,6 +1,3 @@
-(* The code database's sessions and the questions they answer. See
-   database.mli and DATABASE.md, "States" and "Questions". *)
-
 (* Loading packages *)
 
 let load_package ?(usize_bits = 32) engine ~name ~dependencies
@@ -24,7 +21,7 @@ let check_standard engine =
     (fun (module_, _) -> ignore (Engine.get engine Type_checker.file_diagnostics module_))
     Standard_library.modules
 
-let standard_layer () =
+let standard_base () =
   let engine = Engine.create () in
   check_standard engine;
   Engine.freeze ~fixed:true engine;
@@ -84,7 +81,7 @@ let budget () =
    which is built into the compiler, the compiler's identity. *)
 let standard_key identity = identity ^ " standard"
 
-let standard_base store identity =
+let stored_standard store identity =
   let found =
     Option.bind
       (Store.find_result store ~kind:"package" ~key:(standard_key identity))
@@ -108,7 +105,7 @@ let current () =
       let store = Store.open_ (Store.default_directory ()) in
       let identity = Identity.compute (Store.directory store) in
       let fresh =
-        { store; identity; standard = standard_base store identity; sessions = Hashtbl.create 8 }
+        { store; identity; standard = stored_standard store identity; sessions = Hashtbl.create 8 }
       in
       state := Some fresh;
       fresh
@@ -395,16 +392,19 @@ let stabilize state session =
   change
 
 (* A chain of differences is folded into one whole state once the
-   differences reach half its size, or the chain grows long. An engine
-   holds the differences itself and shares the whole state, so this keeps
-   what each session holds, and what is read to open a state, within a
-   constant of what changed. The session is then opened again from that
-   whole state. *)
-let fold state session =
+   differences reach half its size, which costs the state's size. So the
+   background process folds while no request is waiting, and makes a command
+   wait for it only once the differences are several times that. A process
+   that serves one command folds as it opens the state, which costs it the
+   state's size already. *)
+let serving = ref false
+
+let fold ?(waited_for = false) state session =
   match session.pointer with
   | Some pointer ->
       let debt = Engine.debt session.engine in
-      if debt.differences > max (debt.whole / 2) 256 || debt.depth > 64 then begin
+      let limit = max (debt.whole / 2) 256 in
+      if debt.differences > if waited_for && !serving then 4 * limit else limit then begin
         let artifact = Engine.write ~full:true session.engine in
         let files =
           List.sort compare
@@ -419,6 +419,8 @@ let fold state session =
 (* The saved state nearest to a set of files: the one that differs from them
    in the fewest files, if it shares any. *)
 let nearest state (texts : (string * string) list) =
+  (* Another process may have written a state a moment ago. *)
+  Store.refresh state.store;
   let prefix = session_prefix state in
   let wanted = Hashtbl.create (List.length texts) in
   List.iter (fun (path, print) -> Hashtbl.replace wanted path print) texts;
@@ -477,6 +479,8 @@ let open_directory state root =
              root)
       else
         let own =
+          (* Another process may have written the state a moment ago. *)
+          Store.refresh state.store;
           Option.bind (read_record pointer) (fun record ->
               Option.map (fun engine -> (engine, record)) (open_state state record.artifact))
         in
@@ -624,7 +628,7 @@ let open_session directory =
     | Ok session ->
         session.used <- Unix.time ();
         (* Before any command holds the session's engine. *)
-        fold state session;
+        fold ~waited_for:true state session;
         scan session root;
         (* The state is written when the command is done, with what the
            command computed, so that a first write holds a whole state. *)
@@ -1089,6 +1093,7 @@ let serve ~handle =
   match Unix.lockf lock F_TLOCK 0 with
   | exception Unix.Unix_error _ -> ()
   | () ->
+      serving := true;
       (try Unix.unlink path with Unix.Unix_error _ -> ());
       let socket = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
       Unix.bind socket (ADDR_UNIX path);
@@ -1102,6 +1107,7 @@ let serve ~handle =
             let now = Unix.time () in
             drop_idle state now;
             watch state;
+            Hashtbl.iter (fun _ session -> fold state session) state.sessions;
             if now -. !last_collection > 600. then begin
               last_collection := now;
               collect state

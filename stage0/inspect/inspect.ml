@@ -1,7 +1,6 @@
 (* What the tools ask about one definition: its holes, with the type each
-   must have and the names in scope there, and what is at a position. See
-   DATABASE.md, "Requests", and SYNTAX.md, "Unfinished code". These read the
-   type checker's results, and decide nothing of their own. *)
+   must have and the names in scope there, and what is at a position. These
+   read the type checker's results, and decide nothing of their own. *)
 
 open Syntax
 

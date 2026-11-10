@@ -2,8 +2,7 @@ module Names = Resolve.Names
 
 (* Lowering is a query: what each instance compiles to, for a target and
    whether the program checks what the prover would prove, kept current by
-   the code database like any other result. See DATABASE.md, "Exact keys",
-   and CODEGEN.md, "Caching".
+   the code database like any other result.
 
    Each computation makes a lowering context of its own from the query's
    reads, so a layout or a piece of glue worked out on the way is read
@@ -48,7 +47,7 @@ let rec fresh_context lowering database =
 (* A pulled method's version, with its drops elaborated. *)
 and pulled =
   lazy
-    (Query.query ~name:"pulled" ~phase:Lowering ~saved:true
+    (Query.query ~name:"pulled" ~phase:Lowering ~saved:true ~portable:true
        ~show:(fun (lowering, yielding) ->
          show_lowering lowering ^ " " ^ Ground.to_string (Cursor yielding))
        (fun database (lowering, yielding) ->
@@ -94,7 +93,7 @@ let make (context : Lower.context) lowering database (key : Instance.key) : Lir.
   | Real_evidence capability -> Evidence (Lower.real_evidence context capability)
 
 let lowered =
-  Query.query ~name:"lowered_instance" ~phase:Lowering ~saved:true
+  Query.query ~name:"lowered_instance" ~phase:Lowering ~saved:true ~portable:true
     ~show:(fun (lowering, key) -> show_lowering lowering ^ " " ^ Instance.to_string key)
     (fun database (lowering, key) ->
       let context = fresh_context lowering database in
@@ -104,8 +103,7 @@ let lowered =
 
 (* Keys. A test's result is kept under the key of everything its code can
    reach, which is composed from the instances' own keys, so that an edit
-   changes the keys of what can reach the edited code and of nothing else.
-   See CODEGEN.md, "Test results". *)
+   changes the keys of what can reach the edited code and of nothing else. *)
 
 let show_instance (lowering, key) = show_lowering lowering ^ " " ^ Instance.to_string key
 
@@ -123,12 +121,12 @@ let linked =
           (Reachable.own_hash ~references compiled, references))
 
 let own_hash =
-  Query.query ~name:"own_hash" ~phase:Linking ~saved:true ~show:show_instance (fun database key ->
-      fst (Query.demand database linked key))
+  Query.query ~name:"own_hash" ~phase:Linking ~saved:true ~portable:true ~show:show_instance
+    (fun database key -> fst (Query.demand database linked key))
 
 let references =
-  Query.query ~name:"references" ~phase:Linking ~saved:true ~show:show_instance (fun database key ->
-      snd (Query.demand database linked key))
+  Query.query ~name:"references" ~phase:Linking ~saved:true ~portable:true ~show:show_instance
+    (fun database key -> snd (Query.demand database linked key))
 
 (* The tests and programs whose keys have been asked for. The instances
    they reach are those searched for groups that reach each other, so this
@@ -155,7 +153,7 @@ let recursion =
 
 (* The group an instance is in, if it is in one. *)
 let group =
-  Query.query ~name:"group" ~phase:Keys ~saved:true ~show:show_instance
+  Query.query ~name:"group" ~phase:Keys ~saved:true ~portable:true ~show:show_instance
     (fun database (lowering, key) ->
       Reachable.Keys.find_opt key (Query.demand database recursion lowering))
 
@@ -164,7 +162,7 @@ let group =
    walk from the instance reaches it. *)
 let rec reach =
   lazy
-    (Query.query ~name:"reach" ~phase:Keys ~saved:true ~show:show_instance
+    (Query.query ~name:"reach" ~phase:Keys ~saved:true ~portable:true ~show:show_instance
        (fun database (lowering, key) ->
          let reach_of other = Query.demand database (Lazy.force reach) (lowering, other) in
          match Query.demand database group (lowering, key) with
@@ -184,7 +182,7 @@ let rec reach =
    a [typedef] in the C, so the LIR is the same for every width while
    results such as [USize.maximum] are not. *)
 let test_key_query =
-  Query.query ~name:"test_key" ~phase:Keys ~saved:true
+  Query.query ~name:"test_key" ~phase:Keys ~saved:true ~portable:true
     ~show:(fun (lowering, path) -> show_lowering lowering ^ " " ^ Path.show path)
     (fun database (lowering, path) ->
       match Query.demand database (Lazy.force reach) (lowering, Lower.test_key path) with

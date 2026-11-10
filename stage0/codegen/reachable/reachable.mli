@@ -1,5 +1,4 @@
-(* What a build compiles, and what keys a test's result. See CODEGEN.md,
-   "Instances" and "Test results".
+(* What a build compiles, and what keys a test's result.
 
    A build starts from roots and compiles only what they reach: each
    instance that an instance calls, takes as a function value, reads as a

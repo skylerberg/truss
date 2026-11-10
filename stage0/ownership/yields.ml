@@ -1,6 +1,5 @@
 (* Yielding and lending: a [lends] method yields once on every path, and
-   which [yields] methods can be pulled as cursors, and why not. See
-   TYPECHECKER.md, "Yielding and lending". *)
+   which [yields] methods can be pulled as cursors, and why not. *)
 
 open Syntax
 module T = Types

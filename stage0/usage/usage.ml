@@ -1,6 +1,5 @@
 (* The rules on use: every variable is used, and no code is unreachable.
-   See TYPECHECKER.md, "Unreachable code" and DESIGN.md, "Errors". Unused
-   values are reported by body checking, and unused imports by
+   Unused values are reported by body checking, and unused imports by
    resolution. *)
 
 open Syntax

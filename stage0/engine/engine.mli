@@ -1,6 +1,6 @@
 (** What the database sees of the engine: setting inputs, keeping results current, walking the
-    graph, and keeping states and facts in the store. See DATABASE.md, "The interfaces". Only the
-    database and tests use this; compiler stages see {!Query}. *)
+    graph, and keeping states and facts in the store. Only the database and tests use this; compiler
+    stages see {!Query}. *)
 
 type t = Incremental.t
 (** One state: what differs from its bases, with the rest read from them. *)

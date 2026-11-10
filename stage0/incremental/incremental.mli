@@ -1,6 +1,5 @@
 (** The code database's engine: one state's inputs and query results, kept current by pushing each
-    change, phase by phase, to the results that read what really changed. See DATABASE.md, "The
-    engine".
+    change, phase by phase, to the results that read what really changed.
 
     Compiler stages see this module only through {!Query}, and the database only through {!Engine}.
     Nothing else should name it. *)
@@ -43,15 +42,18 @@ val query :
   show:('key -> string) ->
   phase:int ->
   ?saved:bool ->
+  ?portable:bool ->
   ?equal:('value -> 'value -> bool) ->
   ?about:('key -> subject option) ->
   (context -> 'key -> 'value) ->
   ('key, 'value) query
 (** A query, computed by the function, which reads inputs and other queries only through the
     context. Its phase orders it among the queries: it may read queries of its own phase and of
-    earlier ones, and reading a later one raises [Invalid_argument]. With [~saved:true] its results
-    are saved with a state and kept as facts, which needs its keys and values to hold no functions.
-    [equal] decides whether a result came out the same, and defaults to structural equality. *)
+    earlier ones, and reading a later one raises [Invalid_argument]. With [~saved:true] its results'
+    bytes are kept in the store and each is a fact, which needs its keys and values to hold no
+    functions. With [~portable:true] a saved result is also looked for as a fact in a state that has
+    never held one, for which the store keeps what such a result read, by name. [equal] decides
+    whether a result came out the same, and defaults to structural equality. *)
 
 val phases : int
 (** Phases run from 1 to [phases - 1]. Inputs are in phase 0. *)

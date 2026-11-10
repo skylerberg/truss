@@ -1,5 +1,4 @@
 (* [truss impact]: what the worktree's changes from a base commit reach.
-   See CLI.md, "truss impact", and DATABASE.md, "Comparing".
 
    The worktree's session is compared with a session of the base commit:
    every result a changed input can reach is brought up to date and

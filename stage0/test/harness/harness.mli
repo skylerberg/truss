@@ -1,4 +1,4 @@
-(** Running the tests of one test executable. See IMPLEMENTATION.md, "Testing". *)
+(** Running the tests of one test executable. *)
 
 val test : string -> (unit -> unit) -> unit
 (** Runs a test now. An exception it raises is a failure, and so is a result that an engine the test

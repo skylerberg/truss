@@ -1,23 +1,19 @@
 (* Fuzzing the code database's engine. This is a tool, not a test: run it by
-   hand to look for a sequence of changes after which the engine holds a
+   hand to look for a sequence of changes after which an engine holds a
    result that a new engine would not compute, and turn each one it finds
-   into a focused test. See IMPLEMENTATION.md, "Testing", and DATABASE.md,
-   "Checking the engine".
+   into a focused test.
 
      dune exec stage0/tools/engine_fuzz/engine_fuzz.exe -- [--seed N] [--count N] [--steps N]
 
    Each run makes a graph of queries over a few inputs. What a query reads
    depends on what it has read so far, so its reads change as the inputs
    do; some queries divide their result, so that it often comes out the
-   same; some are saved; and the queries are spread over the phases. The
-   run then makes random steps: it sets or removes an input, asks for a
-   result, releases one, brings the engine up to date, writes the state and
-   opens it again, or opens a second engine from the same state and changes
-   that. After each step the engine is audited against a new engine with no
+   same; some are saved; and the queries are spread over the phases. After
+   each random step every engine is audited against a new engine with no
    bases and the same inputs.
 
-   It prints the seed and the steps of each run that fails, and exits with
-   status 1 if there was one. *)
+   For each run that fails it prints the seed and the fewest of the run's
+   steps that still fail, and it exits with status 1 if there was one. *)
 
 let inputs = 6
 let nodes = 40
@@ -62,122 +58,136 @@ and compute database index =
 let node index = (Lazy.force queries).(phase_of index)
 let version = "fuzz"
 
-type world = {
-  store : Store.t;
-  mutable engine : Engine.t;
-  mutable others : Engine.t list;  (** Engines opened from a state this one wrote *)
-  mutable trail : string list;
-}
+type change =
+  | Set of int * int
+  | Remove of int
+  | Get of int
+  | Release of int
+  | Stabilize
+  | Reopen of { full : bool }
+  | Open_second
+
+(* [second]: made in the engine last opened beside the first, if there is
+   one. *)
+type step = { change : change; second : bool }
+
+let show step =
+  let text =
+    match step.change with
+    | Set (key, value) -> Printf.sprintf "set %d to %d" key value
+    | Remove key -> Printf.sprintf "remove %d" key
+    | Get index -> Printf.sprintf "get %d" index
+    | Release index -> Printf.sprintf "release %d" index
+    | Stabilize -> "stabilize"
+    | Reopen { full } ->
+        Printf.sprintf "write%s and open again" (if full then " the whole state" else "")
+    | Open_second -> "write and open a second engine"
+  in
+  if step.second then text ^ " in the second engine" else text
+
+type world = { store : Store.t; mutable engine : Engine.t; mutable other : Engine.t option }
 
 let counter = ref 0
 
-let fresh_store () =
+let fresh_world () =
   incr counter;
   let directory =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "truss-engine-fuzz-%d-%d" (Unix.getpid ()) !counter)
   in
   ignore (Sys.command ("rm -rf " ^ Filename.quote directory));
-  Store.open_ directory
+  let store = Store.open_ directory in
+  let engine = Engine.create () in
+  Engine.attach engine store ~version;
+  { store; engine; other = None }
 
-let note world format = Printf.ksprintf (fun text -> world.trail <- text :: world.trail) format
+let discard world =
+  Store.close world.store;
+  ignore (Sys.command ("rm -rf " ^ Filename.quote (Store.directory world.store)))
 
-let step world random =
-  let engine =
-    match world.others with
-    | other :: _ when Random.State.int random 4 = 0 -> other
-    | _ -> world.engine
+let choose world random =
+  let second = world.other <> None && Random.State.int random 4 = 0 in
+  let change =
+    match Random.State.int random 12 with
+    | 0 | 1 | 2 | 3 ->
+        let key = Random.State.int random inputs in
+        Set (key, Random.State.int random 1000)
+    | 4 -> Remove (Random.State.int random inputs)
+    | 5 | 6 | 7 -> Get (Random.State.int random nodes)
+    | 8 -> Release (Random.State.int random nodes)
+    | 9 -> Stabilize
+    | 10 -> Reopen { full = Random.State.int random 4 = 0 }
+    | _ -> Open_second
   in
-  let which = if engine == world.engine then "" else " in the second engine" in
-  match Random.State.int random 12 with
-  | 0 | 1 | 2 | 3 ->
-      let key = Random.State.int random inputs and value = Random.State.int random 1000 in
-      note world "set %d to %d%s" key value which;
-      Engine.set engine value_input key value
-  | 4 ->
-      let key = Random.State.int random inputs in
-      note world "remove %d%s" key which;
-      Engine.remove engine value_input key
-  | 5 | 6 | 7 ->
-      let index = Random.State.int random nodes in
-      note world "get %d%s" index which;
-      ignore (Engine.get engine (node index) index)
-  | 8 ->
-      let index = Random.State.int random nodes in
-      note world "release %d%s" index which;
-      Engine.release engine (node index) index
-  | 9 ->
-      note world "stabilize%s" which;
-      ignore (Engine.stabilize engine)
-  | 10 -> (
-      let full = Random.State.int random 4 = 0 in
-      note world "write%s and open again" (if full then " the whole state" else "");
-      let artifact = Engine.write ~full world.engine in
-      match Engine.open_ world.store ~version ~bases:[] artifact with
-      | Some opened ->
-          if Sys.getenv_opt "FUZZ_DEBUG" <> None then
-            List.iter
-              (fun node ->
-                match Engine.counterpart node opened with
-                | None -> Printf.printf "  [open] %s is missing\n" (Engine.label node)
-                | Some other ->
-                    if not (Engine.same_outcome world.engine node opened other) then
-                      Printf.printf "  [open] %s differs (own before: %b, own after: %b)\n"
-                        (Engine.label node)
-                        (List.memq node (Engine.differing world.engine))
-                        (List.memq other (Engine.differing opened)))
-              (Engine.nodes world.engine);
-          world.engine <- opened
-      | None -> note world "the store had no such state")
-  | _ -> (
-      note world "write and open a second engine";
-      let artifact = Engine.write world.engine in
-      match Engine.open_ world.store ~version ~bases:[] artifact with
-      | Some opened -> world.others <- [ opened ]
-      | None -> note world "the store had no such state")
+  { change; second = (second && match change with Reopen _ | Open_second -> false | _ -> true) }
+
+let apply world step =
+  let engine = match world.other with Some other when step.second -> other | _ -> world.engine in
+  let opened artifact = Engine.open_ world.store ~version ~bases:[] artifact in
+  match step.change with
+  | Set (key, value) -> Engine.set engine value_input key value
+  | Remove key -> Engine.remove engine value_input key
+  | Get index -> ignore (Engine.get engine (node index) index)
+  | Release index -> Engine.release engine (node index) index
+  | Stabilize -> ignore (Engine.stabilize engine)
+  | Reopen { full } ->
+      Option.iter (fun engine -> world.engine <- engine) (opened (Engine.write ~full world.engine))
+  | Open_second ->
+      Option.iter (fun engine -> world.other <- Some engine) (opened (Engine.write world.engine))
+
+let audit world =
+  List.concat_map (Engine.audit ~flat:true) (world.engine :: Option.to_list world.other)
+
+(* What is wrong after the first of the steps that leaves something wrong. *)
+let problems steps =
+  let world = fresh_world () in
+  let found =
+    try
+      List.fold_left
+        (fun found step ->
+          if found <> [] then found
+          else begin
+            apply world step;
+            audit world
+          end)
+        [] steps
+    with exception_ -> [ "raised " ^ Printexc.to_string exception_ ]
+  in
+  discard world;
+  found
+
+(* Leaves out each step the rest still fails without, until none can go. *)
+let rec shrink steps =
+  let rec without place =
+    if place >= List.length steps then None
+    else
+      let fewer = List.filteri (fun index _ -> index <> place) steps in
+      if problems fewer <> [] then Some fewer else without (place + 1)
+  in
+  match without 0 with Some fewer -> shrink fewer | None -> steps
 
 let run ~seed ~steps =
   let random = Random.State.make [| seed |] in
-  let store = fresh_store () in
-  let engine = Engine.create () in
-  Engine.attach engine store ~version;
-  let world = { store; engine; others = []; trail = [] } in
+  let world = fresh_world () in
+  let made = ref [] in
   let failed = ref false in
   (try
      for _ = 1 to steps do
        if not !failed then begin
-         step world random;
-         List.iter
-           (fun engine ->
-             match Engine.audit ~flat:true engine with
-             | [] -> ()
-             | problems ->
-                 failed := true;
-                 Printf.printf "seed %d, after:\n  %s\n" seed
-                   (String.concat "\n  " (List.rev world.trail));
-                 List.iter (Printf.printf "    %s\n") problems;
-                 if Sys.getenv_opt "FUZZ_DEBUG" <> None then begin
-                   let own = Engine.differing engine in
-                   Printf.printf "    holds: %s\n"
-                     (String.concat " "
-                        (List.map
-                           (fun node ->
-                             Printf.sprintf "%s<-[%s]" (Engine.label node)
-                               (String.concat ","
-                                  (List.map Engine.label (Engine.reads engine node))))
-                           own));
-                   Printf.printf "    all: %s\n"
-                     (String.concat " " (List.map Engine.label (Engine.nodes engine)))
-                 end)
-           (world.engine :: world.others)
+         let step = choose world random in
+         made := step :: !made;
+         apply world step;
+         failed := audit world <> []
        end
      done
-   with exception_ ->
-     failed := true;
-     Printf.printf "seed %d raised %s after:\n  %s\n" seed (Printexc.to_string exception_)
-       (String.concat "\n  " (List.rev world.trail)));
-  Store.close store;
-  ignore (Sys.command ("rm -rf " ^ Filename.quote (Store.directory store)));
+   with _ -> failed := true);
+  discard world;
+  if !failed then begin
+    let fewest = shrink (List.rev !made) in
+    Printf.printf "seed %d, after:\n" seed;
+    List.iter (fun step -> Printf.printf "  %s\n" (show step)) fewest;
+    List.iter (Printf.printf "    %s\n") (problems fewest)
+  end;
   !failed
 
 let () =

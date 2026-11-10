@@ -1,6 +1,4 @@
-(* The interfaces of definitions, as queries. See TYPECHECKER.md, "Checking
-   signatures and definitions" and "One definition at a time, through
-   queries".
+(* The interfaces of definitions, as queries.
 
    [lowered] lowers a definition's outward-facing part and keeps what
    lowering reported. The other queries project one interface out of it by

@@ -1,5 +1,4 @@
-(* Checking each definition's outward-facing part. See TYPECHECKER.md,
-   "Checking signatures and definitions".
+(* Checking each definition's outward-facing part.
 
    These checks read other definitions' interfaces, such as the [impl]s
    that decide whether a bound holds, so they run apart from lowering: an

@@ -1,5 +1,4 @@
-(* Moves, loans, and views, within each function. See TYPECHECKER.md,
-   "Ownership: moves, loans, and views".
+(* Moves, loans, and views, within each function.
 
    Truss has only structured control flow, so the analysis follows the
    tree in evaluation order: the places that may have been moved flow

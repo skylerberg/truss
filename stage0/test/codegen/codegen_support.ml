@@ -3,8 +3,7 @@
    library and running it. *)
 
 (* Code generation's tests. Each test gives a small input and states one
-   fact about what code generation makes of it. See IMPLEMENTATION.md,
-   "Testing", and CODEGEN.md, "Testing". *)
+   fact about what code generation makes of it. *)
 
 let test = Harness.test
 let fail = Harness.fail

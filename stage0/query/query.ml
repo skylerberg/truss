@@ -1,5 +1,3 @@
-(* The compiler stages' view of the code database. See query.mli. *)
-
 type context = Incremental.context
 type subject = Incremental.subject = { path : Path.t; part : string option }
 type ('key, 'value) input = ('key, 'value) Incremental.input
@@ -47,8 +45,8 @@ let phase_name = function
 
 let input = Incremental.input
 
-let query ~name ~show ~phase ?saved ?equal ?about compute =
-  Incremental.query ~name ~show ~phase:(rank phase) ?saved ?equal ?about compute
+let query ~name ~show ~phase ?saved ?portable ?equal ?about compute =
+  Incremental.query ~name ~show ~phase:(rank phase) ?saved ?portable ?equal ?about compute
 
 let find = Incremental.read
 

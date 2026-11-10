@@ -1,6 +1,5 @@
 (* The tests of deterministic CBOR and BLAKE3, the encoding and hash that
-   content hashes are defined over. See IMPLEMENTATION.md, "Hashing and
-   caching". *)
+   keys are defined over. *)
 
 open Harness
 

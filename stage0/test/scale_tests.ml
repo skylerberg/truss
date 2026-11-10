@@ -1,9 +1,8 @@
 (* The cost of a change follows the change, and not the project. Each test
    makes the same edit in a small package and in a large one, and compares
    the work the code database counted: how many results it marked, found
-   current, and computed. See GOALS.md, "Incremental Everything", and
-   DATABASE.md, "The engine". Counts are compared, never times, so the
-   tests are the same on every machine. *)
+   current, and computed. Counts are compared, never times, so the tests
+   are the same on every machine. *)
 
 open Harness
 open Support

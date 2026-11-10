@@ -1,6 +1,6 @@
 (* [truss references] and [truss dependencies]: what reads a definition,
    and what a definition reads, part by part, from the graph of results the
-   session keeps. See DATABASE.md, "Requests". *)
+   session keeps. *)
 
 type direction = References | Dependencies
 

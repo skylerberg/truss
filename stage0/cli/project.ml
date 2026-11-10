@@ -1,5 +1,5 @@
 (* The packages a command acts on, from the code database's session for the
-   worktree it is run in. See CLI.md, "Finding the package".
+   worktree it is run in.
 
    A command is about the packages at or under the directory it is run
    from, or else the one that directory is in: a package's directory and

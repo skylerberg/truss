@@ -1,6 +1,6 @@
 (* The tests of the engine: which queries are computed again after a change,
    what a change reaches, phase by phase, and what an engine over a base
-   holds. See DATABASE.md, "The engine". *)
+   holds. *)
 
 open Harness
 

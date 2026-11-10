@@ -1,8 +1,8 @@
 (* Checking a definition's bodies: a function's body, defaults, and
    clauses; a type's invariants, potential, and field defaults; a trait's
    provided methods and laws; an [impl]'s methods; a constant's value; and
-   the bodies of tests, theorems, and proofs. See TYPECHECKER.md, "Checking
-   bodies". A part the parser did not build as written is not checked. *)
+   the bodies of tests, theorems, and proofs. A part the parser did not
+   build as written is not checked. *)
 
 open Syntax
 module T = Types

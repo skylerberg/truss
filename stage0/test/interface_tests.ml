@@ -1,7 +1,6 @@
 (* The tests of checking interfaces: signatures, types, traits, [impl]s, the
    properties of types, and finding [impl]s. Each gives a few definitions
-   and states one fact. See TYPECHECKER.md, "Checking signatures and
-   definitions" and "Testing". *)
+   and states one fact. *)
 
 open Harness
 open Support

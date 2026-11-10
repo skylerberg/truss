@@ -1,5 +1,5 @@
 (* [truss rename]: renames a definition, a method, or a module, and every
-   reference to it in the package. See CLI.md, "truss rename".
+   reference to it in the package.
 
    The rename is made in memory first and the package checked: if it would
    cause any diagnostic, such as a name already taken, one that breaks a

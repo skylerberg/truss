@@ -1114,22 +1114,33 @@ order of the tests.
 
 A test's result is cached under a key built from all the code it can reach.
 DESIGN.md requires that renaming a definition or moving it to another module
-finds test results already done, so the key contains no names:
+finds test results already done, so the key contains no names. It is
+composed from the instances' own keys, so that an edit changes the keys of
+the tests that can reach the edited code, and costs what can reach it:
 
-- Walk the instances reachable from the test, in the deterministic order of
-  their calls, and number them in the order they are first reached.
-- Hash each instance's LIR with every reference to another instance replaced
-  by that instance's number, and every path, in a type or a position,
-  replaced by a number given in the order paths are first met, since a
-  type's path is a name too.
-- The test's key is the hash of that numbered list, plus the version of code
-  generation and the target. `USize` is a `typedef` in the generated C, so
-  the LIR is the same for 32-bit and 64-bit targets, but results such as
-  `USize.maximum` are not.
+- **An instance's own hash** is the hash of its LIR with every reference to
+  another instance replaced by that instance's place in the list of what it
+  refers to, and every path, in a type or a position, replaced by a number
+  given in the order paths are first met, since a type's path is a name too.
+- **The key of everything an instance can reach** is the hash of its own
+  hash and of the key of each instance it refers to, in order.
+- **Instances that reach each other are keyed as a group,** since a key
+  cannot be made of keys that are made of it. The groups are found among
+  everything the wanted tests reach, and an instance of a group is keyed by
+  the whole group, as a walk from the instance reaches it: each of the
+  group's instances as its own hash and what it refers to, a number for an
+  instance of the group and a key for any other. DATABASE.md's "Composed
+  keys" describes the queries.
+- **The test's key** is the key of everything the test's own instance can
+  reach, with the version of code generation and the target. `USize` is a
+  `typedef` in the generated C, so the LIR is the same for 32-bit and 64-bit
+  targets, but results such as `USize.maximum` are not.
 
 Two programs that differ only in names give the same key, and any change to
 what the test can run changes it. A layout change appears in the LIR of
-every instance that uses the layout, so it changes the key too.
+every instance that uses the layout, so it changes the key too. A function
+that a thousand tests reach is hashed once, and an edit to it makes its own
+hash again, and the keys of what reaches it.
 
 `truss test` keeps results in the code database's store, as
 [DATABASE.md](DATABASE.md#exact-keys) describes, and builds and runs only
@@ -1147,8 +1158,11 @@ machine may have caused. A sanitized run keeps nothing.
 ### Caching
 
 Lowering is a query, kept current by the code database as DATABASE.md's
-"Lowering" describes, and so is each test's key. The steps after it are kept
-under exact keys, the hash of exactly the input each consumed:
+"Lowering" describes, and so are each instance's own hash, what it refers
+to, and its key. Each of these results is kept in the store under what it
+read, so a worktree that reaches an instance another worktree lowered finds
+it done. The steps after lowering are kept under exact keys, the hash of
+exactly the input each consumed:
 
 | Output | Kept by |
 |---|---|
@@ -1204,8 +1218,10 @@ reaches, as a build does, without compiling them, and `build` refuses an
 
 Stage0 links in full every time, as IMPLEMENTATION.md records: with lld or
 mold on Linux and the system linker on macOS, against the platform's libc.
-The standard library is linked from its cached objects. Making linking
-incremental is deferred.
+The standard library is linked from its cached objects. The linker is given
+the objects' names in a file, since a program of a few thousand instances
+names more objects than a command line can hold. Making linking incremental
+is deferred.
 
 ## Testing
 

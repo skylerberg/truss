@@ -1,5 +1,5 @@
 (** The code database's store on disk: values by the hash of their bytes, results by the hash of the
-    input that made them, and pointers to the states being worked on. See DATABASE.md, "The store".
+    input that made them, and pointers to the states being worked on.
 
     Values and results live in append-only segment files. Each process that writes has a segment of
     its own, so writers never share a file or take a lock to write. A full segment is sealed with a
@@ -28,7 +28,11 @@ val put : t -> string -> string
     adds nothing. *)
 
 val get : t -> string -> string option
-(** The bytes with that name, or [None] if the store does not have them. *)
+(** The bytes with that name, or [None] if the store does not have them. A miss looks for what other
+    processes added since the store last looked, at most every twenty milliseconds. *)
+
+val refresh : t -> unit
+(** Looks now for what other processes added, before reading what one of them just wrote. *)
 
 val flush : t -> unit
 (** Makes every value and result added so far durable, before a pointer refers to them. *)

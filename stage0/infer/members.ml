@@ -1,5 +1,5 @@
 (* Looking up a name after a dot: fields, a type's own methods, trait
-   methods, and a type's static members. See TYPECHECKER.md, "Members". *)
+   methods, and a type's static members. *)
 
 module T = Types
 module Names = Resolve.Names

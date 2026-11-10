@@ -1,7 +1,6 @@
 (* The type checker's entry point: every stage, in order, over the
-   definitions of a build. See TYPECHECKER.md, "Structure". The stages are
-   linked together; each reads the earlier ones' results through their
-   queries. *)
+   definitions of a build. The stages are linked together; each reads the
+   earlier ones' results through their queries. *)
 
 module Manifest = Manifest
 
