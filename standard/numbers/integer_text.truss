@@ -17,6 +17,79 @@ internal fn digit_value(byte: UInt8) -> UInt64
   }
 }
 
+internal fn digit_character(digit: UInt64, uppercase: Bool) -> UInt8
+  requires digit < 36
+  cost time O(1)
+{
+  let value: UInt8 = intrinsic::convert(digit)
+  if value < 10 {
+    value + 48
+  } else if uppercase {
+    value + 55
+  } else {
+    value + 87
+  }
+}
+
+internal fn digit_count(value: UInt64, base: UInt64) -> USize
+  requires base >= 2
+  ensures result >= 1
+  ensures result <= log(value) + 1
+  decreases value
+  cost time O(log(value))
+{
+  if value < base {
+    1
+  } else {
+    1 + digit_count(value / base, base: base)
+  }
+}
+
+internal fn write_digits(output: mut intrinsic::Storage[UInt8], value: UInt64, base: UInt64, uppercase: Bool)
+  requires 2 <= base && base <= 36
+  requires intrinsic::storage_length(output) + digit_count(value, base: base) <= intrinsic::storage_capacity(output)
+  ensures intrinsic::storage_length(output) == old(intrinsic::storage_length(output)) + digit_count(value, base: base)
+  ensures intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
+  decreases value
+  cost time O(log(value))
+{
+  if value >= base {
+    write_digits(mut output, value: value / base, base: base, uppercase: uppercase)
+  }
+  intrinsic::storage_push(mut output, value: digit_character(value % base, uppercase: uppercase))
+}
+
+internal fn format_magnitude(
+  magnitude: UInt64,
+  negative: Bool,
+  radix: UInt32,
+  minimum_digits: USize,
+  uppercase: Bool,
+) -> String
+  requires 2 <= radix && radix <= 36
+  cost time O(minimum_digits + 64)
+{
+  if minimum_digits > USize.maximum / 2 {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  let base: UInt64 = intrinsic::convert(radix)
+  let digits = digit_count(magnitude, base: base)
+  let padding = if minimum_digits > digits { minimum_digits - digits } else { 0 }
+  let sign: USize = if negative { 1 } else { 0 }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(sign + padding + digits)
+  if negative {
+    intrinsic::storage_push(mut output, value: 45)
+  }
+  for _ in 0..padding
+    invariant intrinsic::storage_length(output) == sign + yielded.length()
+    invariant intrinsic::storage_capacity(output) == sign + padding + digits
+  {
+    intrinsic::storage_push(mut output, value: 48)
+  }
+  write_digits(mut output, value: magnitude, base: base, uppercase: uppercase)
+  String(storage: own output)
+}
+
 internal fn parse_magnitude(
   text: StringSlice,
   start: USize,
@@ -84,7 +157,13 @@ public fn Int8.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, upper
   requires 2 <= radix && radix <= 36
   cost time O(minimum_digits + Int8.bits)
 {
-  todo
+  format_magnitude(
+    intrinsic::convert(self.unsigned_absolute()),
+    negative: self < 0,
+    radix: radix,
+    minimum_digits: minimum_digits,
+    uppercase: uppercase,
+  )
 }
 
 impl text::Parse for Int16 {
@@ -118,7 +197,13 @@ public fn Int16.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppe
   requires 2 <= radix && radix <= 36
   cost time O(minimum_digits + Int16.bits)
 {
-  todo
+  format_magnitude(
+    intrinsic::convert(self.unsigned_absolute()),
+    negative: self < 0,
+    radix: radix,
+    minimum_digits: minimum_digits,
+    uppercase: uppercase,
+  )
 }
 
 impl text::Parse for Int32 {
@@ -152,7 +237,13 @@ public fn Int32.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppe
   requires 2 <= radix && radix <= 36
   cost time O(minimum_digits + Int32.bits)
 {
-  todo
+  format_magnitude(
+    intrinsic::convert(self.unsigned_absolute()),
+    negative: self < 0,
+    radix: radix,
+    minimum_digits: minimum_digits,
+    uppercase: uppercase,
+  )
 }
 
 impl text::Parse for Int64 {
@@ -186,7 +277,13 @@ public fn Int64.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppe
   requires 2 <= radix && radix <= 36
   cost time O(minimum_digits + Int64.bits)
 {
-  todo
+  format_magnitude(
+    intrinsic::convert(self.unsigned_absolute()),
+    negative: self < 0,
+    radix: radix,
+    minimum_digits: minimum_digits,
+    uppercase: uppercase,
+  )
 }
 
 impl text::Parse for ISize {
@@ -220,7 +317,13 @@ public fn ISize.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppe
   requires 2 <= radix && radix <= 36
   cost time O(minimum_digits + ISize.bits)
 {
-  todo
+  format_magnitude(
+    intrinsic::convert(self.unsigned_absolute()),
+    negative: self < 0,
+    radix: radix,
+    minimum_digits: minimum_digits,
+    uppercase: uppercase,
+  )
 }
 
 impl text::Parse for UInt8 {
@@ -244,7 +347,13 @@ public fn UInt8.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppe
   requires 2 <= radix && radix <= 36
   cost time O(minimum_digits + UInt8.bits)
 {
-  todo
+  format_magnitude(
+    intrinsic::convert(self),
+    negative: false,
+    radix: radix,
+    minimum_digits: minimum_digits,
+    uppercase: uppercase,
+  )
 }
 
 impl text::Parse for UInt16 {
@@ -268,7 +377,13 @@ public fn UInt16.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, upp
   requires 2 <= radix && radix <= 36
   cost time O(minimum_digits + UInt16.bits)
 {
-  todo
+  format_magnitude(
+    intrinsic::convert(self),
+    negative: false,
+    radix: radix,
+    minimum_digits: minimum_digits,
+    uppercase: uppercase,
+  )
 }
 
 impl text::Parse for UInt32 {
@@ -292,7 +407,13 @@ public fn UInt32.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, upp
   requires 2 <= radix && radix <= 36
   cost time O(minimum_digits + UInt32.bits)
 {
-  todo
+  format_magnitude(
+    intrinsic::convert(self),
+    negative: false,
+    radix: radix,
+    minimum_digits: minimum_digits,
+    uppercase: uppercase,
+  )
 }
 
 impl text::Parse for UInt64 {
@@ -316,7 +437,13 @@ public fn UInt64.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, upp
   requires 2 <= radix && radix <= 36
   cost time O(minimum_digits + UInt64.bits)
 {
-  todo
+  format_magnitude(
+    intrinsic::convert(self),
+    negative: false,
+    radix: radix,
+    minimum_digits: minimum_digits,
+    uppercase: uppercase,
+  )
 }
 
 impl text::Parse for USize {
@@ -340,5 +467,11 @@ public fn USize.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppe
   requires 2 <= radix && radix <= 36
   cost time O(minimum_digits + USize.bits)
 {
-  todo
+  format_magnitude(
+    intrinsic::convert(self),
+    negative: false,
+    radix: radix,
+    minimum_digits: minimum_digits,
+    uppercase: uppercase,
+  )
 }
