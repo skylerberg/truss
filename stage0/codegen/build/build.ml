@@ -108,13 +108,26 @@ let objects ?progress toolchain cache settings sources =
       | Error message, _ | _, Error message -> Error message)
     results (Ok [])
 
-let program ?progress ?(tests = false) toolchain cache env settings ~files ~sources ~output =
+let program ?progress ?(tests = false) ?(copied = fun _ -> []) toolchain cache env settings ~files
+    ~sources ~output =
   let target = Memory_layout.target env in
   let emitted =
     List.mapi
       (fun i units ->
+        let own = List.filter_map (function Lir.Code t -> Some t | _ -> None) units in
+        (* Each copy once, and none of an instance the file defines itself. *)
+        let copies =
+          List.fold_left
+            (fun copies (copy : Lir.t) ->
+              if
+                List.exists (fun (other : Lir.t) -> Instance.equal other.key copy.key) (own @ copies)
+              then copies
+              else copies @ [ copy ])
+            [] (List.concat_map copied own)
+        in
         let code =
-          List.filter_map (function Lir.Code t -> Some (t, Emit_c.External) | _ -> None) units
+          List.map (fun t -> (t, Emit_c.External)) own
+          @ List.map (fun t -> (t, Emit_c.Internal)) copies
         in
         let data = List.filter_map (function Lir.Data d -> Some d | _ -> None) units in
         let tables = List.filter_map (function Lir.Table t -> Some t | _ -> None) units in

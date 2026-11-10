@@ -347,6 +347,49 @@ let decode t ty text : Lir.static_value =
   if !at <> String.length text then bug "a value written out while compiling has bytes left over";
   result
 
+(* How much code a function is, for choosing what is small: each statement,
+   and each block twice. *)
+let weight (f : Lir.function_) =
+  Array.fold_left
+    (fun total (block : Lir.basic_block) -> total + 2 + List.length block.statements)
+    0 f.blocks
+
+let small = 24
+
+(* The instances an instance calls by name. *)
+let called (instance : Lir.t) =
+  let of_function (f : Lir.function_) =
+    Array.to_list f.blocks
+    |> List.concat_map (fun (block : Lir.basic_block) ->
+        List.filter_map
+          (function
+            | Lir.Call { target = Direct { function_ = Instance key; _ }; _ } -> Some key
+            | _ -> None)
+          block.statements)
+  in
+  of_function instance.main @ List.concat_map of_function (Array.to_list instance.nested)
+
+(* The small callees emitted beside an instance in a development build, so
+   that the C compiler can inline them: functions from source that the
+   instance calls, of another package than its own, with little code and no
+   lambdas. A package's own small functions stay calls, so that an edit to
+   one compiles only it again. *)
+let small_callees ~find (instance : Lir.t) =
+  match instance.key with
+  | Code { path; _ } ->
+      let package = Path.package path in
+      List.filter_map
+        (fun (key : Instance.key) ->
+          match (key, find key) with
+          | Code { path = callee; _ }, Some (Lir.Code copy)
+            when Path.package callee <> package
+                 && Array.length copy.nested = 0
+                 && weight copy.main <= small ->
+              Some copy
+          | _ -> None)
+        (called instance)
+  | _ -> []
+
 (* Builds what the roots reach into a program at [output], with the given
    startup code, once the instances agree with one another. *)
 let rec build ?progress ?tests t ~roots ~startup ~output =
@@ -368,8 +411,12 @@ let rec build ?progress ?tests t ~roots ~startup ~output =
   let anchors = List.filter_map (anchor t) paths in
   let target = Memory_layout.target t.context.env in
   let sources = [ ("startup", startup); ("anchors", Positions.anchors_file target anchors) ] in
+  let find key = Reachable.Keys.find_opt key found in
+  let copied =
+    match t.settings.build with Development -> small_callees ~find | Release -> fun _ -> []
+  in
   match
-    Build.program ?progress ?tests t.toolchain t.cache t.context.env t.settings
+    Build.program ?progress ?tests ~copied t.toolchain t.cache t.context.env t.settings
       ~files:(List.map (fun unit -> [ unit ]) units)
       ~sources ~output
   with

@@ -1320,11 +1320,18 @@ so upgrading clang recompiles objects but invalidates no test result.
   broken object. Files that need compiling are compiled in parallel, across
   the machine's cores.
 - **Every build compiles one C file per instance.** The C compiler runs
-  once for each instance whose C changed, in parallel across cores. Each
-  instance is an external function of its own file, so in a development
-  build the C compiler inlines nothing from one instance into another.
-  Lowering does write lending and yielding methods and primitive
-  operations into their callers itself.
+  once for each instance whose C changed, in parallel across cores, and
+  each instance is an external function of its own file.
+- **A development build puts small callees in the caller's file.** A
+  function an instance calls, from another package than the instance's
+  own, with little code and no lambdas, is emitted into the instance's
+  file too, as a `static inline` copy, so the C compiler can inline it, as
+  DESIGN.md allows for development builds. A package's own small functions
+  stay calls, so that an edit to one compiles only it again. An object
+  file is found by its C's text, which the copies are part of, so a change
+  to a callee compiles its callers' files again. Lowering writes lending
+  and yielding methods and primitive operations into their callers
+  itself, whatever the build.
 - **Development builds compile at `-O1`,** which is fast to compile and
   avoids the stack traffic of `-O0`.
 - **Release builds** compile at `-O2` and optimize across every file as
@@ -1381,12 +1388,9 @@ a command line can hold.
 - **Room reserved for an interpolation.** The literal lengths are known, so
   the `TextBuilder` can start with that much room and grow only if a part
   writes more than its estimate.
-- **Small callees in the caller's C file.** In a development build, small
-  standard-library and dependency instances that an instance calls can be
-  emitted into its file as `static` functions, chosen by size, so the C
-  compiler can inline them, as DESIGN.md allows; each is then a body the
-  instance reads. Until then a development or test build makes a call for
-  every small method, such as a list's length.
+- **Small callees of small callees, and generated functions, in the
+  caller's C file.** Only the functions an instance calls itself are
+  copied in, and a type's drop and copy functions are not.
 - **The standard library and dependencies at `-O2` in development
   builds,** cached, so a project's development builds run them at full
   speed.
