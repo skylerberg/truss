@@ -44,7 +44,7 @@ internal fn Span.is_empty(self) -> Bool
   self.start == self.end
 }
 
-internal fn component_after(text: StringSlice, from: USize) -> Span
+internal fn next_component(text: StringSlice, from: USize) -> Span
   requires from <= text.length()
   ensures from <= result.start
   ensures result.start <= result.end
@@ -104,7 +104,7 @@ internal fn last_component(text: StringSlice) -> Span
   Span(start: start, end: end)
 }
 
-internal fn is_dots(text: StringSlice, span: Span) -> Bool
+internal fn is_dot_or_dot_dot(text: StringSlice, span: Span) -> Bool
   requires span.start <= span.end
   requires span.end <= text.length()
   cost time O(1)
@@ -139,7 +139,7 @@ internal fn extension_start(text: StringSlice, name: Span) -> USize
   name.end
 }
 
-internal fn join_texts(first: StringSlice, second: StringSlice) -> Path
+internal fn join_paths(first: StringSlice, second: StringSlice) -> Path
   ensures result.text.length() <= first.length() + second.length() + 1
   cost time O(first.length() + second.length())
 {
@@ -170,13 +170,13 @@ public fn Path.is_absolute(self) -> Bool
 public fn Path.join(self, part: StringSlice) -> Path
   cost time O(self.text.length() + part.length())
 {
-  join_texts(self.text.slice(), second: part)
+  join_paths(self.text.slice(), second: part)
 }
 
 public fn Path.join_path(self, other: Path) -> Path
   cost time O(self.text.length() + other.text.length())
 {
-  join_texts(self.text.slice(), second: other.text.slice())
+  join_paths(self.text.slice(), second: other.text.slice())
 }
 
 public fn Path.join_within(self, part: Path) -> Result[Path, SystemError]
@@ -226,7 +226,7 @@ public fn Path.file_name(self) -> Option[StringSlice]
 {
   let text = self.text.slice()
   let name = last_component(text)
-  if name.is_empty() || is_dots(text, span: name) {
+  if name.is_empty() || is_dot_or_dot_dot(text, span: name) {
     None
   } else {
     Some(text.part(name.start, to: name.end))
@@ -238,7 +238,7 @@ public fn Path.stem(self) -> Option[StringSlice]
 {
   let text = self.text.slice()
   let name = last_component(text)
-  if name.is_empty() || is_dots(text, span: name) {
+  if name.is_empty() || is_dot_or_dot_dot(text, span: name) {
     None
   } else {
     Some(text.part(name.start, to: extension_start(text, name: name)))
@@ -250,7 +250,7 @@ public fn Path.extension(self) -> Option[StringSlice]
 {
   let text = self.text.slice()
   let name = last_component(text)
-  if name.is_empty() || is_dots(text, span: name) {
+  if name.is_empty() || is_dot_or_dot_dot(text, span: name) {
     return None
   }
   let dot = extension_start(text, name: name)
@@ -262,7 +262,7 @@ public fn Path.with_extension(self, extension: StringSlice) -> Path
 {
   let text = self.text.slice()
   let name = last_component(text)
-  if name.is_empty() || is_dots(text, span: name) {
+  if name.is_empty() || is_dot_or_dot_dot(text, span: name) {
     return Path(text: text.to_string())
   }
   let stem = text.part(0, to: extension_start(text, name: name))
@@ -283,8 +283,8 @@ public fn Path.with_file_name(self, name: StringSlice) -> Path
 {
   let text = self.text.slice()
   let last = last_component(text)
-  if last.is_empty() || is_dots(text, span: last) {
-    return join_texts(text, second: name)
+  if last.is_empty() || is_dot_or_dot_dot(text, span: last) {
+    return join_paths(text, second: name)
   }
   let before = text.part(0, to: last.start)
   if before.length() > USize.maximum / 4 || name.length() > USize.maximum / 4 {
@@ -308,7 +308,7 @@ public fn Path.components(self) yields StringSlice
     decreases text.length() - from
     cost time O(from)
   {
-    let span = component_after(text, from: from)
+    let span = next_component(text, from: from)
     if span.is_empty() {
       return
     }
@@ -364,12 +364,12 @@ public fn Path.normalized(self) -> Path
     decreases text.length() - index
     cost time O(3 * index + 1 - intrinsic::storage_length(output))
   {
-    let span = component_after(text, from: index)
+    let span = next_component(text, from: index)
     if span.is_empty() {
       index = text.length()
     } else {
       let length = intrinsic::storage_length(output)
-      if is_dots(text, span: span) {
+      if is_dot_or_dot_dot(text, span: span) {
         if span.end - span.start == 2 {
           if length > floor {
             intrinsic::storage_shorten(mut output, length: parent_length(output, floor: floor))
@@ -413,11 +413,11 @@ public fn Path.starts_with(self, base: Path) -> Bool
     decreases prefix.length() - theirs
     cost time O(mine + theirs)
   {
-    let wanted = component_after(prefix, from: theirs)
+    let wanted = next_component(prefix, from: theirs)
     if wanted.is_empty() {
       return true
     }
-    let found = component_after(text, from: mine)
+    let found = next_component(text, from: mine)
     if found.end - found.start != wanted.end - wanted.start {
       return false
     }
@@ -446,11 +446,11 @@ public fn Path.relative_to(self, base: Path) -> Option[Path]
     decreases prefix.length() - theirs
     cost time O(mine + theirs)
   {
-    let wanted = component_after(prefix, from: theirs)
+    let wanted = next_component(prefix, from: theirs)
     if wanted.is_empty() {
       theirs = prefix.length()
     } else {
-      let found = component_after(text, from: mine)
+      let found = next_component(text, from: mine)
       if found.end - found.start != wanted.end - wanted.start {
         return None
       }
@@ -461,7 +461,7 @@ public fn Path.relative_to(self, base: Path) -> Option[Path]
       theirs = wanted.end
     }
   }
-  let rest = component_after(text, from: mine)
+  let rest = next_component(text, from: mine)
   Some(Path(text: text.part(rest.start, to: text.length()).to_string()))
 }
 
