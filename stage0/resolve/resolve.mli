@@ -25,7 +25,7 @@ type target = Walk.target =
   | Yielded  (** [yielded], what a lending or yielding method handed out so far. *)
   | Finished  (** [finished], whether a yielding method ran to its end. *)
   | Cost_function of cost_function
-  | Unknown  (** A name that refers to nothing; its error is reported. *)
+  | Unknown of Diagnostic.reported  (** A name that refers to nothing, with its report. *)
 
 type bracket = Walk.bracket =
   | Index

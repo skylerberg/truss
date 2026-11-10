@@ -18,7 +18,7 @@ let trait_method_key st ~(trait : T.trait_reference) ~name ~receiver ~self_type 
         ( impl,
           List.map (fun (p, a) -> (p, T.substitute_argument st.frame.code.substitution a)) arguments
         )
-    | Bound _ -> (
+    | Bound -> (
         let self = st.context.monomorphic.normalize (substitute self_type) in
         match
           Interface.Impls.implements st.context.database

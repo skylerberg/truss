@@ -360,9 +360,13 @@ and provide state scope (value : expression) implementations body =
     List.map
       (fun (implementation : expression) ->
         used := union !used (expression state scope implementation);
-        let type_ = Option.value ~default:T.Error state.tables.types.(implementation.id) in
+        let type_ =
+          match state.tables.types.(implementation.id) with
+          | Some type_ -> type_
+          | None -> bug "an implementation has no type"
+        in
         let impls = capability_impls state type_ in
-        if impls = [] && type_ <> T.Error then
+        if impls = [] && not (T.is_error type_) then
           report state Not_an_implementation implementation.span
             (Printf.sprintf "`%s` implements no capability, so it provides nothing." (T.show type_));
         let changes =

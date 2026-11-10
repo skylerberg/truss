@@ -14,6 +14,13 @@ open State
 open Hooks
 open Lookups
 
+(* The arguments of a call that has nothing to check them against are
+   still checked on their own, for their own errors; the call is of the
+   type given. *)
+let arguments_alone state env (arguments : argument list) (type_ : T.ty) =
+  List.iter (fun (argument : argument) -> ignore (expression state env argument.value)) arguments;
+  type_
+
 (* A call through a function value: by position, with no labels. *)
 let rec function_value_call state env (value : expression) (callee : expression) arguments =
   let callee_type = normalize state (expression state env callee) in
@@ -63,18 +70,12 @@ let rec function_value_call state env (value : expression) (callee : expression)
             result;
           };
       result
-  | T.Error | T.Hole ->
-      List.iter
-        (fun (argument : argument) -> ignore (expression state env argument.value))
-        arguments;
-      callee_type
+  | T.Error _ | T.Hole -> arguments_alone state env arguments callee_type
   | _ ->
-      report state Not_callable callee.span
-        (Printf.sprintf "`%s` is not a function, so it cannot be called." (show state callee_type));
-      List.iter
-        (fun (argument : argument) -> ignore (expression state env argument.value))
-        arguments;
-      T.Error
+      arguments_alone state env arguments
+        (error state Not_callable callee.span
+           (Printf.sprintf "`%s` is not a function, so it cannot be called."
+              (show state callee_type)))
 
 (* One argument: checked against its parameter's type, with its mark, and
    with the one implicit conversion, from an owned collection to its view. *)
@@ -353,7 +354,7 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
         | Some fields -> Some fields
         | None ->
             (match Members.shape state.database type_path with
-            | Some Error_shape -> ()
+            | Some (Error_shape _) -> ()
             | _ ->
                 report state Not_a_record value.span
                   (Printf.sprintf "`%s` is not a record, so it cannot be built this way."

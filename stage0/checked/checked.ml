@@ -2,7 +2,7 @@ type local = Syntax.id
 
 type evidence =
   | Impl of { impl : Path.t; arguments : Types.substitution }
-  | Bound of Types.parameter
+  | Bound
   | Dynamic
   | Built_in
 
@@ -114,6 +114,19 @@ let create size =
     provides = Array.make size None;
     obligations = [];
   }
+
+let undecided what (span : Syntax.span) =
+  invalid_arg (Printf.sprintf "Checked: the %s at %d..%d has no type" what span.start span.stop)
+
+let type_of checked (value : Syntax.expression) =
+  match checked.types.(value.id) with
+  | Some type_ -> type_
+  | None -> undecided "expression" value.span
+
+let pattern_type checked (written : Syntax.pattern) =
+  match checked.pattern_types.(written.id) with
+  | Some type_ -> type_
+  | None -> undecided "pattern" written.span
 
 let show_meaning = function
   | Local_value local -> Printf.sprintf "local %d" local

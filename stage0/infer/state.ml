@@ -60,12 +60,27 @@ type state = {
   binding_spans : (id, span) Hashtbl.t;
       (** Where each name of the definition is, for lambdas' captures. *)
   mutable lambdas : span list;  (** The lambdas being checked, innermost first. *)
+  mutable unsolved : Diagnostic.reported option;
+      (** The report of the first statement whose types could not be worked out. *)
 }
 
-let report state ?(fixes = []) code (span : span) message =
-  state.diagnostics <-
+let reported state ?(fixes = []) code (span : span) message =
+  let diagnostic =
     Diagnostic.make ~fixes ~code:(Types code) (Source.span span.start span.stop) message
-    :: state.diagnostics
+  in
+  state.diagnostics <- diagnostic :: state.diagnostics;
+  Diagnostic.reported diagnostic
+
+let report state ?fixes code span message = ignore (reported state ?fixes code span message)
+
+(* What resolution, the interfaces, and checking agree on cannot fail; if it
+   does, that is a bug in the compiler, and stopping is better than
+   accepting the code. *)
+let bug format = Printf.ksprintf (fun message -> invalid_arg ("Infer: " ^ message)) format
+
+(* The type of what did not check: its report is what lets everything be
+   accepted of it. *)
+let error state ?fixes code span message = T.Error (reported state ?fixes code span message)
 
 let source state (span : span) =
   if span.stop <= String.length state.text then
@@ -112,11 +127,30 @@ let copyable state type_ =
 
 let plain state type_ = Properties.plain state.database ~bounds:(bounds state) (zonk state type_)
 
+(* The associated type the [impl] of a trait for a type gives. An [impl]
+   that leaves one out has that reported as its own error, which is the
+   report here too. *)
+let associated state type_ (trait : T.trait_reference) name ~(at : span) =
+  match Impls.associated_type state.database ~bounds:(bounds state) type_ trait name with
+  | Some found -> found
+  | None -> (
+      let of_impl =
+        match implements state type_ trait with
+        | Some (Impls.From_impl { impl; _ }) -> Interface.Check.reported state.database impl
+        | _ -> None
+      in
+      match of_impl with
+      | Some report -> T.Error report
+      | None ->
+          error state Unknown_associated_type at
+            (Printf.sprintf "`%s` gives no `%s` as a `%s`." (T.show type_) name (T.show_trait trait))
+      )
+
 let evidence_of = function
   | Impls.From_impl { impl; substitution } -> C.Impl { impl; arguments = substitution }
-  | Impls.From_bound parameter -> C.Bound parameter
+  | Impls.From_bound -> C.Bound
   | Impls.From_any -> C.Dynamic
-  | Impls.Built_in | Impls.Accepted -> C.Built_in
+  | Impls.Built_in | Impls.Accepted _ -> C.Built_in
 
 (* Standard paths *)
 
@@ -166,7 +200,29 @@ let settle state frame =
   let all_types () =
     types_of frame.nodes state.tables.types @ types_of frame.bindings state.tables.local_types
   in
-  let unknowns () = List.concat_map (Unify.unknowns state.unifier) (all_types ()) in
+  (* A call's type arguments count too: one that no parameter or result
+     mentions is in no expression's type. *)
+  let call_arguments () =
+    List.concat_map
+      (fun id ->
+        match state.tables.calls.(id) with
+        | Some
+            {
+              callee =
+                ( Function { type_arguments; _ }
+                | Trait_method { type_arguments; _ }
+                | Constructor { type_arguments; _ }
+                | Intrinsic { type_arguments; _ } );
+              _;
+            } ->
+            type_arguments
+        | _ -> [])
+      frame.nodes
+  in
+  let unknowns () =
+    List.concat_map (Unify.unknowns state.unifier) (all_types ())
+    @ List.concat_map (Unify.argument_unknowns state.unifier) (call_arguments ())
+  in
   (* The literals the statement made that nothing decided take their
      defaults: [Int64] and [Float64], or [Integer] in a specification. *)
   List.iter
@@ -187,14 +243,17 @@ let settle state frame =
       (unknowns ())
   in
   if unsolved <> [] then begin
-    report state Cannot_infer frame.span
-      "The types in this statement cannot be worked out from it alone. Give the `let` a type, or \
-       the call type arguments, such as `var names: List[String] = []`.";
+    let report =
+      reported state Cannot_infer frame.span
+        "The types in this statement cannot be worked out from it alone. Give the `let` a type, or \
+         the call type arguments, such as `var names: List[String] = []`."
+    in
+    if Option.is_none state.unsolved then state.unsolved <- Some report;
     (* Every unsolved variable becomes an error, so it is reported once. *)
     List.iter
       (function
         | Unify.Unknown_type index | Unknown_literal (_, index) ->
-            Hashtbl.replace state.unifier.types index T.Error
+            Hashtbl.replace state.unifier.types index (T.Error report)
         | Unknown_value _ -> ())
       unsolved;
     (* What waits on them never runs, and needs not: the error is reported. *)
@@ -251,17 +310,19 @@ let target state (name : name) = state.resolved.names.(name.id)
 
 let show state type_ = T.show (zonk state type_)
 
-let mismatch state (span : span) ~expected ~found =
+let mismatched state (span : span) ~expected ~found =
   let expected = zonk state expected and found = zonk state found in
   match (resolve state found, expected) with
   | T.Literal (Integer_literal, _), _ when T.is_float_type expected ->
-      report state Integer_for_float span
+      reported state Integer_for_float span
         ~fixes:[ fix "Write it as a float." [ insert span.stop ".0" ] ]
         (Printf.sprintf "An integer literal is never a float, and `%s` is expected here."
            (T.show expected))
   | _ ->
-      report state Mismatch span
+      reported state Mismatch span
         (Printf.sprintf "Expected `%s`, found `%s`." (T.show expected) (T.show found))
+
+let mismatch state span ~expected ~found = ignore (mismatched state span ~expected ~found)
 
 (* Places *)
 
@@ -310,6 +371,23 @@ let rec called (value : expression) =
   | Call _ -> Some value
   | Mode (_, inner) | Parenthesized inner -> called inner
   | _ -> None
+
+(* The report of a name resolution found nothing by, under parentheses and
+   brackets. *)
+let rec unknown_name state (value : expression) =
+  match value.kind with
+  | Name path -> (
+      match target state path.last with Some (Unknown report) -> Some report | _ -> None)
+  | Parenthesized inner | Bracket (inner, _) -> unknown_name state inner
+  | _ -> None
+
+(* The error of an expression that is not what its place needs: the name's
+   own report when resolution found nothing by it, so that is the one
+   report, and a new one otherwise. *)
+let error_at state ?fixes code (value : expression) message =
+  match unknown_name state value with
+  | Some report -> T.Error report
+  | None -> error state ?fixes code value.span message
 
 (* Static references: an expression that names a type or a trait rather
    than a value, before a [.] or a [(]. *)
@@ -387,27 +465,32 @@ let rec static_ state (value : expression) : static_ option =
 
 (* A type written as an expression, as in [List[String].with_capacity]. *)
 and type_argument_of_expression state (value : expression) : T.argument =
+  let type_ () =
+    match static_ state value with
+    | Some (Static_type type_) -> T.Type type_
+    | Some (Static_trait _ | Static_capability _) | None ->
+        T.Type (error_at state Not_a_type value "A type argument is a type, or a `USize` value.")
+  in
   match value.kind with
   | Integer value -> T.Value (Known value)
   | Name path -> (
       match target state path.last with
-      | Some (Generic id) when path.last.text.[0] >= 'a' && path.last.text.[0] <= 'z' -> (
-          match Hashtbl.find_opt state.context.parameters id with
-          | Some parameter -> T.Value (Value_parameter parameter)
-          | None -> T.Type T.Error)
+      | Some (Generic id) when path.last.text.[0] >= 'a' && path.last.text.[0] <= 'z' ->
+          T.Value (Value_parameter (Lower.declared state.context id path.last))
       | Some (Definition path_) when Interface.Summary.kind_of state.database path_ = Some Constant
         -> (
           match Query.demand state.database Interface.Constants.value_of path_ with
           | Some value -> T.Value (Known value)
-          | None -> T.Type T.Error)
-      | _ -> (
-          match static_ state value with
-          | Some (Static_type type_) -> T.Type type_
-          | _ -> T.Type T.Error))
-  | _ -> (
-      match static_ state value with
-      | Some (Static_type type_) -> T.Type type_
-      | _ -> T.Type T.Error)
+          | None ->
+              T.Type
+                (error state Arity value.span
+                   (Printf.sprintf
+                      "The value of `%s` cannot be worked out: a constant used in a type cannot \
+                       refer to itself, and is made of literals, arithmetic, and other such \
+                       constants."
+                      path.last.text)))
+      | _ -> type_ ())
+  | _ -> type_ ()
 
 (* Instantiating signatures *)
 
@@ -492,10 +575,12 @@ let output_type = function T.Returns type_ | Yields (_, type_) | Lends (_, type_
 let intrinsic_signature path =
   Option.map Intrinsic_signatures.signature (Intrinsic.operation_of_path path)
 
+(* A function's signature, or the report of why it has none, when its
+   header did not parse. *)
 let function_signature state (path : Path.t) =
   match intrinsic_signature path with
-  | Some signature -> Some signature
-  | None -> Query.demand state.database Environment.signature path
+  | Some signature -> Some (Ok signature)
+  | None -> Environment.signature_or_report state.database path
 
 (* Arguments and modes *)
 

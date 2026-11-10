@@ -18,7 +18,7 @@ type target = Walk.target =
   | Yielded
   | Finished
   | Cost_function of cost_function
-  | Unknown
+  | Unknown of Diagnostic.reported
 
 type bracket = Walk.bracket = Index | Type_arguments | Method_bracket
 

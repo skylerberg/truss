@@ -392,7 +392,7 @@ let rec missing context (types : T.ty list) (rows : row list) : space list optio
          keeps recursive types from being expanded without end. *)
       let present = List.concat_map head_constructors column in
       match (type_, signature context type_ column) with
-      | (T.Error | T.Hole | T.Never), _ -> None
+      | (T.Error _ | T.Hole | T.Never), _ -> None
       | _, Some all
         when all <> []
              && List.for_all
@@ -510,15 +510,14 @@ let show_row context types row = String.concat ", " (List.map2 (show context) ty
 
 (* Checking *)
 
-let type_of context (value : expression) =
-  Option.value ~default:T.Error context.checked.types.(value.id)
+let type_of context (value : expression) = Checked.type_of context.checked value
 
 (* Whether a type, or a type it is built from, failed to check or parse:
    matching on it is accepted silently, since its error is reported where it
    is written. *)
 let has_error context type_ =
   let rec go seen = function
-    | T.Error | T.Hole -> true
+    | T.Error _ | T.Hole -> true
     | T.Named { path; arguments } -> (
         List.exists (function T.Type type_ -> go seen type_ | _ -> false) arguments
         || (not (List.exists (Path.equal path) seen))
@@ -528,7 +527,7 @@ let has_error context type_ =
              List.exists (fun (field : T.field) -> go seen field.field_type) fields
            in
            match Members.shape context.database path with
-           | Some Error_shape -> true
+           | Some (Error_shape _) -> true
            | Some (Record _) ->
                fields_fail
                  (Option.value ~default:[] (Members.fields context.database path arguments))
@@ -668,7 +667,7 @@ let check_match context ~text (value : expression) scrutinees (arms : arm list) 
 (* A pattern in a [let], a [for], or a lambda's parameters must cover its
    type alone. *)
 let check_irrefutable context (written : pattern) =
-  let type_ = Option.value ~default:T.Error context.checked.pattern_types.(written.id) in
+  let type_ = Checked.pattern_type context.checked written in
   if not (has_error context type_) then
     match missing context [ type_ ] [ [ space context type_ written ] ] with
     | Some witness ->

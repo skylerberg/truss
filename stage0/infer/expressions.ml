@@ -79,11 +79,14 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | Self_value -> (
       (* A lambda that reads [self] captures it, named by the definition's id. *)
       state.references <- state.definition.id :: state.references;
-      match env.self with Some self -> self | None -> T.Error)
+      match env.self with
+      | Some self -> self
+      | None ->
+          error state Not_a_value value.span
+            "`self` is a method's receiver, and this is not a method that takes one.")
   | Self_type_value ->
-      report state Not_a_value value.span
-        "`Self` is a type. Build a value of it, or call one of its methods.";
-      T.Error
+      error state Not_a_value value.span
+        "`Self` is a type. Build a value of it, or call one of its methods."
   | Name path -> name state env value path
   | Member (base, member) -> member_value state env value base member
   | Bracket (base, items) -> bracket state env ?expected value base items
@@ -153,19 +156,20 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       List.iter (fun implementation -> ignore (expression state env implementation)) implementations;
       block_value state env ?expected body
   | Block body -> block_value state env ?expected body
-  | Expression_error -> T.Error
+  | Expression_error -> T.Error (Resolve.Parts.error_node value.span)
 
 (* [receiver.name] read as a value: a field, or a static member of a type. *)
 and member_value state env (value : expression) (base : expression) (member : name) =
   match static_ state base with
   | Some (Static_type type_) -> static_member state value type_ member
   | Some (Static_trait _ | Static_capability _) ->
-      report state Not_a_value value.span
-        (Printf.sprintf "`%s` is a method; call it with `(...)`." member.text);
-      T.Error
+      error state Not_a_value value.span
+        (Printf.sprintf "`%s` is a method; call it with `(...)`." member.text)
   | None -> (
       let base_type = normalize state (expression state env base) in
-      match base_type with T.Error | T.Hole -> base_type | _ -> field state value base_type member)
+      match base_type with
+      | T.Error _ | T.Hole -> base_type
+      | _ -> field state value base_type member)
 
 and bracket state env ?expected (value : expression) (base : expression) items =
   match state.resolved.brackets.(value.id) with
@@ -176,18 +180,19 @@ and bracket state env ?expected (value : expression) (base : expression) items =
           match target state path.last with
           | Some (Definition definition_path) -> (
               match function_signature state definition_path with
-              | Some signature ->
-                  let instance = instantiate state signature in
+              | Some (Ok signature) ->
+                  let instance = instantiate state ~span:value.span signature in
                   explicit_type_arguments state value instance items;
                   state.tables.meanings.(value.id) <-
                     Some
                       (Global { path = definition_path; type_arguments = instance.type_arguments });
                   T.Function (T.function_type_of instance.signature)
-              | None ->
-                  report state Not_a_value value.span "A type is not a value.";
-                  T.Error)
-          | _ -> T.Error)
-      | _ -> T.Error)
+              | Some (Error report) -> T.Error report
+              | None -> error state Not_a_value value.span "A type is not a value.")
+          | _ -> error_at state Not_a_value value "A type is not a value.")
+      | _ ->
+          error_at state Not_a_value value
+            "Type arguments are written after the name of a generic function or a type.")
   | Some Method_bracket -> (
       (* Resolution cannot tell a field from a method before the dot; a
          field followed by brackets is indexed. *)
@@ -196,9 +201,8 @@ and bracket state env ?expected (value : expression) (base : expression) items =
         when Option.is_none (static_ state inner) && is_field state env inner member ->
           index state env ?expected value base items
       | _ ->
-          report state Not_a_value value.span
-            "A method with type arguments is called: write `(...)` after it.";
-          T.Error)
+          error state Not_a_value value.span
+            "A method with type arguments is called: write `(...)` after it.")
   | Some Index | None -> index state env ?expected value base items
 
 and is_field state env (inner : expression) (member : name) =
@@ -228,34 +232,27 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
              || Intrinsic.builtin_of_path path = Some Array ->
           T.Named { path = slice_path; arguments = [ T.Type element ] }
       | T.Named { path; _ } when Path.equal path string_path || Path.equal path string_slice_path ->
-          report state Not_indexable value.span
-            "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`.";
-          T.Error
-      | T.Error | T.Hole -> base_type
+          error state Not_indexable value.span
+            "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
+      | T.Error _ | T.Hole -> base_type
       | _ ->
-          report state Not_indexable value.span
-            (Printf.sprintf "`%s` cannot be sliced." (show state base_type));
-          T.Error)
+          error state Not_indexable value.span
+            (Printf.sprintf "`%s` cannot be sliced." (show state base_type)))
   | [ Item key ] -> (
       if is_named string_path base_type || is_named string_slice_path base_type then begin
-        report state Not_indexable value.span
-          "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`.";
-        T.Error
+        error state Not_indexable value.span
+          "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
       end
       else
         match base_type with
-        | T.Error | T.Hole ->
+        | T.Error _ | T.Hole ->
             ignore (expression state env key);
             base_type
         | _ -> (
             let index_trait = trait_reference (core "Index") in
             match implements state base_type index_trait with
             | Some evidence ->
-                let associated name =
-                  Option.value ~default:T.Error
-                    (Impls.associated_type state.database ~bounds:(bounds state) base_type
-                       index_trait name)
-                in
+                let associated name = associated state base_type index_trait name ~at:value.span in
                 let key_type = associated "Key" and output = associated "Output" in
                 let key_conversion : C.conversion option =
                   if env.specification then
@@ -311,12 +308,9 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                 output
             | None ->
                 ignore (expression state env key);
-                report state Not_indexable value.span
-                  (Printf.sprintf "`%s` cannot be indexed." (show state base_type));
-                T.Error))
-  | _ ->
-      report state Not_indexable value.span "An index is one value.";
-      T.Error
+                error state Not_indexable value.span
+                  (Printf.sprintf "`%s` cannot be indexed." (show state base_type))))
+  | _ -> error state Not_indexable value.span "An index is one value."
 
 let () =
   Hooks.expression_hook := expression;

@@ -14,7 +14,7 @@ type ty =
   | Variable of int
   | Literal of literal_kind * int
   | Hole
-  | Error
+  | Error of Diagnostic.reported
 
 and argument = Type of ty | Value of value | Capabilities of capability list
 and value = Known of Z.t | Value_parameter of parameter | Value_variable of int
@@ -92,7 +92,7 @@ let rec substitute substitution type_ =
     | Any trait -> Any (substitute_trait substitution trait)
     | Cursor { method_; arguments } ->
         Cursor { method_; arguments = List.map (substitute_argument substitution) arguments }
-    | Never | Integer | Variable _ | Literal _ | Hole | Error -> type_
+    | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_
 
 and substitute_argument substitution = function
   | Type type_ -> Type (substitute substitution type_)
@@ -166,9 +166,10 @@ let rec map f type_ =
             }
       | Any reference -> Any (trait reference)
       | Cursor { method_; arguments } -> Cursor { method_; arguments = List.map argument arguments }
-      | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error -> type_)
+      | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_)
 
 let equal left right = left = right
+let is_error = function Error _ -> true | _ -> false
 
 let rec contains_unsolved = function
   | Variable _ | Literal _ | Hole -> true
@@ -180,7 +181,7 @@ let rec contains_unsolved = function
       match output with
       | Returns type_ | Yields (_, type_) | Lends (_, type_) -> contains_unsolved type_)
   | Any trait -> trait_unsolved trait
-  | Parameter _ | Never | Integer | Error -> false
+  | Parameter _ | Never | Integer | Error _ -> false
 
 and argument_unsolved = function
   | Type type_ -> contains_unsolved type_
@@ -214,7 +215,7 @@ let rec show = function
   | Literal (Integer_literal, _) -> "an integer"
   | Literal (Float_literal, _) -> "a float"
   | Hole -> "an undecided type"
-  | Error -> "_"
+  | Error _ -> "_"
 
 and show_argument = function
   | Type type_ -> show type_
@@ -322,7 +323,7 @@ type shape =
   | Sum of variant list
   | Todo_type
   | Builtin_type of Intrinsic.builtin
-  | Error_shape
+  | Error_shape of Diagnostic.reported
 
 type type_interface = {
   type_generics : generic list;
@@ -346,7 +347,7 @@ type trait_interface = {
   associated_types : associated_type list;
   methods : trait_method list;
   is_capability : bool;
-  broken_methods : string list;
+  broken_methods : (string * Diagnostic.reported) list;
 }
 
 type impl_interface = {

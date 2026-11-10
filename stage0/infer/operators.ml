@@ -35,12 +35,11 @@ let rec try_ state env (value : expression) (inner : expression) =
   | T.Named { path; arguments = [ T.Type some ] }, Some (T.Named { path = output_path; _ })
     when Path.equal path option_path && Path.equal output_path option_path ->
       some
-  | (T.Error | T.Hole), _ -> inner_type
+  | (T.Error _ | T.Hole), _ -> inner_type
   | _ ->
-      report state Wrong_try value.span
+      error state Wrong_try value.span
         "`?` works on a `Result` in a function that returns a `Result`, and on an `Option` in a \
-         function that returns an `Option`. Convert between them with `ok_or` or `ok`.";
-      T.Error
+         function that returns an `Option`. Convert between them with `ok_or` or `ok`."
 
 (* [base with (field: value)]: a record with some fields changed. *)
 and with_ state env (value : expression) (base : expression) updates =
@@ -195,10 +194,7 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
       else begin
         (match implements state left reference with
         | Some evidence ->
-            let output =
-              Option.value ~default:T.Error
-                (Impls.associated_type state.database ~bounds:(bounds state) left reference "Output")
-            in
+            let output = associated state left reference "Output" ~at:value.span in
             (* What the statement decided the result is must be what the
                [impl] gives. *)
             let decided = zonk state result in
@@ -227,11 +223,14 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
                   result = output;
                 }
         | None ->
-            ignore (unify state result T.Error);
-            if left <> T.Error then
-              report state No_impl value.span
-                (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply."
-                   (T.show left) (T.show_trait reference)));
+            let unknown =
+              if T.is_error left then left
+              else
+                error state No_impl value.span
+                  (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply."
+                     (T.show left) (T.show_trait reference))
+            in
+            ignore (unify state result unknown));
         true
       end);
   result
@@ -323,7 +322,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
           match normalize state left_type with
           | T.Literal _ | T.Variable _ -> false
           | resolved ->
-              if not (T.is_integer_type resolved || resolved = T.Error) then
+              if not (T.is_integer_type resolved || T.is_error resolved) then
                 report state No_impl value.span
                   (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
                      (T.show resolved));
@@ -340,14 +339,14 @@ and binary state env ?expected (value : expression) operator (left : expression)
           match (normalize state left_type, normalize state right_type) with
           | (T.Literal _ | T.Variable _), _ | _, (T.Literal _ | T.Variable _) -> false
           | left_resolved, right_resolved ->
-              if not (T.is_integer_type left_resolved || left_resolved = T.Error) then
+              if not (T.is_integer_type left_resolved || T.is_error left_resolved) then
                 report state No_impl left.span
                   (Printf.sprintf "Shifts work on built-in integers, not `%s`."
                      (T.show left_resolved));
               if
                 not
                   ((T.is_integer_type right_resolved && not (T.is_signed right_resolved))
-                  || right_resolved = T.Error)
+                  || T.is_error right_resolved)
               then
                 report state Mismatch right.span
                   (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
@@ -369,7 +368,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
       if env.specification && integers left_type && integers right_type then T.bool
       else begin
         if not (unify state left_type right_type) then
-          mismatched_operands state value left right ~left_type ~right_type;
+          ignore (mismatched_operands state value left right ~left_type ~right_type);
         let trait, method_ =
           match operator with
           | Equal | Not_equal -> (core "Equal", "equal")
@@ -477,10 +476,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
             (T.is_integer_type (normalize state left_type)
             && T.is_integer_type (normalize state right_type))
             && not (T.equal (normalize state left_type) (normalize state right_type))
-          then begin
-            mismatched_operands state value left right ~left_type ~right_type;
-            T.Error
-          end
+          then T.Error (mismatched_operands state value left right ~left_type ~right_type)
           else begin
             let result =
               operator_call
@@ -529,12 +525,12 @@ and mismatched_operands state (value : expression) (left : expression) (right : 
         ]
       else []
     in
-    report state Mismatched_integers value.span ~fixes
+    reported state Mismatched_integers value.span ~fixes
       (Printf.sprintf
          "Integer types never convert implicitly: this compares or combines `%s` with `%s`."
          (T.show left_type) (T.show right_type))
   end
-  else mismatch state right.span ~expected:left_type ~found:right_type
+  else mismatched state right.span ~expected:left_type ~found:right_type
 
 (* [any value] *)
 and any_ state env ?expected (value : expression) (inner : expression) =
@@ -554,6 +550,5 @@ and any_ state env ?expected (value : expression) (inner : expression) =
       any_type
   | _ ->
       ignore (expression state env inner);
-      report state Cannot_infer value.span
-        "`any value` needs an expected type `any Trait`, from an annotation or a parameter.";
-      T.Error
+      error state Cannot_infer value.span
+        "`any value` needs an expected type `any Trait`, from an annotation or a parameter."

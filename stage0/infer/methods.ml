@@ -21,7 +21,11 @@ let rec call state env ?expected (value : expression) (callee : expression)
   | Name { modules = []; last } when target state last = Some Old -> (
       match arguments with
       | [ argument ] -> expression state env ?expected argument.value
-      | _ -> T.Error)
+      | _ ->
+          arguments_alone state env arguments
+            (error state
+               (if arguments = [] then Missing_argument else Too_many_arguments)
+               value.span "`old` takes one value: `old(value)`."))
   | Name { modules = []; last } when target state last = Some Identical -> (
       (* Identity, for values of any one type: the solver's equality. *)
       match arguments with
@@ -62,9 +66,10 @@ let rec call state env ?expected (value : expression) (callee : expression)
           | Some Type -> construct state env ?expected value definition_path None arguments
           | _ -> (
               match function_signature state definition_path with
-              | Some signature ->
+              | Some (Ok signature) ->
                   named_call state env ?expected value definition_path signature ~type_arguments:[]
                     arguments
+              | Some (Error report) -> arguments_alone state env arguments (T.Error report)
               | None -> function_value_call state env value callee arguments))
       | Some (Variant (type_path, variant)) ->
           construct state env ?expected value type_path (Some variant) arguments
@@ -78,14 +83,27 @@ let rec call state env ?expected (value : expression) (callee : expression)
               match static_ state callee with
               | Some (Static_type (Named { arguments = type_arguments; _ })) ->
                   construct state env ?expected ~type_arguments value definition_path None arguments
-              | _ -> T.Error)
+              | _ ->
+                  arguments_alone state env arguments
+                    (error state Not_callable callee.span
+                       (Printf.sprintf "`%s` takes no type arguments, and builds no value."
+                          path.last.text)))
           | _ -> (
               match function_signature state definition_path with
-              | Some signature ->
+              | Some (Ok signature) ->
                   named_call state env ?expected value definition_path signature
                     ~type_arguments:items arguments
-              | None -> T.Error))
-      | _ -> T.Error)
+              | Some (Error report) -> arguments_alone state env arguments (T.Error report)
+              | None ->
+                  arguments_alone state env arguments
+                    (error state Not_callable callee.span
+                       (Printf.sprintf "`%s` is not a function or a type, so it cannot be called."
+                          path.last.text))))
+      | _ ->
+          arguments_alone state env arguments
+            (error_at state Not_callable callee
+               (Printf.sprintf "`%s` is not a function or a type, so it cannot be called."
+                  path.last.text)))
   | _ -> function_value_call state env value callee arguments
 
 (* [Type.name(...)]: a variant, a method without [self], or a method
@@ -103,32 +121,29 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           | [ (trait, method_) ] ->
               trait_method_through_type state env ?expected value type_ trait method_ arguments
           | _ :: _ :: _ as several ->
-              report state Ambiguous_method member.span
-                (Printf.sprintf
-                   "More than one trait gives `%s` a method `%s`: %s. Call it through the trait to \
-                    say which."
-                   (show state type_) member.text
-                   (String.concat ", "
-                      (List.map
-                         (fun ((trait : T.trait_reference), _) -> "`" ^ T.show_trait trait ^ "`")
-                         several)));
-              List.iter
-                (fun (argument : argument) -> ignore (expression state env argument.value))
-                arguments;
-              T.Error
+              arguments_alone state env arguments
+                (error state Ambiguous_method member.span
+                   (Printf.sprintf
+                      "More than one trait gives `%s` a method `%s`: %s. Call it through the trait \
+                       to say which."
+                      (show state type_) member.text
+                      (String.concat ", "
+                         (List.map
+                            (fun ((trait : T.trait_reference), _) -> "`" ^ T.show_trait trait ^ "`")
+                            several))))
           | [] ->
-              report state Unknown_member member.span
-                (Printf.sprintf "`%s` has no method `%s`." (show state type_) member.text);
-              List.iter
-                (fun (argument : argument) -> ignore (expression state env argument.value))
-                arguments;
-              T.Error)
+              arguments_alone state env arguments
+                (match Members.broken state.database path with
+                | Some report -> T.Error report
+                | None ->
+                    error state Unknown_member member.span
+                      (Printf.sprintf "`%s` has no method `%s`." (show state type_) member.text)))
       | versions -> (
           let static_version = List.assoc_opt Path.Static versions in
           match static_version with
           | Some method_path -> (
               match function_signature state method_path with
-              | Some signature ->
+              | Some (Ok signature) ->
                   let instance = instantiate state ~span:value.span signature in
                   (* The type's arguments, as written or inferred, are the
                      head's generic arguments. *)
@@ -157,7 +172,8 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                   finish_call state value
                     (C.Function { path = method_path; type_arguments = instance.type_arguments })
                     instance checked left_out
-              | None -> T.Error)
+              | Some (Error report) -> arguments_alone state env arguments (T.Error report)
+              | None -> bug "the method `%s` has no signature" (Path.show method_path))
           | None -> (
               (* A method with [self], written in full: the first argument is the receiver. *)
               match arguments with
@@ -185,16 +201,14 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                       method_with_receiver state env ?expected value ~receiver:receiver.value
                         ~receiver_type method_path rest
                   | None ->
-                      report state Wrong_receiver member.span
+                      error state Wrong_receiver member.span
                         (Printf.sprintf
                            "`%s` has no version for this receiver's mark; mark the receiver `mut` \
                             or `own` as its versions take."
-                           member.text);
-                      T.Error)
+                           member.text))
               | [] ->
-                  report state Missing_argument value.span
-                    "A method written in full takes its receiver as its first argument.";
-                  T.Error)))
+                  error state Missing_argument value.span
+                    "A method written in full takes its receiver as its first argument.")))
   | T.Parameter parameter -> (
       match
         List.find_map
@@ -208,10 +222,13 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
       | Some (trait, method_) ->
           trait_method_through_type state env ?expected value type_ trait method_ arguments
       | None ->
-          report state Unknown_member member.span
-            (Printf.sprintf "`%s` has no method `%s`." parameter.name member.text);
-          T.Error)
-  | _ -> T.Error
+          error state Unknown_member member.span
+            (Printf.sprintf "`%s` has no method `%s`." parameter.name member.text))
+  | T.Error _ | T.Hole -> arguments_alone state env arguments type_
+  | _ ->
+      arguments_alone state env arguments
+        (error state Unknown_member member.span
+           (Printf.sprintf "`%s` has no method `%s`." (show state type_) member.text))
 
 (* A trait method called through a type, with [Self] that type: a
    constructor such as [Int64.from(count)] or [Self.empty()]. The trait's
@@ -295,9 +312,8 @@ and trait_call_in_full state env (value : expression) trait (member : name) argu
           trait_method_through_type state env value (fresh state) (trait_reference trait) method_
             arguments)
   | [] ->
-      report state Unknown_member member.span
-        (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text);
-      T.Error
+      error state Unknown_member member.span
+        (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text)
 
 (* [Clock.now()]: a call to a capability's method. *)
 and capability_call state env (value : expression) capability (member : name) arguments =
@@ -321,12 +337,9 @@ and capability_call state env (value : expression) capability (member : name) ar
           };
       result
   | [] ->
-      report state Unknown_member member.span
-        (Printf.sprintf "`%s` has no method `%s`." (Path.show capability) member.text);
-      List.iter
-        (fun (argument : argument) -> ignore (expression state env argument.value))
-        arguments;
-      T.Error
+      arguments_alone state env arguments
+        (error state Unknown_member member.span
+           (Printf.sprintf "`%s` has no method `%s`." (Path.show capability) member.text))
 
 (* [receiver.name(...)]: the type's own method, or a trait's. *)
 and method_call state env ?expected (value : expression) (base : expression) (member : name)
@@ -377,19 +390,19 @@ and method_call state env ?expected (value : expression) (base : expression) (me
       | Own -> "`own self`"
       | Static -> "no `self`"
     in
-    report state Wrong_receiver member.span
+    error state Wrong_receiver member.span
       (Printf.sprintf "`%s` has no version that takes %s here; it has %s." member.text
          (shown wanted)
          (String.concat ", " (List.map (fun (receiver, _) -> shown receiver) versions)))
   in
   (* A place that calls a method with only a [mut] or [own] version is
      missing its mark, which the fix adds. *)
-  let missing_receiver_mark : 'a. (Path.receiver * 'a) list -> unit =
+  let missing_receiver_mark : 'a. (Path.receiver * 'a) list -> T.ty =
    fun versions ->
     let has receiver = List.exists (fun (found, _) -> found = receiver) versions in
     if (not marked) && place && (has Path.Mut || has Path.Own) then begin
       let mark = if has Path.Mut then "mut" else "own" in
-      report state Missing_mark base.span
+      error state Missing_mark base.span
         ~fixes:[ fix (Printf.sprintf "Mark it `%s`." mark) [ insert base.span.start (mark ^ " ") ] ]
         (Printf.sprintf "`%s` takes `%s self`, so the call marks its receiver `%s`." member.text
            mark mark)
@@ -397,7 +410,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
     else wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) versions)
   in
   match receiver_type with
-  | T.Error | T.Hole ->
+  | T.Error _ | T.Hole ->
       List.iter
         (fun (argument : argument) -> ignore (expression state env argument.value))
         arguments;
@@ -417,9 +430,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
           | Some (_, method_path) ->
               method_with_receiver state env ?expected ~type_arguments value ~receiver:base
                 ~receiver_type method_path arguments
-          | None ->
-              missing_receiver_mark own;
-              T.Error)
+          | None -> missing_receiver_mark own)
       | [] -> (
           match trait_candidates state receiver_type member.text with
           | [ (trait, versions) ] -> (
@@ -436,8 +447,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                   missing_receiver_mark
                     (List.map
                        (fun (method_ : T.trait_method) -> (method_.method_receiver, ()))
-                       versions);
-                  T.Error)
+                       versions))
           | [] ->
               let candidates =
                 match receiver_type with
@@ -447,21 +457,27 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                     | None -> [])
                 | _ -> []
               in
-              report state Unknown_member member.span
-                ~fixes:
-                  (match Resolve.closest member.text candidates with
-                  | Some candidate ->
-                      [
-                        fix
-                          (Printf.sprintf "Write `%s`." candidate)
-                          [ replace member.span candidate ];
-                      ]
-                  | None -> [])
-                (Printf.sprintf "`%s` has no method `%s`." (show state receiver_type) member.text);
-              List.iter
-                (fun (argument : argument) -> ignore (expression state env argument.value))
-                arguments;
-              T.Error
+              let broken =
+                match receiver_type with
+                | T.Named { path; _ } -> Members.broken state.database path
+                | _ -> None
+              in
+              arguments_alone state env arguments
+                (match broken with
+                | Some report -> T.Error report
+                | None ->
+                    error state Unknown_member member.span
+                      ~fixes:
+                        (match Resolve.closest member.text candidates with
+                        | Some candidate ->
+                            [
+                              fix
+                                (Printf.sprintf "Write `%s`." candidate)
+                                [ replace member.span candidate ];
+                            ]
+                        | None -> [])
+                      (Printf.sprintf "`%s` has no method `%s`." (show state receiver_type)
+                         member.text))
           | several ->
               (* The call written in full: the receiver first, then the
                  arguments as written. *)
@@ -477,7 +493,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                     source state (Span.make start argument.value.span.stop))
                   arguments
               in
-              report state Ambiguous_method member.span
+              error state Ambiguous_method member.span
                 ~fixes:
                   (List.map
                      (fun ((trait : T.trait_reference), _) ->
@@ -495,14 +511,14 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                 (Printf.sprintf
                    "More than one trait gives `%s` a method `%s`. Write the call in full to say \
                     which."
-                   (show state receiver_type) member.text);
-              T.Error))
+                   (show state receiver_type) member.text)))
 
 and method_with_receiver state env ?expected ?(type_arguments = []) (value : expression)
     ~(receiver : expression) ~receiver_type method_path arguments =
   match function_signature state method_path with
-  | None -> T.Error
-  | Some signature ->
+  | None -> bug "the method `%s` has no signature" (Path.show method_path)
+  | Some (Error report) -> arguments_alone state env arguments (T.Error report)
+  | Some (Ok signature) ->
       let instance = instantiate state ~span:value.span signature in
       explicit_type_arguments
         ~head:

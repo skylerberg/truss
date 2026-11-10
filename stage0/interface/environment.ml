@@ -18,7 +18,8 @@ type interface =
   | Test_interface of T.capability list
   | Theorem_interface of T.signature
   | Law_proof_interface
-  | Error_interface  (** A definition whose header did not parse: everything is accepted of it. *)
+  | Error_interface of Diagnostic.reported
+      (** A definition whose header did not parse: everything is accepted of it. *)
 
 type lowered = {
   interface : interface;
@@ -27,10 +28,12 @@ type lowered = {
   bounds : (T.parameter * T.trait_reference list) list;  (** The generic parameters' bounds. *)
 }
 
+(* The type a head names, and the generic parameters it declares, which
+   are in scope after it whether or not the type is known. *)
 let head_type context owner (head : type_head) =
+  let generics = Lower.generics context owner head.generics in
   match Lower.target context head.path.last with
   | Some (Definition type_path) ->
-      let generics = Lower.generics context owner head.generics in
       (match Query.demand context.database Summary.generics_of type_path with
       | Some expected when List.length expected <> List.length generics ->
           Lower.report context Arity head.span
@@ -54,8 +57,9 @@ let head_type context owner (head : type_head) =
         | Some Integer -> T.Integer
         | _ -> T.Named { path = type_path; arguments }
       in
-      (generics, Some type_)
-  | _ -> ([], None)
+      (generics, type_)
+  | Some (Unknown report) -> (generics, T.Error report)
+  | _ -> Lower.bug "the type head `%s` is not resolved" (Names.spell_path head.path)
 
 let trait_self_parameter trait : T.parameter = { owner = trait; name = "Self" }
 
@@ -89,221 +93,239 @@ let lower_definition database (key : Names.key) (definition : definition)
   let context = Lower.create database resolved in
   let broken part = Resolve.Parts.broken definition part in
   let path = key.path in
-  let interface =
-    if broken Header then Error_interface
-    else
-      match definition.kind with
-      | Function { signature; _ } ->
-          let head, self_type =
-            match signature.name with
-            | Plain_name _ -> ([], None)
-            | Member_name (head, _) -> head_type context path head
-          in
-          let context = { context with self_type } in
-          Function_interface (Lower.signature context ~owner:path ~head ~self_type signature)
-      | Type_definition { generics; body; clauses; _ } ->
-          let type_generics = Lower.generics context path generics in
-          let self = T.Named { path; arguments = generic_arguments type_generics } in
-          let context = { context with self_type = Some self } in
-          let shape =
-            match body with
-            | Fields written -> T.Record (fields context written)
-            | Variants variants ->
-                T.Sum
-                  (List.map
-                     (fun (variant : variant) ->
-                       {
-                         T.variant_name = variant.name.text;
-                         fields = Option.map (fields context) variant.fields;
-                         indirect = variant.indirect;
-                       })
-                     variants)
-            | Type_todo -> T.Todo_type
-          in
-          let derives =
-            List.concat_map
-              (fun (clause : type_clause) ->
-                match clause.kind with
-                | Derives traits ->
-                    List.filter_map
-                      (fun (trait : path_type) ->
-                        match Lower.target context trait.path.last with
-                        | Some (Definition trait) -> Some trait
-                        | _ -> None)
-                      traits
-                | Type_invariant _ | Potential _ -> [])
-              clauses
-          in
-          Type_interface
-            { type_generics; shape; opaque = definition.visibility = Public_opaque; derives }
-      | Trait { generics; requires; members; _ } ->
-          let trait_generics = Lower.generics context path generics in
-          let self_parameter = trait_self_parameter path in
-          let self_trait : T.trait_reference =
-            { trait = path; trait_arguments = generic_arguments trait_generics; associated = [] }
-          in
-          Hashtbl.replace context.bounds self_parameter [ self_trait ];
-          let context =
-            {
-              context with
-              self_type = Some (T.Parameter self_parameter);
-              self_trait = Some self_trait;
-            }
-          in
-          let requires = List.filter_map (Lower.trait_reference context) requires in
-          let broken_methods = ref [] in
-          let methods = ref [] and associated = ref [] in
-          List.iteri
-            (fun index (line : trait_member line) ->
-              match line.kind with
-              | Trait_method { signature; body } ->
-                  let name =
-                    match signature.name with Plain_name name | Member_name (_, name) -> name.text
-                  in
-                  if broken (Member_header index) then broken_methods := name :: !broken_methods
-                  else
-                    let receiver = receiver_of signature in
-                    let owner : Path.t = Method { owner = path; name; receiver } in
-                    methods :=
+  (* Each kind of definition gives its interface, and the context its bodies
+     are checked in: what [Self] and its associated types mean there. *)
+  let interface, context =
+    match Resolve.Parts.reported definition Header with
+    | Some report -> (Error_interface report, context)
+    | None -> (
+        match definition.kind with
+        | Function { signature; _ } ->
+            let head, self_type =
+              match signature.name with
+              | Plain_name _ -> ([], None)
+              | Member_name (head, _) ->
+                  let generics, self = head_type context path head in
+                  (generics, Some self)
+            in
+            let context = { context with self_type } in
+            ( Function_interface (Lower.signature context ~owner:path ~head ~self_type signature),
+              context )
+        | Type_definition { generics; body; clauses; _ } ->
+            let type_generics = Lower.generics context path generics in
+            let self = T.Named { path; arguments = generic_arguments type_generics } in
+            let context = { context with self_type = Some self } in
+            let shape =
+              match body with
+              | Fields written -> T.Record (fields context written)
+              | Variants variants ->
+                  T.Sum
+                    (List.map
+                       (fun (variant : variant) ->
+                         {
+                           T.variant_name = variant.name.text;
+                           fields = Option.map (fields context) variant.fields;
+                           indirect = variant.indirect;
+                         })
+                       variants)
+              | Type_todo -> T.Todo_type
+            in
+            let derives =
+              List.concat_map
+                (fun (clause : type_clause) ->
+                  match clause.kind with
+                  | Derives traits ->
+                      List.filter_map
+                        (fun (trait : path_type) ->
+                          match Lower.target context trait.path.last with
+                          | Some (Definition trait) -> Some trait
+                          | _ -> None)
+                        traits
+                  | Type_invariant _ | Potential _ -> [])
+                clauses
+            in
+            ( Type_interface
+                { type_generics; shape; opaque = definition.visibility = Public_opaque; derives },
+              context )
+        | Trait { generics; requires; members; _ } ->
+            let trait_generics = Lower.generics context path generics in
+            let self_parameter = trait_self_parameter path in
+            let self_trait : T.trait_reference =
+              { trait = path; trait_arguments = generic_arguments trait_generics; associated = [] }
+            in
+            Hashtbl.replace context.bounds self_parameter [ self_trait ];
+            let context =
+              {
+                context with
+                self_type = Some (T.Parameter self_parameter);
+                self_trait = Some self_trait;
+              }
+            in
+            let requires = Lower.trait_bounds context requires in
+            let broken_methods = ref [] in
+            let methods = ref [] and associated = ref [] in
+            List.iteri
+              (fun index (line : trait_member line) ->
+                match line.kind with
+                | Trait_method { signature; body } ->
+                    let name =
+                      match signature.name with
+                      | Plain_name name | Member_name (_, name) -> name.text
+                    in
+                    begin match Resolve.Parts.reported definition (Member_header index) with
+                    | Some report -> broken_methods := (name, report) :: !broken_methods
+                    | None ->
+                        let receiver = receiver_of signature in
+                        let owner : Path.t = Method { owner = path; name; receiver } in
+                        methods :=
+                          {
+                            T.method_name = name;
+                            method_receiver = receiver;
+                            method_signature =
+                              Lower.signature context ~owner ~head:[]
+                                ~self_type:(Some (T.Parameter self_parameter)) signature;
+                            provided = Option.is_some body;
+                          }
+                          :: !methods
+                    end
+                | Associated_type (name, bounds) ->
+                    associated :=
                       {
-                        T.method_name = name;
-                        method_receiver = receiver;
-                        method_signature =
-                          Lower.signature context ~owner ~head:[]
-                            ~self_type:(Some (T.Parameter self_parameter)) signature;
-                        provided = Option.is_some body;
+                        T.associated_name = name.text;
+                        associated_bounds = Lower.trait_bounds context bounds;
                       }
-                      :: !methods
-              | Associated_type (name, bounds) ->
-                  associated :=
+                      :: !associated
+                | Law _ | Trait_member_error -> ())
+              members;
+            ( Trait_interface
+                {
+                  trait_generics;
+                  requires;
+                  associated_types = List.rev !associated;
+                  methods = List.rev !methods;
+                  is_capability = false;
+                  broken_methods = List.rev !broken_methods;
+                },
+              context )
+        | Capability { members; _ } ->
+            let broken_methods = ref [] and methods = ref [] in
+            List.iteri
+              (fun index (line : capability_member line) ->
+                match line.kind with
+                | Capability_method signature ->
+                    let name =
+                      match signature.name with
+                      | Plain_name name | Member_name (_, name) -> name.text
+                    in
+                    begin match Resolve.Parts.reported definition (Member_header index) with
+                    | Some report -> broken_methods := (name, report) :: !broken_methods
+                    | None ->
+                        let owner : Path.t = Method { owner = path; name; receiver = Static } in
+                        methods :=
+                          {
+                            T.method_name = name;
+                            method_receiver = Static;
+                            method_signature =
+                              Lower.signature context ~owner ~head:[] ~self_type:None signature;
+                            provided = false;
+                          }
+                          :: !methods
+                    end
+                | Capability_member_error -> ())
+              members;
+            ( Trait_interface
+                {
+                  trait_generics = [];
+                  requires = [];
+                  associated_types = [];
+                  methods = List.rev !methods;
+                  is_capability = true;
+                  broken_methods = List.rev !broken_methods;
+                },
+              context )
+        | Impl { trait_; type_ = head; uses; members } -> (
+            let impl_generics, for_type = head_type context path head in
+            match Lower.trait_reference ~capability:true context trait_ with
+            | Error report -> (Error_interface report, context)
+            | Ok implements ->
+                let associated =
+                  List.sort compare
+                    (List.filter_map
+                       (fun (line : impl_member line) ->
+                         match line.kind with
+                         | Associated_definition (name, written) ->
+                             Some
+                               ( name.text,
+                                 Lower.type_ { context with self_type = Some for_type } written )
+                         | Impl_method _ | Impl_member_error -> None)
+                       members)
+                in
+                let implements = { implements with associated } in
+                let context =
+                  {
+                    context with
+                    self_type = Some for_type;
+                    self_trait = Some implements;
+                    self_associated = associated;
+                  }
+                in
+                let methods =
+                  List.concat
+                    (List.mapi
+                       (fun index (line : impl_member line) ->
+                         match line.kind with
+                         | Impl_method { signature; _ } when not (broken (Member_header index)) ->
+                             let name =
+                               match signature.name with
+                               | Plain_name name | Member_name (_, name) -> name.text
+                             in
+                             let receiver = receiver_of signature in
+                             let owner : Path.t = Method { owner = path; name; receiver } in
+                             [
+                               ( name,
+                                 receiver,
+                                 Lower.signature context ~owner ~head:[] ~self_type:(Some for_type)
+                                   signature );
+                             ]
+                         | _ -> [])
+                       members)
+                in
+                ( Impl_interface
                     {
-                      T.associated_name = name.text;
-                      associated_bounds = List.filter_map (Lower.trait_reference context) bounds;
-                    }
-                    :: !associated
-              | Law _ | Trait_member_error -> ())
-            members;
-          Trait_interface
-            {
-              trait_generics;
-              requires;
-              associated_types = List.rev !associated;
-              methods = List.rev !methods;
-              is_capability = false;
-              broken_methods = List.rev !broken_methods;
-            }
-      | Capability { members; _ } ->
-          let broken_methods = ref [] and methods = ref [] in
-          List.iteri
-            (fun index (line : capability_member line) ->
-              match line.kind with
-              | Capability_method signature ->
-                  let name =
-                    match signature.name with Plain_name name | Member_name (_, name) -> name.text
-                  in
-                  if broken (Member_header index) then broken_methods := name :: !broken_methods
-                  else
-                    let owner : Path.t = Method { owner = path; name; receiver = Static } in
-                    methods :=
-                      {
-                        T.method_name = name;
-                        method_receiver = Static;
-                        method_signature =
-                          Lower.signature context ~owner ~head:[] ~self_type:None signature;
-                        provided = false;
-                      }
-                      :: !methods
-              | Capability_member_error -> ())
-            members;
-          Trait_interface
-            {
-              trait_generics = [];
-              requires = [];
-              associated_types = [];
-              methods = List.rev !methods;
-              is_capability = true;
-              broken_methods = List.rev !broken_methods;
-            }
-      | Impl { trait_; type_ = head; uses; members } -> (
-          let impl_generics, for_type = head_type context path head in
-          let for_type = Option.value ~default:T.Error for_type in
-          match Lower.trait_reference ~capability:true context trait_ with
-          | None -> Error_interface
-          | Some implements ->
-              let associated =
-                List.sort compare
-                  (List.filter_map
-                     (fun (line : impl_member line) ->
-                       match line.kind with
-                       | Associated_definition (name, written) ->
-                           Some
-                             ( name.text,
-                               Lower.type_ { context with self_type = Some for_type } written )
-                       | Impl_method _ | Impl_member_error -> None)
-                     members)
-              in
-              let implements = { implements with associated } in
-              let context =
-                {
-                  context with
-                  self_type = Some for_type;
-                  self_trait = Some implements;
-                  self_associated = associated;
-                }
-              in
-              let methods =
-                List.concat
-                  (List.mapi
-                     (fun index (line : impl_member line) ->
-                       match line.kind with
-                       | Impl_method { signature; _ } when not (broken (Member_header index)) ->
-                           let name =
-                             match signature.name with
-                             | Plain_name name | Member_name (_, name) -> name.text
-                           in
-                           let receiver = receiver_of signature in
-                           let owner : Path.t = Method { owner = path; name; receiver } in
-                           [
-                             ( name,
-                               receiver,
-                               Lower.signature context ~owner ~head:[] ~self_type:(Some for_type)
-                                 signature );
-                           ]
-                       | _ -> [])
-                     members)
-              in
-              Impl_interface
-                {
-                  impl_generics;
-                  implements;
-                  for_type;
-                  impl_uses = Lower.capabilities context uses;
-                  impl_methods = methods;
-                  impl_broken = false;
-                })
-      | Constant { name; type_; _ } ->
-          let context =
-            match name with
-            | Plain_name _ -> context
-            | Member_name (head, _) ->
-                let _, self_type = head_type context path head in
-                { context with self_type }
-          in
-          Constant_interface { constant_type = Lower.type_ context type_ }
-      | Test { uses; _ } -> Test_interface (Lower.capabilities context uses)
-      | Theorem { generics; parameters; clauses; _ } ->
-          let signature : signature =
-            {
-              name = Plain_name { text = ""; span = definition.span; id = definition.id };
-              generics;
-              parameters;
-              result = None;
-              clauses;
-            }
-          in
-          Theorem_interface (Lower.signature context ~owner:path ~head:[] ~self_type:None signature)
-      | Law_proof _ -> Law_proof_interface
-      | Definition_error _ -> Error_interface
+                      impl_generics;
+                      implements;
+                      for_type;
+                      impl_uses = Lower.capabilities context uses;
+                      impl_methods = methods;
+                      impl_broken = false;
+                    },
+                  context ))
+        | Constant { name; type_; _ } ->
+            let context =
+              match name with
+              | Plain_name _ -> context
+              | Member_name (head, _) ->
+                  let _, self_type = head_type context path head in
+                  { context with self_type = Some self_type }
+            in
+            (Constant_interface { constant_type = Lower.type_ context type_ }, context)
+        | Test { uses; _ } -> (Test_interface (Lower.capabilities context uses), context)
+        | Theorem { generics; parameters; clauses; _ } ->
+            let signature : signature =
+              {
+                name = Plain_name { text = ""; span = definition.span; id = definition.id };
+                generics;
+                parameters;
+                result = None;
+                clauses;
+              }
+            in
+            ( Theorem_interface
+                (Lower.signature context ~owner:path ~head:[] ~self_type:None signature),
+              context )
+        | Law_proof _ -> (Law_proof_interface, context)
+        | Definition_error _ -> (Error_interface (Resolve.Parts.error_node definition.span), context)
+        )
   in
   ( {
       interface;
@@ -321,7 +343,8 @@ let lowered =
         (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
       with
       | Some definition, Some resolved ->
-          Some (fst (lower_definition database key definition resolved))
+          Names.within key (fun () ->
+              Some (fst (lower_definition database key definition resolved)))
       | _ -> None)
 
 (* The interface a path names, from its definition with ordinal 0. *)
@@ -360,8 +383,8 @@ let type_interface =
       | None -> (
           match Query.demand database interface path with
           | Some (Type_interface type_) -> Some type_
-          | Some Error_interface ->
-              Some { type_generics = []; shape = Error_shape; opaque = false; derives = [] }
+          | Some (Error_interface report) ->
+              Some { type_generics = []; shape = Error_shape report; opaque = false; derives = [] }
           | _ -> None))
 
 (* The signature of a function or method. For a method of a trait, a
@@ -400,6 +423,27 @@ let signature =
           | Some (Function_interface signature | Theorem_interface signature) -> Some signature
           | _ -> None))
 
+(* A function's signature for checking a use of it, or, when its header or
+   its member of a trait did not parse, the report of that, since everything
+   is accepted of it. *)
+let signature_or_report database (path : Path.t) =
+  let broken path =
+    match Query.demand database interface path with
+    | Some (Error_interface report) -> Some (Error report)
+    | _ -> None
+  in
+  match Query.demand database signature path with
+  | Some signature -> Some (Ok signature)
+  | None -> (
+      match path with
+      | Method { owner; name; _ } -> (
+          match Query.demand database interface owner with
+          | Some (Error_interface report) -> Some (Error report)
+          | Some (Trait_interface trait) ->
+              Option.map (fun report -> Error report) (List.assoc_opt name trait.broken_methods)
+          | _ -> broken path)
+      | _ -> broken path)
+
 let trait_interface =
   Query.query ~name:"trait_interface" ~phase:Interfaces ~show:Path.show (fun database path ->
       match Query.demand database interface path with
@@ -410,12 +454,12 @@ let impl_interface =
   Query.query ~name:"impl_interface" ~phase:Interfaces ~show:Path.show (fun database path ->
       match Query.demand database interface path with
       | Some (Impl_interface impl) -> Some impl
-      | Some Error_interface ->
+      | Some (Error_interface report) ->
           Some
             {
               T.impl_generics = [];
               implements = { trait = path; trait_arguments = []; associated = [] };
-              for_type = T.Error;
+              for_type = T.Error report;
               impl_uses = [];
               impl_methods = [];
               impl_broken = true;
@@ -426,5 +470,5 @@ let constant_type =
   Query.query ~name:"constant_type" ~phase:Interfaces ~show:Path.show (fun database path ->
       match Query.demand database interface path with
       | Some (Constant_interface constant) -> Some constant.constant_type
-      | Some Error_interface -> Some T.Error
+      | Some (Error_interface report) -> Some (T.Error report)
       | _ -> None)

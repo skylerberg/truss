@@ -525,4 +525,22 @@ let () =
              (trait "From" [ Types.builtin Int32 ]))
       then fail "it does")
 
+(* Every error type carries its report: these once lowered to an error with
+   no report. *)
+
+let () =
+  test "`Self.Item` outside a trait and an impl of one is an error" (fun () ->
+      one_diagnostic "type Box(value: Int64)\n\nfn Box.get(self) -> Self.Item {\n  todo\n}\n"
+        "types.unknown_associated_type");
+  test "a generic parameter is not a bound" (fun () ->
+      one_diagnostic "fn f[First, Second: First](value: own Second) -> Second {\n  value\n}\n"
+        "types.not_a_trait");
+  test "`Self` in a capability is an error" (fun () ->
+      one_diagnostic "capability Logger {\n  fn log(message: Self)\n}\n" "types.misplaced_self_type");
+  test "`Self` in a function that is not a method is an error" (fun () ->
+      one_diagnostic "fn f(value: Self) {}\n" "types.misplaced_self_type");
+  test "a method of an unknown type keeps its head's generic parameters" (fun () ->
+      one_diagnostic "fn Missing[Element].first(self) -> Element {\n  todo\n}\n"
+        "resolve.unknown_name")
+
 let () = finish ()
