@@ -636,6 +636,28 @@ let check database (key : Names.key) =
         contains state.tables.types || contains state.tables.local_types
         || contains state.tables.pattern_types
       in
+      (* Whether a type is an error, or names a type whose declaration has
+         one. The error is reported at the declaration, and what uses the
+         type is checked without a report of its own. *)
+      let broken =
+        let shapes = Hashtbl.create 8 in
+        fun (part : T.ty) ->
+          T.is_error part
+          ||
+          match part with
+          | T.Named { path; _ } -> (
+              match Hashtbl.find_opt shapes path with
+              | Some broken -> broken
+              | None ->
+                  let broken =
+                    match Members.shape state.database path with
+                    | Some (Error_shape _) -> true
+                    | _ -> false
+                  in
+                  Hashtbl.replace shapes path broken;
+                  broken)
+          | _ -> false
+      in
       (* A definition has a core form if it parsed completely, has no
          diagnostic, and no recorded type contains an error. A type contains
          an error when it depends on a definition that has one. *)
@@ -643,7 +665,7 @@ let check database (key : Names.key) =
         state.diagnostics = [] && resolved.diagnostics = []
         && (not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body))
         && (match lowered.interface with Error_interface _ -> false | _ -> true)
-        && not (any_type T.is_error)
+        && not (any_type broken)
       in
       let build () : Core.t =
         state.form.next_node_id <- 0;

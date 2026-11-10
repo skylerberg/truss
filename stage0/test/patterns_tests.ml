@@ -276,6 +276,22 @@ let () =
       | found when List.mem "patterns.not_covered" found ->
           fail "found [%s]" (String.concat "; " found)
       | _ -> ());
+  test "code that builds a type that failed to parse reports nothing more" (fun () ->
+      (* The definition that builds the value has no error of its own. It
+         must still have no core form, or building one stops the compiler. *)
+      List.iter
+        (fun argument ->
+          match
+            codes_of
+              ("type Entry = {\n\
+               \  name: String\n\
+                }\n\n\
+                fn made(name: String) -> Entry {\n\
+               \  Entry(name: " ^ argument ^ ")\n}\n")
+          with
+          | [] -> ()
+          | found -> fail "found [%s]" (String.concat "; " found))
+        [ "own name"; "\"${name}\"" ]);
   test "a sub-pattern that failed to type makes no arm unreachable" (fun () ->
       match
         codes_of
