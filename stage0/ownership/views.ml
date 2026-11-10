@@ -162,6 +162,8 @@ let lent_mut_message context (loan : loan) ~viewed (place : Place.t) =
   in
   match loan.lender with
   | To_loop -> Printf.sprintf "%s is lent `mut` to the loop, so its body cannot use %s." lent used
+  | To_provide ->
+      Printf.sprintf "%s is lent `mut` to the `provide` block, so its body cannot use %s." lent used
   | To_statement ->
       Printf.sprintf
         "%s is lent `mut` for the rest of this statement, so the statement cannot use %s again."
@@ -176,6 +178,9 @@ let lent_message context (loan : loan) ~viewed (place : Place.t) ~what =
   match loan.lender with
   | To_loop ->
       Printf.sprintf "`%s` cannot %s while the loop goes over %s." place what
+        (if viewed then lent ^ ", which views it" else "it")
+  | To_provide ->
+      Printf.sprintf "`%s` cannot %s while the `provide` block is given %s." place what
         (if viewed then lent ^ ", which views it" else "it")
   | To_statement ->
       Printf.sprintf "`%s` cannot %s while a part of %s is lent, which lasts this statement." place

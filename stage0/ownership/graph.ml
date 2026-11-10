@@ -16,11 +16,12 @@
 module T = Types
 
 (* A place that is lent for a stretch of code: to a loop, for the loop's
-   body; by a lending call, for the rest of the statement; or to an operand
-   that has been evaluated, until the operation that the operand belongs to
-   runs. While a place is lent read-only, the code may not change it. While
-   it is lent [mut], the code may not use it at all. *)
-type lender = To_loop | To_statement | To_operand
+   body; to a [provide] block, for its body; by a lending call, for the
+   rest of the statement; or to an operand that has been evaluated, until
+   the operation that the operand belongs to runs. While a place is lent
+   read-only, the code may not change it. While it is lent [mut], the code
+   may not use it at all. *)
+type lender = To_loop | To_provide | To_statement | To_operand
 type loan = { lent : Place.t; mode : T.mode; lender : lender }
 
 (* A place that a value views, and how. *)
@@ -417,7 +418,28 @@ let rec expression builder frontier (node : Core.expression) : int list =
           ~pending:(fun (implementation : Core.implementation) ->
             pending builder implementation.value)
       in
-      block builder frontier body
+      (* The body runs with the implementations it was given, so a place
+         among them is lent for the body. *)
+      let loans = builder.loans in
+      builder.loans <-
+        List.filter_map
+          (fun (implementation : Core.implementation) ->
+            match implementation.value with
+            | Place found ->
+                Option.map
+                  (fun lent : loan ->
+                    {
+                      lent;
+                      mode = (if implementation.mode = Mut then Mut else Read);
+                      lender = To_provide;
+                    })
+                  (Place.of_core found)
+            | Value _ -> None)
+          implementations
+        @ loans;
+      let frontier = block builder frontier body in
+      builder.loans <- loans;
+      frontier
   | Return value ->
       let frontier =
         match value with Some value -> returned builder frontier value | None -> frontier

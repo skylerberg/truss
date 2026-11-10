@@ -523,6 +523,74 @@ let () =
     \  kept.length()\n\
      }\n"
 
+(* A place given to a [provide] block *)
+
+let () =
+  let counter =
+    "capability Counter {\n\
+    \  fn next() -> USize\n\
+     }\n\n\
+     type Tally(counts: List[USize])\n\n\
+     impl Counter for Tally {\n\
+    \  fn next(mut self) -> USize {\n\
+    \    mut self.counts.push(1)\n\
+    \    self.counts.length()\n\
+    \  }\n\
+     }\n\n\
+     type Fixed(value: USize)\n\n\
+     impl Counter for Fixed {\n\
+    \  fn next(self) -> USize {\n\
+    \    self.value\n\
+    \  }\n\
+     }\n\n\
+     fn count() -> USize\n\
+    \  uses Counter\n\
+     {\n\
+    \  Counter.next()\n\
+     }\n\n"
+  in
+  test "the body of a `provide` cannot use a place that the block is given `mut`" (fun () ->
+      one_diagnostic
+        (counter
+       ^ "fn f() -> USize {\n\
+         \  var tally = Tally(counts: [])\n\
+         \  provide mut tally {\n\
+         \    let before = tally.counts.length()\n\
+         \    count() + before\n\
+         \  }\n\
+          }\n")
+        "ownership.conflicting_loan");
+  test "the body of a `provide` cannot change a place that the block is given" (fun () ->
+      one_diagnostic
+        (counter
+       ^ "fn f() -> USize {\n\
+         \  var fixed = Fixed(value: 1)\n\
+         \  provide fixed {\n\
+         \    fixed = Fixed(value: 2)\n\
+         \    count()\n\
+         \  }\n\
+          }\n")
+        "ownership.changed_while_viewed");
+  test "the body of a `provide` can read a place that the block is given read-only" (fun () ->
+      fine
+        (counter
+       ^ "fn f() -> USize {\n\
+         \  let fixed = Fixed(value: 1)\n\
+         \  provide fixed {\n\
+         \    count() + fixed.value\n\
+         \  }\n\
+          }\n"));
+  test "a place given to a `provide` block is free again after the block" (fun () ->
+      fine
+        (counter
+       ^ "fn f() -> USize {\n\
+         \  var tally = Tally(counts: [])\n\
+         \  let first = provide mut tally {\n\
+         \    count()\n\
+         \  }\n\
+         \  first + tally.counts.length()\n\
+          }\n"))
+
 (* Constants *)
 
 let () =
