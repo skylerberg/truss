@@ -20,6 +20,10 @@ type visit = {
 
 let ignore_all = { expression = ignore; statement = ignore; pattern = ignore; callee = ignore }
 
+let place_type : place -> Types.ty = function
+  | Local { type_; _ } | Constant { type_; _ } | Field { type_; _ } -> type_
+  | Lent value | Temporary value -> value.type_
+
 let rec place visit = function
   | Local _ | Constant _ -> ()
   | Field { base; _ } -> place visit base

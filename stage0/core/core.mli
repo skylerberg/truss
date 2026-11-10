@@ -98,12 +98,14 @@ and operand =
           the call. A [mut] parameter receives a [Value] only when the value is a {!Slice}, which is
           a mutable view of part of a place. *)
 
-(** A memory location. *)
+(** A memory location. Every place has a type: [Local], [Constant], and [Field] carry it, and a
+    [Lent] or [Temporary] place has the type of its expression. [Core_walk.place_type] returns it.
+*)
 and place =
-  | Local of local
-  | Constant of Path.t
-      (** The static data of a constant. It is read-only. A constant used as a value is a {!Use} of
-          this place. *)
+  | Local of { local : local; type_ : Types.ty }
+  | Constant of { path : Path.t; type_ : Types.ty }
+      (** The static data of a constant. It is read-only. A constant used as a value is a {!Use}
+          of this place. *)
   | Field of { base : place; field : string; type_ : Types.ty }
       (** A field of a record. [type_] is the field's type. The fields of a sum type's variant are
           never places of this kind: they are only reachable through pattern bindings. *)

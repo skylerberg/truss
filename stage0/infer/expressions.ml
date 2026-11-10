@@ -89,7 +89,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | Self_value -> (
       (* A lambda that reads [self] captures it, named by the definition's id. *)
       state.references <- state.definition.id :: state.references;
-      register_expression state value (fun () -> Use (Local Self));
+      register_expression state value (fun () -> Use (Form.self_local state env));
       match env.self with
       | Some self -> self
       | None ->

@@ -181,8 +181,8 @@ and operand names = function
   | Value value -> expression names value
 
 and place names = function
-  | Local found -> local names found
-  | Constant path -> Path.show path
+  | Local { local = found; _ } -> local names found
+  | Constant { path; _ } -> Path.show path
   | Field { base; field; _ } -> Printf.sprintf "%s.%s" (place names base) field
   | Lent call -> "lent " ^ expression names call
   | Temporary value -> "temporary " ^ expression names value

@@ -86,8 +86,8 @@ let evidence : Core.evidence -> C.evidence = function
 
 let rec place st (found : Core.place) : Lir.place =
   match found with
-  | Local local -> local_place st local
-  | Constant path -> Matching.static_constant st path
+  | Local { local; _ } -> local_place st local
+  | Constant { path; _ } -> Matching.static_constant st path
   | Field { base; field; _ } -> place st base / Field field
   | Temporary value -> value_place st value
   | Lent _ -> not_ported "a part that a call lends"

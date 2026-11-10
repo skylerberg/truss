@@ -50,6 +50,8 @@ let checked ~check database name =
    - a [let] that binds a mutable local receives a value;
    - the alternatives of a pattern bind the same locals, with the same
      types and modes;
+   - every use of a local has the type of the parameter or the pattern
+     that binds it;
    - a [Yielding_call] is a call of a yielding method. *)
 let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   let module T = Types in
@@ -130,9 +132,42 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
         List.iter (argument "an intrinsic's type argument") type_arguments
     | Capability_method _ | Indirect _ -> ()
   in
+  let local_types : (Core.local, T.ty) Hashtbl.t = Hashtbl.create 16 in
+  let parameters =
+    List.iter (fun (parameter : Core.parameter) ->
+        Hashtbl.replace local_types parameter.local parameter.type_)
+  in
+  (match form.definition with
+  | Function { parameters = declared; _ } -> parameters declared
+  | Trait laws -> List.iter (fun (law : Core.law) -> parameters law.parameters) laws
+  | Type _ | Constant _ | Test _ | Law_proof _ | Empty -> ());
+  Core_walk.definition
+    {
+      Core_walk.ignore_all with
+      expression =
+        (fun (node : Core.expression) ->
+          match node.kind with
+          | Quantified { binder = Over_type { local; type_; _ }; _ } ->
+              Hashtbl.replace local_types local type_
+          | _ -> ());
+      pattern =
+        (fun (node : Core.pattern) ->
+          match node.kind with
+          | Bind { local; _ } -> Hashtbl.replace local_types local node.type_
+          | _ -> ());
+    }
+    form.definition;
   let rec place (found : Core.place) =
     match found with
-    | Lent { kind = Call { lends = Some _; _ }; _ } | Local _ | Constant _ | Temporary _ -> ()
+    | Local { local; type_ = used } -> (
+        type_ "a local" used;
+        match Hashtbl.find_opt local_types local with
+        | Some bound when not (T.equal bound used) ->
+            wrong "a local is used with the type `%s` and bound with the type `%s`" (T.show used)
+              (T.show bound)
+        | _ -> ())
+    | Constant { type_ = constant; _ } -> type_ "a constant" constant
+    | Lent { kind = Call { lends = Some _; _ }; _ } | Temporary _ -> ()
     | Lent _ -> wrong "a `Lent` place is not a call of a lending method"
     | Field { base; type_ = field; _ } ->
         type_ "a field" field;
@@ -145,7 +180,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
     place found;
     match found with
     | Local _ | Temporary _ -> ()
-    | Constant path -> wrong "%s mutates the constant `%s`" what (Path.show path)
+    | Constant { path; _ } -> wrong "%s mutates the constant `%s`" what (Path.show path)
     | Field { base; _ } -> mutable_place what base
     | Lent { kind = Call { lends = Some Mut; _ }; _ } -> ()
     | Lent _ -> wrong "%s mutates a place that is lent read-only" what
