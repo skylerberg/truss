@@ -2342,6 +2342,92 @@ let () =
         \  tree is Leaf\n\
          }\n")
 
+(* Code that does not run *)
+
+let () =
+  test "a lambda's result is in range only for arguments in range" (fun () ->
+      not_proven
+        "fn f() -> Int64\n\
+        \  ensures result == 1\n\
+         {\n\
+        \  let same: (fn(Int64) -> Int64 cost time finite) = fn(x) { x }\n\
+        \  same(0)\n\
+         }\n"
+        "prover.ensures");
+  test "a proof block's assignments do not reach the program" (fun () ->
+      not_proven
+        "fn f() -> Int64\n\
+        \  ensures result == 5\n\
+         {\n\
+        \  var x: Int64 = 0\n\
+        \  proof {\n\
+        \    x = 5\n\
+        \  }\n\
+        \  x\n\
+         }\n"
+        "prover.ensures");
+  test "a proof block's return does not end the program's path" (fun () ->
+      not_proven
+        "fn f(x: USize, divisor: USize) -> USize {\n\
+        \  proof {\n\
+        \    return 1\n\
+        \  }\n\
+        \  x / divisor\n\
+         }\n"
+        "prover.division");
+  test "a proof block that never ends shows nothing" (fun () ->
+      not_proven
+        "fn f(x: Int64) -> Int64\n\
+        \  ensures result == 0\n\
+         {\n\
+        \  proof {\n\
+        \    while true {}\n\
+        \  }\n\
+        \  x\n\
+         }\n"
+        "prover.ensures");
+  test "an uncalled lambda's calls show nothing of the path" (fun () ->
+      not_proven
+        "fn hang() -> Int64\n\
+        \  ensures false\n\
+         {\n\
+        \  while true {}\n\
+         }\n\n\
+         fn f(x: Int64) -> Int64\n\
+        \  ensures result <= 0\n\
+         {\n\
+        \  if x > 0 {\n\
+        \    let _: fn() -> Int64 = fn() { hang() }\n\
+        \  }\n\
+        \  x\n\
+         }\n"
+        "prover.ensures");
+  test "a lambda whose arguments cannot meet its requires shows nothing of the path" (fun () ->
+      not_proven
+        "fn each_index(count: USize, visit: (fn(index: USize) -> USize requires index < count)) -> \
+         USize {\n\
+        \  if count > 0 { visit(count - 1) } else { 0 }\n\
+         }\n\n\
+         fn f(x: Int64) -> Int64\n\
+        \  ensures result <= 0\n\
+         {\n\
+        \  if x > 0 {\n\
+        \    let _ = each_index(0, visit: fn(i) { i })\n\
+        \  }\n\
+        \  x\n\
+         }\n"
+        "prover.ensures");
+  test "a law's proof that never ends shows nothing" (fun () ->
+      not_proven
+        (monoid ^ flag_impl "true" ^ "\nproof Monoid.left_identity for Flag {\n  while true {}\n}\n")
+        "prover.law");
+  test "a todo in a law's proof is a hole that stands for the law" (fun () ->
+      let text =
+        monoid ^ flag_impl "true" ^ "\nproof Monoid.left_identity for Flag {\n  todo\n}\n"
+      in
+      proven text;
+      if holes text <> 1 then fail "%d holes" (holes text))
+
 (* Concurrent code *)
 
 let early_return ensures =
