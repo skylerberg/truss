@@ -1,3 +1,5 @@
+use standard::intrinsic
+
 public type Alphabet = Standard | UrlSafe
   derives Equal
 
@@ -8,8 +10,57 @@ public type DecodeError =
   derives Equal
 
 impl Display for DecodeError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      InvalidCharacter(offset) => {
+        mut output.write("the byte at offset ")
+        offset.display(mut output)
+        mut output.write(" is not in the alphabet")
+      }
+      InvalidLength => mut output.write("the text is one symbol too long to be whole bytes")
+      InvalidPadding => mut output.write("the padding is wrong, or the last symbol has bits that no byte uses")
+    }
+  }
+}
+
+internal fn symbol(value: UInt8, alphabet: Alphabet) -> UInt8
+  requires value < 64
+  cost time O(1)
+  cost allocations == 0
+{
+  if value < 26 {
+    value + 65
+  } else if value < 52 {
+    value + 71
+  } else if value < 62 {
+    value - 4
+  } else if value == 62 {
+    if alphabet == Alphabet.UrlSafe { 45 } else { 43 }
+  } else {
+    if alphabet == Alphabet.UrlSafe { 95 } else { 47 }
+  }
+}
+
+internal fn symbol_value(byte: UInt8, alphabet: Alphabet) -> UInt8
+  ensures result <= 64
+  cost time O(1)
+  cost allocations == 0
+{
+  let plus: UInt8 = if alphabet == Alphabet.UrlSafe { 45 } else { 43 }
+  let slash: UInt8 = if alphabet == Alphabet.UrlSafe { 95 } else { 47 }
+  if byte >= 65 && byte <= 90 {
+    byte - 65
+  } else if byte >= 97 && byte <= 122 {
+    byte - 71
+  } else if byte >= 48 && byte <= 57 {
+    byte + 4
+  } else if byte == plus {
+    62
+  } else if byte == slash {
+    63
+  } else {
+    64
   }
 }
 
@@ -17,7 +68,49 @@ public fn encode(bytes: Slice[UInt8], alphabet: Alphabet = Alphabet.Standard, pa
   cost time O(bytes.length())
   cost allocations <= 1
 {
-  todo
+  let count = bytes.length()
+  if count > USize.maximum / 2 {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(4 * ((count + 2) / 3))
+  var index: USize = 0
+  while index + 3 <= count
+    invariant index <= count
+    invariant index % 3 == 0
+    invariant intrinsic::storage_length(output) == 4 * (index / 3)
+    invariant intrinsic::storage_capacity(output) == 4 * ((count + 2) / 3)
+    decreases count - index
+    cost time O(index)
+    cost allocations == 0
+  {
+    let first = bytes[index]
+    let second = bytes[index + 1]
+    let third = bytes[index + 2]
+    intrinsic::storage_push(mut output, value: symbol(first / 4, alphabet: alphabet))
+    intrinsic::storage_push(mut output, value: symbol(first % 4 * 16 + second / 16, alphabet: alphabet))
+    intrinsic::storage_push(mut output, value: symbol(second % 16 * 4 + third / 64, alphabet: alphabet))
+    intrinsic::storage_push(mut output, value: symbol(third % 64, alphabet: alphabet))
+    index += 3
+  }
+  if count - index == 1 {
+    let first = bytes[index]
+    intrinsic::storage_push(mut output, value: symbol(first / 4, alphabet: alphabet))
+    intrinsic::storage_push(mut output, value: symbol(first % 4 * 16, alphabet: alphabet))
+    if padding {
+      intrinsic::storage_push(mut output, value: 61)
+      intrinsic::storage_push(mut output, value: 61)
+    }
+  } else if count - index == 2 {
+    let first = bytes[index]
+    let second = bytes[index + 1]
+    intrinsic::storage_push(mut output, value: symbol(first / 4, alphabet: alphabet))
+    intrinsic::storage_push(mut output, value: symbol(first % 4 * 16 + second / 16, alphabet: alphabet))
+    intrinsic::storage_push(mut output, value: symbol(second % 16 * 4, alphabet: alphabet))
+    if padding {
+      intrinsic::storage_push(mut output, value: 61)
+    }
+  }
+  String(storage: own output)
 }
 
 public fn encode_onto(
@@ -31,9 +124,118 @@ public fn encode_onto(
   todo
 }
 
+internal fn unpadded_length(text: StringSlice) -> USize
+  ensures result <= text.length()
+  ensures text.length() - result <= 2
+  cost time O(1)
+  cost allocations == 0
+{
+  var data = text.length()
+  if data > 0 && text.byte(data - 1) == 61 {
+    data -= 1
+    if data > 0 && text.byte(data - 1) == 61 {
+      data -= 1
+    }
+  }
+  data
+}
+
+internal fn symbol_at(text: StringSlice, index: USize, alphabet: Alphabet) -> Result[UInt8, DecodeError]
+  requires index < text.length()
+  ensures !(result is Ok(value) && value >= 64)
+  cost time O(1)
+  cost allocations == 0
+{
+  let value = symbol_value(text.byte(index), alphabet: alphabet)
+  if value == 64 { Err(DecodeError.InvalidCharacter(offset: index)) } else { Ok(value) }
+}
+
+internal fn decode_group(
+  text: StringSlice,
+  index: USize,
+  alphabet: Alphabet,
+  bytes: mut intrinsic::Storage[UInt8],
+) -> Result[Unit, DecodeError]
+  requires index <= text.length()
+  requires 4 <= text.length() - index
+  requires intrinsic::storage_length(bytes) + 3 <= intrinsic::storage_capacity(bytes)
+  ensures !(result is Ok(_)
+    && intrinsic::storage_length(bytes) != old(intrinsic::storage_length(bytes)) + 3)
+  ensures intrinsic::storage_capacity(bytes) == old(intrinsic::storage_capacity(bytes))
+  cost time O(1)
+  cost allocations == 0
+{
+  let first = symbol_at(text, index: index, alphabet: alphabet)?
+  let second = symbol_at(text, index: index + 1, alphabet: alphabet)?
+  let third = symbol_at(text, index: index + 2, alphabet: alphabet)?
+  let fourth = symbol_at(text, index: index + 3, alphabet: alphabet)?
+  intrinsic::storage_push(mut bytes, value: first * 4 + second / 16)
+  intrinsic::storage_push(mut bytes, value: second % 16 * 16 + third / 4)
+  intrinsic::storage_push(mut bytes, value: third % 4 * 64 + fourth)
+  Ok(Unit)
+}
+
+internal fn decode_tail(
+  text: StringSlice,
+  index: USize,
+  rest: USize,
+  alphabet: Alphabet,
+  bytes: mut intrinsic::Storage[UInt8],
+) -> Result[Unit, DecodeError]
+  requires rest == 2 || rest == 3
+  requires index <= text.length()
+  requires rest <= text.length() - index
+  requires intrinsic::storage_length(bytes) + rest - 1 <= intrinsic::storage_capacity(bytes)
+  cost time O(1)
+  cost allocations == 0
+{
+  let first = symbol_at(text, index: index, alphabet: alphabet)?
+  let second = symbol_at(text, index: index + 1, alphabet: alphabet)?
+  intrinsic::storage_push(mut bytes, value: first * 4 + second / 16)
+  if rest == 2 {
+    if second % 16 != 0 {
+      return Err(DecodeError.InvalidPadding)
+    }
+    return Ok(Unit)
+  }
+  let third = symbol_at(text, index: index + 2, alphabet: alphabet)?
+  if third % 4 != 0 {
+    return Err(DecodeError.InvalidPadding)
+  }
+  intrinsic::storage_push(mut bytes, value: second % 16 * 16 + third / 4)
+  Ok(Unit)
+}
+
 public fn decode(text: StringSlice, alphabet: Alphabet = Alphabet.Standard) -> Result[List[UInt8], DecodeError]
   cost time O(text.length())
   cost allocations <= 1
 {
-  todo
+  let data = unpadded_length(text)
+  let padded = text.length() - data
+  let rest = data % 4
+  if rest == 1 {
+    return Err(DecodeError.InvalidLength)
+  }
+  if padded > 0 && rest + padded != 4 {
+    return Err(DecodeError.InvalidPadding)
+  }
+  let tail: USize = if rest == 0 { 0 } else { rest - 1 }
+  var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(data / 4 * 3 + tail)
+  var index: USize = 0
+  while index + 4 <= data
+    invariant index <= data
+    invariant index % 4 == 0
+    invariant intrinsic::storage_length(bytes) == index / 4 * 3
+    invariant intrinsic::storage_capacity(bytes) == data / 4 * 3 + tail
+    decreases data - index
+    cost time O(index)
+    cost allocations == 0
+  {
+    decode_group(text, index: index, alphabet: alphabet, bytes: mut bytes)?
+    index += 4
+  }
+  if rest >= 2 {
+    decode_tail(text, index: index, rest: rest, alphabet: alphabet, bytes: mut bytes)?
+  }
+  Ok(List(storage: own bytes))
 }

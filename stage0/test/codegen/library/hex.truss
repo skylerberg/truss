@@ -1,0 +1,29 @@
+use standard::hex
+
+test "bytes encode as two hexadecimal digits each" {
+  let bytes: List[UInt8] = [0, 1, 15, 16, 171, 255]
+  assert hex::encode(bytes) == "00010f10abff"
+  assert hex::encode(bytes, uppercase: true) == "00010F10ABFF"
+  let none: List[UInt8] = []
+  assert hex::encode(none) == ""
+}
+
+test "hexadecimal text decodes to bytes, in either case" {
+  assert hex::decode("00010f10ABff") is Ok(bytes) && bytes.length() == 6 && bytes[2] == 15 && bytes[4] == 171
+    && bytes[5] == 255
+  assert hex::decode("") is Ok(bytes) && bytes.length() == 0
+}
+
+test "decoding says what is wrong with text that is not hexadecimal" {
+  assert hex::decode("abc") == Err(hex::DecodeError.OddLength)
+  assert hex::decode("ag") == Err(hex::DecodeError.InvalidCharacter(offset: 1))
+  assert hex::decode("zz") == Err(hex::DecodeError.InvalidCharacter(offset: 0))
+  assert hex::decode("00 1") == Err(hex::DecodeError.InvalidCharacter(offset: 2))
+  assert "${hex::DecodeError.OddLength}" == "the text has an odd number of digits"
+  assert "${hex::DecodeError.InvalidCharacter(offset: 4)}" == "the byte at offset 4 is not a hexadecimal digit"
+}
+
+test "encoding and decoding undo each other" {
+  let bytes: List[UInt8] = [222, 173, 190, 239]
+  assert hex::decode(hex::encode(bytes)) is Ok(decoded) && decoded == bytes
+}
