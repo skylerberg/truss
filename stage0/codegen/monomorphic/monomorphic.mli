@@ -33,6 +33,11 @@ val substitution : Types.generic list -> Ground.argument list -> Types.substitut
 (* The ground type of a built-in. *)
 val builtin : Intrinsic.builtin -> Ground.ty
 
+(* [Panic], the one capability with no evidence: [Panic.crash] ends the
+   process, so no function takes evidence for it and no ground function
+   type lists it. *)
+val panic_capability : Path.t
+
 (* What a ground type is made of, for its layout. *)
 val shape : context -> Ground.ty -> Memory_layout.shape
 
