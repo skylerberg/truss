@@ -148,10 +148,8 @@ let evidence_of st capability =
   | Some (_, operand) -> operand
   | None -> (
       let missing () = bug "no evidence for %s here" (Path.show capability) in
-      (* An [impl]'s methods are anchored at the [impl]. *)
-      match st.frame.code.anchor with
-      | Impl _ as impl when Path.equal (impl_interface st.context impl).implements.trait capability
-        ->
+      match st.frame.code.within with
+      | Some impl when Path.equal (impl_interface st.context impl).implements.trait capability ->
           let interface = impl_interface st.context impl in
           let self_ty =
             Monomorphic.ground st.context.monomorphic st.frame.code.substitution interface.for_type

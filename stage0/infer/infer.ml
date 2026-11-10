@@ -24,6 +24,12 @@ let clean database key =
   with
   | Some definition, Some resolved, Some { checked; diagnostics = []; _ }
     when resolved.diagnostics = []
-         && not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body) ->
+         && (not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body))
+         &&
+         (* A method written inside what did not parse has nothing known
+            of it. *)
+         match Query.demand database Interface.Environment.lowered key with
+         | Some { interface = Error_interface _; _ } -> false
+         | _ -> true ->
       Some checked
   | _ -> None

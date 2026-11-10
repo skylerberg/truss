@@ -57,6 +57,7 @@ let rec head resolved (value : Syntax.expression) =
 let declared_name (definition : Syntax.definition) : Syntax.name option =
   match definition.kind with
   | Function { signature = { name = Plain_name name | Member_name (_, name); _ }; _ }
+  | Method_declaration { name = Plain_name name | Member_name (_, name); _ }
   | Constant { name = Plain_name name | Member_name (_, name); _ }
   | Type_definition { name; _ }
   | Trait { name; _ }
@@ -84,7 +85,18 @@ let resolved =
               holes = [];
             }
           in
-          Walk.definition state ~path:key.path definition;
+          let container =
+            Option.bind (Query.demand database Names.container key) (fun (container : Names.key) ->
+                Option.map
+                  (fun definition -> (container.path, definition))
+                  (Query.demand database Names.definition container))
+          in
+          (* Nothing written inside a definition whose own header did not
+             parse is resolved, since what it is written inside is not
+             known. *)
+          (match container with
+          | Some (_, around) when Parts.broken around Header -> ()
+          | _ -> Walk.definition state ~path:key.path ?container definition);
           (* The prelude is the same everywhere, so no definition outside the
              module that defines a prelude name may take it. *)
           (match key.path with

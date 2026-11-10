@@ -13,8 +13,10 @@ module Environment = Interface.Environment
 type change = Breaks of string | Grows of string
 type found = { path : Path.t; change : change }
 
+(* A method written inside a trait or a capability is compared with that
+   one, not on its own. *)
 let public (declaration : Names.declaration) =
-  declaration.ordinal = 0
+  declaration.ordinal = 0 && declaration.container = None
   &&
   match declaration.visibility with
   | Public | Public_opaque -> true
@@ -169,29 +171,12 @@ let type_ ~(before : T.type_interface) ~(after : T.type_interface) ~before_defin
 
 (* Traits and capabilities *)
 
-let member_clauses (definition : definition option) name receiver =
-  let of_signature (signature : Syntax.signature) =
-    match signature.name with
-    | (Plain_name written | Member_name (_, written))
-      when written.text = name && Names.receiver signature.parameters = receiver ->
-        Some signature.clauses
-    | _ -> None
-  in
-  match definition with
-  | Some { kind = Trait { members; _ }; _ } ->
-      List.find_map
-        (fun (member : trait_member line) ->
-          match member.kind with
-          | Trait_method { signature; _ } -> of_signature signature
-          | _ -> None)
-        members
-  | Some { kind = Capability { members; _ }; _ } ->
-      List.find_map
-        (fun (member : capability_member line) ->
-          match member.kind with
-          | Capability_method signature -> of_signature signature
-          | Capability_member_error -> None)
-        members
+(* The clauses of a method written inside a trait or a capability, which
+   is a definition of its own. *)
+let member_clauses database (owner : Path.t) name receiver =
+  match Interface.Summary.definition database (Method { owner; name; receiver }) with
+  | Some (_, { kind = Function { signature; _ } | Method_declaration signature; _ }) ->
+      Some signature.clauses
   | _ -> None
 
 let laws (definition : definition option) =
@@ -205,7 +190,7 @@ let laws (definition : definition option) =
   | _ -> []
 
 let trait ~(before : T.trait_interface) ~(after : T.trait_interface) ~before_definition
-    ~after_definition =
+    ~after_definition ~clauses_before ~clauses_after =
   let same (was : T.trait_method) (now : T.trait_method) =
     was.method_name = now.method_name && was.method_receiver = now.method_receiver
   in
@@ -224,11 +209,9 @@ let trait ~(before : T.trait_interface) ~(after : T.trait_interface) ~before_def
               (signature ~before:was.method_signature ~after:now.method_signature
               @ contract
                   ~before:
-                    (Option.value ~default:[]
-                       (member_clauses before_definition was.method_name was.method_receiver))
+                    (Option.value ~default:[] (clauses_before was.method_name was.method_receiver))
                   ~after:
-                    (Option.value ~default:[]
-                       (member_clauses after_definition now.method_name now.method_receiver))
+                    (Option.value ~default:[] (clauses_after now.method_name now.method_receiver))
               @ if was.provided && not now.provided then [ Breaks "has no body any more" ] else []))
       before.methods
   in
@@ -316,6 +299,8 @@ let compare ~before ~after package =
                   type_ ~before:old_type ~after:new_type ~before_definition ~after_definition
               | Some (Trait_interface old_trait), Some (Trait_interface new_trait) ->
                   trait ~before:old_trait ~after:new_trait ~before_definition ~after_definition
+                    ~clauses_before:(member_clauses before path)
+                    ~clauses_after:(member_clauses after path)
               | Some (Constant_interface old_constant), Some (Constant_interface new_constant) ->
                   (if old_constant.constant_type <> new_constant.constant_type then
                      [ Breaks "has another type" ]

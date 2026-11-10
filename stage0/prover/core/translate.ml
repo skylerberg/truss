@@ -768,38 +768,28 @@ let function_contract database (path : Path.t) =
         (callee_source database key)
   | _ -> None
 
-(* A trait's method's clauses, from the trait's definition. *)
-let trait_part database (trait : Path.t) name receiver =
-  match Interface.Summary.definition database trait with
-  | Some (key, { kind = Trait { members; _ }; _ }) -> (
-      match callee_source database key with
-      | Some callee ->
-          List.find_map
-            (fun (member : trait_member line) ->
-              match member.kind with
-              | Trait_method { signature; _ }
-                when name_of signature = name && receiver_of signature.parameters = receiver ->
-                  Some (part_of callee signature.parameters signature.clauses, signature)
-              | _ -> None)
-            members
-      | None -> None)
+(* A method written inside a trait, an [impl], or a capability, which is a
+   definition of its own: its key, its signature, and its body if it has
+   one. *)
+let method_definition database (owner : Path.t) name receiver =
+  match Interface.Summary.definition database (Method { owner; name; receiver }) with
+  | Some (key, { kind = Function { signature; body }; _ }) -> Some (key, signature, Some body)
+  | Some (key, { kind = Method_declaration signature; _ }) -> Some (key, signature, None)
   | _ -> None
 
-(* A capability's method's clauses, from the capability's definition. *)
+(* A method's clauses, from its own definition. *)
+let method_part database (owner : Path.t) name receiver =
+  Option.bind (method_definition database owner name receiver) (fun (key, signature, _) ->
+      Option.map
+        (fun callee -> (part_of callee signature.parameters signature.clauses, signature))
+        (callee_source database key))
+
+(* A trait's method's clauses. *)
+let trait_part database (trait : Path.t) name receiver = method_part database trait name receiver
+
+(* A capability's method's clauses. *)
 let capability_part database (capability : Path.t) name =
-  match Interface.Summary.definition database capability with
-  | Some (key, { kind = Capability { members; _ }; _ }) -> (
-      match callee_source database key with
-      | Some callee ->
-          List.find_map
-            (fun (member : capability_member line) ->
-              match member.kind with
-              | Capability_method signature when name_of signature = name ->
-                  Some (part_of callee signature.parameters signature.clauses, signature)
-              | _ -> None)
-            members
-      | None -> None)
-  | _ -> None
+  method_part database capability name Static
 
 (* A capability's method's contract. Its calls are never a function in the
    logic: two calls may give different results, since the prover never
@@ -818,17 +808,7 @@ let capability_contract database (capability : Path.t) name =
 
 (* A trait method's body, when it provides one. *)
 let provided_body database (trait : Path.t) name receiver =
-  match Interface.Summary.definition database trait with
-  | Some (_, { kind = Trait { members; _ }; _ }) ->
-      List.find_map
-        (fun (member : trait_member line) ->
-          match member.kind with
-          | Trait_method { signature; body = Some body }
-            when name_of signature = name && receiver_of signature.parameters = receiver ->
-              Some body
-          | _ -> None)
-        members
-  | _ -> None
+  Option.bind (method_definition database trait name receiver) (fun (_, _, body) -> body)
 
 (* A trait method's contract: the [impl]'s own clauses with the trait's,
    when the call is known to reach one [impl], and the trait's alone
@@ -839,20 +819,15 @@ let method_contract database (trait : T.trait_reference) name receiver (evidence
   | Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
       match Interface.Summary.definition database impl with
-      | Some (key, { kind = Impl { members; _ }; _ }) -> (
+      | Some (_, { kind = Impl _; _ }) -> (
           let own =
-            match callee_source database key with
-            | Some callee ->
-                List.find_map
-                  (fun (member : impl_member line) ->
-                    match member.kind with
-                    | Impl_method { signature; body }
-                      when name_of signature = name && receiver_of signature.parameters = receiver
-                      ->
-                        Some (part_of callee signature.parameters signature.clauses, signature, body)
-                    | _ -> None)
-                  members
-            | None -> None
+            match method_definition database impl name receiver with
+            | Some (key, signature, Some body) ->
+                Option.map
+                  (fun callee ->
+                    (part_of callee signature.parameters signature.clauses, signature, body))
+                  (callee_source database key)
+            | _ -> None
           in
           match (own, trait_side) with
           | Some (part, signature, body), _ ->
@@ -1828,7 +1803,7 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
       in
       let own_key =
         match evidence with
-        | Impl { impl; _ } -> Query.demand context.database Interface.Summary.key impl
+        | Impl _ -> Query.demand context.database Interface.Summary.key path
         | _ -> None
       in
       let substitution_of (part : part) =
@@ -6187,7 +6162,10 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
            (* A tag's [from_template] may require more than its trait, since
               only a template calls it, where the tag is known; a call through
               a bound is an error, which keeps that sound. *)
-           && not (Path.equal part.callee.key.path template_trait) ->
+           && not
+                (match part.callee.key.path with
+                | Method { owner; _ } -> Path.equal owner template_trait
+                | _ -> false) ->
         List.iter
           (fun (clause : expression) -> assume context start (snd (value context inside clause)))
           part.requires;

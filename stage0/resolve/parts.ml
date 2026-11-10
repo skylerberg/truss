@@ -4,8 +4,9 @@ type part = Header | Body | Member_header of int | Member_body of int
 
 (* The spans of a definition's parts. A member's header runs from the
    member's start to its body's start, and a member without a body is all
-   header. A trait's, an [impl]'s, or a capability's own header runs to its
-   first member. *)
+   header. A trait's, an [impl]'s, or a capability's own header runs to the
+   first member it holds itself. The methods written inside it are
+   definitions of their own, and no part of it. *)
 let spans (definition : definition) =
   let split header body (whole : span) (body_span : span) =
     [ (header, Span.make whole.start body_span.start); (body, body_span) ]
@@ -31,16 +32,12 @@ let spans (definition : definition) =
   | Function { body; _ } | Test { body; _ } | Theorem { body; _ } | Law_proof { body; _ } ->
       split Header Body definition.span body.span
   | Constant { value; _ } -> split Header Body definition.span value.span
-  | Type_definition _ | Definition_error _ -> [ (Header, definition.span) ]
+  | Method_declaration _ | Type_definition _ | Definition_error _ -> [ (Header, definition.span) ]
   | Trait { members; _ } ->
       with_members members (function
-        | Trait_method { body = Some body; _ } -> Some body.span
         | Law { body; _ } -> Some body.span
-        | Trait_method { body = None; _ } | Associated_type _ | Trait_member_error -> None)
-  | Impl { members; _ } ->
-      with_members members (function
-        | Impl_method { body; _ } -> Some body.span
-        | Associated_definition _ | Impl_member_error -> None)
+        | Associated_type _ | Trait_member_error -> None)
+  | Impl { members; _ } -> with_members members (fun (_ : impl_member) -> None)
   | Capability { members; _ } -> with_members members (fun (_ : capability_member) -> None)
 
 let lies_in all (recovered : span) (part_span : span) =

@@ -25,6 +25,9 @@ type t = {
           header read again, so that ids are unique within the definition. *)
   recoveries : Source.span list ref;
       (** Where the parser recovered, in this definition and its interpolations, newest first. *)
+  methods : (int * int) list ref;
+      (** The methods written inside this definition, each by the indexes of its first token and one
+          past its last, newest first. Each is a definition of its own, parsed apart. *)
   mutable cut_off : bool;
       (** The current item has consumed a closer the lexer inserted, so what follows in it is not
           what the author wrote, and no more syntax errors are reported in it. *)
@@ -72,6 +75,7 @@ let create ~source ~diagnostics ~base tokens ~first ~stop =
     depth = 0;
     next_id = ref 0;
     recoveries = ref [];
+    methods = ref [];
     cut_off = false;
     cut_off_end = false;
     line_ended = false;

@@ -250,6 +250,7 @@ let fields cursor (fields : field list) =
 let definition cursor (definition : definition) =
   match definition.kind with
   | Function function_ -> function_definition cursor function_
+  | Method_declaration declared -> signature cursor declared
   | Type_definition { generics; body; clauses; _ } ->
       generic_parameters cursor generics;
       (match body with
@@ -268,7 +269,6 @@ let definition cursor (definition : definition) =
       List.iter
         (fun (member : trait_member line) ->
           match member.kind with
-          | Trait_method { signature; body } -> function_ cursor signature body
           | Law law ->
               parameters cursor law.parameters;
               List.iter (expression cursor (specification plain)) law.requires;
@@ -280,17 +280,10 @@ let definition cursor (definition : definition) =
       List.iter
         (fun (member : impl_member line) ->
           match member.kind with
-          | Impl_method function_ -> function_definition cursor function_
           | Associated_definition (_, type_) -> types cursor plain type_
           | Impl_member_error -> ())
         members
-  | Capability { members; _ } ->
-      List.iter
-        (fun (member : capability_member line) ->
-          match member.kind with
-          | Capability_method method_ -> signature cursor method_
-          | Capability_member_error -> ())
-        members
+  | Capability _ -> ()
   | Constant { type_; value; _ } ->
       types cursor plain type_;
       expression cursor plain value
