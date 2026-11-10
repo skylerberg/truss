@@ -40,7 +40,7 @@ impl Display for Error {
   }
 }
 
-public fn Parser.new(name: StringSlice, about: StringSlice) -> Parser {
+public fn Parser.new(name: StringSlice, about: StringSlice = "") -> Parser {
   Parser(name: name.to_string(), about: about.to_string(), parameters: [], commands: [])
 }
 
