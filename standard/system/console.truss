@@ -1,5 +1,6 @@
 use standard::console
 use standard::system::calls
+use standard::system::handles
 use standard::system::lines
 
 internal type SystemConsole(input: lines::LineInput)
@@ -31,18 +32,18 @@ impl Console for SystemConsole {
   }
 
   fn input(self) -> console::Input {
-    todo
+    console::Input.from_handle(handles::duplicate(0))
   }
 
   fn output(self) -> console::Output {
-    todo
+    console::Output.from_handle(handles::duplicate(1))
   }
 
   fn error_output(self) -> console::Output {
-    todo
+    console::Output.from_handle(handles::duplicate(2))
   }
 
   fn terminal(self) -> console::Terminal {
-    todo
+    console::Terminal.from_handle(handles::controlling_terminal())
   }
 }
