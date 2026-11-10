@@ -58,7 +58,9 @@ let () =
          fn Bag.each(own self) yields own Int64 { todo }\n");
   test "a type's constant cannot share a name with a trait's method" (fun () ->
       one_diagnostic
-        "trait Bounded {\n  fn largest() -> Self\n}\n\n\
+        "trait Bounded {\n\
+        \  fn largest() -> Self\n\
+         }\n\n\
          type Level(value: Int64)\n\n\
          let Level.largest: Level = Level(9)\n\n\
          impl Bounded for Level {\n\
@@ -201,15 +203,17 @@ let () =
       Database.load_package (Engine.of_context database) ~name:"lib" ~dependencies:[]
         [
           ( module_of "lib::counter",
-            "public type Counter(count: Int64)\n\n\
-             public fn Counter.label(self) -> Int64 { todo }\n" );
+            "public type Counter(count: Int64)\n\npublic fn Counter.label(self) -> Int64 { todo }\n"
+          );
         ];
       Database.load_package (Engine.of_context database) ~name:"app"
         ~dependencies:[ { package = "lib"; capabilities = [] } ]
         [
           ( module_of "app::main",
             "use lib::counter\n\n\
-             trait Cleared {\n  fn label(mut self) -> Int64\n}\n\n\
+             trait Cleared {\n\
+            \  fn label(mut self) -> Int64\n\
+             }\n\n\
              impl Cleared for counter::Counter {\n\
             \  fn label(mut self) -> Int64 { todo }\n\
              }\n" );

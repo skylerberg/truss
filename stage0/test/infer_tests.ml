@@ -617,11 +617,19 @@ let () =
          }\n");
   test "a call picks a version among a type's own and its family of traits'" (fun () ->
       fine
-        "trait Shown {\n  fn label(self) -> Int64\n}\n\n\
-         trait Cleared: Shown {\n  fn label(mut self) -> Int64\n}\n\n\
+        "trait Shown {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         trait Cleared: Shown {\n\
+        \  fn label(mut self) -> Int64\n\
+         }\n\n\
          type Counter(count: Int64)\n\n\
-         impl Shown for Counter {\n  fn label(self) -> Int64 { todo }\n}\n\n\
-         impl Cleared for Counter {\n  fn label(mut self) -> Int64 { todo }\n}\n\n\
+         impl Shown for Counter {\n\
+        \  fn label(self) -> Int64 { todo }\n\
+         }\n\n\
+         impl Cleared for Counter {\n\
+        \  fn label(mut self) -> Int64 { todo }\n\
+         }\n\n\
          fn Counter.label(own self) -> Int64 { todo }\n\n\
          fn f(counter: mut Counter) -> Int64 {\n\
         \  let read = counter.label()\n\
@@ -633,45 +641,91 @@ let () =
          }\n");
   test "two traits that give one version of a name are ambiguous at the call" (fun () ->
       one_diagnostic
-        "trait First {\n  fn label(self) -> Int64\n}\n\n\
-         trait Second {\n  fn label(self) -> Int64\n}\n\n\
+        "trait First {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         trait Second {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
          type Counter(count: Int64)\n\n\
-         impl First for Counter {\n  fn label(self) -> Int64 { todo }\n}\n\n\
-         impl Second for Counter {\n  fn label(self) -> Int64 { todo }\n}\n\n\
-         fn f(counter: Counter) -> Int64 {\n  counter.label()\n}\n"
+         impl First for Counter {\n\
+        \  fn label(self) -> Int64 { todo }\n\
+         }\n\n\
+         impl Second for Counter {\n\
+        \  fn label(self) -> Int64 { todo }\n\
+         }\n\n\
+         fn f(counter: Counter) -> Int64 {\n\
+        \  counter.label()\n\
+         }\n"
         "types.ambiguous_method"
         ~fixed:
-          "trait First {\n  fn label(self) -> Int64\n}\n\n\
-           trait Second {\n  fn label(self) -> Int64\n}\n\n\
+          "trait First {\n\
+          \  fn label(self) -> Int64\n\
+           }\n\n\
+           trait Second {\n\
+          \  fn label(self) -> Int64\n\
+           }\n\n\
            type Counter(count: Int64)\n\n\
-           impl First for Counter {\n  fn label(self) -> Int64 { todo }\n}\n\n\
-           impl Second for Counter {\n  fn label(self) -> Int64 { todo }\n}\n\n\
-           fn f(counter: Counter) -> Int64 {\n  First.label(counter)\n}\n");
+           impl First for Counter {\n\
+          \  fn label(self) -> Int64 { todo }\n\
+           }\n\n\
+           impl Second for Counter {\n\
+          \  fn label(self) -> Int64 { todo }\n\
+           }\n\n\
+           fn f(counter: Counter) -> Int64 {\n\
+          \  First.label(counter)\n\
+           }\n");
   test "two unrelated traits that share a name are ambiguous however each takes self" (fun () ->
       one_diagnostic
-        "trait First {\n  fn label(self) -> Int64\n}\n\n\
-         trait Second {\n  fn label(own self) -> Int64\n}\n\n\
+        "trait First {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         trait Second {\n\
+        \  fn label(own self) -> Int64\n\
+         }\n\n\
          type Counter(count: Int64)\n\n\
-         impl First for Counter {\n  fn label(self) -> Int64 { todo }\n}\n\n\
-         impl Second for Counter {\n  fn label(own self) -> Int64 { todo }\n}\n\n\
-         fn f() -> Int64 {\n  Counter(count: 3).label()\n}\n"
+         impl First for Counter {\n\
+        \  fn label(self) -> Int64 { todo }\n\
+         }\n\n\
+         impl Second for Counter {\n\
+        \  fn label(own self) -> Int64 { todo }\n\
+         }\n\n\
+         fn f() -> Int64 {\n\
+        \  Counter(count: 3).label()\n\
+         }\n"
         "types.ambiguous_method");
   test "two bounds that give one version of a name are ambiguous through the type" (fun () ->
       one_diagnostic
-        "trait First {\n  fn make() -> Self\n}\n\n\
-         trait Second {\n  fn make() -> Self\n}\n\n\
-         fn f[Value: First + Second]() -> Value {\n  Value.make()\n}\n"
+        "trait First {\n\
+        \  fn make() -> Self\n\
+         }\n\n\
+         trait Second {\n\
+        \  fn make() -> Self\n\
+         }\n\n\
+         fn f[Value: First + Second]() -> Value {\n\
+        \  Value.make()\n\
+         }\n"
         "types.ambiguous_method");
   test "two unrelated bounds that share a name are ambiguous however each takes self" (fun () ->
       one_diagnostic
-        "trait First {\n  fn label(self) -> Int64\n}\n\n\
-         trait Second {\n  fn label(mut self) -> Int64\n}\n\n\
-         fn f[Value: First + Second](value: Value) -> Int64 {\n  value.label()\n}\n"
+        "trait First {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         trait Second {\n\
+        \  fn label(mut self) -> Int64\n\
+         }\n\n\
+         fn f[Value: First + Second](value: Value) -> Int64 {\n\
+        \  value.label()\n\
+         }\n"
         "types.ambiguous_method");
   test "a bound's method is picked from its family by how the call takes self" (fun () ->
       fine
-        "trait Shown {\n  fn label(self) -> Int64\n}\n\n\
-         trait Cleared: Shown {\n  fn label(mut self) -> Int64\n}\n\n\
+        "trait Shown {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         trait Cleared: Shown {\n\
+        \  fn label(mut self) -> Int64\n\
+         }\n\n\
          fn f[Value: Cleared](value: mut Value) -> Int64 {\n\
         \  let read = value.label()\n\
         \  let cleared = mut value.label()\n\
@@ -680,8 +734,12 @@ let () =
          }\n");
   test "a trait's method written in full has no version for a mark it lacks" (fun () ->
       one_diagnostic
-        "trait Shown {\n  fn label(self) -> Int64\n}\n\n\
-         fn f[Value: Shown](value: mut Value) -> Int64 {\n  Shown.label(mut value)\n}\n"
+        "trait Shown {\n\
+        \  fn label(self) -> Int64\n\
+         }\n\n\
+         fn f[Value: Shown](value: mut Value) -> Int64 {\n\
+        \  Shown.label(mut value)\n\
+         }\n"
         "types.wrong_receiver");
   test "an associated type of an argument is normalized" (fun () ->
       fine

@@ -386,8 +386,8 @@ let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path
   | Some from ->
       report state Redeclared_method name.span
         (Printf.sprintf
-           "`%s` already declares a `%s` that takes %s, so a trait that requires it cannot \
-            declare it again."
+           "`%s` already declares a `%s` that takes %s, so a trait that requires it cannot declare \
+            it again."
            (Path.show from) name.text (Path.show_receiver receiver))
   | None -> ()
 

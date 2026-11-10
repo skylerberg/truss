@@ -104,8 +104,8 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
     arguments_alone state env arguments
       (error state Wrong_receiver member.span
          (Printf.sprintf
-            "`%s` has no version for this receiver's mark; mark the receiver `mut` or `own` as \
-             its versions take."
+            "`%s` has no version for this receiver's mark; mark the receiver `mut` or `own` as its \
+             versions take."
             member.text))
   in
   (* A method with [self], written in full: its first argument is the
@@ -139,8 +139,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
               | Some expected, Returns output -> ignore (unify state output expected)
               | _ -> ());
               let matched, left_out =
-                match_arguments state value instance.signature.parameters arguments
-                  ~record:false
+                match_arguments state value instance.signature.parameters arguments ~record:false
               in
               let checked =
                 check_arguments state env instance.signature.parameters matched ~offset:0
@@ -161,35 +160,38 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
               match versions state type_ member.text with
               | Error traits -> ambiguous traits
               | Ok found -> (
-              match (arguments, List.assoc_opt wanted found) with
-              | receiver :: rest, Some (Own_version method_path) ->
-                  let inner =
-                    match receiver.value.kind with Mode (_, inner) -> inner | _ -> receiver.value
-                  in
-                  let receiver_type = expression state env inner in
-                  if inner != receiver.value then record state receiver.value receiver_type;
-                  if not (unify state receiver_type type_) then
-                    mismatch state inner.span ~expected:type_ ~found:receiver_type;
-                  let mode : T.mode = match wanted with Mut -> Mut | Own -> Own | _ -> Read in
-                  check_mode state receiver.value
-                    { name = "self"; mode; type_; has_default = false }
-                    receiver_type;
-                  method_with_receiver state env ?expected value ~receiver:receiver.value
-                    ~receiver_type method_path rest
-              | _ :: _, Some (Trait_version (trait, method_)) ->
-                  trait_method_through_type state env ?expected value type_ trait method_ arguments
-              | _ :: _, None when found <> [] -> wrong_receiver ()
-              | [], _ when found <> [] ->
-                  error state Missing_argument value.span
-                    "A method written in full takes its receiver as its first argument."
-              | _ ->
-                  arguments_alone state env arguments
-                    (match Members.broken state.database path with
-                    | Some report -> T.Error report
-                    | None ->
-                        error state Unknown_member member.span
-                          (Printf.sprintf "`%s` has no method `%s`." (show state type_) member.text))
-              ))))
+                  match (arguments, List.assoc_opt wanted found) with
+                  | receiver :: rest, Some (Own_version method_path) ->
+                      let inner =
+                        match receiver.value.kind with
+                        | Mode (_, inner) -> inner
+                        | _ -> receiver.value
+                      in
+                      let receiver_type = expression state env inner in
+                      if inner != receiver.value then record state receiver.value receiver_type;
+                      if not (unify state receiver_type type_) then
+                        mismatch state inner.span ~expected:type_ ~found:receiver_type;
+                      let mode : T.mode = match wanted with Mut -> Mut | Own -> Own | _ -> Read in
+                      check_mode state receiver.value
+                        { name = "self"; mode; type_; has_default = false }
+                        receiver_type;
+                      method_with_receiver state env ?expected value ~receiver:receiver.value
+                        ~receiver_type method_path rest
+                  | _ :: _, Some (Trait_version (trait, method_)) ->
+                      trait_method_through_type state env ?expected value type_ trait method_
+                        arguments
+                  | _ :: _, None when found <> [] -> wrong_receiver ()
+                  | [], _ when found <> [] ->
+                      error state Missing_argument value.span
+                        "A method written in full takes its receiver as its first argument."
+                  | _ ->
+                      arguments_alone state env arguments
+                        (match Members.broken state.database path with
+                        | Some report -> T.Error report
+                        | None ->
+                            error state Unknown_member member.span
+                              (Printf.sprintf "`%s` has no method `%s`." (show state type_)
+                                 member.text))))))
   | T.Parameter parameter -> (
       (* A method of a bound: the one without [self], or else the version
          the first argument's mark names. Two bounds on one trait differ only
@@ -201,8 +203,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
             | Some method_
               when not
                      (List.exists
-                        (fun ((other : T.trait_reference), _) ->
-                          Path.equal other.trait bound.trait)
+                        (fun ((other : T.trait_reference), _) -> Path.equal other.trait bound.trait)
                         found) ->
                 found @ [ (bound, method_) ]
             | _ -> found)
@@ -414,8 +415,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
     error state Wrong_receiver member.span
       (Printf.sprintf "`%s` has no version that takes %s here; it has %s." member.text
          (Path.show_receiver wanted)
-         (String.concat ", "
-            (List.map (fun (receiver, _) -> Path.show_receiver receiver) versions)))
+         (String.concat ", " (List.map (fun (receiver, _) -> Path.show_receiver receiver) versions)))
   in
   (* A place that calls a method with only a [mut] or [own] version is
      missing its mark, which the fix adds. *)
@@ -440,35 +440,34 @@ and method_call state env ?expected (value : expression) (base : expression) (me
   | _ -> (
       match versions state receiver_type member.text with
       | Ok [] ->
-        let candidates =
-          match receiver_type with
-          | T.Named { path; arguments } -> (
-              match Members.fields state.database path arguments with
-              | Some fields -> List.map (fun (field : T.field) -> field.field_name) fields
-              | None -> [])
-          | _ -> []
-        in
-        let broken =
-          match receiver_type with
-          | T.Named { path; _ } -> Members.broken state.database path
-          | _ -> None
-        in
-        arguments_alone state env arguments
-          (match broken with
-          | Some report -> T.Error report
-          | None ->
-              error state Unknown_member member.span
-                ~fixes:
-                  (match Resolve.closest member.text candidates with
-                  | Some candidate ->
-                      [
-                        fix
-                          (Printf.sprintf "Write `%s`." candidate)
-                          [ replace member.span candidate ];
-                      ]
-                  | None -> [])
-                (Printf.sprintf "`%s` has no method `%s`." (show state receiver_type)
-                   member.text))
+          let candidates =
+            match receiver_type with
+            | T.Named { path; arguments } -> (
+                match Members.fields state.database path arguments with
+                | Some fields -> List.map (fun (field : T.field) -> field.field_name) fields
+                | None -> [])
+            | _ -> []
+          in
+          let broken =
+            match receiver_type with
+            | T.Named { path; _ } -> Members.broken state.database path
+            | _ -> None
+          in
+          arguments_alone state env arguments
+            (match broken with
+            | Some report -> T.Error report
+            | None ->
+                error state Unknown_member member.span
+                  ~fixes:
+                    (match Resolve.closest member.text candidates with
+                    | Some candidate ->
+                        [
+                          fix
+                            (Printf.sprintf "Write `%s`." candidate)
+                            [ replace member.span candidate ];
+                        ]
+                    | None -> [])
+                  (Printf.sprintf "`%s` has no method `%s`." (show state receiver_type) member.text))
       | Ok found -> (
           match choose_temporary found with
           | None -> missing_receiver_mark found
@@ -479,39 +478,38 @@ and method_call state env ?expected (value : expression) (base : expression) (me
               trait_method_call state env value ~receiver:base ~receiver_type trait method_
                 ~type_arguments arguments)
       | Error traits ->
-                (* The call written in full: the receiver first, then the
+          (* The call written in full: the receiver first, then the
                    arguments as written. *)
-                let receiver_text = source state base.span in
-                let arguments_text =
-                  List.map
-                    (fun (argument : argument) ->
-                      let start =
-                        match argument.label with
-                        | Some label -> label.span.start
-                        | None -> argument.value.span.start
-                      in
-                      source state (Span.make start argument.value.span.stop))
-                    arguments
+          let receiver_text = source state base.span in
+          let arguments_text =
+            List.map
+              (fun (argument : argument) ->
+                let start =
+                  match argument.label with
+                  | Some label -> label.span.start
+                  | None -> argument.value.span.start
                 in
-                error state Ambiguous_method member.span
-                  ~fixes:
-                    (List.map
-                       (fun (trait : T.trait_reference) ->
-                         let name =
-                           match trait.trait with Top { name; _ } -> name | path -> Path.show path
-                         in
-                         fix
-                           (Printf.sprintf "Call `%s`'s `%s`." name member.text)
-                           [
-                             replace value.span
-                               (Printf.sprintf "%s.%s(%s)" name member.text
-                                  (String.concat ", " (receiver_text :: arguments_text)));
-                           ])
-                       traits)
-                  (Printf.sprintf
-                     "More than one trait gives `%s` a method `%s`. Write the call in full to say \
-                      which."
-                     (show state receiver_type) member.text))
+                source state (Span.make start argument.value.span.stop))
+              arguments
+          in
+          error state Ambiguous_method member.span
+            ~fixes:
+              (List.map
+                 (fun (trait : T.trait_reference) ->
+                   let name =
+                     match trait.trait with Top { name; _ } -> name | path -> Path.show path
+                   in
+                   fix
+                     (Printf.sprintf "Call `%s`'s `%s`." name member.text)
+                     [
+                       replace value.span
+                         (Printf.sprintf "%s.%s(%s)" name member.text
+                            (String.concat ", " (receiver_text :: arguments_text)));
+                     ])
+                 traits)
+            (Printf.sprintf
+               "More than one trait gives `%s` a method `%s`. Write the call in full to say which."
+               (show state receiver_type) member.text))
 
 and method_with_receiver state env ?expected ?(type_arguments = []) (value : expression)
     ~(receiver : expression) ~receiver_type method_path arguments =
