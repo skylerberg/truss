@@ -1328,6 +1328,40 @@ mut grid.cell(position).visit()
   `yield`, or with two, is a compile error.
 - A lending method cannot drive a `for` loop or be pulled.
 
+A method can also lend a value that it builds around its parts. This is how
+a lookup that can miss lends an `Option` without copying the element:
+
+```truss
+fn Slice[Element].get(self, index: USize) lends Option[Element] {
+  if index < self.length() {
+    yield Some(self[index])
+  } else {
+    yield None
+  }
+}
+```
+
+- **The operand of `yield` may be a constructor application.** An argument
+  that is a place is lent to the value that is built. It needs no `own` and
+  no copy. The place can be any place the method could yield by itself.
+- **Constructors nest,** as in
+  `yield Some(SplitFirst(first: self[0], rest: self[1..]))`.
+- **Only the constructor written directly after `yield` counts.** A `let`,
+  an `if` expression, or a call around it does not, so the `if` above
+  chooses between two `yield` statements.
+- **The other fields have nothing to drop.** Beside a lent place, a field
+  is a place, a nested constructor, or a value that is `Plain`, such as an
+  index or a `Slice`. An owned value there is an error. Bind it to a name
+  first, and the name is then a place.
+- **A `mut` lend marks each place it lends `mut`:**
+  `yield Indexed(index: index, value: mut self[index])`. The caller's
+  changes to a marked field reach the place when the lend ends. A field
+  without the mark is a value, and a change to it ends with the lend. Two
+  places lent `mut` by one `yield` must be different places.
+- **The value owns none of what it was lent.** It holds each lent place's
+  value for as long as it is lent, and `self` is lent whole for that time,
+  as it is when one part is lent.
+
 A yielding method gives out parts one after another:
 
 - `yields Cell` gives read-only parts, `yields mut Cell` lends `mut` access
