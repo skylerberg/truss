@@ -1533,23 +1533,36 @@ follow the same data race rule as `parallel`. They differ in two ways: `?`,
   `concurrent` code,** for this check: a `return` ends the function, and a
   `break` or a `continue` goes to its loop. By then each other branch has
   either not started or run to one of its ends, and each end is checked.
-- **A task cannot borrow what the method of a `concurrent for` yields.** Each
-  iteration runs as a task, and the task outlives the `yield` that started it:
-  the yielding method resumes while the task still runs. If the task borrowed
-  the yielded element, the method could mutate or drop the element after it
-  resumes, which would be a use after free. So a `concurrent for` is rejected
-  (`ownership.task_outlives_yield`) in three cases:
-  - the method yields `mut`;
-  - the method yields read-only, and the element type is not `Plain`;
-  - the element type is a view type. This case also applies to a method that
-    yields owned values and to a loop over a cursor.
+- **A task can keep a borrow or a view only of a place that the yielding method
+  cannot mutate or drop.** Each iteration of a `concurrent for` runs as a task,
+  and the task outlives the `yield` that started it: the yielding method
+  resumes while the task still runs. A place inside a read-only parameter of
+  the method cannot change or be dropped while the call runs, so a task can
+  borrow it or keep a view of it. A local of the method, and a place inside a
+  `mut` or `own` parameter, can change, so a borrow or a view of one would be a
+  use after free. A `concurrent for` over a yielding method is therefore
+  rejected (`ownership.task_outlives_yield`) when one of the method's `yield`s
+  - yields `mut`;
+  - lends a place that is not inside a read-only parameter;
+  - yields a value that views a place that is not inside a read-only parameter
+    or a constant.
 
-  A method that yields by position is exempt. Its body is a single `for` loop
-  over a range of integers, and the loop body is a single `yield`. The tasks
-  run as the iterations of that loop, and the method does nothing after the
-  loop. `Core_walk.yields_by_position` decides this. A `parallel for` needs no
-  such rule: over a method that does not yield by position, the method runs
-  sequentially and each loop body runs inline at its `yield`.
+  Three cases are decided differently:
+  - A method that yields by position is accepted. Its body is a single `for`
+    loop over a range of integers, and the loop body is a single `yield`. The
+    tasks run as the iterations of that loop, and the method does nothing after
+    the loop. `Core_walk.yields_by_position` decides this.
+  - An element of a `Plain` type that is not a view is copied to the task. It
+    is accepted whatever it was borrowed from, unless the method yields `mut`.
+  - For a callee without a known body, such as a trait method that is called
+    through a bound, and for a loop over a cursor, the task needs an owned
+    element that is not a view, or a `Plain` copy of a read-only one.
+
+  The fact about a method's `yield`s is `Views.task_hazard`. The method's own
+  dataflow analysis computes it, and the check of the `concurrent for` reads
+  it. A `parallel for` needs no such rule: over a method that does not yield by
+  position, the method runs sequentially and each loop body runs inline at its
+  `yield`.
 
 ## Capabilities
 

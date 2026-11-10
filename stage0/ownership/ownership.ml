@@ -16,8 +16,11 @@ type result = {
   obligations : Checked.obligation list;
 }
 
-(* [None] if the definition has no core form. *)
-let check database (key : Resolve.Names.key) : result option =
+(* The inputs of the check of one definition: a new context, the core form,
+   the lowered interface, and whether the definition is executable. A
+   specification-only function is never executed, so it has no moves or
+   borrows to check. [None] if the definition has no core form. *)
+let inputs database (key : Resolve.Names.key) =
   match
     ( Query.demand database Infer.core key,
       Query.demand database Resolve.Names.spans key,
@@ -60,26 +63,65 @@ let check database (key : Resolve.Names.key) : result option =
         }
       in
       Context.collect context form.definition;
-      (* A specification-only function is never executed, so it has no moves
-         or borrows to check. *)
       let executable =
         match lowered.interface with
         | Function_interface signature | Theorem_interface signature ->
             not signature.specification_only
         | _ -> true
       in
-      (if executable then
-         match
-           Graph.of_definition ~plain:(Context.plain context) ~is_view:(Context.is_view context)
-             ~stores_function:(Context.stores_function context) form.definition
-         with
-         | Some graph ->
-             Moves.check context graph;
-             Views.check context graph
-         | None -> ());
+      Some (context, form, lowered, executable)
+  | _ -> None
+
+(* The result of the dataflow analyses of one definition. *)
+type analysis = {
+  reported : Diagnostic.t list;
+  moved : Core.id list;
+  must_be_disjoint : (Core.origin * Core.origin) list;
+  task_hazard : Views.task_hazard option;
+}
+
+(* The dataflow analyses of a definition: moves, loans, and views. They
+   read no other definition's analysis. The rules on [yield] read a
+   callee's [task_hazard], so they demand this query, and two methods that
+   loop over each other cannot form a query cycle. *)
+let analysis =
+  Query.query ~name:"ownership_analysis" ~phase:Bodies ~show:Resolve.Names.show_key
+    (fun database key ->
+      Option.map
+        (fun ((context : Context.context), (form : Core.t), _, executable) ->
+          let task_hazard =
+            if executable then
+              match
+                Graph.of_definition ~plain:(Context.plain context)
+                  ~is_view:(Context.is_view context)
+                  ~stores_function:(Context.stores_function context) form.definition
+              with
+              | Some graph ->
+                  Moves.check context graph;
+                  Views.check context graph
+              | None -> None
+            else None
+          in
+          {
+            reported = context.diagnostics;
+            moved = context.moves;
+            must_be_disjoint = context.must_be_disjoint;
+            task_hazard;
+          })
+        (inputs database key))
+
+(* [None] if the definition has no core form. *)
+let check database (key : Resolve.Names.key) : result option =
+  match (inputs database key, Query.demand database analysis key) with
+  | Some (context, form, lowered, executable), Some analyzed ->
       if executable then begin
         Yield_rules.check_cursors context form.definition;
-        Yield_rules.check_concurrent_loops context form.definition;
+        Yield_rules.check_concurrent_loops context form.definition ~task_hazard:(fun path ->
+            Option.map
+              (fun (callee : analysis) -> callee.task_hazard)
+              (Option.bind
+                 (Query.demand database Interface.Summary.key path)
+                 (Query.demand database analysis)));
         (* A lending method yields exactly once on every path. The report
            is at the method's name. *)
         match
@@ -102,8 +144,8 @@ let check database (key : Resolve.Names.key) : result option =
             List.sort_uniq
               (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
                 compare (left.span, left.message) (right.span, right.message))
-              context.diagnostics;
-          moves = List.sort_uniq compare context.moves;
+              (analyzed.reported @ context.diagnostics);
+          moves = List.sort_uniq compare analyzed.moved;
           (* Two rules can report the same pair, in either order, so the
              pairs are normalized and deduplicated. *)
           obligations =
@@ -112,7 +154,7 @@ let check database (key : Resolve.Names.key) : result option =
               (List.sort_uniq compare
                  (List.map
                     (fun (first, second) -> (min first second, max first second))
-                    context.must_be_disjoint));
+                    analyzed.must_be_disjoint));
         }
   | _ -> None
 

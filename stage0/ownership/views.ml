@@ -223,7 +223,18 @@ let read_loan_message context (loan : loan) ~viewed (place : Place.t) ~verb =
         place verb
         (if viewed then borrowed ^ ", which views it," else borrowed)
 
-let check context (graph : Graph.t) =
+(* Why a task that starts at one of a method's [yield]s cannot keep the
+   yielded value after the method resumes. *)
+type task_hazard =
+  | Yields_mut  (** The method yields [mut] borrows. *)
+  | Borrows of string
+      (** A yielded value borrows or views this place, which the method can mutate or drop when it
+          resumes: a local, or a place inside a [mut] or [own] parameter. *)
+
+(* Reports the errors of loans and views. Returns the first [task_hazard]
+   of the definition's [yield]s, if it has one. *)
+let check context (graph : Graph.t) : task_hazard option =
+  let task_hazard = ref None in
   let before = held_views_before context graph in
   let after = live_after graph in
   (* Whether a loan covers a place: the loan borrows the place, or it
@@ -555,7 +566,37 @@ let check context (graph : Graph.t) =
                         through."
                        (show context slice) (show context viewed.place) (show context slice))
               | None -> ()))
-      | Yield_point views -> (
+      | Yield_point { mode; lent; views } -> (
+          (* A task can keep a borrow or a view only of a place that the
+             method cannot mutate or drop: a place inside a read-only
+             parameter, or a constant. *)
+          (if !task_hazard = None then
+             let safe (view : view) =
+               match view.place.root with
+               | Constant _ -> true
+               | Environment -> false
+               | Local local ->
+                   (local = Self || List.mem local context.parameters)
+                   && kind context view.place.root = Borrowed
+             in
+             let borrowed =
+               List.concat_map
+                 (function
+                   | Some place -> resolve context before.(index) [ { place; copied_out = false } ]
+                   | None -> [])
+                 lent
+             in
+             task_hazard :=
+               if mode = Mut then Some Yields_mut
+               else
+                 match
+                   List.find_opt
+                     (fun view -> not (safe view))
+                     (borrowed @ resolve context before.(index) views)
+                 with
+                 | Some view -> Some (Borrows (show context view.place))
+                 | None when List.mem None lent -> Some (Borrows "a part that a lending call lends")
+                 | None -> None);
           (* The caller may store a yielded view, so a method can yield a
              view only of its parameters. *)
           match
@@ -678,4 +719,5 @@ let check context (graph : Graph.t) =
                   mutate only its own element and its own locals."
                  keyword))
         (fst (effects range)))
-    graph.simultaneous_loops
+    graph.simultaneous_loops;
+  !task_hazard
