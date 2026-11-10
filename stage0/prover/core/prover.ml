@@ -396,30 +396,67 @@ type running = {
 
 let not_running = { template = (fun _ -> None); call = (fun _ -> None) }
 
-let answers ?(running = not_running) solver (obligations : Translate.obligation list) =
-  (* What running code gives of the calls a query mentions, as facts, which
-     are only as true as the compiled code, which the prover trusts. *)
-  let given (obligation : Translate.obligation) =
-    List.filter_map
-      (fun (known : Translate.known_call) ->
-        Option.map
-          (fun value ->
-            L.equal known.term
-              (if known.result_is_bool then L.Boolean (not (Z.equal value Z.zero))
-               else L.Integer value))
-          (running.call known))
-      obligation.known_calls
+(* What running code gives of the calls a query mentions, as facts, which
+   are only as true as the compiled code, which the prover trusts. *)
+let given running (obligation : Translate.obligation) =
+  List.filter_map
+    (fun (known : Translate.known_call) ->
+      Option.map
+        (fun value ->
+          L.equal known.term
+            (if known.result_is_bool then L.Boolean (not (Z.equal value Z.zero))
+             else L.Integer value))
+        (running.call known))
+    obligation.known_calls
+
+(* An obligation's query with a choice of constants for its bounds. *)
+let query_with running (obligation : Translate.obligation) choice =
+  let pins =
+    List.map
+      (fun (constants : Costs.constants) ->
+        Costs.pin constants (List.assoc constants.factor choice))
+      obligation.constants
   in
+  { obligation.query with facts = obligation.query.facts @ pins @ given running obligation }
+
+(* Every choice of a pair of constants for each bound the obligations
+   mention, in the order they are tried. *)
+let choices (obligations : Translate.obligation list) =
+  let groups =
+    List.fold_left
+      (fun groups (obligation : Translate.obligation) ->
+        List.fold_left
+          (fun groups (constants : Costs.constants) ->
+            if List.exists (fun (g : Costs.constants) -> g.factor = constants.factor) groups then
+              groups
+            else groups @ [ constants ])
+          groups obligation.constants)
+      [] obligations
+  in
+  let rec all = function
+    | [] -> [ [] ]
+    | (constants : Costs.constants) :: rest ->
+        List.concat_map
+          (fun pair -> List.map (fun choice -> (constants.factor, pair) :: choice) (all rest))
+          constants.pairs
+  in
+  all groups
+
+(* The queries a definition's obligations are first asked: each with the
+   first choice of constants, leaving out those that running code
+   decides. *)
+let first_queries running (obligations : Translate.obligation list) =
+  let first = List.hd (choices obligations) in
+  List.filter_map
+    (fun (obligation : Translate.obligation) ->
+      if obligation.evaluation <> None then None
+      else Some (List.map fst obligation.values, query_with running obligation first))
+    obligations
+
+let answers ?(running = not_running) solver (obligations : Translate.obligation list) =
+  ignore (Solver.solve_all solver (first_queries running obligations));
   let solve (obligation : Translate.obligation) choice =
-    let pins =
-      List.map
-        (fun (constants : Costs.constants) ->
-          Costs.pin constants (List.assoc constants.factor choice))
-        obligation.constants
-    in
-    let query =
-      { obligation.query with facts = obligation.query.facts @ pins @ given obligation }
-    in
+    let query = query_with running obligation choice in
     let values = List.map fst obligation.values in
     (* A clause running code decides is decided so, and the solver never
        asked. *)
@@ -435,28 +472,10 @@ let answers ?(running = not_running) solver (obligations : Translate.obligation 
             | Some exact -> Solved (Solver.solve solver ~values exact)
             | None -> Solved first))
   in
-  let groups =
-    List.fold_left
-      (fun groups (obligation : Translate.obligation) ->
-        List.fold_left
-          (fun groups (constants : Costs.constants) ->
-            if List.exists (fun (g : Costs.constants) -> g.factor = constants.factor) groups then
-              groups
-            else groups @ [ constants ])
-          groups obligation.constants)
-      [] obligations
-  in
-  let rec choices = function
-    | [] -> [ [] ]
-    | (constants : Costs.constants) :: rest ->
-        List.concat_map
-          (fun pair -> List.map (fun choice -> (constants.factor, pair) :: choice) (choices rest))
-          constants.pairs
-  in
   let bounded =
     List.filter (fun (obligation : Translate.obligation) -> obligation.constants <> []) obligations
   in
-  let all_choices = choices groups in
+  let all_choices = choices obligations in
   let chosen =
     match
       List.find_opt
@@ -507,5 +526,23 @@ let definition_diagnostics ?running database solver (key : Names.key) =
                      or a theorem.")))
         (answers ?running solver outcome.obligations)
 
-let diagnostics ?running database solver module_ =
-  Names.per_definition database module_ (definition_diagnostics ?running database solver)
+(* The queries of every definition of the modules, solved together,
+   several at once, so that reading each definition's answers after finds
+   them solved. *)
+let solve_ahead ?(running = not_running) database solver modules =
+  ignore
+    (Solver.solve_all solver
+       (List.concat_map
+          (fun module_ ->
+            List.concat_map
+              (fun declaration ->
+                let key = Names.key_of declaration in
+                match (Query.demand database Names.base key, Query.demand database proof key) with
+                | Some _, Obligations outcome -> first_queries running outcome.obligations
+                | _ -> [])
+              (Query.demand database Names.declarations module_))
+          modules))
+
+let diagnostics ?(running = not_running) database solver module_ =
+  solve_ahead ~running database solver [ module_ ];
+  Names.per_definition database module_ (definition_diagnostics ~running database solver)

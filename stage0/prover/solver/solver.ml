@@ -83,6 +83,11 @@ let rec show_sexp = function
 
 let cache : (string, answer) Hashtbl.t = Hashtbl.create 256
 
+(* Queries are solved on several domains at once, which share the cache
+   and the count of what was solved. *)
+let lock = Mutex.create ()
+let locked f = Mutex.protect lock f
+
 let rec make_directories directory =
   if not (Sys.file_exists directory) then begin
     make_directories (Filename.dirname directory);
@@ -124,7 +129,7 @@ let solve solver ?(values = []) query =
         | _ -> None)
     | _ -> None
   in
-  match (Hashtbl.find_opt cache key, stored) with
+  match (locked (fun () -> Hashtbl.find_opt cache key), stored) with
   | Some answer, _ | None, Some answer -> answer
   | None, None ->
       let text = Logic.text query in
@@ -134,7 +139,7 @@ let solve solver ?(values = []) query =
         if requested = [] then ""
         else Printf.sprintf "(get-value (%s))\n" (String.concat " " (List.map snd requested))
       in
-      solver.solved <- solver.solved + 1;
+      locked (fun () -> solver.solved <- solver.solved + 1);
       let _, output, _ = Toolchain.run ~input solver.program [ "-in"; "-smt2" ] in
       let answer =
         match parse_sexps output with
@@ -157,7 +162,7 @@ let solve solver ?(values = []) query =
                  requested)
         | _ -> Out_of_steps
       in
-      Hashtbl.replace cache key answer;
+      locked (fun () -> Hashtbl.replace cache key answer);
       (match file with
       | Some file -> (
           let text =
@@ -182,4 +187,22 @@ let solve solver ?(values = []) query =
       | None -> ());
       answer
 
-let solved solver = solver.solved
+let solve_all solver queries =
+  let queries = Array.of_list queries in
+  let answers = Array.make (Array.length queries) Out_of_steps in
+  let next = Atomic.make 0 in
+  let rec work () =
+    let index = Atomic.fetch_and_add next 1 in
+    if index < Array.length queries then begin
+      let values, query = queries.(index) in
+      answers.(index) <- solve solver ~values query;
+      work ()
+    end
+  in
+  let others = min (Array.length queries) (Domain.recommended_domain_count ()) - 1 in
+  let domains = List.init (max 0 others) (fun _ -> Domain.spawn work) in
+  work ();
+  List.iter Domain.join domains;
+  Array.to_list answers
+
+let solved solver = locked (fun () -> solver.solved)

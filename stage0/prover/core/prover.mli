@@ -27,6 +27,12 @@ type running = {
 (** Running compiled code, which the caller gives through code generation: a template's check, and a
     call whose arguments are known, whose result is a [Bool] as 0 or 1. *)
 
+val solve_ahead : ?running:running -> Query.context -> Solver.t -> Path.module_ list -> unit
+(** Solves the queries of every definition of the modules, several at once, one for each core, so
+    that {!diagnostics} of each finds them solved. A caller that will ask for many modules' proofs
+    calls it once with all of them, which keeps every core busy where one module's queries are few.
+*)
+
 val diagnostics : ?running:running -> Query.context -> Solver.t -> Path.module_ -> Diagnostic.t list
 (** Every obligation of a file's definitions that the solver could not prove, and every definition
     the prover could not read, in the file's offsets and in order. [running] runs compiled code, as
