@@ -1298,6 +1298,62 @@ let () =
         \  mut table.insert(1, value: 2)\n\
          }\n")
 
+(* Literals of maps and sets, any, provide, and let else *)
+
+let () =
+  test "a map literal holds each key's value" (fun () ->
+      proven
+        "fn f() -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  let table: Map[Int64, Int64] = [1: 2, 3: 4]\n\
+        \  table.contains(3)\n\
+         }\n");
+  test "a map literal's keys must be distinct" (fun () ->
+      not_proven "fn f() -> Map[Int64, Int64] {\n  [1: 2, 1: 3]\n}\n" "prover.disjoint");
+  test "a set literal contains what it lists and nothing else" (fun () ->
+      proven
+        "fn f() -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  let colors: Set[Int64] = [1, 2]\n\
+        \  colors.contains(2) && !colors.contains(5)\n\
+         }\n");
+  test "any is one allocation" (fun () ->
+      proven "fn f(value: Int64) -> any Display\n  cost allocations == 1\n{\n  any value\n}\n");
+  test "a provided implementation's calls keep the capability's contract" (fun () ->
+      proven
+        (dice
+       ^ "type Fixed()\n\n\
+          impl Dice for Fixed {\n\
+         \  fn roll(self) -> UInt8 {\n\
+         \    4\n\
+         \  }\n\
+          }\n\n\
+          fn f() -> UInt8\n\
+         \  ensures result <= 6\n\
+          {\n\
+         \  provide Fixed() {\n\
+         \    Dice.roll()\n\
+         \  }\n\
+          }\n"));
+  test "let else continues where its pattern matched" (fun () ->
+      proven
+        "fn f(found: Option[UInt8]) -> UInt8 {\n\
+        \  let Some(value) = found else {\n\
+        \    return 0\n\
+        \  }\n\
+        \  if value < 255 { value + 1 } else { value }\n\
+         }\n");
+  test "a quantifier over a list ranges over its elements" (fun () ->
+      proven
+        "fn f(items: List[Int64]) -> Bool\n\
+        \  requires forall item in items => item > 0\n\
+        \  ensures result\n\
+         {\n\
+        \  items.length() == 0 || items[0] > 0\n\
+         }\n")
+
 (* Places lent together *)
 
 let swap =
@@ -1966,7 +2022,24 @@ let () =
 
 let () =
   test "a construct the prover cannot read yet" (fun () ->
-      not_proven "fn f() -> Map[Int64, Int64] {\n  [1: 2]\n}\n" "prover.unsupported");
+      not_proven
+        "type Countdown(left: UInt8)\n\n\
+         impl Cursor for Countdown {\n\
+        \  type Element = UInt8\n\n\
+        \  fn next(mut self) -> Option[UInt8] {\n\
+        \    if self.left == 0 { None } else {\n\
+        \      self.left -= 1\n\
+        \      Some(self.left)\n\
+        \    }\n\
+        \  }\n\
+         }\n\n\
+         fn f(countdown: Countdown) {\n\
+        \  var left = countdown\n\
+        \  for value in left {\n\
+        \    let _ = value\n\
+        \  }\n\
+         }\n"
+        "prover.unsupported");
   ()
 
 (* Queries *)

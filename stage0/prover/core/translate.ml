@@ -1062,15 +1062,61 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
   | Lambda { parameters; body } ->
       Some (lambda context frame written parameters body ~facts:(fun _ -> []))
   | List items -> Some (list_literal context frame written items)
-  | Map _ -> unsupported written.span "a map literal"
+  | Map entries -> Some (map_literal context frame written entries)
   | String literal -> Some (string_literal context frame written literal)
   | Float _ -> (
       match literal_value frame written with
       | Some term -> Some (frame, term)
       | None -> unsupported written.span "a float literal without a value")
   | Range _ -> unsupported written.span "a range outside a `for` loop or a quantifier"
-  | Any _ -> unsupported written.span "`any`"
-  | Provide _ -> unsupported written.span "`provide`"
+  | Any inner ->
+      (* A value of [any Trait], known through the trait's contracts: one
+         allocation, of the block that holds the value. *)
+      let frame, _ = value context frame inner in
+      let frame =
+        spend context frame (fun (counter : Costs.counter) ->
+            match (counter.resource, counter.counting) with
+            | Allocations, _ -> L.int 1
+            | Allocated_bytes, Units -> L.int 1
+            | Allocated_bytes, (At_most | Exactly) -> unknown_amount context frame counter
+            | (Time | Calls _), _ -> Costs.zero)
+      in
+      Some (frame, arrive context frame "any" (type_of frame written))
+  | Provide { implementations; body } ->
+      (* The body runs with the implementations, which the prover never
+         models, so a capability call in it gives a fresh value by its
+         contract. Each one handed over [mut] holds a fresh value of its
+         type afterward, which meets its type's invariants. *)
+      let frame =
+        List.fold_left
+          (fun frame (implementation : expression) -> fst (value context frame implementation))
+          frame implementations
+      in
+      Option.map
+        (fun ((after : frame), result) ->
+          let after =
+            List.fold_left
+              (fun after (implementation : expression) ->
+                match implementation.kind with
+                | Mode (Mut, place) ->
+                    let after = havoc_root context after place in
+                    let (root : expression) = root_of place in
+                    (match (root.kind, place_local after root) with
+                    | Self_value, _ -> (
+                        match (after.self, after.self_type) with
+                        | Some self, Some ty -> assume_valid context after ty self
+                        | _ -> ())
+                    | _, Some (id, ty) -> (
+                        match Ids.find_opt id after.locals with
+                        | Some term -> assume_valid context after ty term
+                        | None -> ())
+                    | _ -> ());
+                    after
+                | _ -> after)
+              after implementations
+          in
+          (after, result))
+        (block_value context frame body)
   | Self_type_value | Expression_error -> unsupported written.span "this expression"
 
 (* The right side of [&&], [||], or [==>], which runs only on some paths:
@@ -1433,7 +1479,59 @@ and quantified context frame (written : expression) quantifier binder body =
         if inclusive then Costs.plus (Costs.minus high low) (L.int 1) else Costs.minus high low
       in
       make ~count symbol Int premise inner
-  | Binder_in _ -> unsupported written.span "a quantifier over a collection"
+  | Binder_in ({ kind = Binding_or_constant name_; _ }, collection) -> (
+      (* Over a collection's elements: by index into its sequence, or each
+         value its set contains. *)
+      let collection_type = type_of frame collection in
+      let _, collected = value context frame collection in
+      let element =
+        match local_type frame name_.id with
+        | Some ty -> ty
+        | None -> unsupported written.span "a quantifier over a value without a type"
+      in
+      let set_path : Path.t =
+        Top { module_ = { package = "standard"; modules = [ "set" ] }; name = "Set" }
+      in
+      let bound_to term =
+        { frame with locals = Ids.add name_.id term frame.locals; bound = symbol :: frame.bound }
+      in
+      match collection_type with
+      | Named { path; _ } when Path.equal path set_path || Path.equal path finite_set_path ->
+          let finite = T.Named { path = finite_set_path; arguments = [ T.Type element ] } in
+          let model =
+            if Path.equal path finite_set_path then Some collected
+            else model_as context collection_type collected ~model:finite
+          in
+          let model =
+            match model with
+            | Some model -> model
+            | None -> unsupported collection.span "a quantifier over `%s`" (T.show collection_type)
+          in
+          let each = L.Symbol symbol in
+          make symbol (sort_of context element)
+            (finite_function context finite "contains" L.Bool
+               [ (each, sort_of context element) ]
+               model)
+            (bound_to each)
+      | _ -> (
+          let sequence =
+            match collection_type with
+            | Named { path; _ } when Path.equal path sequence_path -> Some collected
+            | _ -> model_of context collection_type collected ~element
+          in
+          match sequence with
+          | Some sequence -> (
+              let index = L.Symbol symbol in
+              match sequence_at context element sequence index with
+              | Some at ->
+                  let length = sequence_length context element sequence in
+                  make ~count:length symbol Int
+                    L.(Apply ("<=", [ int 0; index ]) &&& Apply ("<", [ index; length ]))
+                    (bound_to at)
+              | None ->
+                  unsupported collection.span "a quantifier over `%s`" (T.show collection_type))
+          | None -> unsupported collection.span "a quantifier over `%s`" (T.show collection_type)))
+  | Binder_in _ -> unsupported written.span "a quantifier over a collection with a pattern"
 
 (* Calls *)
 
@@ -2229,18 +2327,7 @@ and extensional context frame (ty : T.ty) a b =
       | T.Type key :: rest ->
           context.fresh <- context.fresh + 1;
           let each = Printf.sprintf "key.%d" context.fresh in
-          let type_arguments = arguments in
-          let function_ name output inputs =
-            let symbol =
-              "function."
-              ^ Path.show (Path.Method { owner = path; name; receiver = Read })
-              ^ "["
-              ^ String.concat ", " (List.map argument_key type_arguments)
-              ^ "]"
-            in
-            declare context (L.Function (symbol, sort_of context ty :: List.map snd inputs, output));
-            fun term -> L.Apply (symbol, term :: List.map fst inputs)
-          in
+          let function_ name output inputs = finite_function context ty name output inputs in
           let key_sort = sort_of context key in
           let has =
             function_
@@ -2263,6 +2350,22 @@ and extensional context frame (ty : T.ty) a b =
             L.(Forall ([ (each, key_sort) ], in_range key (Symbol each) ==> same) ==> equal a b)
       | _ -> ())
   | _ -> ()
+
+(* A method of a [FiniteSet] or a [FiniteMap], as a function in the logic,
+   applied to a value of it and the inputs given with their sorts. *)
+and finite_function context (ty : T.ty) name output inputs =
+  match ty with
+  | Named { path; arguments } ->
+      let symbol =
+        "function."
+        ^ Path.show (Path.Method { owner = path; name; receiver = Read })
+        ^ "["
+        ^ String.concat ", " (List.map argument_key arguments)
+        ^ "]"
+      in
+      declare context (L.Function (symbol, sort_of context ty :: List.map snd inputs, output));
+      fun term -> L.Apply (symbol, term :: List.map fst inputs)
+  | _ -> fun term -> term
 
 and finite_set_path : Path.t =
   Top { module_ = { package = "standard"; modules = [ "specification" ] }; name = "FiniteSet" }
@@ -2290,7 +2393,10 @@ and list_literal context frame (written : expression) items =
   let literal =
     match sequence_of context frame ty ~element values with
     | Some literal -> literal
-    | None -> unsupported written.span "a literal of `%s`" (T.show ty)
+    | None -> (
+        match set_of context frame ty ~element values with
+        | Some literal -> literal
+        | None -> unsupported written.span "a literal of `%s`" (T.show ty))
   in
   let allocates =
     items <> []
@@ -2553,6 +2659,114 @@ and sequence_of context frame (ty : T.ty) ~element values =
       made)
     sequence
 
+(* A [Set] or a [FiniteSet] of these elements: one that contains each of
+   them and nothing else, so no more of them than were written. *)
+and set_of context frame (ty : T.ty) ~element values =
+  let set_path : Path.t =
+    Top { module_ = { package = "standard"; modules = [ "set" ] }; name = "Set" }
+  in
+  let finite = T.Named { path = finite_set_path; arguments = [ T.Type element ] } in
+  let made = arrive context frame "literal" ty in
+  let model =
+    match ty with
+    | Named { path; _ } when Path.equal path finite_set_path -> Some made
+    | Named { path; _ } when Path.equal path set_path -> model_as context ty made ~model:finite
+    | _ -> None
+  in
+  Option.map
+    (fun model ->
+      assume_valid context frame ty made;
+      let element_sort = sort_of context element in
+      let contains value =
+        finite_function context finite "contains" L.Bool [ (value, element_sort) ] model
+      in
+      List.iter (fun value -> assume context frame (contains value)) values;
+      context.fresh <- context.fresh + 1;
+      let each = Printf.sprintf "value.%d" context.fresh in
+      assume context frame
+        (L.Forall
+           ( [ (each, element_sort) ],
+             L.( ==> ) (contains (L.Symbol each))
+               (L.disjunction (List.map (L.equal (L.Symbol each)) values)) ));
+      let size = finite_function context finite "size" L.Int [] model in
+      assume context frame (Costs.at_most size (L.int (List.length values)));
+      made)
+    model
+
+(* A [Map] or a [FiniteMap] written out: each key with its value, and no
+   other keys. Its keys must be distinct. A non-empty map is one
+   allocation. See PROVER.md, "Obligations". *)
+and map_literal context frame (written : expression) entries =
+  let ty = type_of frame written in
+  let map_path : Path.t =
+    Top { module_ = { package = "standard"; modules = [ "map" ] }; name = "Map" }
+  in
+  let key_type, value_type =
+    match ty with
+    | Named { arguments = [ T.Type key; T.Type value_type ]; _ } -> (key, value_type)
+    | _ -> unsupported written.span "a literal of `%s`" (T.show ty)
+  in
+  let frame, terms =
+    List.fold_left
+      (fun (frame, terms) ((key : expression), (entry : expression)) ->
+        let frame, key_term = value context frame key in
+        let frame, value_term = value context frame entry in
+        (frame, terms @ [ (key, key_term, value_term) ]))
+      (frame, []) entries
+  in
+  List.iteri
+    (fun index (_, key_term, _) ->
+      List.iteri
+        (fun other ((other_key : expression), other_term, _) ->
+          if other > index then
+            oblige context frame Disjoint other_key.span
+              (Printf.sprintf "The key `%s` may equal an earlier key of this map."
+                 (quote frame.source other_key.span))
+              (L.not_ (equal_of context frame key_type key_term other_term)))
+        terms)
+    terms;
+  let finite =
+    T.Named { path = finite_map_path; arguments = [ T.Type key_type; T.Type value_type ] }
+  in
+  let made = arrive context frame "literal" ty in
+  let model =
+    match ty with
+    | Named { path; _ } when Path.equal path finite_map_path -> made
+    | Named { path; _ } when Path.equal path map_path -> (
+        match model_as context ty made ~model:finite with
+        | Some model -> model
+        | None -> unsupported written.span "a literal of `%s`" (T.show ty))
+    | _ -> unsupported written.span "a literal of `%s`" (T.show ty)
+  in
+  assume_valid context frame ty made;
+  let key_sort = sort_of context key_type in
+  let has key = finite_function context finite "contains_key" L.Bool [ (key, key_sort) ] model in
+  let get key =
+    finite_function context finite "get" (sort_of context value_type) [ (key, key_sort) ] model
+  in
+  List.iter
+    (fun (_, key, entry) -> assume context frame L.(has key &&& equal (get key) entry))
+    terms;
+  context.fresh <- context.fresh + 1;
+  let each = Printf.sprintf "key.%d" context.fresh in
+  assume context frame
+    (L.Forall
+       ( [ (each, key_sort) ],
+         L.( ==> ) (has (L.Symbol each))
+           (L.disjunction (List.map (fun (_, key, _) -> L.equal (L.Symbol each) key) terms)) ));
+  assume context frame
+    (L.equal (finite_function context finite "size" L.Int [] model) (L.int (List.length terms)));
+  let frame =
+    spend context frame (fun (counter : Costs.counter) ->
+        match (counter.resource, counter.counting) with
+        | Allocations, _ when entries <> [] -> L.int 1
+        | Allocated_bytes, Units when entries <> [] -> L.int 1
+        | Allocated_bytes, (At_most | Exactly) when entries <> [] ->
+            unknown_amount context frame counter
+        | _ -> Costs.zero)
+  in
+  (frame, made)
+
 (* Text as a value whose model is its UTF-8 bytes. *)
 and text_value context frame (ty : T.ty) text =
   let made = arrive context frame "string" ty in
@@ -2599,6 +2813,11 @@ and part_frame frame (part : part) ~arguments ~substitution =
 (* A value's model, by the standard library's [impl] of [Model] for its
    type, as a call of [model()] would read it. *)
 and model_of context (ty : T.ty) term ~element =
+  model_as context ty term ~model:(sequence_type element)
+
+(* A value's model of the given type, by the standard library's [impl] of
+   [Model] for its type, as a call of [model()] would read it. *)
+and model_as context (ty : T.ty) term ~(model : T.ty) =
   let model_trait : Path.t =
     Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Model" }
   in
@@ -2610,8 +2829,7 @@ and model_of context (ty : T.ty) term ~element =
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
       let symbol = "function." ^ Path.show path ^ "[" ^ type_key ty ^ "]" in
-      declare context
-        (L.Function (symbol, [ sort_of context ty ], sort_of context (sequence_type element)));
+      declare context (L.Function (symbol, [ sort_of context ty ], sort_of context model));
       Some (L.Apply (symbol, [ term ]))
   | [] -> None
 
@@ -4630,7 +4848,21 @@ and statement_kind context frame (written : statement) : frame option =
           (* A [let]'s pattern cannot fail, so only its names matter. *)
           let _, frame = pattern_match context frame pattern term (type_of frame initial) in
           Some frame)
-  | Let { else_ = Some _; _ } -> unsupported written.span "`let ... else`"
+  | Let { pattern; value = initial; else_ = Some otherwise; _ } -> (
+      (* The pattern may fail, and the [else] block, which must leave the
+         path, runs where it does. *)
+      match expression context frame initial with
+      | None -> None
+      | Some (frame, term) -> (
+          let matched, bound = pattern_match context frame pattern term (type_of frame initial) in
+          match block_value context (restrict frame (L.not_ matched)) otherwise with
+          | Some (fallen, _) ->
+              oblige context fallen Unreachable otherwise.span
+                "This `else` block may finish, but it must leave the path, since the pattern did \
+                 not match."
+                (L.Boolean false);
+              Some (restrict bound matched)
+          | None -> Some (restrict bound matched)))
   | Assignment { target; operator; value = assigned } ->
       assignment context frame written target operator assigned
   | While { condition; clauses; body } -> while_ context frame written condition clauses body

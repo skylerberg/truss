@@ -1020,15 +1020,19 @@ It proves, with one canonical, numbered, hashed query per obligation:
 - a method that replaces one its trait provides shows that its result is
   the provided body's, which must be functional
 - `assert` in theorems and proofs, assumed in tests
-- quantifiers over ranges, in specifications and in code
+- quantifiers over ranges, in specifications and in code, and over a
+  collection's elements: a list's or a sequence's by index, and a set's
+  by what it contains
 - models: `Model.model()` and the operations of `standard::specification`
   are functions in the logic, known by their contracts, and `identical` is
   the solver's equality, so the contracts of `List` and `Slice`, stated
   through their models, prove facts such as a pushed element's index and
   value; `Set` and `Map`, by their `FiniteSet` and `FiniteMap` models;
   sequences, sets, and maps are extensional; and literals of `List` and
-  `Sequence` have their elements. Literals of maps and sets are not built
-  yet.
+  `Sequence` have their elements. A map literal holds each key's value
+  and no other key, and its keys must be distinct, under
+  `prover.disjoint`; a set literal contains what it lists and nothing
+  else.
 - views: a `List` passed as a `Slice`, or a `String` as a `StringSlice`,
   is a view with the same model, and a slice, `items[a..b]`, must be
   within its collection and has that run of its model; two slices, or a
@@ -1038,6 +1042,11 @@ It proves, with one canonical, numbered, hashed query per obligation:
   bytes, which costs nothing; one with interpolations is a new `String`
   known only by its type, since each part is written out by its
   `Display`.
+- `any value`, a value known through its trait's contracts, which is one
+  allocation; `provide`, whose body's capability calls are known by their
+  contracts, after which each implementation handed over `mut` holds a
+  fresh value that meets its type's invariants; and `let ... else`, whose
+  `else` block must leave the path
 - tagged templates, as a call of the tag's `from_template` with the
   template: its literal texts, each a `Literal` whose model is its bytes,
   and its parts, each turned into the tag's `Part` by its `From`. The
@@ -1084,8 +1093,8 @@ A call whose callee's contract it cannot read, such as one with errors,
 gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
-definition that uses anything else, such as a map literal or `any`, is
-reported as
+definition that uses anything else, such as a loop over a type's own
+`Cursor`, is reported as
 `prover.unsupported` with what stopped it, and none of its obligations
 count as proven.
 
