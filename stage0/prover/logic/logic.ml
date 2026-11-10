@@ -94,6 +94,130 @@ let rec replace ~from ~into term =
     | Exists (bound, body) ->
         if mentions (List.map fst bound) from then term else Exists (bound, replace ~from ~into body)
 
+(* Triggers *)
+
+(* The terms that make the solver use a quantified statement, as Dafny
+   chooses them: sets of applications of the query's own functions that
+   together name every bound variable, each variable as an argument and not
+   under arithmetic, since the solver matches a trigger by its shape. An
+   application that contains another with the same variables is left out
+   for the smaller one, and so is one that the statement's own body would
+   match with a larger term, which would use the statement again and again,
+   unless nothing else is left. An equation that defines a function on its
+   left side is triggered by that side alone. With no trigger, the solver
+   chooses its own. *)
+let triggers ~triggering variables body =
+  let names = List.map fst variables in
+  let rec usable = function
+    | Symbol _ | Integer _ | Boolean _ | Bits _ -> true
+    | Apply (name, arguments) ->
+        if triggering name then List.for_all usable arguments
+        else not (mentions names (Apply (name, arguments)))
+    | (Forall _ | Exists _) as term -> not (mentions names term)
+  in
+  let candidate = function
+    | Apply (name, _ :: _) as term -> triggering name && mentions names term && usable term
+    | _ -> false
+  in
+  let applications = ref [] in
+  let rec walk term =
+    match term with
+    | Apply (_, arguments) ->
+        if not (List.mem term !applications) then applications := term :: !applications;
+        List.iter walk arguments
+    | Forall _ | Exists _ | Symbol _ | Integer _ | Boolean _ | Bits _ -> ()
+  in
+  walk body;
+  let applications = List.rev !applications in
+  let covers term = List.filter (fun name -> mentions [ name ] term) names in
+  let rec within inner term =
+    inner <> term
+    &&
+    match term with
+    | Apply (_, arguments) ->
+        List.exists (fun argument -> argument = inner || within inner argument) arguments
+    | _ -> false
+  in
+  (* Whether [pattern] matches [term], binding its bound variables. *)
+  let rec matching bindings pattern term =
+    match (pattern, bindings) with
+    | _, None -> None
+    | Symbol name, Some found when List.mem name names -> (
+        match List.assoc_opt name found with
+        | Some bound -> if bound = term then bindings else None
+        | None -> Some ((name, term) :: found))
+    | Apply (name, arguments), _ -> (
+        match term with
+        | Apply (other, others) when name = other && List.length arguments = List.length others ->
+            List.fold_left2 matching bindings arguments others
+        | _ -> None)
+    | _ -> if pattern = term then bindings else None
+  in
+  let loops trigger =
+    List.exists
+      (fun term ->
+        term <> trigger
+        &&
+        match matching (Some []) trigger term with
+        | Some bindings ->
+            List.exists (fun (name, bound) -> bound <> Symbol name && mentions names bound) bindings
+        | None -> false)
+      applications
+  in
+  let rec conclusion = function Apply ("=>", [ _; inner ]) -> conclusion inner | term -> term in
+  match conclusion body with
+  | Apply ("=", [ (Apply _ as defined); _ ]) when candidate defined && covers defined = names ->
+      [ [ defined ] ]
+  | _ -> (
+      let candidates = List.filter candidate applications in
+      let candidates =
+        List.filter
+          (fun term ->
+            not
+              (List.exists
+                 (fun inner -> within inner term && covers inner = covers term)
+                 candidates))
+          candidates
+      in
+      let chosen candidates =
+        match List.filter (fun term -> covers term = names) candidates with
+        | _ :: _ as whole -> List.map (fun term -> [ term ]) whole
+        | [] ->
+            List.concat_map
+              (fun first ->
+                List.filter_map
+                  (fun second ->
+                    if
+                      first < second
+                      && List.for_all
+                           (fun name -> List.mem name (covers first @ covers second))
+                           names
+                    then Some [ first; second ]
+                    else None)
+                  candidates)
+              candidates
+      in
+      match chosen (List.filter (fun term -> not (loops term)) candidates) with
+      | [] -> chosen candidates
+      | found -> found)
+
+(* The functions a trigger may apply: a declared function or a datatype's
+   constructor or selector. *)
+let triggering_in declarations =
+  let functions = Hashtbl.create 64 in
+  List.iter
+    (function
+      | Function (name, _, _) -> Hashtbl.replace functions name ()
+      | Datatype (_, constructors) ->
+          List.iter
+            (fun (constructor, fields) ->
+              Hashtbl.replace functions constructor ();
+              List.iter (fun (selector, _) -> Hashtbl.replace functions selector ()) fields)
+            constructors
+      | Constant _ -> ())
+    declarations;
+  Hashtbl.mem functions
+
 (* Pruning *)
 
 (* The declared symbols a term mentions. A datatype's constructors and
@@ -124,30 +248,18 @@ let prune query =
   let reached = Hashtbl.create 64 in
   let reach symbols = List.iter (fun symbol -> Hashtbl.replace reached symbol ()) symbols in
   reach (declared_symbols declared query.goal);
-  (* A quantified fact can be used only where a term of the shape of one of
-     its triggers is: an application of a declared function that names
-     every bound variable. So it waits until each symbol of one of them is
+  let triggering = triggering_in query.declarations in
+  (* A quantified fact can be used only where terms of the shape of one of
+     its triggers are, so it waits until each symbol of one of them is
      kept. A fact under a path's condition is read through it. *)
   let rec needs fact symbols =
     match fact with
     | Apply ("=>", [ _; (Forall _ as inner) ]) -> needs inner symbols
     | Forall (variables, body) -> (
-        let names = List.map fst variables in
-        let triggers = ref [] in
-        let rec walk = function
-          | Apply (name, arguments) as term ->
-              if
-                Hashtbl.mem declared name
-                && List.for_all (fun bound -> mentions [ bound ] term) names
-              then triggers := declared_symbols declared term :: !triggers;
-              List.iter walk arguments
-          | Forall (_, inner) | Exists (_, inner) -> walk inner
-          | Symbol _ | Integer _ | Boolean _ | Bits _ -> ()
-        in
-        walk body;
-        match !triggers with
+        match triggers ~triggering variables body with
         | [] -> fun () -> List.exists (Hashtbl.mem reached) symbols
         | triggers ->
+            let triggers = List.map (List.concat_map (declared_symbols declared)) triggers in
             fun () ->
               List.exists (fun trigger -> List.for_all (Hashtbl.mem reached) trigger) triggers)
     | _ -> fun () -> List.exists (Hashtbl.mem reached) symbols
@@ -188,6 +300,7 @@ type numbering = {
   datatypes : (string, (string * (string * sort) list) list) Hashtbl.t;
   member_of : (string, string * string) Hashtbl.t;
       (** Each constructor, selector, and tester: its datatype and its canonical suffix. *)
+  triggering : string -> bool;
   symbol_names : (string, string) Hashtbl.t;
   mutable symbol_order : string list;  (** Reversed. *)
   sort_names : (string, string) Hashtbl.t;
@@ -299,10 +412,25 @@ and quantifier numbering bound buffer word variables body =
       add (Printf.sprintf "(%s %s)" canonical (sort_name numbering sort)))
     named;
   add ") ";
-  print numbering
-    (List.map (fun (name, canonical, _) -> (name, canonical)) named @ bound)
-    buffer body;
-  add ")"
+  let bound = List.map (fun (name, canonical, _) -> (name, canonical)) named @ bound in
+  match triggers ~triggering:numbering.triggering variables body with
+  | [] ->
+      print numbering bound buffer body;
+      add ")"
+  | triggers ->
+      add "(! ";
+      print numbering bound buffer body;
+      List.iter
+        (fun trigger ->
+          add " :pattern (";
+          List.iteri
+            (fun index term ->
+              if index > 0 then add " ";
+              print numbering bound buffer term)
+            trigger;
+          add ")")
+        triggers;
+      add "))"
 
 let numbering query =
   let declared = Hashtbl.create 64 in
@@ -329,6 +457,7 @@ let numbering query =
     declared;
     datatypes;
     member_of;
+    triggering = triggering_in query.declarations;
     symbol_names = Hashtbl.create 64;
     symbol_order = [];
     sort_names = Hashtbl.create 8;

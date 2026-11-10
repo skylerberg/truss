@@ -241,21 +241,34 @@ let declare context declaration =
     context.declarations <- declaration :: context.declarations
   end
 
-let fresh context prefix sort =
+(* A symbol for a value made at this point. Inside quantifiers it is a
+   function of their bound symbols, since the value can differ for each of
+   theirs. *)
+let made_here context frame name sort =
+  match List.rev frame.binders with
+  | [] ->
+      declare context (L.Constant (name, sort));
+      L.Symbol name
+  | outermost_first ->
+      declare context (L.Function (name, List.map (fun (_, sort, _) -> sort) outermost_first, sort));
+      L.Apply (name, List.map (fun (bound, _, _) -> L.Symbol bound) outermost_first)
+
+let fresh context frame prefix sort =
   context.fresh <- context.fresh + 1;
   let name = Printf.sprintf "%s.%d" prefix context.fresh in
-  declare context (L.Constant (name, sort));
   Hashtbl.replace context.fresh_order name context.fresh;
-  L.Symbol name
+  made_here context frame name sort
 
 (* Whether a term mentions a fresh symbol made after [mark]: a value a
    loop changes, or one made inside it. *)
 let made_since context mark term =
+  let made name =
+    match Hashtbl.find_opt context.fresh_order name with Some n -> n > mark | None -> false
+  in
   let rec walk = function
-    | L.Symbol name -> (
-        match Hashtbl.find_opt context.fresh_order name with Some n -> n > mark | None -> false)
+    | L.Symbol name -> made name
     | L.Integer _ | L.Boolean _ | L.Bits _ -> false
-    | L.Apply (_, arguments) -> List.exists walk arguments
+    | L.Apply (name, arguments) -> made name || List.exists walk arguments
     | L.Forall (_, body) | L.Exists (_, body) -> walk body
   in
   walk term
@@ -279,18 +292,18 @@ let closed_over_binders frame term =
 
 (* A fact of mathematics, true on every path. Inside a quantifier, one that
    names a bound symbol is left out, which is always sound: closed over the
-   quantifier it would be true, but there are many such facts, and the
-   solver spends its steps on them. *)
+   quantifier it would be true, but a body's calls give many such facts,
+   and the solver spends its steps on them. *)
 let fact context frame term =
   if not (L.mentions frame.bound term) then context.facts <- term :: context.facts
 
 (* A fact is guarded by its path's condition, and left out where either
    names a bound symbol, as [fact] says. *)
-let assume context frame fact =
-  if not (L.mentions frame.bound fact || L.mentions frame.bound frame.condition) then
-    match fact with
+let assume context frame term =
+  if not (L.mentions frame.bound term || L.mentions frame.bound frame.condition) then
+    match term with
     | L.Boolean true -> ()
-    | _ -> context.facts <- L.( ==> ) frame.condition fact :: context.facts
+    | _ -> context.facts <- L.( ==> ) frame.condition term :: context.facts
 
 (* An obligation is shown by its own query, and is a fact for what comes
    after it. Inside a quantifier it is shown for each value the
@@ -636,7 +649,7 @@ let canonical_binders term =
 (* A value of a type that arrives from outside what is known: a parameter,
    a call's result, a loop's havocked local. *)
 let arrive context frame prefix ty =
-  let value = fresh context prefix (sort_of context ty) in
+  let value = fresh context frame prefix (sort_of context ty) in
   assume context frame (in_range ty value);
   value
 
@@ -701,7 +714,7 @@ let join context ?value_type frames =
                      last earlier)
             | _ -> None)
         | _ ->
-            let symbol = fresh context prefix sort in
+            let symbol = fresh context first prefix sort in
             List.iter
               (fun ((frame : frame), term) ->
                 match term with
@@ -752,8 +765,8 @@ let join context ?value_type frames =
                 in
                 if L.mentions first.bound choice then (key, choice)
                 else
-                  let symbol = fresh context "spent" L.Int in
-                  context.facts <- L.equal symbol choice :: context.facts;
+                  let symbol = fresh context first "spent" L.Int in
+                  fact context first (L.equal symbol choice);
                   (key, symbol))
           first.spent
       in
@@ -2532,8 +2545,13 @@ and lambda_definition context frame (function_type : T.function_type) parameters
               (String.concat " " (List.map (fun (_, sort) -> sort_label sort) bound)
               ^ " " ^ L.show_term named_by_position)
         in
-        declare context (L.Constant (symbol, sort_of context (T.Function function_type)));
-        let term = L.Symbol symbol in
+        let sort = sort_of context (T.Function function_type) in
+        (* A lambda that captures a quantifier's bound symbol is a function
+           of it. *)
+        let term =
+          if L.mentions frame.bound defined then made_here context frame symbol sort
+          else made_here context { frame with binders = [] } symbol sort
+        in
         let application =
           applied context function_type term (List.map (fun (name, _) -> L.Symbol name) bound)
         in
@@ -3382,19 +3400,19 @@ and option_path : Path.t =
 
 (* A sequence of parts with nothing in it. *)
 and empty_parts context frame element =
-  let parts = fresh context "parts" (sort_of context (sequence_type element)) in
+  let parts = fresh context frame "parts" (sort_of context (sequence_type element)) in
   assume context frame (L.equal (sequence_length context element parts) (L.int 0));
   parts
 
 (* A sequence of parts about which only its length is known. *)
 and some_parts context frame element =
-  let parts = fresh context "parts" (sort_of context (sequence_type element)) in
+  let parts = fresh context frame "parts" (sort_of context (sequence_type element)) in
   assume context frame L.(Apply (">=", [ sequence_length context element parts; int 0 ]));
   parts
 
 (* The parts, with one more after them. *)
 and appended context frame element parts part =
-  let longer = fresh context "parts" (sort_of context (sequence_type element)) in
+  let longer = fresh context frame "parts" (sort_of context (sequence_type element)) in
   let length = sequence_length context element parts in
   assume context frame
     L.(
@@ -4483,14 +4501,14 @@ and spend context frame (amount : Costs.counter -> L.term) =
 
 (* An amount nothing bounds: at least zero, or one for a call's time. *)
 and unknown_amount context frame (counter : Costs.counter) =
-  let amount = fresh context "spent" L.Int in
+  let amount = fresh context frame "spent" L.Int in
   let least = match counter.resource with Time -> 1 | _ -> 0 in
   assume context frame (L.Apply ("<=", [ L.int least; amount ]));
   amount
 
 (* An amount from zero to [bound], for a counter that counts exactly. *)
 and bounded_amount context frame bound =
-  let amount = fresh context "spent" L.Int in
+  let amount = fresh context frame "spent" L.Int in
   assume context frame L.(Apply ("<=", [ int 0; amount ]) &&& Apply ("<=", [ amount; bound ]));
   amount
 
@@ -5180,8 +5198,9 @@ and loop_costs context frame (clauses : loop_clause list) ~held =
         | None ->
             Per_iteration
               {
-                per = fresh context "per" L.Int;
-                per_held = Option.map (fun held -> (fresh context "per" L.Int, held frame)) held;
+                per = fresh context frame "per" L.Int;
+                per_held =
+                  Option.map (fun held -> (fresh context frame "per" L.Int, held frame)) held;
               }
       in
       { counter; key; entry; rule; held })
@@ -5216,7 +5235,7 @@ and counted_with ~(counter : Costs.counter) ~at ~bound =
 and loop_head context head costs ~iterations =
   let iterations = Option.value iterations ~default:Costs.zero in
   let head =
-    { head with spent = List.map (fun cost -> (cost.key, fresh context "spent" L.Int)) costs }
+    { head with spent = List.map (fun cost -> (cost.key, fresh context head "spent" L.Int)) costs }
   in
   List.iter
     (fun cost ->
@@ -6113,7 +6132,7 @@ and while_ context frame (node : statement) condition clauses body =
   let most =
     match (start_measures, measure_terms frame, iterations) with
     | Some [ at_head ], Some [ on_entry ], Some iterations ->
-        let last = fresh context "last" L.Int in
+        let last = fresh context head "last" L.Int in
         assume context head
           L.(
             equal iterations (int 0)
@@ -6169,7 +6188,7 @@ and iterations_so_far context head costs =
         match cost.rule with Per_iteration _ -> true | Clause_bound _ -> false)
       costs
   then begin
-    let iterations = fresh context "iterations" L.Int in
+    let iterations = fresh context head "iterations" L.Int in
     assume context head (L.Apply ("<=", [ L.int 0; iterations ]));
     Some iterations
   end
@@ -6202,7 +6221,7 @@ and for_ context frame (node : statement) (pattern : pattern) (iteration : itera
         Costs.normalize
           (if inclusive then Costs.plus (Costs.minus high low) (L.int 1) else Costs.minus high low)
       in
-      let iterations = fresh context "iterations" L.Int in
+      let iterations = fresh context head "iterations" L.Int in
       assume context head
         L.(
           Apply ("<=", [ int 0; iterations ])
@@ -6384,7 +6403,7 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
     ~start:(fun head -> some_parts context head element_type)
     ~receive:(fun head before ->
       (* Each time round, the method either hands out another part or ends. *)
-      let another = fresh context "another" L.Bool in
+      let another = fresh context head "another" L.Bool in
       let element = arrive context head "element" element_type in
       let inside = restrict head another in
       assume_valid context inside element_type element;

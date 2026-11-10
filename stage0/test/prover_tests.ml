@@ -2419,6 +2419,20 @@ let () =
          {\n\
         \  0\n\
          }\n");
+  test "a call under a quantifier gives a value for each value, not one for all" (fun () ->
+      not_proven
+        "fn same(item: Int64) -> Int64\n\
+        \  ensures result == item\n\
+         {\n\
+        \  item\n\
+         }\n\n\
+         fn f(items: List[Int64]) -> Bool\n\
+        \  requires items.length() == 2 && items[0] == 1 && items[1] == 2\n\
+        \  ensures !result\n\
+         {\n\
+        \  forall i in 0..items.length() => same(items[i]) == items[i]\n\
+         }\n"
+        "prover.ensures");
   test "alternatives bind each name to the part that matched" (fun () ->
       proven
         "type Side =\n\
@@ -2462,6 +2476,48 @@ let () =
       let first = key_of "fn f(count: UInt8) -> UInt8 {\n  count + 1\n}\n" in
       let second = key_of "fn g(total: UInt8) -> UInt8 {\n  total + 1\n}\n" in
       if first <> second || first = "none" then fail "%s and %s" first second)
+
+(* Triggers *)
+
+let triggered fact =
+  let open Logic in
+  Logic.text
+    {
+      declarations =
+        [ Function ("f", [ Int ], Int); Function ("g", [ Int ], Int); Constant ("n", Int) ];
+      facts = [ fact ];
+      goal = Apply (">", [ Apply ("f", [ Symbol "n" ]); int 0 ]);
+    }
+
+let () =
+  let open Logic in
+  let i = Symbol "i" and j = Symbol "j" in
+  let f term = Apply ("f", [ term ]) and g term = Apply ("g", [ term ]) in
+  let positive term = Apply (">", [ term; int 0 ]) in
+  let expect fact fragment =
+    let text = triggered fact in
+    if not (contains text fragment) then fail "expected %s in %s" fragment text
+  in
+  test "a quantified fact triggers on an application of its variable" (fun () ->
+      expect
+        (Forall ([ ("i", Int) ], Apply (">=", [ i; int 0 ]) ==> positive (f i)))
+        ":pattern ((x0 b0))");
+  test "a trigger has no arithmetic on a bound variable" (fun () ->
+      let text = triggered (Forall ([ ("i", Int) ], positive (f (Apply ("+", [ i; int 1 ]))))) in
+      if contains text ":pattern" then fail "%s" text);
+  test "a trigger that would match its own body's larger term is passed over" (fun () ->
+      expect
+        (Forall
+           ([ ("i", Int) ], Apply ("<", [ f i; f (Apply ("+", [ i; int 1 ])) ]) &&& positive (g i)))
+        ":pattern ((x2 b0)))");
+  test "a definition triggers on what it defines" (fun () ->
+      let text = triggered (Forall ([ ("i", Int) ], equal (f i) (Apply ("+", [ g i; int 1 ])))) in
+      if (not (contains text ":pattern ((x0 b0)))")) || contains text ":pattern ((x1" then
+        fail "%s" text);
+  test "variables named by no one application share a trigger" (fun () ->
+      expect
+        (Forall ([ ("i", Int); ("j", Int) ], Apply ("<", [ f i; g j ])))
+        ":pattern ((x0 b0) (x2 b1))")
 
 (* Short-circuit operators *)
 
