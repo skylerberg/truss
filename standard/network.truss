@@ -1,3 +1,4 @@
+use standard::intrinsic
 use standard::streams
 use standard::text
 
@@ -13,38 +14,442 @@ public let IpAddress.unspecified: IpAddress = IpAddress.Version4([0, 0, 0, 0])
 public fn IpAddress.is_loopback(self) -> Bool
   cost time O(1)
 {
-  todo
+  match self {
+    Version4(octets) => octets[0] == 127
+    Version6(octets) => (forall index in 0..15 => octets[index] == 0) && octets[15] == 1
+  }
 }
 
 public fn IpAddress.is_private(self) -> Bool
   cost time O(1)
 {
-  todo
+  match self {
+    Version4(octets) =>
+      octets[0] == 10 || (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31)
+        || (octets[0] == 192 && octets[1] == 168)
+    Version6(octets) => octets[0] == 252 || octets[0] == 253
+  }
 }
 
 public fn IpAddress.is_unspecified(self) -> Bool
   cost time O(1)
 {
-  todo
+  match self {
+    Version4(octets) => (forall index in 0..4 => octets[index] == 0)
+    Version6(octets) => (forall index in 0..16 => octets[index] == 0)
+  }
 }
 
 public fn IpAddress.is_multicast(self) -> Bool
   cost time O(1)
 {
-  todo
+  match self {
+    Version4(octets) => octets[0] >= 224 && octets[0] <= 239
+    Version6(octets) => octets[0] == 255
+  }
+}
+
+internal fn write_dotted(output: mut TextBuilder, first: UInt8, second: UInt8, third: UInt8, fourth: UInt8) {
+  first.display(mut output)
+  mut output.write(".")
+  second.display(mut output)
+  mut output.write(".")
+  third.display(mut output)
+  mut output.write(".")
+  fourth.display(mut output)
+}
+
+internal fn group(octets: Array[UInt8, 16], index: USize) -> UInt16
+  requires index < 8
+  cost time O(1)
+{
+  intrinsic::convert[UInt8, UInt16](octets[2 * index]) * 256 + intrinsic::convert[UInt8, UInt16](octets[2 * index + 1])
+}
+
+internal type ZeroRun(start: USize, length: USize)
+
+internal fn longest_zero_run(octets: Array[UInt8, 16]) -> ZeroRun
+  ensures result.start + result.length <= 8
+  cost time O(1)
+{
+  var best = ZeroRun(start: 0, length: 0)
+  var start: USize = 0
+  var length: USize = 0
+  let groups: USize = 8
+  for index in 0..groups
+    invariant length <= yielded.length()
+    invariant length > 0 ==> start + length == yielded.length()
+    invariant best.start + best.length <= 8
+  {
+    if group(octets, index: index) == 0 {
+      if length == 0 {
+        start = index
+      }
+      length += 1
+      if length > best.length {
+        best = ZeroRun(start: start, length: length)
+      }
+    } else {
+      length = 0
+    }
+  }
+  best
+}
+
+internal fn is_mapped(octets: Array[UInt8, 16]) -> Bool
+  cost time O(1)
+{
+  (forall index in 0..10 => octets[index] == 0) && octets[10] == 255 && octets[11] == 255
+}
+
+internal fn write_groups(output: mut TextBuilder, octets: Array[UInt8, 16]) {
+  if is_mapped(octets) {
+    mut output.write("::ffff:")
+    write_dotted(mut output, first: octets[12], second: octets[13], third: octets[14], fourth: octets[15])
+    return
+  }
+  let run = longest_zero_run(octets)
+  var index: USize = 0
+  while index < 8
+    invariant index <= 8
+    decreases 8 - index
+  {
+    if run.length >= 2 && index == run.start {
+      mut output.write("::")
+      index += run.length
+    } else {
+      if index > 0 && !(run.length >= 2 && index == run.start + run.length) {
+        mut output.write(":")
+      }
+      mut output.write(group(octets, index: index).format(radix: 16))
+      index += 1
+    }
+  }
 }
 
 impl Display for IpAddress {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Version4(octets) =>
+        write_dotted(mut output, first: octets[0], second: octets[1], third: octets[2], fourth: octets[3])
+      Version6(octets) => write_groups(mut output, octets: octets)
+    }
   }
+}
+
+internal type Octet(value: UInt8, end: USize)
+
+internal fn octet_at(text: StringSlice, from: USize) -> Result[Octet, AddressError]
+  requires from <= text.length()
+  ensures !(result is Ok(octet) && (octet.end <= from || octet.end > text.length()))
+  ensures !(result is Err(error) && error.offset > text.length())
+  cost time O(1)
+{
+  var value: UInt16 = 0
+  var index = from
+  while index < text.length() && index - from < 3 && text.byte(index) >= 48 && text.byte(index) <= 57
+    invariant from <= index
+    invariant index <= text.length()
+    invariant index - from <= 3
+    invariant index - from <= 0 ==> value == 0
+    invariant index - from <= 1 ==> value < 10
+    invariant index - from <= 2 ==> value < 100
+    invariant value < 1000
+    decreases from + 3 - index
+  {
+    value = value * 10 + intrinsic::convert[UInt8, UInt16](text.byte(index) - 48)
+    index += 1
+  }
+  if index == from || value > 255 || (index - from > 1 && text.byte(from) == 48) {
+    return Err(AddressError(offset: from))
+  }
+  Ok(Octet(value: intrinsic::convert(value), end: index))
+}
+
+internal fn after(text: StringSlice, from: USize, byte: UInt8) -> Result[USize, AddressError]
+  requires from <= text.length()
+  ensures !(result is Ok(next) && (next != from + 1 || next > text.length()))
+  ensures !(result is Err(error) && error.offset > text.length())
+  cost time O(1)
+{
+  if from < text.length() && text.byte(from) == byte {
+    Ok(from + 1)
+  } else {
+    Err(AddressError(offset: from))
+  }
+}
+
+internal type Quad(octets: Array[UInt8, 4], end: USize)
+
+internal fn quad_at(text: StringSlice, from: USize) -> Result[Quad, AddressError]
+  requires from <= text.length()
+  ensures !(result is Ok(quad) && (quad.end <= from || quad.end > text.length()))
+  ensures !(result is Err(error) && error.offset > text.length())
+  cost time O(1)
+{
+  let first = octet_at(text, from: from)?
+  let second = octet_at(text, from: after(text, from: first.end, byte: 46)?)?
+  let third = octet_at(text, from: after(text, from: second.end, byte: 46)?)?
+  let fourth = octet_at(text, from: after(text, from: third.end, byte: 46)?)?
+  Ok(Quad(octets: [first.value, second.value, third.value, fourth.value], end: fourth.end))
+}
+
+internal fn dotted_at(text: StringSlice, from: USize) -> Bool
+  requires from <= text.length()
+  cost time O(1)
+{
+  var index = from
+  while index < text.length() && index - from < 3 && text.byte(index) >= 48 && text.byte(index) <= 57
+    invariant from <= index
+    invariant index <= text.length()
+    invariant index - from <= 3
+    decreases from + 3 - index
+  {
+    index += 1
+  }
+  index > from && index < text.length() && text.byte(index) == 46
+}
+
+internal fn hexadecimal_value(byte: UInt8) -> UInt16
+  ensures result <= 16
+  cost time O(1)
+{
+  if byte >= 48 && byte <= 57 {
+    intrinsic::convert(byte - 48)
+  } else if byte >= 97 && byte <= 102 {
+    intrinsic::convert(byte - 87)
+  } else if byte >= 65 && byte <= 70 {
+    intrinsic::convert(byte - 55)
+  } else {
+    16
+  }
+}
+
+internal type Group(value: UInt16, end: USize)
+
+internal fn group_at(text: StringSlice, from: USize) -> Result[Group, AddressError]
+  requires from <= text.length()
+  ensures !(result is Ok(found) && (found.end <= from || found.end > text.length()))
+  ensures !(result is Err(error) && error.offset > text.length())
+  cost time O(1)
+{
+  var value: UInt16 = 0
+  var index = from
+  while index < text.length() && index - from < 4 && hexadecimal_value(text.byte(index)) < 16
+    invariant from <= index
+    invariant index <= text.length()
+    invariant index - from <= 4
+    invariant index - from <= 0 ==> value == 0
+    invariant index - from <= 1 ==> value < 16
+    invariant index - from <= 2 ==> value < 256
+    invariant index - from <= 3 ==> value < 4096
+    decreases from + 4 - index
+  {
+    value = value * 16 + hexadecimal_value(text.byte(index))
+    index += 1
+  }
+  if index == from {
+    return Err(AddressError(offset: from))
+  }
+  Ok(Group(value: value, end: index))
+}
+
+internal type Reading(groups: Array[UInt16, 8], count: USize, gap: USize, index: USize, pending: Bool)
+
+internal fn Reading.holds(self, text: StringSlice) -> Bool
+  cost time O(1)
+{
+  self.count <= 8 && (self.gap == 9 || self.gap <= self.count) && self.index <= text.length()
+}
+
+internal fn Reading.with_quad(self, text: StringSlice) -> Result[Reading, AddressError]
+  requires self.holds(text)
+  requires self.count <= 6
+  ensures !(result is Ok(next) && !(next.holds(text) && next.index > self.index))
+  ensures !(result is Err(error) && error.offset > text.length())
+  cost time O(1)
+{
+  let quad = quad_at(text, from: self.index)?
+  var groups = self.groups
+  groups[self.count] = intrinsic::convert[UInt8, UInt16](quad.octets[0]) * 256 + intrinsic::convert[UInt8, UInt16](quad.octets[1])
+  groups[self.count + 1] = intrinsic::convert[UInt8, UInt16](quad.octets[2]) * 256 + intrinsic::convert[UInt8, UInt16](quad.octets[3])
+  if quad.end != text.length() {
+    return Err(AddressError(offset: quad.end))
+  }
+  Ok(Reading(groups: groups, count: self.count + 2, gap: self.gap, index: quad.end, pending: false))
+}
+
+internal fn Reading.with_group(self, text: StringSlice) -> Result[Reading, AddressError]
+  requires self.holds(text)
+  requires self.count <= 7
+  ensures !(result is Ok(next) && !(next.holds(text) && next.index > self.index))
+  ensures !(result is Err(error) && error.offset > text.length())
+  cost time O(1)
+{
+  let found = group_at(text, from: self.index)?
+  var groups = self.groups
+  groups[self.count] = found.value
+  let count = self.count + 1
+  if found.end == text.length() {
+    return Ok(Reading(groups: groups, count: count, gap: self.gap, index: found.end, pending: false))
+  }
+  let colon = after(text, from: found.end, byte: 58)?
+  if colon < text.length() && text.byte(colon) == 58 {
+    if self.gap != 9 {
+      return Err(AddressError(offset: colon))
+    }
+    return Ok(Reading(groups: groups, count: count, gap: count, index: colon + 1, pending: false))
+  }
+  Ok(Reading(groups: groups, count: count, gap: self.gap, index: colon, pending: true))
+}
+
+internal fn Reading.next(self, text: StringSlice) -> Result[Reading, AddressError]
+  requires self.holds(text)
+  ensures !(result is Ok(next) && !(next.holds(text) && next.index > self.index))
+  ensures !(result is Err(error) && error.offset > text.length())
+  cost time O(1)
+{
+  if self.count == 8 {
+    Err(AddressError(offset: self.index))
+  } else if self.count <= 6 && dotted_at(text, from: self.index) {
+    self.with_quad(text)
+  } else {
+    self.with_group(text)
+  }
+}
+
+internal fn Reading.octets(self) -> Option[Array[UInt8, 16]]
+  requires self.count <= 8
+  requires self.gap == 9 || self.gap <= self.count
+  cost time O(1)
+{
+  if self.pending || (self.gap == 9 && self.count != 8) || (self.gap != 9 && self.count == 8) {
+    return None
+  }
+  let missing = 8 - self.count
+  var octets: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let positions: USize = 8
+  for position in 0..positions {
+    if self.gap == 9 || position < self.gap {
+      octets[2 * position] = intrinsic::convert(self.groups[position] / 256)
+      octets[2 * position + 1] = intrinsic::convert(self.groups[position] % 256)
+    } else if position >= self.gap + missing {
+      octets[2 * position] = intrinsic::convert(self.groups[position - missing] / 256)
+      octets[2 * position + 1] = intrinsic::convert(self.groups[position - missing] % 256)
+    }
+  }
+  Some(octets)
+}
+
+internal fn groups_address(text: StringSlice) -> Result[IpAddress, AddressError]
+  ensures !(result is Err(error) && error.offset > text.length())
+  cost time O(text.length())
+{
+  let starts_with_gap = text.length() >= 2 && text.byte(0) == 58 && text.byte(1) == 58
+  var reading = Reading(
+    groups: [0, 0, 0, 0, 0, 0, 0, 0],
+    count: 0,
+    gap: if starts_with_gap { 0 } else { 9 },
+    index: if starts_with_gap { 2 } else { 0 },
+    pending: false,
+  )
+  while reading.index < text.length()
+    invariant reading.holds(text)
+    decreases text.length() - reading.index
+    cost time O(reading.index)
+  {
+    reading = reading.next(text)?
+  }
+  match reading.octets() {
+    Some(octets) => Ok(IpAddress.Version6(octets))
+    None => Err(AddressError(offset: text.length()))
+  }
+}
+
+internal fn address_of(text: StringSlice) -> Result[IpAddress, AddressError]
+  ensures !(result is Err(error) && error.offset > text.length())
+  cost time O(text.length())
+{
+  if dotted_at(text, from: 0) {
+    let quad = quad_at(text, from: 0)?
+    if quad.end != text.length() {
+      return Err(AddressError(offset: quad.end))
+    }
+    Ok(IpAddress.Version4(quad.octets))
+  } else {
+    groups_address(text)
+  }
+}
+
+internal fn address_within(text: StringSlice, from: USize, to: USize) -> Result[IpAddress, AddressError]
+  requires from <= to
+  requires to <= text.length()
+  ensures !(result is Err(error) && error.offset > text.length())
+  cost time O(text.length())
+{
+  match address_of(text.part(from, to: to)) {
+    Ok(address) => Ok(address)
+    Err(error) => Err(AddressError(offset: from + error.offset))
+  }
+}
+
+internal fn number_at(text: StringSlice, from: USize, limit: UInt32) -> Result[UInt32, AddressError]
+  requires from <= text.length()
+  requires limit <= 65535
+  ensures !(result is Ok(value) && value > limit)
+  ensures !(result is Err(error) && error.offset > text.length())
+  cost time O(text.length() - from)
+{
+  var value: UInt32 = 0
+  var index = from
+  while index < text.length()
+    invariant from <= index
+    invariant index <= text.length()
+    invariant value <= limit
+    decreases text.length() - index
+    cost time O(index - from)
+  {
+    let byte = text.byte(index)
+    if byte < 48 || byte > 57 {
+      return Err(AddressError(offset: index))
+    }
+    let next = value * 10 + intrinsic::convert[UInt8, UInt32](byte - 48)
+    if next > limit {
+      return Err(AddressError(offset: index))
+    }
+    value = next
+    index += 1
+  }
+  if index == from {
+    return Err(AddressError(offset: from))
+  }
+  Ok(value)
+}
+
+internal fn position_of(text: StringSlice, byte: UInt8) -> USize
+  ensures result <= text.length()
+  ensures result == text.length() || text.byte(result) == byte
+  cost time O(text.length())
+{
+  var index: USize = 0
+  while index < text.length() && text.byte(index) != byte
+    invariant index <= text.length()
+    decreases text.length() - index
+    cost time O(index)
+  {
+    index += 1
+  }
+  index
 }
 
 impl text::Parse for IpAddress {
   type Error = AddressError
 
-  fn parse(text: StringSlice) -> Result[IpAddress, AddressError] {
-    todo
+  fn parse(text: StringSlice) -> Result[IpAddress, AddressError]
+    ensures !(result is Err(error) && error.offset > text.length())
+  {
+    address_of(text)
   }
 }
 
@@ -52,16 +457,39 @@ public type SocketAddress(address: IpAddress, port: UInt16)
   derives Equal, Hash, Ordered
 
 impl Display for SocketAddress {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self.address {
+      Version4(_) => self.address.display(mut output)
+      Version6(_) => {
+        mut output.write("[")
+        self.address.display(mut output)
+        mut output.write("]")
+      }
+    }
+    mut output.write(":")
+    self.port.display(mut output)
   }
 }
 
 impl text::Parse for SocketAddress {
   type Error = AddressError
 
-  fn parse(text: StringSlice) -> Result[SocketAddress, AddressError] {
-    todo
+  fn parse(text: StringSlice) -> Result[SocketAddress, AddressError]
+    ensures !(result is Err(error) && error.offset > text.length())
+  {
+    let bracketed = text.length() > 0 && text.byte(0) == 91
+    let close = position_of(text, byte: if bracketed { 93 } else { 58 })
+    if close == text.length() {
+      return Err(AddressError(offset: close))
+    }
+    let address = address_within(text, from: if bracketed { 1 } else { 0 }, to: close)?
+    if bracketed != (address is Version6(_)) {
+      return Err(AddressError(offset: 0))
+    }
+    let colon = if bracketed { after(text, from: close + 1, byte: 58)? } else { close + 1 }
+    let port = number_at(text, from: colon, limit: 65535)?
+    Ok(SocketAddress(address: address, port: intrinsic::convert(port)))
   }
 }
 
@@ -69,31 +497,85 @@ public type AddressError(offset: USize)
   derives Equal
 
 impl Display for AddressError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write("the text is not an address at offset ")
+    self.offset.display(mut output)
   }
 }
 
 public opaque type IpNetwork(address: IpAddress, prefix_length: UInt8)
   derives Plain, Equal, Hash
 
+internal fn masked(octet: UInt8, index: USize, prefix_length: UInt8) -> UInt8
+  requires index < 16
+  cost time O(1)
+{
+  let kept: USize = intrinsic::convert(prefix_length)
+  if kept >= 8 * index + 8 {
+    octet
+  } else if kept <= 8 * index {
+    0
+  } else {
+    let dropped = 8 * index + 8 - kept
+    (octet >> dropped) << dropped
+  }
+}
+
 public fn IpNetwork.new(address: IpAddress, prefix_length: UInt8) -> Option[IpNetwork]
   cost time O(1)
 {
-  todo
+  match address {
+    Version4(octets) => {
+      if prefix_length > 32 {
+        return None
+      }
+      var kept = octets
+      let count: USize = 4
+      for index in 0..count {
+        kept[index] = masked(octets[index], index: index, prefix_length: prefix_length)
+      }
+      Some(IpNetwork(address: IpAddress.Version4(kept), prefix_length: prefix_length))
+    }
+    Version6(octets) => {
+      if prefix_length > 128 {
+        return None
+      }
+      var kept = octets
+      let count: USize = 16
+      for index in 0..count {
+        kept[index] = masked(octets[index], index: index, prefix_length: prefix_length)
+      }
+      Some(IpNetwork(address: IpAddress.Version6(kept), prefix_length: prefix_length))
+    }
+  }
 }
 
 public fn IpNetwork.contains(self, address: IpAddress) -> Bool
   cost time O(1)
 {
-  todo
+  match IpNetwork.new(address, prefix_length: self.prefix_length) {
+    Some(network) => network.address == self.address
+    None => false
+  }
 }
 
 impl text::Parse for IpNetwork {
   type Error = AddressError
 
-  fn parse(text: StringSlice) -> Result[IpNetwork, AddressError] {
-    todo
+  fn parse(text: StringSlice) -> Result[IpNetwork, AddressError]
+    ensures !(result is Err(error) && error.offset > text.length())
+  {
+    let slash = position_of(text, byte: 47)
+    if slash == text.length() {
+      return Err(AddressError(offset: slash))
+    }
+    let address = address_within(text, from: 0, to: slash)?
+    let length = number_at(text, from: slash + 1, limit: 128)?
+    match IpNetwork.new(address, prefix_length: intrinsic::convert(length)) {
+      Some(network) => Ok(network)
+      None => Err(AddressError(offset: slash + 1))
+    }
   }
 }
 
@@ -222,7 +704,17 @@ public fn DatagramSocket.set_read_timeout(mut self, timeout: Option[Duration]) -
 public fn connect(host: StringSlice, port: UInt16, timeout: Option[Duration] = None) -> Result[Connection, SystemError]
   uses NetworkClient
 {
-  todo
+  let addresses = NetworkClient.resolve(host)?
+  var failure = SystemError.HostNotFound
+  for address in addresses {
+    match NetworkClient.connect(SocketAddress(address: address, port: port), timeout: timeout) {
+      Ok(connection) => return Ok(own connection)
+      Err(error) => {
+        failure = error
+      }
+    }
+  }
+  Err(failure)
 }
 
 public type HostsAllowed(hosts: Set[String])
