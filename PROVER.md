@@ -1223,10 +1223,10 @@ sanitized runs, test the trusted base against real executions.
 - **Proof states in the language server.** `Prover.states` gives each
   obligation's state at its position, proven or not with the diagnostic
   that says why; the language server, `truss lsp`, is not built yet.
-- **A fuzzer of proofs, and a benchmark of solving.** The fuzzer is to
-  mutate the documents' examples and check that no obligation the prover
-  proves fails its run-time check when the mutated program runs. The
-  benchmark is to time solving over the standard library.
+- **A fuzzer of proofs.** It is to mutate the documents' examples and check
+  that no obligation the prover proves fails its run-time check when the
+  mutated program runs. `stage0/tools/proof_benchmark` times solving the
+  standard library's proofs, with no answers kept, by module.
 - **Turning off a definition** is not decided. Dafny and Verus can hide a
   body from the solver, which keeps large definitions from slowing queries
   that do not need them. Pruning may be enough; if not, a way to say so is
