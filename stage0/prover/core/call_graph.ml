@@ -208,3 +208,14 @@ let reaches (graph : t) ~from ~target =
        end
   in
   go from
+
+(* Whether a function can call itself again: whether something it calls
+   reaches back to it. *)
+let recursive (graph : t) path =
+  match List.find_opt (fun (node, _) -> Path.equal node path) graph with
+  | Some (_, edges) ->
+      List.exists
+        (fun edge ->
+          List.exists (fun from -> reaches graph ~from ~target:path) (targets graph edge))
+        edges
+  | None -> false
