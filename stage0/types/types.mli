@@ -55,7 +55,14 @@ and function_type = {
 }
 
 and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
-and capability = Capability of Path.t | Capability_parameter of parameter
+
+and capability =
+  | Capability of Path.t
+  | Capability_parameter of parameter
+  | Capability_variable of int
+      (** The set a call's capability parameter stands for, while a definition is checked: it is
+          what the functions passed for the parameter use, which is known once the whole definition
+          is. No result that is given out holds one. *)
 
 and cost = { amortized : bool; resource : string; bound : cost_bound }
 (** A cost clause of a function type, which cannot mention parameters. Only the prover reads its
@@ -93,6 +100,15 @@ val map : (ty -> ty option) -> ty -> ty
 (** Rewrites a type from the outside in: where [f] gives a replacement, it is used as it is, and
     elsewhere the type's parts are rewritten. Every part is visited: arguments, function inputs and
     outputs, [any] and projection traits. *)
+
+val map_capabilities : (capability list -> capability list) -> ty -> ty
+(** A type with every set of capabilities in it rewritten: the [uses] of each function type and each
+    capability argument, at any depth. *)
+
+val map_argument_capabilities : (capability list -> capability list) -> argument -> argument
+
+val unknown_capabilities : capability list -> bool
+(** Whether a set has a {!Capability_variable} in it, so that what it holds is not known yet. *)
 
 val equal : ty -> ty -> bool
 (** Structural: types are nominal, so two [Named] types are equal when they name the same definition

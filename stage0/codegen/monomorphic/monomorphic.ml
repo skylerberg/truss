@@ -45,7 +45,8 @@ and ground_argument context substitution (argument : Types.argument) : Ground.ar
            (List.concat_map
               (function
                 | Types.Capability path -> [ path ]
-                | Capability_parameter p -> context.capabilities p)
+                | Capability_parameter p -> context.capabilities p
+                | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
               set))
 
 and ground_function context substitution (f : Types.function_type) : Ground.function_type =
@@ -62,7 +63,9 @@ and ground_function context substitution (f : Types.function_type) : Ground.func
       List.sort_uniq Path.compare
         (List.concat_map
            (function
-             | Types.Capability path -> [ path ] | Capability_parameter p -> context.capabilities p)
+             | Types.Capability path -> [ path ]
+             | Capability_parameter p -> context.capabilities p
+             | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
            f.uses);
   }
 

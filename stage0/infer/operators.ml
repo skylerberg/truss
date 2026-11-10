@@ -210,7 +210,6 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
         arguments = operands;
         defaults_left_out = [];
         uses = [];
-        capability_arguments = [];
         result;
       };
   defer state (fun () ->
@@ -250,7 +249,6 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
                   arguments = operands;
                   defaults_left_out = [];
                   uses = [];
-                  capability_arguments = [];
                   result = output;
                 }
         | None ->
@@ -290,7 +288,6 @@ and built_in_operator state (value : expression) (operands : expression list) re
             operands;
         defaults_left_out = [];
         uses = [];
-        capability_arguments = [];
         result;
       }
 
@@ -420,7 +417,6 @@ and binary state env ?expected (value : expression) operator (left : expression)
                 ];
               defaults_left_out = [];
               uses = [];
-              capability_arguments = [];
               result;
             };
         resolve_evidence state value left_type (trait_reference trait);

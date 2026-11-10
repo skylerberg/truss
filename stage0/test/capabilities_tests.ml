@@ -756,19 +756,79 @@ let () =
         \    action()\n\
         \  }\n\
          }\n");
-  test "a function calling itself passes nothing more for its capability parameter" (fun () ->
+  test "a function calling itself needs what it passes for its capability parameter" (fun () ->
+      let repeat uses =
+        ticks
+        ^ "fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant\n\
+          \  uses " ^ uses
+        ^ "\n{\n  if again {\n    repeat(tick, again: false)\n  } else {\n    action()\n  }\n}\n"
+      in
+      one_diagnostic (repeat "Mine") "capabilities.not_available";
+      fine (repeat "Mine, Clock"))
+
+(* A capability parameter in what a call gives, and in a type *)
+
+let later =
+  ticks
+  ^ "fn later[capability Granted](action: (fn() -> Instant uses Granted)) -> (fn() -> Instant uses \
+     Granted) {\n\
+    \  action\n\
+     }\n\n"
+
+let () =
+  test "what a call gives uses what was passed for its capability parameter" (fun () ->
       one_diagnostic
-        (ticks
-       ^ "fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant\n\
-         \  uses Mine\n\
+        (later ^ "fn f() -> Instant {\n  let kept = later(tick)\n  kept()\n}\n")
+        "capabilities.not_available";
+      fine (later ^ "fn f() -> Instant\n  uses Clock\n{\n  let kept = later(tick)\n  kept()\n}\n");
+      fine (later ^ "fn f() -> Instant {\n  let kept = later(still)\n  kept()\n}\n"));
+  test "what a call gives must be within the function type it meets" (fun () ->
+      one_diagnostic
+        (later
+       ^ "fn f()\n  uses Clock\n{\n  let kept: fn() -> Instant = later(tick)\n  let _ = kept\n}\n")
+        "types.mismatch";
+      fine
+        (later
+       ^ "fn f()\n\
+         \  uses Clock\n\
           {\n\
-         \  if again {\n\
-         \    repeat(tick, again: false)\n\
-         \  } else {\n\
-         \    action()\n\
-         \  }\n\
+         \  let kept: (fn() -> Instant uses Clock) = later(tick)\n\
+         \  let _ = kept\n\
+          }\n"));
+  test "a variable assigned another function uses what either does" (fun () ->
+      one_diagnostic
+        (later ^ "fn f() -> Instant {\n  var kept = later(still)\n  kept = tick\n  kept()\n}\n")
+        "capabilities.not_available";
+      fine
+        (later
+       ^ "fn f() -> Instant\n\
+         \  uses Clock\n\
+          {\n\
+         \  var kept = later(still)\n\
+         \  kept = tick\n\
+         \  kept()\n\
+          }\n"));
+  test "a type's capability parameter is what its fields' functions use" (fun () ->
+      let holder =
+        ticks ^ "type Holder[capability Granted](action: (fn() -> Instant uses Granted))\n\n"
+      in
+      one_diagnostic
+        (holder
+       ^ "fn f() -> Instant {\n\
+         \  let holder = Holder(action: tick)\n\
+         \  let action = holder.action\n\
+         \  action()\n\
           }\n")
-        "types.mismatch")
+        "capabilities.not_available";
+      fine
+        (holder
+       ^ "fn f() -> Instant\n\
+         \  uses Clock\n\
+          {\n\
+         \  let holder = Holder(action: tick)\n\
+         \  let action = holder.action\n\
+         \  action()\n\
+          }\n"))
 
 (* Function values and the costs their types promise *)
 

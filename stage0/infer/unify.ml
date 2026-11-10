@@ -6,9 +6,20 @@ type t = {
   mutable next : int;
   types : (int, T.ty) Hashtbl.t;  (** What each solved type variable or literal is. *)
   values : (int, T.value) Hashtbl.t;  (** What each solved value variable is. *)
+  mutable unknown_sets : int;  (** How many unknown sets of capabilities were made. *)
+  mutable agreements : (T.capability list * T.capability list) list;
+      (** Sets of capabilities that two types unified hold in the same place, of which one is not
+          known yet: they must turn out the same. *)
 }
 
-let create () = { next = 0; types = Hashtbl.create 16; values = Hashtbl.create 4 }
+let create () =
+  {
+    next = 0;
+    types = Hashtbl.create 16;
+    values = Hashtbl.create 4;
+    unknown_sets = 0;
+    agreements = [];
+  }
 
 let fresh unifier =
   unifier.next <- unifier.next + 1;
@@ -21,6 +32,25 @@ let fresh_literal unifier kind =
 let fresh_value unifier =
   unifier.next <- unifier.next + 1;
   T.Value_variable unifier.next
+
+(* An unknown set of capabilities: what a capability parameter stands for
+   where its function or type is used, which is the least set that what is
+   passed for it uses. No statement works it out: it is known once the
+   whole definition is checked. *)
+let fresh_capabilities unifier =
+  unifier.unknown_sets <- unifier.unknown_sets + 1;
+  [ T.Capability_variable unifier.unknown_sets ]
+
+(* Whether two sets of capabilities are one. Where either holds an unknown,
+   that is noted, to be held once the unknowns are solved. *)
+let same_capabilities unifier left right =
+  let left = List.sort_uniq compare left and right = List.sort_uniq compare right in
+  left = right
+  || (T.unknown_capabilities left || T.unknown_capabilities right)
+     && begin
+       unifier.agreements <- (left, right) :: unifier.agreements;
+       true
+     end
 
 (* The type a variable stands for, one step at a time, until it is not a
    solved variable. *)
@@ -184,13 +214,14 @@ let rec unify unifier (left : T.ty) (right : T.ty) =
       Path.equal left.path right.path && unify_arguments unifier left.arguments right.arguments
   | Parameter left, Parameter right -> left = right
   | Function left, Function right ->
-      T.same_clauses left right
+      List.sort_uniq compare left.costs = List.sort_uniq compare right.costs
       && List.length left.inputs = List.length right.inputs
       && List.for_all2
            (fun (left_mode, left) (right_mode, right) ->
              left_mode = right_mode && unify unifier left right)
            left.inputs right.inputs
       && unify_result unifier left.output right.output
+      && same_capabilities unifier left.uses right.uses
   | Any left, Any right -> unify_trait unifier left right
   | Projection left, Projection right ->
       left.name = right.name
@@ -219,8 +250,7 @@ and unify_arguments unifier left right =
          | T.Type left, T.Type right -> unify unifier left right
          | T.Value left, T.Value right -> unify_value unifier left right
          | T.Type (T.Error _), _ | _, T.Type (T.Error _) -> true
-         | T.Capabilities left, T.Capabilities right ->
-             List.sort_uniq compare left = List.sort_uniq compare right
+         | T.Capabilities left, T.Capabilities right -> same_capabilities unifier left right
          | _ -> false)
        left right
 

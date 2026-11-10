@@ -26,9 +26,18 @@ type env = {
   loop_element : T.ty option;
       (** In a [for] loop's clauses, what each iteration receives, which [yielded] is a sequence of.
       *)
-  own : T.parameter list;
-      (** The capability parameters of the function being checked. Each stands for itself throughout
-          the body, in a call of the function by itself too. *)
+}
+
+(* One set of capabilities that must be within another, where either holds
+   an unknown: a function value's [uses] within those of the function type
+   it meets, and what a call needs within what is available where it is.
+   An unknown in [wanted] is made to hold what [given] has and [wanted]
+   lacks; once every unknown is solved, [lacking] reports what [wanted]
+   still does not hold. *)
+type within = {
+  given : T.capability list;
+  wanted : T.capability list;
+  lacking : T.capability list -> unit;
 }
 
 type frame = {
@@ -81,11 +90,11 @@ type state = {
   mutable lambdas : span list;  (** The lambdas being checked, innermost first. *)
   mutable unsolved : Diagnostic.reported option;
       (** The report of the first statement whose types could not be worked out. *)
-  widened : (id, T.capability list * T.capability list) Hashtbl.t;
-      (** By its expression, each function value that uses more than the function type it meets
-          lists: that type's [uses], which have a capability parameter of what an enclosing call
-          calls, and the capabilities they do not list, which the call's check takes as passed for
-          the parameter. *)
+  mutable within : within list;
+      (** What the unknown sets of capabilities must hold, and be held within. *)
+  mutable capabilities : (int, T.capability list) Hashtbl.t option;
+      (** What each unknown set of capabilities is, once they are solved: one with no entry is
+          empty. *)
   mutable evidence : string list;  (** The packages whose [impl]s met a bound here. *)
 }
 
@@ -218,10 +227,30 @@ let unsolved state =
 
 (* A type as the finished definition has it: solved, normalized, and an
    error where nothing decided it. *)
+(* A set of capabilities as the finished definition has it: each unknown
+   in it replaced by what it was solved as. Until they are solved, the set
+   as it is. *)
+let final_capabilities state (capabilities : T.capability list) =
+  match state.capabilities with
+  | Some solution when T.unknown_capabilities capabilities ->
+      List.sort_uniq compare
+        (List.concat_map
+           (function
+             | T.Capability_variable unknown ->
+                 Option.value ~default:[] (Hashtbl.find_opt solution unknown)
+             | capability -> [ capability ])
+           capabilities)
+  | _ -> capabilities
+
 let final state type_ =
-  T.map
-    (function T.Variable _ | T.Literal _ -> Some (unsolved state) | _ -> None)
-    (normalize state type_)
+  let type_ =
+    T.map
+      (function T.Variable _ | T.Literal _ -> Some (unsolved state) | _ -> None)
+      (normalize state type_)
+  in
+  match state.capabilities with
+  | Some _ -> T.map_capabilities (final_capabilities state) type_
+  | None -> type_
 
 let final_argument state = function
   | T.Type type_ -> T.Type (final state type_)
@@ -229,7 +258,7 @@ let final_argument state = function
       match Unify.resolve_value state.unifier value with
       | T.Value_variable _ -> T.Type (unsolved state)
       | value -> T.Value value)
-  | T.Capabilities _ as capabilities -> capabilities
+  | T.Capabilities capabilities -> T.Capabilities (final_capabilities state capabilities)
 
 (* Projections whose base is known are normalized first, so [C.Key] meets
    the type the [impl] chooses. *)
@@ -238,6 +267,16 @@ let unify state left right =
     Impls.normalize state.database ~bounds:(bounds state) (Unify.zonk state.unifier type_)
   in
   Unify.unify state.unifier (normalize left) (normalize right)
+
+(* What a call gives meets the type expected of it before the call's
+   arguments are checked, so that the type arguments this decides are known
+   while they are. It decides nothing about sets of capabilities, which may
+   differ where a function value is widened: those are held where the value
+   is converted. *)
+let hint state found expected =
+  let agreements = state.unifier.agreements in
+  ignore (unify state found expected);
+  state.unifier.agreements <- agreements
 
 (* A trait as it is asked about: with its arguments in their normal form,
    as a type is, so that an associated type among them is what it stands
@@ -329,6 +368,24 @@ let is_named path type_ =
    error. What still mentions an enclosing statement's variables is left to
    that statement. *)
 let settle state frame =
+  (* The sets of capabilities the statement's types hold in one place must
+     turn out the same, each within the other. *)
+  List.iter
+    (fun (left, right) ->
+      let lacking _ =
+        report state Mismatch frame.span
+          (Printf.sprintf
+             "Two function types here must use the same capabilities, and one uses `%s` where the \
+              other uses `%s`."
+             (T.show_argument (T.Capabilities (final_capabilities state left)))
+             (T.show_argument (T.Capabilities (final_capabilities state right))))
+      in
+      state.within <-
+        { given = left; wanted = right; lacking }
+        :: { given = right; wanted = left; lacking }
+        :: state.within)
+    state.unifier.agreements;
+  state.unifier.agreements <- [];
   let run_pending () =
     let rec loop pending =
       let left = List.filter (fun check -> not (check ())) pending in
@@ -638,10 +695,14 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
           Option.map
             (fun build () ->
               let inner : Core.expression = build () in
+              let expected = final state expected in
               match convert conversion with
+              (* A function value whose type turned out to be the one
+                 expected, once the unknown sets were solved, is not
+                 widened. *)
+              | Some Widen when T.equal inner.type_ expected -> inner
               | Some conversion ->
-                  make state ~origin:id (final state expected)
-                    (Convert { conversion; value = inner })
+                  make state ~origin:id expected (Convert { conversion; value = inner })
               | None -> inner)
             before
     | _ -> ());
@@ -677,25 +738,32 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
           (fun capability -> not (List.mem capability wanted_function.uses))
           given_function.uses
       in
-      let solved_by_a_call =
-        List.exists
-          (function
-            | T.Capability_parameter parameter -> not (List.mem parameter env.own)
-            | T.Capability _ -> false)
-          wanted_function.uses
+      (* With an unknown set on either side, whether the value's [uses] are
+         within the type's is known once the unknowns are solved: one in the
+         type is made to hold what the value uses beyond the rest. *)
+      let unknown =
+        T.unknown_capabilities given_function.uses || T.unknown_capabilities wanted_function.uses
       in
       let proven = T.costs_imply ~given:given_function.costs ~wanted:wanted_function.costs in
       if
         Unify.unify state.unifier wanted
           (T.Function
              { given_function with uses = wanted_function.uses; costs = wanted_function.costs })
-        && (unlisted = [] || (solved_by_a_call && Option.is_some expression))
+        && (unlisted = [] || unknown)
         && (proven || argument || Option.is_some expression)
       then begin
+        if unlisted <> [] then
+          state.within <-
+            {
+              given = given_function.uses;
+              wanted = wanted_function.uses;
+              lacking =
+                (fun _ ->
+                  mismatch state span ~expected:(final state expected) ~found:(final state found));
+            }
+            :: state.within;
         Option.iter
           (fun expression ->
-            if unlisted <> [] then
-              Hashtbl.replace state.widened expression (wanted_function.uses, unlisted);
             if not (proven || argument) then
               state.obligations <-
                 Costs_imply { expression; given = given_function; expected = wanted_function }
@@ -777,7 +845,7 @@ let fresh_arguments state (path : Path.t) =
           match generic.kind with
           | Value_generic -> T.Value (Unify.fresh_value state.unifier)
           | Type_generic _ -> T.Type (fresh state)
-          | Capability_generic -> T.Capabilities [])
+          | Capability_generic -> T.Capabilities (Unify.fresh_capabilities state.unifier))
         interface.type_generics
   | None -> []
 
@@ -887,8 +955,7 @@ let instantiate state (span : span) ?(extra = []) (signature : T.signature) =
           match generic.kind with
           | Value_generic -> T.Value (Unify.fresh_value state.unifier)
           | Type_generic _ -> T.Type (fresh state)
-          (* Solved from what the call's lambdas use, by the capability check. *)
-          | Capability_generic -> T.Capabilities [ T.Capability_parameter generic.generic ] ))
+          | Capability_generic -> T.Capabilities (Unify.fresh_capabilities state.unifier) ))
       signature.generics
     @ extra
   in

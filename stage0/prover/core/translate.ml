@@ -4780,10 +4780,7 @@ and call_reaches context (call_ : C.call) values (target : Costs.target) =
       List.exists
         (function
           | T.Capability used -> Path.equal used path
-          | T.Capability_parameter parameter -> (
-              match List.assoc_opt parameter call_.capability_arguments with
-              | Some given -> List.mem (T.Capability path) given
-              | None -> true))
+          | T.Capability_parameter _ | T.Capability_variable _ -> true)
         call_.uses
 
 and lambda_captures_target context lambda target =
@@ -4822,7 +4819,9 @@ and function_value_amount context frame (function_type : T.function_type) callee
   | Calls (Capability path | Capability_method (path, _)) ->
       if
         List.exists
-          (function T.Capability used -> Path.equal used path | T.Capability_parameter _ -> true)
+          (function
+            | T.Capability used -> Path.equal used path
+            | T.Capability_parameter _ | T.Capability_variable _ -> true)
           function_type.uses
       then unknown_amount context frame counter
       else Costs.zero
@@ -6659,7 +6658,6 @@ and own_cursor_loop context frame (written : statement) pattern iterable clauses
       arguments = [ argument ];
       defaults_left_out = [];
       uses = [];
-      capability_arguments = [];
       result = option_type;
     }
   in

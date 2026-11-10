@@ -341,7 +341,6 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                         ];
                       defaults_left_out = [];
                       uses = [];
-                      capability_arguments = [];
                       result = output;
                     };
                 Form.draft_index state value;
