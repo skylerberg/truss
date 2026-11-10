@@ -320,6 +320,12 @@ let check context (graph : Graph.t) =
             | None ->
                 "This value is dropped at the end of the statement, but what the statement binds \
                  still views it. Bind it to a name first, so it lives as long as the view."
+            (* A local that the compiler made, such as the list that a list
+               literal builds, has no name that the source shows. *)
+            | Some { root = Local (Synthetic _); _ } ->
+                "This value is dropped at the end of the statement, but the collection that is \
+                 built here may still view it. Bind it to a name first, so it lives as long as the \
+                 view."
             | Some place ->
                 Printf.sprintf
                   "This value is dropped at the end of the statement, but `%s` may still view it. \
