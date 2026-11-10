@@ -1115,6 +1115,9 @@ Each obligation the prover could not prove is an error, with the shared
   reads back as the same bits, and a record or a variant is its name with
   its fields. An agent can turn these values into a test, which then fails
   at its run-time check if the code is wrong.
+- **A state for every obligation.** Each obligation, shown or not, has a
+  state at its position, for a language server to show; the diagnostics
+  are the states that were not shown.
 - **One report for one failure.** An obligation whose kind and message are
   another's that failed in the same definition, such as a second index into
   the same list with the same index on another path, is not reported again.
@@ -1217,8 +1220,9 @@ sanitized runs, test the trusted base against real executions.
 - **Proof programs as a data structure of their own,** made from a body
   and then turned into verification conditions by weakest preconditions,
   which would keep reading Truss apart from the logic. One walk does both.
-- **Proof states in the language server:** each obligation's state at its
-  position, and the counterexample of each one that failed.
+- **Proof states in the language server.** `Prover.states` gives each
+  obligation's state at its position, proven or not with the diagnostic
+  that says why; the language server, `truss lsp`, is not built yet.
 - **A fuzzer of proofs.** It is to mutate the documents' examples and check
   that no obligation the prover proves fails its run-time check when the
   mutated program runs. `stage0/tools/proof_benchmark` times solving the
