@@ -627,3 +627,24 @@ test "text that is not a number says where it stops being one" {
   assert Float64.parse("nan") == Err(core::ParseFloatError.Invalid(offset: 0))
   assert Float64.parse("1_000") == Err(core::ParseFloatError.Invalid(offset: 1))
 }
+
+fn reads_single(text: StringSlice, bits: UInt32) -> Bool {
+  match Float32.parse(text) {
+    Ok(value) => value.to_bits() == bits
+    Err(_) => false
+  }
+}
+
+test "text is read as the nearest Float32, rounding once" {
+  assert reads_single("1.0", bits: 1065353216)
+  assert reads_single("0.1", bits: 1036831949)
+  assert reads_single("1.000000059604644775390625", bits: 1065353216)
+  assert reads_single("1.00000005960464477539062500000001", bits: 1065353217)
+  assert reads_single("3.4028235e38", bits: 2139095039)
+  assert reads_single("1e39", bits: 2139095040)
+  assert reads_single("1e-45", bits: 1)
+  assert reads_single("-0.0", bits: 2147483648)
+  assert Float32.parse("-infinity") == Ok(Float32.negative_infinity)
+  assert Float32.parse("NaN") is Ok(value) && value.is_nan()
+  assert Float32.parse("1.5f") == Err(core::ParseFloatError.Invalid(offset: 3))
+}

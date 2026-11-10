@@ -145,3 +145,81 @@ test "bytes compare equal only when they are the same bytes" {
   assert !cryptography::constant_time_equal("xecret".bytes(), second: "secret".bytes())
   assert cryptography::constant_time_equal("".bytes(), second: "".bytes())
 }
+
+fn pattern(count: USize) -> List[UInt8] {
+  List.generate(count, make: fn(index) { pattern_byte(index) })
+}
+
+fn pattern_byte(index: USize) -> UInt8 {
+  let small = index % 251
+  match UInt8.try_from(small) {
+    Ok(byte) => byte
+    Err(_) => 0
+  }
+}
+
+fn blake3_of(bytes: Slice[UInt8]) -> String {
+  let digest = cryptography::blake3(bytes)
+  hex::encode(digest[..])
+}
+
+test "BLAKE3 of the published test vectors" {
+  assert blake3_of(pattern(0)) == "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
+  assert blake3_of(pattern(1)) == "2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213"
+  assert blake3_of(pattern(1024)) == "42214739f095a406f3fc83deb889744ac00df831c10daa55189b5d121c855af7"
+  assert blake3_of(pattern(1025)) == "d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444"
+  assert blake3_of("abc".bytes()) == "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"
+}
+
+test "BLAKE3 at block and chunk boundaries" {
+  assert blake3_of(pattern(63)) == "e9bc37a594daad83be9470df7f7b3798297c3d834ce80ba85d6e207627b7db7b"
+  assert blake3_of(pattern(64)) == "4eed7141ea4a5cd4b788606bd23f46e212af9cacebacdc7d1f4c6dc7f2511b98"
+  assert blake3_of(pattern(65)) == "de1e5fa0be70df6d2be8fffd0e99ceaa8eb6e8c93a63f2d8d1c30ecb6b263dee"
+  assert blake3_of(pattern(1023)) == "10108970eeda3eb932baac1428c7a2163b0e924c9a9e25b35bba72b28f70bd11"
+  assert blake3_of(pattern(2048)) == "e776b6028c7cd22a4d0ba182a8bf62205d2ef576467e838ed6f2529b85fba24a"
+  assert blake3_of(pattern(2049)) == "5f4d72f40d7a5f82b15ca2b2e44b1de3c2ef86c426c95c1af0b6879522563030"
+  assert blake3_of(pattern(3072)) == "b98cb0ff3623be03326b373de6b9095218513e64f1ee2edd2525c7ad1e5cffd2"
+  assert blake3_of(pattern(4097)) == "9b4052b38f1c5fc8b1f9ff7ac7b27cd242487b3d890d15c96a1c25b8aa0fb995"
+  assert blake3_of(pattern(7169)) == "a003fc7a51754a9b3c7fae0367ab3d782dccf28855a03d435f8cfe74605e7817"
+  assert blake3_of(pattern(16384)) == "f875d6646de28985646f34ee13be9a576fd515f76b5b0a26bb324735041ddde4"
+}
+
+fn keyed_blake3_of(bytes: Slice[UInt8]) -> String {
+  let key = "whats the Elvish word for friend".to_bytes()
+  var words: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let count: USize = 32
+  for index in 0..count {
+    words[index] = key[index]
+  }
+  var hasher = cryptography::Blake3.keyed(words)
+  mut hasher.update(bytes)
+  let digest = own hasher.finish()
+  hex::encode(digest[..])
+}
+
+test "keyed BLAKE3 of the published test vectors" {
+  assert keyed_blake3_of(pattern(0)) == "92b2b75604ed3c761f9d6f62392c8a9227ad0ea3f09573e783f1498a4ed60d26"
+  assert keyed_blake3_of(pattern(65)) == "c0a4edefa2d2accb9277c371ac12fcdbb52988a86edc54f0716e1591b4326e72"
+  assert keyed_blake3_of(pattern(2049)) == "9f29700902f7c86e514ddc4df1e3049f258b2472b6dd5267f61bf13983b78dd5"
+}
+
+test "BLAKE3 in pieces is BLAKE3 of the whole, and its output extends" {
+  let bytes = pattern(2049)
+  var hasher = cryptography::Blake3.new()
+  mut hasher.update(bytes[..1])
+  mut hasher.update(bytes[1..1000])
+  mut hasher.update(bytes[1000..1030])
+  mut hasher.update(bytes[1030..])
+  let digest = own hasher.finish()
+  assert hex::encode(digest[..]) == "5f4d72f40d7a5f82b15ca2b2e44b1de3c2ef86c426c95c1af0b6879522563030"
+  var long = cryptography::Blake3.new()
+  mut long.update(pattern(1025))
+  let extended = own long.finish_extended(131)
+  assert hex::encode(extended) == "d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444f4c4a22b4b399155358a994e52bf255de60035742ec71bd08ac275a1b51cc6bfe332b0ef84b409108cda080e6269ed4b3e2c3f7d722aa4cdc98d16deb554e5627be8f955c98e1d5f9565a9194cad0c4285f93700062d9595adb992ae68ff12800ab67a"
+  let empty = cryptography::Blake3.new()
+  assert hex::encode(own empty.finish_extended(70)) == "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262e00f03e7b69af26b7faaf09fcd333050338ddfe085b8cc869ca98b206c08243a26f5487789e8"
+  let none = cryptography::Blake3.new()
+  assert (own none.finish_extended(0)).length() == 0
+}
