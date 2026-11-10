@@ -1131,6 +1131,16 @@ of a program to run, is a `View[USize]` that Truss fills with
 `view_address`, which gives the address of a view's elements as a number;
 nothing turns a number back into an address.
 
+A row also says how much the function reads or writes through each
+address: as many elements as a count that the call passes, a fixed number,
+a number of the system such as `PATH_MAX` or the size of a `struct stat`,
+or up to the first zero element, as C reads a path. And it says which
+count bounds the result, as `read` returns no more than the count it was
+given. Code generation does not use these. They are what the prover holds
+a call to: a view has the elements that are read, and storage has the room
+that is filled. So the proof that a call stays inside the memory it is
+given is one rule over the table, and a new row needs no rule of its own.
+
 A function's result is a number; the number at the address it returns,
 which is how `errno` is reached; text, the bytes at the address it
 returns up to a zero byte, as a view, with a `mut Bool` that says whether

@@ -20,17 +20,82 @@ let host =
 
 type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize | Float64
 
+type number =
+  | O_rdonly
+  | O_wronly
+  | O_creat
+  | O_trunc
+  | O_cloexec
+  | Eintr
+  | Enoent
+  | Eacces
+  | Eio
+  | Einval
+  | Clock_realtime
+  | Clock_monotonic
+  | Sc_nprocessors_onln
+  | Pollin
+  | Pollhup
+  | Sigkill
+  | O_rdwr
+  | O_append
+  | O_excl
+  | Seek_set
+  | Seek_cur
+  | Seek_end
+  | Eperm
+  | Ebadf
+  | Eexist
+  | Enotdir
+  | Eisdir
+  | Enfile
+  | Emfile
+  | Enospc
+  | Epipe
+  | Enosys
+  | Enotempty
+  | Enotsup
+  | Eaddrinuse
+  | Eaddrnotavail
+  | Enetunreach
+  | Econnaborted
+  | Econnreset
+  | Enotconn
+  | Etimedout
+  | Econnrefused
+  | Ehostunreach
+  | Stat_size
+  | Stat_mode_offset
+  | Stat_mode_size
+  | Stat_length_offset
+  | Stat_accessed_offset
+  | Stat_modified_offset
+  | Stat_created_offset
+  | S_ifmt
+  | S_ifreg
+  | S_ifdir
+  | S_iflnk
+  | At_fdcwd
+  | Utime_omit
+  | Path_max
+
+type extent =
+  | Counted of { by : string; each : int }
+  | Exactly of int
+  | Number of number
+  | Through_zero
+
 type passes =
   | Value of scalar
-  | Elements of scalar
-  | Room of scalar
-  | Elements_to_change of scalar
+  | Elements of scalar * extent
+  | Room of scalar * extent
+  | Elements_to_change of scalar * extent
   | Written of scalar * string list
   | Always of int
   | Environment
 
 type result = Returns of scalar | Points_at of scalar | Text | Never
-type signature = { parameters : (string * passes) list; result : result }
+type signature = { parameters : (string * passes) list; result : result; at_most : string option }
 
 type declaration = {
   symbol : string;
@@ -165,6 +230,7 @@ type row = {
   symbol : system -> string;
   returns : system -> string;
   result : result;
+  at_most : string option;
   parameters : (string * passes * (system -> string)) list;
   variadic_from : int option;
   headers : string list;
@@ -190,30 +256,31 @@ let offset = by_os (function Linux -> "long" | Macos -> "long long")
 
 let describe function_ =
   let row ?(symbol = everywhere (function_name function_)) ?variadic_from ?(layout = [])
-      ?(named = []) returns result parameters ~headers =
-    { symbol; returns; result; parameters; variadic_from; headers; layout; named }
+      ?(named = []) ?at_most returns result parameters ~headers =
+    { symbol; returns; result; at_most; parameters; variadic_from; headers; layout; named }
   in
+  let counted by = Counted { by; each = 1 } in
   match function_ with
   | Write ->
-      row (everywhere "long") (Returns ISize)
+      row ~at_most:"count" (everywhere "long") (Returns ISize)
         [
           ("descriptor", Value Int32, everywhere "int");
-          ("bytes", Elements UInt8, everywhere "const void *");
+          ("bytes", Elements (UInt8, counted "count"), everywhere "const void *");
           ("count", Value USize, size);
         ]
         ~headers:[ "unistd.h" ]
   | Read ->
-      row (everywhere "long") (Returns ISize)
+      row ~at_most:"count" (everywhere "long") (Returns ISize)
         [
           ("descriptor", Value Int32, everywhere "int");
-          ("buffer", Room UInt8, everywhere "void *");
+          ("buffer", Room (UInt8, counted "count"), everywhere "void *");
           ("count", Value USize, size);
         ]
         ~headers:[ "unistd.h" ]
   | Open ->
       row (everywhere "int") (Returns Int32) ~variadic_from:2
         [
-          ("path", Elements UInt8, everywhere "const char *");
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
           ("flags", Value Int32, everywhere "int");
           ("mode", Value Int32, everywhere "int");
         ]
@@ -253,16 +320,16 @@ let describe function_ =
         ~headers:[ "sys/types.h"; "sys/random.h" ]
   | Getenv ->
       row (everywhere "char *") Text
-        [ ("name", Elements UInt8, everywhere "const char *") ]
+        [ ("name", Elements (UInt8, Through_zero), everywhere "const char *") ]
         ~headers:[ "stdlib.h" ]
   | Posix_spawnp ->
       row (everywhere "int") (Returns Int32)
         [
           ("process", Written (Int32, [ "process" ]), everywhere "int *");
-          ("program", Elements UInt8, everywhere "const char *");
+          ("program", Elements (UInt8, Through_zero), everywhere "const char *");
           ("file_actions", Always 0, everywhere "const void *");
           ("attributes", Always 0, everywhere "const void *");
-          ("arguments", Elements USize, everywhere "char *const *");
+          ("arguments", Elements (USize, Through_zero), everywhere "char *const *");
           ("environment", Environment, everywhere "char *const *");
         ]
         ~named:
@@ -285,9 +352,9 @@ let describe function_ =
          that takes the two. *)
       row (everywhere "int") (Returns Int32) ~variadic_from:3
         [
-          ("buffer", Room UInt8, everywhere "char *");
+          ("buffer", Room (UInt8, counted "size"), everywhere "char *");
           ("size", Value USize, size);
-          ("format", Elements UInt8, everywhere "const char *");
+          ("format", Elements (UInt8, Through_zero), everywhere "const char *");
           ("precision", Value Int32, everywhere "int");
           ("value", Value Float64, everywhere "double");
         ]
@@ -295,7 +362,7 @@ let describe function_ =
   | Strtod ->
       row (everywhere "double") (Returns Float64)
         [
-          ("text", Elements UInt8, everywhere "const char *");
+          ("text", Elements (UInt8, Through_zero), everywhere "const char *");
           ("end", Always 0, everywhere "char **");
         ]
         ~headers:[ "stdlib.h" ]
@@ -308,9 +375,11 @@ let describe function_ =
       (* A [pollfd] is its descriptor and then two numbers of half the
          size, what to wait for and what was found, which are the low and
          the high half of one [Int32] where the low byte comes first. *)
-      row (everywhere "int") (Returns Int32)
+      row ~at_most:"count" (everywhere "int") (Returns Int32)
         [
-          ("waited_for", Elements_to_change Int32, everywhere "struct pollfd *");
+          ( "waited_for",
+            Elements_to_change (Int32, Counted { by = "count"; each = 2 }),
+            everywhere "struct pollfd *" );
           ( "count",
             Value USize,
             by_os (function Linux -> "unsigned long" | Macos -> "unsigned int") );
@@ -341,19 +410,19 @@ let describe function_ =
         [ ("status", Value Int32, everywhere "int") ]
         ~symbol:(everywhere "_exit") ~headers:[ "unistd.h" ]
   | Pread ->
-      row (everywhere "long") (Returns ISize)
+      row ~at_most:"count" (everywhere "long") (Returns ISize)
         [
           ("descriptor", Value Int32, everywhere "int");
-          ("buffer", Room UInt8, everywhere "void *");
+          ("buffer", Room (UInt8, counted "count"), everywhere "void *");
           ("count", Value USize, size);
           ("offset", Value Int64, offset);
         ]
         ~headers:[ "unistd.h" ]
   | Pwrite ->
-      row (everywhere "long") (Returns ISize)
+      row ~at_most:"count" (everywhere "long") (Returns ISize)
         [
           ("descriptor", Value Int32, everywhere "int");
-          ("bytes", Elements UInt8, everywhere "const void *");
+          ("bytes", Elements (UInt8, counted "count"), everywhere "const void *");
           ("count", Value USize, size);
           ("offset", Value Int64, offset);
         ]
@@ -379,7 +448,8 @@ let describe function_ =
          at the offsets the table's numbers give. *)
       row (everywhere "int") (Returns Int32)
         [
-          ("descriptor", Value Int32, everywhere "int"); ("status", Room UInt8, everywhere "void *");
+          ("descriptor", Value Int32, everywhere "int");
+          ("status", Room (UInt8, Number Stat_size), everywhere "void *");
         ]
         ~symbol:(status_symbol "fstat")
         ~named:[ ("status", "struct stat *") ]
@@ -395,8 +465,8 @@ let describe function_ =
   | Stat ->
       row (everywhere "int") (Returns Int32)
         [
-          ("path", Elements UInt8, everywhere "const char *");
-          ("status", Room UInt8, everywhere "void *");
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("status", Room (UInt8, Number Stat_size), everywhere "void *");
         ]
         ~symbol:(status_symbol "stat")
         ~named:[ ("status", "struct stat *") ]
@@ -404,44 +474,50 @@ let describe function_ =
   | Lstat ->
       row (everywhere "int") (Returns Int32)
         [
-          ("path", Elements UInt8, everywhere "const char *");
-          ("status", Room UInt8, everywhere "void *");
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("status", Room (UInt8, Number Stat_size), everywhere "void *");
         ]
         ~symbol:(status_symbol "lstat")
         ~named:[ ("status", "struct stat *") ]
         ~headers:[ "sys/stat.h" ]
   | Mkdir ->
       row (everywhere "int") (Returns Int32)
-        [ ("path", Elements UInt8, everywhere "const char *"); ("mode", Value Int32, mode) ]
+        [
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("mode", Value Int32, mode);
+        ]
         ~headers:[ "sys/stat.h" ]
   | Remove ->
       row (everywhere "int") (Returns Int32)
-        [ ("path", Elements UInt8, everywhere "const char *") ]
+        [ ("path", Elements (UInt8, Through_zero), everywhere "const char *") ]
         ~headers:[ "stdio.h" ]
   | Rename ->
       row (everywhere "int") (Returns Int32)
         [
-          ("from", Elements UInt8, everywhere "const char *");
-          ("to", Elements UInt8, everywhere "const char *");
+          ("from", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("to", Elements (UInt8, Through_zero), everywhere "const char *");
         ]
         ~headers:[ "stdio.h" ]
   | Symlink ->
       row (everywhere "int") (Returns Int32)
         [
-          ("target", Elements UInt8, everywhere "const char *");
-          ("link", Elements UInt8, everywhere "const char *");
+          ("target", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("link", Elements (UInt8, Through_zero), everywhere "const char *");
         ]
         ~headers:[ "unistd.h" ]
   | Link ->
       row (everywhere "int") (Returns Int32)
         [
-          ("target", Elements UInt8, everywhere "const char *");
-          ("link", Elements UInt8, everywhere "const char *");
+          ("target", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("link", Elements (UInt8, Through_zero), everywhere "const char *");
         ]
         ~headers:[ "unistd.h" ]
   | Chmod ->
       row (everywhere "int") (Returns Int32)
-        [ ("path", Elements UInt8, everywhere "const char *"); ("mode", Value Int32, mode) ]
+        [
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("mode", Value Int32, mode);
+        ]
         ~headers:[ "sys/stat.h" ]
   | Utimensat ->
       (* The times are two [timespec]s, the time of access and then the time
@@ -449,16 +525,16 @@ let describe function_ =
       row (everywhere "int") (Returns Int32)
         [
           ("directory", Value Int32, everywhere "int");
-          ("path", Elements UInt8, everywhere "const char *");
-          ("times", Elements Int64, everywhere "const struct timespec *");
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("times", Elements (Int64, Exactly 4), everywhere "const struct timespec *");
           ("flags", Value Int32, everywhere "int");
         ]
         ~headers:[ "fcntl.h"; "sys/stat.h" ]
   | Readlink ->
-      row (everywhere "long") (Returns ISize)
+      row ~at_most:"count" (everywhere "long") (Returns ISize)
         [
-          ("path", Elements UInt8, everywhere "const char *");
-          ("buffer", Room UInt8, everywhere "char *");
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("buffer", Room (UInt8, counted "count"), everywhere "char *");
           ("count", Value USize, size);
         ]
         ~headers:[ "unistd.h" ]
@@ -467,14 +543,14 @@ let describe function_ =
          [PATH_MAX] bytes, and the address returned is that room's. *)
       row (everywhere "char *") Text
         [
-          ("path", Elements UInt8, everywhere "const char *");
-          ("resolved", Room UInt8, everywhere "char *");
+          ("path", Elements (UInt8, Through_zero), everywhere "const char *");
+          ("resolved", Room (UInt8, Number Path_max), everywhere "char *");
         ]
         ~headers:[ "stdlib.h"; "limits.h" ]
   | Nanosleep ->
       row (everywhere "int") (Returns Int32)
         [
-          ("duration", Elements Int64, everywhere "const struct timespec *");
+          ("duration", Elements (Int64, Exactly 2), everywhere "const struct timespec *");
           ( "remaining",
             Written (Int64, [ "remaining_seconds"; "remaining_nanoseconds" ]),
             everywhere "struct timespec *" );
@@ -486,6 +562,7 @@ let signature function_ =
   {
     parameters = List.map (fun (name, passes, _) -> (name, passes)) row.parameters;
     result = row.result;
+    at_most = row.at_most;
   }
 
 let declaration system function_ : declaration =
@@ -536,65 +613,6 @@ let prototype (declaration : declaration) =
   in
   String.concat "" (List.map (fun structure -> structure ^ ";\n") declared)
   ^ Printf.sprintf "%s %s(%s);\n" declaration.returns declaration.symbol parameters
-
-type number =
-  | O_rdonly
-  | O_wronly
-  | O_creat
-  | O_trunc
-  | O_cloexec
-  | Eintr
-  | Enoent
-  | Eacces
-  | Eio
-  | Einval
-  | Clock_realtime
-  | Clock_monotonic
-  | Sc_nprocessors_onln
-  | Pollin
-  | Pollhup
-  | Sigkill
-  | O_rdwr
-  | O_append
-  | O_excl
-  | Seek_set
-  | Seek_cur
-  | Seek_end
-  | Eperm
-  | Ebadf
-  | Eexist
-  | Enotdir
-  | Eisdir
-  | Enfile
-  | Emfile
-  | Enospc
-  | Epipe
-  | Enosys
-  | Enotempty
-  | Enotsup
-  | Eaddrinuse
-  | Eaddrnotavail
-  | Enetunreach
-  | Econnaborted
-  | Econnreset
-  | Enotconn
-  | Etimedout
-  | Econnrefused
-  | Ehostunreach
-  | Stat_size
-  | Stat_mode_offset
-  | Stat_mode_size
-  | Stat_length_offset
-  | Stat_accessed_offset
-  | Stat_modified_offset
-  | Stat_created_offset
-  | S_ifmt
-  | S_ifreg
-  | S_ifdir
-  | S_iflnk
-  | At_fdcwd
-  | Utime_omit
-  | Path_max
 
 let numbers =
   [

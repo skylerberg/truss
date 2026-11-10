@@ -105,7 +105,42 @@ let () =
       if
         modes (Libc Read) <> [ ("descriptor", Types.Read); ("buffer", Mut); ("count", Read) ]
         || modes (Libc Write) <> [ ("descriptor", Types.Read); ("bytes", Read); ("count", Read) ]
-      then fail "read and write take their memory in the wrong modes")
+      then fail "read and write take their memory in the wrong modes");
+  test "what a row says a call reads and writes is counted by a number the call is passed"
+    (fun () ->
+      List.iter
+        (fun function_ ->
+          let { Libc.parameters; at_most; _ } = Libc.signature function_ in
+          let name = Libc.function_name function_ in
+          let passed what parameter =
+            match List.assoc_opt parameter parameters with
+            | Some (Libc.Value USize) -> ()
+            | _ -> fail "%s: %s is `%s`, which is no USize the call is passed" name what parameter
+          in
+          Option.iter (passed "the bound of the result") at_most;
+          List.iter
+            (fun (parameter, (passes : Libc.passes)) ->
+              match passes with
+              | Elements (_, extent) | Room (_, extent) | Elements_to_change (_, extent) -> (
+                  match extent with
+                  | Counted { by; each } ->
+                      passed ("the count of `" ^ parameter ^ "`") by;
+                      if each < 1 then fail "%s: `%s` has no elements for each one" name parameter
+                  | Exactly count ->
+                      if count < 1 then fail "%s: `%s` has no elements" name parameter
+                  | Number number ->
+                      if Libc.number_type number <> USize then
+                        fail "%s: `%s` is counted by %s, which is no USize" name parameter
+                          (Libc.number_name number)
+                  | Through_zero -> ())
+              | Value _ | Written _ | Always _ | Environment -> ())
+            parameters)
+        Libc.functions;
+      let { Libc.parameters; at_most; _ } = Libc.signature Read in
+      if
+        List.assoc "buffer" parameters <> Room (UInt8, Counted { by = "count"; each = 1 })
+        || at_most <> Some "count"
+      then fail "read does not fill at most `count` bytes of room")
 
 let () =
   test "a program writes a view's bytes with write" (fun () ->
