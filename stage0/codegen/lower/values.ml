@@ -391,7 +391,7 @@ and lambda st (e : S.expression) ~(parameters : S.pattern list) ~(body : S.block
 and with_ st (base : S.expression) (updates : S.update list) destination =
   let ty = type_of st base.id in
   (match place_expression st base with
-  | Some place -> emit st.b (Assign (destination, Use (owned st place ty)))
+  | Some place -> take st place ty ~destination
   | None -> into st base destination);
   List.iter
     (fun (update : S.update) ->
@@ -449,18 +449,7 @@ and interpolate st (literal : S.string_literal) destination =
       let slice = temporary st slice_ty in
       (match Monomorphic.shape st.context.monomorphic slice_ty with
       | Record [ (field, Typed view) ] ->
-          emit st.b
-            (Assign
-               ( slice / Field field,
-                 Build
-                   {
-                     ty = view;
-                     variant = None;
-                     fields =
-                       [
-                         ("elements", Constant (Bytes text)); ("length", usize (String.length text));
-                       ];
-                   } ))
+          emit st.b (Assign (slice / Field field, text_view view text))
       | _ -> bug "a StringSlice that is not a view");
       call (method_ "write" Mut)
         [ (Mut, builder_ty, builder); (Read, slice_ty, slice) ]

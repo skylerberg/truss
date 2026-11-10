@@ -77,6 +77,15 @@ let () =
           Verify.instance
             (shape_env ~extra:[ ("Quad", four) ] ())
             (entry [ local (value quad) ] [ block [ swapped ] (Return (Some (constant_int32 0))) ])));
+  test "a move out of a constant's static data is a bug" (fun () ->
+      let constant : Lir.place =
+        { root = Static { key = Constant (definition "words"); ty = text }; projections = [] }
+      in
+      expect_bug ~saying:"a move out of test::words, which is static data" (fun () ->
+          Verify.instance (shape_env ~extra:drop_shapes ())
+            (entry
+               [ local (value text) ]
+               [ block [ Assign (at 0, Use (Move constant)) ] (Return (Some (constant_int32 0))) ])));
   test "an instance whose calls fit their targets passes" (fun () ->
       Verify.instance env (caller [ constant_int32 1 ]));
   let find units key =
@@ -108,35 +117,23 @@ let refused name ~saying source =
       | Error message -> if not (contains message saying) then fail "got %S" message)
 
 let () =
-  refused "a lending method that does more after its yield is refused, at the call"
-    ~saying:"example/main.truss:10:17: Stage0 cannot build this yet"
-    {|type Counted(value: Int64, reads: Int64)
-
-fn Counted.current(mut self) lends Int64 {
-  yield self.value
-  self.value = 99
-}
-
-test "lent" {
-  var counted = Counted(value: 1, reads: 0)
-  let got = mut counted.current() + 0
-  assert got == 1
-}
-|};
-  refused "a lending method that lends a value it made is refused"
+  refused "a lending method with a yield on each of two paths is refused, at the call"
     ~saying:
-      "example/main.truss:10:10: Stage0 cannot build this yet: example::main::Holder.label, a \
-       lending method that lends a value it made"
-    {|type Holder(id: Int64)
+      "example/main.truss:13:10: Stage0 cannot build this yet: example::main::Sides.pick, a \
+       lending method with more than one yield"
+    {|type Sides(first: Int64, second: Int64)
 
-fn Holder.label(self) lends String {
-  let text = "label ${self.id}"
-  yield text
+fn Sides.pick(self, first: Bool) lends Int64 {
+  if first {
+    yield self.first
+  } else {
+    yield self.second
+  }
 }
 
 test "lent" {
-  let holder = Holder(id: 1)
-  assert holder.label() == "label 1"
+  let sides = Sides(first: 1, second: 2)
+  assert sides.pick(true) == 1
 }
 |};
   refused "a lambda in a yielding method that is pulled is refused"

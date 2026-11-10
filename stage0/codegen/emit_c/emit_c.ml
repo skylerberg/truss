@@ -126,6 +126,23 @@ let file env build ?(data = []) ?(tables = []) ?(evidence = []) (instances : (Li
     end
   in
   List.iter emit keys;
+  (* The C compiler lays each type out again from its definition, so it is
+     made to check that it agrees with the layout the rest was built on. *)
+  List.iter
+    (fun key ->
+      let layout =
+        match key with
+        | Type ty -> Some (Memory_layout.of_type env ty)
+        | Block (ty, variant) -> Some (Memory_layout.block env ty variant)
+        | Code _ | Environment _ -> None
+      in
+      Option.iter
+        (fun (layout : Memory_layout.t) ->
+          Buffer.add_string buffer
+            (Printf.sprintf "_Static_assert(sizeof(%s) == %d && _Alignof(%s) == %d, \"layout\");\n"
+               (key_name key) layout.size (key_name key) layout.alignment))
+        layout)
+    keys;
   List.iter
     (fun (text, name) ->
       let bytes = List.init (String.length text) (fun i -> string_of_int (Char.code text.[i])) in

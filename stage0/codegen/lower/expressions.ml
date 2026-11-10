@@ -156,7 +156,7 @@ and into st (e : S.expression) (destination : Lir.place) =
       assign (Build { ty = ty (); variant = None; fields = [ (field, Move built) ] })
   | Name _ | Self_value | Member _ -> (
       match place_expression st e with
-      | Some place -> assign (Use (owned st place (ty ())))
+      | Some place -> take st place (ty ()) ~destination
       | None -> name_value st e destination)
   | Call (callee, arguments) -> call st e ~callee ~arguments destination
   | Binary { operator = And | Or; _ } | Is _ ->
@@ -225,7 +225,7 @@ and into st (e : S.expression) (destination : Lir.place) =
   | Lambda { parameters; body } -> lambda st e ~parameters ~body destination
   | Bracket _ -> (
       match place_expression st e with
-      | Some place -> assign (Use (owned st place (ty ())))
+      | Some place -> take st place (ty ()) ~destination
       | None -> bug "an index with no meaning")
   | Any inner -> any_value st e inner destination
   | Map entries ->

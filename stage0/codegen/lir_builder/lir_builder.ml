@@ -1,22 +1,37 @@
 type t = {
   mutable locals : Lir.local_info list;  (** Most recent first *)
-  mutable blocks : Lir.basic_block array;
+  mutable local_count : int;
+  mutable blocks : Lir.basic_block array;  (** With room to spare past [block_count] *)
+  mutable block_count : int;
   mutable current : int;
   mutable statements : Lir.statement list;  (** Of the current block, most recent first *)
 }
 
-let create () = { locals = []; blocks = [||]; current = 0; statements = [] }
+let empty_block : Lir.basic_block = { statements = []; terminator = Unreachable }
+
+let create () =
+  {
+    locals = [];
+    local_count = 0;
+    blocks = Array.make 8 empty_block;
+    block_count = 0;
+    current = 0;
+    statements = [];
+  }
 
 let local b ?name ?(borrowed = false) ty =
   b.locals <- { Lir.ty; name; borrowed } :: b.locals;
-  List.length b.locals - 1
+  b.local_count <- b.local_count + 1;
+  b.local_count - 1
 
-let local_count b = List.length b.locals
-let local_type b local = (List.nth b.locals (List.length b.locals - 1 - local)).ty
+let local_count b = b.local_count
+let local_type b local = (List.nth b.locals (b.local_count - 1 - local)).ty
 
 let block b =
-  b.blocks <- Array.append b.blocks [| { Lir.statements = []; terminator = Unreachable } |];
-  Array.length b.blocks - 1
+  if b.block_count = Array.length b.blocks then
+    b.blocks <- Array.append b.blocks (Array.make b.block_count empty_block);
+  b.block_count <- b.block_count + 1;
+  b.block_count - 1
 
 let current b = b.current
 
@@ -77,6 +92,6 @@ let build ?written_result b ~parameters ~result : Lir.function_ =
     result;
     returns = true;
     locals = Array.of_list (List.rev b.locals);
-    blocks = b.blocks;
+    blocks = Array.sub b.blocks 0 b.block_count;
     environment = [];
   }

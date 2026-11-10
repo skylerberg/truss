@@ -81,22 +81,32 @@ let compiled_references env : Lir.compiled -> Instance.key list = function
   | Table t -> List.map fst t.entries
   | Evidence e -> e.table :: e.outer
 
+module Table = Hashtbl.Make (struct
+  type t = Instance.key
+
+  let equal = Instance.equal
+  let hash key = Hashtbl.hash_param 64 256 key
+end)
+
 let reached env ~lookup roots =
   (* Breadth-first, so an instance's number depends only on the shape of
      the walk up to it. Each key in the queue carries the way it was
      reached, nearest first. *)
-  let rec walk seen found = function
-    | [] -> List.rev found
-    | (key, way) :: queue ->
-        if List.exists (Instance.equal key) seen then walk seen found queue
-        else
-          let compiled = lookup key in
-          let way = key :: way in
-          walk (key :: seen)
-            ((compiled, List.rev way) :: found)
-            (queue @ List.map (fun next -> (next, way)) (compiled_references env compiled))
-  in
-  walk [] [] (List.map (fun root -> (root, [])) roots)
+  let seen = Table.create 256 in
+  let queue = Queue.create () in
+  List.iter (fun root -> Queue.add (root, []) queue) roots;
+  let found = ref [] in
+  while not (Queue.is_empty queue) do
+    let key, way = Queue.pop queue in
+    if not (Table.mem seen key) then begin
+      Table.replace seen key ();
+      let compiled = lookup key in
+      let way = key :: way in
+      found := (compiled, List.rev way) :: !found;
+      List.iter (fun next -> Queue.add (next, way) queue) (compiled_references env compiled)
+    end
+  done;
+  List.rev !found
 
 let reachable env ~lookup roots = List.map fst (reached env ~lookup roots)
 
@@ -141,13 +151,6 @@ module Keys = Map.Make (struct
   type t = Instance.key
 
   let compare = Instance.compare
-end)
-
-module Table = Hashtbl.Make (struct
-  type t = Instance.key
-
-  let equal = Instance.equal
-  let hash key = Hashtbl.hash_param 64 256 key
 end)
 
 (* The groups of instances that reach each other, among everything the

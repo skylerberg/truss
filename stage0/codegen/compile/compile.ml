@@ -18,8 +18,6 @@ let show_lowering lowering =
   Printf.sprintf "%d-bit%s" (lowering.target.usize_bytes * 8)
     (if lowering.checks then ", checked" else "")
 
-exception Needs_evaluation of Path.t * Ground.ty
-
 type lowered_outcome = Compiled of Lir.compiled | Evaluate of Path.t * Ground.ty
 
 let environment (instance : Lir.t) n = instance.nested.(n).environment
@@ -35,13 +33,21 @@ let elaborate_code (context : Lower.context) (instance : Lir.t) =
          nested = Array.map elaborate instance.nested;
        })
 
+(* A lowering context of its own for one computation, which reads a pulled
+   method's cursor and another constant's value through the queries below,
+   so that each is made once and what read it is known. *)
 let rec fresh_context lowering database =
   let context = Lower.context ~checks:lowering.checks database lowering.target in
   (context.cursor_fields :=
      fun yielding ->
        Yields.cursor_fields context.env
          (fst (Query.demand database (Lazy.force pulled) (lowering, yielding))));
-  (context.evaluate := fun path ty -> raise (Needs_evaluation (path, ty)));
+  (context.constant :=
+     fun path ->
+       match Query.demand database (Lazy.force lowered) (lowering, Instance.Constant path) with
+       | Compiled (Data data) -> Some data.value
+       | Evaluate _ -> None
+       | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path));
   context
 
 (* A pulled method's version, with its drops elaborated. *)
@@ -62,52 +68,59 @@ and pulled =
                  f,
                owned ))))
 
-let make (context : Lower.context) lowering database (key : Instance.key) : Lir.compiled =
+and make (context : Lower.context) lowering database (key : Instance.key) : lowered_outcome =
   let glue = context.glue in
   let pulled yielding = Query.demand database (Lazy.force pulled) (lowering, yielding) in
+  let code instance = Compiled (elaborate_code context instance) in
   match key with
-  | Code _ -> elaborate_code context (Lower.instance context key)
-  | Constant path -> Data (Lower.constant context path)
+  | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ -> code (Lower.instance context key)
+  | Constant path -> (
+      match Lower.constant context path with
+      | Folded data -> Compiled (Data data)
+      | Run ty -> Evaluate (path, ty))
   | Drop (Cursor yielding as cursor) ->
       let f, owned = pulled yielding in
-      Code
-        (Lir.canonical_instance
-           { key; main = Yields.cursor_drop context.env ~cursor ~owned f; nested = [||] })
+      Compiled
+        (Code
+           (Lir.canonical_instance
+              { key; main = Yields.cursor_drop context.env ~cursor ~owned f; nested = [||] }))
   | Cursor_next yielding ->
       let f, _ = pulled yielding in
       let cursor = Ground.Cursor yielding in
       let result = Lower.cursor_result context yielding in
-      Code
-        (Lir.canonical_instance
-           { key; main = Yields.cursor_next context.env ~cursor ~result f; nested = [||] })
-  | Drop ty -> elaborate_code context (Glue.drop glue ty)
-  | Copy ty -> elaborate_code context (Glue.copy glue ty)
-  | Debug ty -> elaborate_code context (Glue.debug glue ty)
-  | Encode ty -> elaborate_code context (Glue.encode glue ty)
-  | Any_drop ty -> elaborate_code context (Glue.any_drop glue ty)
-  | Evaluator path -> elaborate_code context (Lower.evaluator context path)
+      Compiled
+        (Code
+           (Lir.canonical_instance
+              { key; main = Yields.cursor_next context.env ~cursor ~result f; nested = [||] }))
+  | Drop ty -> code (Glue.drop glue ty)
+  | Copy ty -> code (Glue.copy glue ty)
+  | Debug ty -> code (Glue.debug glue ty)
+  | Encode ty -> code (Glue.encode glue ty)
+  | Any_drop ty -> code (Glue.any_drop glue ty)
+  | Evaluator path -> code (Lower.evaluator context path)
   | Template_check { from_template; texts } ->
-      elaborate_code context (Lower.template_check context key ~from_template ~texts)
-  | Entry _ | Program_main _ | Any_entry _ | Adapter _ ->
-      elaborate_code context (Lower.instance context key)
-  | Any_table _ -> Table (Lower.any_table context key)
-  | Table _ -> Table (Lower.table context key)
-  | Real_evidence capability -> Evidence (Lower.real_evidence context capability)
+      code (Lower.template_check context key ~from_template ~texts)
+  | Any_table _ -> Compiled (Table (Lower.any_table context key))
+  | Table _ -> Compiled (Table (Lower.table context key))
+  | Real_evidence capability -> Compiled (Evidence (Lower.real_evidence context capability))
 
-let lowered =
-  Query.query ~name:"lowered_instance" ~phase:Lowering ~saved:true ~portable:true
-    ~show:(fun (lowering, key) -> show_lowering lowering ^ " " ^ Instance.to_string key)
-    (fun database (lowering, key) ->
-      Compiler_bug.within ~stage:"Compile"
-        ("lowering " ^ Instance.to_string key)
-        (fun () ->
-          let context = fresh_context lowering database in
-          match make context lowering database key with
-          | Code instance as compiled ->
-              Verify.instance context.env instance;
-              Compiled compiled
-          | compiled -> Compiled compiled
-          | exception Needs_evaluation (path, ty) -> Evaluate (path, ty)))
+(* What an instance compiles to, or for a constant whose value does not
+   fold, that its evaluator is to be run, which no query can do, since
+   running code is not a function of what a query reads. *)
+and lowered =
+  lazy
+    (Query.query ~name:"lowered_instance" ~phase:Lowering ~saved:true ~portable:true
+       ~show:(fun (lowering, key) -> show_lowering lowering ^ " " ^ Instance.to_string key)
+       (fun database (lowering, key) ->
+         Compiler_bug.within ~stage:"Compile"
+           ("lowering " ^ Instance.to_string key)
+           (fun () ->
+             let context = fresh_context lowering database in
+             let outcome = make context lowering database key in
+             (match outcome with
+             | Compiled (Code instance) -> Verify.instance context.env instance
+             | Compiled _ | Evaluate _ -> ());
+             outcome)))
 
 (* Keys. A test's result is kept under the key of everything its code can
    reach, which is composed from the instances' own keys, so that an edit
@@ -120,7 +133,7 @@ let show_instance (lowering, key) = show_lowering lowering ^ " " ^ Instance.to_s
    whose code is what decides its value. *)
 let linked =
   Query.query ~name:"linked" ~phase:Linking ~show:show_instance (fun database (lowering, key) ->
-      match Query.demand database lowered (lowering, key) with
+      match Query.demand database (Lazy.force lowered) (lowering, key) with
       | Evaluate (path, _) ->
           (Blake3.hash "a constant worked out by its evaluator", [ Instance.Evaluator path ])
       | Compiled compiled ->
@@ -204,6 +217,8 @@ let test_key_query =
                 Bytes (Query.demand database (Lazy.force reach) (lowering, Lower.test_key path));
               ])))
 
+type template_check = Ran of (int * bool) list | Ran_too_long
+
 type t = {
   database : Query.context;
   lowering : lowering;
@@ -216,6 +231,8 @@ type t = {
   file_name : Path.module_ -> string;  (** The file a position names, which the program reports *)
   mutable evaluated : (Path.t * Lir.static_value) list;
       (** Each constant worked out by running code, in this build *)
+  checked : (string, template_check) Hashtbl.t;
+      (** Each template check done in this build, by the key of the code that ran *)
 }
 
 let bug format = Compiler_bug.bug ~stage:"Compile" format
@@ -388,7 +405,7 @@ and evaluate t path ty =
    build. *)
 and compiled t key =
   let compiled =
-    match Query.demand t.database lowered (t.lowering, key) with
+    match Query.demand t.database (Lazy.force lowered) (t.lowering, key) with
     | Compiled compiled -> compiled
     | Evaluate (path, ty) ->
         let value =
@@ -756,10 +773,6 @@ let build_program t ~main ~output =
    position among the clauses, with whether it holds. Results are kept for
    the compiler's run, and, with [results], under the key of the code that
    ran, as test results are, which the texts are part of. *)
-type template_check = Ran of (int * bool) list | Ran_too_long
-
-let checked_templates : (Instance.key, template_check) Hashtbl.t = Hashtbl.create 8
-
 let check_key t root =
   t.want t.lowering [ root ];
   Blake3.hash
@@ -775,38 +788,37 @@ let check_key t root =
 
 let check_template ?results t ~time_limit ~from_template ~texts =
   reporting t @@ fun () ->
-  let root = Instance.Template_check { from_template; texts } in
-  match Hashtbl.find_opt checked_templates root with
-  | Some found -> found
-  | None -> (
-      match Lower.template_checked t.context from_template with
-      | [] -> Ran []
-      | positions -> (
-          let key = Option.map (fun results -> (results, check_key t root)) results in
+  match Lower.template_checked t.context from_template with
+  | [] -> Ran []
+  | positions -> (
+      let root = Instance.Template_check { from_template; texts } in
+      let key = check_key t root in
+      match Hashtbl.find_opt t.checked key with
+      | Some found -> found
+      | None ->
           let status, output, errors =
-            match Option.bind key (fun ((results : results), key) -> results.find key) with
+            match Option.bind results (fun (results : results) -> results.find key) with
             | Some output -> (0, output, "")
             | None ->
                 build_and_run t ~time_limit ~roots:[ root ]
                   ~startup:(Startup.evaluator_calling (Instance.symbol root))
                   ~arguments:[]
           in
-          match status with
-          | 0 when String.length output = List.length positions ->
-              Option.iter (fun ((results : results), key) -> results.add key output) key;
-              let found =
+          let found =
+            match status with
+            | 0 when String.length output = List.length positions ->
+                Option.iter (fun (results : results) -> results.add key output) results;
                 Ran
                   (List.mapi (fun index position -> (position, output.[index] <> '\000')) positions)
-              in
-              Hashtbl.replace checked_templates root found;
-              found
-          | 137 ->
-              (* Killed at its time limit. *)
-              Hashtbl.replace checked_templates root Ran_too_long;
-              Ran_too_long
-          | status ->
-              cannot_build "Checking a template of %s ended with status %d: %s"
-                (Path.show from_template) status errors))
+            | 137 ->
+                (* Killed at its time limit. *)
+                Ran_too_long
+            | status ->
+                cannot_build "Checking a template of %s ended with status %d: %s"
+                  (Path.show from_template) status errors
+          in
+          Hashtbl.replace t.checked key found;
+          found)
 
 let no_keys _ _ = bug "keys were asked for, and nothing was given to say which are wanted"
 
@@ -823,4 +835,5 @@ let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys)
     settings;
     file_name;
     evaluated = [];
+    checked = Hashtbl.create 8;
   }

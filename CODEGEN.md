@@ -104,6 +104,14 @@ and defines only the small helpers it uses, such as the one that gives a
 float's bits with every NaN made canonical. Every local starts zeroed, which
 the C compiler removes wherever it is overwritten.
 
+The compiler lays every type out itself (see [Data layout](#data-layout)),
+and the C compiler lays each one out again from the `struct` it is given.
+Code generation relies on the two agreeing: the size it allocates for a
+value, and whether a value is passed by address, come from its own layout.
+So each type a file defines is followed by a static assertion of its size
+and alignment, and a layout the C compiler would not make is a C file that
+does not compile, on whatever target that is.
+
 The runtime (see [Program startup and failure](#program-startup-and-failure))
 is the exception. It is one fixed file for each target, compiled once and
 cached, and it includes the system's headers, since its declarations of
@@ -577,11 +585,21 @@ so they are compiled once and shared:
   is `Copyable`; handles and the types that hold one have none. A trivial
   type is a memory copy. A copy function takes the value as a read-only
   parameter and returns the copy, by the
-  [calling convention](#calling-convention). `Storage` with capacity 0, as
-  static bytes have, or with no elements, is shared, not copied, so a
-  static `String` is shared. Otherwise its copy is one allocation of
-  exactly its length, and for trivial elements one memory copy, the fast
-  path DESIGN.md mentions; other elements are copied one by one.
+  [calling convention](#calling-convention). A `Storage` is in one of
+  three states, which its capacity and length say, and its copy follows
+  the state:
+  - *empty*, with capacity 0 and no elements, and *static*, with capacity
+    0 and elements it does not own, as a string literal has: it owns no
+    buffer, so it is shared, not copied
+  - *owning*, with a capacity that is not 0: it owns a buffer on the heap,
+    which is never shared, since both would free it. With no elements its
+    copy is empty. Otherwise its copy is one allocation of exactly its
+    length, and for trivial elements one memory copy, the fast path
+    DESIGN.md mentions; other elements are copied one by one.
+
+  One module defines the two built-in types that hold a buffer, `Storage`
+  and `View`: their fields, these states, and how each is built. Nothing
+  else in code generation names their fields.
 - **Debug output:** the built-in debug output every type has, used by
   `echo`, failed `assert`s, and the test runner, and to write out values
   computed while compiling. A debug function takes a read-only pointer to
@@ -687,12 +705,19 @@ and its siblings. Full-width multiplication, used by hashing and
   can go in a read-only section. What an instance compiles to is either
   code, its LIR, or data: a ground type and a static value, which the
   emitter writes as C initializers, with the elements of storage and the
-  blocks of `indirect` variants as static objects of their own. Lowering
-  works a constant's value out exactly from its constant expression:
-  integers with Zarith, floats with IEEE arithmetic rounded once to their
-  type, and records, variants, strings, lists, and arrays from their parts.
-  Another constant's value is written in place, since C cannot initialize
-  static data from another object.
+  blocks of `indirect` variants as static objects of their own.
+- **A constant's value is what running its expression gives.** Lowering
+  folds what it can to exactly that, to save the run: literals, operators
+  on integers, with Zarith, on floats, with IEEE arithmetic rounded once to
+  their type, and on `Bool`, and records, variants, strings, lists, and
+  arrays of parts that fold. Another constant's value, where it folds, is
+  written in place, since C cannot initialize static data from another
+  object. Whatever the folder does not know, or cannot give exactly, such
+  as a sum that does not fit its type, is not folded: the constant's
+  evaluator is run (see [Code run while compiling](#code-run-while-compiling)),
+  so folding can be incomplete and never wrong. A constant made of one that
+  is run is run too, and its evaluator copies that one's static data,
+  since nothing is moved out of a constant.
 - **A list or map literal in a function body** allocates its buffer and
   fills it, which is the one allocation DESIGN.md counts. A literal whose
   parts are all constant, and which is only read, can be static data
@@ -801,14 +826,25 @@ loop the C compiler would make of the loop form, and needs no rewriting of
 the caller into continuation-passing style. The caller then reads the
 method's body, and depends on it.
 
-An inlined lending method runs to its end before the caller's statement
-uses the part, where DESIGN.md has it go on only after that statement. So
-stage0 lowers a lending method only when the two cannot be told apart, and
-refuses any other as one it cannot build yet:
-- each `yield` is the last thing its path does, so nothing of the method is
-  left to run
-- what it lends is none of the method's own values, which are dropped as its
-  body ends
+A lending method goes on after the caller's statement, as DESIGN.md has
+it, and its own values live until then, so it may lend one it made. The
+LIR is a graph of blocks, so this needs no function for the rest of the
+statement:
+
+- The method's body is written into the caller up to its `yield`, which
+  jumps to the rest of the caller's statement with the place it lends.
+- What is left of the method, its code after the `yield` and the drops of
+  what it owns, is written once, in blocks nothing reaches yet.
+- The scope the lending call is in owns the lend, as it owns a temporary.
+  As that scope ends, on each way out of it, the code sets a selector to
+  the way it was going and jumps to what is left of the method, which ends
+  by going on that way. So a `return` or a `?` in the statement finishes
+  the method first, as an ordinary end does, and lends in one statement
+  finish in reverse order.
+
+Where nothing is left, as for an index into a `List`, whose method ends at
+its `yield` owning nothing, the method simply ends there and the lend costs
+nothing.
 
 A loop over a yielding method that is already inlined around it, as a
 tree's `each` loops over its subtrees, would be inlined forever. Stage0
@@ -1339,10 +1375,8 @@ a command line can hold.
   through the same `each` a `for` loop calls, that stops at the first
   element that decides the answer: `forall` at the first false body,
   `exists` at the first true one.
-- **A lending method that goes on after the caller's statement.** One that
-  does more after its `yield`, or lends a value it made, or lends through a
-  call to itself, is refused (see
-  [Loops and lending calls](#loops-and-lending-calls)).
+- **A lending method with more than one `yield`,** one on each of several
+  paths, and one that lends through a call to itself.
 - **A lambda in a yielding method that is pulled,** and in a pulled method
   a default for a parameter that is passed by address or is a view.
 - **A range without both of its ends, as a value.**

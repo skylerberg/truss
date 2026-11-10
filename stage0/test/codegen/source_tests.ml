@@ -273,4 +273,38 @@ test "any" {
 }
 |}
 
+let () =
+  passes "a constant that compares constants is folded"
+    {|let small: Int64 = 3
+let is_small: Bool = small < 10 && !(small == 4)
+
+test "compared" {
+  assert is_small
+}
+|};
+  passes "a constant made of one that is worked out by running is worked out by running too"
+    {|let table: Map[String, Int64] = ["a": 1]
+let tables: List[Map[String, Int64]] = [table]
+
+test "nested" {
+  assert tables.length() == 1
+  assert tables[0].contains("a")
+  assert table.contains("a")
+}
+|};
+  test "a constant whose sum does not fit its type is run, which reports the overflow" (fun () ->
+      let database, compile =
+        load
+          {|let big: Int8 = 100
+let bigger: Int8 = big + big
+
+test "overflowed" {
+  assert bigger == 0
+}
+|}
+      in
+      match Compile.run_tests compile ~time_limit:2000 (tests_of database) with
+      | Ok _ -> fail "expected the constant not to be worked out"
+      | Error message -> if not (contains message "arithmetic overflow") then fail "got %S" message)
+
 let () = Harness.finish ()

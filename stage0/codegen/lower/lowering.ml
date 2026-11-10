@@ -8,7 +8,19 @@ open Lir_builder
 
 (* What leaving a scope does: drop what a place still owns, or free the
    heap block a pointer points at, once what is in it has been dropped. *)
-type cleanup = Drop_value of Lir.place | Free_pointed of Lir.place
+type cleanup = Drop_value of Lir.place | Free_pointed of Lir.place | Finish_lend of lend
+
+(* A lending call whose method has more to do once it has lent its part. The
+   method's body is written into the caller up to its [yield]; the rest of
+   it waits at [resume] and ends at [finished]. Each way out of the scope
+   that owns the lend jumps to [resume], with [selector] saying which way it
+   was going, and [finished] sends it on, to one of [ways]. *)
+and lend = {
+  resume : Lir.block;
+  finished : Lir.block;
+  selector : Lir.local;
+  mutable ways : Lir.block list;  (** Most recent first, numbered from the first *)
+}
 
 (* A scope owns what is dropped as it ends: the scope of a block's names,
    or the scope of one statement, whose temporaries end with it. *)
@@ -230,7 +242,29 @@ let drop_scope st (scope : scope) =
       | Drop_value place -> emit st.b (Drop place)
       | Free_pointed pointer ->
           emit st.b
-            (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded }))
+            (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded })
+      | Finish_lend lend ->
+          (* The method goes on from its [yield] now, and comes back here. *)
+          let way = block st.b in
+          emit st.b
+            (Assign
+               ( at lend.selector,
+                 Use (Constant (Integer (UInt32, Z.of_int (List.length lend.ways)))) ));
+          lend.ways <- way :: lend.ways;
+          finish st.b (Goto lend.resume);
+          aside st.b lend.finished (fun () ->
+              finish st.b
+                (match lend.ways with
+                | [ only ] -> Goto only
+                | ways ->
+                    Switch
+                      {
+                        value = Copy (at lend.selector);
+                        cases =
+                          List.mapi (fun i way -> (Z.of_int (List.length ways - 1 - i), way)) ways;
+                        default = None;
+                      }));
+          start st.b way)
     scope.owned
 
 (* Drops everything owned in the scopes inside the [depth] outermost, as a
@@ -297,6 +331,15 @@ let unreachable_block st =
    returned value. The type checker has made sure a place there is a
    temporary or was marked [own], or copies implicitly. *)
 let owned st place ty = if trivial st ty then Lir.Copy place else Lir.Move place
+
+(* Gives [destination], which holds nothing, the value at a place as its
+   own: moved out of the place, or for a constant's static data, which
+   nothing moves from, copied. *)
+let take st (place : Lir.place) ty ~destination =
+  match place.root with
+  | Static _ when not (trivial st ty) ->
+      Glue.copy_into st.context.glue st.b ~destination ~source:place ty
+  | Static _ | Local _ -> emit st.b (Assign (destination, Use (owned st place ty)))
 
 (* Replaces the value at a place the program names with one worked out
    beforehand: what the place still owns is dropped, and the new value moved

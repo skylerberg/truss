@@ -140,15 +140,8 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
       | Some Unit, [] -> Record []
       | Some Never, [] -> Sum []
       | Some Array, [ Type element; Value count ] -> Array (element, Z.to_int count)
-      | Some Storage, [ Type element ] ->
-          Record
-            [
-              ("buffer", Raw (Pointer (Data element)));
-              ("length", Typed usize);
-              ("capacity", Typed usize);
-            ]
-      | Some View, [ Type element ] ->
-          Record [ ("elements", Raw (Pointer (Data element))); ("length", Typed usize) ]
+      | Some Storage, [ Type element ] -> Storage.shape ~usize element
+      | Some View, [ Type element ] -> Storage.view_shape ~usize element
       | Some Handle, [] -> Record [ ("descriptor", Raw (Integer Int32)) ]
       | Some Integer, _ -> bug "Integer exists only in specifications"
       | Some _, _ -> bug "a built-in type with the wrong arguments: %s" (Ground.to_string ty)
@@ -174,13 +167,11 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
               | Error_shape _ -> bug "%s did not parse, which no build reaches" (Path.show path))))
 
 let kind context ty : Glue.kind =
-  match ty with
-  | Ground.Named { path; arguments = [ Type element ] }
-    when Intrinsic.builtin_of_path path = Some Storage ->
-      Storage element
-  | Ground.Named { path; arguments = [] } when Intrinsic.builtin_of_path path = Some Handle ->
+  match (Storage.elements_of ty, ty) with
+  | Some element, _ -> Storage element
+  | None, Ground.Named { path; arguments = [] } when Intrinsic.builtin_of_path path = Some Handle ->
       Handle
-  | _ -> Shape (shape context ty)
+  | None, _ -> Shape (shape context ty)
 
 let debug_form : Ground.ty -> Glue.debug_form = function
   | Named
