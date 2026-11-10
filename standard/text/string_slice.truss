@@ -49,6 +49,7 @@ internal fn StringSlice.decode(self, offset: USize) -> Decoded
   requires offset < self.length()
   ensures 1 <= result.length
   ensures result.length <= self.length() - offset
+  ensures result.length < 4 ==> result.character.code() < 65536
   cost time O(1)
 {
   let invalid = Decoded(character: Character.replacement, length: 1)
@@ -265,30 +266,151 @@ public fn StringSlice.split_at(self, offset: USize) -> core::Pair[StringSlice, S
   core::Pair(first: self.part(0, to: offset), second: self.part(offset, to: self.length()))
 }
 
+internal fn failure_table(pattern: StringSlice) -> List[USize]
+  ensures result.length() == pattern.length()
+  ensures forall i in 0..result.length() => result.model()[i] <= i
+  cost time O(pattern.length())
+{
+  var table: intrinsic::Storage[USize] = intrinsic::storage_with_capacity(pattern.length())
+  if pattern.length() == 0 {
+    return List(storage: own table)
+  }
+  intrinsic::storage_push(mut table, value: 0)
+  var matched: USize = 0
+  var index: USize = 1
+  while index < pattern.length()
+    invariant 1 <= index
+    invariant index <= pattern.length()
+    invariant matched < index
+    invariant intrinsic::storage_length(table) == index
+    invariant intrinsic::storage_capacity(table) == pattern.length()
+    invariant forall i in 0..index => intrinsic::storage_model(table)[i] <= i
+    decreases pattern.length() - index
+    cost time O(2 * index - matched)
+  {
+    let before = matched
+    while matched > 0 && pattern.byte(index) != pattern.byte(matched)
+      invariant matched <= before
+      decreases matched
+      cost time O(before - matched)
+    {
+      matched = intrinsic::view_at(intrinsic::storage_view(table), index: matched - 1)
+    }
+    if pattern.byte(index) == pattern.byte(matched) {
+      matched += 1
+    }
+    intrinsic::storage_push(mut table, value: matched)
+    index += 1
+  }
+  List(storage: own table)
+}
+
+internal fn StringSlice.advance(self, pattern: StringSlice, table: Slice[USize], matched: USize, index: USize) -> USize
+  requires index < self.length()
+  requires matched < pattern.length()
+  requires table.length() == pattern.length()
+  requires forall i in 0..table.length() => table.model()[i] <= i
+  ensures result <= matched + 1
+  ensures result <= pattern.length()
+  cost time O(matched + 1 - result)
+{
+  var current = matched
+  while current > 0 && self.byte(index) != pattern.byte(current)
+    invariant current <= matched
+    decreases current
+    cost time O(matched - current)
+  {
+    current = table[current - 1]
+  }
+  if self.byte(index) == pattern.byte(current) { current + 1 } else { current }
+}
+
+internal fn StringSlice.find_first(self, pattern: StringSlice, table: Slice[USize]) -> Option[USize]
+  requires pattern.length() > 0
+  requires table.length() == pattern.length()
+  requires forall i in 0..table.length() => table.model()[i] <= i
+  ensures !(result is Some(offset)
+    && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
+  cost time O(self.length())
+{
+  var found = false
+  var first: USize = 0
+  var matched: USize = 0
+  var index: USize = 0
+  while index < self.length() && !found
+    invariant index <= self.length()
+    invariant matched < pattern.length()
+    invariant matched <= index
+    invariant found ==> first + pattern.length() <= self.length() && self.is_boundary(first)
+    decreases self.length() - index
+    cost time O(2 * index - matched)
+  {
+    matched = self.advance(pattern, table: table, matched: matched, index: index)
+    index += 1
+    if matched == pattern.length() {
+      let offset = index - matched
+      if self.is_boundary(offset) {
+        found = true
+        first = offset
+      }
+      matched = table[matched - 1]
+    }
+  }
+  if found { Some(first) } else { None }
+}
+
 public fn StringSlice.contains(self, pattern: StringSlice) -> Bool
+  ensures result == (self.find(pattern) is Some(_))
   cost time O(self.length() + pattern.length())
 {
-  todo
+  self.find(pattern) is Some(_)
 }
 
 public fn StringSlice.find(self, pattern: StringSlice) -> Option[USize]
-  ensures match result {
-    Some(offset) => offset + pattern.length() <= self.length() && self.is_boundary(offset)
-    None => !self.contains(pattern)
-  }
+  ensures !(result is Some(offset)
+    && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
   cost time O(self.length() + pattern.length())
 {
-  todo
+  if pattern.is_empty() {
+    return if self.is_boundary(0) { Some(0) } else { None }
+  }
+  let table = failure_table(pattern)
+  self.find_first(pattern, table: table.slice())
 }
 
 public fn StringSlice.find_last(self, pattern: StringSlice) -> Option[USize]
-  ensures match result {
-    Some(offset) => offset + pattern.length() <= self.length() && self.is_boundary(offset)
-    None => !self.contains(pattern)
-  }
+  ensures !(result is Some(offset)
+    && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
   cost time O(self.length() + pattern.length())
 {
-  todo
+  if pattern.is_empty() {
+    return Some(self.length())
+  }
+  let table = failure_table(pattern)
+  var found = false
+  var last: USize = 0
+  var matched: USize = 0
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant matched < pattern.length()
+    invariant matched <= index
+    invariant found ==> last + pattern.length() <= self.length() && self.is_boundary(last)
+    decreases self.length() - index
+    cost time O(2 * index - matched)
+  {
+    matched = self.advance(pattern, table: table.slice(), matched: matched, index: index)
+    index += 1
+    if matched == pattern.length() {
+      let offset = index - matched
+      if self.is_boundary(offset) {
+        found = true
+        last = offset
+      }
+      matched = table[matched - 1]
+    }
+  }
+  if found { Some(last) } else { None }
 }
 
 public fn StringSlice.find_character(
@@ -306,9 +428,33 @@ public fn StringSlice.find_character(
 
 public fn StringSlice.occurrences(self, pattern: StringSlice) -> USize
   requires pattern.length() > 0
+  ensures result <= self.length()
   cost time O(self.length() + pattern.length())
 {
-  todo
+  let table = failure_table(pattern)
+  var count: USize = 0
+  var matched: USize = 0
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant matched < pattern.length()
+    invariant matched <= index
+    invariant count <= index
+    decreases self.length() - index
+    cost time O(2 * index - matched)
+  {
+    matched = self.advance(pattern, table: table.slice(), matched: matched, index: index)
+    index += 1
+    if matched == pattern.length() {
+      if self.is_boundary(index - matched) {
+        count += 1
+        matched = 0
+      } else {
+        matched = table[matched - 1]
+      }
+    }
+  }
+  count
 }
 
 public fn StringSlice.starts_with(self, prefix: StringSlice) -> Bool
@@ -405,18 +551,74 @@ public fn StringSlice.trim_matching(self, matching: (fn(Character) -> Bool cost 
 
 public fn StringSlice.split(self, separator: StringSlice) yields StringSlice
   requires separator.length() > 0
+  ensures yielded.length() <= self.length() + 1
   cost time O(self.length() + separator.length())
 {
-  todo
+  let table = failure_table(separator)
+  var start: USize = 0
+  var matched: USize = 0
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant matched < separator.length()
+    invariant start + matched <= index
+    invariant yielded.length() <= index
+    decreases self.length() - index
+    cost time O(2 * index - matched)
+  {
+    matched = self.advance(separator, table: table.slice(), matched: matched, index: index)
+    index += 1
+    if matched == separator.length() {
+      let offset = index - matched
+      if self.is_boundary(offset) {
+        yield self.part(start, to: offset)
+        start = index
+        matched = 0
+      } else {
+        matched = table[matched - 1]
+      }
+    }
+  }
+  yield self.part(start, to: self.length())
 }
 
 public fn StringSlice.split_at_most(self, separator: StringSlice, parts: USize) yields StringSlice
   requires separator.length() > 0
   requires parts > 0
-  ensures yielded.length() < parts
+  ensures yielded.length() <= parts
+  ensures yielded.length() <= self.length() + 1
   cost time O(self.length() + separator.length())
 {
-  todo
+  let table = failure_table(separator)
+  var start: USize = 0
+  var matched: USize = 0
+  var index: USize = 0
+  var count: USize = 0
+  while index < self.length() && count + 1 < parts
+    invariant index <= self.length()
+    invariant matched < separator.length()
+    invariant start + matched <= index
+    invariant yielded.length() == count
+    invariant count < parts
+    invariant count <= index
+    decreases self.length() - index
+    cost time O(2 * index - matched)
+  {
+    matched = self.advance(separator, table: table.slice(), matched: matched, index: index)
+    index += 1
+    if matched == separator.length() {
+      let offset = index - matched
+      if self.is_boundary(offset) {
+        yield self.part(start, to: offset)
+        count += 1
+        start = index
+        matched = 0
+      } else {
+        matched = table[matched - 1]
+      }
+    }
+  }
+  yield self.part(start, to: self.length())
 }
 
 public fn StringSlice.split_matching(self, matching: (fn(Character) -> Bool cost time finite)) yields StringSlice
@@ -436,15 +638,31 @@ public fn StringSlice.split_once(self, separator: StringSlice) -> Option[core::P
   ensures (result is Some(_)) == self.contains(separator)
   cost time O(self.length() + separator.length())
 {
-  todo
+  match self.find(separator) {
+    Some(offset) => Some(
+      core::Pair(
+        first: self.part(0, to: offset),
+        second: self.part(offset + separator.length(), to: self.length()),
+      ),
+    )
+    None => None
+  }
 }
 
 public fn StringSlice.split_once_last(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
   requires separator.length() > 0
-  ensures (result is Some(_)) == self.contains(separator)
+  ensures (result is Some(_)) == (self.find_last(separator) is Some(_))
   cost time O(self.length() + separator.length())
 {
-  todo
+  match self.find_last(separator) {
+    Some(offset) => Some(
+      core::Pair(
+        first: self.part(0, to: offset),
+        second: self.part(offset + separator.length(), to: self.length()),
+      ),
+    )
+    None => None
+  }
 }
 
 public fn StringSlice.replace(self, pattern: StringSlice, replacement: StringSlice) -> String
@@ -465,14 +683,46 @@ public fn StringSlice.repeated(self, times: USize) -> String
   ensures result.length() == self.length() * times
   cost time O(self.length() * times)
 {
-  todo
+  if self.length() == 0 || times == 0 {
+    return String(storage: intrinsic::storage_empty())
+  }
+  if times > USize.maximum / 2 / self.length() {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  let total = self.length() * times
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(total)
+  for index in 0..total
+    invariant intrinsic::storage_length(output) == yielded.length()
+    invariant intrinsic::storage_capacity(output) == total
+  {
+    intrinsic::storage_push(mut output, value: self.byte(index % self.length()))
+  }
+  String(storage: own output)
 }
 
 public fn StringSlice.reversed(self) -> String
   ensures result.length() == self.length()
   cost time O(self.length())
 {
-  todo
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(self.length())
+  var end = self.length()
+  while end > 0
+    invariant end <= self.length()
+    invariant intrinsic::storage_length(output) == self.length() - end
+    invariant intrinsic::storage_capacity(output) == self.length()
+    decreases end
+    cost time O(self.length() - end)
+  {
+    let start = self.previous_start(end)
+    for index in start..end
+      invariant intrinsic::storage_length(output) == self.length() - end + yielded.length()
+      invariant intrinsic::storage_capacity(output) == self.length()
+    {
+      intrinsic::storage_push(mut output, value: self.byte(index))
+    }
+    end = start
+  }
+  String(storage: own output)
 }
 
 public fn StringSlice.to_uppercase(self) -> String
@@ -491,14 +741,28 @@ public fn StringSlice.to_ascii_uppercase(self) -> String
   ensures result.length() == self.length()
   cost time O(self.length())
 {
-  todo
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(self.length())
+  for index in 0..self.length()
+    invariant intrinsic::storage_length(output) == yielded.length()
+    invariant intrinsic::storage_capacity(output) == self.length()
+  {
+    intrinsic::storage_push(mut output, value: ascii_uppercase(self.byte(index)))
+  }
+  String(storage: own output)
 }
 
 public fn StringSlice.to_ascii_lowercase(self) -> String
   ensures result.length() == self.length()
   cost time O(self.length())
 {
-  todo
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(self.length())
+  for index in 0..self.length()
+    invariant intrinsic::storage_length(output) == yielded.length()
+    invariant intrinsic::storage_capacity(output) == self.length()
+  {
+    intrinsic::storage_push(mut output, value: ascii_lowercase(self.byte(index)))
+  }
+  String(storage: own output)
 }
 
 internal fn ascii_lowercase(byte: UInt8) -> UInt8
@@ -556,7 +820,27 @@ public fn StringSlice.to_utf16(self) -> List[UInt16]
   ensures result.length() <= self.length()
   cost time O(self.length())
 {
-  todo
+  var units: intrinsic::Storage[UInt16] = intrinsic::storage_with_capacity(self.length())
+  var offset: USize = 0
+  while offset < self.length()
+    invariant offset <= self.length()
+    invariant intrinsic::storage_length(units) <= offset
+    invariant intrinsic::storage_capacity(units) == self.length()
+    decreases self.length() - offset
+    cost time O(offset)
+  {
+    let decoded = self.decode(offset)
+    let code = decoded.character.code()
+    if code < 65536 {
+      intrinsic::storage_push(mut units, value: intrinsic::convert(code))
+    } else {
+      let above = code - 65536
+      intrinsic::storage_push(mut units, value: intrinsic::convert(55296 + above / 1024))
+      intrinsic::storage_push(mut units, value: intrinsic::convert(56320 + above % 1024))
+    }
+    offset += decoded.length
+  }
+  List(storage: own units)
 }
 
 impl Ordered for StringSlice {
