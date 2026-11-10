@@ -1,0 +1,125 @@
+use standard::text
+
+type Kind = Switch | Valued | Positional | Rest
+  derives Equal
+
+type Parameter(
+  name: String,
+  short: Option[Character],
+  help: String,
+  kind: Kind,
+  required: Bool,
+  repeated: Bool,
+  default: Option[String],
+)
+
+public opaque type Parser(name: String, about: String, parameters: List[Parameter], commands: List[Parser])
+  derives Copyable
+
+public opaque type Parsed(
+  switches: Set[String],
+  values: Map[String, List[String]],
+  command_name: Option[String],
+  command: List[Parsed],
+)
+  derives Copyable
+
+public type Error =
+  | UnknownOption(name: String)
+  | MissingValue(name: String)
+  | MissingRequired(name: String)
+  | UnexpectedArgument(value: String)
+  | InvalidValue(name: String, value: String)
+  | UnknownCommand(name: String)
+  | HelpRequested
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public fn Parser.new(name: StringSlice, about: StringSlice) -> Parser {
+  Parser(name: name.to_string(), about: about.to_string(), parameters: [], commands: [])
+}
+
+public fn Parser.flag(own self, name: StringSlice, help: StringSlice, short: Option[Character] = None) -> Parser {
+  todo
+}
+
+public fn Parser.option(
+  own self,
+  name: StringSlice,
+  help: StringSlice,
+  short: Option[Character] = None,
+  default: Option[String] = None,
+  required: Bool = false,
+  repeated: Bool = false,
+) -> Parser {
+  todo
+}
+
+public fn Parser.positional(own self, name: StringSlice, help: StringSlice, required: Bool = true) -> Parser {
+  todo
+}
+
+public fn Parser.rest(own self, name: StringSlice, help: StringSlice) -> Parser {
+  todo
+}
+
+public fn Parser.command(own self, command: own Parser) -> Parser {
+  todo
+}
+
+public fn Parser.parse(self, arguments: Slice[String]) -> Result[Parsed, Error]
+  cost time finite
+{
+  todo
+}
+
+public fn Parser.usage(self) -> String
+  cost time finite
+{
+  todo
+}
+
+public fn Parser.help(self) -> String
+  cost time finite
+{
+  todo
+}
+
+public fn Parsed.flag(self, name: StringSlice) -> Bool
+  cost time finite
+{
+  todo
+}
+
+public fn Parsed.value(self, name: StringSlice) -> Option[StringSlice]
+  cost time finite
+{
+  todo
+}
+
+public fn Parsed.values(self, name: StringSlice) -> Slice[String]
+  cost time finite
+{
+  todo
+}
+
+public fn Parsed.parsed_value[Target: text::Parse](self, name: StringSlice) -> Result[Option[Target], Error] {
+  todo
+}
+
+public fn Parsed.command_name(self) -> Option[StringSlice]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Parsed.command(self) lends Option[Parsed]
+  cost time O(1)
+{
+  todo
+}

@@ -1,0 +1,310 @@
+public fn sha256(bytes: Slice[UInt8]) -> Array[UInt8, 32]
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn sha512(bytes: Slice[UInt8]) -> Array[UInt8, 64]
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn sha1(bytes: Slice[UInt8]) -> Array[UInt8, 20]
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn blake3(bytes: Slice[UInt8]) -> Array[UInt8, 32]
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public opaque type Sha256(state: Array[UInt32, 8], pending: Array[UInt8, 64], pending_length: USize, total: UInt64)
+  derives Copyable
+
+public fn Sha256.new() -> Sha256
+  cost time O(1)
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Sha256.update(mut self, bytes: Slice[UInt8])
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Sha256.finish(own self) -> Array[UInt8, 32]
+  cost time O(1)
+  cost allocations == 0
+{
+  todo
+}
+
+public opaque type Sha512(state: Array[UInt64, 8], pending: Array[UInt8, 128], pending_length: USize, total: UInt64)
+  derives Copyable
+
+public fn Sha512.new() -> Sha512
+  cost time O(1)
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Sha512.update(mut self, bytes: Slice[UInt8])
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Sha512.finish(own self) -> Array[UInt8, 64]
+  cost time O(1)
+  cost allocations == 0
+{
+  todo
+}
+
+public opaque type Blake3(state: List[UInt32])
+  derives Copyable
+
+public fn Blake3.new() -> Blake3 {
+  todo
+}
+
+public fn Blake3.keyed(key: Array[UInt8, 32]) -> Blake3 {
+  todo
+}
+
+public fn Blake3.update(mut self, bytes: Slice[UInt8])
+  cost time O(bytes.length())
+{
+  todo
+}
+
+public fn Blake3.finish(own self) -> Array[UInt8, 32]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Blake3.finish_extended(own self, length: USize) -> List[UInt8]
+  ensures result.length() == length
+  cost time O(length)
+{
+  todo
+}
+
+public fn hmac_sha256(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 32]
+  cost time O(key.length() + message.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn hmac_sha512(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 64]
+  cost time O(key.length() + message.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn hkdf_sha256(
+  secret: Slice[UInt8],
+  salt: Slice[UInt8],
+  information: Slice[UInt8],
+  length: USize,
+) -> List[UInt8]
+  requires length <= 8160
+  ensures result.length() == length
+  cost time O(secret.length() + salt.length() + information.length() + length)
+{
+  todo
+}
+
+public fn pbkdf2_hmac_sha256(
+  password: Slice[UInt8],
+  salt: Slice[UInt8],
+  iterations: UInt32,
+  length: USize,
+) -> List[UInt8]
+  requires iterations > 0
+  ensures result.length() == length
+  cost time finite
+{
+  todo
+}
+
+public type PasswordCost(memory_kibibytes: UInt32 = 19456, iterations: UInt32 = 2, parallelism: UInt32 = 1)
+
+public fn hash_password(
+  password: Slice[UInt8],
+  salt: Slice[UInt8],
+  effort: PasswordCost = PasswordCost(),
+) -> Array[UInt8, 32]
+  requires salt.length() >= 8
+  cost time finite
+{
+  todo
+}
+
+public fn constant_time_equal(first: Slice[UInt8], second: Slice[UInt8]) -> Bool
+  cost time O(first.length() + second.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public opaque type SecretKey(bytes: Array[UInt8, 32])
+  derives Copyable
+
+public fn SecretKey.generate() -> SecretKey
+  uses Random
+{
+  todo
+}
+
+public fn SecretKey.from_bytes(bytes: Array[UInt8, 32]) -> SecretKey
+  cost time O(1)
+{
+  SecretKey(bytes: bytes)
+}
+
+public fn SecretKey.expose(self) -> Array[UInt8, 32]
+  cost time O(1)
+{
+  self.bytes
+}
+
+public type Nonce(bytes: Array[UInt8, 12])
+  derives Equal
+
+public fn Nonce.generate() -> Nonce
+  uses Random
+{
+  todo
+}
+
+public type Cipher = ChaCha20Poly1305 | Aes256Gcm
+  derives Equal
+
+public type AuthenticationError()
+  derives Equal
+
+impl Display for AuthenticationError {
+  fn display(self, output: mut TextBuilder) {
+    mut output.write("the data is not what the key sealed")
+  }
+}
+
+public fn seal(
+  key: SecretKey,
+  nonce: Nonce,
+  plaintext: Slice[UInt8],
+  associated_data: Slice[UInt8],
+  cipher: Cipher = Cipher.ChaCha20Poly1305,
+) -> List[UInt8]
+  ensures result.length() == plaintext.length() + 16
+  cost time O(plaintext.length() + associated_data.length())
+{
+  todo
+}
+
+public fn open(
+  key: SecretKey,
+  nonce: Nonce,
+  sealed: Slice[UInt8],
+  associated_data: Slice[UInt8],
+  cipher: Cipher = Cipher.ChaCha20Poly1305,
+) -> Result[List[UInt8], AuthenticationError]
+  ensures match result {
+    Ok(plaintext) => plaintext.length() + 16 == sealed.length()
+    Err(_) => true
+  }
+  cost time O(sealed.length() + associated_data.length())
+{
+  todo
+}
+
+public opaque type SigningKey(seed: Array[UInt8, 32])
+  derives Copyable
+
+public opaque type VerifyingKey(bytes: Array[UInt8, 32])
+  derives Plain, Equal, Hash
+
+public type Signature(bytes: Array[UInt8, 64])
+  derives Equal
+
+public fn SigningKey.generate() -> SigningKey
+  uses Random
+{
+  todo
+}
+
+public fn SigningKey.from_seed(seed: Array[UInt8, 32]) -> SigningKey
+  cost time O(1)
+{
+  SigningKey(seed: seed)
+}
+
+public fn SigningKey.verifying_key(self) -> VerifyingKey
+  cost time O(1)
+{
+  todo
+}
+
+public fn SigningKey.sign(self, message: Slice[UInt8]) -> Signature
+  cost time O(message.length())
+{
+  todo
+}
+
+public fn VerifyingKey.from_bytes(bytes: Array[UInt8, 32]) -> Option[VerifyingKey]
+  cost time O(1)
+{
+  todo
+}
+
+public fn VerifyingKey.bytes(self) -> Array[UInt8, 32]
+  cost time O(1)
+{
+  self.bytes
+}
+
+public fn VerifyingKey.verify(self, message: Slice[UInt8], signature: Signature) -> Bool
+  cost time O(message.length())
+{
+  todo
+}
+
+public opaque type AgreementKey(bytes: Array[UInt8, 32])
+
+public type AgreementPublicKey(bytes: Array[UInt8, 32])
+  derives Equal, Hash
+
+public fn AgreementKey.generate() -> AgreementKey
+  uses Random
+{
+  todo
+}
+
+public fn AgreementKey.public_key(self) -> AgreementPublicKey
+  cost time O(1)
+{
+  todo
+}
+
+public fn AgreementKey.agree(own self, their: AgreementPublicKey) -> Option[SecretKey]
+  cost time O(1)
+{
+  todo
+}
