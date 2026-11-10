@@ -219,6 +219,12 @@ type context = {
           the bound is used. *)
   mutable lambda_captures : (L.term * Core.local list) list;  (** What each lambda captures. *)
   mutable potentials : L.term list;  (** Each value's potential whose definition is a fact. *)
+  models : (string, (L.term -> L.term) option) Hashtbl.t;
+      (** Each type's model function, by the types' keys, which reading it takes the standard
+          library's impls to find, and which is asked at every potential. *)
+  holds_potential : (string, bool) Hashtbl.t;  (** Whether each type can hold potential. *)
+  buffers : (string, (T.ty * (L.term -> L.term)) option) Hashtbl.t;
+      (** Each type's elements and model as a buffer's, where it is one. *)
   mutable equalities : L.term list;  (** Each derived [==] whose definition is a fact. *)
   mutable known_calls : known_call list;  (** Each call running code can give a value. *)
   mutable cursors : (L.term * cursor) list;  (** Where each cursor value came from. *)
@@ -3574,6 +3580,15 @@ and model_as context (ty : T.ty) term ~(model : T.ty) =
 (* A type's [model()], as a function of its values, if the standard library
    gives it one. *)
 and model_function context (ty : T.ty) ~(model : T.ty) =
+  let key = type_key ty ^ " " ^ type_key model in
+  match Hashtbl.find_opt context.models key with
+  | Some found -> found
+  | None ->
+      let found = find_model_function context ty ~model in
+      Hashtbl.replace context.models key found;
+      found
+
+and find_model_function context (ty : T.ty) ~(model : T.ty) =
   let model_trait : Path.t =
     Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Model" }
   in
@@ -5892,6 +5907,17 @@ and potential_clause context (ty : T.ty) =
    holds, which saves potential for growing. A type parameter may stand for
    such a type. *)
 and has_potential context ?(seen = []) (ty : T.ty) =
+  if seen <> [] then holds_potential_type context ~seen ty
+  else
+    let key = type_key ty in
+    match Hashtbl.find_opt context.holds_potential key with
+    | Some found -> found
+    | None ->
+        let found = holds_potential_type context ~seen ty in
+        Hashtbl.replace context.holds_potential key found;
+        found
+
+and holds_potential_type context ~seen (ty : T.ty) =
   if List.exists (T.equal ty) seen then false
   else
     match ty with
@@ -6048,6 +6074,15 @@ and parts_potential context frame ~seen ty term (variant, fields) =
    a type whose [Model] is the sequence of the storage it holds in its one
    field, as a [List] and a [String] are. *)
 and buffer_elements context (ty : T.ty) =
+  let key = type_key ty in
+  match Hashtbl.find_opt context.buffers key with
+  | Some found -> found
+  | None ->
+      let found = find_buffer_elements context ty in
+      Hashtbl.replace context.buffers key found;
+      found
+
+and find_buffer_elements context (ty : T.ty) =
   match ty with
   | Named { path; arguments = [ T.Type element; T.Value _ ] }
     when Intrinsic.builtin_of_path path = Some Array ->
@@ -7205,6 +7240,9 @@ let new_context database ~home ~current ~terminates ~measures =
     lambda_times = [];
     lambda_captures = [];
     potentials = [];
+    models = Hashtbl.create 16;
+    holds_potential = Hashtbl.create 16;
+    buffers = Hashtbl.create 16;
     equalities = [];
     known_calls = [];
     cursors = [];
