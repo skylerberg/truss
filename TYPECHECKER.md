@@ -1653,7 +1653,11 @@ The core form records these decisions:
   - A tagged string is a call of the tag type's `from_template` on a
     `Template` record. The node also keeps the literal text segments,
     because the prover evaluates the tag's `requires` clauses on them.
-- **Some constructs keep a node of their own.** An array literal is
+- **Some constructs keep a node of their own.** A slice expression such as
+  `items[1..3]` names the place it views, and holds the call of the base
+  type's `slice_range` that creates the view. The bounds of that call are
+  already computed: a missing start is `0`, a missing stop is the length of
+  the base, and an inclusive stop is `stop + 1`. An array literal is
   constructed in place. A specification's sequence, set, or map is never
   constructed at run time. An interpolated string records its pieces, the
   `display` method of each interpolated value, and the methods of the text

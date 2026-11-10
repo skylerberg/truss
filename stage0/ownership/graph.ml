@@ -274,12 +274,8 @@ let rec expression builder frontier (node : Core.expression) : int list =
   | Map_literal { entries } ->
       all frontier (List.concat_map (fun (key, value) -> [ key; value ]) entries)
   | Record_update { base; updates } -> all (expression builder frontier base) (List.map snd updates)
-  | Slice { base; start; stop; _ } -> (
-      let frontier = place_parts builder frontier base in
-      let frontier = all frontier (Option.to_list start @ Option.to_list stop) in
-      match Place.of_core base with
-      | Some place -> emit builder frontier (Read place) (Core_walk.place_origin base)
-      | None -> frontier)
+  | Slice { call = { kind = Call call; _ }; _ } -> arguments builder frontier call.arguments
+  | Slice { call; _ } -> expression builder frontier call
   | Call call -> call_ builder frontier node call
   | Operator { arguments; _ } | Cost_function { arguments; _ } -> all frontier arguments
   | Compare { left; right; _ } | Identical (left, right) -> all frontier [ left; right ]

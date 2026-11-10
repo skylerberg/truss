@@ -135,8 +135,10 @@ let () =
     "{ let own numbers = { let var own storage = intrinsic::storage_with_capacity(3); \
      intrinsic::storage_push(mut place storage, own 1); intrinsic::storage_push(mut place storage, \
      own 2); intrinsic::storage_push(mut place storage, own 3); \
-     standard::list::List.from_storage[Int64](own storage) }; let _ = numbers[1..]; lent Index.at \
-     for List[Int64] by standard::list::impl Index for List[Element](place numbers, 0) lends }";
+     standard::list::List.from_storage[Int64](own storage) }; let _ = slice \
+     standard::list::List.slice_range[Int64](place numbers, 1, \
+     standard::list::List.length[Int64](place numbers)); lent Index.at for List[Int64] by \
+     standard::list::impl Index for List[Element](place numbers, 0) lends }";
   expect_body "a set literal becomes `with_capacity` and one `insert` per element"
     "fn g(first: own String, second: own String) -> Set[String] {\n  [own first, own second]\n}\n"
     "{ { let var own set = standard::set::Set.with_capacity[String](2); \
@@ -150,6 +152,12 @@ let () =
      }";
   expect_body "an empty set literal is the call of `with_capacity`"
     "fn g() -> Set[Int64] {\n  []\n}\n" "{ standard::set::Set.with_capacity[Int64](0) }";
+  expect_body "a slice holds the call of `slice_range`, with an inclusive stop as `stop + 1`"
+    "fn g(items: List[Int64], last: USize) -> Slice[Int64] {\n  items[..=last]\n}\n"
+    "{ slice standard::list::List.slice_range[Int64](place items, 0, add(last, 1)) }";
+  expect_body "a slice of a slice calls the slice's `slice_range`"
+    "fn g(items: Slice[Int64]) -> Slice[Int64] {\n  items[1..3]\n}\n"
+    "{ slice standard::list::Slice.slice_range[Int64](place items, 1, 3) }";
   expect_body "a record update lists the replaced fields, and expands the shorthand"
     "type Config(port: Int64, host: String)\n\n\
      fn g(config: Config, port: Int64) -> Config {\n\
@@ -383,7 +391,7 @@ let () =
      fn g(items: mut List[Int64]) {\n\
     \  sort_part(mut items[..2])\n\
      }\n"
-    "{ app::main::sort_part(mut items[..2]) }"
+    "{ app::main::sort_part(mut slice standard::list::List.slice_range[Int64](place items, 0, 2)) }"
 
 (* Holes *)
 

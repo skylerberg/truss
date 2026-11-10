@@ -1152,8 +1152,23 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
   | Collection_literal { elements; _ } -> Some (list_literal context frame node elements)
   | Map_literal { entries; _ } -> Some (map_literal context frame node entries)
   | Record_update { base; updates } -> Some (with_ context frame node base updates)
-  | Slice { base; start; stop; inclusive } ->
-      Some (slice context frame node base ~start ~stop ~inclusive)
+  | Slice
+      {
+        base;
+        call =
+          {
+            kind =
+              Call
+                {
+                  arguments =
+                    [ _; Passed { value = Value start; _ }; Passed { value = Value stop; _ } ];
+                  _;
+                };
+            _;
+          };
+      } ->
+      Some (slice context frame node base ~start:(Some start) ~stop:(Some stop) ~inclusive:false)
+  | Slice _ -> unsupported (at frame node) "a slice whose call is not of `slice_range`"
   | Call call_ -> (
       match resolved_call context frame node call_ with
       | Some _ when T.equal (type_of context frame node) T.Never ->

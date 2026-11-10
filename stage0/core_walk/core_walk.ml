@@ -86,10 +86,8 @@ let expression_children visit (node : expression) =
   | Record_update { base; updates } ->
       visit.expression base;
       List.iter (fun (_, value) -> visit.expression value) updates
-  | Slice { base; start; stop; _ } ->
-      place visit base;
-      Option.iter visit.expression start;
-      Option.iter visit.expression stop
+  (* [base] is the first argument of [call], so the call covers it. *)
+  | Slice { call; _ } -> visit.expression call
   | Call call ->
       (match call.callee with
       | Indirect function_value -> operand visit function_value

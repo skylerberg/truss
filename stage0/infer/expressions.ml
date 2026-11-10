@@ -283,13 +283,9 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
       register_expression state value (fun () ->
           let base = place_of (build_expression state base) in
           let start = Option.map (build_expression state) start in
-          Slice
-            {
-              base;
-              start;
-              stop = Option.map (build_expression state) stop;
-              inclusive = (match range.kind with Range { inclusive; _ } -> inclusive | _ -> false);
-            });
+          let stop = Option.map (build_expression state) stop in
+          Form.slice state value base ~start ~stop
+            ~inclusive:(match range.kind with Range { inclusive; _ } -> inclusive | _ -> false));
       match base_type with
       | T.Named { path; arguments = T.Type element :: _ }
         when Path.equal path list_path || Path.equal path slice_path

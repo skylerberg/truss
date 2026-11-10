@@ -73,11 +73,7 @@ let rec expression names (node : expression) =
   | Record_update { base; updates } ->
       Printf.sprintf "%s with (%s)" (expression base)
         (list (fun (path, value) -> String.concat "." path ^ ": " ^ expression value) updates)
-  | Slice { base; start; stop; inclusive } ->
-      let end_ = function Some value -> expression value | None -> "" in
-      Printf.sprintf "%s[%s%s%s]" (place base) (end_ start)
-        (if inclusive then "..=" else "..")
-        (end_ stop)
+  | Slice { call; _ } -> "slice " ^ expression call
   | Call made -> call names made
   | Operator { operation; arguments } ->
       Printf.sprintf "%s(%s)" (Intrinsic.operation_name operation) (list expression arguments)
