@@ -44,7 +44,10 @@ public fn Slice[Element].split_at(self, index: USize) -> core::Pair[Slice[Elemen
   ensures result.second.length() == self.length() - index
   cost time O(1)
 {
-  todo
+  core::Pair(
+    first: self.slice_range(0, stop: index),
+    second: self.slice_range(index, stop: self.length()),
+  )
 }
 
 public fn Slice[Element: Equal].contains(self, item: Element) -> Bool

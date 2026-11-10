@@ -29,6 +29,15 @@ public fn Array[Element, count: USize].slice(self) -> Slice[Element]
   todo
 }
 
+internal fn Array[Element, count: USize].slice_range(self, start: USize, stop: USize) -> Slice[Element]
+  requires start <= stop
+  requires stop <= count
+  ensures result.length() == stop - start
+  cost time O(1)
+{
+  todo
+}
+
 impl Index for Array[Element, count: USize] {
   type Key = USize
   type Output = Element
