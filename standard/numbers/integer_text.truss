@@ -1,0 +1,222 @@
+use standard::core
+use standard::text
+
+impl text::Parse for Int8 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[Int8, core::ParseIntegerError] {
+    Int8.parse_radix(text, radix: 10)
+  }
+}
+
+public fn Int8.parse_radix(text: StringSlice, radix: UInt32) -> Result[Int8, core::ParseIntegerError]
+  requires 2 <= radix && radix <= 36
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn Int8.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
+  requires 2 <= radix && radix <= 36
+  cost time O(minimum_digits + Int8.bits)
+{
+  todo
+}
+
+impl text::Parse for Int16 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[Int16, core::ParseIntegerError] {
+    Int16.parse_radix(text, radix: 10)
+  }
+}
+
+public fn Int16.parse_radix(text: StringSlice, radix: UInt32) -> Result[Int16, core::ParseIntegerError]
+  requires 2 <= radix && radix <= 36
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn Int16.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
+  requires 2 <= radix && radix <= 36
+  cost time O(minimum_digits + Int16.bits)
+{
+  todo
+}
+
+impl text::Parse for Int32 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[Int32, core::ParseIntegerError] {
+    Int32.parse_radix(text, radix: 10)
+  }
+}
+
+public fn Int32.parse_radix(text: StringSlice, radix: UInt32) -> Result[Int32, core::ParseIntegerError]
+  requires 2 <= radix && radix <= 36
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn Int32.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
+  requires 2 <= radix && radix <= 36
+  cost time O(minimum_digits + Int32.bits)
+{
+  todo
+}
+
+impl text::Parse for Int64 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[Int64, core::ParseIntegerError] {
+    Int64.parse_radix(text, radix: 10)
+  }
+}
+
+public fn Int64.parse_radix(text: StringSlice, radix: UInt32) -> Result[Int64, core::ParseIntegerError]
+  requires 2 <= radix && radix <= 36
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn Int64.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
+  requires 2 <= radix && radix <= 36
+  cost time O(minimum_digits + Int64.bits)
+{
+  todo
+}
+
+impl text::Parse for ISize {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[ISize, core::ParseIntegerError] {
+    ISize.parse_radix(text, radix: 10)
+  }
+}
+
+public fn ISize.parse_radix(text: StringSlice, radix: UInt32) -> Result[ISize, core::ParseIntegerError]
+  requires 2 <= radix && radix <= 36
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn ISize.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
+  requires 2 <= radix && radix <= 36
+  cost time O(minimum_digits + ISize.bits)
+{
+  todo
+}
+
+impl text::Parse for UInt8 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[UInt8, core::ParseIntegerError] {
+    UInt8.parse_radix(text, radix: 10)
+  }
+}
+
+public fn UInt8.parse_radix(text: StringSlice, radix: UInt32) -> Result[UInt8, core::ParseIntegerError]
+  requires 2 <= radix && radix <= 36
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn UInt8.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
+  requires 2 <= radix && radix <= 36
+  cost time O(minimum_digits + UInt8.bits)
+{
+  todo
+}
+
+impl text::Parse for UInt16 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[UInt16, core::ParseIntegerError] {
+    UInt16.parse_radix(text, radix: 10)
+  }
+}
+
+public fn UInt16.parse_radix(text: StringSlice, radix: UInt32) -> Result[UInt16, core::ParseIntegerError]
+  requires 2 <= radix && radix <= 36
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn UInt16.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
+  requires 2 <= radix && radix <= 36
+  cost time O(minimum_digits + UInt16.bits)
+{
+  todo
+}
+
+impl text::Parse for UInt32 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[UInt32, core::ParseIntegerError] {
+    UInt32.parse_radix(text, radix: 10)
+  }
+}
+
+public fn UInt32.parse_radix(text: StringSlice, radix: UInt32) -> Result[UInt32, core::ParseIntegerError]
+  requires 2 <= radix && radix <= 36
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn UInt32.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
+  requires 2 <= radix && radix <= 36
+  cost time O(minimum_digits + UInt32.bits)
+{
+  todo
+}
+
+impl text::Parse for UInt64 {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[UInt64, core::ParseIntegerError] {
+    UInt64.parse_radix(text, radix: 10)
+  }
+}
+
+public fn UInt64.parse_radix(text: StringSlice, radix: UInt32) -> Result[UInt64, core::ParseIntegerError]
+  requires 2 <= radix && radix <= 36
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn UInt64.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
+  requires 2 <= radix && radix <= 36
+  cost time O(minimum_digits + UInt64.bits)
+{
+  todo
+}
+
+impl text::Parse for USize {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[USize, core::ParseIntegerError] {
+    USize.parse_radix(text, radix: 10)
+  }
+}
+
+public fn USize.parse_radix(text: StringSlice, radix: UInt32) -> Result[USize, core::ParseIntegerError]
+  requires 2 <= radix && radix <= 36
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn USize.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
+  requires 2 <= radix && radix <= 36
+  cost time O(minimum_digits + USize.bits)
+{
+  todo
+}

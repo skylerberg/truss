@@ -360,6 +360,36 @@ impl Equal for Unit {
 }
 
 public type ConversionError()
+  derives Equal
+
+impl Display for ConversionError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type ParseIntegerError =
+  | Empty
+  | InvalidDigit(offset: USize)
+  | OutOfRange
+  derives Equal
+
+impl Display for ParseIntegerError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type ParseFloatError =
+  | Empty
+  | Invalid(offset: USize)
+  derives Equal
+
+impl Display for ParseFloatError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
 
 impl Display for Bool {
   fn display(self, output: mut TextBuilder) {
