@@ -1,4 +1,5 @@
 use standard::network
+use standard::system::sockets
 
 internal type SystemNetworkClient()
 
@@ -12,10 +13,10 @@ impl NetworkClient for SystemNetworkClient {
     address: network::SocketAddress,
     timeout: Option[Duration],
   ) -> Result[network::Connection, SystemError] {
-    todo
+    sockets::connect(address, timeout: timeout)
   }
 
   fn open_datagram(self) -> Result[network::DatagramSocket, SystemError] {
-    todo
+    sockets::open_datagram()
   }
 }

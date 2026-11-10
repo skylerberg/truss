@@ -632,6 +632,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                     List.iteri
                       (fun index _ ->
                         let written = place (argument (taken ())) in
+                        emit b (Assign (at structure / Index (usize index), Use (Copy written)));
                         after :=
                           (fun () ->
                             emit b

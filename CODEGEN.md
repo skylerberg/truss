@@ -1150,7 +1150,7 @@ reaches it:
 | A number | Its value, converted to the parameter's C type |
 | A `View` | The address of its elements, which the function only reads |
 | A `mut Storage` | The address after its last element, for a function that fills room the storage has beyond its length; or, where the row says so, the address of its first element, for a function that reads the elements the storage has and changes some |
-| Several `mut` numbers of one type | The address of a structure of them, which the function writes; each number then goes to its argument |
+| Several `mut` numbers of one type | The address of a structure of them, which holds the arguments' values and which the function writes; each number then goes to its argument. A function that reads a number there before it writes it, as `accept` reads how much room an address has, finds the argument's value |
 
 Truss has no pointer type, so memory crosses to C only as a view, as
 storage, or as numbers to write. A small structure a function fills is the
@@ -1328,9 +1328,23 @@ holds the signals it is asked for back with `sigprocmask`, so that one
 that arrives does not end the program, and takes the next with `sigwait`.
 They stay held back afterwards, so one that arrives between two waits is
 there for the second. `SystemTasks.yield_now`
-does nothing, since tasks run one after another. `NetworkClient` and
-`NetworkServer` have no real implementation, and a `main` that uses one is
-refused with a message saying so. A handle's is the only drop that does more
+does nothing, since tasks run one after another. The real `NetworkServer`
+and `NetworkClient` are sockets. An address is a `sockaddr_in` or a
+`sockaddr_in6` as bytes, which the standard library writes and reads: the
+family is where the system keeps it, and the port and the address are high
+byte first. Listening is `socket`, `bind`, and `listen`, and the address
+the listener reports is the one `getsockname` gives, so a port asked for
+as 0 comes back as the port the system chose. Connecting with a limit puts
+the socket in the mode where `connect` does not wait, waits for it with
+`poll`, and reads how it went with `getsockopt`. A read or a write that
+runs past a timeout set with `setsockopt` is `TimedOut`. A datagram socket
+that is not bound to an address is an IPv6 socket that also carries IPv4,
+where the system has IPv6: an IPv4 address is sent to as the IPv6 address
+that stands for it, and a sender's is given back as IPv4. Every socket is
+closed in programs that are run. `NetworkClient.resolve` has no body: the C
+library gives the addresses of a name as a chain of structures that hold
+addresses of one another, which the table cannot describe. A handle's is
+the only drop that does more
 than free memory, and it runs no Truss code, as DESIGN.md requires.
 Standard-library types such as `File` hold one in a field, so their drop
 functions release the resource by dropping that field.
@@ -1754,8 +1768,7 @@ a command line can hold.
   tests runs tasks one at a time, and needs no threads or locks at all.
 - **`parallel` branches at once.** Branches can go to a thread pool with no
   change to the LIR above the statement that starts them.
-- **Handles for processes and threads, and real implementations of
-  `NetworkClient` and `NetworkServer`.**
+- **Finding a host's addresses by its name,** `NetworkClient.resolve`.
 - **Keeping an instance's C and a linked program.** The C is emitted again
   for each build, and found as an object by its text. It could be kept by
   the LIR's hash and the emitter's version, and a program by its objects,

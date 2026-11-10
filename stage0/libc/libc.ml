@@ -20,7 +20,7 @@ let host =
   | Some os, Some architecture -> Some { os; architecture }
   | _ -> None
 
-type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize | Float64
+type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | USize | ISize | Float64
 
 type number =
   | O_rdonly
@@ -125,6 +125,28 @@ type number =
   | Cs8
   | Sigset_size
   | Sig_block
+  | Af_inet
+  | Af_inet6
+  | Sock_stream
+  | Sock_dgram
+  | Sol_socket
+  | So_reuseaddr
+  | So_rcvtimeo
+  | So_sndtimeo
+  | So_error
+  | Shut_rd
+  | Shut_wr
+  | Shut_rdwr
+  | Ipproto_ipv6
+  | Ipv6_v6only
+  | O_nonblock
+  | F_getfl
+  | F_setfl
+  | Einprogress
+  | Eagain
+  | Pollout
+  | Sockaddr_family_offset
+  | Sockaddr_family_size
 
 type extent =
   | Counted of { by : string; each : int }
@@ -208,6 +230,20 @@ type function_ =
   | Sigaddset
   | Sigprocmask_block
   | Sigwait
+  | Socket
+  | Bind
+  | Connect
+  | Listen
+  | Accept
+  | Getsockname
+  | Getpeername
+  | Shutdown
+  | Setsockopt
+  | Getsockopt
+  | Sendto
+  | Recvfrom
+  | Fcntl_getfl
+  | Fcntl_setfl
 
 let functions =
   [
@@ -267,6 +303,20 @@ let functions =
     Sigaddset;
     Sigprocmask_block;
     Sigwait;
+    Socket;
+    Bind;
+    Connect;
+    Listen;
+    Accept;
+    Getsockname;
+    Getpeername;
+    Shutdown;
+    Setsockopt;
+    Getsockopt;
+    Sendto;
+    Recvfrom;
+    Fcntl_getfl;
+    Fcntl_setfl;
   ]
 
 let function_name = function
@@ -326,6 +376,20 @@ let function_name = function
   | Sigaddset -> "sigaddset"
   | Sigprocmask_block -> "sigprocmask_block"
   | Sigwait -> "sigwait"
+  | Socket -> "socket"
+  | Bind -> "bind"
+  | Connect -> "connect"
+  | Listen -> "listen"
+  | Accept -> "accept"
+  | Getsockname -> "getsockname"
+  | Getpeername -> "getpeername"
+  | Shutdown -> "shutdown"
+  | Setsockopt -> "setsockopt"
+  | Getsockopt -> "getsockopt"
+  | Sendto -> "sendto"
+  | Recvfrom -> "recvfrom"
+  | Fcntl_getfl -> "fcntl_getfl"
+  | Fcntl_setfl -> "fcntl_setfl"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -871,6 +935,145 @@ let describe function_ =
         ]
         ~named:[ ("set", "const sigset_t *") ]
         ~headers:[ "signal.h" ]
+  | Socket ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("domain", Value Int32, everywhere "int");
+          ("kind", Value Int32, everywhere "int");
+          ("protocol", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "sys/socket.h" ]
+  | Bind ->
+      (* An address is a [struct sockaddr_in] or [sockaddr_in6] as bytes:
+         where its family is differs between systems, and the rest is laid
+         out as the check holds it to. *)
+      row (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("address", Elements (UInt8, counted "length"), everywhere "const void *");
+          ("length", Value USize, everywhere "unsigned int");
+        ]
+        ~named:[ ("address", "const struct sockaddr *") ]
+        ~headers:[ "sys/socket.h"; "netinet/in.h" ]
+        ~layout:
+          [
+            "sizeof(struct sockaddr_in) == 16";
+            "__builtin_offsetof(struct sockaddr_in, sin_port) == 2";
+            "__builtin_offsetof(struct sockaddr_in, sin_addr) == 4";
+            "sizeof(struct sockaddr_in6) == 28";
+            "__builtin_offsetof(struct sockaddr_in6, sin6_port) == 2";
+            "__builtin_offsetof(struct sockaddr_in6, sin6_addr) == 8";
+          ]
+  | Connect ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("address", Elements (UInt8, counted "length"), everywhere "const void *");
+          ("length", Value USize, everywhere "unsigned int");
+        ]
+        ~named:[ ("address", "const struct sockaddr *") ]
+        ~headers:[ "sys/socket.h" ]
+  | Listen ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int"); ("waiting", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "sys/socket.h" ]
+  | Accept ->
+      (* The length is how much room the address has, and then how long
+         the address is. *)
+      row (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("address", Elements_to_change (UInt8, counted "length"), everywhere "void *");
+          ("length", Written (UInt32, [ "length" ]), everywhere "unsigned int *");
+        ]
+        ~named:[ ("address", "struct sockaddr *") ]
+        ~headers:[ "sys/socket.h" ]
+  | Getsockname ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("address", Elements_to_change (UInt8, counted "length"), everywhere "void *");
+          ("length", Written (UInt32, [ "length" ]), everywhere "unsigned int *");
+        ]
+        ~named:[ ("address", "struct sockaddr *") ]
+        ~headers:[ "sys/socket.h" ]
+  | Getpeername ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("address", Elements_to_change (UInt8, counted "length"), everywhere "void *");
+          ("length", Written (UInt32, [ "length" ]), everywhere "unsigned int *");
+        ]
+        ~named:[ ("address", "struct sockaddr *") ]
+        ~headers:[ "sys/socket.h" ]
+  | Shutdown ->
+      row (everywhere "int") (Returns Int32)
+        [ ("descriptor", Value Int32, everywhere "int"); ("how", Value Int32, everywhere "int") ]
+        ~headers:[ "sys/socket.h" ]
+  | Setsockopt ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("level", Value Int32, everywhere "int");
+          ("option", Value Int32, everywhere "int");
+          ("value", Elements (UInt8, counted "length"), everywhere "const void *");
+          ("length", Value USize, everywhere "unsigned int");
+        ]
+        ~headers:[ "sys/socket.h"; "sys/time.h" ]
+        ~layout:
+          [ "sizeof(struct timeval) == 16"; "__builtin_offsetof(struct timeval, tv_usec) == 8" ]
+  | Getsockopt ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("level", Value Int32, everywhere "int");
+          ("option", Value Int32, everywhere "int");
+          ("value", Elements_to_change (UInt8, counted "length"), everywhere "void *");
+          ("length", Written (UInt32, [ "length" ]), everywhere "unsigned int *");
+        ]
+        ~headers:[ "sys/socket.h" ]
+  | Sendto ->
+      row ~at_most:"count" (everywhere "long") (Returns ISize)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("bytes", Elements (UInt8, counted "count"), everywhere "const void *");
+          ("count", Value USize, size);
+          ("flags", Value Int32, everywhere "int");
+          ("address", Elements (UInt8, counted "length"), everywhere "const void *");
+          ("length", Value USize, everywhere "unsigned int");
+        ]
+        ~named:[ ("address", "const struct sockaddr *") ]
+        ~headers:[ "sys/socket.h" ]
+  | Recvfrom ->
+      row ~at_most:"count" (everywhere "long") (Returns ISize)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("buffer", Room (UInt8, counted "count"), everywhere "void *");
+          ("count", Value USize, size);
+          ("flags", Value Int32, everywhere "int");
+          ("address", Elements_to_change (UInt8, counted "length"), everywhere "void *");
+          ("length", Written (UInt32, [ "length" ]), everywhere "unsigned int *");
+        ]
+        ~named:[ ("address", "struct sockaddr *") ]
+        ~headers:[ "sys/socket.h" ]
+  | Fcntl_getfl ->
+      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("request", Fixed F_getfl, everywhere "int");
+          ("unused", Always 0, everywhere "int");
+        ]
+        ~headers:[ "fcntl.h" ]
+  | Fcntl_setfl ->
+      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("request", Fixed F_setfl, everywhere "int");
+          ("flags", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "fcntl.h" ]
 
 let available system function_ = (describe function_).on system.os
 
@@ -1035,6 +1238,28 @@ let numbers =
     Cs8;
     Sigset_size;
     Sig_block;
+    Af_inet;
+    Af_inet6;
+    Sock_stream;
+    Sock_dgram;
+    Sol_socket;
+    So_reuseaddr;
+    So_rcvtimeo;
+    So_sndtimeo;
+    So_error;
+    Shut_rd;
+    Shut_wr;
+    Shut_rdwr;
+    Ipproto_ipv6;
+    Ipv6_v6only;
+    O_nonblock;
+    F_getfl;
+    F_setfl;
+    Einprogress;
+    Eagain;
+    Pollout;
+    Sockaddr_family_offset;
+    Sockaddr_family_size;
   ]
 
 let number_name = function
@@ -1140,6 +1365,28 @@ let number_name = function
   | Cs8 -> "CS8"
   | Sigset_size -> "SIGSET_SIZE"
   | Sig_block -> "SIG_BLOCK"
+  | Af_inet -> "AF_INET"
+  | Af_inet6 -> "AF_INET6"
+  | Sock_stream -> "SOCK_STREAM"
+  | Sock_dgram -> "SOCK_DGRAM"
+  | Sol_socket -> "SOL_SOCKET"
+  | So_reuseaddr -> "SO_REUSEADDR"
+  | So_rcvtimeo -> "SO_RCVTIMEO"
+  | So_sndtimeo -> "SO_SNDTIMEO"
+  | So_error -> "SO_ERROR"
+  | Shut_rd -> "SHUT_RD"
+  | Shut_wr -> "SHUT_WR"
+  | Shut_rdwr -> "SHUT_RDWR"
+  | Ipproto_ipv6 -> "IPPROTO_IPV6"
+  | Ipv6_v6only -> "IPV6_V6ONLY"
+  | O_nonblock -> "O_NONBLOCK"
+  | F_getfl -> "F_GETFL"
+  | F_setfl -> "F_SETFL"
+  | Einprogress -> "EINPROGRESS"
+  | Eagain -> "EAGAIN"
+  | Pollout -> "POLLOUT"
+  | Sockaddr_family_offset -> "SOCKADDR_FAMILY_OFFSET"
+  | Sockaddr_family_size -> "SOCKADDR_FAMILY_SIZE"
 
 (* A size or an offset in a structure is a [USize], and the bits of a
    file's mode are compared with a number read out of the structure. *)
@@ -1152,7 +1399,7 @@ let number_type = function
   | Path_max | Spawn_file_actions_size | Dirent_length_offset | Dirent_kind_offset
   | Dirent_name_offset | Termios_size | Termios_iflag_offset | Termios_oflag_offset
   | Termios_cflag_offset | Termios_lflag_offset | Termios_flag_size | Termios_cc_offset | Vmin
-  | Vtime | Sigset_size ->
+  | Vtime | Sigset_size | Sockaddr_family_offset | Sockaddr_family_size ->
       USize
   | Tiocgwinsz | Icanon | Echo | Isig | Iexten | Ixon | Icrnl | Brkint | Inpck | Istrip | Opost
   | Cs8 ->
@@ -1191,6 +1438,14 @@ let number_headers = function
   | Echo | Isig | Iexten | Ixon | Icrnl | Brkint | Inpck | Istrip | Opost | Cs8 ->
       [ "termios.h" ]
   | Tiocgwinsz -> [ "sys/ioctl.h" ]
+  | Af_inet | Af_inet6 | Sock_stream | Sock_dgram | Sol_socket | So_reuseaddr | So_rcvtimeo
+  | So_sndtimeo | So_error | Shut_rd | Shut_wr | Shut_rdwr | Sockaddr_family_offset
+  | Sockaddr_family_size ->
+      [ "sys/socket.h" ]
+  | Ipproto_ipv6 | Ipv6_v6only -> [ "netinet/in.h" ]
+  | O_nonblock | F_getfl | F_setfl -> [ "fcntl.h" ]
+  | Einprogress | Eagain -> [ "errno.h" ]
+  | Pollout -> [ "poll.h" ]
   | Path_max -> [ "limits.h" ]
 
 (* The C expression that a number is the value of, which the check compares
@@ -1202,6 +1457,8 @@ let number_expression (system : system) number =
   match (number, system.os) with
   | Stat_size, _ -> Some "sizeof(struct stat)"
   | Sigset_size, _ -> Some "sizeof(sigset_t)"
+  | Sockaddr_family_offset, _ -> Some "__builtin_offsetof(struct sockaddr, sa_family)"
+  | Sockaddr_family_size, _ -> Some "sizeof(((struct sockaddr *)0)->sa_family)"
   | Termios_size, _ -> Some "sizeof(struct termios)"
   | Termios_iflag_offset, _ -> Some "__builtin_offsetof(struct termios, c_iflag)"
   | Termios_oflag_offset, _ -> Some "__builtin_offsetof(struct termios, c_oflag)"
@@ -1380,6 +1637,40 @@ let value (system : system) number =
   | Opost, (Linux | Macos) -> 1
   | Cs8, Linux -> 48
   | Cs8, Macos -> 768
+  | Af_inet, (Linux | Macos) -> 2
+  | Af_inet6, Linux -> 10
+  | Af_inet6, Macos -> 30
+  | Sock_stream, (Linux | Macos) -> 1
+  | Sock_dgram, (Linux | Macos) -> 2
+  | Sol_socket, Linux -> 1
+  | Sol_socket, Macos -> 65535
+  | So_reuseaddr, Linux -> 2
+  | So_reuseaddr, Macos -> 4
+  | So_rcvtimeo, Linux -> 20
+  | So_rcvtimeo, Macos -> 4102
+  | So_sndtimeo, Linux -> 21
+  | So_sndtimeo, Macos -> 4101
+  | So_error, Linux -> 4
+  | So_error, Macos -> 4103
+  | Shut_rd, (Linux | Macos) -> 0
+  | Shut_wr, (Linux | Macos) -> 1
+  | Shut_rdwr, (Linux | Macos) -> 2
+  | Ipproto_ipv6, (Linux | Macos) -> 41
+  | Ipv6_v6only, Linux -> 26
+  | Ipv6_v6only, Macos -> 27
+  | O_nonblock, Linux -> 2048
+  | O_nonblock, Macos -> 4
+  | F_getfl, (Linux | Macos) -> 3
+  | F_setfl, (Linux | Macos) -> 4
+  | Einprogress, Linux -> 115
+  | Einprogress, Macos -> 36
+  | Eagain, Linux -> 11
+  | Eagain, Macos -> 35
+  | Pollout, (Linux | Macos) -> 4
+  | Sockaddr_family_offset, Linux -> 0
+  | Sockaddr_family_offset, Macos -> 1
+  | Sockaddr_family_size, Linux -> 2
+  | Sockaddr_family_size, Macos -> 1
   | Sigset_size, Linux -> 128
   | Sigset_size, Macos -> 4
   | Sig_block, Linux -> 0
@@ -1397,7 +1688,7 @@ let value (system : system) number =
    width: code run while compiling for a narrower target has the target's. *)
 let bytes = function
   | UInt8 -> 1
-  | Int32 -> 4
+  | Int32 | UInt32 -> 4
   | Int64 | UInt64 | Float64 -> 8
   | USize | ISize -> invalid_arg "a USize the C library reaches through an address"
 
