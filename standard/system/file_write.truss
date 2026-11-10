@@ -1,5 +1,6 @@
 use standard::files
 use standard::intrinsic
+use standard::system::calls
 use standard::system::handles
 
 internal type SystemFileWrite()
@@ -27,26 +28,39 @@ impl FileWrite for SystemFileWrite {
   }
 
   fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
-    todo
+    handles::with_file_error(calls::make_directory(directory.text.slice().bytes))
   }
 
   fn remove(self, path: Path) -> Result[Unit, SystemError] {
-    todo
+    handles::with_file_error(calls::remove(path.text.slice().bytes))
   }
 
   fn rename(self, from: Path, to: Path) -> Result[Unit, SystemError] {
-    todo
+    handles::with_file_error(calls::rename(from.text.slice().bytes, to: to.text.slice().bytes))
   }
 
   fn link(self, target: Path, link: Path, kind: files::LinkKind) -> Result[Unit, SystemError] {
-    todo
+    handles::with_file_error(
+      calls::make_link(
+        target.text.slice().bytes,
+        link: link.text.slice().bytes,
+        symbolic: kind == files::LinkKind.Symbolic,
+      ),
+    )
   }
 
   fn set_permissions(self, path: Path, permissions: files::Permissions) -> Result[Unit, SystemError] {
-    todo
+    let mode: Int32 = intrinsic::convert(permissions.mode())
+    handles::with_file_error(calls::set_mode(path.text.slice().bytes, mode: mode))
   }
 
   fn set_modified(self, path: Path, time: Instant) -> Result[Unit, SystemError] {
-    todo
+    let whole = time.nanoseconds / 1000000000
+    let part = time.nanoseconds % 1000000000
+    let seconds = if part < 0 { whole - 1 } else { whole }
+    let nanoseconds = if part < 0 { part + 1000000000 } else { part }
+    handles::with_file_error(
+      calls::set_modified(path.text.slice().bytes, seconds: seconds, nanoseconds: nanoseconds),
+    )
   }
 }

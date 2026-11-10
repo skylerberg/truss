@@ -66,6 +66,16 @@ type function_ =
   | Fstat
   | Stat
   | Lstat
+  | Mkdir
+  | Remove
+  | Rename
+  | Symlink
+  | Link
+  | Chmod
+  | Utimensat
+  | Readlink
+  | Realpath
+  | Nanosleep
 
 let functions =
   [
@@ -95,6 +105,16 @@ let functions =
     Fstat;
     Stat;
     Lstat;
+    Mkdir;
+    Remove;
+    Rename;
+    Symlink;
+    Link;
+    Chmod;
+    Utimensat;
+    Readlink;
+    Realpath;
+    Nanosleep;
   ]
 
 let function_name = function
@@ -124,6 +144,16 @@ let function_name = function
   | Fstat -> "fstat"
   | Stat -> "stat"
   | Lstat -> "lstat"
+  | Mkdir -> "mkdir"
+  | Remove -> "remove"
+  | Rename -> "rename"
+  | Symlink -> "symlink"
+  | Link -> "link"
+  | Chmod -> "chmod"
+  | Utimensat -> "utimensat"
+  | Readlink -> "readlink"
+  | Realpath -> "realpath"
+  | Nanosleep -> "nanosleep"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -151,6 +181,9 @@ let size = everywhere "__SIZE_TYPE__"
    structure, and the one the headers call has this suffix. *)
 let status_symbol name (system : system) =
   match system with { os = Macos; architecture = X86_64 } -> name ^ "$INODE64" | _ -> name
+
+(* [mode_t], a file's permission bits. *)
+let mode = by_os (function Linux -> "unsigned int" | Macos -> "unsigned short")
 
 (* [off_t], a position in a file. *)
 let offset = by_os (function Linux -> "long" | Macos -> "long long")
@@ -377,6 +410,76 @@ let describe function_ =
         ~symbol:(status_symbol "lstat")
         ~named:[ ("status", "struct stat *") ]
         ~headers:[ "sys/stat.h" ]
+  | Mkdir ->
+      row (everywhere "int") (Returns Int32)
+        [ ("path", Elements UInt8, everywhere "const char *"); ("mode", Value Int32, mode) ]
+        ~headers:[ "sys/stat.h" ]
+  | Remove ->
+      row (everywhere "int") (Returns Int32)
+        [ ("path", Elements UInt8, everywhere "const char *") ]
+        ~headers:[ "stdio.h" ]
+  | Rename ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("from", Elements UInt8, everywhere "const char *");
+          ("to", Elements UInt8, everywhere "const char *");
+        ]
+        ~headers:[ "stdio.h" ]
+  | Symlink ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("target", Elements UInt8, everywhere "const char *");
+          ("link", Elements UInt8, everywhere "const char *");
+        ]
+        ~headers:[ "unistd.h" ]
+  | Link ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("target", Elements UInt8, everywhere "const char *");
+          ("link", Elements UInt8, everywhere "const char *");
+        ]
+        ~headers:[ "unistd.h" ]
+  | Chmod ->
+      row (everywhere "int") (Returns Int32)
+        [ ("path", Elements UInt8, everywhere "const char *"); ("mode", Value Int32, mode) ]
+        ~headers:[ "sys/stat.h" ]
+  | Utimensat ->
+      (* The times are two [timespec]s, the time of access and then the time
+         of modification, as four numbers. *)
+      row (everywhere "int") (Returns Int32)
+        [
+          ("directory", Value Int32, everywhere "int");
+          ("path", Elements UInt8, everywhere "const char *");
+          ("times", Elements Int64, everywhere "const struct timespec *");
+          ("flags", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "fcntl.h"; "sys/stat.h" ]
+  | Readlink ->
+      row (everywhere "long") (Returns ISize)
+        [
+          ("path", Elements UInt8, everywhere "const char *");
+          ("buffer", Room UInt8, everywhere "char *");
+          ("count", Value USize, size);
+        ]
+        ~headers:[ "unistd.h" ]
+  | Realpath ->
+      (* The resolved path is written into the room given, which is to hold
+         [PATH_MAX] bytes, and the address returned is that room's. *)
+      row (everywhere "char *") Text
+        [
+          ("path", Elements UInt8, everywhere "const char *");
+          ("resolved", Room UInt8, everywhere "char *");
+        ]
+        ~headers:[ "stdlib.h"; "limits.h" ]
+  | Nanosleep ->
+      row (everywhere "int") (Returns Int32)
+        [
+          ("duration", Elements Int64, everywhere "const struct timespec *");
+          ( "remaining",
+            Written (Int64, [ "remaining_seconds"; "remaining_nanoseconds" ]),
+            everywhere "struct timespec *" );
+        ]
+        ~headers:[ "time.h" ]
 
 let signature function_ =
   let row = describe function_ in
@@ -489,6 +592,9 @@ type number =
   | S_ifreg
   | S_ifdir
   | S_iflnk
+  | At_fdcwd
+  | Utime_omit
+  | Path_max
 
 let numbers =
   [
@@ -546,6 +652,9 @@ let numbers =
     S_ifreg;
     S_ifdir;
     S_iflnk;
+    At_fdcwd;
+    Utime_omit;
+    Path_max;
   ]
 
 let number_name = function
@@ -603,6 +712,9 @@ let number_name = function
   | S_ifreg -> "S_IFREG"
   | S_ifdir -> "S_IFDIR"
   | S_iflnk -> "S_IFLNK"
+  | At_fdcwd -> "AT_FDCWD"
+  | Utime_omit -> "UTIME_OMIT"
+  | Path_max -> "PATH_MAX"
 
 (* A size or an offset in a structure is a [USize], and the bits of a
    file's mode are compared with a number read out of the structure. *)
@@ -611,6 +723,8 @@ let number_type = function
   | Stat_modified_offset | Stat_created_offset ->
       USize
   | S_ifmt | S_ifreg | S_ifdir | S_iflnk -> UInt64
+  | Utime_omit -> Int64
+  | Path_max -> USize
   | _ -> Int32
 
 let number_headers = function
@@ -626,8 +740,11 @@ let number_headers = function
   | Pollin | Pollhup -> [ "poll.h" ]
   | Sigkill -> [ "signal.h" ]
   | Stat_size | Stat_mode_offset | Stat_mode_size | Stat_length_offset | Stat_accessed_offset
-  | Stat_modified_offset | Stat_created_offset | S_ifmt | S_ifreg | S_ifdir | S_iflnk ->
+  | Stat_modified_offset | Stat_created_offset | S_ifmt | S_ifreg | S_ifdir | S_iflnk | Utime_omit
+    ->
       [ "sys/stat.h" ]
+  | At_fdcwd -> [ "fcntl.h" ]
+  | Path_max -> [ "limits.h" ]
 
 (* The C expression that a number is the value of, which the check compares
    with the table's value. Most numbers are constants that the headers
@@ -732,6 +849,12 @@ let value (system : system) number =
   | S_ifreg, (Linux | Macos) -> 0o100000
   | S_ifdir, (Linux | Macos) -> 0o040000
   | S_iflnk, (Linux | Macos) -> 0o120000
+  | At_fdcwd, Linux -> -100
+  | At_fdcwd, Macos -> -2
+  | Utime_omit, Linux -> 1073741822
+  | Utime_omit, Macos -> -2
+  | Path_max, Linux -> 4096
+  | Path_max, Macos -> 1024
 
 (* How many bytes a number the function reaches through an address takes,
    which the C type it is declared with must take too. [USize] has no one

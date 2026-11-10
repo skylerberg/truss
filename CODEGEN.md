@@ -1200,7 +1200,15 @@ and moves, shortens, flushes, and closes a file with `lseek`, `ftruncate`,
 and from `stat` or `lstat` for a path: its kind, length, permissions, and
 times are read out of the structure's bytes. `SystemFileWrite.open` opens a file in each write
 mode: to replace it, to append to it, to create it only if it is missing,
-or to update it in place.
+or to update it in place. `SystemFileWrite` makes a directory with
+`mkdir`, removes a file or an empty directory with `remove`, renames with
+`rename`, links with `symlink` and `link`, and sets permissions and the
+time of last change with `chmod` and `utimensat`. `SystemFileRead` reads
+where a symbolic link points with `readlink` and resolves a path with
+`realpath`, each into room for the longest path the system allows.
+`SystemClock.sleep` calls `nanosleep`, and sleeps again for the time left
+when a signal interrupts it; the monotonic clock is `clock_gettime` with
+`CLOCK_MONOTONIC`.
 `SystemEnvironment` reads `getenv`. `SystemProcesses` runs a program found
 on the `PATH` with `posix_spawnp` and waits for it with `waitpid`: it lays
 the program's name and its arguments end to end, each with its zero byte,
