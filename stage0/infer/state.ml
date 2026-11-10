@@ -137,7 +137,7 @@ type state = {
       (** Where each name of the definition is, for lambdas' captures. *)
   mutable lambdas : span list;  (** The lambdas being checked, innermost first. *)
   mutable unsolved : Diagnostic.reported option;
-      (** The report of the first statement whose types could not be worked out. *)
+      (** The report of the first statement whose types could not be inferred. *)
   mutable capability_constraints : subset_constraint list;
   mutable capability_solution : (int, T.capability list) Hashtbl.t option;
       (** The set each capability variable was solved to. [None] until the constraints are solved. A
@@ -175,8 +175,8 @@ let fresh_node_id state =
   state.form.next_node_id <- id + 1;
   id
 
-(* A core expression that desugaring introduces. It has no syntax node of
-   its own, so the caller gives its origin and type. *)
+(* A core expression that desugaring introduces. It has no syntax node, so
+   the caller supplies its origin and type. *)
 let synthetic_expression state ~origin type_ kind : Core.expression =
   { id = fresh_node_id state; origin; type_; kind }
 
@@ -435,10 +435,10 @@ let unify state left right =
   Unify.unify state.unifier (normalize left) (normalize right)
 
 (* Unifies a call's result type with the expected type before the call's
-   arguments are checked, so that the type arguments this infers are known
-   while the arguments are checked. Capability sets are left out: a
-   function value may be widened to a type with more [uses], and [convert]
-   compares the capability sets when it checks the value. *)
+   arguments are checked, so that the type arguments inferred here are known
+   while the arguments are checked. Capability sets are excluded: a function
+   value may be widened to a type with more [uses], and [convert] compares
+   the capability sets when it checks the value. *)
 let unify_as_hint state found expected =
   let deferred_capability_equalities = state.unifier.deferred_capability_equalities in
   ignore (unify state found expected);
@@ -739,7 +739,7 @@ let default_literal state type_ =
   | T.Literal (Float_literal, _) -> decide (T.builtin Float64)
   | _ -> type_
 
-(* What a name expression refers to, as name resolution decided. *)
+(* The referent of a name expression, as name resolution decided. *)
 let head state (value : expression) = Resolve.head state.resolved value
 
 (* A member name that starts with a capital letter is a variant. *)
@@ -1248,13 +1248,12 @@ let rec is_slice (value : expression) =
 let borrowed state (value : expression) =
   (is_place state value || Option.is_some (lent state value)) && not (is_slice value)
 
-(* The mode with which the bindings of a pattern hold the parts of the
-   scrutinee of a [match] or an [is]. A scrutinee marked [own] or [mut]
-   gives that mode. An unmarked place or lent part is borrowed, so the
-   bindings are [Read]. Any other scrutinee is a value that the match
-   consumes, so the bindings are [Own]. A mark that belongs to the receiver
-   of a method call, as in [mut cursor.next()], is not a mark on the
-   scrutinee. *)
+(* The mode in which a pattern's bindings bind the parts of the scrutinee of
+   a [match] or an [is]. A scrutinee marked [own] or [mut] has that mode. An
+   unmarked place or lent part is borrowed, so the bindings are [Read]. Any
+   other scrutinee is a value that the match consumes, so the bindings are
+   [Own]. A mark that belongs to the receiver of a method call, as in [mut
+   cursor.next()], is not a mark on the scrutinee. *)
 let scrutinee_mode state (scrutinee : expression) : T.mode =
   match scrutinee.kind with
   | Mode (Own, inner) when Option.is_none (marked_call state inner) -> Own
@@ -1269,7 +1268,7 @@ type immutable =
       (** The place is, or is part of, a [let] binding, a parameter that is not [mut], a constant,
           or [self] in a method that does not take [mut self]. *)
   | Captured of string  (** Inside a lambda, the place belongs to the enclosing function. *)
-  | Lent_read_only  (** The place is part of what a call lends read-only. *)
+  | Lent_read_only  (** The place is a part that a lending call lent read-only. *)
   | Not_a_place
 
 (* Why a place cannot be mutated, or [None] if it can. Only a [var], a

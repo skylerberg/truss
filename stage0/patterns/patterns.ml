@@ -23,8 +23,8 @@ type constructor =
   | Interval of Z.t * Z.t  (** Inclusive. *)
   | Text of string  (** A string literal, one of infinitely many. *)
   | Opaque of string
-      (** A value that is not worked out, which covers nothing else. The text names it in a message.
-      *)
+      (** A value that is not evaluated at compile time, which covers only itself. The text names it
+          in a diagnostic. *)
 
 type space = Wild | Constructed of constructor * space list | Alternatives of space list
 
@@ -86,9 +86,10 @@ let field_types context type_ constructor =
 
 let arity context type_ constructor = List.length (fields_of context type_ constructor)
 
-(* A pattern as a space, its fields put in declared order, with fields it
-   does not name as wildcards. [replace] stands one or-pattern, by its id,
-   for only some of its alternatives, to ask what those alone cover. *)
+(* A pattern as a space, with its fields in declaration order and the fields
+   that it does not name as wildcards. [replace] substitutes one or-pattern,
+   by its id, with a subset of its alternatives, to compute what that subset
+   covers. *)
 let rec space ?replace context (written : Core.pattern) : space =
   match written.kind with
   | Wildcard | Bind _ -> Wild
@@ -98,7 +99,7 @@ let rec space ?replace context (written : Core.pattern) : space =
       | Ok low, Ok high ->
           let high = if inclusive then high else Z.pred high in
           if Z.gt low high then Alternatives [] else Constructed (Interval (low, high), [])
-      (* An end whose value is not worked out here covers nothing else. *)
+      (* A bound whose value is not evaluated here covers only itself. *)
       | Error shown, _ | _, Error shown -> Constructed (Opaque shown, []))
   | Variant { variant; fields } -> fielded ?replace context written.type_ (Variant variant) fields
   | Record fields -> fielded ?replace context written.type_ Record fields
@@ -109,7 +110,7 @@ let rec space ?replace context (written : Core.pattern) : space =
       Alternatives (List.map (space ?replace context) alternatives)
 
 (* The value that a pattern compares the scrutinee with, as the pattern of
-   that value. A value that is not worked out here covers nothing else. *)
+   that value. A value that is not evaluated here covers only itself. *)
 and compared context (value : Core.expression) : space =
   match value.kind with
   | Use (Constant { path; _ }) -> constant context path
@@ -123,9 +124,9 @@ and literal (value : Core.expression) : space option =
   | String text -> Some (Constructed (Text text, []))
   | _ -> None
 
-(* A constant as the pattern of its value, so it covers exactly what that
-   value does. A value that is not worked out here, such as one built by a
-   function call, covers nothing else. *)
+(* A constant as the pattern of its value, so that it covers exactly the
+   values that its value covers. A value that is not evaluated here, such as
+   the result of a function call, covers only itself. *)
 and constant ?(seen = []) context path =
   let opaque = Constructed (Opaque (Path.show path), []) in
   if List.exists (Path.equal path) seen then opaque
@@ -151,8 +152,8 @@ and constant_value context seen (value : Core.expression) : space option =
       | Constructed (Opaque _, _) -> None
       | space -> Some space)
   | Construct { variant; fields } ->
-      (* Every field must be given and worked out. A field left to its
-         default is not worked out here. *)
+      (* Every field must be written and evaluated. A field that takes its
+         default is not evaluated here. *)
       let parts =
         List.map
           (fun (_, (field : Core.operand option)) ->
@@ -169,8 +170,8 @@ and constant_value context seen (value : Core.expression) : space option =
       else None
   | _ -> literal value
 
-(* A range's end: [Ok] its value, or [Error] the name of a constant whose
-   value is not worked out here. *)
+(* A bound of a range: [Ok] with its value, or [Error] with the name of a
+   constant whose value is not evaluated here. *)
 and range_end context (value : Core.expression) =
   match value.kind with
   | Integer found -> Ok found

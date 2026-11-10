@@ -63,12 +63,12 @@ type call = {
   uses : Types.capability list;
       (** The capabilities the call needs, with capability parameters substituted. *)
   result : Types.ty;
-      (** What the callee gives. For an operator that tests what its call gives, as [<] tests the
-          [Ordering] of [compare] and [!=] the [Bool] of [equal], it is not the operator's own type.
-      *)
+      (** The result type of the callee. For an operator that tests the result of its call, as [<]
+          tests the [Ordering] of [compare] and [!=] the [Bool] of [equal], this is not the
+          operator's own type. *)
 }
 
-(** What a name or member expression means. *)
+(** The meaning of a name or member expression. *)
 type meaning =
   | Local_value of local
   | Global of { path : Path.t; type_arguments : Types.argument list }

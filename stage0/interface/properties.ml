@@ -1,14 +1,14 @@
-(* Whether a type is [Copyable], [Plain], or a view, and what it holds in
-   place, worked out from its shape.
+(* The properties of a type that are derived from its shape: [Copyable],
+   [Plain], the view property, and the types that it holds in place.
 
-   An opaque type has [Copyable] or [Plain] only when it declares so with
+   An opaque type is [Copyable] or [Plain] only when it declares so with
    [derives]. It then has the property under the conditions that its fields
-   give, as any other type does: [Slice[Element]] is [Plain] whatever
-   [Element] is, because it holds a view of its elements, and
-   [List[Element]] is [Copyable] when [Element] is. A generic parameter has
-   them only when bounded, and so does an associated type of one, by its
-   declared bounds. Whether a type is a view is part of its shape, so it is
-   worked out from the fields. *)
+   give, as any other type does: [Slice[Element]] is [Plain] for every
+   [Element], because it holds a view of its elements, and [List[Element]]
+   is [Copyable] when [Element] is. A generic parameter has these properties
+   only when it is bounded by them, and an associated type of a parameter
+   only when its declared bounds include them. The view property is part of
+   a type's shape, so it is derived from the fields. *)
 
 module T = Types
 
@@ -17,16 +17,18 @@ let copyable_trait = core "Copyable"
 let plain_trait = core "Plain"
 let storable_trait = core "Storable"
 
-(* What a trait's [Self] and parameters stand for in a reference to it. A
-   reference with the wrong number of arguments, which lowering reported,
-   gives [Self] alone: a parameter left standing equals nothing. *)
+(* The substitution for a trait reference: the types that the trait's [Self]
+   and parameters are instantiated with. A reference with the wrong number
+   of arguments, which lowering reported, substitutes [Self] only: an
+   unsubstituted parameter equals no type. *)
 let trait_substitution (interface : T.trait_interface) ~self (reference : T.trait_reference) :
     T.substitution =
   (({ owner = reference.trait; name = "Self" } : T.parameter), T.Type self)
   :: Option.value ~default:[] (T.substitution_of interface.trait_generics reference.trait_arguments)
 
-(* Every trait a bound gives a type, with the traits each requires, and
-   [Self] in what they require replaced by the type. *)
+(* The closure of a bound on a type: the bound's trait and, transitively,
+   the traits that it requires, with [Self] in the required traits
+   substituted by the type. *)
 let rec bound_closure database ?(seen = []) ~self (bound : T.trait_reference) =
   if List.exists (fun (other : T.trait_reference) -> Path.equal other.trait bound.trait) seen then
     []
@@ -39,8 +41,8 @@ let rec bound_closure database ?(seen = []) ~self (bound : T.trait_reference) =
     in
     bound :: List.concat_map (bound_closure database ~seen:(bound :: seen) ~self) required
 
-(* The bounds an associated type is declared with, for a base type: the
-   [Key: Hash] in [trait Keyed { type Key: Hash }]. *)
+(* The declared bounds of an associated type, for a base type: the [Key:
+   Hash] in [trait Keyed { type Key: Hash }]. *)
 let associated_bounds database ~base (trait : T.trait_reference) name =
   match Query.demand database Environment.trait_interface trait.trait with
   | Some interface -> (
@@ -56,8 +58,9 @@ let associated_bounds database ~base (trait : T.trait_reference) name =
       | None -> [])
   | None -> []
 
-(* The traits a type is known to have from bounds: a generic parameter's,
-   or a projection's declared ones, each with what it requires. *)
+(* The traits that a type implements according to bounds: the bounds of a
+   generic parameter, or the declared bounds of a projection, each with its
+   closure. *)
 let known_bounds database ~bounds (type_ : T.ty) =
   match type_ with
   | T.Parameter parameter -> List.concat_map (bound_closure database ~self:type_) (bounds parameter)
@@ -74,22 +77,22 @@ let has_bound database ~bounds type_ trait =
 
 type property = Copyable | Plain | View
 
-(* What a type definition says of every type built from it, as conditions
-   on what stands for its parameters. Each is worked out once for the
-   definition, so a question about [Option[Option[List[Int64]]]] is
-   [Option]'s condition asked of its argument, and never a walk of fields
-   that could take a type nested in itself for a type that contains
-   itself. A condition is a parameter, or an associated type, which is
-   decided where what the parameter stands for is known. *)
+(* The facts that a type definition gives about every instantiation of it,
+   as conditions on its type arguments. They are computed once per
+   definition. A query about [Option[Option[List[Int64]]]] instantiates
+   [Option]'s condition with its argument. It never traverses fields, so a
+   type nested in itself cannot be mistaken for a recursive type. A
+   condition is a parameter or an associated type, and it is decided where
+   the parameter's instantiation is known. *)
 type facts = {
   copyable : T.ty list option;
-      (** What must be [Copyable] for the type to be. [None] when it never is. *)
+      (** The types that must be [Copyable] for the type to be. [None] if the type never is. *)
   plain : T.ty list option;  (** The same for [Plain]. *)
   view : T.ty list option;
-      (** What makes the type a view when any of it is one. [None] when it always is. *)
+      (** The types of which any one makes the type a view. [None] if the type always is one. *)
   in_place : T.ty list;
-      (** What a value holds in place: in a field of a variant that is not [indirect], outside
-          collections' storage, functions, and [any]. *)
+      (** The types that a value holds in place: in a field of a variant that is not [indirect], and
+          not inside a collection's storage, a function, or an [any]. *)
 }
 
 (* The facts of a type with no fields. *)
@@ -103,15 +106,15 @@ let conditions_of facts = function
 let type_arguments arguments =
   List.filter_map (function T.Type type_ -> Some type_ | _ -> None) arguments
 
-(* A definition's conditions for the arguments it is given, each worked
-   out by [resolve]. *)
+(* A definition's conditions, instantiated with the given type arguments and
+   normalized by [resolve]. *)
 let instantiate ~resolve (interface : T.type_interface) arguments conditions =
   let substitution =
     Option.value ~default:[] (T.substitution_of interface.type_generics arguments)
   in
   List.map (fun condition -> resolve (T.substitute substitution condition)) conditions
 
-(* The conditions of every one of some types: [None] when any gives it. *)
+(* The conditions of all of some types. [None] if any of them gives [None]. *)
 let all conditions types =
   List.fold_left
     (fun found type_ ->
@@ -120,30 +123,31 @@ let all conditions types =
       | _ -> None)
     (Some []) types
 
-(* No program nests types this deep, or writes a condition this large:
-   past it a question gets the safe answer, which ends one about types
-   whose arguments grow as they contain each other. *)
+(* A depth limit. No program nests types this deeply or has a condition this
+   large. Past the limit a query gets the conservative answer, which
+   terminates a query about types whose arguments grow as they contain each
+   other. *)
 let limit = 64
 
-(* The conditions a type has a property on: for [Copyable] and [Plain]
-   what must have it, for [View] what makes it one, and [None] when it
-   never has the first two or always is the third. [leaf] answers for a
-   parameter and an associated type, [facts_of] gives a definition's
-   facts, and [resolve] works out a definition's condition for its
-   arguments.
+(* The conditions under which a type has a property. For [Copyable] and
+   [Plain]: the types that must have it. For [View]: the types of which any
+   one makes the type a view. [None] if the type never has the first two, or
+   always is a view. [leaf] decides a parameter and an associated type,
+   [facts_of] gives a definition's facts, and [resolve] normalizes a
+   definition's condition for its arguments.
 
-   Working a condition out can come back to a type whose answer is being
-   worked out, when an associated type is that type. [within] holds those
-   types, whole, and one met again adds nothing: a type that contains
-   itself has a property when nothing else in it says otherwise, and is a
-   view only when something else in it is one. *)
+   Computing a condition can reach a type whose answer is being computed,
+   when an associated type is that type. [within] holds the types in
+   progress. A type that is reached again adds no condition: a recursive
+   type has a property unless another part of it prevents that, and is a
+   view only if another part of it is. *)
 let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (type_ : T.ty) =
   let each = all (conditions database ~facts_of ~resolve ~leaf ~within property) in
   match type_ with
   | T.Error _ | T.Hole | T.Variable _ | T.Never | T.Literal _ | T.Integer -> Some []
-  (* A function value may be a lambda, which views what it captures. The
-     type does not say whether it captures, so every function type is a
-     view. *)
+  (* A function value may be a capturing lambda, which views its captures.
+     The type does not state whether the function captures, so every
+     function type is a view type. *)
   | T.Function _ -> if property = View then None else Some []
   | T.Parameter _ | T.Projection _ -> leaf type_
   | T.Any trait -> (
@@ -155,11 +159,11 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (ty
       match property with
       | Copyable -> if requires [ copyable_trait; plain_trait ] then Some [] else None
       | Plain -> None
-      (* The type does not say what the value inside holds, so an [any] is
-         a view unless its trait requires [Storable]. *)
+      (* The type does not name the type of the value that it holds, so an
+         [any] is a view type unless its trait requires [Storable]. *)
       | View -> if requires [ storable_trait ] then Some [] else None)
-  (* A cursor from an [own self] method owns what it goes over; one from a
-     [self] method views it. *)
+  (* A cursor from an [own self] method owns the collection that it iterates
+     over. A cursor from a [self] method views it. *)
   | T.Cursor { method_ = Method { receiver = Own; _ }; arguments } when property = View ->
       each (type_arguments arguments)
   | T.Cursor _ -> None
@@ -186,9 +190,9 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (ty
                     (conditions database ~facts_of ~resolve ~leaf ~within:(type_ :: within) property)
                     (instantiate ~resolve interface arguments found))))
 
-(* What a value of a type holds in place: the named types, and the
-   parameters and associated types, through the arguments of generic types
-   that hold them in place. *)
+(* The types that a value of a type holds in place: named types, parameters,
+   and associated types, including those reached through the arguments of
+   generic types that hold their arguments in place. *)
 let rec in_place database ~facts_of ~resolve ?(within = []) (type_ : T.ty) =
   match type_ with
   | T.Parameter _ | T.Projection _ -> [ type_ ]
@@ -219,9 +223,10 @@ let size type_ =
        type_);
   !count
 
-(* A definition's facts, from its shape and the facts of what its fields
-   name. Nothing is known of its parameters here, so each one a fact turns
-   on is a condition, and so is each associated type. *)
+(* A definition's facts, derived from its shape and from the facts of its
+   field types. The definition's parameters are uninstantiated here, so each
+   parameter that a fact depends on is a condition, and so is each
+   associated type. *)
 let facts_from database ~facts_of (interface : T.type_interface) =
   let small type_ = size type_ <= limit in
   let conditions property types =
@@ -282,9 +287,10 @@ let facts_from database ~facts_of (interface : T.type_interface) =
                fields);
       }
 
-(* A package's types, each with the group of those that name each other
-   in their fields, itself among them. Packages do not depend on each other
-   in a cycle, so a group is within one package. *)
+(* The types of a package, each with its group of mutually recursive types:
+   the types that name each other in their fields, including itself.
+   Packages cannot depend on each other in a cycle, so a group is within one
+   package. *)
 let groups =
   Query.query ~name:"type_groups" ~phase:Interfaces ~show:Fun.id (fun database package ->
       let types =
@@ -331,13 +337,14 @@ let group =
       Option.value ~default:[ path ]
         (Path.Map.find_opt path (Query.demand database groups (Path.package path))))
 
-(* The facts of a group of types, by its first member. A type that
-   contains itself is [Copyable] and [Plain] when nothing in it says
-   otherwise, and is a view, or holds something in place, only when
-   something in it does. So the group starts with the facts of types with no
-   fields, and each round works every member's facts out from the others'
-   as the round before left them, until nothing changes. A round only adds
-   conditions, and there are only so many small ones, so the rounds end. *)
+(* The facts of a group of mutually recursive types, keyed by the group's
+   first member. A recursive type is [Copyable] and [Plain] unless a part of
+   it prevents that, and is a view, or holds a type in place, only if a part
+   of it does. So the facts are a fixed point: the iteration starts from the
+   facts of the types without fields, and each round recomputes every
+   member's facts from the others' facts of the previous round, until none
+   changes. A round only adds conditions, and the set of possible conditions
+   is finite, so the iteration terminates. *)
 let rec group_facts =
   lazy
     (Query.query ~name:"type_group_facts" ~phase:Interfaces ~saved:true ~show:Path.show
@@ -374,17 +381,18 @@ and facts_of database path =
 (* The facts of a type definition. *)
 let facts = Query.query ~name:"type_facts" ~phase:Interfaces ~show:Path.show facts_of
 
-(* Whether an associated type is of a generic parameter, or of a type not
-   worked out yet, and so of a type the code asking does not have. *)
+(* Whether the base of an associated type is a generic parameter or a type
+   that is not inferred yet, so that the projection cannot be normalized
+   here. *)
 let rec is_open = function
   | T.Parameter _ | T.Variable _ | T.Hole | T.Error _ -> true
   | T.Projection { base; _ } -> is_open base
   | _ -> false
 
-(* Whether a type has a property, where [bounds] gives what is known of
-   each generic parameter in scope and [normalize] replaces an associated
-   type by what its [impl] chooses. An associated type that no [impl]
-   answers is taken not to be [Copyable] or [Plain], and to be a view. *)
+(* Whether a type has a property. [bounds] gives the bounds of each generic
+   parameter in scope, and [normalize] replaces an associated type by its
+   definition in the matching [impl]. An associated type that no [impl]
+   defines is assumed not to be [Copyable] or [Plain], and to be a view. *)
 let has database ~bounds ~normalize property type_ =
   let leaf type_ =
     let bounded trait = has_bound database ~bounds type_ trait in
@@ -402,10 +410,10 @@ let has database ~bounds ~normalize property type_ =
   in
   match property with Copyable | Plain -> Option.is_some found | View -> Option.is_none found
 
-(* Whether a type is not a view type whatever its generic parameters stand
-   for, which is what the prelude trait [Storable] says. A generic
-   parameter, or an associated type of one, counts only when it is bounded
-   by [Storable], because what it stands for may be a view. So
+(* Whether a type is [Storable]: it is not a view type for every
+   instantiation of its generic parameters. A generic parameter, or an
+   associated type of one, is [Storable] only when it is bounded by
+   [Storable], because it may be instantiated with a view type. So
    [List[Element]] is [Storable] where [Element] is. *)
 let storable database ~bounds ~normalize type_ =
   let leaf type_ = if has_bound database ~bounds type_ storable_trait then Some [] else None in

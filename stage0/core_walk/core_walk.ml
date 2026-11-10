@@ -265,10 +265,10 @@ let definition visit found = definition_children (deep visit) found
 let tasks_capability : Path.t =
   Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Tasks" }
 
-(* Whether code can use [Tasks]: it has [concurrent] code, or a call in it
-   uses [Tasks] or a capability parameter, which may stand for [Tasks]. The
-   calls of an implementation that is provided [mut] around such code take
-   turns. [solved] gives what a capability variable stands for, for a core
+(* Whether code can use [Tasks]: it contains [concurrent] code, or a call in
+   it uses [Tasks] or a capability parameter, which may be instantiated with
+   [Tasks]. An implementation that is provided [mut] around such code is a
+   monitor. [solved] gives the solution of a capability variable, for a core
    form whose capability variables are not solved yet. *)
 let can_use_tasks ?(solved = fun (_ : int) : Types.capability list -> []) (body : block) : bool =
   let found = ref false in

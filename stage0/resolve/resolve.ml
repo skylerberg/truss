@@ -91,9 +91,8 @@ let resolved =
                   (fun definition -> (container.path, definition))
                   (Query.demand database Names.definition container))
           in
-          (* Nothing written inside a definition whose own header did not
-             parse is resolved, since what it is written inside is not
-             known. *)
+          (* No member of a definition whose own header did not parse is
+             resolved, because its enclosing declaration is unknown. *)
           (match container with
           | Some (_, around) when Parts.broken around Header -> ()
           | _ -> Walk.definition state ~path:key.path ?container definition);

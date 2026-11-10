@@ -428,10 +428,9 @@ and arm_value state env ?expected (body : statement) =
       ignore (statement state env body ~last:false);
       T.unit
 
-(* The type of the elements that a quantifier goes over. In code that runs,
-   a quantifier over a collection is a loop, so the call of the
-   collection's [each] is recorded for the quantifier, as for a [for]
-   loop. *)
+(* The element type of a quantifier's range or collection. In executable
+   code, a quantifier over a collection is a loop, so the call of the
+   collection's [each] is recorded for the quantifier, as for a [for] loop. *)
 and element_of_collection state env ~(quantifier : expression) (collection : expression) =
   let collection_type = normalize state (expression state env collection) in
   match collection_type with

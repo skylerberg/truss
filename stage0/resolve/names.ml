@@ -1,7 +1,6 @@
-(* What each file defines, and finding a definition by name.
-
-   Every lookup across definitions is a query keyed by where and what name,
-   so a change re-runs only the lookups it can affect: adding a definition
+(* The declarations of each file, and looking a definition up by name. Every
+   lookup across definitions is a query keyed by location and name, so a
+   change re-runs only the lookups that it can affect: adding a definition
    named [count] to a file re-runs the lookups of [count] in that file. *)
 
 open Syntax
@@ -19,9 +18,9 @@ type kind =
   | Test
   | Law_proof
 
-(* What a name can mean: the definitions that have a name of their own, which
-   is every kind but a method, a member constant, an [impl], a test, and a
-   law's proof. *)
+(* The kinds of definition that a name can resolve to: every kind that has a
+   name of its own, which excludes a method, a member constant, an [impl], a
+   test, and a law's proof. *)
 type named = Function | Type | Trait | Capability | Constant | Theorem
 
 let kind_of_named : named -> kind = function
@@ -45,12 +44,12 @@ let kind_name : kind -> string = function
   | Test -> "a test"
   | Law_proof -> "a law's proof"
 
-(* A definition, as its file declares it. [ordinal] counts the definitions
-   before it in the file with the same path, so only the first, with
-   ordinal 0, is what the path names; the others are reported as
-   duplicates. [index] is its place among the file's definitions, and
-   [container] the place of the trait, the [impl], or the capability it is
-   written inside, when it is a method of one. *)
+(* A definition, as its file declares it. [ordinal] counts the earlier
+   definitions in the file with the same path. Only the first, with ordinal
+   0, is the referent of the path; the others are reported as duplicates.
+   [index] is its position among the file's definitions. [container] is the
+   position of the enclosing trait, [impl], or capability, when the
+   definition is a method of one. *)
 type declaration = {
   module_ : Path.module_;  (** Where it is written. *)
   path : Path.t;
@@ -62,8 +61,8 @@ type declaration = {
   generic : bool;
 }
 
-(* A definition: its path, where it is written, and its ordinal. The path
-   alone does not say where a method is written, since a method may be in
+(* The key of a definition: its path, its module, and its ordinal. The path
+   alone does not determine the file of a method, because a method can be in
    any file of its type's package. *)
 type key = { module_ : Path.module_; path : Path.t; ordinal : int }
 
@@ -142,10 +141,11 @@ let packages database (module_ : Path.module_) =
   in
   List.sort_uniq compare (module_.package :: Prelude.standard :: dependencies)
 
-(* The module a full path's names give, written in a file of [from]: a
-   package's name, which is two of them when it has an owner, and then the
-   modules'. [standard::file_system] is the package [standard] and the
-   module [file_system], and [acme::geometry::vector] is the package
+(* The module that a full path denotes, written in a file of [from]. The
+   path starts with a package's name, which takes two segments when the
+   package has an owner, followed by the module's segments.
+   [standard::file_system] is the package [standard] and the module
+   [file_system], and [acme::geometry::vector] is the package
    [acme::geometry] and the module [vector]. *)
 let full_module database ~(from : Path.module_) (names : string list) : Path.module_ =
   match names with
@@ -186,8 +186,8 @@ let top module_ name : Path.t = Top { module_; name }
    that moving a definition changes no lookup of it. *)
 type entry = { name : string; kind : named; visibility : visibility; generic : bool }
 
-(* What a definition whose header did not parse was meant to be, by the
-   keyword it starts with. *)
+(* The kind of definition that a definition whose header did not parse was
+   meant to be, according to its first keyword. *)
 let named_of_keyword : Token.keyword option -> named option = function
   | Some Fn -> Some Function
   | Some Type -> Some Type
@@ -290,9 +290,9 @@ type module_lookup =
   | Ambiguous_module of Path.module_ * Path.module_
   | No_module of string
 
-(* The module that the names before [::] give, from a file in [from]: the
-   first name is a module the file imports, by its last name, or a
-   package. *)
+(* The module that the segments before [::] denote, from a file in [from]:
+   the first segment is the last name of a module that the file imports, or
+   a package. *)
 let lookup_module database ~(from : Path.module_) (names : string list) =
   match names with
   | [] -> No_module ""
@@ -470,8 +470,8 @@ module Member_map = Map.Make (struct
     | order -> order
 end)
 
-(* Everything a package declares, module by module: what each index of a
-   package is built from, in one pass over it. *)
+(* All declarations of a package, module by module. Each index of the
+   package is built from this list in one pass. *)
 let package_declarations =
   Query.query ~name:"package_declarations" ~phase:Declarations ~show:Fun.id (fun database package ->
       List.concat_map
@@ -600,8 +600,9 @@ let contained =
             (Query.demand database declarations module_)
       | None -> [])
 
-(* A definition's tree, with positions relative to it, so that a definition
-   that only moved gives the same tree and changes nothing that reads it. *)
+(* A definition's tree, with positions relative to the definition. A
+   definition that only moved then has the same tree, and invalidates no
+   result that reads it. *)
 let definition =
   Query.query ~name:"definition" ~phase:Declarations ~show:show_key ~saved:true
     ~about:(fun key -> Some { path = key.path; part = Some "tree" })
@@ -611,9 +612,10 @@ let definition =
       | Some (module_, declaration) ->
           Some (Query.demand database items module_).(declaration.index).value)
 
-(* Where each node of a definition is within it, by its id. The core form
-   holds no positions, so that laying a definition out again changes nothing
-   that reads its form; what shows a node's source asks here. *)
+(* The span of each node of a definition, relative to the definition, by
+   node id. The core form holds no positions, so reformatting a definition
+   invalidates no result that reads its form. Code that displays a node's
+   source text demands this query. *)
 let spans =
   Query.query ~name:"spans" ~phase:Declarations ~show:show_key (fun database key ->
       Option.map Syntax_walk.spans (Query.demand database definition key))
@@ -626,8 +628,9 @@ let base =
       | Some (module_, declaration) ->
           Some (module_, (Query.demand database items module_).(declaration.index).base))
 
-(* A stage's diagnostics for a file: each definition's, which [of_definition]
-   gives in the definition's own offsets, moved to the file's, in order. *)
+(* A stage's diagnostics for a file, in order. [of_definition] returns the
+   diagnostics of each definition in the definition's own offsets, and this
+   converts them to the file's offsets. *)
 let per_definition database module_ of_definition =
   List.concat_map
     (fun declaration ->

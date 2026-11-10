@@ -1,10 +1,8 @@
-(* Resolving the names of one definition.
-
-   The walk keeps a scope of what each name means at each point, and records
-   in tables keyed by node id what each name refers to and how each
-   [name[...]] reads. It never changes the tree. Parts the parser did not
-   build as written are not walked, since their trees are not what the
-   source says. *)
+(* Resolving the names of one definition. The walk maintains a scope with
+   the referent of each name at each point. It records, in tables keyed by
+   node id, the referent of each name and the interpretation of each
+   [name[...]]. It never changes the tree. Broken parts are not walked,
+   because their trees differ from the source. *)
 
 open Syntax
 module String_map = Map.Make (String)
@@ -18,14 +16,16 @@ type target =
       (** A generic type parameter, by the definition that declares it and its name. *)
   | Capability_parameter of Types.parameter  (** A generic parameter declared [capability Name]. *)
   | Value_parameter of Types.parameter  (** A [USize] generic parameter. *)
-  | Definition of Names.named * Path.t  (** A definition, and what kind of definition it is. *)
+  | Definition of Names.named * Path.t  (** A definition, with its kind. *)
   | Variant of Path.t * string  (** A prelude variant written bare, such as [Some]. *)
   | Module of Path.module_
   | Field of string  (** A record's field, by name, in the record's invariant or potential. *)
   | Result_value  (** [result], in [ensures] and [cost]. *)
   | Old  (** [old], in specifications and proofs. *)
   | Identical  (** [identical], in specifications and proofs: identity, for every type. *)
-  | Yielded  (** [yielded], what a lending or yielding method handed out so far. *)
+  | Yielded
+      (** [yielded]: the sequence of the parts that a lending or yielding method has yielded so far.
+      *)
   | Finished  (** [finished], whether a yielding method ran to its end. *)
   | Specification_function of specification_function
       (** [log], [power], [time], or [calls] in a [cost] bound, or [log] or [power] in another
@@ -34,7 +34,7 @@ type target =
 
 type bracket = Index | Type_arguments | Method_bracket
 
-(* What a local value name in scope is. *)
+(* The kind of a local value name in scope. *)
 type value = Value_local of id | Value_generic of Types.parameter | Value_field of string
 
 type specification = {
@@ -42,17 +42,19 @@ type specification = {
   result : bool;  (** In [ensures] or [cost], where [result] does. *)
   cost_bound : bool;  (** In a [cost] bound, where [time] and [calls] have their meaning. *)
   yielded : bool;
-      (** In a lending or yielding method's [ensures], or a [for] loop's clauses, where [yielded]
-          names what was handed out so far. *)
+      (** In the [ensures] of a lending or yielding method, or in the clauses of a [for] loop, where
+          [yielded] is the sequence of the parts yielded so far. *)
   finished : bool;
       (** In a lending or yielding method's [ensures], where [finished] has its meaning. *)
 }
 
 type scope = {
-  values : (value * string) String_map.t;  (** With what binds it, as messages name it. *)
+  values : (value * string) String_map.t;
+      (** With the kind of its binding, as diagnostics name it. *)
   types : target String_map.t;  (** Generic type and capability parameters, as names mean them. *)
   specification : specification;
-  hands_out : bool;  (** In a method that lends or yields, whose [ensures] name what it hands out. *)
+  hands_out : bool;
+      (** In a method that lends or yields, whose [ensures] can name the yielded parts. *)
 }
 
 let no_specification =
@@ -157,8 +159,8 @@ let module_of_names state (first : name) (rest : name list) =
     Names.lookup_module state.database ~from:state.module_
       (List.map (fun (name : Syntax.name) -> name.text) (first :: rest))
   with
-  (* Through an import, the [use] line has the error, and the names
-         after it mean what they say. *)
+  (* For a name through an import, the [use] line has the error, and the
+     names after it resolve as usual. *)
   | Found_module (module_, `Package)
     when module_ = Intrinsic.module_ && state.module_.package <> Prelude.standard ->
       failed
@@ -410,7 +412,7 @@ and name_expression state scope (path : path) =
         type_name state scope ~variants:true path
       else local_value state scope path.last
 
-(* What a name expression resolved to, if it is a name. *)
+(* The referent of a name expression, if the expression is a name. *)
 and name_target state (value : expression) =
   match value.kind with
   | Name path -> target_of state path.last
@@ -454,7 +456,8 @@ and bracket state scope (value : expression) base items =
    call. After that call, the expression works on its result, so a [?] can
    follow it, as in [mut file.read_line()?]. *)
 and check_place state (marked : expression) (inner : expression) =
-  (* [`Place called] says whether a method call took the place. *)
+  (* [`Place called]: [called] is whether the place is the receiver of a
+     method call. *)
   let rec head (value : expression) =
     match value.kind with
     | Member (base, _) -> head base
@@ -585,9 +588,9 @@ and expression state scope (value : expression) =
       block state scope body
   | Block body -> block state scope body
 
-(* A condition: what an [is] at the top of its [&&] chain binds is in scope
-   in the rest of the chain, and in the scope this returns, for the block
-   the condition guards. *)
+(* A condition. A name that an [is] at the top level of its [&&] chain binds
+   is in scope in the rest of the chain, and in the returned scope, which is
+   for the block that the condition guards. *)
 and condition state scope (value : expression) =
   match value.kind with
   | Binary { operator = And; left; right; _ } ->
@@ -772,8 +775,8 @@ and statement state scope (statement_ : statement) =
       block state inner body;
       scope
   | Parallel body | Concurrent body ->
-      (* Each branch sees only what is in scope before the block; what the
-         branches bind is in scope after it. *)
+      (* Each branch has only the scope before the block. The names that the
+         branches bind are in scope after the block. *)
       let word = match statement_.kind with Concurrent _ -> "concurrent" | _ -> "parallel" in
       List.fold_left
         (fun (after : scope) (branch : statement) ->
@@ -807,9 +810,9 @@ and loop_clause ?(for_loop = false) state scope (written : loop_clause) =
     if for_loop then { scope with specification = { scope.specification with yielded = true } }
     else scope
   in
-  (* [yielded] names what the nearest loop or method hands out: a [for]
-     loop's own parts, or else, in a lending or yielding method, the
-     method's. *)
+  (* [yielded] refers to the parts of the nearest loop or method: the parts
+     of a [for] loop, or else, in a lending or yielding method, the parts of
+     the method. *)
   let specification =
     { scope with specification = { in_specification with yielded = for_loop || scope.hands_out } }
   in
@@ -893,8 +896,8 @@ let empty_scope =
     hands_out = false;
   }
 
-(* The scope a definition's head gives: the type head's generic parameters,
-   for a method or a member constant. *)
+(* The scope of a definition's head: the generic parameters of the type
+   head, for a method or a member constant. *)
 let head state scope ~owner = function
   | Plain_name _ -> scope
   | Member_name (head_, _) ->
