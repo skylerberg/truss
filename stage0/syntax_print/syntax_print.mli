@@ -5,6 +5,8 @@
 
 val path : Syntax.path -> string
 val expression : Syntax.expression -> string
+val clause : Syntax.clause -> string
+val law : Syntax.law -> string
 val statement : Syntax.statement -> string
 val pattern : Syntax.pattern -> string
 val type_expression : Syntax.type_expression -> string

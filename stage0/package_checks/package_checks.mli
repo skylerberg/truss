@@ -21,3 +21,6 @@ val manifest_problems : (string, manifest_problem list) Query.query
 (** A package's, by its name. *)
 
 val manifest_sentence : package:string -> manifest_problem -> string
+
+val code_packages : (string, string list) Query.query
+(** The packages a package's code uses, its tests apart, by the package's name. *)

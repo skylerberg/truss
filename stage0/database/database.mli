@@ -193,6 +193,13 @@ val plan_lock :
     newest. The rest follow as a build's versions do. It fetches what it needs and writes no file.
     An error says, in sentences, why there is no such lock file. *)
 
+val published_engine : string -> Registry.Version.t -> (Engine.t, string) result
+(** A published package at a version, in an engine of its own with the packages it was published
+    with, for comparing a release with it. An error says, as a sentence, why it cannot be had. *)
+
+val code_packages : session -> string -> string list
+(** The packages a package's code uses, its tests apart. *)
+
 val trial_with_lock : session -> string -> session
 (** A session that starts from another's state, with a lock file in place of its own, for seeing
     what other versions would change before the file is written. *)

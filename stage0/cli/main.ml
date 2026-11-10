@@ -288,6 +288,15 @@ let upgrade =
           ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."
       $ json)
 
+let publish =
+  command "publish"
+    ~doc:
+      "Add the package to the registry as its next version, once it is finished and breaks nothing \
+       its last version offers."
+    Term.(
+      const (fun directory json -> exit_with (fun () -> Publish_command.run ~directory ~json))
+      $ directory $ json)
+
 let new_ =
   let name = Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME") in
   command "new" ~doc:"Make a new package in a directory named $(i,NAME)."
@@ -359,6 +368,7 @@ let truss =
       rename;
       add;
       upgrade;
+      publish;
       new_;
       sync;
       status;
