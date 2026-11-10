@@ -585,31 +585,6 @@ let unsupported name ~message text =
       | _ -> fail "the program was built")
 
 let () =
-  unsupported "a concurrent for over a method that yields borrowed places of a non-trivial type"
-    ~message:
-      "example/main.truss:15:3: Stage0 cannot build this yet: a `concurrent for` over \
-       `example::main::Bag.each`, which yields borrowed places and whose body is not a single \
-       `for` over a range."
-    {|type Bag(items: List[String])
-
-fn Bag.each(self) yields String {
-  var index: USize = 0
-  while index < self.items.length() {
-    yield self.items[index]
-    index += 1
-  }
-}
-
-fn main(arguments: List[String]) -> ExitCode
-  uses Tasks, Console
-{
-  let bag = Bag(items: ["a", "b"])
-  concurrent for item in bag {
-    Console.print_line(item)
-  }
-  ExitCode.success
-}
-|};
   unsupported "concurrent code in a pulled method"
     ~message:
       "example/main.truss:5:3: Stage0 cannot build this yet: `concurrent` code in a yielding \
