@@ -1,0 +1,12 @@
+(executable
+ (name proof_benchmark)
+ (libraries
+  engine
+  database
+  standard_library
+  type_checker
+  path
+  query
+  solver
+  prover
+  unix))
