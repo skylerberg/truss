@@ -21,33 +21,33 @@ impl FileWrite for SystemFileWrite {
         let descriptor = handles::open_to_write_from_empty(file)?
         Ok(files::File(handle: streams::Handle(descriptor: own descriptor, number: 0)))
       }
-      Append => Err(SystemError.Unsupported)
-      CreateNew => Err(SystemError.Unsupported)
-      Update => Err(SystemError.Unsupported)
+      Append => todo
+      CreateNew => todo
+      Update => todo
     }
   }
 
   fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
-    Err(SystemError.Unsupported)
+    todo
   }
 
   fn remove(self, path: Path) -> Result[Unit, SystemError] {
-    Err(SystemError.Unsupported)
+    todo
   }
 
   fn rename(self, from: Path, to: Path) -> Result[Unit, SystemError] {
-    Err(SystemError.Unsupported)
+    todo
   }
 
   fn link(self, target: Path, link: Path, kind: files::LinkKind) -> Result[Unit, SystemError] {
-    Err(SystemError.Unsupported)
+    todo
   }
 
   fn set_permissions(self, path: Path, permissions: files::Permissions) -> Result[Unit, SystemError] {
-    Err(SystemError.Unsupported)
+    todo
   }
 
   fn set_modified(self, path: Path, time: Instant) -> Result[Unit, SystemError] {
-    Err(SystemError.Unsupported)
+    todo
   }
 }

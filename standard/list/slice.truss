@@ -1,8 +1,5 @@
 use standard::core
-
-public type SplitFirst[Element](first: Element, rest: Slice[Element])
-
-public type SplitLast[Element](last: Element, rest: Slice[Element])
+use standard::list
 
 public fn Slice[Element].is_empty(self) -> Bool
   ensures result == (self.length() == 0)
@@ -29,13 +26,13 @@ public fn Slice[Element].last(self) lends Option[Element]
   todo
 }
 
-public fn Slice[Element].split_first(self) lends Option[SplitFirst[Element]]
+public fn Slice[Element].split_first(self) lends Option[list::SplitFirst[Element]]
   cost time O(1)
 {
   todo
 }
 
-public fn Slice[Element].split_last(self) lends Option[SplitLast[Element]]
+public fn Slice[Element].split_last(self) lends Option[list::SplitLast[Element]]
   cost time O(1)
 {
   todo

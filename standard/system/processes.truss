@@ -49,7 +49,7 @@ impl Processes for SystemProcesses {
   }
 
   fn spawn(self, command: processes::Command) -> Result[processes::Child, SystemError] {
-    Err(SystemError.Unsupported)
+    todo
   }
 }
 

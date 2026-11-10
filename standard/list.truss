@@ -7,6 +7,10 @@ public opaque type List[Element](storage: intrinsic::Storage[Element])
 public opaque type Slice[Element](elements: intrinsic::View[Element])
   derives Plain
 
+public type SplitFirst[Element](first: Element, rest: Slice[Element])
+
+public type SplitLast[Element](last: Element, rest: Slice[Element])
+
 impl Model for List[Element] {
   type Value = Sequence[Element]
 

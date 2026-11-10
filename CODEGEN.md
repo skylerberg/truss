@@ -953,8 +953,7 @@ for `parallel` code.
 - **Inside an `impl` of a capability,** a function value that uses the
   capability means the implementation itself, as the type checker rules,
   so its evidence is the implementation's own, made on the stack like a
-  `provide`'s. This is how `FileWrite.write_with` hands its callback the
-  file system it writes to.
+  `provide`'s.
 - **`Panic` has no evidence.** It cannot be provided, so `Panic.crash` is a
   direct call into the runtime.
 
@@ -1098,7 +1097,7 @@ The standard library's real implementations are Truss on the C library's
 functions: opening a file, with its path given a zero byte at its end and
 refused if it holds one; reading into storage; writing every byte; going
 on after a signal interrupts a call; and turning an error number into a
-`FileError`. `SystemFileRead`, `SystemFileWrite`, `FileReader`, and
+`SystemError`. `SystemFileRead`, `SystemFileWrite`, `FileReader`, and
 `FileWriter` are written on those, `SystemConsole` writes with them,
 `SystemClock` reads `clock_gettime`, and `SystemRandom` reads
 `getentropy`. `SystemConsole` and `FileReader` each hold a reader of

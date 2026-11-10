@@ -431,7 +431,9 @@ public type Pair[First, Second](first: First, second: Second)
 ```
 
 `enumerate` produces `Indexed` values, maps hold `Entry` values, and `zip`
-produces `Pair` values. A function that returns several values declares a
+produces `Pair` values. They are in `standard::core` and `standard::map`,
+not in the prelude: a pattern never names them, and a signature that does
+writes `core::Pair`. A function that returns several values declares a
 record for its result:
 
 ```truss
@@ -1210,15 +1212,18 @@ A method can have up to three versions that differ only in how they take
 `self`:
 
 ```truss
-fn List[Element].enumerate(self) -> Enumeration[Element]
-fn List[Element].enumerate(mut self) -> MutableEnumeration[Element]
-fn List[Element].enumerate(own self) -> OwnedEnumeration[Element]
+fn List[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
+fn List[Element].filter(own self, keep: fn(Element) -> Bool) -> List[Element]
+
+fn List[Element].enumerate(self) yields Indexed[Element]
+fn List[Element].enumerate(mut self) yields mut Indexed[Element]
 ```
 
 The keyword at the call site picks the version, and no keyword picks the
 read-only one. On a temporary value, the `own` version is used if there is one,
-so `scores.filter(is_valid).enumerate()` moves the filtered elements instead of
-copying them. This is the only overloading Truss allows.
+so `load_scores().filter(is_valid)` keeps the elements of the list it was
+given instead of copying them into a new one. This is the only overloading
+Truss allows.
 
 A type's versions of one name need not all be its own methods. One can come
 from a trait the type implements in its own package:
@@ -1517,7 +1522,7 @@ the function's. To convert, call `map_error` first:
 
 ```truss
 type ConfigError =
-  | Unreadable(error: FileError)
+  | Unreadable(error: SystemError)
   | Malformed(error: ParseError)
 
 fn load_config(file: Path) -> Result[Config, ConfigError]
@@ -1530,7 +1535,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 ```
 
 A variant with exactly one field can be used as a function, so
-`ConfigError.Unreadable` is a function from `FileError` to `ConfigError`. The same rule makes
+`ConfigError.Unreadable` is a function from `SystemError` to `ConfigError`. The same rule makes
 `names.map(Some)` work.
 
 `?` also works on an `Option` in a function that returns an `Option`. It never
@@ -1802,34 +1807,34 @@ flags |= Permission.write
 A capability is a set of methods for doing something outside pure computation,
 such as reading files or getting the time. A function lists the capabilities
 it needs with `uses`. The code that runs it decides which implementation to
-provide. The standard library declares the `Clock` capability like this:
+provide. The standard library declares the `Random` capability like this:
 
 ```truss
-capability Clock {
-  fn now() -> Instant
+capability Random {
+  fn next() -> UInt64
 }
 
-fn timestamp_message(message: String) -> String
-  uses Clock
+fn roll_die() -> UInt64
+  uses Random
 {
-  "[${Clock.now()}] ${message}"
+  Random.next() % 6 + 1
 }
 ```
 
 Code calls a capability's methods through the capability's name, as in
-`Clock.now()`. An implementation is an ordinary type with an `impl`, like a
+`Random.next()`. An implementation is an ordinary type with an `impl`, like a
 trait implementation. Its methods take `self`, or `mut self` if they change
 the implementation's own state:
 
 ```truss
-type FixedClock(time: Instant)
+type LoadedDie(face: UInt64)
 
-impl Clock for FixedClock {
-  fn now(self) -> Instant { self.time }
+impl Random for LoadedDie {
+  fn next(self) -> UInt64 { self.face }
 }
 
-let stamped = provide FixedClock(time: Instant.epoch) {
-  timestamp_message("ready")
+let rolled = provide LoadedDie(face: 5) {
+  roll_die()
 }
 ```
 
@@ -1839,16 +1844,16 @@ mark, and a place is marked `mut` when its methods change its state. The
 changes then remain in the place afterward:
 
 ```truss
-var files = MemoryFiles(files: [:])
-let config = provide mut files, DiscardLog() {
+var disk = files::MemoryFiles.new()
+let config = provide mut disk, log::DiscardLog() {
   save_and_reload(Path.new("app.toml"))
 }
 ```
 
-Afterward, `files` holds everything that was written.
+Afterward, `disk` holds everything that was written.
 
-- An implementation is never called directly. `Clock.now()` is the only way to
-  call the clock.
+- An implementation is never called directly. `Random.next()` is the only way
+  to call it.
 - A type can implement several capabilities. Providing it provides all of
   them.
 - An `impl` can declare `uses` when its methods need capabilities of their own.
@@ -1864,13 +1869,21 @@ These capabilities are in the prelude:
 | `FileRead` | Reading files and listing directories |
 | `FileWrite` | Creating, writing, renaming, and deleting files |
 | `NetworkClient` | Opening outgoing connections and looking up names |
-| `NetworkServer` | Listening for and accepting incoming connections |
+| `NetworkServer` | Listening for incoming connections |
+| `Handles` | Reading, writing, and closing what is already open: a file, a connection, a listener, a running program |
 | `Clock` | The current time, a monotonic clock, and sleeping |
 | `Random` | Random numbers from the operating system |
 | `Environment` | Environment variables, the current directory, and which operating system and processor the program runs on |
 | `Processes` | Running other programs |
+| `Signals` | Waiting for a signal sent to the program |
 | `Tasks` | Starting concurrent tasks and using channels |
+| `Log` | Recording what the program did |
 | `Panic` | Ending the program |
+
+Each capability's methods are the least an implementation has to give.
+What is built from them is an ordinary function in a module of the standard
+library, such as `files::write_with` and `network::connect`, so it works
+with every implementation.
 
 `Panic` is built in. Its method is `Panic.crash("message")`, and it is also
 required by `expect` and `unwrap`. Code cannot `provide` an implementation of
@@ -1887,36 +1900,37 @@ network connection, or a running process, is released automatically when its
 owner is done with it, the same way memory is:
 
 ```truss
-fn first_line(path: Path) -> Result[String, FileError]
-  uses FileRead
+fn first_line(path: Path) -> Result[Option[String], SystemError]
+  uses FileRead, Handles
 {
   var file = FileRead.open(path)?
-  let line = mut file.read_line()?
-  Ok(own line)
+  mut file.read_line()
 }
 ```
 
 The file is closed when `first_line` returns, on every path, including the
 early returns from `?`.
 
-- A handle's methods declare the capability they use, so `read_line` has
-  `uses FileRead`, and code that only holds a handle still cannot use it
-  without the capability.
+- Opening is one capability and using what is open is another. `open` is
+  `FileRead`'s, and `read_line` has `uses Handles`, as every method of a
+  handle does. Code that is handed a file or a connection needs `Handles`
+  alone, and can open nothing with it. Code that only holds a handle still
+  cannot use it without the capability.
 - Releasing a handle never runs Truss code and never fails. Types cannot
   define code that runs when a value is released.
 - Anything that can fail, or that the program needs to know happened, is an
   explicit call that returns a `Result`, such as `flush`, `sync`, `shutdown`
   for closing a connection cleanly, and `wait` for a process's exit status.
 - A buffered writer is only lent, inside a scope, so its data can never be
-  lost without anyone knowing. `write_with` lends the writer to a function,
-  then writes out what is left and returns the first error, from the
-  function or from writing:
+  lost without anyone knowing. `files::write_with` lends the writer to a
+  function, then writes out what is left and returns the first error, from
+  the function or from writing:
 
   ```truss
-  fn save_report(path: Path, report: Report) -> Result[Unit, FileError]
-    uses FileWrite
+  fn save_report(path: Path, report: Report) -> Result[Unit, SystemError]
+    uses FileWrite, Handles
   {
-    FileWrite.write_with(path, fn(writer) {
+    files::write_with(path, write: fn(writer) {
       mut writer.write(report.header())?
       mut writer.write(report.body())
     })
@@ -1964,19 +1978,21 @@ type FilesWithin(root: Path)
 impl FileRead for FilesWithin
   uses FileRead
 {
-  fn read(self, file: Path) -> Result[Bytes, FileError] {
+  fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
     FileRead.read(self.root.join_within(file)?)
   }
 }
 
-let summary = provide FilesWithin(root: Path.new("logs")) {
+let summary = provide files::FilesWithin(root: Path.new("logs")) {
   log_report::summarize(Path.new("access.log"))
 }
 ```
 
-`log_report::summarize` declares `uses FileRead` and cannot tell it has been
-narrowed. Its read of `access.log` reaches `logs/access.log` on the real file
-system, and a path such as `../secrets` fails with a `FileError`. Narrowing
+The `impl` is shown with one of `FileRead`'s methods; the rest are written
+the same way. `log_report::summarize` declares `uses FileRead` and cannot
+tell it has been narrowed. Its read of `access.log` reaches
+`logs/access.log` on the real file system, and a path such as `../secrets`
+fails with a `SystemError`. Narrowing
 again inside the block narrows further, since each layer passes its calls to
 the one outside it. A capability that is not narrowed passes through unchanged.
 
@@ -2538,8 +2554,8 @@ for handler in server.handlers {
 
 ```truss
 test "config loads with defaults" {
-  let files = MemoryFiles(files: [Path.new("app.toml"): ""])
-  let config = provide files, DiscardLog() {
+  let disk = files::MemoryFiles.new().with_text(Path.new("app.toml"), contents: "")
+  let config = provide disk, log::DiscardLog() {
     load_config(Path.new("app.toml"))
   }
   assert config == Ok(Config.default())
@@ -2554,7 +2570,7 @@ real implementations of exactly those capabilities, as `main` does.
 test "writes the report"
   uses FileRead, FileWrite
 {
-  let written = provide FilesWithin(root: Path.new("test_output/report")) {
+  let written = provide files::FilesWithin(root: Path.new("test_output/report")) {
     write_report(sample_report())
   }
   assert written == Ok(Unit)
@@ -2833,19 +2849,19 @@ that has a `[package]` table.
 then written with the module's name and `::` in front:
 
 ```truss
-use standard::file_system
+use standard::json
 use standard::url
 
-let text = file_system::read_text(path)?
+let settings = json::parse(text)?
 let url = url::parse(raw)?
-let local = file_system::Path.new("app.toml")
+let fallback = json::Value.Null
 ```
 
 - `::` always reaches into a module, and `.` always reaches into a type or a
-  value. `url::parse` is a function in the `url` module, and `url.host` is a
-  field of the variable `url`.
+  value. `url::parse` is a function in the `url` module, and `url.host()` is
+  a method of the variable `url`.
 - Every name that is not local or from the prelude shows where it comes from.
-  `file_system::Path` and `url::Path` cannot be confused.
+  `json::ParseError` and `url::ParseError` cannot be confused.
 - There are no import aliases.
 - A full path such as `standard::json::parse(text)` works without a `use`. Use
   it when two imported modules would have the same last name. Importing two
@@ -2905,9 +2921,13 @@ never clash with variable or function names:
   `Remainder`, and `Negate`
 - `Integer`, `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`, for
   specifications
-- the standard capabilities, such as `Console`, `FileRead`, and `Panic`
+- the standard capabilities, such as `Console`, `FileRead`, and `Panic`, and
+  the types signatures are written with everywhere: `Path`, `Instant`,
+  `Duration`, and `SystemError`
 
-Everything else is imported with `use`. Projects cannot define their own
+Everything else is imported with `use`, including the standard library's
+records for grouping values, `core::Pair` and `core::Indexed`, so that a
+package's own `Pair` never clashes. Projects cannot define their own
 prelude, and code cannot define a name that hides a prelude name. The prelude
 changes only with a new language version.
 
@@ -2964,8 +2984,8 @@ truss = "0.1"
 
 [dependencies]
 forecast = []
-"truss::json" = []
-"truss::http" = ["NetworkClient", "Clock"]
+"truss::toml" = []
+"truss::http" = ["NetworkClient", "Handles", "Clock"]
 ```
 
 - **`name`** is a `lower_snake_case` name, or two joined by `::`, an owner
@@ -3030,8 +3050,8 @@ kept in version control.
 ```text
 format 1
 acme::geometry_v2 2.1.3 6f1c2f0f8f0b7a1e3d9c4a5b6e7d8c9f0a1b2c3d4e5f60718293a4b5c6d7e8f9
-truss::http 1.12.0 0d4e8a1b7c3f2e6d5a9b8c7f1e0d3a2b4c6e8f0a1c3e5a7b9d1f3e5c7a9b0d2f holds Clock, NetworkClient
-truss::json 1.9.4 a3b1c5d7e9f20416283a4c6e8f0b2d4f6a8c0e2f4b6d8a0c2e4f6b8d0a2c4e6f
+truss::http 1.12.0 0d4e8a1b7c3f2e6d5a9b8c7f1e0d3a2b4c6e8f0a1c3e5a7b9d1f3e5c7a9b0d2f holds Clock, Handles, NetworkClient
+truss::toml 1.9.4 a3b1c5d7e9f20416283a4c6e8f0b2d4f6a8c0e2f4b6d8a0c2e4f6b8d0a2c4e6f
 ```
 
 - The first line names the format. Each line after it is one package: its

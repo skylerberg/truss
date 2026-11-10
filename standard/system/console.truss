@@ -1,5 +1,4 @@
 use standard::console
-use standard::streams
 use standard::system::calls
 use standard::system::lines
 
@@ -32,18 +31,18 @@ impl Console for SystemConsole {
   }
 
   fn input(self) -> console::Input {
-    console::Input.from_handle(streams::Handle.numbered(0))
+    todo
   }
 
   fn output(self) -> console::Output {
-    console::Output.from_handle(streams::Handle.numbered(1))
+    todo
   }
 
   fn error_output(self) -> console::Output {
-    console::Output.from_handle(streams::Handle.numbered(2))
+    todo
   }
 
   fn terminal(self) -> console::Terminal {
-    console::Terminal.from_handle(streams::Handle.numbered(1))
+    todo
   }
 }

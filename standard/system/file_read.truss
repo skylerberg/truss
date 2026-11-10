@@ -23,18 +23,18 @@ impl FileRead for SystemFileRead {
   }
 
   fn metadata(self, path: Path, follow_links: Bool) -> Result[files::Metadata, SystemError] {
-    Err(SystemError.Unsupported)
+    todo
   }
 
   fn list(self, directory: Path) -> Result[List[files::DirectoryEntry], SystemError] {
-    Err(SystemError.Unsupported)
+    todo
   }
 
   fn read_link(self, link: Path) -> Result[Path, SystemError] {
-    Err(SystemError.Unsupported)
+    todo
   }
 
   fn resolve(self, path: Path) -> Result[Path, SystemError] {
-    Err(SystemError.Unsupported)
+    todo
   }
 }
