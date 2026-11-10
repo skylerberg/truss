@@ -596,6 +596,29 @@ let () =
      {  }"
 
 let () =
+  expect_definition "`log` and `power` are specification functions outside a cost bound too"
+    "fn g(value: UInt64) -> USize\n\
+    \  ensures result <= log(value) + 1\n\
+    \  ensures power(2, result) >= 1\n\
+     {\n\
+    \  todo\n\
+     }\n"
+    "fn(value: UInt64)\n\
+     ensures (to_integer(result) <= add(log(value), 1))\n\
+     ensures (power(2, result) >= 1)\n\
+     { todo }";
+  expect_definition "a function of the file named `power` is called in a specification"
+    "fn power(base: Int64, exponent: Int64) -> Int64\n\
+    \  cost time finite\n\
+     {\n\
+    \  base\n\
+     }\n\n\
+     fn g(value: Int64) -> Int64\n\
+    \  ensures result == power(value, exponent: 1)\n\
+     {\n\
+    \  value\n\
+     }\n"
+    "fn(value: Int64)\nensures (result == app::main::power(place value, 1))\n{ value }";
   expect_definition "the time of a method of a type parameter's bound names the trait method"
     "fn g[Element: Equal](items: List[Element], item: Element) -> Bool\n\
     \  cost time O(items.length() * time(Element.equal))\n\

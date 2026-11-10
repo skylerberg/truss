@@ -27,7 +27,9 @@ type target =
   | Identical  (** [identical], in specifications and proofs: identity, for every type. *)
   | Yielded  (** [yielded], what a lending or yielding method handed out so far. *)
   | Finished  (** [finished], whether a yielding method ran to its end. *)
-  | Cost_function of cost_function  (** [log], [power], [time], or [calls], in a [cost] bound. *)
+  | Cost_function of cost_function
+      (** [log], [power], [time], or [calls] in a [cost] bound, or [log] or [power] in another
+          specification. *)
   | Unknown of Diagnostic.reported  (** A name that refers to nothing, with its report. *)
 
 type bracket = Index | Type_arguments | Method_bracket
@@ -503,8 +505,19 @@ and expression state scope (value : expression) =
   | Name path -> name_expression state scope path
   | Member (base, _) -> expression state scope base
   | Bracket (base, items) -> bracket state scope value base items
+  (* In a [cost] bound, the four names are the cost functions. [log] and
+     [power] are also specification functions on [Integer] in any other
+     specification, unless a local or a definition of the file has the
+     name. *)
   | Call ({ kind = Name { modules = []; last }; _ }, arguments)
-    when scope.specification.cost_bound && List.mem last.text [ "log"; "power"; "time"; "calls" ] ->
+    when (scope.specification.cost_bound && List.mem last.text [ "log"; "power"; "time"; "calls" ])
+         || scope.specification.active
+            && List.mem last.text [ "log"; "power" ]
+            && (not (String_map.mem last.text scope.values))
+            &&
+            match file_item state last.text with
+            | Some item -> not (Names.is_value_kind item.kind)
+            | None -> true ->
       set state last
         (Cost_function
            (match last.text with "log" -> Log | "power" -> Power | "time" -> Time | _ -> Calls));
