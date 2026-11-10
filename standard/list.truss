@@ -160,10 +160,62 @@ public fn List[Element].each(mut self) yields mut Element {
   }
 }
 
-public fn List[Element].each(own self) yields own Element
+public fn List[Element].swap(mut self, first: USize, second: USize)
+  requires first < self.length()
+  requires second < self.length()
+  ensures self.length() == old(self.length())
+  ensures identical(self.model()[first], old(self.model())[second])
+  ensures identical(self.model()[second], old(self.model())[first])
+  ensures forall i in 0..self.length() =>
+    i == first || i == second || identical(self.model()[i], old(self.model())[i])
+  cost time O(1)
+{
+  intrinsic::storage_swap(mut self.storage, first: first, second: second)
+}
+
+public fn List[Element].reverse(mut self)
+  ensures self.length() == old(self.length())
+  ensures forall i in 0..self.length() =>
+    identical(self.model()[i], old(self.model())[self.length() - 1 - i])
   cost time O(self.length())
 {
-  todo
+  var low: USize = 0
+  var high = self.length()
+  while low + 1 < high
+    invariant self.length() == old(self.length())
+    invariant low + high == self.length()
+    invariant forall i in 0..low =>
+      identical(self.model()[i], old(self.model())[self.length() - 1 - i])
+    invariant forall i in high..self.length() =>
+      identical(self.model()[i], old(self.model())[self.length() - 1 - i])
+    invariant forall i in low..high => identical(self.model()[i], old(self.model())[i])
+    decreases high - low
+  {
+    high -= 1
+    mut self.swap(low, second: high)
+    low += 1
+  }
+}
+
+public fn List[Element].each(own self) yields own Element
+  ensures identical(result, self.model()[yielded.length()])
+  ensures yielded.length() <= self.length()
+  ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+  ensures finished ==> yielded.length() == self.length()
+  ensures finished ==> identical(yielded, self.model())
+  cost time O(self.length())
+{
+  var remaining = own self
+  mut remaining.reverse()
+  while remaining.length() > 0
+    invariant remaining.length() + yielded.length() == self.length()
+    invariant forall i in 0..remaining.length() =>
+      identical(remaining.model()[i], self.model()[self.length() - 1 - i])
+    invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+    decreases remaining.length()
+  {
+    yield intrinsic::storage_pop(mut remaining.storage)
+  }
 }
 
 public fn Slice[Element].length(self) -> USize

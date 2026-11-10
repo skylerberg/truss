@@ -72,6 +72,33 @@ test "left early" {
   }
 }
 |};
+  passes "a loop that uses up a list takes its elements in order"
+    {|fn join(names: own List[String]) -> String {
+  var text = ""
+  for name in own names {
+    text = "${text}${name}"
+  }
+  text
+}
+
+test "used up" {
+  assert join(["a${1}", "b${2}", "c${3}", "d${4}"]) == "a1b2c3d4"
+  assert join(["a${1}", "b${2}", "c${3}"]) == "a1b2c3"
+  assert join(["a${1}"]) == "a1"
+  assert join([]) == ""
+}
+|};
+  passes "a loop that uses up a list and is left early drops the elements it did not reach"
+    {|test "left early" {
+  let names = ["a${1}", "b${2}", "c${3}"]
+  var first = ""
+  for name in own names {
+    first = own name
+    break
+  }
+  assert first == "a1"
+}
+|};
   passes "continue keeps a list a loop is over, when the list is a call's result"
     {|fn make() -> List[String] {
   ["a${1}", "bb${2}", "c${3}"]

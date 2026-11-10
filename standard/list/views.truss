@@ -223,22 +223,6 @@ public fn List[Element].zip[Other](mut self, other: mut Slice[Other]) yields mut
   todo
 }
 
-public fn List[Element].swap(mut self, first: USize, second: USize)
-  requires first < self.length()
-  requires second < self.length()
-  ensures self.length() == old(self.length())
-  cost time O(1)
-{
-  todo
-}
-
-public fn List[Element].reverse(mut self)
-  ensures self.length() == old(self.length())
-  cost time O(self.length())
-{
-  todo
-}
-
 public fn List[Element].rotate_left(mut self, by: USize)
   requires by <= self.length()
   ensures self.length() == old(self.length())
