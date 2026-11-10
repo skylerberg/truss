@@ -887,8 +887,10 @@ with the same inputs.
   a shared store would skip exactly the checks Truss exists to make, and an
   object file is code that will run. That is the supply-chain attack
   GOALS.md sets out to stop. So a result from another machine will be used
-  only when it is signed by a key the user has said to trust, as Nix accepts
-  substitutes only with `trusted-public-keys`. Every result is a function of
+  only when it is signed by a key the user trusts, as Nix accepts
+  substitutes only with `trusted-public-keys`. The registry's key is trusted
+  unless a project says otherwise, as DESIGN.md's "The registry" decides,
+  for the results it computed of the packages it holds. Every result is a function of
   its key, so a signed result can also be checked by computing it again.
 - **A specified encoding for values.** A fingerprint is the hash of
   marshaled bytes, which only the same compiler can make again. The compiler
@@ -912,9 +914,13 @@ with the same inputs.
 - **A package being worked on as an artifact of its own,** keyed by its
   sources and the interfaces it reads of others, so that an unchanged
   package is found in one lookup from any worktree.
-- **Dependency packages as artifacts,** each keyed by the package's content
-  and the keys of the packages it depends on. There is no package registry,
-  so the standard library's is the only one.
+- **Registry packages as artifacts,** each keyed by the hash of the
+  package's content and the keys of the packages it depends on, and each a
+  fixed base under every state that uses it, as the standard library is.
+  Stage0 fetches no package, so the standard library's is the only one.
+- **A session for a project.** A session is a git worktree's, with every
+  package under it, where DESIGN.md's "Projects" has a build be one
+  project's: its packages and the registry packages its lock file names.
 - **Artifacts read in part.** A whole state is one value, read whole to open
   the state, so the first command of a new process costs the state's size:
   every node is made before one is asked for. In the background process that
