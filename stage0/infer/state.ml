@@ -1,8 +1,8 @@
-(* The state of the type checker while it checks one definition, and the
-   helpers that every part of the checker uses: reporting diagnostics,
-   recording types, unification, the paths of standard library types,
-   places, instantiation of signatures, and argument modes. [Expressions]
-   describes the checking algorithm. *)
+(* What checking a body works with: the state of a definition's check and
+   of each statement in it, the environment of a body, and what every part
+   of checking shares: reporting, recording types, unifying, the standard
+   library's paths, places, instantiating signatures, and modes at calls.
+   See [Expressions] for how checking proceeds. *)
 
 open Syntax
 module T = Types
@@ -16,19 +16,16 @@ module Lower = Interface.Lower
 
 type local = { type_ : T.ty; mutable_ : bool; mode : T.mode }
 
-(* The context of the code that is being checked. *)
+(* Where a statement is: what [return] and [yield] check against, and
+   whether it is a specification. *)
 type env = {
   output : T.result option;
-      (** The result of the enclosing function or lambda. [return] and [yield] are checked against
-          it. *)
   specification : bool;
-      (** The code is a specification: a contract, a [proof] block, or the body of a function for
-          specifications only. *)
   self : T.ty option;  (** The type of [self]. *)
-  self_mode : T.mode;  (** The mode of [self]. Only [mut self] can be mutated. *)
+  self_mode : T.mode;  (** How the method takes [self]: only [mut self] can be assigned to. *)
   loop_element : T.ty option;
-      (** In the clauses of a [for] loop: the type of the loop's elements. [yielded] is a sequence
-          of them. *)
+      (** In a [for] loop's clauses, what each iteration receives, which [yielded] is a sequence of.
+      *)
   compile_time : bool;
       (** The expression is a constant expression, which the compiler evaluates: the value of a
           constant, or a default. *)
@@ -53,19 +50,17 @@ type subset_constraint = {
   report_missing : T.capability list -> unit;
 }
 
-(* The state of the check of one statement. Types are inferred one
-   statement at a time. *)
 type frame = {
-  start : int;  (** The first inference variable created for the statement. *)
-  mutable nodes : int list;  (** The expressions whose types were recorded for the statement. *)
-  mutable bindings : int list;  (** The locals that the statement binds. *)
-  mutable patterns : int list;  (** The patterns whose types were recorded for the statement. *)
+  start : int;  (** The first inference variable the statement made. *)
+  mutable nodes : int list;  (** Expressions whose types the statement recorded. *)
+  mutable bindings : int list;  (** Locals it bound. *)
+  mutable patterns : int list;  (** Patterns whose matched types it recorded. *)
   mutable pending : (unit -> bool) list;
-      (** Deferred checks that need a type that is not inferred yet. Each returns whether it is
+      (** Checks that wait for types the statement has not decided yet; each says whether it is
           done. *)
   mutable unmet : (T.ty * T.trait_reference) list;
-      (** The trait bounds already reported as not satisfied, with their types, so that each is
-          reported once per statement. *)
+      (** The bounds reported as not holding, each with its type, so that a statement reports one
+          once however many of its parts need it. *)
   frame_specification : bool;
   span : span;
 }
@@ -127,13 +122,13 @@ let reported state ?(fixes = []) code (span : span) message =
 
 let report state ?fixes code span message = ignore (reported state ?fixes code span message)
 
-(* Raises a compiler bug. Used where an earlier stage guarantees that a
-   case cannot happen. *)
+(* What resolution, the interfaces, and checking agree on cannot fail; if it
+   does, that is a bug in the compiler, and stopping is better than
+   accepting the code. *)
 let bug format = Compiler_bug.bug ~stage:"Infer" format
 
-(* Reports a diagnostic and returns the error type that carries the
-   report. Every operation on an error type is accepted, so one mistake is
-   reported once. *)
+(* The type of what did not check: its report is what lets everything be
+   accepted of it. *)
 let error state ?fixes code span message = T.Error (reported state ?fixes code span message)
 
 let source state (span : span) =
@@ -344,9 +339,10 @@ let bounds state parameter =
 
 let normalize state type_ = Impls.normalize state.database ~bounds:(bounds state) (zonk state type_)
 
-(* The error type for an inference variable that no statement solved. The
-   first unsolved variable is reported, and later ones reuse that report,
-   so an unsolved type is never stored without a diagnostic. *)
+(* What no statement settled is an error, under the report of the first
+   statement that could not work its types out, or one made here when
+   there is none: nothing unsolved is ever stored unreported. A hole stays
+   a hole, since a [todo] is not an error. *)
 let unsolved state =
   match state.unsolved with
   | Some report -> T.Error report
@@ -399,8 +395,8 @@ let final_argument state = function
       | value -> T.Value value)
   | T.Capabilities capabilities -> T.Capabilities (resolve_capabilities state capabilities)
 
-(* Unifies two types. Projections are normalized first, so [C.Key] unifies
-   with the type that the [impl] assigns to [Key]. *)
+(* Projections whose base is known are normalized first, so [C.Key] meets
+   the type the [impl] chooses. *)
 let unify state left right =
   let normalize type_ =
     Impls.normalize state.database ~bounds:(bounds state) (Unify.zonk state.unifier type_)
@@ -417,8 +413,9 @@ let unify_as_hint state found expected =
   ignore (unify state found expected);
   state.unifier.deferred_capability_equalities <- deferred_capability_equalities
 
-(* Normalizes the type arguments and the associated types of a trait
-   reference, as [normalize] does for a type. *)
+(* A trait as it is asked about: with its arguments in their normal form,
+   as a type is, so that an associated type among them is what it stands
+   for. *)
 let normalize_trait state (trait : T.trait_reference) : T.trait_reference =
   {
     trait with
@@ -433,9 +430,8 @@ let implements state type_ trait =
   Impls.implements state.database ~bounds:(bounds state) (normalize state type_)
     (normalize_trait state trait)
 
-(* A bound that an [impl] satisfies makes this definition depend on the
-   [impl]'s code. Checks that the capabilities the [impl] uses are granted
-   to its package, and records the package. *)
+(* A bound that is met by an [impl] names the [impl]'s code, so what the
+   [impl] uses must be granted to its package. *)
 let check_evidence_grants state (span : span) evidence =
   let impls = Interface.Grants.evidence_uses state.database ~bounds:(bounds state) evidence in
   state.evidence <- List.map (fun (impl, _, _) -> Path.package impl) impls @ state.evidence;
@@ -449,9 +445,9 @@ let check_evidence_grants state (span : span) evidence =
 let copyable state type_ = Impls.copyable state.database ~bounds:(bounds state) (zonk state type_)
 let plain state type_ = Impls.plain state.database ~bounds:(bounds state) (zonk state type_)
 
-(* The associated type [name] of a trait for a type. If the [impl] does
-   not define it, the [impl] already has a diagnostic, and this returns an
-   error type that carries that report. *)
+(* The associated type the [impl] of a trait for a type gives. An [impl]
+   that leaves one out has that reported as its own error, which is the
+   report here too. *)
 let associated state type_ (trait : T.trait_reference) name ~(at : span) =
   let type_ = normalize state type_ and trait = normalize_trait state trait in
   match Impls.associated_type state.database ~bounds:(bounds state) type_ trait name with
@@ -502,10 +498,10 @@ let is_named path type_ =
 
 (* Statements *)
 
-(* Finishes the inference of a statement. An unsolved literal variable
-   takes its default type. Any other unsolved variable that the statement
-   created is an error. A type that mentions a variable of an enclosing
-   statement is left for that statement. *)
+(* Settles a statement's types. Literals it made that nothing decided take
+   their defaults, and a variable it made that is still unsolved is an
+   error. What still mentions an enclosing statement's variables is left to
+   that statement. *)
 let settle state frame =
   (* Unification deferred these equalities between capability sets because
      one side had a capability variable. An equality is two subset
@@ -538,8 +534,8 @@ let settle state frame =
   let all_types () =
     types_of frame.nodes state.tables.types @ types_of frame.bindings state.tables.local_types
   in
-  (* The type arguments of each call are checked too. A type argument that
-     no parameter or result mentions is in no expression's type. *)
+  (* A call's type arguments count too: one that no parameter or result
+     mentions is in no expression's type. *)
   let call_arguments () =
     List.concat_map
       (fun id ->
@@ -561,8 +557,8 @@ let settle state frame =
     List.concat_map (Unify.unknowns state.unifier) (all_types ())
     @ List.concat_map (Unify.argument_unknowns state.unifier) (call_arguments ())
   in
-  (* An unsolved literal variable of the statement takes its default type:
-     [Int64] or [Float64], or [Integer] in a specification. *)
+  (* The literals the statement made that nothing decided take their
+     defaults: [Int64] and [Float64], or [Integer] in a specification. *)
   List.iter
     (function
       | Unify.Unknown_literal (kind, index) when index >= frame.start ->
@@ -587,16 +583,14 @@ let settle state frame =
          the call type arguments, such as `var names: List[String] = []`."
     in
     if Option.is_none state.unsolved then state.unsolved <- Some report;
-    (* Each unsolved variable is bound to the error type, so it is reported
-       once. *)
+    (* Every unsolved variable becomes an error, so it is reported once. *)
     List.iter
       (function
         | Unify.Unknown_type index | Unknown_literal (_, index) ->
             Hashtbl.replace state.unifier.types index (T.Error report)
         | Unknown_value _ -> ())
       unsolved;
-    (* The deferred checks wait on types that are now errors, so they are
-       dropped. *)
+    (* What waits on them never runs, and needs not: the error is reported. *)
     frame.pending <- []
   end;
   let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in
@@ -636,8 +630,8 @@ let in_statement state env (span : span) body =
   state.frames <- List.tl state.frames;
   result
 
-(* Whether a statement diverges: its expression has type [Never], or it
-   is a [while true] loop with no [break]. *)
+(* Whether a statement never ends: a value of type [Never], or a loop
+   with nothing to leave it. *)
 let rec statement_never state (written : statement) =
   match written.kind with
   | Expression value -> (
@@ -662,8 +656,8 @@ and contains_break (written : block) =
   List.iter statement written.statements;
   !found
 
-(* Builds the core node of a block. The last expression is the block's
-   value if the checker checked it as a value and not as a statement. *)
+(* A block's node: its statements, and the expression it ends with when
+   that was checked as its value and not as a statement. *)
 let build_block state (written : block) : Core.block =
   let rec go (statements : statement list) =
     match statements with
@@ -697,9 +691,9 @@ let declare state (name : name) type_ ~mutable_ ~mode =
 
 let target state (name : name) = state.resolved.names.(name.id)
 
-(* A literal used as a receiver takes its default type, as in
-   [5.wrapping_add(3)], because the method lookup needs the receiver's
-   type. *)
+(* A literal that is a receiver has its default type, as in
+   [5.wrapping_add(3)], since nothing else can decide it before the method
+   is looked up. *)
 let default_literal state type_ =
   let decide default =
     ignore (Unify.unify state.unifier type_ default);
@@ -710,10 +704,11 @@ let default_literal state type_ =
   | T.Literal (Float_literal, _) -> decide (T.builtin Float64)
   | _ -> type_
 
-(* What a name expression refers to, as name resolution decided. *)
+(* What an expression names, when it is a name: the one reading of it that
+   every part of checking shares. *)
 let head state (value : expression) = Resolve.head state.resolved value
 
-(* A member name that starts with a capital letter is a variant. *)
+(* A name after a dot is a variant when it is written as a type is. *)
 let names_variant (member : name) =
   member.text <> "" && member.text.[0] >= 'A' && member.text.[0] <= 'Z'
 
@@ -737,6 +732,8 @@ let mismatch state span ~expected ~found = ignore (mismatched state span ~expect
 
 (* Places *)
 
+(* Whether an expression is a place: a local, a parameter, [self], or a
+   constant, followed by fields and indexes. *)
 (* Whether an expression is a constant that a type declares, such as
    [UInt8.maximum]. *)
 let is_member_constant state (value : expression) =
@@ -744,8 +741,6 @@ let is_member_constant state (value : expression) =
   | Some (Global { path = Member_constant _; _ }) -> true
   | _ -> false
 
-(* Whether an expression is a place: a local, a parameter, [self], or a
-   constant, followed by fields and indexes. *)
 let rec is_place state (value : expression) =
   match value.kind with
   | Name path -> (
@@ -763,9 +758,8 @@ let rec is_place state (value : expression) =
   | Parenthesized inner -> is_place state inner
   | _ -> false
 
-(* In a marked expression such as [mut config.servers.sort()], the mark
-   applies to the receiver of the first method call whose receiver is a
-   place. Returns the id of that call. *)
+(* The first method call in a marked expression whose receiver is the
+   place, which the mark gives its mode. *)
 let rec marked_call state (value : expression) =
   match value.kind with
   | Call ({ kind = Member (base, _); _ }, _)
@@ -774,7 +768,7 @@ let rec marked_call state (value : expression) =
   | Member (base, _) | Bracket (base, _) | Try base -> marked_call state base
   | _ -> None
 
-(* The call inside an expression, looking through marks and parentheses. *)
+(* The call an expression is, under a mark and parentheses. *)
 let rec called (value : expression) =
   match value.kind with
   | Call _ -> Some value
@@ -789,8 +783,9 @@ let error_at state ?fixes code (value : expression) message =
   | Some { target = Unknown report; _ } -> T.Error report
   | _ -> error state ?fixes code value.span message
 
-(* Checks the target of a [calls] clause: a function-typed parameter, a
-   capability, or a method of a capability. *)
+(* What a [calls] clause counts must be something whose calls can be
+   counted: a parameter that is a function, a capability, or one of a
+   capability's methods. *)
 let check_resource state (resource : Syntax.resource) =
   let capability (path : path_type) (method_ : name option) =
     let shown = Names.spell_path path.path in
@@ -832,35 +827,35 @@ let check_resource state (resource : Syntax.resource) =
                 capability, and `%s` is neither."
                name.text))
 
-(* An expression before a [.] or a [(] that names a type, a trait, or a
-   capability instead of a value. *)
+(* Static references: an expression that names a type or a trait rather
+   than a value, before a [.] or a [(]. *)
 type static_ =
   | Static_type of T.ty
   | Static_trait of Path.t * T.argument list option
-      (** The trait's type arguments, if they are written. *)
+      (** With the trait's arguments, when they are written. *)
   | Static_capability of Path.t
 
-(* Checks a value of type [found] where [expected] is expected, and
-   returns the implicit conversion, if one applies. This is the only place
-   where a type converts to another:
+(* Where a value of one type goes where another is expected, which is the
+   one place a type converts, and the conversion made:
 
-   - [Never] converts to any type.
-   - A function value converts to a function type with more [uses] or
-     weaker costs (widening). The expected type may lack a capability that
-     the value uses only if the expected type has a capability variable,
-     which the capability check solves. If the constants in the two types
-     do not show that the costs are weaker, the prover must show it: at the
-     call, for an argument, and as an obligation on [expression] otherwise.
-   - An argument that is an owned collection converts to its view. In a
-     specification, an argument that is a built-in integer converts to
-     [Integer], and an [Integer] converts to a built-in integer that it
-     fits.
+   - [Never] becomes any type.
+   - A function value becomes a function type with more [uses] or weaker
+     costs. A capability the expected type does not list is allowed only
+     when the type has a capability parameter of another function, which a
+     call of that function solves as what is passed for it: the value is
+     noted for the check of capabilities, which knows the call. Costs that
+     the types' constants do not show to be weaker are the prover's to
+     show: of what is passed for a parameter where it checks the call, and
+     of [expression] elsewhere, as an obligation.
+   - Where a value is passed for a parameter, an owned collection becomes
+     its view and, in a specification, a built-in integer becomes an
+     [Integer] or an [Integer] a built-in integer that it fits.
 
    In every other case, [found] must unify with [expected]. *)
 let convert state env ?(argument = false) ?expression (span : span) ~found ~expected :
     C.conversion option =
-  (* Wraps the expression's core node in the conversion. The wrapped node
-     has the expected type. *)
+  (* What converts is the conversion's node from then on, of the type
+     expected. *)
   let converted (conversion : C.conversion option) =
     (match (conversion, expression) with
     | Some conversion, Some id ->
@@ -876,13 +871,14 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
               in
               match conversion with
               | From_never -> inner
-              (* If the value's type equals the expected type after the
-                 capability variables are solved, there is no widening. *)
+              (* A function value whose type turned out to be the one
+                 expected, once the unknown sets were solved, is not
+                 widened. *)
               | Function_widening -> if T.equal inner.type_ expected then inner else convert Widen
               | To_integer -> convert To_integer
               | From_integer -> convert From_integer
-              (* An owned collection converts to its view by a call of its
-                 [slice], which borrows the collection. *)
+              (* An owned collection is seen as its view by its [slice],
+                 which reads it where it is. *)
               | Owned_to_view -> (
                   match inner.type_ with
                   | T.Named { path; arguments } ->
@@ -935,7 +931,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
   | T.Integer, _, Some expression when argument && env.specification && T.is_integer_type wanted ->
       state.obligations <- Integer_fits { expression; type_ = wanted } :: state.obligations;
       Some From_integer
-  (* In a specification, a built-in integer converts to [Integer]. *)
+  (* A built-in integer is an [Integer] wherever a specification gives one. *)
   | _, T.Integer, _ when env.specification && T.is_integer_type given -> Some To_integer
   | T.Function given_function, T.Function wanted_function, _
     when not (T.same_clauses given_function wanted_function) ->
@@ -944,9 +940,9 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
           (fun capability -> not (List.mem capability wanted_function.uses))
           given_function.uses
       in
-      (* If either set has a capability variable, the check waits until
-         the variables are solved: a subset constraint requires the value's
-         [uses] to be within the expected type's. *)
+      (* With an unknown set on either side, whether the value's [uses] are
+         within the type's is known once the unknowns are solved: one in the
+         type is made to hold what the value uses beyond the rest. *)
       let unknown =
         T.has_capability_variable given_function.uses
         || T.has_capability_variable wanted_function.uses
@@ -983,15 +979,13 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
 
 (* Bounds *)
 
-(* Requires a type to satisfy a trait bound. The check is deferred until
-   the type is inferred. The type must implement the trait, and each
-   associated type that the bound fixes must unify with the one the [impl]
-   defines, which can infer other types of the statement.
-
-   [unmet] reports a failure: with [None] if the type does not implement
-   the trait, and with the name of an associated type and the type the
-   [impl] defines if those differ. A capability that the [impl] uses and
-   that its package is not granted is reported at [at]. *)
+(* Holds a type to a bound, once the statement has worked the type out. The
+   type must implement the trait, and each associated type the bound fixes
+   must equal the one the [impl] gives, which can be what works out the
+   rest of the statement. [unmet] reports the type with [None] when it does
+   not implement the trait, and with an associated type's name and what
+   the [impl] gives when that is another type. What the [impl] uses and its
+   package is not granted is reported at [at]. *)
 let require state ~(at : span) type_ (bound : T.trait_reference) ~unmet =
   let trait = { bound with associated = [] } in
   defer state (fun () ->
@@ -1013,9 +1007,9 @@ let require state ~(at : span) type_ (bound : T.trait_reference) ~unmet =
         true
       end)
 
-(* Requires the type arguments of an instantiation to satisfy the bounds
-   of their generic parameters. [of_type] is the type that declares the
-   parameters. Without it, the parameters are a callee's. *)
+(* Holds what stands for a definition's generic parameters to their
+   bounds. [of_type] is the type whose parameters they are, and without it
+   they are those of what a call calls. *)
 let require_bounds state (span : span) ?of_type generics substitution =
   List.iter
     (fun (argument, bound) ->
@@ -1066,8 +1060,8 @@ let require_type_bounds state span path arguments =
         (T.substitution_of interface.type_generics arguments)
   | None -> ()
 
-(* Fresh inference variables for the generic parameters of a type, each
-   required to satisfy the bounds of its parameter. *)
+(* Unknown arguments for a type, which the statement works out, each held to
+   the bounds of its parameter. *)
 let instantiate_type state span path =
   let arguments = fresh_arguments state path in
   require_type_bounds state span path arguments;
@@ -1089,8 +1083,8 @@ let rec static_ state (value : expression) : static_ option =
   | Parenthesized inner, None -> static_ state inner
   | _ -> None
 
-(* A type named in an expression, with the type arguments written after
-   it, or with fresh inference variables if none are written. *)
+(* A type named in an expression: with the arguments written after it, or
+   with unknown ones for the statement to work out. *)
 and named_type state (value : expression) path type_arguments =
   let type_ arguments =
     match Intrinsic.builtin_of_path path with
@@ -1154,8 +1148,8 @@ type instance = {
   type_arguments : T.argument list;
 }
 
-(* Instantiates a signature at a use: its generic parameters are replaced
-   by fresh inference variables, each required to satisfy its bounds. *)
+(* What a signature is where it is used: unknowns for its generic
+   parameters, which the statement works out, each held to its bounds. *)
 let instantiate state (span : span) ?(extra = []) (signature : T.signature) =
   let substitution =
     List.map
@@ -1183,7 +1177,7 @@ let output_type = function T.Returns type_ | Yields (_, type_) | Lends (_, type_
 let intrinsic_signature path =
   Option.map Intrinsic_signatures.signature (Intrinsic.operation_of_path path)
 
-(* The signature of a function. [Error] with the report if the function's
+(* A function's signature, or the report of why it has none, when its
    header did not parse. *)
 let function_signature state (path : Path.t) =
   match intrinsic_signature path with
@@ -1192,18 +1186,17 @@ let function_signature state (path : Path.t) =
 
 (* Lending *)
 
-(* Records that a call is a call of a lending method, with the mode it
-   lends with. The result of such a call is a part of the receiver, lent
-   for the rest of the caller's statement. It is not a temporary: it is
-   never moved. *)
+(* A call of a lending method is the part the method gives, lent for the
+   rest of the caller's statement. It is not a temporary: it is never moved,
+   and what may be done with it follows how it is lent. *)
 let note_lending state (value : expression) (output : T.result) =
   match output with
   | Lends (mode, _) -> state.tables.lends.(value.id) <- Some mode
   | Returns _ | Yields _ -> ()
 
-(* The mode with which an expression is lent, if it is the result of a
-   lending call, or a field or an element of one. A mark before the
-   expression belongs to the receiver of the lending call. *)
+(* How an expression is lent, when it is what a lending call gives or a
+   part of that, a field or an element. A mark before it is the mark of the
+   place it is lent from. *)
 let rec lent state (value : expression) : T.mode option =
   match value.kind with
   | Call _ -> state.tables.lends.(value.id)

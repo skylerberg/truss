@@ -460,10 +460,13 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
       | None -> ())
   | None, Capability_method { capability; name } ->
       let slot, signature = capability_method st.context capability name in
+      if List.mem Core.Default call.arguments then
+        Compiler_bug.unsupported
+          ~at:(at_site (site_of st value.origin))
+          "a capability method called with an argument omitted";
       let arguments, _ =
         evaluate_arguments st { signature with receiver = None } [] call.arguments
       in
-      capability_defaults st ~capability ~name call.arguments arguments;
       if Path.equal capability panic_path then
         (* [Panic.crash] has no evidence: it ends the process at once. *)
         match arguments with
@@ -510,59 +513,6 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
            call.arguments)
         destination
   | None, Function _ -> bug "a function that does not resolve"
-
-(* Evaluates the default of each argument that a call of a capability method
-   omits, into the temporary [evaluate_arguments] gave it. The caller
-   evaluates these defaults: an entry of a capability's table takes every
-   argument, and there is no one implementation to evaluate them. A default
-   is written in the capability's definition, so it is lowered in that
-   definition's frame. *)
-and capability_defaults st ~capability ~name (arguments : Core.argument list) evaluated =
-  if List.mem Core.Default arguments then begin
-    let receiver =
-      match demand st.context Environment.trait_interface capability with
-      | Some interface -> (
-          match
-            List.find_opt (fun (m : T.trait_method) -> m.method_name = name) interface.methods
-          with
-          | Some declared -> declared.method_receiver
-          | None -> bug "%s has no method %s" (Path.show capability) name)
-      | None -> bug "no interface for %s" (Path.show capability)
-    in
-    let path : Path.t = Method { owner = capability; name; receiver } in
-    let parameters =
-      match demand st.context Infer.core_of_path path with
-      | Some ({ definition = Function { parameters; _ }; _ }, _) -> parameters
-      | _ -> bug "%s has no core form" (Path.show path)
-    in
-    let key = key_of st.context capability in
-    let caller = st.frame in
-    st.frame <-
-      {
-        caller with
-        code =
-          {
-            caller.code with
-            definition_key = key;
-            anchor = capability;
-            within = None;
-            text = text_of st.context key;
-            substitution = [];
-          };
-        bindings = Hashtbl.create 1;
-        synthetic = Hashtbl.create 1;
-        self_place = None;
-      };
-    List.iter2
-      (fun (parameter : Core.parameter) ((argument : Core.argument), (_, _, place)) ->
-        match (argument, parameter.default) with
-        | Default, Some default -> into st default place
-        | Default, None -> bug "%s is omitted and has no default" parameter.name
-        | Passed _, _ -> ())
-      parameters
-      (List.combine arguments evaluated);
-    st.frame <- caller
-  end
 
 (* An argument's mode, type, and place, for a call whose callee has no
    signature to read the parameter's type from. *)
