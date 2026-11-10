@@ -28,7 +28,7 @@ public fn Array[Element, count: USize].slice(self) -> Slice[Element]
   ensures identical(result.model(), self.model())
   cost time O(1)
 {
-  todo
+  Slice(elements: intrinsic::array_view(self))
 }
 
 internal fn Array[Element, count: USize].slice_range(self, start: USize, stop: USize) -> Slice[Element]
@@ -67,7 +67,7 @@ impl Index for Array[Element, count: USize] {
     ensures identical(result, self.model()[key])
     cost time O(1)
   {
-    todo
+    yield intrinsic::view_at(intrinsic::array_view(self), index: key)
   }
 
   fn at(mut self, key: USize) lends mut Element
@@ -76,7 +76,7 @@ impl Index for Array[Element, count: USize] {
     ensures identical(self.model(), old(self.model()).update(key, value: yielded[0]))
     cost time O(1)
   {
-    todo
+    yield intrinsic::array_at_mut(mut self, index: key)
   }
 }
 
