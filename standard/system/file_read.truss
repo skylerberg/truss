@@ -1,4 +1,6 @@
 use standard::files
+use standard::intrinsic
+use standard::system::calls
 use standard::system::handles
 use standard::system::lines
 
@@ -23,7 +25,10 @@ impl FileRead for SystemFileRead {
   }
 
   fn metadata(self, path: Path, follow_links: Bool) -> Result[files::Metadata, SystemError] {
-    todo
+    let status = handles::with_file_error(
+      calls::status_of_path(path.text.slice().bytes, follow_links: follow_links),
+    )?
+    Ok(handles::metadata_from(intrinsic::storage_view(status)))
   }
 
   fn list(self, directory: Path) -> Result[List[files::DirectoryEntry], SystemError] {

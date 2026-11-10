@@ -15,7 +15,7 @@ let toolchain () =
 (* Stage0 builds programs for the system it runs on. *)
 let target () =
   match Libc.host with
-  | Some os -> Memory_layout.target_64 os
+  | Some system -> Memory_layout.target_64 system
   | None -> Project.cannot_run "Stage0 builds programs only for Linux and macOS."
 
 (* A development build compiles the package at -O1, one C file an

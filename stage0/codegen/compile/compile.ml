@@ -15,7 +15,8 @@ module Names = Resolve.Names
 type lowering = { target : Memory_layout.target; checks : bool }
 
 let show_lowering lowering =
-  Printf.sprintf "%d-bit %s%s" (lowering.target.usize_bytes * 8) (Libc.os_name lowering.target.os)
+  Printf.sprintf "%d-bit %s%s" (lowering.target.usize_bytes * 8)
+    (Libc.system_name lowering.target.system)
     (if lowering.checks then ", checked" else "")
 
 (* The target as part of a key: a result that depends on what the code was
@@ -23,7 +24,9 @@ let show_lowering lowering =
 let target_key (target : Memory_layout.target) =
   Cbor.Array
     [
-      Cbor.int target.pointer_bytes; Cbor.int target.usize_bytes; Cbor.Text (Libc.os_name target.os);
+      Cbor.int target.pointer_bytes;
+      Cbor.int target.usize_bytes;
+      Cbor.Text (Libc.system_name target.system);
     ]
 
 type lowered_outcome = Compiled of Lir.compiled | Evaluate of Path.t * Ground.ty

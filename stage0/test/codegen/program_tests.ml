@@ -261,6 +261,64 @@ fn main(arguments: List[String]) -> ExitCode
         output)
 
 let () =
+  test "a program reads the metadata of a file, of a directory, and of an open file" (fun () ->
+      let directory = Lazy.force scratch in
+      let path = Filename.concat directory "measured.txt" in
+      let status, output, _ =
+        run_main ~arguments:[ directory; path ]
+          {|use standard::files
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, FileRead, FileWrite, Handles
+{
+  let directory = Path.new(arguments[1].slice())
+  let file = Path.new(arguments[2].slice())
+  if FileWrite.write_text(file, contents: "twelve bytes".slice()) is Err(_) {
+    return ExitCode(1)
+  }
+  match FileRead.metadata(file, follow_links: true) {
+    Ok(metadata) => {
+      Console.print_line("file ${metadata.is_file()} ${metadata.length}".slice())
+      Console.print_line("recent ${metadata.modified.unix_nanoseconds() > 1577836800000000000}".slice())
+      Console.print_line("accessed ${metadata.accessed.is_some()}".slice())
+      Console.print_line("owner can write ${!metadata.permissions.is_read_only()}".slice())
+    }
+    Err(_) => Console.print_line("no file".slice())
+  }
+  match FileRead.metadata(directory, follow_links: false) {
+    Ok(metadata) => {
+      Console.print_line("directory ${metadata.is_directory()} ${metadata.is_file()}".slice())
+    }
+    Err(_) => Console.print_line("no directory".slice())
+  }
+  if FileRead.metadata(Path.new("/nonexistent/truss".slice()), follow_links: true) is Err(NotFound) {
+    Console.print_line("missing".slice())
+  }
+  match FileWrite.open(file, mode: files::WriteMode.Update) {
+    Ok(opened) => {
+      if opened.metadata() is Ok(metadata) {
+        Console.print_line("open ${metadata.length}".slice())
+      }
+    }
+    Err(_) => {}
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string
+        ~expected:
+          "file true 12\n\
+           recent true\n\
+           accessed true\n\
+           owner can write true\n\
+           directory true false\n\
+           missing\n\
+           open 12\n"
+        output)
+
+let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"
     (fun () ->
       let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in
