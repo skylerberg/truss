@@ -614,11 +614,12 @@ let call_next st (yielding : Ground.yielding) cursor destination =
        })
 
 (* Pulls a cursor until it ends, running [body] with the place of each
-   value. The loop owns the value that [next] gave, so whatever the body
-   did not take is dropped before the next value is asked for, and on every
-   way out. *)
-let pull_loop st (yielding : Ground.yielding) cursor ~(body : Lir.place -> unit) =
-  let option = cursor_result st.context yielding in
+   value. [call_next] calls the cursor's [next], which writes an [Option] of
+   type [option] to the place it is given. The loop owns the value that
+   [next] gave, so whatever the body did not take is dropped before the
+   next value is asked for, and on every way out. *)
+let pull_loop st ~(option : Ground.ty) ~(call_next : Lir.place -> unit) ~(body : Lir.place -> unit)
+    =
   in_scope st (fun () ->
       let next = binding st option in
       let depth = List.length st.scopes in
@@ -626,7 +627,7 @@ let pull_loop st (yielding : Ground.yielding) cursor ~(body : Lir.place -> unit)
       finish st.b (Goto test);
       start st.b test;
       if not (trivial st option) then emit st.b (Drop next);
-      call_next st yielding cursor next;
+      call_next next;
       let more = local st.b (Raw Bool) in
       emit st.b (Assign (at more, Is_variant (next, "Some")));
       finish st.b
