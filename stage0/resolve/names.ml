@@ -136,12 +136,9 @@ let receiver (parameters : parameter list) : Path.receiver =
    standard library, and its dependencies. *)
 let packages database (module_ : Path.module_) =
   let dependencies =
-    match Workspace.package database module_.package with
-    | Some package ->
-        List.map
-          (fun (dependency : Workspace.dependency) -> dependency.package)
-          package.dependencies
-    | None -> []
+    List.map
+      (fun (dependency : Workspace.dependency) -> dependency.package)
+      (Query.demand database Workspace.dependencies module_.package)
   in
   List.sort_uniq compare (module_.package :: Prelude.standard :: dependencies)
 
@@ -473,28 +470,67 @@ module Member_map = Map.Make (struct
     | order -> order
 end)
 
-(* A package's methods and member constants by owner and name, built in one
-   pass over its declarations. *)
+(* Everything a package declares, module by module: what each index of a
+   package is built from, in one pass over it. *)
+let package_declarations =
+  Query.query ~name:"package_declarations" ~phase:Declarations ~show:Fun.id (fun database package ->
+      List.concat_map
+        (fun module_ -> Query.demand database declarations module_)
+        (Query.demand database Workspace.modules package))
+
+(* A package's methods and member constants by owner and name. *)
 let member_index =
-  Query.query ~name:"member_index" ~phase:Declarations ~show:Fun.id (fun database package_name ->
-      match Workspace.package database package_name with
-      | None -> Member_map.empty
-      | Some package ->
-          List.fold_left
-            (fun index module_ ->
-              List.fold_left
-                (fun index (declaration : declaration) ->
-                  match declaration.path with
-                  | (Method { owner; name; _ } | Member_constant { owner; name })
-                    when declaration.ordinal = 0 ->
-                      Member_map.update (owner, name)
-                        (fun found -> Some (key_of declaration :: Option.value ~default:[] found))
-                        index
-                  | _ -> index)
+  Query.query ~name:"member_index" ~phase:Declarations ~show:Fun.id (fun database package ->
+      List.fold_left
+        (fun index (declaration : declaration) ->
+          match declaration.path with
+          | (Method { owner; name; _ } | Member_constant { owner; name })
+            when declaration.ordinal = 0 ->
+              Member_map.update (owner, name)
+                (fun found -> Some (key_of declaration :: Option.value ~default:[] found))
                 index
-                (Query.demand database declarations module_))
-            Member_map.empty package.modules
-          |> Member_map.map List.rev)
+          | _ -> index)
+        Member_map.empty
+        (Query.demand database package_declarations package)
+      |> Member_map.map List.rev)
+
+(* A package's traits by the names of the methods written inside them, in
+   the order they are declared. A method written inside a trait is declared
+   as that trait's, so this reads no trait's interface. *)
+let trait_index =
+  Query.query ~name:"trait_index" ~phase:Declarations ~show:Fun.id (fun database package ->
+      let declared = Query.demand database package_declarations package in
+      let traits =
+        List.filter_map
+          (fun (declaration : declaration) ->
+            if declaration.kind = Trait && declaration.ordinal = 0 then
+              Some ((declaration.module_, declaration.index), declaration.path)
+            else None)
+          declared
+      in
+      List.fold_left
+        (fun index (declaration : declaration) ->
+          match (declaration.path, declaration.container) with
+          | Method { name; _ }, Some container -> (
+              match List.assoc_opt (declaration.module_, container) traits with
+              | Some trait ->
+                  String_map.update name
+                    (fun found ->
+                      let found = Option.value ~default:[] found in
+                      Some
+                        (if List.exists (Path.equal trait) found then found else found @ [ trait ]))
+                    index
+              | None -> index)
+          | _ -> index)
+        String_map.empty declared)
+
+(* The traits of a package that declare a method with a name. *)
+let traits_declaring =
+  Query.query ~name:"traits_declaring" ~phase:Declarations ~saved:true
+    ~show:(fun (package, name) -> package ^ " " ^ name)
+    (fun database (package, name) ->
+      Option.value ~default:[]
+        (String_map.find_opt name (Query.demand database trait_index package)))
 
 (* The methods and constants written under a type, with one name, from
    every file of the type's package, where they must be. Their keys carry

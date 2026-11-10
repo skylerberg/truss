@@ -356,10 +356,7 @@ and check_literal_fits state (value : expression) number type_ =
 (* The width of [USize] and [ISize] the package's code must hold for: 32
    bits unless its manifest says [usize_bits = 64], so that code checked
    once holds on every target. *)
-and usize_bits state =
-  match Workspace.package state.database state.package with
-  | Some package -> package.usize_bits
-  | None -> 32
+and usize_bits state = Query.demand state.database Workspace.usize_bits state.package
 
 and builtin_range ?(usize_bits = 64) type_ =
   let bits signed width =

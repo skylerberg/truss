@@ -1506,10 +1506,28 @@ pushes a change in any of these to the results that read it:
 | The names a file defines with one name | The definitions named `count` in `report.truss` |
 | A module | Whether `standard::json` exists, and its visible names named `parse` |
 | The members of a type with one name | The members of `List` named `length` |
+| The traits of a package that declare a method with one name | The traits of `standard` with a method `compare` |
+| One thing a package's manifest says | The modules of `weather`, or its dependencies, or the width of its `USize` |
 | The `impl`s of a trait for a type constructor, in one package | `Add` for `Instant`, in the package of `Duration` |
 | The capability `impl`s of a type | The capabilities `MemoryFiles` implements |
 | A body fact | Whether `Tree.each` can be pulled |
 | A manifest entry | The capabilities granted to `http`, each as the definition its name means |
+
+A lookup across a package is a lookup in an index built from what the
+package's files declare, and from nothing else:
+
+- **A package's declarations are listed once,** and each index is one pass
+  over that list: its methods and member constants by owner and name, its
+  traits by the names of their methods, its `impl`s by trait and type, and
+  its types by the groups that contain each other. A method written inside
+  a trait is declared as that trait's, so finding the traits with a method
+  `compare` reads no trait's interface.
+- **Each question about an index is a result of its own,** so a definition
+  that asked for the members of `List` named `length` is checked again only
+  when that answer changes, though the index is rebuilt whenever the package
+  declares something new.
+- **What a manifest says is read one thing at a time.** A result that reads
+  a package's modules is not worked out again when its dependencies change.
 
 What each kind of result depends on:
 
