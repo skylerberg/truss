@@ -1138,7 +1138,9 @@ The intrinsic module also provides one handle type: `Handle`, a file
 descriptor in an `Int32`, which is neither `Copyable` nor `Plain`.
 `handle_from` makes one of a descriptor that is open, and
 `handle_descriptor` reads it. Its drop function calls the operating system
-to release it, with `close`.
+to release it, with `close`. `handle_release` gives up a handle without
+closing it and returns its descriptor, so that `Handles.close` can call
+`close` itself and report an error from it.
 
 The standard library's real implementations are Truss on the C library's
 functions: opening a file, with its path given a zero byte at its end and
@@ -1149,6 +1151,12 @@ on after a signal interrupts a call; and turning an error number into a
 `SystemClock` reads `clock_gettime`, and `SystemRandom` reads
 `getentropy`. `SystemConsole` and `FileReader` each hold a reader of
 lines, which reads a block at a time and keeps what it has not given out.
+`SystemHandles` reads onto the end of a list and writes a slice with
+`read` and `write`, does the same at an offset with `pread` and `pwrite`,
+and moves, shortens, flushes, and closes a file with `lseek`, `ftruncate`,
+`fsync`, and `close`. `SystemFileWrite.open` opens a file in each write
+mode: to replace it, to append to it, to create it only if it is missing,
+or to update it in place.
 `SystemEnvironment` reads `getenv`. `SystemProcesses` runs a program found
 on the `PATH` with `posix_spawnp` and waits for it with `waitpid`: it lays
 the program's name and its arguments end to end, each with its zero byte,

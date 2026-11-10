@@ -969,25 +969,97 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) : Core
       guards_exhaustive = false;
     }
 
-(* How a collection literal of the given type is constructed. *)
-let construction_of_type (type_ : T.ty) : Core.construction =
-  match type_ with
-  | T.Named { path; _ } when Intrinsic.builtin_of_path path = Some Array -> Array
-  | T.Named { path; arguments } when Path.equal path set_path || Path.equal path map_path ->
-      let method_ name receiver : Core.callee =
-        Function { path = Method { owner = path; name; receiver }; type_arguments = arguments }
+(* A set or a map literal, desugared to a block: create the collection
+   with capacity for the entries, insert each entry, and evaluate to the
+   collection. [entries] holds the arguments of each insertion. A literal
+   with no entries is the call that creates the collection. *)
+let inserted_literal state ~origin (type_ : T.ty) ~name ~insert
+    (entries : Core.expression list list) : Core.kind =
+  let path, type_arguments =
+    match type_ with
+    | T.Named { path; arguments } -> (path, arguments)
+    | _ -> bug "a set or map literal of type `%s`" (T.show type_)
+  in
+  let make = synthetic_expression state ~origin in
+  let statement kind : Core.statement = { id = fresh_node_id state; origin; kind } in
+  let call name receiver arguments result =
+    make result
+      (Call
+         {
+           callee = Function { path = Method { owner = path; name; receiver }; type_arguments };
+           arguments;
+           lends = None;
+           uses = [];
+         })
+  in
+  let capacity = make (T.builtin USize) (Integer (Z.of_int (List.length entries))) in
+  let created =
+    call "with_capacity" Static [ Passed { mode = Read; value = Value capacity } ] type_
+  in
+  match entries with
+  | [] -> created.kind
+  | _ ->
+      let local = fresh_synthetic_local state in
+      let collection : Core.place = Local { local; type_; origin } in
+      let bind =
+        statement
+          (Let
+             {
+               pattern =
+                 {
+                   id = fresh_node_id state;
+                   origin;
+                   type_;
+                   kind = Bind { local; name; mutable_ = true; mode = Own };
+                 };
+               value = Value created;
+               else_ = None;
+             })
       in
-      By_insertion { empty = method_ "empty" Static; insert = method_ "insert" Mut }
-  | T.Named { path; _ }
-    when Path.equal path sequence_path || Path.equal path finite_set_path
-         || Path.equal path finite_map_path ->
-      Specification_only
-  | _ -> bug "a collection literal of type `%s`" (T.show type_)
+      let inserts =
+        List.map
+          (fun entry ->
+            statement
+              (Evaluate
+                 (call insert Mut
+                    (Passed { mode = Mut; value = Place collection }
+                    :: List.map
+                         (fun argument : Core.argument ->
+                           Passed { mode = Own; value = Value argument })
+                         entry)
+                    T.unit)))
+          entries
+      in
+      Block
+        {
+          statements = bind :: inserts;
+          value = Some (make type_ (Use collection));
+          diverges = false;
+        }
 
-(* A collection literal. A list literal is desugared to calls. Any other
-   collection is a [Collection_literal] node. *)
+(* A list, set, or array literal, or a specification's sequence or set.
+   A list or a set literal is desugared to calls. *)
 let collection_literal state (value : expression) (elements : Core.expression list) : Core.kind =
   match type_of state value with
   | T.Named { path; arguments = [ T.Type element ] } when Path.equal path list_path ->
       list_literal state ~origin:value.id element elements
-  | type_ -> Collection_literal { elements; construction = construction_of_type type_ }
+  | T.Named { path; _ } as type_ when Path.equal path set_path ->
+      inserted_literal state ~origin:value.id type_ ~name:"set" ~insert:"insert"
+        (List.map (fun element -> [ element ]) elements)
+  | T.Named { path; _ } when Intrinsic.builtin_of_path path = Some Array ->
+      Collection_literal { elements; construction = Array }
+  | T.Named { path; _ } when Path.equal path sequence_path || Path.equal path finite_set_path ->
+      Collection_literal { elements; construction = Specification_only }
+  | type_ -> bug "a collection literal of type `%s`" (T.show type_)
+
+(* A map literal. A [Map] literal is desugared to calls of [insert_absent],
+   which requires that the key is not in the map yet, so the prover checks
+   that the keys of the literal are distinct. *)
+let map_literal state (value : expression) (entries : (Core.expression * Core.expression) list) :
+    Core.kind =
+  match type_of state value with
+  | T.Named { path; _ } as type_ when Path.equal path map_path ->
+      inserted_literal state ~origin:value.id type_ ~name:"map" ~insert:"insert_absent"
+        (List.map (fun (key, entry) -> [ key; entry ]) entries)
+  | T.Named { path; _ } when Path.equal path finite_map_path -> Map_literal { entries }
+  | type_ -> bug "a map literal of type `%s`" (T.show type_)

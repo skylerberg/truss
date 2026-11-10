@@ -168,9 +168,11 @@ and kind =
           lists every field in declaration order. A field with [None] takes its default value, which
           is in the type's core form. A range expression such as [1..5] is desugared to this. *)
   | Collection_literal of { elements : expression list; construction : construction }
-      (** An array literal, a set literal, or a specification-only sequence or set. The node's type
-          says which. List literals are not this node: they are desugared to calls. *)
-  | Map_literal of { entries : (expression * expression) list; construction : construction }
+      (** An array literal, or a specification-only sequence or set. The node's type says which.
+          List and set literals are not this node: they are desugared to calls. *)
+  | Map_literal of { entries : (expression * expression) list }
+      (** A specification-only [FiniteMap]. A [Map] literal is not this node: it is desugared to
+          calls. *)
   | Record_update of { base : expression; updates : (string list * expression) list }
       (** [base with (...)]: a copy of the record [base] with some fields replaced. Each update
           gives the path to a field (for a nested field, several names) and the new value. *)
@@ -249,15 +251,12 @@ and piece =
       (** An interpolated value, converted to text by [display] (its [Display.display]). The value
           is only borrowed. *)
 
-(** How a collection literal is constructed at run time. *)
+(** How a collection literal is constructed. *)
 and construction =
   | Array  (** An array, constructed in place. *)
-  | By_insertion of { empty : callee; insert : callee }
-      (** A set or a map: call [empty], then call [insert] for each element. This will be desugared
-          into the calls once the standard library has [Set.empty] and [Map.empty]. *)
   | Specification_only
-      (** A [Sequence], [FiniteSet], or [FiniteMap]. These exist only in specifications and are
-          never constructed at run time. *)
+      (** A [Sequence] or a [FiniteSet]. These exist only in specifications and are never
+          constructed at run time. *)
 
 (** An implicit conversion. *)
 and conversion =

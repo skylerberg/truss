@@ -7,8 +7,8 @@
 open Core
 
 (* [callee] is called for every callee that is stored in a node other than
-   a [Call]: an interpolated piece's [display], a collection literal's
-   [empty] and [insert], a cursor's [next], and a pattern's [equal]. The
+   a [Call]: an interpolated piece's [display], a cursor's [next], and a
+   pattern's [equal]. The
    callee of a [Call] is not reported here, because the visitor sees the
    [Call] node itself. *)
 type visit = {
@@ -41,12 +41,6 @@ let operand visit = function
 let block visit (body : block) =
   List.iter visit.statement body.statements;
   Option.iter visit.expression body.value
-
-let construction visit = function
-  | Array | Specification_only -> ()
-  | By_insertion { empty; insert } ->
-      visit.callee empty;
-      visit.callee insert
 
 let cost visit (cost : cost) =
   match cost.bound with
@@ -82,16 +76,13 @@ let expression_children visit (node : expression) =
       block visit body
   | Construct { fields; _ } ->
       List.iter (fun (_, value) -> Option.iter visit.expression value) fields
-  | Collection_literal { elements; construction = how } ->
-      List.iter visit.expression elements;
-      construction visit how
-  | Map_literal { entries; construction = how } ->
+  | Collection_literal { elements; _ } -> List.iter visit.expression elements
+  | Map_literal { entries } ->
       List.iter
         (fun (key, value) ->
           visit.expression key;
           visit.expression value)
-        entries;
-      construction visit how
+        entries
   | Record_update { base; updates } ->
       visit.expression base;
       List.iter (fun (_, value) -> visit.expression value) updates
