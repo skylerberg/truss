@@ -3,107 +3,15 @@
 open Harness
 open Support
 
-(* Whether a definition has a [parallel] block or loop, whose rules the
-   check on the core form does not have yet. *)
-let has_parallel database key =
-  match Query.demand database Infer.core key with
-  | Some form ->
-      let found = ref false in
-      Core_walk.definition
-        {
-          Core_walk.ignore_all with
-          statement =
-            (fun (node : Core.statement) ->
-              match node.kind with
-              | Parallel _ | For { parallel = true; _ } -> found := true
-              | _ -> ());
-        }
-        form.definition;
-      !found
-  | None -> false
-
-(* The check on the core form must report what the current check reports,
-   for the rules that are ported and for every definition that both run
-   on. *)
-let compare_checks database module_ =
-  let ported (diagnostic : Diagnostic.t) =
-    match diagnostic.code with
-    | Ownership
-        ( Use_after_move | Not_owned | Field_not_restored | Needs_owned | Conflicting_loan
-        | Changed_while_viewed | Views_temporary | Returns_local_view | Stores_local_view
-        | Keeps_lent_part ) ->
-        true
-    | _ -> false
-  in
-  let shown (diagnostic : Diagnostic.t) =
-    match diagnostic.code with
-    | Ownership Field_not_restored -> Diagnostic.Code.name diagnostic.code
-    | _ ->
-        Printf.sprintf "%s at %d..%d"
-          (Diagnostic.Code.name diagnostic.code)
-          diagnostic.span.start diagnostic.span.stop
-  in
-  List.iter
-    (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.key_of declaration in
-      match
-        ( Infer.clean database key,
-          Query.demand database Ownership.ownership key,
-          Ownership.On_core.check database key )
-      with
-      | Some _, Some current, Some on_core ->
-          let expected =
-            List.sort_uniq compare (List.map shown (List.filter ported current.diagnostics))
-          in
-          let found = List.sort_uniq compare (List.map shown on_core.diagnostics) in
-          if expected <> found then
-            fail "%s: the check on the core form reports [%s], and the current check [%s]"
-              (Resolve.Names.show_key key) (String.concat "; " found) (String.concat "; " expected);
-          let pairs found =
-            List.sort_uniq compare
-              (List.map (fun (first, second) -> (min first second, max first second)) found)
-          in
-          let expected =
-            pairs
-              (List.filter_map
-                 (function Checked.Disjoint { first; second } -> Some (first, second) | _ -> None)
-                 current.obligations)
-          in
-          let found = pairs on_core.disjoint in
-          let show found =
-            String.concat "; "
-              (List.map (fun (first, second) -> Printf.sprintf "%d and %d" first second) found)
-          in
-          if expected <> found && not (has_parallel database key) then
-            fail "%s: the check on the core form wants [%s] disjoint, and the current check [%s]"
-              (Resolve.Names.show_key key) (show found) (show expected)
-      | _ -> ())
-    (Query.demand database Resolve.Names.declarations module_)
-
 let check database module_ =
-  let found =
-    Resolve.diagnostics database module_
-    @ Interface.diagnostics database module_
-    @ Infer.diagnostics database module_
-    @ Patterns.diagnostics database module_
-    @ Usage.diagnostics database module_
-    @ Ownership.diagnostics database module_
-  in
-  compare_checks database module_;
-  found
+  Resolve.diagnostics database module_
+  @ Interface.diagnostics database module_
+  @ Infer.diagnostics database module_
+  @ Patterns.diagnostics database module_
+  @ Usage.diagnostics database module_
+  @ Ownership.diagnostics database module_
 
 let one_diagnostic = one_diagnostic ~check
-
-let () =
-  let database = setup [] in
-  List.iter
-    (fun ((module_ : Path.module_), _) ->
-      test
-        (Printf.sprintf "%s: the check on the core form agrees with the current check"
-           (Path.show_module module_))
-        (fun () -> compare_checks database module_))
-    Standard_library.modules
-
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 let keep = "fn keep(items: own List[Int64]) {}\n\nfn look(items: List[Int64]) {}\n\n"
 

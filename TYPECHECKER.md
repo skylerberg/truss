@@ -13,10 +13,12 @@ code database, which [DATABASE.md](DATABASE.md) describes.
 
 The type checker takes the syntax tree of each definition, the package's
 manifest, and the manifests of its dependencies. For each definition it
-produces a *resolved form*, an *interface*, which is what other definitions
-may depend on, and a *checked form*, which is what the prover and code
-generation read. The database records what each result read, and keeps each
-result under what it read, as DATABASE.md describes.
+produces a *resolved form*; an *interface*, which is what other definitions
+may depend on; a *core form*, which is what ownership checking, the prover,
+and code generation read; and a *checked form*, a set of tables that the
+pattern and usage checks and the tools read. The database records what each
+result read, and keeps each result under what it read, as DATABASE.md
+describes.
 
 The type checker:
 
@@ -45,7 +47,7 @@ It does not:
 - prove anything. Every fact that needs the solver, such as an index in
   bounds, an addition that cannot overflow, a `requires` at a call, a type
   invariant, a cost, termination, or two index ranges that do not overlap,
-  goes to the prover. The checked form records the few obligations that the
+  goes to the prover. The core form marks the few obligations that the
   type checker creates itself (see
   [Obligations the type checker creates](#obligations-the-type-checker-creates)).
 - run code. Constants are worked out exactly, from literals alone (see
@@ -56,7 +58,7 @@ It does not:
 ## Structure
 
 ```text
-syntax tree ──▶ Resolve ──▶ Interface ──▶ Body ──▶ checked form
+syntax tree ──▶ Resolve ──▶ Interface ──▶ Body ──▶ core form, checked form
    (per definition)  │            │             │
                      └─────▶ diagnostics ◀──────┘
                                   ▲
@@ -1063,8 +1065,22 @@ vector, so a `match` over several values is checked as one:
 ## Ownership: moves, loans, and views
 
 `Ownership` checks DESIGN.md's rules on modes, moves, and views within each
-function. It runs once types are known, over a control-flow graph of the
-body, and needs only the body and the interfaces of what it calls.
+function. It reads the definition's [core form](#the-core-form) and the
+interfaces of what the definition calls.
+
+The check builds a control-flow graph of the body. Each point of the graph
+does one thing to one place: it reads it, moves it, borrows it `mut`,
+assigns it, or binds new locals. The edges follow the order of evaluation,
+and a loop has a back edge. The body of a lambda is a separate entry into
+the graph, because it runs when the lambda is called. Three analyses run on
+the graph:
+
+- forward, the places that may have been moved before each point;
+- forward, the places that each holder of a view may view at each point;
+- backward, the locals that are still used after each point.
+
+A function for specifications only is not checked. It never runs, so it
+moves and borrows nothing.
 
 ### Places
 
@@ -1100,8 +1116,13 @@ matching an owned value, by `own base with (...)`, and by returning it. A
   Rust. The fixes offer `copy()`, and a method such as `remove` for an
   element. A `mut` parameter or `mut self` may have a field moved out only
   if the field is assigned again on every path before the function returns.
-- **The checked form records every move,** whole and partial, which is what
-  CODEGEN.md's drop elaboration starts from.
+- **A returned place that is not owned is an error,** with a fix that
+  copies it. This holds for the function's last expression, and for the
+  value of a block, an `if`, or a `match` arm that is the last expression.
+- **Inside a lambda, a captured local is a view,** so it cannot be moved
+  there.
+- **The result records every move,** by the id of the core node that takes
+  the value.
 
 ### Loans
 
@@ -1545,10 +1566,11 @@ name in one package are an error.
 
 ## The checked form
 
-The checked form of a definition is what the prover and code generation
-read. It is a set of tables keyed by the tree's node ids (see
-[Node identity](#node-identity)), and records these facts, so that nothing
-needs to work anything out from the syntax tree again:
+The checked form of a definition is a set of tables keyed by the tree's
+node ids (see [Node identity](#node-identity)). The pattern check, the usage
+check, the package checks, and the tools read it. Ownership checking, the
+prover, and code generation read [the core form](#the-core-form) instead.
+The tables record:
 
 - **the type of every expression,** with no inference variables
 - **what each name means:** the definition and its type arguments, the field
@@ -1559,8 +1581,6 @@ needs to work anything out from the syntax tree again:
   [No subtyping](#no-subtyping) table
 - **each literal's type and value,** with floats already rounded
 - **each pattern's variants and fields,** and the order of arms
-- **every move,** whole and partial, which `Ownership`'s result for the
-  definition holds beside the checked form, since it is found after it
 - **each call of a lending method,** with how the part it gives is lent
 - **the capability set** at each call, with each capability parameter of
   what is called solved among the call's type arguments, and the evidence
@@ -1762,8 +1782,10 @@ method by its path. There are three cases:
 
 Most proof obligations come from the program itself: every index, every
 arithmetic operation, every `requires` at a call, every invariant. The
-prover finds those in the checked form. A few come from decisions the type
-checker made, and the checked form records each with its position:
+prover finds those in the core form. A few come from decisions the type
+checker made. The core form marks the second with a conversion node and the
+third with a flag on the `match`, and the ownership check's result lists
+the first:
 
 | Obligation | From |
 |---|---|
@@ -1881,15 +1903,15 @@ gives an exact fix whenever it knows what was meant:
   broken definition, the parser keeps what PARSER.md states, and the type
   checker relies on it as [Broken definitions](#broken-definitions)
   describes.
-- **The prover** reads checked forms, the interfaces and contracts of what
+- **The prover** reads core forms, the interfaces and contracts of what
   they call, the functional bodies it reads as definitions, and the type
   checker's obligations, as [PROVER.md](PROVER.md) describes. It discharges
   every `requires` and invariant, every operation that could fail, every
   cost, termination, and every obligation above.
-- **Code generation** reads checked forms, the shapes of types, and which
+- **Code generation** reads core forms, the shapes of types, and which
   methods can be pulled, as CODEGEN.md describes. Instantiation cycles have
   already been rejected.
-- **The build** uses checked forms to find what `main` can reach, to refuse
+- **The build** uses core forms to find what `main` can reach, to refuse
   programs that can reach a `todo` or an `echo`.
 - **Tools** show the type of an expression and the definition a name means
   from checked forms, and list every hole with its type, the names in
@@ -1949,9 +1971,6 @@ list's `each`, which only the `impl`'s method has.
 
 ## Not built
 
-- **Ownership on the core form.** The prover and code generation read the
-  core form. The ownership check still reads the checked form's tables and
-  the syntax tree.
 - **An interpolated string as calls.** It is still a node that names the
   text builder's methods and each value's `display`. It will be desugared
   to those calls once they have `time` clauses.
