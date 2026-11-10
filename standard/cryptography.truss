@@ -210,7 +210,7 @@ public fn seal(
   key: SecretKey,
   nonce: Nonce,
   plaintext: Slice[UInt8],
-  associated_data: Slice[UInt8],
+  associated_data: Slice[UInt8] = [],
   cipher: Cipher = Cipher.ChaCha20Poly1305,
 ) -> List[UInt8]
   ensures result.length() == plaintext.length() + 16
@@ -223,7 +223,7 @@ public fn open(
   key: SecretKey,
   nonce: Nonce,
   sealed: Slice[UInt8],
-  associated_data: Slice[UInt8],
+  associated_data: Slice[UInt8] = [],
   cipher: Cipher = Cipher.ChaCha20Poly1305,
 ) -> Result[List[UInt8], AuthenticationError]
   ensures match result {
