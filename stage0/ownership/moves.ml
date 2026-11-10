@@ -64,10 +64,13 @@ let transfer verdicts (index : int) (point : point) (before : moved list) : move
   | Bind locals | Ends locals ->
       List.filter
         (fun ((moved : Place.t), _) ->
-          match moved.root with Local local -> not (List.mem local locals) | Constant _ -> true)
+          match moved.root with
+          | Local local -> not (List.mem local locals)
+          | Constant _ | Environment -> true)
         before
   | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Exit | Suspend | Hold _ | Store _
-  | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Write_through _ | Arguments _ ->
+  | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Gives_function _ | Write_through _
+  | Arguments _ ->
       before
 
 (* The places that may have been moved before each point. *)
@@ -156,7 +159,7 @@ let check context (graph : Graph.t) =
   in
   let bound locals : Place.root -> bool = function
     | Local local -> List.mem local locals
-    | Constant _ -> false
+    | Constant _ | Environment -> false
   in
   Array.iteri
     (fun index (point : point) ->
@@ -213,6 +216,6 @@ let check context (graph : Graph.t) =
                  its lambda ends."
                 moved root)
       | Enter | Hold _ | Store _ | Return_view _ | Views_temporary _ | Keeps_lent_part _
-      | Write_through _ | Arguments _ ->
+      | Gives_function _ | Write_through _ | Arguments _ ->
           ())
     points

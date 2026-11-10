@@ -56,6 +56,9 @@ type action =
       (** A value that the statement drops is viewed by what the statement binds, or by the given
           place. The origin is the dropped value. *)
   | Keeps_lent_part of T.ty  (** A [let] binds a part that a call lends only for the statement. *)
+  | Gives_function of Place.t list
+      (** A function value that views these places is passed to an [own] parameter. The callee may
+          keep the function after the caller returns. *)
   | Write_through of Place.t
       (** A mutation writes through a slice that is held in this place. The mutation changes
           everything that the slice views. *)
@@ -155,10 +158,12 @@ let rec viewed builder (value : Core.expression) : Place.t list =
   | Use found -> viewed_place builder found
   | Slice { base; _ } -> (
       match Place.of_slice value with Some place -> [ place ] | None -> viewed_place builder base)
+  | Lambda { captures = []; _ } -> []
   | Lambda { captures; _ } ->
-      List.map
-        (fun (capture : Core.capture) : Place.t -> { root = Local capture.local; steps = [] })
-        captures
+      { root = Environment; steps = [] }
+      :: List.map
+           (fun (capture : Core.capture) : Place.t -> { root = Local capture.local; steps = [] })
+           captures
   | Call call -> List.concat_map (viewed_operand builder) (lent_arguments builder call)
   | Construct { fields; _ } ->
       List.concat_map
@@ -469,6 +474,16 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
         | _ -> frontier)
       frontier call.arguments
   in
+  (* A function value given to an [own] parameter may be kept by the callee. *)
+  let frontier =
+    List.fold_left
+      (fun frontier (argument : Core.argument) ->
+        match argument with
+        | Passed { mode = Own; value = Value ({ type_ = T.Function _; _ } as value) } ->
+            emit builder frontier (Gives_function (viewed builder value)) value.origin
+        | _ -> frontier)
+      frontier call.arguments
+  in
   (* A lending call lends its receiver for the rest of the statement. *)
   (match (call.lends, call.arguments) with
   | Some _, Passed { mode; value = Place receiver } :: _ -> (
@@ -579,7 +594,7 @@ and use builder frontier (node : Core.expression) (found : Core.place) ~returned
         let captured =
           match place.root with
           | Local local -> List.mem local builder.captured
-          | Constant _ -> false
+          | Constant _ | Environment -> false
         in
         emit builder frontier
           (Move { place; use = node.id; type_ = node.type_; returned; captured })

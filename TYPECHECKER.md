@@ -495,7 +495,7 @@ is `Plain` exactly when `Value` is.
 |---|---|---|
 | `Copyable` | every type except the standard library's handles and types that hold one | call `copy()` |
 | `Plain` | integers, floats, `Bool`, `Character`, `Unit`, arrays, records, and sum types made only of `Plain` parts, with no heap data and no handle | copy implicitly. `Plain` requires `Copyable`. |
-| View | `Slice`, `StringSlice`, a cursor from a `self` method, a lambda that captures locals, an `any` that holds a view, and anything holding a view anywhere, in a field, a variant, an element, or a type argument | nothing extra; values of view types stay within their function (see [Views](#views)) |
+| View | `Slice`, `StringSlice`, a cursor from a `self` method, every function type, an `any` that holds a view, and anything holding a view anywhere, in a field, a variant, an element, or a type argument | nothing extra; values of view types stay within their function (see [Views](#views)) |
 | Structural equality | the built-in integers, `Bool`, `Character`, `Unit`, `String`, the types of specifications, and a type that derives `Equal` whose fields all have it; never floats, a hand-written `Equal`, or, outside its package, an opaque type | be a constant in a pattern; the prover substitutes through `==` |
 
 - **`Copyable` and `Plain` are prelude traits that the compiler implements.**
@@ -1268,12 +1268,26 @@ required, such as an `own` function-typed parameter. Putting a view into a
 record or a list makes that record or list a view, so "a view cannot be
 stored" holds by construction.
 
-Function values are the one case decided by the value rather than its type,
-because function types do not say whether a function captures. A lambda
-that captures locals holds shared loans of them, and is a view. A named
-function, or a lambda that captures nothing, holds none. A function value
-stored in a field, an element, or an `own` parameter must capture nothing. A
-lambda cannot change what it captures, which is a type error: captured
+A function type does not say whether a function captures, so every function
+type is a view type, and the value decides what it views:
+
+- **A named function, or a lambda that captures nothing, views nothing.** It
+  can be returned and stored like any plain value.
+- **A lambda that captures views what it captures and its environment.**
+  The environment is the record of what the lambda captured. It is a local
+  of the function that the lambda is written in, whatever the lambda
+  captures, a parameter included. So a lambda that captures cannot be
+  returned, alone or inside a record or a collection, and cannot be put in
+  a place that the caller keeps. It can be passed to a call, and held in a
+  local record or list that stays in the function. DESIGN.md's answer for a
+  `make_adder` is a record with a method.
+- **A function value given to an `own` parameter must capture nothing,**
+  because the callee may keep it after the caller returns. A lambda that
+  captures is refused there, and so is a function value that the caller
+  does not own, such as a read-only function-typed parameter, which may be
+  a lambda that captures.
+
+A lambda cannot change what it captures, which is a type error: captured
 variables are read-only inside it.
 
 ### Owned values where they are required
