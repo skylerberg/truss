@@ -1,0 +1,16 @@
+use standard::map
+
+public opaque type Deque[Element](front: List[Element], back: List[Element])
+  derives Copyable
+
+public opaque type Heap[Element: Ordered](items: List[Element], largest_first: Bool)
+  derives Copyable
+
+public opaque type SortedMap[Key: Ordered, Value](entries: List[map::Entry[Key, Value]])
+  derives Copyable
+
+public opaque type SortedSet[Element: Ordered](elements: List[Element])
+  derives Copyable
+
+public opaque type BitSet(words: List[UInt64], length: USize)
+  derives Copyable

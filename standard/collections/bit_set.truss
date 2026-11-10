@@ -1,0 +1,171 @@
+use standard::collections
+
+public fn collections::BitSet.new(length: USize) -> collections::BitSet
+  ensures result.length() == length
+  ensures result.count_ones() == 0
+  cost time O(length)
+{
+  todo
+}
+
+public fn collections::BitSet.length(self) -> USize
+  cost time O(1)
+{
+  self.length
+}
+
+public fn collections::BitSet.is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
+  cost time O(1)
+{
+  self.length == 0
+}
+
+public fn collections::BitSet.get(self, index: USize) -> Option[Bool]
+  ensures (result is Some(_)) == (index < self.length())
+  cost time O(1)
+{
+  todo
+}
+
+public fn collections::BitSet.flip(mut self, index: USize)
+  requires index < self.length()
+  ensures self.length() == old(self.length())
+  cost time O(1)
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::BitSet.fill(mut self, value: Bool)
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::BitSet.resize(mut self, length: USize)
+  ensures self.length() == length
+  cost time O(length)
+{
+  todo
+}
+
+public fn collections::BitSet.count_ones(self) -> USize
+  ensures result <= self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::BitSet.count_zeros(self) -> USize
+  ensures result <= self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::BitSet.first_one(self) -> Option[USize]
+  ensures match result {
+    Some(index) => index < self.length()
+    None => self.count_ones() == 0
+  }
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::BitSet.first_zero(self) -> Option[USize]
+  ensures match result {
+    Some(index) => index < self.length()
+    None => self.count_zeros() == 0
+  }
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::BitSet.ones(self) yields USize
+  ensures result < self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::BitSet.unite(mut self, other: collections::BitSet)
+  requires other.length() == self.length()
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::BitSet.intersect(mut self, other: collections::BitSet)
+  requires other.length() == self.length()
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::BitSet.subtract(mut self, other: collections::BitSet)
+  requires other.length() == self.length()
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::BitSet.invert(mut self)
+  ensures self.length() == old(self.length())
+  cost time O(self.length())
+  cost allocations == 0
+{
+  todo
+}
+
+impl Index for collections::BitSet {
+  type Key = USize
+  type Output = Bool
+
+  fn at(self, key: USize) lends Bool
+    requires key < self.length()
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn at(mut self, key: USize) lends mut Bool
+    requires key < self.length()
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+impl Iterable for collections::BitSet {
+  type Element = Bool
+
+  fn each(self) yields Bool
+    ensures finished ==> yielded.length() == self.length()
+    cost time O(self.length())
+  {
+    todo
+  }
+}
+
+impl Equal for collections::BitSet {
+  fn equal(self, other: collections::BitSet) -> Bool {
+    todo
+  }
+}
+
+impl Hash for collections::BitSet {
+  fn hash(self, hasher: mut Hasher) {
+    todo
+  }
+}

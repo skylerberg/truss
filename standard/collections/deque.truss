@@ -1,0 +1,195 @@
+use standard::collections
+
+public fn collections::Deque[Element].new() -> collections::Deque[Element]
+  ensures result.length() == 0
+  cost time O(1)
+  cost allocations == 0
+{
+  collections::Deque(front: [], back: [])
+}
+
+public fn collections::Deque[Element].with_capacity(capacity: USize) -> collections::Deque[Element]
+  ensures result.length() == 0
+{
+  todo
+}
+
+public fn collections::Deque[Element].collect[Source: Cursor[Element = Element]](
+  source: own Source,
+) -> collections::Deque[Element] {
+  todo
+}
+
+public fn collections::Deque[Element].length(self) -> USize
+  cost time O(1)
+{
+  todo
+}
+
+public fn collections::Deque[Element].is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
+  cost time O(1)
+{
+  self.length() == 0
+}
+
+public fn collections::Deque[Element].push_front(mut self, item: own Element)
+  ensures self.length() == old(self.length()) + 1
+  cost amortized time O(1)
+{
+  todo
+}
+
+public fn collections::Deque[Element].push_back(mut self, item: own Element)
+  ensures self.length() == old(self.length()) + 1
+  cost amortized time O(1)
+{
+  todo
+}
+
+public fn collections::Deque[Element].pop_front(mut self) -> Option[Element]
+  ensures (result is None) == (old(self.length()) == 0)
+  cost amortized time O(1)
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::Deque[Element].pop_back(mut self) -> Option[Element]
+  ensures (result is None) == (old(self.length()) == 0)
+  cost amortized time O(1)
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::Deque[Element].front(self) lends Option[Element]
+  cost time O(1)
+{
+  todo
+}
+
+public fn collections::Deque[Element].back(self) lends Option[Element]
+  cost time O(1)
+{
+  todo
+}
+
+public fn collections::Deque[Element].get(self, index: USize) lends Option[Element]
+  cost time O(1)
+{
+  todo
+}
+
+public fn collections::Deque[Element].clear(mut self)
+  ensures self.length() == 0
+  cost time O(old(self.length()))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::Deque[Element].reserve(mut self, additional: USize)
+  ensures self.length() == old(self.length())
+{
+  todo
+}
+
+public fn collections::Deque[Element].rotate_left(mut self, by: USize)
+  requires by <= self.length()
+  ensures self.length() == old(self.length())
+  cost time O(by)
+{
+  todo
+}
+
+public fn collections::Deque[Element].rotate_right(mut self, by: USize)
+  requires by <= self.length()
+  ensures self.length() == old(self.length())
+  cost time O(by)
+{
+  todo
+}
+
+public fn collections::Deque[Element].to_list(own self) -> List[Element]
+  ensures result.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::Deque[Element: Equal].contains(self, item: Element) -> Bool
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::Deque[Element].extend[Source: Cursor[Element = Element]](mut self, items: own Source) {
+  todo
+}
+
+impl Index for collections::Deque[Element] {
+  type Key = USize
+  type Output = Element
+
+  fn at(self, key: USize) lends Element
+    requires key < self.length()
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn at(mut self, key: USize) lends mut Element
+    requires key < self.length()
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+impl Iterable for collections::Deque[Element] {
+  type Element = Element
+
+  fn each(self) yields Element
+    ensures finished ==> yielded.length() == self.length()
+    cost time O(self.length())
+  {
+    todo
+  }
+}
+
+public fn collections::Deque[Element].each(mut self) yields mut Element
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn collections::Deque[Element].each(own self) yields own Element
+  cost time O(self.length())
+{
+  todo
+}
+
+impl Equal for collections::Deque[Element: Equal] {
+  fn equal(self, other: collections::Deque[Element]) -> Bool {
+    todo
+  }
+}
+
+impl Hash for collections::Deque[Element: Hash] {
+  fn hash(self, hasher: mut Hasher) {
+    todo
+  }
+}
+
+impl Default for collections::Deque[Element] {
+  fn default() -> collections::Deque[Element] {
+    collections::Deque.new()
+  }
+}
+
+impl From[List[Element]] for collections::Deque[Element] {
+  fn from(value: own List[Element]) -> collections::Deque[Element] {
+    collections::Deque(front: [], back: own value)
+  }
+}

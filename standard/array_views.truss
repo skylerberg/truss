@@ -243,14 +243,14 @@ public fn Array[Element, count: USize].swap(mut self, first: USize, second: USiz
   ensures self.length() == old(self.length())
   cost time O(1)
 {
-  todo
+  mut self[..].swap(first, second)
 }
 
 public fn Array[Element, count: USize].reverse(mut self)
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  todo
+  mut self[..].reverse()
 }
 
 public fn Array[Element, count: USize].rotate_left(mut self, by: USize)
@@ -258,7 +258,7 @@ public fn Array[Element, count: USize].rotate_left(mut self, by: USize)
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  todo
+  mut self[..].rotate_left(by)
 }
 
 public fn Array[Element, count: USize].rotate_right(mut self, by: USize)
@@ -266,14 +266,14 @@ public fn Array[Element, count: USize].rotate_right(mut self, by: USize)
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  todo
+  mut self[..].rotate_right(by)
 }
 
 public fn Array[Element: Copyable, count: USize].fill(mut self, value: Element)
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  todo
+  mut self[..].fill(value)
 }
 
 public fn Array[Element: Copyable, count: USize].copy_from(mut self, source: Slice[Element])
@@ -281,7 +281,7 @@ public fn Array[Element: Copyable, count: USize].copy_from(mut self, source: Sli
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  todo
+  mut self[..].copy_from(source)
 }
 
 public fn Array[Element, count: USize].update_each[capability Granted](
@@ -293,7 +293,7 @@ public fn Array[Element, count: USize].update_each[capability Granted](
   cost calls(change) == self.length()
   cost time O(self.length() * time(change))
 {
-  todo
+  mut self[..].update_each(change)
 }
 
 public fn Array[Element: Ordered, count: USize].sort(mut self)
@@ -301,19 +301,19 @@ public fn Array[Element: Ordered, count: USize].sort(mut self)
   ensures self.is_sorted()
   cost time O(self.length() * log(self.length()))
 {
-  todo
+  mut self[..].sort()
 }
 
 public fn Array[Element, count: USize].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(compare))
 {
-  todo
+  mut self[..].sort_by(compare)
 }
 
 public fn Array[Element, count: USize].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(key))
 {
-  todo
+  mut self[..].sort_by_key(key)
 }
