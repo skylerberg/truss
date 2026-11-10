@@ -112,7 +112,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
   | Storage_at_mut ->
       own (argument 0);
       lent (element_at (place (argument 0)) (value 1))
-  | View_at -> lent (Storage.view_at (place (argument 0)) (value 1))
+  | View_at | View_at_mut -> lent (Storage.view_at (place (argument 0)) (value 1))
   | Array_at_mut -> lent (place (argument 0) / Index (value 1))
   | _ ->
       let integer_argument () =
@@ -161,7 +161,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
         | _ -> binary op
       in
       (match (operation : Intrinsic.operation) with
-      | Storage_at | Storage_at_mut | View_at | Array_at_mut -> ()
+      | Storage_at | Storage_at_mut | View_at | View_at_mut | Array_at_mut -> ()
       | Add -> checked_arithmetic Add Add_overflow
       | Subtract -> checked_arithmetic Subtract Subtract_overflow
       | Multiply -> checked_arithmetic Multiply Multiply_overflow
@@ -396,7 +396,62 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                (Storage.view_of_elements (element ()))
                ~elements
                ~length:(Constant (Integer (USize, count))))
-      | Storage_view ->
+      | View_swap ->
+          let element_at index = Storage.view_at (place (argument 0)) index in
+          let held = local b (Value (element ())) in
+          emit b (Assign (at held, Use (Move (element_at (value 1)))));
+          emit b (Assign (element_at (value 1), Use (Move (element_at (value 2)))));
+          emit b (Assign (element_at (value 2), Use (Move (at held))))
+      | (Storage_take_view | View_take_view | Array_take_view) as operation ->
+          (* The view is of the owner's own elements, so there is nothing to
+             write. A checked build makes sure that it is. *)
+          if checks then begin
+            let owner = place (argument 0) and part = place (argument 1) in
+            let from = value 2 in
+            let first, owner_length =
+              match operation with
+              | Storage_take_view -> (element_at owner from, length owner)
+              | View_take_view -> (Storage.view_at owner from, view_length owner)
+              | _ ->
+                  let count =
+                    match value_arguments with
+                    | [ count ] -> count
+                    | _ -> bug "array_take_view without the array's length"
+                  in
+                  (owner / Index from, Lir.Constant (Integer (USize, count)))
+            in
+            let message = "a view taken back is not of these elements" in
+            let stop = usize_local "stop" in
+            emit b (Assign (at stop, Binary (Add, from, view_length part)));
+            let beyond = local b (Raw Bool) in
+            emit b (Assign (at beyond, Binary (Greater, Copy (at stop), owner_length)));
+            panic_when (Copy (at beyond)) message;
+            if (element_layout ()).size > 0 then begin
+              (* An empty view may be of nothing, and then has no address
+                 to compare. *)
+              let go_on = block b and compare = block b in
+              let empty = local b (Raw Bool) in
+              emit b (Assign (at empty, Binary (Equal, view_length part, usize 0)));
+              finish b
+                (Switch
+                   { value = Copy (at empty); cases = [ (Z.one, go_on) ]; default = Some compare });
+              start b compare;
+              let expected = local b (Pointer { target = Value (element ()); writable = false }) in
+              emit b (Assign (at expected, Use (Address { place = first; writable = false })));
+              let expected_address = usize_local "expected" and address = usize_local "address" in
+              emit b (Assign (at expected_address, Convert (Copy (at expected), Integer USize)));
+              emit b
+                (Assign (at address, Convert (Copy (Storage.view_elements part), Integer USize)));
+              let apart = local b (Raw Bool) in
+              emit b
+                (Assign (at apart, Binary (Not_equal, Copy (at address), Copy (at expected_address))));
+              panic_when (Copy (at apart)) message;
+              finish b (Goto go_on);
+              start b go_on
+            end
+          end
+      | (Storage_view | Storage_view_mut) as operation ->
+          if operation = Storage_view_mut then own (argument 0);
           let storage = place (argument 0) in
           set
             (Storage.view

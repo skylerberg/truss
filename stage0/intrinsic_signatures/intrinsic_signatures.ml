@@ -44,7 +44,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
   in
   let unary output = make ~generics:[ "Value" ] ~output:(Returns output) [ input "value" value ] in
   (* An operation on an [Array[Element, count]], generic over both. *)
-  let over_array ~output parameters =
+  let over_array ?output parameters =
     let count = parameter operation "count" in
     let array =
       T.Named
@@ -54,7 +54,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
         }
     in
     {
-      (make ~output (parameters array)) with
+      (make ?output (parameters array)) with
       generics = [ generic "Element"; { T.generic = count; kind = Value_generic } ];
     }
   in
@@ -119,12 +119,27 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Storage_at -> with_storage ~output:(Lends (Read, element)) [ input "index" usize ]
   | Storage_at_mut -> with_storage ~mode:Mut ~output:(Lends (Mut, element)) [ input "index" usize ]
   | Storage_view -> with_storage ~output:(Returns (view element)) []
+  | Storage_view_mut -> with_storage ~mode:Mut ~output:(Returns (view element)) []
   | View_length ->
       make ~generics:[ "Element" ] ~output:(Returns usize) [ input "view" (view element) ]
   | View_at ->
       make ~generics:[ "Element" ]
         ~output:(Lends (Read, element))
         [ input "view" (view element); input "index" usize ]
+  | View_at_mut ->
+      make ~generics:[ "Element" ]
+        ~output:(Lends (Mut, element))
+        [ input ~mode:Mut "view" (view element); input "index" usize ]
+  | View_swap ->
+      make ~generics:[ "Element" ]
+        [ input ~mode:Mut "view" (view element); input "first" usize; input "second" usize ]
+  | Storage_take_view -> with_storage ~mode:Mut [ input "view" (view element); input "start" usize ]
+  | View_take_view ->
+      make ~generics:[ "Element" ]
+        [ input ~mode:Mut "view" (view element); input "part" (view element); input "start" usize ]
+  | Array_take_view ->
+      over_array (fun array ->
+          [ input ~mode:Mut "array" array; input "view" (view element); input "start" usize ])
   | View_slice ->
       make ~generics:[ "Element" ]
         ~output:(Returns (view element))
@@ -211,10 +226,11 @@ let cost (operation : Intrinsic.operation) =
   | Convert | Fits | Square_root | Fused_multiply_add | Floor | Ceiling | Truncate | Round_to_even
   | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
   | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
-  | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
-  | View_slice | View_address | Array_view | Array_at_mut | Storage_model | View_model | Array_model
-  | Crash | Storage_lengthen | Storage_push | Handle_from | Handle_descriptor | Handle_release
-  | Report_tests_to | Live_blocks | Libc_number _ ->
+  | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | Storage_view_mut
+  | View_length | View_at | View_at_mut | View_swap | Storage_take_view | View_take_view
+  | Array_take_view | View_slice | View_address | Array_view | Array_at_mut | Storage_model
+  | View_model | Array_model | Crash | Storage_lengthen | Storage_push | Handle_from
+  | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks | Libc_number _ ->
       { time = Constant_time; allocations = No_allocations }
   | Compare_bytes | Storage_remove | Storage_insert ->
       { time = Linear_in 0; allocations = No_allocations }
