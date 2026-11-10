@@ -1683,6 +1683,16 @@ runs to completion before the next call starts.
   with `Tasks`. `Core_walk.can_use_tasks` decides this from the core form,
   after the capability sets are solved. Code generation calls the same
   function, so the two stages agree on which implementations are monitors.
+- **A monitor needs `Tasks` at its `provide`**
+  (`capabilities.monitor_needs_tasks`). Code generation locks each method of a
+  monitor through `Tasks`, using the implementation of `Tasks` in the same
+  `provide`, or else the one that is available at the `provide`. If neither
+  exists, the methods have no lock, and two tasks could run a `mut self` method
+  at the same time, which is a data race. That happens when the only
+  implementation of `Tasks` is in a nested `provide`, or when the body uses a
+  capability parameter that is instantiated with `Tasks`. So `Tasks` must be
+  available at the `provide`, or one of its implementations must implement
+  `Tasks`. An implementation of `Tasks` itself is not a monitor.
 - **A capability that a monitor implements has no method with a callback
   parameter that can use a capability** (`capabilities.callback_may_deadlock`).
   A parameter's type counts when it is a function type with a `uses` clause, an
