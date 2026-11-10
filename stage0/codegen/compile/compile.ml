@@ -88,6 +88,8 @@ let make (context : Lower.context) lowering database (key : Instance.key) : Lir.
   | Evaluator path -> elaborate_code context (Lower.evaluator context path)
   | Template_check { from_template; texts } ->
       elaborate_code context (Lower.template_check context key ~from_template ~texts)
+  | Call_evaluation { function_; arguments } ->
+      elaborate_code context (Lower.call_evaluation context key ~function_ ~arguments)
   | Entry _ | Program_main _ | Any_entry _ | Adapter _ ->
       elaborate_code context (Lower.instance context key)
   | Any_table _ -> Table (Lower.any_table context key)
@@ -738,7 +740,9 @@ type template_check = Ran of (int * bool) list | Ran_too_long
 
 let checked_templates : (Instance.key, template_check) Hashtbl.t = Hashtbl.create 8
 
-let check_key t root =
+(* What a run of code while compiling is kept under: the key of everything
+   its root can reach, which its inputs are part of. *)
+let run_key t root =
   t.want t.lowering [ root ];
   match Query.demand t.database (Lazy.force reach) (t.lowering, root) with
   | key ->
@@ -747,7 +751,7 @@ let check_key t root =
            (Cbor.encode
               (Cbor.Array
                  [
-                   Text "truss template check";
+                   Text "truss code run while compiling";
                    Cbor.int Lir.version;
                    Cbor.Array
                      [
@@ -769,7 +773,7 @@ let check_template ?results t ~time_limit ~from_template ~texts =
       | positions -> (
           let key =
             match results with
-            | Some results -> Option.map (fun key -> (results, key)) (check_key t root)
+            | Some results -> Option.map (fun key -> (results, key)) (run_key t root)
             | None -> None
           in
           let output =
@@ -798,6 +802,53 @@ let check_template ?results t ~time_limit ~from_template ~texts =
               Error
                 (Printf.sprintf "Compile: checking a template of %s ended with status %d: %s"
                    (Path.show from_template) status errors)))
+
+(* Works out a call whose arguments are known, by running it: its result as
+   static data, or that it ran past [time_limit]. Results are kept for the
+   compiler's run, and, with [results], under the key of the code that ran. *)
+type evaluated_call = Returned of Lir.static_value | Call_ran_too_long
+
+let evaluated_calls : (Instance.key, evaluated_call) Hashtbl.t = Hashtbl.create 8
+
+let evaluate_call ?results t ~time_limit ~function_ ~arguments =
+  let root = Instance.Call_evaluation { function_; arguments } in
+  match Hashtbl.find_opt evaluated_calls root with
+  | Some found -> Ok found
+  | None -> (
+      match Query.demand t.database Interface.Environment.signature function_ with
+      | Some { output = Returns result; _ } -> (
+          let ty = Monomorphic.ground t.context.monomorphic [] result in
+          let key =
+            match results with
+            | Some results -> Option.map (fun key -> (results, key)) (run_key t root)
+            | None -> None
+          in
+          let output =
+            match Option.bind key (fun (results, key) -> results.find key) with
+            | Some output -> Ok (0, output, "")
+            | None ->
+                build_and_run t ~time_limit ~roots:[ root ]
+                  ~startup:(Startup.evaluator_calling (Instance.symbol root))
+                  ~arguments:[]
+          in
+          match output with
+          | Error message -> Error message
+          | Ok (0, output, _) -> (
+              match decode t ty output with
+              | value ->
+                  Option.iter (fun (results, key) -> results.add key output) key;
+                  let found = Returned value in
+                  Hashtbl.replace evaluated_calls root found;
+                  Ok found
+              | exception Invalid_argument message -> Error message)
+          | Ok (137, _, _) ->
+              Hashtbl.replace evaluated_calls root Call_ran_too_long;
+              Ok Call_ran_too_long
+          | Ok (status, _, errors) ->
+              Error
+                (Printf.sprintf "Compile: working out a call of %s ended with status %d: %s"
+                   (Path.show function_) status errors))
+      | _ -> Error ("Compile: " ^ Path.show function_ ^ " has no result to work out"))
 
 let no_keys _ _ =
   invalid_arg "Compile: keys were asked for, and nothing was given to say which are wanted"

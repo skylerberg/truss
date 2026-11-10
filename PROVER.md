@@ -783,8 +783,18 @@ regular-expression parser.
   limit is an error that names the call.
 - **Results are cached** by the function's compiled code and the arguments.
 
-**What stage0 runs.** Stage0 decides a tagged template's checks by running
-them, as [Tagged templates](DESIGN.md#tagged-templates) intends:
+**What stage0 runs.** Stage0 runs two kinds of code while proving.
+
+- **A call whose arguments are all known:** a function that is compiled and
+  not generic, reached directly rather than through a bound, with every
+  argument an integer or `Bool` literal and a result of one of those. Each
+  such call a query mentions is run, and its result is a fact of the query,
+  so `count_up(7)` is known to be `7` though nothing in `count_up`'s
+  contract says so. A call that cannot be built, or runs past the time
+  limit, is left as the solver knows it.
+
+It also decides a tagged template's checks by running them, as
+[Tagged templates](DESIGN.md#tagged-templates) intends:
 
 - **A clause of a tag's `from_template` that reads its template only as
   `template.literals`** is decided by running it, for an `impl` that is not
@@ -798,7 +808,7 @@ them, as [Tagged templates](DESIGN.md#tagged-templates) intends:
   worked out and written out. A clause that cannot run, such as one that
   calls a function for specifications only, is left to the solver.
 - **The prover does not depend on code generation.** `Prover.diagnostics`
-  is given the running, and `truss check` gives it through the compiler it
+  is given the running, which the `running` library makes from a compiler, and `truss check` gives it through the compiler it
   builds programs with, made only when a template asks for it. So proofs
   stay queries of their own, and what ran is decided only when obligations
   are asked, as the solver's answers are.

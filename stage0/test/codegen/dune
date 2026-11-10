@@ -58,6 +58,7 @@
   compile
   type_checker
   prover
+  running
   solver
   documents)
  (deps

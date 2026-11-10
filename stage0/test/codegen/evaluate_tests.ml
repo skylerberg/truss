@@ -11,19 +11,7 @@ let solver =
    running them. *)
 let proven_with_running text =
   let database, compile = load text in
-  let evaluate (evaluation : Prover.Translate.evaluation) : Prover.evaluated option =
-    match
-      Compile.check_template compile ~time_limit:10_000 ~from_template:evaluation.from_template
-        ~texts:evaluation.texts
-    with
-    | Ok (Ran found) ->
-        Option.map
-          (fun holds -> if holds then Prover.Holds else Prover.Fails)
-          (List.assoc_opt evaluation.clause found)
-    | Ok Ran_too_long -> Some Too_long
-    | Error message -> failwith message
-  in
-  Prover.diagnostics ~evaluate database (Lazy.force solver) example
+  Prover.diagnostics ~running:(Running.through (lazy compile)) database (Lazy.force solver) example
 
 let shout =
   {|type Shout(text: String)
@@ -99,5 +87,43 @@ fn f() -> Count {
       | [] -> ()
       | found ->
           fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found)))
+
+let counting =
+  {|fn count_up(value: UInt8) -> UInt8
+  cost time finite
+{
+  var count: UInt8 = 0
+  for _ in 0..value
+    invariant count == yielded.length()
+  {
+    count += 1
+  }
+  count
+}
+|}
+
+let () =
+  test "a call whose arguments are known is worked out by running it" (fun () ->
+      match
+        proven_with_running
+          (counting ^ "\nfn f() -> UInt8\n  ensures result == 7\n{\n  count_up(7)\n}\n")
+      with
+      | [] -> ()
+      | found ->
+          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found)));
+  test "without running it, such a call is known only by its contract" (fun () ->
+      let database, _ =
+        load (counting ^ "\nfn f() -> UInt8\n  ensures result == 7\n{\n  count_up(7)\n}\n")
+      in
+      match Prover.diagnostics database (Lazy.force solver) example with
+      | [ _ ] -> ()
+      | found -> fail "%d diagnostics" (List.length found));
+  test "what running a call gives is what it gives, not what was hoped" (fun () ->
+      match
+        proven_with_running
+          (counting ^ "\nfn f() -> UInt8\n  ensures result == 8\n{\n  count_up(7)\n}\n")
+      with
+      | [ _ ] -> ()
+      | found -> fail "%d diagnostics" (List.length found))
 
 let () = Harness.finish ()

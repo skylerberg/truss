@@ -38,6 +38,11 @@ let unsupported span format =
    texts. See PROVER.md, "Running code while proving". *)
 type evaluation = { from_template : Path.t; texts : string list; clause : int }
 
+(* A call whose arguments are all known, of a function that is compiled and
+   not generic: its term in the logic, which running it can give a value.
+   A [Bool] is 0 or 1, in its arguments and its result. *)
+type known_call = { function_ : Path.t; arguments : Z.t list; term : L.term; result_is_bool : bool }
+
 type obligation = {
   code : Code.prover;
   span : span;  (** Relative to the definition being proven. *)
@@ -47,6 +52,7 @@ type obligation = {
   constants : Costs.constants list;
       (** The constants of each [O(...)] bound the query mentions, which each try pins. *)
   evaluation : evaluation option;  (** Running code that decides it, where there is any. *)
+  known_calls : known_call list;  (** The calls its query mentions that running code can give. *)
 }
 
 type outcome = {
@@ -182,6 +188,7 @@ type context = {
   mutable lambda_captures : (L.term * C.local list) list;  (** What each lambda captures. *)
   mutable potentials : L.term list;  (** Each value's potential whose definition is a fact. *)
   mutable equalities : L.term list;  (** Each derived [==] whose definition is a fact. *)
+  mutable known_calls : known_call list;  (** Each call running code can give a value. *)
   mutable cursors : (L.term * cursor) list;  (** Where each cursor value came from. *)
   mutable proving : bool;
       (** In a theorem, a [proof] block, or a law's proof, where a [todo] is a hole. *)
@@ -269,7 +276,23 @@ and make_obligation ?evaluation context frame code span message goal =
         L.mentions names query.goal || List.exists (L.mentions names) query.facts)
       context.groups
   in
-  { code; span; message; query; values = context.values; constants; evaluation }
+  let known_calls =
+    List.filter
+      (fun (known : known_call) ->
+        let mentioned term = occurs known.term term in
+        mentioned query.goal || List.exists mentioned query.facts)
+      context.known_calls
+  in
+  { code; span; message; query; values = context.values; constants; evaluation; known_calls }
+
+(* Whether a term holds another. *)
+and occurs part term =
+  term = part
+  ||
+  match term with
+  | L.Apply (_, arguments) -> List.exists (occurs part) arguments
+  | L.Forall (_, body) | L.Exists (_, body) -> occurs part body
+  | L.Symbol _ | L.Integer _ | L.Boolean _ | L.Bits _ -> false
 
 (* Source text, for messages. *)
 let quote source (span : span) =
@@ -1575,7 +1598,8 @@ and quantified context frame (written : expression) quantifier binder body =
                   let length = sequence_length context element sequence in
                   let matched, inner = bound_to at in
                   make ~count:length symbol Int
-                    L.(Apply ("<=", [ int 0; index ]) &&& Apply ("<", [ index; length ]) &&& matched)
+                    L.(
+                      Apply ("<=", [ int 0; index ]) &&& Apply ("<", [ index; length ]) &&& matched)
                     inner
               | None ->
                   unsupported collection.span "a quantifier over `%s`" (T.show collection_type))
@@ -3937,6 +3961,7 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
              sort_of context (substituted frame call_.result) ));
       let term = L.Apply (symbol, own_arguments) in
       assume context after (in_range (substituted frame call_.result) term);
+      note_known_call context call_ path term own_arguments;
       term
     end
     else if contract.result_kind = `Yields then
@@ -4080,6 +4105,35 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
               ~call_ ~values ~change:(Some change) counter)
   in
   (after, result)
+
+(* A call that running code could give a value: a function that is
+   compiled and not generic, reached directly, with every argument an
+   integer or [Bool] literal and a result of one of those. See PROVER.md,
+   "Running code while proving". *)
+and note_known_call context (call_ : C.call) path term arguments =
+  let direct =
+    match call_.callee with
+    | Function { type_arguments = []; _ } -> true
+    | Trait_method { evidence = Impl { arguments = []; _ }; type_arguments = []; _ } -> true
+    | _ -> false
+  in
+  let literal = function
+    | L.Integer value -> Some value
+    | L.Boolean value -> Some (if value then Z.one else Z.zero)
+    | _ -> None
+  in
+  let values = List.filter_map literal arguments in
+  match Query.demand context.database Interface.Environment.signature path with
+  | Some ({ specification_only = false; generics = []; output = Returns result; _ } : T.signature)
+    when direct
+         && List.length values = List.length arguments
+         && (is_numeric result || is_bool result)
+         && not (T.equal result T.Integer) ->
+      if not (List.exists (fun (known : known_call) -> known.term = term) context.known_calls) then
+        context.known_calls <-
+          { function_ = path; arguments = values; term; result_is_bool = is_bool result }
+          :: context.known_calls
+  | _ -> ()
 
 (* The parameters of the definition proven whose types are datatypes,
    with their values on entry and their arguments' positions. *)
@@ -5910,6 +5964,7 @@ let new_context database ~home ~current ~terminates ~measures checked =
     lambda_captures = [];
     potentials = [];
     equalities = [];
+    known_calls = [];
     cursors = [];
     proving = false;
     holes = [];

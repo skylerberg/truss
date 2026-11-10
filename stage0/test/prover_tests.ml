@@ -1393,8 +1393,7 @@ let () =
         \  spans.length() == 0 || spans[0].low <= spans[0].high\n\
          }\n");
   test "a quantifier over a range may ignore its index" (fun () ->
-      proven
-        "fn f(count: Int64) -> Bool\n  ensures result\n{\n  forall _ in 0..count => true\n}\n");
+      proven "fn f(count: Int64) -> Bool\n  ensures result\n{\n  forall _ in 0..count => true\n}\n");
   test "a quantifier over a list ranges over its elements" (fun () ->
       proven
         "fn f(items: List[Int64]) -> Bool\n\

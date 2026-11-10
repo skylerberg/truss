@@ -1,0 +1,6 @@
+; Running compiled code for the prover, through code generation, which the
+; prover does not depend on. See PROVER.md, "Running code while proving".
+
+(library
+ (name running)
+ (libraries zarith lir compile prover))

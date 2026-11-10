@@ -8,6 +8,7 @@ type key =
   | Encode of Ground.ty
   | Evaluator of Path.t
   | Template_check of { from_template : Path.t; texts : string list }
+  | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
   | Cursor_next of Ground.yielding
   | Adapter of { function_ : key; ty : Ground.function_type }
   | Entry of key
@@ -43,6 +44,7 @@ let rank = function
   | Evaluator _ -> 14
   | Any_drop _ -> 15
   | Template_check _ -> 16
+  | Call_evaluation _ -> 17
 
 let ( >>= ) c next = if c <> 0 then c else next ()
 
@@ -70,6 +72,9 @@ let rec compare a b =
   | Template_check a, Template_check b ->
       Path.compare a.from_template b.from_template >>= fun () ->
       List.compare String.compare a.texts b.texts
+  | Call_evaluation a, Call_evaluation b ->
+      Path.compare a.function_ b.function_ >>= fun () ->
+      List.compare Z.compare a.arguments b.arguments
   | _ -> Int.compare (rank a) (rank b)
 
 let equal a b = compare a b = 0
@@ -89,6 +94,9 @@ let rec encode ?(path = Ground.encode_path) key =
   | Evaluator p -> tagged 14 [ path p ]
   | Template_check { from_template; texts } ->
       tagged 16 [ path from_template; Cbor.Array (List.map (fun text -> Cbor.Text text) texts) ]
+  | Call_evaluation { function_; arguments } ->
+      tagged 17
+        [ path function_; Cbor.Array (List.map (fun z -> Cbor.Text (Z.to_string z)) arguments) ]
   | Cursor_next yielding -> tagged 5 [ ty (Cursor yielding) ]
   | Adapter { function_; ty } ->
       tagged 6 [ encode ~path function_; Ground.encode ~path (Function ty) ]
@@ -191,6 +199,10 @@ let rec mangle = function
   | Template_check { from_template; texts } ->
       marker "Check" ^ path from_template
       ^ String.concat "" (List.map (fun t -> marker "Text" ^ text t ^ marker "End") texts)
+  | Call_evaluation { function_; arguments } ->
+      marker "Evaluate" ^ path function_
+      ^ String.concat "" (List.map (fun z -> marker "Value" ^ text (Z.to_string z)) arguments)
+      ^ marker "End"
   | Cursor_next yielding -> marker "Next" ^ mangle_yielding yielding
   | Adapter { function_; ty } ->
       marker "Adapter" ^ mangle function_ ^ marker "As" ^ mangle_ty (Function ty)
@@ -227,6 +239,10 @@ let rec to_string = function
   | Template_check { from_template; texts } ->
       "template check " ^ Path.show from_template ^ " of "
       ^ String.concat ", " (List.map (Printf.sprintf "%S") texts)
+  | Call_evaluation { function_; arguments } ->
+      "evaluation " ^ Path.show function_ ^ "("
+      ^ String.concat ", " (List.map Z.to_string arguments)
+      ^ ")"
   | Cursor_next yielding -> "next " ^ Ground.to_string (Cursor yielding)
   | Adapter { function_; _ } -> "adapter " ^ to_string function_
   | Any_entry key -> "any entry " ^ to_string key

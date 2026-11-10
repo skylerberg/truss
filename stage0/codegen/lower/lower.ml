@@ -157,8 +157,10 @@ let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list
    order. A clause that reads the template's parts is not asked of it; the
    prover asks only those that read its literals. See CODEGEN.md, "Code run
    while compiling". *)
-let check_state context from_template =
-  let code = code_of context from_template [] in
+(* A state to lower code run while compiling in, in the frame of a
+   definition, which is not generic. *)
+let code_state context path =
+  let code = code_of context path [] in
   let st =
     {
       context;
@@ -168,7 +170,7 @@ let check_state context from_template =
           bindings = Hashtbl.create 4;
           self_place = None;
           on_yield = None;
-          inlined = [ from_template ];
+          inlined = [ path ];
           exit = None;
         };
       b = Lir_builder.create ();
@@ -187,12 +189,32 @@ let check_state context from_template =
 (* The positions, among a tag's [from_template]'s clauses, of those a
    template check works out. *)
 let template_checked context from_template =
-  let st, code = check_state context from_template in
+  let st, code = code_state context from_template in
   List.concat
     (List.mapi (fun index clause -> if executable st clause then [ index ] else []) code.requires)
 
+(* Writes what the debug buffer holds to standard output, which is how code
+   run while compiling gives its results back. *)
+let write_out st =
+  let b = st.b in
+  let call ?result intrinsic arguments =
+    emit b
+      (Call
+         {
+           target = Intrinsic intrinsic;
+           arguments;
+           result = (match result with Some r -> Lir.Returned r | None -> Discarded);
+         })
+  in
+  let bytes = local b (Raw (Pointer Opaque)) and length = new_local st st.context.types.usize in
+  call ~result:(at bytes) Debug_bytes [];
+  call ~result:length Debug_length [];
+  let written = new_local st st.context.types.isize in
+  call ~result:written System_write
+    [ Constant (Integer (Int32, Z.one)); Copy (at bytes); Copy length ]
+
 let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
-  let st, code = check_state context from_template in
+  let st, code = code_state context from_template in
   let b = st.b in
   start b (block b);
   let call ?result intrinsic arguments =
@@ -223,12 +245,54 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
             Glue.encode_call context.glue b context.bool holds
           end)
         code.requires;
-      let bytes = local b (Raw (Pointer Opaque)) and length = new_local st context.types.usize in
-      call ~result:(at bytes) Debug_bytes [];
-      call ~result:length Debug_length [];
-      let written = new_local st context.types.isize in
-      call ~result:written System_write
-        [ Constant (Integer (Int32, Z.one)); Copy (at bytes); Copy length ]);
+      write_out st);
+  finish b (Return None);
+  {
+    key;
+    main = Lir_builder.build b ~parameters:[] ~result:None;
+    nested =
+      Array.of_list
+        (List.map (function Some f -> f | None -> bug "a lambda left unfinished") !(st.nested));
+  }
+
+(* Code run while compiling, for a call the prover knows the arguments of:
+   the function, which is not generic, called with each argument a
+   constant, and its result written out. See PROVER.md, "Running code while
+   proving". *)
+let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
+  let st, _ = code_state context function_ in
+  let b = st.b in
+  start b (block b);
+  let signature = signature_of context function_ in
+  let ground ty = Monomorphic.ground context.monomorphic [] ty in
+  in_scope st (fun () ->
+      let passed =
+        List.map2
+          (fun (mode, ty) value ->
+            let ty = ground ty in
+            let place = new_local st ty in
+            let constant =
+              match scalar_of st ty with
+              | Integer integer -> constant_int integer value
+              | Bool -> Lir.Constant (Bool (not (Z.equal value Z.zero)))
+              | _ -> bug "an evaluated call's argument of type %s" (Ground.to_string ty)
+            in
+            emit b (Assign (place, Use constant));
+            (mode, ty, place))
+          (interface_parameters signature) arguments
+      in
+      let result_ty =
+        match signature.output with
+        | Returns ty -> ground ty
+        | _ -> bug "an evaluated call that does not return"
+      in
+      let result = new_local st result_ty in
+      call_instance st
+        (Code { path = function_; type_arguments = [] })
+        ~signature ~substitution:[] ~arguments:passed ~mask:0 ~destination:result;
+      emit b (Call { target = Intrinsic Debug_begin; arguments = []; result = Discarded });
+      Glue.encode_call context.glue b result_ty result;
+      write_out st);
   finish b (Return None);
   {
     key;
