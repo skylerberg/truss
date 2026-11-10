@@ -1251,11 +1251,12 @@ gone.
 - **A lambda's `uses` are inferred** from its body: the capabilities it
   calls. They must be within the `uses` of the function type it is checked
   against.
-- **A capability parameter of the function a call calls is solved** as the
-  union of what is passed for it: what each lambda and each function that
-  meets a function type listing the parameter uses beyond what the type
-  lists, wherever in the call's arguments it is, in parentheses or at the
-  end of a branch as well. That set must then be available at the call. So
+- **A capability parameter of what a call calls,** a function or a trait's
+  method, **is solved** as the union of what is passed for it: what each
+  lambda and each function that meets a function type listing the parameter
+  uses beyond what the type lists, wherever in the call's arguments it is,
+  in parentheses or at the end of a branch as well. That set must then be
+  available at the call. So
   `for_each(3, visit: tick)` needs `Clock` when `tick` uses it and `visit`
   is a `(fn(Int64) uses Granted)`.
 - **A function's own capability parameter stands for itself** throughout its
