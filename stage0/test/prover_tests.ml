@@ -2588,7 +2588,41 @@ let () =
         \    1\n\
         \  }\n\
          }\n"
-        "prover.law")
+        "prover.law");
+  test "an element changed through a lend meets its invariant when the lend ends" (fun () ->
+      not_proven
+        "type Span(low: Int64, high: Int64)\n\
+        \  invariant low <= high\n\n\
+         fn f() -> Int64\n\
+        \  ensures result == 1\n\
+         {\n\
+        \  var spans: List[Span] = [Span(low: 0, high: 0)]\n\
+        \  spans[0].low = 1\n\
+        \  spans[0].high\n\
+         }\n"
+        "prover.invariant");
+  test "an element changed through a lend that keeps its invariant proves" (fun () ->
+      proven
+        "type Span(low: Int64, high: Int64)\n\
+        \  invariant low <= high\n\n\
+         fn f() -> Int64\n\
+        \  ensures result == 5\n\
+         {\n\
+        \  var spans: List[Span] = [Span(low: 0, high: 0)]\n\
+        \  spans[0].high = 5\n\
+        \  spans[0].high\n\
+         }\n");
+  test "a yielded part meets its invariant" (fun () ->
+      not_proven
+        "type Positive(n: Int64)\n\
+        \  invariant n > 0\n\n\
+         type Source()\n\n\
+         fn Source.each(self) yields Positive {\n\
+        \  var p = Positive(n: 1)\n\
+        \  p.n = -5\n\
+        \  yield p\n\
+         }\n"
+        "prover.invariant")
 
 (* Concurrent code *)
 

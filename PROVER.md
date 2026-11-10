@@ -1203,6 +1203,16 @@ A proof is as trustworthy as:
 - the standard library's contracts whose bodies end in any other
   intrinsic, which the prover knows only by its type, so they are relied
   on and not proven
+- three facts about `intrinsic::Shared`, which the prover knows only by
+  its operations' types, so a model of it must keep them:
+  - other tasks may update a `Shared`'s value between any two calls of
+    `shared_update`, so the result of one call is unconstrained by earlier
+    calls
+  - `copy()` of a `Shared` is an alias of the same block, so `Shared` is
+    not a value type, and value equality on it would be unsound
+  - `shared_key` is the block's address, not a function of its value: two
+    blocks with equal values have different keys, and a key differs
+    between runs
 - compiled code, for the checks that are run
 
 Everything else is proven. The run-time checks of every test build, and

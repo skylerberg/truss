@@ -4879,12 +4879,31 @@ and contract_call context frame (node : expression) (call_ : call) path contract
     else arrive context after "result" result_type
   in
   if contract.result_kind <> `Yields then assume_valid context after result_type result;
+  (* A part lent [mut] goes back into the value it is part of when the lend
+     ends, as the caller's statement left it, so that value is valid only
+     if the part is, which is checked below. *)
+  let left_valid =
+    match (contract.result_kind, call_.lends, lent_final) with
+    | `Lends, Some T.Mut, Some leave ->
+        Some (validity context after ~assuming:false ~deep:true result_type (leave result), leave)
+    | _ -> None
+  in
+  let check_left () =
+    match left_valid with
+    | Some (_, leave) ->
+        check_valid context after span result_type (leave result) ~deep:true
+          ~when_:"when the lend of this part ends"
+    | None -> ()
+  in
   let helper = updating_helper context call_ in
   List.iter
     (fun (passed : passed) ->
       if passed.mode = T.Mut && not (helper && passed.position = 0) then
         match List.assoc_opt passed.position changed with
-        | Some term -> assume_valid context after passed.type_ term
+        | Some term ->
+            let valid = validity context after ~assuming:true passed.type_ term in
+            assume context after
+              (match left_valid with Some (left, _) -> L.( ==> ) left valid | None -> valid)
         | None -> ())
     values;
   if not (List.exists (Path.equal path) context.instantiating) then begin
@@ -4909,74 +4928,85 @@ and contract_call context frame (node : expression) (call_ : call) path contract
     | _ -> ());
     (* The [ensures], after, where the [requires] held: [mut] parameters
        have their new values, and [old] the ones they had. *)
-    List.iter
-      (fun (part : part) ->
-        let entry = bindings part in
-        let exit_bindings =
-          List.mapi
-            (fun index (parameter, term) ->
-              ( parameter,
-                match List.assoc_opt index changed with Some term -> Some term | None -> term ))
-            entry
-        in
-        let entry_locals, types, entry_self = bind entry in
-        let exit_locals, _, exit_self = bind exit_bindings in
-        let ensures_frame =
-          {
-            frame with
-            source = part.callee;
-            condition = after.condition;
-            locals = exit_locals;
-            types;
-            old_locals = entry_locals;
-            self = self_of part exit_self;
-            old_self = self_of part entry_self;
-            self_type = self_type_of part entry_self;
-            result = Some result;
-            checking = false;
-            loop = None;
-            updating = None;
-            substitution = substitution_of part;
-          }
-        in
-        let ensures_frame =
-          match contract.result_kind with
-          | `Lends ->
-              (* The part as lent, and the parts handed out: the one part, as
+    let assume_ensures keep =
+      List.iter
+        (fun (part : part) ->
+          let entry = bindings part in
+          let exit_bindings =
+            List.mapi
+              (fun index (parameter, term) ->
+                ( parameter,
+                  match List.assoc_opt index changed with Some term -> Some term | None -> term ))
+              entry
+          in
+          let entry_locals, types, entry_self = bind entry in
+          let exit_locals, _, exit_self = bind exit_bindings in
+          let ensures_frame =
+            {
+              frame with
+              source = part.callee;
+              condition = after.condition;
+              locals = exit_locals;
+              types;
+              old_locals = entry_locals;
+              self = self_of part exit_self;
+              old_self = self_of part entry_self;
+              self_type = self_type_of part entry_self;
+              result = Some result;
+              checking = false;
+              loop = None;
+              updating = None;
+              substitution = substitution_of part;
+            }
+          in
+          let ensures_frame =
+            match contract.result_kind with
+            | `Lends ->
+                (* The part as lent, and the parts handed out: the one part, as
                  the caller's statement left it. *)
-              let left = match lent_final with Some leave -> leave result | None -> result in
-              let none = empty_parts context after result_type in
-              {
-                ensures_frame with
-                yielded = Some (appended context after result_type none left);
-                finished = Some (L.Boolean true);
-              }
-          | `Returns | `Yields -> ensures_frame
-        in
-        List.iter
-          (fun (clause : expression) ->
-            let frame_for_clause =
-              if contract.result_kind = `Lends && mentions_result clause then
+                let left = match lent_final with Some leave -> leave result | None -> result in
+                let none = empty_parts context after result_type in
                 {
                   ensures_frame with
-                  locals = entry_locals;
-                  self = self_of part entry_self;
-                  yielded = None;
+                  yielded = Some (appended context after result_type none left);
+                  finished = Some (L.Boolean true);
                 }
-              else ensures_frame
-            in
-            match clause_value context frame_for_clause clause with
-            | _, term ->
-                (* A pure call's [ensures], where its [requires] holds, is a
+            | `Returns | `Yields -> ensures_frame
+          in
+          List.iter
+            (fun (clause : expression) ->
+              if keep clause then
+                let frame_for_clause =
+                  if contract.result_kind = `Lends && mentions_result clause then
+                    {
+                      ensures_frame with
+                      locals = entry_locals;
+                      self = self_of part entry_self;
+                      yielded = None;
+                    }
+                  else ensures_frame
+                in
+                match clause_value context frame_for_clause clause with
+                | _, term ->
+                    (* A pure call's [ensures], where its [requires] holds, is a
                    fact of mathematics, true whether or not a quantifier's
                    body around it runs. *)
-                state (L.( ==> ) (required_by part) term))
-          part.ensures)
-      (* A yielding method's clauses are about each part it hands out and
+                    state (L.( ==> ) (required_by part) term))
+            part.ensures)
+        (* A yielding method's clauses are about each part it hands out and
          how it ends, which each pull of the cursor it makes meets. *)
-      (if contract.result_kind = `Yields then [] else contract.parts);
+        (if contract.result_kind = `Yields then [] else contract.parts)
+    in
+    (* A lend's clauses about the part as lent come before the check of what
+       the caller left in it, and those about how the lend ends, which read
+       that part, after. *)
+    let about_part clause = contract.result_kind <> `Lends || mentions_result clause in
+    assume_ensures about_part;
+    check_left ();
+    assume_ensures (fun clause -> not (about_part clause));
     context.instantiating <- List.tl context.instantiating
-  end;
+  end
+  else check_left ();
   (if contract.result_kind = `Yields then
      match result_type with
      | T.Cursor _ as cursor_type -> (
@@ -6613,6 +6643,8 @@ and handing_out context frame (node : statement) (mode : T.mode) (part : operand
           clauses
       in
       show each ~at:frame ~result:(Some handed) ~yielded:before ~finished:None
+        ~when_:"for the part handed out here";
+      check_valid context frame span part_type handed ~deep:true
         ~when_:"for the part handed out here";
       (* What the caller leaves in a part lent [mut] is stored back in each
          place it lends. *)
