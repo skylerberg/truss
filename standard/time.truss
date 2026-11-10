@@ -627,7 +627,7 @@ public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[
 public fn TimeZone.name(self) -> StringSlice
   cost time O(1)
 {
-  self.name
+  self.name.slice()
 }
 
 public fn TimeZone.offset_at(self, instant: Instant) -> Duration
@@ -680,7 +680,7 @@ public fn zone(name: StringSlice) -> Result[TimeZone, ZoneError]
 public opaque type Layout(parts: List[LayoutPart])
   derives Copyable
 
-public type LayoutPart =
+type LayoutPart =
   | Text(text: String)
   | Year
   | Month

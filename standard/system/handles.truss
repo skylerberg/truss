@@ -1,33 +1,38 @@
+use standard::console
+use standard::files
 use standard::intrinsic
+use standard::network
+use standard::processes
+use standard::streams
 use standard::system::calls
 
-internal fn file_error(number: Int32) -> FileError {
+internal fn file_error(number: Int32) -> SystemError {
   if number == intrinsic::libc_enoent() {
-    FileError.NotFound
+    SystemError.NotFound
   } else if number == intrinsic::libc_eacces() {
-    FileError.PermissionDenied
+    SystemError.PermissionDenied
   } else {
-    FileError.Other(code: number)
+    SystemError.Other(code: number)
   }
 }
 
-internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[Value, FileError] {
+internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[Value, SystemError] {
   match own outcome {
     Ok(value) => Ok(own value)
     Err(number) => Err(file_error(number))
   }
 }
 
-internal fn open_to_read(file: Path) -> Result[intrinsic::Handle, FileError] {
+internal fn open_to_read(file: Path) -> Result[intrinsic::Handle, SystemError] {
   with_file_error(calls::open_file(file.text.slice().bytes, flags: intrinsic::libc_o_rdonly()))
 }
 
-internal fn open_to_write_from_empty(file: Path) -> Result[intrinsic::Handle, FileError] {
+internal fn open_to_write_from_empty(file: Path) -> Result[intrinsic::Handle, SystemError] {
   let flags = intrinsic::libc_o_wronly() | intrinsic::libc_o_creat() | intrinsic::libc_o_trunc()
   with_file_error(calls::open_file(file.text.slice().bytes, flags: flags))
 }
 
-internal fn read_all(handle: mut intrinsic::Handle) -> Result[intrinsic::Storage[UInt8], FileError] {
+internal fn read_all(handle: mut intrinsic::Handle) -> Result[intrinsic::Storage[UInt8], SystemError] {
   var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
   var reading = true
   while reading {
@@ -41,6 +46,103 @@ internal fn read_all(handle: mut intrinsic::Handle) -> Result[intrinsic::Storage
   Ok(own bytes)
 }
 
-internal fn write_all(handle: mut intrinsic::Handle, bytes: intrinsic::View[UInt8]) -> Result[Unit, FileError] {
+internal fn write_all(handle: mut intrinsic::Handle, bytes: intrinsic::View[UInt8]) -> Result[Unit, SystemError] {
   with_file_error(calls::write_fully(intrinsic::handle_descriptor(handle), bytes: bytes))
+}
+
+internal type SystemHandles()
+
+impl Handles for SystemHandles {
+  fn read(self, handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn write(self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn read_at(
+    self,
+    handle: streams::Handle,
+    offset: UInt64,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn write_at(self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn seek(self, handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError] {
+    todo
+  }
+
+  fn set_length(self, handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn synchronize(self, handle: streams::Handle) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn metadata(self, handle: streams::Handle) -> Result[files::Metadata, SystemError] {
+    todo
+  }
+
+  fn close(self, handle: own streams::Handle) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn shut_down(self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn set_timeout(
+    self,
+    handle: streams::Handle,
+    direction: network::Direction,
+    timeout: Option[Duration],
+  ) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn accept(self, listener: streams::Handle) -> Result[network::Accepted, SystemError] {
+    todo
+  }
+
+  fn send_to(
+    self,
+    socket: streams::Handle,
+    bytes: Slice[UInt8],
+    address: network::SocketAddress,
+  ) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn receive_from(
+    self,
+    socket: streams::Handle,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[network::Datagram, SystemError] {
+    todo
+  }
+
+  fn wait(self, process: streams::Handle) -> Result[processes::ExitStatus, SystemError] {
+    todo
+  }
+
+  fn signal(self, process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn terminal_size(self, terminal: streams::Handle) -> Result[console::Size, SystemError] {
+    todo
+  }
+
+  fn set_raw_mode(self, terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError] {
+    todo
+  }
 }

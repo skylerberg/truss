@@ -1,24 +1,40 @@
-use standard::capabilities
+use standard::files
 use standard::system::handles
 use standard::system::lines
 
 internal type SystemFileRead()
 
 impl FileRead for SystemFileRead {
-  fn read(self, file: Path) -> Result[Bytes, FileError] {
+  fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
     var handle = handles::open_to_read(file)?
     let bytes = handles::read_all(mut handle)?
-    Ok(Bytes(data: List.from_storage(own bytes)))
+    Ok(List.from_storage(own bytes))
   }
 
-  fn read_text(self, file: Path) -> Result[String, FileError] {
+  fn read_text(self, file: Path) -> Result[String, SystemError] {
     var handle = handles::open_to_read(file)?
     let bytes = handles::read_all(mut handle)?
     Ok(String.from_bytes(own bytes))
   }
 
-  fn open(self, file: Path) -> Result[capabilities::FileReader, FileError] {
+  fn open(self, file: Path) -> Result[files::FileReader, SystemError] {
     let handle = handles::open_to_read(file)?
-    Ok(capabilities::FileReader(handle: own handle, input: lines::LineInput.new()))
+    Ok(files::FileReader(handle: own handle, input: lines::LineInput.new()))
+  }
+
+  fn metadata(self, path: Path, follow_links: Bool) -> Result[files::Metadata, SystemError] {
+    todo
+  }
+
+  fn list(self, directory: Path) -> Result[List[files::DirectoryEntry], SystemError] {
+    todo
+  }
+
+  fn read_link(self, link: Path) -> Result[Path, SystemError] {
+    todo
+  }
+
+  fn resolve(self, path: Path) -> Result[Path, SystemError] {
+    todo
   }
 }

@@ -1,26 +1,44 @@
-use standard::capabilities
+use standard::files
 use standard::system::handles
 
 internal type SystemFileWrite()
 
 impl FileWrite for SystemFileWrite {
-  fn write(self, file: Path, contents: Bytes) -> Result[Unit, FileError] {
+  fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
     var handle = handles::open_to_write_from_empty(file)?
-    handles::write_all(mut handle, bytes: contents.data.elements())
+    handles::write_all(mut handle, bytes: contents.elements)
   }
 
-  fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, FileError] {
+  fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
     var handle = handles::open_to_write_from_empty(file)?
     handles::write_all(mut handle, bytes: contents.bytes)
   }
 
-  fn write_with(
-    self,
-    file: Path,
-    write: (fn(mut capabilities::FileWriter) -> Result[Unit, FileError] uses FileWrite),
-  ) -> Result[Unit, FileError] {
-    let handle = handles::open_to_write_from_empty(file)?
-    var writer = capabilities::FileWriter(handle: own handle)
-    write(mut writer)
+  fn open(self, file: Path, mode: files::WriteMode) -> Result[files::File, SystemError] {
+    todo
+  }
+
+  fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn remove(self, path: Path) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn rename(self, from: Path, to: Path) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn link(self, target: Path, link: Path, kind: files::LinkKind) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn set_permissions(self, path: Path, permissions: files::Permissions) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn set_modified(self, path: Path, time: Instant) -> Result[Unit, SystemError] {
+    todo
   }
 }

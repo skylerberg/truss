@@ -15,7 +15,7 @@ public type Platform(
 public type Variable(name: String, value: String)
 
 public type Location = Home | Temporary | Executable | Configuration | Cache | Data
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 public opaque type FixedEnvironment(
   variables: Map[String, String],

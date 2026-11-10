@@ -1,3 +1,4 @@
+use standard::console
 use standard::system::calls
 use standard::system::lines
 
@@ -8,6 +9,10 @@ internal fn SystemConsole.new() -> SystemConsole {
 }
 
 impl Console for SystemConsole {
+  fn print(self, text: StringSlice) {
+    let _ = calls::write_fully(1, bytes: text.bytes)
+  }
+
   fn print_line(self, text: StringSlice) {
     let _ = calls::write_fully(1, bytes: text.bytes)
     let _ = calls::write_fully(1, bytes: "\n".slice().bytes)
@@ -23,5 +28,21 @@ impl Console for SystemConsole {
       Ok(line) => line
       Err(_) => None
     }
+  }
+
+  fn input(self) -> console::Input {
+    todo
+  }
+
+  fn output(self) -> console::Output {
+    todo
+  }
+
+  fn error_output(self) -> console::Output {
+    todo
+  }
+
+  fn terminal(self) -> Option[console::Terminal] {
+    todo
   }
 }

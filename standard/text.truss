@@ -355,7 +355,7 @@ public fn String.capacity(self) -> USize
 public fn String.reserve(mut self, additional: USize)
   ensures identical(self.model(), old(self.model()))
 {
-  intrinsic::storage_reserve(mut self.storage, additional: additional)
+  growth::reserve(mut self.storage, additional: additional)
 }
 
 public fn String.clear(mut self)

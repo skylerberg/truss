@@ -10,7 +10,12 @@ let in_standard modules : Path.module_ = { package = standard; modules }
 
 (* Types, traits, and capabilities, each with the module that defines it. *)
 let types =
-  List.map (fun builtin -> (Intrinsic.builtin_name builtin, Intrinsic.module_)) Intrinsic.builtins
+  List.filter_map
+    (fun (builtin : Intrinsic.builtin) ->
+      match builtin with
+      | Storage | View | Handle -> None
+      | _ -> Some (Intrinsic.builtin_name builtin, Intrinsic.module_))
+    Intrinsic.builtins
   @ List.concat_map
       (fun (modules, names) -> List.map (fun name -> (name, in_standard modules)) names)
       [
@@ -40,12 +45,9 @@ let types =
             "Iterable";
             "Cursor";
             "Range";
-            "Indexed";
-            "Pair";
             "ExitCode";
           ] );
-        ( [ "text" ],
-          [ "String"; "StringSlice"; "TextBuilder"; "FromTemplate"; "Template"; "Literal" ] );
+        ([ "text" ], [ "String"; "StringSlice"; "TextBuilder"; "FromTemplate"; "Template" ]);
         ([ "list" ], [ "List"; "Slice" ]);
         ([ "specification" ], [ "Sequence"; "FiniteSet"; "FiniteMap"; "Multiset" ]);
         ([ "map" ], [ "Map" ]);
@@ -57,18 +59,19 @@ let types =
             "FileWrite";
             "NetworkClient";
             "NetworkServer";
+            "Handles";
             "Clock";
             "Random";
             "Environment";
             "Processes";
+            "Signals";
             "Tasks";
+            "Log";
             "Panic";
-            "Instant";
-            "Duration";
-            "Path";
-            "Bytes";
-            "FileError";
+            "SystemError";
           ] );
+        ([ "time" ], [ "Instant"; "Duration" ]);
+        ([ "files" ], [ "Path" ]);
       ]
 
 (* The variants written bare everywhere, with the type they belong to. *)

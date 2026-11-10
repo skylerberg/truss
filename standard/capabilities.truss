@@ -1,38 +1,97 @@
-use standard::intrinsic
-use standard::system::handles
-use standard::system::lines
+use standard::console
+use standard::environment
+use standard::files
+use standard::log
+use standard::network
+use standard::processes
+use standard::streams
 
 public capability Console {
+  fn print(text: StringSlice)
   fn print_line(text: StringSlice)
   fn print_error(text: StringSlice)
   fn read_line() -> Option[String]
+  fn input() -> console::Input
+  fn output() -> console::Output
+  fn error_output() -> console::Output
+  fn terminal() -> Option[console::Terminal]
 }
 
 public capability FileRead {
-  fn read(file: Path) -> Result[Bytes, FileError]
-  fn read_text(file: Path) -> Result[String, FileError]
-  fn open(file: Path) -> Result[FileReader, FileError]
+  fn read(file: Path) -> Result[List[UInt8], SystemError]
+  fn read_text(file: Path) -> Result[String, SystemError]
+  fn open(file: Path) -> Result[files::FileReader, SystemError]
+  fn metadata(path: Path, follow_links: Bool = true) -> Result[files::Metadata, SystemError]
+  fn list(directory: Path) -> Result[List[files::DirectoryEntry], SystemError]
+  fn read_link(link: Path) -> Result[Path, SystemError]
+  fn resolve(path: Path) -> Result[Path, SystemError]
 }
 
 public capability FileWrite {
-  fn write(file: Path, contents: Bytes) -> Result[Unit, FileError]
-  fn write_text(file: Path, contents: StringSlice) -> Result[Unit, FileError]
-  fn write_with(
-    file: Path,
-    write: (fn(mut FileWriter) -> Result[Unit, FileError] uses FileWrite),
-  ) -> Result[Unit, FileError]
+  fn write(file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError]
+  fn write_text(file: Path, contents: StringSlice) -> Result[Unit, SystemError]
+  fn open(file: Path, mode: files::WriteMode) -> Result[files::File, SystemError]
+  fn create_directory(directory: Path) -> Result[Unit, SystemError]
+  fn remove(path: Path) -> Result[Unit, SystemError]
+  fn rename(from: Path, to: Path) -> Result[Unit, SystemError]
+  fn link(target: Path, link: Path, kind: files::LinkKind) -> Result[Unit, SystemError]
+  fn set_permissions(path: Path, permissions: files::Permissions) -> Result[Unit, SystemError]
+  fn set_modified(path: Path, time: Instant) -> Result[Unit, SystemError]
 }
 
 public capability NetworkClient {
-  fn connect(host: StringSlice, port: UInt16) -> Result[Bytes, FileError]
+  fn resolve(host: StringSlice) -> Result[List[network::IpAddress], SystemError]
+  fn connect(address: network::SocketAddress, timeout: Option[Duration]) -> Result[network::Connection, SystemError]
+  fn open_datagram() -> Result[network::DatagramSocket, SystemError]
 }
 
 public capability NetworkServer {
-  fn listen(port: UInt16) -> Result[Unit, FileError]
+  fn listen(address: network::SocketAddress) -> Result[network::Listener, SystemError]
+  fn bind_datagram(address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError]
+}
+
+public capability Handles {
+  fn read(handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+  fn write(handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+  fn read_at(
+    handle: streams::Handle,
+    offset: UInt64,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[USize, SystemError]
+  fn write_at(handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+  fn seek(handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError]
+  fn set_length(handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError]
+  fn synchronize(handle: streams::Handle) -> Result[Unit, SystemError]
+  fn metadata(handle: streams::Handle) -> Result[files::Metadata, SystemError]
+  fn close(handle: own streams::Handle) -> Result[Unit, SystemError]
+  fn shut_down(handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError]
+  fn set_timeout(
+    handle: streams::Handle,
+    direction: network::Direction,
+    timeout: Option[Duration],
+  ) -> Result[Unit, SystemError]
+  fn accept(listener: streams::Handle) -> Result[network::Accepted, SystemError]
+  fn send_to(
+    socket: streams::Handle,
+    bytes: Slice[UInt8],
+    address: network::SocketAddress,
+  ) -> Result[USize, SystemError]
+  fn receive_from(
+    socket: streams::Handle,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[network::Datagram, SystemError]
+  fn wait(process: streams::Handle) -> Result[processes::ExitStatus, SystemError]
+  fn signal(process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError]
+  fn terminal_size(terminal: streams::Handle) -> Result[console::Size, SystemError]
+  fn set_raw_mode(terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError]
 }
 
 public capability Clock {
   fn now() -> Instant
+  fn monotonic() -> Duration
+  fn sleep(duration: Duration)
 }
 
 public capability Random {
@@ -41,76 +100,66 @@ public capability Random {
 
 public capability Environment {
   fn variable(name: StringSlice) -> Option[String]
+  fn variables() -> List[environment::Variable]
+  fn current_directory() -> Result[Path, SystemError]
+  fn platform() -> environment::Platform
+  fn location(location: environment::Location) -> Option[Path]
+  fn local_zone() -> Option[String]
+  fn zone_rules(name: StringSlice) -> Option[List[UInt8]]
 }
 
 public capability Processes {
-  fn run(program: Path, arguments: List[String]) -> Result[ExitCode, FileError]
+  fn run(command: processes::Command) -> Result[processes::Output, SystemError]
+  fn spawn(command: processes::Command) -> Result[processes::Child, SystemError]
+}
+
+public capability Signals {
+  fn wait(signals: Slice[processes::Signal]) -> processes::Signal
 }
 
 public capability Tasks {
   fn yield_now()
 }
 
+public capability Log {
+  fn record(record: log::Record)
+  fn enabled(level: log::Level) -> Bool
+}
+
 public capability Panic {
   fn crash(message: StringSlice) -> Never
 }
 
-public type Instant(nanoseconds: Int64)
-  derives Equal, Hash, Ordered
-
-public let Instant.epoch: Instant = Instant(nanoseconds: 0)
-
-impl Display for Instant {
-  fn display(self, output: mut TextBuilder) {
-    self.nanoseconds.display(mut output)
-  }
-}
-
-public type Duration(nanoseconds: Int64)
-  derives Equal, Hash, Ordered
-
-impl Display for Duration {
-  fn display(self, output: mut TextBuilder) {
-    self.nanoseconds.display(mut output)
-    mut output.write("ns")
-  }
-}
-
-public opaque type Path(text: String)
-  derives Copyable
-
-public fn Path.new(text: StringSlice) -> Path {
-  Path(text: text.to_string())
-}
-
-public type Bytes(data: List[UInt8])
-
-public opaque type FileReader(handle: intrinsic::Handle, input: lines::LineInput)
-
-public fn FileReader.read_line(mut self) -> Result[String, FileError]
-  uses FileRead
-{
-  match mut self.input.next_line(intrinsic::handle_descriptor(self.handle)) {
-    Ok(line) => {
-      match own line {
-        Some(text) => Ok(own text)
-        None => Ok("")
-      }
-    }
-    Err(number) => Err(handles::file_error(number))
-  }
-}
-
-public opaque type FileWriter(handle: intrinsic::Handle)
-
-public fn FileWriter.write(mut self, text: StringSlice) -> Result[Unit, FileError]
-  uses FileWrite
-{
-  handles::write_all(mut self.handle, bytes: text.bytes)
-}
-
-public type FileError =
+public type SystemError =
   | NotFound
   | PermissionDenied
+  | AlreadyExists
+  | NotADirectory
+  | IsADirectory
+  | DirectoryNotEmpty
+  | InvalidInput
+  | InvalidData
+  | UnexpectedEnd
+  | Interrupted
+  | TimedOut
+  | BrokenPipe
+  | ConnectionRefused
+  | ConnectionReset
+  | ConnectionAborted
+  | NotConnected
+  | AddressInUse
+  | AddressNotAvailable
+  | HostNotFound
+  | Unreachable
+  | OutOfStorage
+  | TooManyOpen
+  | Unsupported
+  | Closed
   | Other(code: Int32)
   derives Equal
+
+impl Display for SystemError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}

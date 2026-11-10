@@ -1,3 +1,5 @@
+use standard::core
+
 public opaque type Skip[Source: Cursor](source: Source, left: USize)
 
 impl Cursor for Skip[Source: Cursor] {
@@ -45,9 +47,9 @@ impl Cursor for Chain[First: Cursor, Second: Cursor[Element = First.Element]] {
 public opaque type Zip[First: Cursor, Second: Cursor](first: First, second: Second)
 
 impl Cursor for Zip[First: Cursor, Second: Cursor] {
-  type Element = Pair[First.Element, Second.Element]
+  type Element = core::Pair[First.Element, Second.Element]
 
-  fn next(mut self) -> Option[Pair[First.Element, Second.Element]] {
+  fn next(mut self) -> Option[core::Pair[First.Element, Second.Element]] {
     todo
   }
 }
@@ -55,9 +57,9 @@ impl Cursor for Zip[First: Cursor, Second: Cursor] {
 public opaque type Enumerate[Source: Cursor](source: Source, index: USize)
 
 impl Cursor for Enumerate[Source: Cursor] {
-  type Element = Indexed[Source.Element]
+  type Element = core::Indexed[Source.Element]
 
-  fn next(mut self) -> Option[Indexed[Source.Element]] {
+  fn next(mut self) -> Option[core::Indexed[Source.Element]] {
     todo
   }
 }

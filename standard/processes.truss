@@ -1,4 +1,5 @@
 use standard::streams
+use standard::text
 
 public opaque type Command(
   program: String,
@@ -97,13 +98,13 @@ public fn Command.error_output(own self, error_output: Redirect) -> Command {
 public fn Command.program(self) -> StringSlice
   cost time O(1)
 {
-  self.program
+  self.program.slice()
 }
 
 public fn Command.argument_list(self) -> Slice[String]
   cost time O(1)
 {
-  self.arguments
+  self.arguments.slice()
 }
 
 public type ExitStatus =

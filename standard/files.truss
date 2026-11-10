@@ -1,5 +1,8 @@
 use standard::intrinsic
 use standard::streams
+use standard::system::handles
+use standard::system::lines
+use standard::text
 
 public opaque type Path(text: String)
   derives Copyable
@@ -203,17 +206,15 @@ public type WriteMode =
 public type LinkKind = Symbolic | Hard
   derives Equal
 
-public opaque type FileReader(
-  handle: intrinsic::Handle,
-  pending: intrinsic::Storage[UInt8],
-  start: USize,
-  ended: Bool,
-)
+public opaque type FileReader(handle: intrinsic::Handle, input: lines::LineInput)
 
 public fn FileReader.read_line(mut self) -> Result[Option[String], SystemError]
   uses Handles
 {
-  todo
+  match mut self.input.next_line(intrinsic::handle_descriptor(self.handle)) {
+    Ok(line) => Ok(own line)
+    Err(number) => Err(handles::file_error(number))
+  }
 }
 
 public fn FileReader.lines(mut self) yields own Result[String, SystemError]
@@ -249,7 +250,7 @@ public opaque type FileWriter(handle: intrinsic::Handle)
 public fn FileWriter.write(mut self, text: StringSlice) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  handles::write_all(mut self.handle, bytes: text.bytes)
 }
 
 public fn FileWriter.write_line(mut self, text: StringSlice) -> Result[Unit, SystemError]
@@ -338,7 +339,7 @@ impl streams::Seek for File {
   }
 }
 
-public fn exists(path: Path) -> Bool
+public fn is_present(path: Path) -> Bool
   uses FileRead
 {
   FileRead.metadata(path, follow_links: true).is_ok()

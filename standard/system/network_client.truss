@@ -1,0 +1,21 @@
+use standard::network
+
+internal type SystemNetworkClient()
+
+impl NetworkClient for SystemNetworkClient {
+  fn resolve(self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
+    todo
+  }
+
+  fn connect(
+    self,
+    address: network::SocketAddress,
+    timeout: Option[Duration],
+  ) -> Result[network::Connection, SystemError] {
+    todo
+  }
+
+  fn open_datagram(self) -> Result[network::DatagramSocket, SystemError] {
+    todo
+  }
+}

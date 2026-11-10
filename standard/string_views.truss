@@ -1,3 +1,5 @@
+use standard::core
+
 public fn String.bytes(self) -> Slice[UInt8]
   ensures result.length() == self.length()
   cost time O(1)
@@ -23,7 +25,7 @@ public fn String.characters(self) yields Character
   todo
 }
 
-public fn String.characters_with_offsets(self) yields Indexed[Character]
+public fn String.characters_with_offsets(self) yields core::Indexed[Character]
   ensures result.index < self.length()
   cost time O(self.length())
 {
@@ -80,7 +82,7 @@ public fn String.get_substring(self, from: USize, to: USize) -> Option[StringSli
   self.slice().get_substring(from, to)
 }
 
-public fn String.split_at(self, offset: USize) -> Pair[StringSlice, StringSlice]
+public fn String.split_at(self, offset: USize) -> core::Pair[StringSlice, StringSlice]
   requires offset <= self.length()
   requires self.is_boundary(offset)
   ensures result.first.length() == offset
@@ -211,7 +213,7 @@ public fn String.split_whitespace(self) yields StringSlice
   todo
 }
 
-public fn String.split_once(self, separator: StringSlice) -> Option[Pair[StringSlice, StringSlice]]
+public fn String.split_once(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
   requires separator.length() > 0
   ensures (result is Some(_)) == self.contains(separator)
   cost time O(self.length() + separator.length())
@@ -219,7 +221,7 @@ public fn String.split_once(self, separator: StringSlice) -> Option[Pair[StringS
   self.slice().split_once(separator)
 }
 
-public fn String.split_once_last(self, separator: StringSlice) -> Option[Pair[StringSlice, StringSlice]]
+public fn String.split_once_last(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
   requires separator.length() > 0
   ensures (result is Some(_)) == self.contains(separator)
   cost time O(self.length() + separator.length())

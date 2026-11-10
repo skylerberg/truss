@@ -1,3 +1,5 @@
+use standard::core
+
 public type SplitFirst[Element](first: Element, rest: Slice[Element])
 
 public type SplitLast[Element](last: Element, rest: Slice[Element])
@@ -39,7 +41,7 @@ public fn Slice[Element].split_last(self) lends Option[SplitLast[Element]]
   todo
 }
 
-public fn Slice[Element].split_at(self, index: USize) -> Pair[Slice[Element], Slice[Element]]
+public fn Slice[Element].split_at(self, index: USize) -> core::Pair[Slice[Element], Slice[Element]]
   requires index <= self.length()
   ensures result.first.length() == index
   ensures result.second.length() == self.length() - index
@@ -178,14 +180,14 @@ public fn Slice[Element: Display].join(self, separator: StringSlice) -> String
   todo
 }
 
-public fn Slice[Element].enumerate(self) yields Indexed[Element]
+public fn Slice[Element].enumerate(self) yields core::Indexed[Element]
   ensures finished ==> yielded.length() == self.length()
   cost time O(self.length())
 {
   todo
 }
 
-public fn Slice[Element].enumerate(mut self) yields mut Indexed[Element]
+public fn Slice[Element].enumerate(mut self) yields mut core::Indexed[Element]
   cost time O(self.length())
 {
   todo
@@ -226,13 +228,13 @@ public fn Slice[Element: Equal].split(self, separator: Element) yields Slice[Ele
   todo
 }
 
-public fn Slice[Element].zip[Other](self, other: Slice[Other]) yields Pair[Element, Other]
+public fn Slice[Element].zip[Other](self, other: Slice[Other]) yields core::Pair[Element, Other]
   cost time O(self.length())
 {
   todo
 }
 
-public fn Slice[Element].zip[Other](mut self, other: mut Slice[Other]) yields mut Pair[Element, Other]
+public fn Slice[Element].zip[Other](mut self, other: mut Slice[Other]) yields mut core::Pair[Element, Other]
   cost time O(self.length())
 {
   todo

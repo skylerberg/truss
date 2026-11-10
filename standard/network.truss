@@ -1,4 +1,3 @@
-use standard::core
 use standard::streams
 use standard::text
 

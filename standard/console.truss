@@ -43,9 +43,9 @@ public fn Terminal.set_raw_mode(mut self, enabled: Bool) -> Result[Unit, SystemE
   todo
 }
 
-public fn with_raw_mode[Output, capability Granted](
-  run: (fn() -> Output uses Granted),
-) -> Result[Output, SystemError]
+public fn with_raw_mode[Returned, capability Granted](
+  run: (fn() -> Returned uses Granted),
+) -> Result[Returned, SystemError]
   uses Console, Handles, Granted
 {
   todo
@@ -74,7 +74,7 @@ public type Color =
   | BrightMagenta
   | BrightCyan
   | BrightWhite
-  | Indexed(index: UInt8)
+  | Palette(index: UInt8)
   | TrueColor(red: UInt8, green: UInt8, blue: UInt8)
   derives Equal
 
@@ -114,13 +114,13 @@ public fn CapturedConsole.new(input: own List[String] = []) -> CapturedConsole {
 public fn CapturedConsole.output(self) -> StringSlice
   cost time O(1)
 {
-  self.output
+  self.output.slice()
 }
 
 public fn CapturedConsole.errors(self) -> StringSlice
   cost time O(1)
 {
-  self.errors
+  self.errors.slice()
 }
 
 impl Console for CapturedConsole {

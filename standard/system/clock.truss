@@ -11,6 +11,14 @@ impl Clock for SystemClock {
       seconds: mut seconds,
       nanoseconds: mut nanoseconds,
     )
-    Instant(nanoseconds: seconds * 1000000000 + nanoseconds)
+    Instant.from_unix_nanoseconds(seconds * 1000000000 + nanoseconds)
+  }
+
+  fn monotonic(self) -> Duration {
+    todo
+  }
+
+  fn sleep(self, duration: Duration) {
+    todo
   }
 }
