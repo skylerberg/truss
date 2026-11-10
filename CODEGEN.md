@@ -1576,7 +1576,9 @@ so upgrading clang recompiles objects but invalidates no test result.
 - **Object files are cached by their key,** each written under a temporary
   name and renamed into place, so a build that stops partway leaves no
   broken object. Files that need compiling are compiled in parallel, across
-  the machine's cores.
+  the machine's cores. An object that a build finds is given the present
+  time, so a cache that drops objects by age drops those no build has used
+  for that long, and never one that is still in use.
 - **Every build compiles one C file per instance.** The C compiler runs
   once for each instance whose C changed, in parallel across cores, and
   each instance is an external function of its own file.
