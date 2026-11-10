@@ -187,45 +187,6 @@ let check_main state (signature : T.signature) span =
   if not (list_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
     report state Main_signature span main_message
 
-(* Defaults are constant expressions that name no parameter. *)
-let rec constant_expression state (resolved : Resolve.resolved) (value : expression) =
-  let recurse = constant_expression state resolved in
-  match value.kind with
-  | Integer _ | Float _ | True | False -> true
-  | String literal -> literal.rest = []
-  | Parenthesized inner | Prefix (_, inner) -> recurse inner
-  | Binary { left; right; _ } -> recurse left && recurse right
-  | Name path -> (
-      match resolved.names.(path.last.id) with
-      | Some (Definition _ | Variant _) -> true
-      | Some (Local _ | Type_parameter _ | Capability_parameter _ | Value_parameter _) -> false
-      | _ -> true)
-  | Member (base, _) -> recurse base
-  | Bracket (base, items) ->
-      recurse base
-      && List.for_all (function Item item -> recurse item | Item_constraint _ -> true) items
-  | Call (callee, arguments) ->
-      (* Building a record or variant, never running code: an UpperCamelCase
-         name before the parentheses. *)
-      let builds =
-        match callee.kind with
-        | Name path ->
-            String.length path.last.text > 0
-            && Char.uppercase_ascii path.last.text.[0] = path.last.text.[0]
-        | Member (_, member) -> Char.uppercase_ascii member.text.[0] = member.text.[0]
-        | _ -> false
-      in
-      builds && List.for_all (fun (argument : argument) -> recurse argument.value) arguments
-  | List items -> List.for_all recurse items
-  | Map entries -> List.for_all (fun (key, item) -> recurse key && recurse item) entries
-  | _ -> false
-
-let check_default state resolved (value : expression) =
-  if not (constant_expression state resolved value) then
-    report state Default_not_constant value.span
-      "A default must be a constant expression: literals, arithmetic, constants, and records, \
-       variants, and collections built from them. It cannot call a function or name a parameter."
-
 (* Types *)
 
 let check_duplicates state what (names : name list) =
@@ -797,27 +758,13 @@ let check state =
             | Plain_name name ->
                 if name.text = "main" && state.key.module_.modules = [ "main" ] then
                   check_main state lowered name.span);
-            List.iter
-              (fun (parameter : parameter) ->
-                match parameter.kind with
-                | Named_parameter { default = Some value; _ } -> check_default state resolved value
-                | _ -> ())
-              signature.parameters;
             let span =
               match signature.name with Plain_name name | Member_name (_, name) -> name.span
             in
             check_private_in_public state (signature_types lowered) span
         | Type_definition { name; body; clauses; _ }, Type_interface interface ->
             (match body with
-            | Fields fields ->
-                check_duplicates state "field" (field_names fields);
-                List.iter
-                  (fun (field : field) ->
-                    match field.kind with
-                    | Field_declaration { default = Some value; _ } ->
-                        check_default state resolved value
-                    | _ -> ())
-                  fields
+            | Fields fields -> check_duplicates state "field" (field_names fields)
             | Variants variants ->
                 check_duplicates state "variant"
                   (List.map (fun (variant : variant) -> variant.name) variants);

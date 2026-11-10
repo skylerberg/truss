@@ -968,4 +968,71 @@ let () =
           }\n")
         "types.unsatisfied_bound")
 
+(* Constant expressions *)
+
+let point = "type Point(x: Int64, y: Int64)\n\n"
+
+let () =
+  test "a constant is built from literals, operators on numbers, and other constants" (fun () ->
+      fine
+        "let small: UInt8 = 200 + 55\n\n\
+         let lowest: Int8 = -128\n\n\
+         let is_small: Bool = small < 10 && !(small == 4)\n");
+  test "a constant builds records, variants, and collections of constants" (fun () ->
+      fine
+        (point
+       ^ "let origin: Point = Point(x: 1, y: 2 * 3)\n\n\
+          let points: List[Point] = [origin, Point(x: 0, y: 0)]\n\n\
+          let no_point: Option[Point] = None\n\n\
+          let wrapped: Option[Int64] = Some(4)\n\n\
+          let first: Int64 = origin.x\n\n\
+          let epoch: Instant = Instant.epoch\n"));
+  test "a constant cannot call a function" (fun () ->
+      one_diagnostic "fn compute() -> Int64 {\n  1\n}\n\nlet computed: Int64 = compute()\n"
+        "types.not_constant");
+  test "a constant cannot call a capability" (fun () ->
+      one_diagnostic "let started: Instant = Clock.now()\n" "types.not_constant");
+  test "a constant cannot call a method" (fun () ->
+      one_diagnostic "let length: USize = \"four\".length()\n" "types.not_constant");
+  test "a constant cannot index a collection" (fun () ->
+      one_diagnostic "let numbers: List[Int64] = [1, 2]\n\nlet first: Int64 = numbers[0]\n"
+        "types.not_constant");
+  test "a constant cannot branch" (fun () ->
+      one_diagnostic "let chosen: Int64 = if true { 1 } else { 2 }\n" "types.not_constant");
+  test "a constant cannot use an operator that a type defines" (fun () ->
+      one_diagnostic "let greeting: String = \"a\"\n\nlet same: Bool = greeting == greeting\n"
+        "types.not_constant");
+  test "a constant's arithmetic must stay within its type" (fun () ->
+      one_diagnostic "let size: USize = 0 - 1\n" "types.constant_overflow");
+  test "each step of a constant's arithmetic must stay within its type" (fun () ->
+      one_diagnostic "let small: UInt8 = 200 + 100 - 100\n" "types.constant_overflow");
+  test "a constant's arithmetic through another constant must stay within its type" (fun () ->
+      one_diagnostic "let most: UInt8 = 255\n\nlet more: UInt8 = most + 1\n"
+        "types.constant_overflow");
+  test "negating a constant's least value overflows" (fun () ->
+      one_diagnostic "let flipped: Int8 = -(-128)\n" "types.constant_overflow");
+  test "a constant cannot divide by zero" (fun () ->
+      one_diagnostic "let nothing: Int64 = 5 / 0\n" "types.constant_overflow");
+  test "a default must be a constant expression" (fun () ->
+      one_diagnostic "fn compute() -> Int64 {\n  1\n}\n\nfn f(count: Int64 = compute()) {}\n"
+        "types.default_not_constant");
+  test "a default cannot name a parameter" (fun () ->
+      one_diagnostic "fn f(count: Int64, twice: Int64 = count * 2) {}\n"
+        "types.default_not_constant");
+  test "a method's default must be a constant expression" (fun () ->
+      one_diagnostic
+        (point
+       ^ "fn compute() -> Int64 {\n\
+         \  1\n\
+          }\n\n\
+          fn Point.moved(self, by: Int64 = compute()) -> Int64 {\n\
+         \  self.x + by\n\
+          }\n")
+        "types.default_not_constant");
+  test "a field's default must be a constant expression" (fun () ->
+      one_diagnostic "fn compute() -> Int64 {\n  1\n}\n\ntype Settings(limit: Int64 = compute())\n"
+        "types.default_not_constant");
+  test "a field's default's arithmetic must stay within its type" (fun () ->
+      one_diagnostic "type Settings(retries: UInt8 = 250 + 10)\n" "types.constant_overflow")
+
 let () = finish ()
