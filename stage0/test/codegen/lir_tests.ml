@@ -587,6 +587,48 @@ let () =
               emit b (Assign (at status, Binary (Add, Copy (at status), Copy (at middle))));
               status);
         ]);
+  test "a view of an array has the array's elements" (fun () ->
+      let open Lir_builder in
+      let array_ty =
+        Ground.Named
+          { path = Intrinsic.builtin_path Array; arguments = [ Type int32; Value (Z.of_int 3) ] }
+      in
+      let view_ty =
+        Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type int32 ] }
+      in
+      let extra = [ (Ground.to_string view_ty, Storage.view_shape ~usize:(named "USize") int32) ] in
+      let operate b ?destination operation arguments =
+        Intrinsics.lower
+          ~value_arguments:[ Z.of_int 3 ]
+          (shape_env ~extra ()) b intrinsic_types operation ~type_arguments:[ int32 ] arguments
+          ~destination
+          ~site:{ definition = definition "entry"; line = 0; column = 1 }
+      in
+      expect_status ~extra 53
+        [
+          built_entry (fun b ->
+              let array = local b ~name:"array" (value array_ty) in
+              List.iteri
+                (fun index n ->
+                  emit b (Assign (at array / Index (usize index), Use (constant_int32 n))))
+                [ 4; 5; 6 ];
+              let view = local b ~name:"view" (value view_ty) in
+              ignore (operate b ~destination:(at view) Array_view [ Place (at array) ]);
+              let middle =
+                match operate b View_at [ Place (at view); Value (usize 1) ] with
+                | Some place -> place
+                | None -> failwith "view_at lends nothing"
+              in
+              let length = local b (value (named "USize")) in
+              ignore (operate b ~destination:(at length) View_length [ Place (at view) ]);
+              let status = local b (value int32) in
+              emit b (Assign (at status, Convert (Copy (at length), Integer Int32)));
+              emit b (Assign (at status, Binary (Add, Copy (at status), constant_int32 50)));
+              let weighted = local b (value int32) in
+              emit b (Assign (at weighted, Binary (Subtract, Copy middle, constant_int32 5)));
+              emit b (Assign (at status, Binary (Add, Copy (at status), Copy (at weighted))));
+              status);
+        ]);
   test "static storage given room is copied to the heap, where it can be pushed onto" (fun () ->
       let open Lir_builder in
       let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in

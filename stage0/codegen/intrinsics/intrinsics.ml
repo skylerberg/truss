@@ -113,6 +113,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
       own (argument 0);
       lent (element_at (place (argument 0)) (value 1))
   | View_at -> lent (Storage.view_at (place (argument 0)) (value 1))
+  | Array_at_mut -> lent (place (argument 0) / Index (value 1))
   | _ ->
       let integer_argument () =
         match (Memory_layout.of_type env (type_argument 0)).form with
@@ -160,7 +161,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
         | _ -> binary op
       in
       (match (operation : Intrinsic.operation) with
-      | Storage_at | Storage_at_mut | View_at -> ()
+      | Storage_at | Storage_at_mut | View_at | Array_at_mut -> ()
       | Add -> checked_arithmetic Add Add_overflow
       | Subtract -> checked_arithmetic Subtract Subtract_overflow
       | Multiply -> checked_arithmetic Multiply Multiply_overflow
@@ -370,6 +371,31 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
           end;
           add_to_length (at result) (Constant (Integer (USize, count)));
           set (Use (Move (at result)))
+      | Array_view ->
+          (* An array's elements are one after another from its start. An
+             array with no bytes has no address, and its view is of
+             nothing. *)
+          let count =
+            match value_arguments with
+            | [ count ] -> count
+            | _ -> bug "array_view without the array's length"
+          in
+          let array_ty : Ground.ty =
+            Named
+              {
+                path = Intrinsic.builtin_path Array;
+                arguments = [ Type (element ()); Value count ];
+              }
+          in
+          let elements : Lir.operand =
+            if (Memory_layout.of_type env array_ty).size = 0 then Constant (Bytes "")
+            else Address { place = read (argument 0) / Index (usize 0); writable = false }
+          in
+          set
+            (Storage.view
+               (Storage.view_of_elements (element ()))
+               ~elements
+               ~length:(Constant (Integer (USize, count))))
       | Storage_view ->
           let storage = place (argument 0) in
           set
