@@ -1,6 +1,7 @@
 use standard::files
 use standard::intrinsic
 use standard::system::calls
+use standard::system::directories
 use standard::system::handles
 use standard::system::lines
 
@@ -32,7 +33,7 @@ impl FileRead for SystemFileRead {
   }
 
   fn list(self, directory: Path) -> Result[List[files::DirectoryEntry], SystemError] {
-    todo
+    directories::entries(directory)
   }
 
   fn read_link(self, link: Path) -> Result[Path, SystemError] {

@@ -1,0 +1,180 @@
+use standard::files
+use standard::growth
+use standard::intrinsic
+use standard::system::calls
+use standard::system::handles
+
+internal fn entries(directory: Path) -> Result[List[files::DirectoryEntry], SystemError] {
+  let flags = intrinsic::libc_o_rdonly() | intrinsic::libc_o_directory()
+  let handle = handles::with_file_error(calls::open_file(directory.text.slice().bytes, flags: flags))?
+  let descriptor = intrinsic::handle_descriptor(handle)
+  var found: List[files::DirectoryEntry] = []
+  if intrinsic::system_is_macos() {
+    handles::with_file_error(entries_on_macos(descriptor, found: mut found))?
+  } else {
+    handles::with_file_error(
+      entries_on_linux(descriptor, directory: directory.text.slice().bytes, found: mut found),
+    )?
+  }
+  Ok(own found)
+}
+
+fn entries_on_linux(
+  descriptor: Int32,
+  directory: intrinsic::View[UInt8],
+  found: mut List[files::DirectoryEntry],
+) -> Result[Unit, Int32] {
+  let room: USize = 32768
+  let length_at = intrinsic::libc_dirent_length_offset()
+  let kind_at = intrinsic::libc_dirent_kind_offset()
+  let name_at = intrinsic::libc_dirent_name_offset()
+  if length_at > 64 || kind_at > 64 || name_at > 64 {
+    return Err(intrinsic::libc_enosys())
+  }
+  var reading = true
+  while reading {
+    var block: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
+    let got = intrinsic::libc_getdents64(descriptor, buffer: mut block, count: room)
+    if got < 0 {
+      if !calls::interrupted_by_signal() {
+        return Err(intrinsic::libc_errno())
+      }
+    } else if got == 0 {
+      reading = false
+    } else {
+      let filled: USize = intrinsic::convert(got)
+      intrinsic::storage_lengthen(mut block, by: filled)
+      let bytes = intrinsic::storage_view(block)
+      var start: USize = 0
+      while start < filled
+        invariant start <= filled
+      {
+        let stated = calls::number_at(bytes, offset: start + length_at, size: 2)
+        if stated > 32768 {
+          return Err(intrinsic::libc_eio())
+        }
+        let length: USize = intrinsic::convert(stated)
+        if length <= name_at || length > filled - start {
+          return Err(intrinsic::libc_eio())
+        }
+        let name = calls::before_zero_byte(
+          intrinsic::view_slice(bytes, start: start + name_at, stop: start + length),
+        )
+        let stated_kind = calls::number_at(bytes, offset: start + kind_at, size: 1)
+        let kind = if stated_kind == intrinsic::libc_dt_reg() {
+          files::FileKind.File
+        } else if stated_kind == intrinsic::libc_dt_dir() {
+          files::FileKind.Directory
+        } else if stated_kind == intrinsic::libc_dt_lnk() {
+          files::FileKind.SymbolicLink
+        } else if stated_kind == intrinsic::libc_dt_unknown() {
+          kind_by_status(directory, name: intrinsic::storage_view(name))
+        } else {
+          files::FileKind.Other
+        }
+        add(mut found, name: own name, kind: kind)
+        start += length
+      }
+    }
+  }
+  Ok(Unit)
+}
+
+fn entries_on_macos(descriptor: Int32, found: mut List[files::DirectoryEntry]) -> Result[Unit, Int32] {
+  let attributes = intrinsic::libc_attr_cmn_returned_attrs()
+    | intrinsic::libc_attr_cmn_name()
+    | intrinsic::libc_attr_cmn_objtype()
+  var wanted: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+  calls::add_number(mut wanted, number: intrinsic::libc_attr_bit_map_count(), size: 2)
+  calls::add_number(mut wanted, number: 0, size: 2)
+  calls::add_number(mut wanted, number: attributes, size: 4)
+  calls::add_number(mut wanted, number: 0, size: 8)
+  calls::add_number(mut wanted, number: 0, size: 8)
+  let room: USize = 32768
+  var block: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
+  for _ in 0..room
+    invariant intrinsic::storage_length(block) == yielded.length()
+    invariant intrinsic::storage_capacity(block) == room
+  {
+    intrinsic::storage_push(mut block, value: 0)
+  }
+  var reading = true
+  while reading
+    invariant intrinsic::storage_length(block) == room
+    invariant intrinsic::storage_length(wanted) == 24
+  {
+    let count = intrinsic::libc_getattrlistbulk(
+      descriptor,
+      wanted: intrinsic::storage_view(wanted),
+      buffer: mut block,
+      size: room,
+      options: 0,
+    )
+    if count < 0 {
+      if !calls::interrupted_by_signal() {
+        return Err(intrinsic::libc_errno())
+      }
+    } else if count == 0 {
+      reading = false
+    } else {
+      let bytes = intrinsic::storage_view(block)
+      var start: USize = 0
+      var index: Int32 = 0
+      while index < count && start < room
+        invariant start <= room
+      {
+        let stated = calls::number_at(bytes, offset: start, size: 4)
+        let name_from = calls::number_at(bytes, offset: start + 24, size: 4)
+        let name_size = calls::number_at(bytes, offset: start + 28, size: 4)
+        if stated < 36 || stated > 32768 || name_from > 32768 || name_size > 32768 {
+          return Err(intrinsic::libc_eio())
+        }
+        let length: USize = intrinsic::convert(stated)
+        let name_start: USize = start + 24 + intrinsic::convert(name_from)
+        let name_stop: USize = name_start + intrinsic::convert(name_size)
+        if length > room - start || name_stop > start + length {
+          return Err(intrinsic::libc_eio())
+        }
+        let name = calls::before_zero_byte(intrinsic::view_slice(bytes, start: name_start, stop: name_stop))
+        let stated_kind = calls::number_at(bytes, offset: start + 32, size: 4)
+        let kind = if stated_kind == intrinsic::libc_vreg() {
+          files::FileKind.File
+        } else if stated_kind == intrinsic::libc_vdir() {
+          files::FileKind.Directory
+        } else if stated_kind == intrinsic::libc_vlnk() {
+          files::FileKind.SymbolicLink
+        } else {
+          files::FileKind.Other
+        }
+        add(mut found, name: own name, kind: kind)
+        start += length
+        index += 1
+      }
+    }
+  }
+  Ok(Unit)
+}
+
+fn add(found: mut List[files::DirectoryEntry], name: own intrinsic::Storage[UInt8], kind: files::FileKind) {
+  let bytes = intrinsic::storage_view(name)
+  let length = intrinsic::view_length(bytes)
+  let itself = length == 1 && intrinsic::view_at(bytes, index: 0) == 46
+  let parent = length == 2
+    && intrinsic::view_at(bytes, index: 0) == 46
+    && intrinsic::view_at(bytes, index: 1) == 46
+  if length > 0 && !itself && !parent {
+    mut found.push(files::DirectoryEntry(name: String.from_bytes(own name), kind: kind))
+  }
+}
+
+fn kind_by_status(directory: intrinsic::View[UInt8], name: intrinsic::View[UInt8]) -> files::FileKind {
+  var path: intrinsic::Storage[UInt8] = calls::copy_of(directory)
+  growth::push(mut path, value: 47)
+  for index in 0..intrinsic::view_length(name) {
+    growth::push(mut path, value: intrinsic::view_at(name, index: index))
+  }
+  match calls::status_of_path(intrinsic::storage_view(path), follow_links: false) {
+    Ok(status) => handles::metadata_from(intrinsic::storage_view(status)).kind
+    Err(_) => files::FileKind.Other
+  }
+}

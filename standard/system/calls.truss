@@ -421,6 +421,20 @@ internal fn before_zero_byte(bytes: intrinsic::View[UInt8]) -> intrinsic::Storag
   copy
 }
 
+internal fn add_number(bytes: mut intrinsic::Storage[UInt8], number: UInt64, size: USize)
+  requires size <= 8
+  ensures intrinsic::storage_length(bytes) == old(intrinsic::storage_length(bytes)) + size
+{
+  let before = intrinsic::storage_length(bytes)
+  var left = number
+  for _ in 0..size
+    invariant intrinsic::storage_length(bytes) == before + yielded.length()
+  {
+    growth::push(mut bytes, value: intrinsic::convert(left & 255))
+    left = left >> 8
+  }
+}
+
 internal fn copy_of(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
   let length = intrinsic::view_length(bytes)
   var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)

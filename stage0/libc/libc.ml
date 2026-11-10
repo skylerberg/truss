@@ -86,6 +86,21 @@ type number =
   | Spawn_file_actions_size
   | Sigusr1
   | Sigusr2
+  | O_directory
+  | Dirent_length_offset
+  | Dirent_kind_offset
+  | Dirent_name_offset
+  | Dt_unknown
+  | Dt_dir
+  | Dt_reg
+  | Dt_lnk
+  | Attr_bit_map_count
+  | Attr_cmn_returned_attrs
+  | Attr_cmn_name
+  | Attr_cmn_objtype
+  | Vreg
+  | Vdir
+  | Vlnk
 
 type extent =
   | Counted of { by : string; each : int }
@@ -160,6 +175,8 @@ type function_ =
   | Posix_spawn_file_actions_adddup2
   | Posix_spawn_file_actions_addopen
   | Posix_spawn_file_actions_addchdir
+  | Getdents64
+  | Getattrlistbulk
 
 let functions =
   [
@@ -210,6 +227,8 @@ let functions =
     Posix_spawn_file_actions_adddup2;
     Posix_spawn_file_actions_addopen;
     Posix_spawn_file_actions_addchdir;
+    Getdents64;
+    Getattrlistbulk;
   ]
 
 let function_name = function
@@ -260,6 +279,8 @@ let function_name = function
   | Posix_spawn_file_actions_adddup2 -> "posix_spawn_file_actions_adddup2"
   | Posix_spawn_file_actions_addopen -> "posix_spawn_file_actions_addopen"
   | Posix_spawn_file_actions_addchdir -> "posix_spawn_file_actions_addchdir"
+  | Getdents64 -> "getdents64"
+  | Getattrlistbulk -> "getattrlistbulk"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -707,6 +728,34 @@ let describe function_ =
         ]
         ~named:[ ("actions", "posix_spawn_file_actions_t *") ]
         ~headers:[ "spawn.h" ]
+  | Getdents64 ->
+      (* The next entries of a directory that is open, as many as fit: each
+         is a [struct dirent64], as long as it says it is. *)
+      row ~at_most:"count"
+        ~on:(fun os -> os = Linux)
+        (everywhere "long") (Returns ISize)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("buffer", Room (UInt8, counted "count"), everywhere "void *");
+          ("count", Value USize, size);
+        ]
+        ~headers:[ "dirent.h" ]
+  | Getattrlistbulk ->
+      (* The next entries of a directory that is open, as many as fit, and
+         how many. Each is the attributes that [wanted], a
+         [struct attrlist], asks for, in the order of their numbers. *)
+      row
+        ~on:(fun os -> os = Macos)
+        (everywhere "int") (Returns Int32)
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("wanted", Elements (UInt8, Exactly 24), everywhere "void *");
+          ("buffer", Elements_to_change (UInt8, counted "size"), everywhere "void *");
+          ("size", Value USize, size);
+          ("options", Value UInt64, everywhere "unsigned long long");
+        ]
+        ~headers:[ "sys/attr.h"; "unistd.h" ]
+        ~layout:[ "sizeof(struct attrlist) == 24" ]
 
 let available system function_ = (describe function_).on system.os
 
@@ -832,6 +881,21 @@ let numbers =
     Spawn_file_actions_size;
     Sigusr1;
     Sigusr2;
+    O_directory;
+    Dirent_length_offset;
+    Dirent_kind_offset;
+    Dirent_name_offset;
+    Dt_unknown;
+    Dt_dir;
+    Dt_reg;
+    Dt_lnk;
+    Attr_bit_map_count;
+    Attr_cmn_returned_attrs;
+    Attr_cmn_name;
+    Attr_cmn_objtype;
+    Vreg;
+    Vdir;
+    Vlnk;
   ]
 
 let number_name = function
@@ -898,6 +962,21 @@ let number_name = function
   | Spawn_file_actions_size -> "SPAWN_FILE_ACTIONS_SIZE"
   | Sigusr1 -> "SIGUSR1"
   | Sigusr2 -> "SIGUSR2"
+  | O_directory -> "O_DIRECTORY"
+  | Dirent_length_offset -> "DIRENT_LENGTH_OFFSET"
+  | Dirent_kind_offset -> "DIRENT_KIND_OFFSET"
+  | Dirent_name_offset -> "DIRENT_NAME_OFFSET"
+  | Dt_unknown -> "DT_UNKNOWN"
+  | Dt_dir -> "DT_DIR"
+  | Dt_reg -> "DT_REG"
+  | Dt_lnk -> "DT_LNK"
+  | Attr_bit_map_count -> "ATTR_BIT_MAP_COUNT"
+  | Attr_cmn_returned_attrs -> "ATTR_CMN_RETURNED_ATTRS"
+  | Attr_cmn_name -> "ATTR_CMN_NAME"
+  | Attr_cmn_objtype -> "ATTR_CMN_OBJTYPE"
+  | Vreg -> "VREG"
+  | Vdir -> "VDIR"
+  | Vlnk -> "VLNK"
 
 (* A size or an offset in a structure is a [USize], and the bits of a
    file's mode are compared with a number read out of the structure. *)
@@ -907,7 +986,12 @@ let number_type = function
       USize
   | S_ifmt | S_ifreg | S_ifdir | S_iflnk -> UInt64
   | Utime_omit -> Int64
-  | Path_max | Spawn_file_actions_size -> USize
+  | Path_max | Spawn_file_actions_size | Dirent_length_offset | Dirent_kind_offset
+  | Dirent_name_offset ->
+      USize
+  | Dt_unknown | Dt_dir | Dt_reg | Dt_lnk | Attr_bit_map_count | Attr_cmn_returned_attrs
+  | Attr_cmn_name | Attr_cmn_objtype | Vreg | Vdir | Vlnk ->
+      UInt64
   | _ -> Int32
 
 let number_headers = function
@@ -927,7 +1011,13 @@ let number_headers = function
   | Stat_modified_offset | Stat_created_offset | S_ifmt | S_ifreg | S_ifdir | S_iflnk | Utime_omit
     ->
       [ "sys/stat.h" ]
-  | At_fdcwd | F_dupfd_cloexec | F_setfd | Fd_cloexec -> [ "fcntl.h" ]
+  | At_fdcwd | F_dupfd_cloexec | F_setfd | Fd_cloexec | O_directory -> [ "fcntl.h" ]
+  | Dirent_length_offset | Dirent_kind_offset | Dirent_name_offset | Dt_unknown | Dt_dir | Dt_reg
+  | Dt_lnk ->
+      [ "dirent.h" ]
+  | Attr_bit_map_count | Attr_cmn_returned_attrs | Attr_cmn_name | Attr_cmn_objtype ->
+      [ "sys/attr.h" ]
+  | Vreg | Vdir | Vlnk -> [ "sys/vnode.h" ]
   | Path_max -> [ "limits.h" ]
 
 (* The C expression that a number is the value of, which the check compares
@@ -938,6 +1028,14 @@ let number_expression (system : system) number =
   let offset_of field = Some (Printf.sprintf "__builtin_offsetof(struct stat, %s)" field) in
   match (number, system.os) with
   | Stat_size, _ -> Some "sizeof(struct stat)"
+  | Dirent_length_offset, Linux -> Some "__builtin_offsetof(struct dirent64, d_reclen)"
+  | Dirent_kind_offset, Linux -> Some "__builtin_offsetof(struct dirent64, d_type)"
+  | Dirent_name_offset, Linux -> Some "__builtin_offsetof(struct dirent64, d_name)"
+  | (Dirent_length_offset | Dirent_kind_offset | Dirent_name_offset), Macos -> None
+  | ( ( Attr_bit_map_count | Attr_cmn_returned_attrs | Attr_cmn_name | Attr_cmn_objtype | Vreg
+      | Vdir | Vlnk ),
+      Linux ) ->
+      None
   | Spawn_file_actions_size, _ -> Some "sizeof(posix_spawn_file_actions_t)"
   | Stat_mode_offset, _ -> offset_of "st_mode"
   | Stat_mode_size, _ -> Some "sizeof(((struct stat *)0)->st_mode)"
@@ -1050,6 +1148,27 @@ let value (system : system) number =
   | Sigusr1, Macos -> 30
   | Sigusr2, Linux -> 12
   | Sigusr2, Macos -> 31
+  | O_directory, Linux -> ( match system.architecture with X86_64 -> 0x10000 | Arm64 -> 0x4000)
+  | O_directory, Macos -> 0x100000
+  | Dirent_length_offset, Linux -> 16
+  | Dirent_kind_offset, Linux -> 18
+  | Dirent_name_offset, Linux -> 19
+  | (Dirent_length_offset | Dirent_kind_offset | Dirent_name_offset), Macos -> 0
+  | Dt_unknown, (Linux | Macos) -> 0
+  | Dt_dir, (Linux | Macos) -> 4
+  | Dt_reg, (Linux | Macos) -> 8
+  | Dt_lnk, (Linux | Macos) -> 10
+  | Attr_bit_map_count, Macos -> 5
+  | Attr_cmn_returned_attrs, Macos -> 0x80000000
+  | Attr_cmn_name, Macos -> 1
+  | Attr_cmn_objtype, Macos -> 8
+  | Vreg, Macos -> 1
+  | Vdir, Macos -> 2
+  | Vlnk, Macos -> 5
+  | ( ( Attr_bit_map_count | Attr_cmn_returned_attrs | Attr_cmn_name | Attr_cmn_objtype | Vreg
+      | Vdir | Vlnk ),
+      Linux ) ->
+      0
 
 (* How many bytes a number the function reaches through an address takes,
    which the C type it is declared with must take too. [USize] has no one
@@ -1067,7 +1186,8 @@ let check system =
       (fun seen header -> if List.mem header seen then seen else seen @ [ header ])
       []
       (List.concat_map (fun function_ -> (describe function_).headers) functions
-      @ List.concat_map number_headers numbers)
+      @ List.concat_map number_headers
+          (List.filter (fun number -> number_expression system number <> None) numbers))
   in
   let holds what condition = Printf.sprintf "_Static_assert(%s, \"%s\");\n" condition what in
   (* The address is of one of the numbers, where C takes the first of
