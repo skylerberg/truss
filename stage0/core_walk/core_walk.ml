@@ -261,3 +261,34 @@ let definition_children visit = function
 
 (* Calls [visit] on every node of a definition. *)
 let definition visit found = definition_children (deep visit) found
+
+let tasks_capability : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Tasks" }
+
+(* Whether code can use [Tasks]: it has [concurrent] code, or a call in it
+   uses [Tasks] or a capability parameter, which may stand for [Tasks]. The
+   calls of an implementation that is provided [mut] around such code take
+   turns. [solved] gives what a capability variable stands for, for a core
+   form whose capability variables are not solved yet. *)
+let can_use_tasks ?(solved = fun (_ : int) : Types.capability list -> []) (body : block) : bool =
+  let found = ref false in
+  let rec used (capability : Types.capability) =
+    match capability with
+    | Capability path -> if Path.equal path tasks_capability then found := true
+    | Capability_parameter _ -> found := true
+    | Capability_variable variable -> List.iter used (solved variable)
+  in
+  block
+    (deep
+       {
+         ignore_all with
+         expression =
+           (fun node -> match node.kind with Call call -> List.iter used call.uses | _ -> ());
+         statement =
+           (fun node ->
+             match node.kind with
+             | Concurrent _ | For { mode = Concurrent_loop; _ } -> found := true
+             | _ -> ());
+       })
+    body;
+  !found

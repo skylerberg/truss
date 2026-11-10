@@ -183,6 +183,7 @@ module Code = struct
     | Not_granted
     | Provide_mark
     | Not_an_implementation
+    | Function_in_turn
 
   type prover =
     | Overflow
@@ -418,6 +419,7 @@ module Code = struct
     | Not_granted -> "not_granted"
     | Provide_mark -> "provide_mark"
     | Not_an_implementation -> "not_an_implementation"
+    | Function_in_turn -> "function_in_turn"
 
   let package_name code =
     match code with

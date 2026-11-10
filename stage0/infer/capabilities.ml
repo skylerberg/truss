@@ -33,13 +33,16 @@ let panic : T.capability =
 
 (* What [concurrent] code uses: what it does can depend on which task runs
    first. *)
-let tasks : T.capability =
-  Capability
-    (Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Tasks" })
+let tasks : T.capability = Capability Core_walk.tasks_capability
 
 (* [spans] maps a syntax node id to its span. A core node is reported at the
    span of its origin. *)
-type checking = { state : state; spans : span array }
+type checking = {
+  state : state;
+  spans : span array;
+  mutable provides : (Core.implementation list * Core.block) list;
+      (** Every [provide] of the definition: its implementations and its body. *)
+}
 
 let report checking ?(fixes = []) code (origin : Core.origin) message =
   let span = checking.spans.(origin) in
@@ -344,6 +347,7 @@ and check_provide checking scope implementations body =
         union !provided
           (List.map (fun ((found : Core.provided), _) -> T.Capability found.capability) impls))
     implementations;
+  checking.provides <- (implementations, body) :: checking.provides;
   check_block checking { scope with available = union scope.available !provided } body
 
 (* Solves the definition's capability constraints.
@@ -397,8 +401,106 @@ let solve (state : state) =
       match missing constraint_ with [] -> () | missing -> constraint_.report_missing missing)
     (List.rev state.capability_constraints)
 
+(* Whether a value of a type can call code that uses a capability: the type
+   is a function type with a [uses] clause, or an [any] type or a bounded
+   type parameter whose trait has a method with one, or it holds such a
+   type at any depth. *)
+let rec calls_with_capabilities (state : state) ~bounds ?(seen = []) (type_ : T.ty) =
+  let inside = calls_with_capabilities state ~bounds ~seen in
+  let trait_uses (trait : T.trait_reference) =
+    List.exists
+      (fun (bound : T.trait_reference) ->
+        match Query.demand state.database Environment.trait_interface bound.trait with
+        | Some interface ->
+            List.exists
+              (fun (method_ : T.trait_method) -> method_.method_signature.uses <> [])
+              interface.methods
+        | None -> false)
+      (trait :: Interface.Properties.bound_closure state.database ~self:type_ trait)
+  in
+  let arguments =
+    List.exists (function
+      | T.Type argument -> inside argument
+      | T.Value _ | T.Capabilities _ -> false)
+  in
+  match type_ with
+  | T.Function { uses; inputs; output; _ } ->
+      uses <> []
+      || List.exists (fun (_, input) -> inside input) inputs
+      || inside (match output with Returns given | Yields (_, given) | Lends (_, given) -> given)
+  | T.Any trait -> trait_uses trait
+  | T.Parameter parameter -> List.exists trait_uses (bounds parameter)
+  | T.Cursor { arguments = given; _ } -> arguments given
+  | T.Named { path; arguments = given } -> (
+      arguments given
+      || (not (List.exists (Path.equal path) seen))
+         &&
+         let inside = calls_with_capabilities state ~bounds ~seen:(path :: seen) in
+         let fields = List.exists (fun (field : T.field) -> inside field.field_type) in
+         (match Members.fields state.database path given with
+           | Some found -> fields found
+           | None -> false)
+         ||
+         match Members.variants state.database path given with
+         | Some variants ->
+             List.exists
+               (fun (variant : T.variant) -> fields (Option.value ~default:[] variant.fields))
+               variants
+         | None -> false)
+  | T.Projection _ | T.Never | T.Integer | T.Literal _ | T.Variable _ | T.Hole | T.Error _ -> false
+
+(* Where the code inside a [provide] can use [Tasks], the calls of an
+   implementation that is provided [mut] take turns: each runs from start
+   to end before the next begins. A method that is given a function that
+   uses a capability could call an implementation provided further in, and
+   two tasks could then wait for each other's turn. So such a capability
+   has no method that takes one. *)
+let check_turns checking ~solved (implementations, body) =
+  let state = checking.state in
+  if Core_walk.can_use_tasks ~solved body then
+    List.iter
+      (fun (implementation : Core.implementation) ->
+        if implementation.mode = Mut then
+          List.iter
+            (fun ((found : Core.provided), (_ : T.impl_interface)) ->
+              match Query.demand state.database Environment.trait_interface found.capability with
+              | Some capability ->
+                  List.iter
+                    (fun (method_ : T.trait_method) ->
+                      let signature = method_.method_signature in
+                      let bounds (parameter : T.parameter) =
+                        List.concat_map
+                          (fun (generic : T.generic) ->
+                            match generic.kind with
+                            | Type_generic bounds when generic.generic = parameter -> bounds
+                            | _ -> [])
+                          signature.generics
+                      in
+                      match
+                        List.find_opt
+                          (fun (parameter : T.parameter_info) ->
+                            calls_with_capabilities state ~bounds parameter.type_)
+                          signature.parameters
+                      with
+                      | Some parameter ->
+                          report checking Function_in_turn implementation.origin
+                            (Printf.sprintf
+                               "The code inside this `provide` can use `Tasks`, so the calls of \
+                                this implementation take turns. `%s.%s` is given `%s`, which can \
+                                call code that uses a capability. That code could call an \
+                                implementation that is provided further in, and two tasks could \
+                                then wait for each other's turn. Give the method the values it \
+                                needs instead."
+                               (show_capability (T.Capability found.capability))
+                               method_.method_name parameter.name)
+                      | None -> ())
+                    capability.methods
+              | None -> ())
+            (Form.capability_impls state implementation.type_))
+      implementations
+
 let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
-  let checking = { state; spans = Syntax_walk.spans state.definition } in
+  let checking = { state; spans = Syntax_walk.spans state.definition; provides = [] } in
   let function_body ?implemented_capability available =
     { available; kind = Function_body; implemented_capability }
   in
@@ -452,4 +554,12 @@ let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
   | Function { body = Some body; _ }, Theorem _, _ | Law_proof body, _, _ ->
       check_block checking (no_capabilities "a proof") body
   | _ -> ());
-  solve state
+  solve state;
+  (* Whether a [provide]'s body can use [Tasks] is known once the
+     capability variables are solved. *)
+  let solved variable =
+    match state.capability_solution with
+    | Some solution -> Option.value ~default:[] (Hashtbl.find_opt solution variable)
+    | None -> []
+  in
+  List.iter (check_turns checking ~solved) (List.rev checking.provides)
