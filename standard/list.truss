@@ -281,7 +281,15 @@ impl Iterable for Slice[Element] {
 public fn Slice[Element].each(mut self) yields mut Element
   cost time O(self.length())
 {
-  todo
+  var index: USize = 0
+  while index < self.length()
+    invariant self.length() == old(self.length())
+    invariant index <= self.length()
+    decreases self.length() - index
+  {
+    yield mut self[index]
+    index += 1
+  }
 }
 
 impl Index for List[Element] {
