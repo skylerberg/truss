@@ -790,6 +790,18 @@ let check state =
               match signature.name with Plain_name name | Member_name (_, name) -> name.span
             in
             check_private_in_public state (signature_types lowered) span
+        (* A law's proof is of a law its trait has, as a type that
+           implements the trait keeps it. *)
+        | None, Law_proof { law; type_; _ }, Law_proof_interface { trait; for_type; _ } ->
+            (match Query.demand database Summary.trait_header trait.trait with
+            | Some header when not (List.mem law.text header.laws) ->
+                report state Unknown_member law.span
+                  (Printf.sprintf "`%s` has no law `%s`." (T.show_trait trait) law.text)
+            | _ -> ());
+            if (not (T.is_error for_type)) && Option.is_none (implements state for_type trait) then
+              report state No_impl type_.span
+                (Printf.sprintf "`%s` does not implement `%s`, so it has no law of it to keep."
+                   (T.show for_type) (T.show_trait trait))
         | None, Type_definition { name; body; clauses; _ }, Type_interface interface ->
             (match body with
             | Fields fields -> check_duplicates state "field" (field_names fields)

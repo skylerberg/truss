@@ -64,9 +64,18 @@ and capability =
           what the functions passed for the parameter use, which is known once the whole definition
           is. No result that is given out holds one. *)
 
-and cost = { amortized : bool; resource : string; bound : cost_bound }
+and cost = { amortized : bool; resource : resource; bound : cost_bound }
 (** A cost clause of a function type, which cannot mention parameters. Only the prover reads its
     bound; the checker reads whether there is a [time] clause. *)
+
+(** What a function type's cost clause counts. Its [calls] counts the calls of a capability's
+    methods, or of one of them: calls through a parameter are counted in a function's own clauses,
+    which can name it. *)
+and resource =
+  | Time
+  | Allocations
+  | Allocated_bytes
+  | Calls of { capability : Path.t; method_ : string option }
 
 (** A function type's bound, which is a constant since its parameters have no names: the number,
     when it is written as one. *)

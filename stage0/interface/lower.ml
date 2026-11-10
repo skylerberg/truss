@@ -326,20 +326,54 @@ and function_type_ context (written : function_type) : T.function_type =
         (List.concat_map
            (fun (clause : clause) -> match clause.kind with Uses paths -> paths | _ -> [])
            written.clauses);
-    costs = costs written.clauses;
+    costs = costs context written.clauses;
   }
 
-and costs clauses =
+(* A function type's cost clauses. What [calls] counts there is a
+   capability's calls: a type cannot name a parameter, whose calls a
+   function's own clauses count. *)
+and costs context clauses =
+  let counted (path : path_type) (method_ : name option) : T.resource option =
+    let shown = show_path path.path in
+    match target context path.path.last with
+    | Some (Definition (Capability, capability)) -> (
+        match method_ with
+        | Some method_
+          when Query.demand context.database Resolve.Names.members (capability, method_.text) = []
+          ->
+            report context Unknown_member method_.span
+              (Printf.sprintf "`%s` has no method `%s`." shown method_.text);
+            None
+        | _ ->
+            Some
+              (Calls
+                 { capability; method_ = Option.map (fun (method_ : name) -> method_.text) method_ })
+        )
+    | Some (Unknown _) -> None
+    | _ ->
+        report context Not_a_capability path.span
+          (Printf.sprintf "`calls` counts the calls of a capability, and `%s` is not one." shown);
+        None
+  in
   List.filter_map
     (fun (clause : clause) ->
       match clause.kind with
       | Cost cost ->
-          let resource =
+          let resource : T.resource option =
             match cost.resource with
-            | Time -> "time"
-            | Allocations -> "allocations"
-            | Allocated_bytes -> "allocated_bytes"
-            | Calls _ -> "calls"
+            | Time -> Some Time
+            | Allocations -> Some Allocations
+            | Allocated_bytes -> Some Allocated_bytes
+            | Calls (Call_capability path) -> counted path None
+            | Calls (Call_method (path, method_)) -> counted path (Some method_)
+            | Calls (Call_parameter name) ->
+                report context Not_a_capability name.span
+                  (Printf.sprintf
+                     "A function type's `calls` counts the calls of a capability, as in \
+                      `calls(FileRead)`: a type cannot name `%s`. Calls through a parameter are \
+                      counted in a function's own clauses."
+                     name.text);
+                None
           in
           let constant (value : expression) =
             match value.kind with Integer value -> Some value | _ -> None
@@ -351,7 +385,7 @@ and costs clauses =
             | At_most value -> No_more_than (constant value)
             | Exactly value -> Exactly_cost (constant value)
           in
-          Some { T.amortized = cost.amortized; resource; bound }
+          Option.map (fun resource -> { T.amortized = cost.amortized; resource; bound }) resource
       | _ -> None)
     clauses
 

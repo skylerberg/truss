@@ -445,6 +445,21 @@ let () =
           | _ -> fail "no form")
         (Query.demand database Resolve.Names.declarations (module_of "app::main")))
 
+let () =
+  shows "a cost clause says what it counts"
+    "fn g(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
+    \  uses Clock\n\
+    \  cost calls(visit) == items.length()\n\
+    \  cost calls(Clock.now) <= 1\n\
+    \  cost time O(items.length() * time(visit))\n\
+     {\n\
+     }\n"
+    "fn(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
+     cost calls(visit) == standard::list::List.length[Int64](place items)\n\
+     cost calls(standard::capabilities::Clock.now) <= 1\n\
+     cost time O(multiply(to_integer(standard::list::List.length[Int64](place items)), time(visit)))\n\
+     {  }"
+
 (* Every form of the standard library holds together. *)
 
 let () =

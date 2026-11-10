@@ -89,6 +89,10 @@ let clause_expressions (clauses : clause list) =
 let check_clauses state env (clauses : clause list) =
   let env = { env with specification = true } in
   List.iter
+    (fun (clause : clause) ->
+      match clause.kind with Cost { resource; _ } -> check_resource state resource | _ -> ())
+    clauses;
+  List.iter
     (fun ((value : expression), kind) ->
       in_statement state env value.span (fun () ->
           match kind with
@@ -146,18 +150,6 @@ let check_defaults state env (written : parameter list) (signature : T.signature
 
 (* The core form of a definition's parts *)
 
-let core_cost state ({ amortized; resource; bound } : cost) : Core.cost =
-  {
-    amortized;
-    resource;
-    bound =
-      (match bound with
-      | Finite -> Finite
-      | Big_o value -> Order_of (built state value)
-      | At_most value -> At_most (built state value)
-      | Exactly value -> Exactly (built state value));
-  }
-
 let core_contract state (clauses : clause list) : Core.contract =
   let each choose = List.concat_map (fun (clause : clause) -> choose clause.kind) clauses in
   let requires =
@@ -175,7 +167,13 @@ let core_contract state (clauses : clause list) : Core.contract =
     requires;
     ensures;
     decreases;
-    costs = each (function Cost cost -> [ core_cost state cost ] | _ -> []);
+    costs =
+      List.filter_map
+        (fun (clause : clause) ->
+          match clause.kind with
+          | Cost cost -> Some (Form.cost state ~origin:clause.id cost)
+          | _ -> None)
+        clauses;
   }
 
 (* The parameters as the body names them: [self] first when there is one,

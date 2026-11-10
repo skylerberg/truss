@@ -640,6 +640,50 @@ let error_at state ?fixes code (value : expression) message =
   | Some { target = Unknown report; _ } -> T.Error report
   | _ -> error state ?fixes code value.span message
 
+(* What a [calls] clause counts must be something whose calls can be
+   counted: a parameter that is a function, a capability, or one of a
+   capability's methods. *)
+let check_resource state (resource : Syntax.resource) =
+  let capability (path : path_type) (method_ : name option) =
+    let shown = Names.spell_path path.path in
+    match target state path.path.last with
+    | Some (Definition (Capability, capability)) -> (
+        match method_ with
+        | Some method_
+          when Query.demand state.database Names.members (capability, method_.text) = [] ->
+            report state Unknown_member method_.span
+              (Printf.sprintf "`%s` has no method `%s`." shown method_.text)
+        | _ -> ())
+    | Some (Unknown _) -> ()
+    | _ ->
+        report state Not_a_capability path.span
+          (Printf.sprintf "`calls` counts the calls of a capability, and `%s` is not one." shown)
+  in
+  match resource with
+  | Time | Allocations | Allocated_bytes -> ()
+  | Calls (Call_capability path) -> capability path None
+  | Calls (Call_method (path, method_)) -> capability path (Some method_)
+  | Calls (Call_parameter name) -> (
+      match target state name with
+      | Some (Local id) -> (
+          match
+            Option.map
+              (fun (local : local) -> resolve state local.type_)
+              (Hashtbl.find_opt state.locals id)
+          with
+          | Some (T.Function _ | T.Error _ | T.Hole) | None -> ()
+          | Some other ->
+              report state Not_callable name.span
+                (Printf.sprintf "`calls` counts the calls through a function, and `%s` is a `%s`."
+                   name.text (T.show other)))
+      | Some (Unknown _) -> ()
+      | _ ->
+          report state Not_callable name.span
+            (Printf.sprintf
+               "`calls` counts the calls through a parameter that is a function, or of a \
+                capability, and `%s` is neither."
+               name.text))
+
 (* Static references: an expression that names a type or a trait rather
    than a value, before a [.] or a [(]. *)
 type static_ =

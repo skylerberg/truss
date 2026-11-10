@@ -278,7 +278,15 @@ and loop_clause =
   | Decreases of expression list
   | Cost of cost  (** What the loop has spent since it started, at each iteration. *)
 
-and cost = { amortized : bool; resource : Syntax.resource; bound : bound }
+and cost = { origin : origin; amortized : bool; resource : resource; bound : bound }
+and resource = Time | Allocations | Allocated_bytes | Calls of target
+
+(** What a [calls] clause counts. *)
+and target =
+  | Through of local  (** Calls through a function value: one of the parameters. *)
+  | Capability of Path.t  (** Calls of a capability's methods. *)
+  | Capability_method of Path.t * string  (** Calls of one of them. *)
+
 and bound = Finite | Order_of of expression | At_most of expression | Exactly of expression
 
 and clause = { value : expression; runs : bool }
