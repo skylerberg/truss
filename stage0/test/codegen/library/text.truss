@@ -116,3 +116,132 @@ test "strings compare without regard to ASCII case, and order by bytes" {
   assert "b".slice() > "apple".slice()
   assert "same".slice() == "same".slice()
 }
+
+test "ASCII case conversion changes only ASCII letters and keeps the length" {
+  assert "Hello, World 1!".to_ascii_uppercase() == "HELLO, WORLD 1!"
+  assert "Hello, World 1!".to_ascii_lowercase() == "hello, world 1!"
+  assert "\u{e9}t\u{c9}".to_ascii_uppercase() == "\u{e9}T\u{c9}"
+  assert "".to_ascii_uppercase() == ""
+}
+
+test "a string is repeated and reversed by characters" {
+  assert "ab".repeated(3) == "ababab"
+  assert "ab".repeated(0) == ""
+  assert "".repeated(5) == ""
+  assert "x".repeated(1) == "x"
+  assert "abc".reversed() == "cba"
+  assert "a\u{e9}\u{20ac}\u{1F600}".reversed() == "\u{1F600}\u{20ac}\u{e9}a"
+  assert "".reversed() == ""
+}
+
+test "a string converts to UTF-16, with a pair of units past U+FFFF" {
+  let units = "a\u{e9}\u{20ac}\u{1F600}".to_utf16()
+  assert units.length() == 5
+  assert units[0] == 97
+  assert units[1] == 233
+  assert units[2] == 8364
+  assert units[3] == 55357
+  assert units[4] == 56832
+  assert "".to_utf16().length() == 0
+}
+
+test "find gives the first match and find_last the last" {
+  let text = "one two one two one"
+  assert text.find("one") == Some(0)
+  assert text.find("two") == Some(4)
+  assert text.find("three") is None
+  assert text.find("") == Some(0)
+  assert text.find(text) == Some(0)
+  assert text.find("one two one two one!") is None
+  assert text.find_last("one") == Some(16)
+  assert text.find_last("two") == Some(12)
+  assert text.find_last("three") is None
+  assert text.find_last("") == Some(19)
+  assert "aaaa".find("aa") == Some(0)
+  assert "aaaa".find_last("aa") == Some(2)
+  assert "aabaabaaab".find("aaab") == Some(6)
+  assert "abababc".find("ababc") == Some(2)
+  assert "caf\u{e9} cr\u{e8}me".find("cr\u{e8}") == Some(6)
+  assert "".find("a") is None
+}
+
+test "contains and occurrences count matches that do not overlap" {
+  assert "haystack".contains("st")
+  assert "haystack".contains("")
+  assert !"haystack".contains("needle")
+  assert "banana".occurrences("an") == 2
+  assert "banana".occurrences("a") == 3
+  assert "aaaa".occurrences("aa") == 2
+  assert "aaaaa".occurrences("aa") == 2
+  assert "banana".occurrences("x") == 0
+  assert "".occurrences("x") == 0
+}
+
+test "split yields the parts between separators, empty ones included" {
+  var parts: List[String] = []
+  for part in "a,b,,c".split(",") {
+    mut parts.push(part.to_string())
+  }
+  assert parts.length() == 4
+  assert parts[0] == "a"
+  assert parts[1] == "b"
+  assert parts[2] == ""
+  assert parts[3] == "c"
+  var ends: List[String] = []
+  for part in ",x,".split(",") {
+    mut ends.push(part.to_string())
+  }
+  assert ends.length() == 3
+  assert ends[0] == ""
+  assert ends[1] == "x"
+  assert ends[2] == ""
+  var whole = 0
+  for part in "no separator".split("--") {
+    whole += 1
+    assert same(part, expected: "no separator")
+  }
+  assert whole == 1
+  var long: List[String] = []
+  for part in "one<>two<>three".split("<>") {
+    mut long.push(part.to_string())
+  }
+  assert long.length() == 3
+  assert long[1] == "two"
+  var empty = 0
+  for part in "".split(",") {
+    empty += 1
+    assert part.is_empty()
+  }
+  assert empty == 1
+}
+
+test "split_at_most stops splitting when it has the parts asked for" {
+  var parts: List[String] = []
+  for part in "a=b=c=d".split_at_most("=", parts: 2) {
+    mut parts.push(part.to_string())
+  }
+  assert parts.length() == 2
+  assert parts[0] == "a"
+  assert parts[1] == "b=c=d"
+  var one: List[String] = []
+  for part in "a=b".split_at_most("=", parts: 1) {
+    mut one.push(part.to_string())
+  }
+  assert one.length() == 1
+  assert one[0] == "a=b"
+  var many: List[String] = []
+  for part in "a=b".split_at_most("=", parts: 9) {
+    mut many.push(part.to_string())
+  }
+  assert many.length() == 2
+}
+
+test "split_once splits at the first separator and split_once_last at the last" {
+  assert "key=value=more".split_once("=") is Some(pair) && same(pair.first, expected: "key")
+    && same(pair.second, expected: "value=more")
+  assert "key=value=more".split_once_last("=") is Some(pair) && same(pair.first, expected: "key=value")
+    && same(pair.second, expected: "more")
+  assert "none".split_once("=") is None
+  assert "none".split_once_last("=") is None
+  assert "=".split_once("=") is Some(pair) && pair.first.is_empty() && pair.second.is_empty()
+}
