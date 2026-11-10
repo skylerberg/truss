@@ -33,7 +33,8 @@ let yield_counts (body : Core.block) : count list =
         if block [ Zero ] body <> [ Zero ] then
           List.concat_map (fun count -> [ count; add count Many ]) counts
         else counts
-    | Let { value = Place _; _ } | Assign _ | Compound_assign _ | Parallel _ | Proof _ | Assert _ ->
+    | Let { value = Place _; _ }
+    | Assign _ | Compound_assign _ | Parallel _ | Concurrent _ | Proof _ | Assert _ ->
         counts
   and expression counts (value : Core.expression) =
     match value.kind with

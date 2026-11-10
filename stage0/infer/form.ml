@@ -892,7 +892,14 @@ let loop_clause state (clause : loop_clause) : Core.loop_clause =
    is the success variant: its arm evaluates to the variant's field. The
    second is the failure variant: its arm returns the failure variant of
    the function's result type, with the same fields. *)
-let try_ state (value : expression) (inner : expression) ~(output : T.ty) : Core.kind =
+(* An exit, inside a [Leaving] if it ends tasks early. *)
+let leaving (tasks : Core.task list) state ~origin (exit : Core.kind) : Core.kind =
+  match tasks with
+  | [] -> exit
+  | _ -> Leaving { tasks; exit = synthetic_expression state ~origin T.Never exit }
+
+let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leaves : Core.task list)
+    : Core.kind =
   let scrutinee = build_expression state inner in
   let variants (type_ : T.ty) =
     match type_ with
@@ -961,19 +968,20 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) : Core
               value =
                 Some
                   (make T.Never
-                     (Return
-                        (Some
-                           (make output
-                              (Construct
-                                 {
-                                   variant = Some returned_failure.variant_name;
-                                   fields =
-                                     List.map2
-                                       (fun (field : T.field) (_, field_value) ->
-                                         (field.field_name, Some (Core.Value field_value)))
-                                       (Option.value ~default:[] returned_failure.fields)
-                                       failure_fields;
-                                 })))));
+                     (leaving leaves state ~origin:value.id
+                        (Return
+                           (Some
+                              (make output
+                                 (Construct
+                                    {
+                                      variant = Some returned_failure.variant_name;
+                                      fields =
+                                        List.map2
+                                          (fun (field : T.field) (_, field_value) ->
+                                            (field.field_name, Some (Core.Value field_value)))
+                                          (Option.value ~default:[] returned_failure.fields)
+                                          failure_fields;
+                                    }))))));
               diverges = true;
             };
         ];

@@ -1474,6 +1474,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
   | Specification_function { function_; arguments } ->
       specification_function context frame node function_ arguments
   | Method_time callee -> Some (frame, method_time context frame callee)
+  | Leaving _ -> unsupported (at frame node) "an early exit from `concurrent` code"
 
 (* The right side of [&&], [||], or [==>], which runs only where [runs]
    holds. One that changes a local, as a call with a [mut] argument does,
@@ -6281,7 +6282,9 @@ and statement_kind context frame (node : statement) : frame option =
       let after, new_value = value context { frame with updating = Some current } updated in
       Some (store context { after with updating = frame.updating } target new_value)
   | While { condition; clauses; body } -> while_ context frame node condition clauses body
-  | For { pattern; iteration; clauses; body; parallel = _ } ->
+  | For { mode = Concurrent_loop; _ } ->
+      unsupported (span_of frame.source node.origin) "a `concurrent for` loop"
+  | For { pattern; iteration; clauses; body; mode = Sequential | Parallel_loop } ->
       for_ context frame node pattern iteration clauses body
   | Assert { value = asserted; _ } ->
       let frame, term = value context frame asserted in
@@ -6305,6 +6308,7 @@ and statement_kind context frame (node : statement) : frame option =
         (fun frame branch ->
           match frame with Some frame -> statement context frame branch | None -> None)
         (Some frame) branches
+  | Concurrent _ -> unsupported (span_of frame.source node.origin) "a `concurrent` block"
   | Yield { mode; part } -> handing_out context frame node mode part
 
 (* A [yield] in a lending or yielding method's own body: the part meets

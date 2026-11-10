@@ -84,9 +84,15 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | Todo -> (
       register_expression state value (fun () -> Todo);
       match expected with Some expected -> expected | None -> T.Hole)
-  | Unreachable | Break | Continue ->
+  | Unreachable ->
+      register_expression state value (fun () -> Unreachable);
+      T.Never
+  | Break | Continue ->
+      let (exit : exit), (kind : Core.kind) =
+        match value.kind with Break -> (Break_exit, Break) | _ -> (Continue_exit, Continue)
+      in
       register_expression state value (fun () ->
-          match value.kind with Break -> Break | Continue -> Continue | _ -> Unreachable);
+          Form.leaving (left_by exit env.around) state ~origin:value.id kind);
       T.Never
   | Self_value -> (
       (* A lambda that reads [self] captures it. In the list of references,
@@ -197,7 +203,9 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       register_expression state value (fun () -> Echo (build_expression state inner));
       type_
   | Return inner ->
-      register_expression state value (fun () -> Return (Option.map (build_expression state) inner));
+      register_expression state value (fun () ->
+          Form.leaving (left_by Return_exit env.around) state ~origin:value.id
+            (Return (Option.map (build_expression state) inner)));
       (match (inner, env.output) with
       | Some inner, Some (Returns output) -> check state env inner output
       | None, Some (Returns output) ->

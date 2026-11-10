@@ -20,17 +20,26 @@ let markdown_files =
   |> List.filter (fun name -> Filename.check_suffix name ".md")
   |> List.sort compare
 
-(* The codes that mean the block needs context it does not have, or a
-   construct that is not built. *)
+(* The codes that mean the block needs context it does not have. *)
 let excerpt_codes =
   [
-    "types.not_built";
     "resolve.unknown_name";
     "resolve.unknown_module";
     "resolve.hides_name";
     "types.method_outside_package";
     "package.impl_location";
   ]
+
+(* The prover cannot read [concurrent] code yet, and says so. An example
+   with [concurrent] code is checked and not proven until it can. *)
+let not_built (text : string) (unproven : Diagnostic.t list) =
+  let word = "concurrent" in
+  let length = String.length word in
+  let rec mentions from =
+    from + length <= String.length text
+    && (String.sub text from length = word || mentions (from + 1))
+  in
+  mentions 0 && List.for_all (fun code -> code = "prover.unsupported") (Support.codes unproven)
 
 let () =
   List.iter
@@ -56,6 +65,7 @@ let () =
                   | [] -> (
                       match Prover.diagnostics database solver module_ with
                       | [] -> ()
+                      | unproven when not_built text unproven -> ()
                       | unproven ->
                           fail "%s"
                             (String.concat "" (List.map (Diagnostic.render file.source) unproven)))

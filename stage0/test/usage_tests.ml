@@ -50,6 +50,20 @@ let () =
       fine "fn f() -> Int64 {\n  while true {\n    break\n  }\n  1\n}\n");
   test "code after todo is not unreachable" (fun () -> fine "fn f() -> Int64 {\n  todo\n  1\n}\n");
   test "if false is not reported" (fun () ->
-      fine "fn f() -> Int64 {\n  if false {\n    return 0\n  }\n  1\n}\n")
+      fine "fn f() -> Int64 {\n  if false {\n    return 0\n  }\n  1\n}\n");
+  test "a branch after one that returns still runs" (fun () ->
+      fine "fn f() -> Int64\n  uses Tasks\n{\n  concurrent {\n    return 1\n    return 2\n  }\n}\n");
+  test "code after a block whose branch never finishes is unreachable" (fun () ->
+      one_diagnostic
+        "fn f() -> Int64\n\
+        \  uses Tasks\n\
+         {\n\
+        \  concurrent {\n\
+        \    return 1\n\
+        \    return 2\n\
+        \  }\n\
+        \  3\n\
+         }\n"
+        "usage.unreachable_code")
 
 let () = finish ()

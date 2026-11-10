@@ -164,7 +164,6 @@ module Code : sig
     | Impl_uses
     | Unknown_associated_type
     | Associated_type_not_fixed
-    | Not_built
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
   type usage = Unused_variable | Unreachable_code
