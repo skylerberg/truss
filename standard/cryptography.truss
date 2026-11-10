@@ -318,7 +318,9 @@ public fn blake3(bytes: Slice[UInt8]) -> Array[UInt8, 32]
   cost time O(bytes.length())
   cost allocations == 0
 {
-  todo
+  var hasher = Blake3.new()
+  mut hasher.update(bytes)
+  own hasher.finish()
 }
 
 public opaque type Sha256(state: Array[UInt32, 8], pending: Array[UInt8, 64], pending_length: USize, total: UInt64)
@@ -512,34 +514,464 @@ public fn Sha512.finish(own self) -> Array[UInt8, 64]
   ]
 }
 
-public opaque type Blake3(state: List[UInt32])
-  derives Copyable
+let blake3_initial_value: Array[UInt32, 8] = [
+  0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+]
 
-public fn Blake3.new() -> Blake3 {
-  todo
+let blake3_empty_stack: Array[UInt32, 432] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]
+
+let blake3_empty_block: Array[UInt8, 64] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]
+
+public opaque type Blake3(
+  key: Array[UInt32, 8],
+  flags: UInt32,
+  stack: Array[UInt32, 432],
+  stack_length: USize,
+  chaining_value: Array[UInt32, 8],
+  chunk_counter: UInt64,
+  block: Array[UInt8, 64],
+  block_length: USize,
+  blocks_compressed: USize,
+)
+  derives Copyable
+  invariant stack_length <= 54
+  invariant block_length <= 64
+  invariant blocks_compressed <= 15
+
+internal type Blake3Node(
+  chaining_value: Array[UInt32, 8],
+  block: Array[UInt32, 16],
+  counter: UInt64,
+  block_length: UInt32,
+  flags: UInt32,
+)
+
+internal fn blake3_mix(state: mut Array[UInt32, 16], a: USize, b: USize, c: USize, d: USize, x: UInt32, y: UInt32)
+  requires a < 16
+  requires b < 16
+  requires c < 16
+  requires d < 16
+  cost time O(1)
+  cost allocations == 0
+{
+  state[a] = wrapping_add_32(wrapping_add_32(state[a], second: state[b]), second: x)
+  state[d] = rotate_right_32(state[d] ^ state[a], right: 16)
+  state[c] = wrapping_add_32(state[c], second: state[d])
+  state[b] = rotate_right_32(state[b] ^ state[c], right: 12)
+  state[a] = wrapping_add_32(wrapping_add_32(state[a], second: state[b]), second: y)
+  state[d] = rotate_right_32(state[d] ^ state[a], right: 8)
+  state[c] = wrapping_add_32(state[c], second: state[d])
+  state[b] = rotate_right_32(state[b] ^ state[c], right: 7)
 }
 
-public fn Blake3.keyed(key: Array[UInt8, 32]) -> Blake3 {
-  todo
+internal fn blake3_round(state: mut Array[UInt32, 16], message: Array[UInt32, 16])
+  cost time O(1)
+  cost allocations == 0
+{
+  blake3_mix(mut state, a: 0, b: 4, c: 8, d: 12, x: message[0], y: message[1])
+  blake3_mix(mut state, a: 1, b: 5, c: 9, d: 13, x: message[2], y: message[3])
+  blake3_mix(mut state, a: 2, b: 6, c: 10, d: 14, x: message[4], y: message[5])
+  blake3_mix(mut state, a: 3, b: 7, c: 11, d: 15, x: message[6], y: message[7])
+  blake3_mix(mut state, a: 0, b: 5, c: 10, d: 15, x: message[8], y: message[9])
+  blake3_mix(mut state, a: 1, b: 6, c: 11, d: 12, x: message[10], y: message[11])
+  blake3_mix(mut state, a: 2, b: 7, c: 8, d: 13, x: message[12], y: message[13])
+  blake3_mix(mut state, a: 3, b: 4, c: 9, d: 14, x: message[14], y: message[15])
+}
+
+internal fn blake3_permute(message: Array[UInt32, 16]) -> Array[UInt32, 16]
+  cost time O(1)
+  cost allocations == 0
+{
+  [
+    message[2], message[6], message[3], message[10], message[7], message[0], message[4], message[13],
+    message[1], message[11], message[12], message[5], message[9], message[14], message[15], message[8],
+  ]
+}
+
+internal fn blake3_compress(
+  chaining_value: Array[UInt32, 8],
+  block: Array[UInt32, 16],
+  counter: UInt64,
+  block_length: UInt32,
+  flags: UInt32,
+) -> Array[UInt32, 16]
+  cost time O(1)
+  cost allocations == 0
+{
+  var state: Array[UInt32, 16] = [
+    chaining_value[0], chaining_value[1], chaining_value[2], chaining_value[3],
+    chaining_value[4], chaining_value[5], chaining_value[6], chaining_value[7],
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    intrinsic::convert(counter % 4294967296), intrinsic::convert(counter / 4294967296), block_length, flags,
+  ]
+  var message = block
+  let rounds: USize = 7
+  for _ in 0..rounds
+    cost allocations == 0
+  {
+    blake3_round(mut state, message: message)
+    message = blake3_permute(message)
+  }
+  let half: USize = 8
+  for index in 0..half
+    cost allocations == 0
+  {
+    state[index] = state[index] ^ state[index + 8]
+    state[index + 8] = state[index + 8] ^ chaining_value[index]
+  }
+  state
+}
+
+internal fn first_eight(words: Array[UInt32, 16]) -> Array[UInt32, 8]
+  cost time O(1)
+  cost allocations == 0
+{
+  [words[0], words[1], words[2], words[3], words[4], words[5], words[6], words[7]]
+}
+
+internal fn blake3_words(block: Array[UInt8, 64], length: USize) -> Array[UInt32, 16]
+  requires length <= 64
+  cost time O(1)
+  cost allocations == 0
+{
+  var words: Array[UInt32, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let count: USize = 64
+  for index in 0..count
+    cost allocations == 0
+  {
+    if index < length {
+      let byte: UInt32 = intrinsic::convert(block[index])
+      let place = index % 4
+      let shifted: UInt32 = if place == 0 {
+        byte
+      } else if place == 1 {
+        byte * 256
+      } else if place == 2 {
+        byte * 65536
+      } else {
+        byte * 16777216
+      }
+      words[index / 4] = words[index / 4] | shifted
+    }
+  }
+  words
+}
+
+internal fn word_byte(words: Array[UInt32, 16], offset: USize) -> UInt8
+  requires offset < 64
+  cost time O(1)
+  cost allocations == 0
+{
+  intrinsic::convert((words[offset / 4] >> (8 * (offset % 4))) & 255)
+}
+
+internal fn Blake3Node.output_value(self) -> Array[UInt32, 8]
+  cost time O(1)
+  cost allocations == 0
+{
+  first_eight(blake3_compress(
+    self.chaining_value,
+    block: self.block,
+    counter: self.counter,
+    block_length: self.block_length,
+    flags: self.flags,
+  ))
+}
+
+internal fn Blake3Node.root_block(self, counter: UInt64) -> Array[UInt32, 16]
+  cost time O(1)
+  cost allocations == 0
+{
+  blake3_compress(
+    self.chaining_value,
+    block: self.block,
+    counter: counter,
+    block_length: self.block_length,
+    flags: self.flags | 8,
+  )
+}
+
+internal fn blake3_parent(left: Array[UInt32, 8], right: Array[UInt32, 8], key: Array[UInt32, 8], flags: UInt32) -> Blake3Node
+  cost time O(1)
+  cost allocations == 0
+{
+  Blake3Node(
+    chaining_value: key,
+    block: [
+      left[0], left[1], left[2], left[3], left[4], left[5], left[6], left[7],
+      right[0], right[1], right[2], right[3], right[4], right[5], right[6], right[7],
+    ],
+    counter: 0,
+    block_length: 64,
+    flags: flags | 4,
+  )
+}
+
+internal fn Blake3.with_key(key: Array[UInt32, 8], flags: UInt32) -> Blake3
+  cost time O(1)
+  cost allocations == 0
+{
+  Blake3(
+    key: key,
+    flags: flags,
+    stack: blake3_empty_stack,
+    stack_length: 0,
+    chaining_value: key,
+    chunk_counter: 0,
+    block: blake3_empty_block,
+    block_length: 0,
+    blocks_compressed: 0,
+  )
+}
+
+internal fn Blake3.stack_entry(self, index: USize) -> Array[UInt32, 8]
+  requires index < 54
+  cost time O(1)
+  cost allocations == 0
+{
+  let start = 8 * index
+  [
+    self.stack[start], self.stack[start + 1], self.stack[start + 2], self.stack[start + 3],
+    self.stack[start + 4], self.stack[start + 5], self.stack[start + 6], self.stack[start + 7],
+  ]
+}
+
+internal fn Blake3.chunk_node(self) -> Blake3Node
+  cost time O(1)
+  cost allocations == 0
+{
+  let start: UInt32 = if self.blocks_compressed == 0 { 1 } else { 0 }
+  Blake3Node(
+    chaining_value: self.chaining_value,
+    block: blake3_words(self.block, length: self.block_length),
+    counter: self.chunk_counter,
+    block_length: intrinsic::convert(self.block_length),
+    flags: self.flags | start | 2,
+  )
+}
+
+internal fn Blake3.compress_block(mut self)
+  requires self.block_length == 64
+  requires self.blocks_compressed < 15
+  ensures self.block_length == 0
+  cost time O(1)
+  cost allocations == 0
+{
+  let start: UInt32 = if self.blocks_compressed == 0 { 1 } else { 0 }
+  self.chaining_value = first_eight(blake3_compress(
+    self.chaining_value,
+    block: blake3_words(self.block, length: 64),
+    counter: self.chunk_counter,
+    block_length: 64,
+    flags: self.flags | start,
+  ))
+  self.blocks_compressed += 1
+  self.block_length = 0
+}
+
+internal fn Blake3.end_chunk(mut self)
+  ensures self.block_length == 0
+  cost time O(1)
+  cost allocations == 0
+{
+  var value = self.chunk_node().output_value()
+  let chunks = intrinsic::wrapping_add(self.chunk_counter, right: 1)
+  var remaining = chunks
+  let most: USize = 54
+  for _ in 0..most
+    invariant self.stack_length <= 54
+    invariant self.block_length <= 64
+    invariant self.blocks_compressed <= 15
+    cost allocations == 0
+  {
+    if remaining % 2 == 0 && self.stack_length > 0 {
+      self.stack_length -= 1
+      value = blake3_parent(
+        self.stack_entry(self.stack_length),
+        right: value,
+        key: self.key,
+        flags: self.flags,
+      ).output_value()
+      remaining = remaining / 2
+    }
+  }
+  if self.stack_length == 54 {
+    intrinsic::crash("BLAKE3 cannot hash that many bytes".slice())
+  }
+  let start = 8 * self.stack_length
+  let count: USize = 8
+  for index in 0..count
+    invariant self.stack_length < 54
+    invariant self.block_length <= 64
+    invariant self.blocks_compressed <= 15
+    cost allocations == 0
+  {
+    self.stack[start + index] = value[index]
+  }
+  self.stack_length += 1
+  self.chaining_value = self.key
+  self.chunk_counter = chunks
+  self.block_length = 0
+  self.blocks_compressed = 0
+}
+
+internal fn Blake3.push_byte(mut self, byte: UInt8)
+  cost time O(1)
+  cost allocations == 0
+{
+  if self.block_length == 64 {
+    if self.blocks_compressed == 15 {
+      mut self.end_chunk()
+    } else {
+      mut self.compress_block()
+    }
+  }
+  self.block[self.block_length] = byte
+  self.block_length += 1
+}
+
+internal fn Blake3.root_node(self) -> Blake3Node
+  cost time O(1)
+  cost allocations == 0
+{
+  var node = self.chunk_node()
+  var remaining = self.stack_length
+  let most: USize = 54
+  for _ in 0..most
+    invariant remaining <= 54
+    cost allocations == 0
+  {
+    if remaining > 0 {
+      remaining -= 1
+      node = blake3_parent(
+        self.stack_entry(remaining),
+        right: node.output_value(),
+        key: self.key,
+        flags: self.flags,
+      )
+    }
+  }
+  node
+}
+
+public fn Blake3.new() -> Blake3
+  cost time O(1)
+  cost allocations == 0
+{
+  Blake3.with_key(blake3_initial_value, flags: 0)
+}
+
+public fn Blake3.keyed(key: Array[UInt8, 32]) -> Blake3
+  cost time O(1)
+  cost allocations == 0
+{
+  var words: Array[UInt32, 8] = [0, 0, 0, 0, 0, 0, 0, 0]
+  let count: USize = 8
+  for index in 0..count
+    cost allocations == 0
+  {
+    let first: UInt32 = intrinsic::convert(key[4 * index])
+    let second: UInt32 = intrinsic::convert(key[4 * index + 1])
+    let third: UInt32 = intrinsic::convert(key[4 * index + 2])
+    let fourth: UInt32 = intrinsic::convert(key[4 * index + 3])
+    words[index] = first | (second * 256) | (third * 65536) | (fourth * 16777216)
+  }
+  Blake3.with_key(words, flags: 16)
 }
 
 public fn Blake3.update(mut self, bytes: Slice[UInt8])
+  cost allocations == 0
   cost time O(bytes.length())
 {
-  todo
+  for index in 0..bytes.length()
+    invariant self.stack_length <= 54
+    invariant self.block_length <= 64
+    invariant self.blocks_compressed <= 15
+    cost allocations == 0
+  {
+    mut self.push_byte(bytes[index])
+  }
 }
 
 public fn Blake3.finish(own self) -> Array[UInt8, 32]
+  cost allocations == 0
   cost time O(1)
 {
-  todo
+  let words = self.root_node().root_block(0)
+  var digest: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let count: USize = 32
+  for index in 0..count
+    cost allocations == 0
+  {
+    digest[index] = word_byte(words, offset: index)
+  }
+  digest
+}
+
+internal fn push_output_block(output: mut intrinsic::Storage[UInt8], words: Array[UInt32, 16], length: USize)
+  requires intrinsic::storage_capacity(output) == length
+  requires intrinsic::storage_length(output) < length
+  ensures intrinsic::storage_capacity(output) == length
+  ensures intrinsic::storage_length(output) > old(intrinsic::storage_length(output))
+  ensures intrinsic::storage_length(output) <= length
+  cost time O(1)
+  cost allocations == 0
+{
+  let size: USize = 64
+  for offset in 0..size
+    invariant intrinsic::storage_capacity(output) == length
+    invariant intrinsic::storage_length(output) <= length
+    invariant intrinsic::storage_length(output) >= old(intrinsic::storage_length(output))
+    invariant yielded.length() > 0 ==> intrinsic::storage_length(output) > old(intrinsic::storage_length(output))
+    cost allocations == 0
+  {
+    if intrinsic::storage_length(output) < length {
+      intrinsic::storage_push(mut output, value: word_byte(words, offset: offset))
+    }
+  }
 }
 
 public fn Blake3.finish_extended(own self, length: USize) -> List[UInt8]
   ensures result.length() == length
   cost time O(length)
 {
-  todo
+  let node = self.root_node()
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
+  var counter: UInt64 = 0
+  while intrinsic::storage_length(output) < length
+    invariant intrinsic::storage_capacity(output) == length
+    invariant intrinsic::storage_length(output) <= length
+    decreases length - intrinsic::storage_length(output)
+    cost time O(intrinsic::storage_length(output))
+  {
+    push_output_block(mut output, words: node.root_block(counter), length: length)
+    counter = intrinsic::wrapping_add(counter, right: 1)
+  }
+  List(storage: own output)
 }
 
 internal type HmacSha256(inner: Sha256, outer: Sha256)

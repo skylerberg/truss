@@ -542,7 +542,17 @@ impl text::Parse for Float32 {
   type Error = core::ParseFloatError
 
   fn parse(text: StringSlice) -> Result[Float32, core::ParseFloatError] {
-    todo
+    match classify_float_text(text) {
+      Invalid(error) => Err(error)
+      Special(value) => Ok(value.to_float32())
+      Decimal(from) => {
+        if validate_decimal(text, from: from) is Some(error) {
+          return Err(error)
+        }
+        let buffer = null_terminated(text)
+        Ok(intrinsic::libc_strtof(intrinsic::storage_view(buffer)))
+      }
+    }
   }
 }
 
