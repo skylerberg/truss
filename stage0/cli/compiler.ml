@@ -1,5 +1,4 @@
-(* Code generation as the commands that build use it. See CODEGEN.md, "C
-   files and optimization". *)
+(* Code generation as the commands that build use it. *)
 
 type build = Development | Release
 
@@ -39,6 +38,7 @@ let create ?(sanitize = false) (project : Project.t) build =
     | Development, Some file -> Project.shown file
     | _ -> Workspace.file_path module_
   in
-  Compile.create ~file_name project.context Memory_layout.target_64 toolchain
+  Compile.create ~file_name ~want:(Database.want project.session) project.context
+    Memory_layout.target_64 toolchain
     (Build.cache (Database.objects_directory ()))
     settings

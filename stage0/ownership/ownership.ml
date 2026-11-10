@@ -1,5 +1,4 @@
-(* Moves, loans, and views, within each function. See TYPECHECKER.md,
-   "Ownership: moves, loans, and views".
+(* Moves, loans, and views, within each function.
 
    Truss has only structured control flow, so the analysis follows the
    tree in evaluation order: the places that may have been moved flow
@@ -188,7 +187,7 @@ let check database (key : Resolve.Names.key) =
   | _ -> None
 
 let ownership =
-  Query.query ~name:"ownership" ~show:Resolve.Names.show_key ~saved:true
+  Query.query ~name:"ownership" ~phase:Bodies ~show:Resolve.Names.show_key ~saved:true
     ~about:(fun (key : Resolve.Names.key) ->
       Some { Query.path = key.path; part = Some "ownership" })
     check

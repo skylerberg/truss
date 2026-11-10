@@ -1,19 +1,30 @@
 (* Compiling a program or a test run from a database of checked
    definitions: lowering each instance a root reaches, elaborating its
-   drops, building it through the object cache, and running it. See
-   CODEGEN.md, "Instances" and "Tests". *)
+   drops, building it through the object cache, and running it. *)
 
 type t
 
+(* How instances are lowered: for which target, and whether the program
+   checks what the prover would prove. *)
+type lowering
+
+(* The instances whose keys have been asked for, for each way of lowering.
+   Finding the instances that reach each other starts from these, so a
+   driver's [want] adds to this input before a key is asked for. Only the
+   database sets it. *)
+val roots : (lowering, Instance.key list) Query.input
+
 (* With [checks], the default, the program checks at run time what the
    prover would prove: [requires] clauses that can run, integer overflow,
-   and division. Stage0 has no prover, so its builds check, as CODEGEN.md's
-   [--check-proofs] does. [file_name] names the file of each position the
+   and division. Stage0 has no prover, so its builds check. [file_name] names the file of each position the
    program reports, by its module, and is [Workspace.file_path] unless a
-   driver shows files another way. *)
+   driver shows files another way. [want] is told which instances' keys are
+   about to be asked for, and adds them to [roots]; without it, asking for
+   a key is an error. *)
 val create :
   ?checks:bool ->
   ?file_name:(Path.module_ -> string) ->
+  ?want:(lowering -> Instance.key list -> unit) ->
   Query.context ->
   Memory_layout.target ->
   Toolchain.t ->
@@ -67,8 +78,8 @@ type results = { find : string -> string option; add : string -> string -> unit 
 (* Builds a program that runs the tests, each named by its path, runs it,
    and returns each test's record in the order given. With [results], each
    test that passes with nothing to show is kept there
-   under the key of the code it can run, as CODEGEN.md's "Test results"
-   says, and is not built or run again until that code changes; with
+   under the key of the code it can run, and is not built or run again until
+   that code changes; with
    [rerun], every test runs, and passes are kept again. [progress] is told
    of each step as it happens. *)
 val run_tests :

@@ -1,7 +1,6 @@
 (* The type checker's entry point: every stage, in order, over the
-   definitions of a build. See TYPECHECKER.md, "Structure". The stages are
-   linked together; each reads the earlier ones' results through their
-   queries. *)
+   definitions of a build. The stages are linked together; each reads the
+   earlier ones' results through their queries. *)
 
 module Manifest = Manifest
 
@@ -24,4 +23,5 @@ let diagnostics database module_ =
 (* The same, as a query, which the database keeps current for each file of
    a worktree and saves, so that a check after a restart finds it done. *)
 let file_diagnostics =
-  Query.query ~name:"all_diagnostics" ~show:Path.show_module ~saved:true diagnostics
+  Query.query ~name:"all_diagnostics" ~phase:Diagnostics ~show:Path.show_module ~saved:true
+    diagnostics

@@ -1,11 +1,11 @@
 (** What a compiler stage sees of the code database: declaring inputs and queries, and reading them
-    while a query runs. See DATABASE.md, "The interfaces".
+    while a query runs.
 
     A query is a pure function of what it reads through its context. The database records each read,
-    and when something changes, computes again only the results that read it, directly or through
-    others, stopping wherever a result comes out the same. A stage never sets an input, never names
-    a session, and cannot tell whether it runs in the background process, in a test, or for a
-    commit. *)
+    and when something changes, computes again only the results that read what really changed,
+    stopping wherever a result comes out the same. A stage never sets an input, never names a
+    session, and cannot tell whether it runs in the background process, in a test, or for a commit.
+*)
 
 type context = Incremental.context
 (** What a running query reads through. A driver gets one from the database for reads made outside
@@ -26,20 +26,44 @@ val input :
   ('key, 'value) input
 (** An input, which only the database sets. [show] names a key in logs and messages. *)
 
+(** The compiler's phases, in order. A query reads queries of its own phase and of earlier ones,
+    never of a later one, so that when the database brings a phase up to date, every earlier one is
+    final, and a result that comes out the same in one phase costs the later ones nothing. *)
+type phase =
+  | Syntax  (** A file's tokens and trees *)
+  | Declarations  (** What each file and package declares, and finding a definition by name *)
+  | Resolution  (** What each name in a definition means *)
+  | Interfaces  (** Signatures, shapes, constants, and the [impl]s found for a type *)
+  | Bodies  (** Checked bodies, and what is found in them *)
+  | Checks  (** The rules that span a package *)
+  | Diagnostics  (** Every stage's diagnostics for a file *)
+  | Lowering  (** What each instance compiles to *)
+  | Linking  (** What each instance refers to, and the hash of its own code *)
+  | Recursion  (** Which instances reach themselves *)
+  | Keys  (** The key of everything an instance can reach *)
+
+val phase_name : phase -> string
+
 type ('key, 'value) query = ('key, 'value) Incremental.query
 
 val query :
   name:string ->
   show:('key -> string) ->
+  phase:phase ->
   ?saved:bool ->
+  ?portable:bool ->
   ?equal:('value -> 'value -> bool) ->
   ?about:('key -> subject option) ->
   (context -> 'key -> 'value) ->
   ('key, 'value) query
-(** A query, computed by the function. With [~saved:true] its results are saved with the graph, so a
-    new process finds them done; its keys and values must then hold no functions. [equal] decides
-    early cutoff, and defaults to structural equality, so a value must not hold functions unless
-    [equal] is given. *)
+(** A query of a phase, computed by the function. With [~saved:true] its results' bytes are kept in
+    the store, and each is a fact that a state finds once it has held a result of the same key; its
+    keys and values must then hold no functions. With [~portable:true] a state that has never held
+    one finds it too, which suits results that many states come to need without starting from one
+    another, such as what an instance of the standard library compiles to. [equal] decides whether a
+    result came out the same, and defaults to structural equality, so a value must not hold
+    functions unless [equal] is given. Reading a query of a later phase raises [Invalid_argument].
+*)
 
 val get : context -> ('key, 'value) input -> 'key -> 'value
 (** An input's value. Raises [Not_found] if it is not set; either answer is read. *)

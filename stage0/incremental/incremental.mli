@@ -1,5 +1,5 @@
-(** The code database's engine: a graph of inputs and query results, kept current by pushing each
-    change to what it can affect. See DATABASE.md, "Pushing changes".
+(** The code database's engine: one state's inputs and query results, kept current by pushing each
+    change, phase by phase, to the results that read what really changed.
 
     Compiler stages see this module only through {!Query}, and the database only through {!Engine}.
     Nothing else should name it. *)
@@ -11,10 +11,10 @@ exception Cycle of string list
     is met. *)
 
 type subject = { path : Path.t; part : string option }
-(** The definition, and the part of it, that a node is about. *)
+(** The definition, and the part of it, that a result is about. *)
 
 type t
-(** An engine: one session's graph, or a frozen layer that sessions share. *)
+(** An engine: one state. It holds what differs from its bases, and reads the rest from them. *)
 
 type context
 (** What a running query reads through, or the engine itself for reads made outside any query, such
@@ -35,20 +35,28 @@ val input :
   ?about:('key -> subject option) ->
   unit ->
   ('key, 'value) input
-(** An input, which only the database sets. Its keys and values are saved with the graph. *)
+(** An input, which only the database sets. Its keys and values are saved with a state. *)
 
 val query :
   name:string ->
   show:('key -> string) ->
+  phase:int ->
   ?saved:bool ->
+  ?portable:bool ->
   ?equal:('value -> 'value -> bool) ->
   ?about:('key -> subject option) ->
   (context -> 'key -> 'value) ->
   ('key, 'value) query
 (** A query, computed by the function, which reads inputs and other queries only through the
-    context. With [~saved:true] its results are saved with the graph, which needs its keys and
-    values to hold no functions. [equal] decides early cutoff and defaults to structural equality.
-*)
+    context. Its phase orders it among the queries: it may read queries of its own phase and of
+    earlier ones, and reading a later one raises [Invalid_argument]. With [~saved:true] its results'
+    bytes are kept in the store and each is a fact, which needs its keys and values to hold no
+    functions. With [~portable:true] a saved result is also looked for as a fact in a state that has
+    never held one, for which the store keeps what such a result read, by name. [equal] decides
+    whether a result came out the same, and defaults to structural equality. *)
+
+val phases : int
+(** Phases run from 1 to [phases - 1]. Inputs are in phase 0. *)
 
 (** {1 Reading} *)
 
@@ -57,41 +65,46 @@ val read : context -> ('key, 'value) input -> 'key -> 'value option
     the reader. *)
 
 val demand : context -> ('key, 'value) query -> 'key -> 'value
-(** A query's result, computed if it has none and brought up to date if a change may have reached
-    it. Raises the exception the query raised, or {!Cycle}. *)
+(** A query's result, computed if it has none. Raises the exception the query raised, or {!Cycle}.
+*)
 
 (** {1 Engines} *)
 
-val create : ?log:bool -> ?shared:t -> unit -> t
-(** An engine. With [~shared], it reads from that frozen layer every input the layer has set, and
-    moves there every result computed only from the layer's inputs, so that other engines sharing
-    the layer find it already done. With [~log:true] it keeps the log of {!executed}. *)
+val create : ?log:bool -> ?bases:t list -> unit -> t
+(** An engine over frozen bases: it reads every input and result they hold, and holds itself only
+    what it sets, computes, or finds changed. With [~log:true] it keeps the log of {!executed}. *)
 
-val frozen_layer : ?log:bool -> unit -> t
-(** A frozen layer: an engine whose inputs are set once, before anything reads them. *)
+val freeze : ?fixed:bool -> t -> unit
+(** Brings the engine up to date and makes it a base: nothing in it changes again. A [fixed] base's
+    inputs are a package's whose sources never change, such as the standard library's; the others
+    are an earlier state of what is being worked on. *)
 
+val is_frozen : t -> bool
+val bases : t -> t list
 val context : t -> context
-(** Reads made outside any query. Every result read through it is kept current until {!release}. *)
+
+val engine_of : context -> t
+(** The engine a context reads from. *)
 
 val set : t -> ('key, 'value) input -> 'key -> 'value -> unit
-(** Sets an input. If the value differs from what it was, every result that read it, directly or
-    through others, is marked as possibly changed. Raises [Invalid_argument] while a query runs, and
-    for a frozen layer's input that has been read. *)
+(** Sets an input. If the value differs from what the engine sees, what read it is brought up to
+    date at the next read or {!stabilize}. Raises [Invalid_argument] while a query runs, and for a
+    frozen engine. *)
 
 val remove : t -> ('key, 'value) input -> 'key -> unit
 (** Removes an input, as a change. *)
 
 type change = { computed : node list; changed : node list }
-(** What computing again found: each node computed again, and each whose result came out different,
+(** What bringing an engine up to date did: each result computed, and each that came out different,
     in the order they were computed. *)
 
 val stabilize : t -> change
-(** Brings every kept result up to date, and returns what was computed since the last stabilization.
-*)
+(** Brings every result the engine holds up to date, and returns what was computed since the last
+    call. *)
 
 val release : t -> ('key, 'value) query -> 'key -> unit
-(** No longer keeps a result current for reads made outside queries. A result nothing else reads is
-    then dropped. *)
+(** No longer keeps a result for reads made outside queries. A result nothing reads is then dropped.
+*)
 
 val executed : t -> string list
 (** With [~log:true], the queries computed since the log was last cleared, as ["name(key)"], in the
@@ -99,63 +112,134 @@ val executed : t -> string list
 
 val clear_log : t -> unit
 
-(** {1 Nodes} *)
+type counters = {
+  marked : int;  (** Results marked as possibly changed *)
+  confirmed : int;  (** Marked results found current without computing them *)
+  computed : int;  (** Results computed *)
+  changed : int;  (** Results that came out different *)
+  adopted : int;  (** Results found as facts in the store instead of computed *)
+  copied : int;  (** Results of a base copied into the engine, to be checked there *)
+  dropped : int;  (** Results dropped because nothing read them *)
+}
+
+val counters : t -> counters
+(** The work the engine has done since it was made. Tests compare these at two sizes of a project,
+    to hold that a change's cost follows the change. *)
+
+(** {1 The graph} *)
 
 val label : node -> string
 val subject : node -> subject option
-val reads : node -> node list
-val readers : node -> node list
-val is_frozen : node -> bool
+val is_input : node -> bool
 
 val nodes : t -> node list
-(** Every node the engine holds, in the order they were made. *)
+(** Every input and result of the state, apart from those of its fixed bases, in the order they were
+    made. *)
+
+val count : t -> int
+(** How many inputs and results the engine itself holds. *)
+
+val is_fixed : node -> bool
+(** Whether a node belongs to a fixed base. *)
+
+val reads : t -> node -> node list
+(** What a result read when it was last computed, in order, as the engine sees each. *)
+
+val readers : t -> node -> node list
+(** What reads a node, as the engine sees it. *)
+
+val differing : t -> node list
+(** The nodes the engine itself holds: what differs from its bases, or may. *)
+
+val unshared : t -> t -> node list
+(** The nodes of an engine that may differ from another's: those it holds itself, and those of each
+    base, apart from fixed ones, that the other does not also have. *)
+
+val identity : node -> string
+(** What names a node in every engine: a hash of its input or query and its key. *)
 
 val counterpart : node -> t -> node option
 (** The node with the same query or input and key in another engine, if it has one. *)
 
-val same_outcome : node -> node -> bool
-(** Whether two nodes of the same query or input and key hold equal results. *)
-
-(** {1 Saving}
-
-    The pieces {!Engine} saves and loads a graph from. *)
-
-type saved_node = {
-  id : int;
-  name : string;
-  key : string;  (** The key, marshaled *)
-  value : string option;  (** The hash of the marshaled result, in the store *)
-  reads : reference list;
-  kept : bool;
-}
-
-and reference = Own of int | Frozen of string * string  (** A frozen node, by name and key *)
-
-val changes_to_save : t -> saved_node list * int list
-(** The saved nodes made or changed since the last call, with their values put in the store through
-    [put], and the ids of saved nodes dropped since. Unsaved nodes are left out, and a saved node's
-    reads go through them to the saved nodes and inputs they reach. *)
-
-val everything_to_save : t -> saved_node list
-(** Every saved node, for a journal's new base. *)
-
-val set_store : t -> put:(string -> string) -> get:(string -> string option) -> unit
-(** How the engine puts and gets marshaled values by hash. *)
-
-val restore : t -> saved_node list -> unit
-(** Fills an empty engine with saved nodes, whose values are read through [get] when first needed.
-    Nodes of queries this program does not declare are left out, with every node that reads them. *)
-
-val engine_of : context -> t
-(** The engine a context reads from. *)
-
-val fork : t -> t
-(** A copy of an engine that shares every result with it and diverges from here on, for a new
-    worktree or a commit started from another session's state. *)
-
 val current_in : node -> t -> node option
-(** The node with the same query and key in another engine, computed or brought up to date there;
-    for an input, the same input if it is set there. *)
+(** The same, computed there if it is a result the other engine does not have; for an input, the
+    same input if the other engine has a cell for it. *)
 
-val bring_up_to_date : node -> unit
-val is_input : node -> bool
+val same_outcome : t -> node -> t -> node -> bool
+(** Whether two nodes of the same query or input and key, each in its engine, hold equal results. *)
+
+(** {1 Facts and states in a store} *)
+
+type store = {
+  id : string;  (** What tells one store from another: its directory *)
+  version : string;
+      (** What computed the results: the compiler's identity. It is part of every key. *)
+  put : string -> string;  (** Keeps bytes, and returns their name: their hash *)
+  get : string -> string option;
+  find : kind:string -> key:string -> string option;
+  add : kind:string -> key:string -> string -> unit;  (** Keeps a result under a key, once *)
+}
+(** How an engine keeps values by fingerprint, and facts by key. *)
+
+val attach : t -> store -> unit
+
+val fingerprint : t -> node -> string option
+(** The name of a node's value in the store: the hash of its bytes. [None] for a result that raised,
+    or whose value holds functions, or when no store is attached. *)
+
+val record : t -> unit
+(** Keeps a fact for each saved result computed since the last call: its value under the key of what
+    it read. Another state whose reads have the same fingerprints finds it instead of computing.
+    {!write} does this too. *)
+
+val write : ?full:bool -> t -> string
+(** Writes the state as an artifact in the store, and returns its name. The artifact holds what the
+    engine itself holds and changed since the last write, as a difference over the artifact the
+    engine was opened from or last wrote; with [~full:true], or when there is no such artifact, it
+    holds the whole state apart from its fixed bases. *)
+
+type debt = { whole : int; differences : int; depth : int }
+(** How many nodes the whole state an engine's artifact chain starts from holds, how many the
+    differences after it hold, and how many differences there are. *)
+
+val debt : t -> debt
+
+val unwritten : t -> bool
+(** Whether the engine holds anything {!write} has not written. *)
+
+val artifact : t -> string option
+(** The artifact the engine last wrote, or was opened from. *)
+
+val open_ : ?log:bool -> store -> bases:t list -> string -> t option
+(** An engine for the state an artifact names, over the given fixed bases: the artifact's chain is
+    followed to the whole state it starts from, which is loaded as a frozen base and shared by every
+    engine opened from it, and the differences after it are the engine's own. [None] if the store no
+    longer has the chain. Values are read from the store when first needed. *)
+
+val frozen_of : store -> bases:t list -> fixed:bool -> string -> t option
+(** The whole state an artifact names, as a frozen base. *)
+
+val values_in : store -> string -> string list
+(** Every name an artifact's chain refers to in the store, itself included, for collecting the
+    store. *)
+
+val forget_bases : unit -> unit
+(** Drops the frozen bases kept for sharing between engines, as a new process starts without. *)
+
+(** {1 Checking the engine} *)
+
+val audit : ?flat:bool -> t -> string list
+(** Brings the engine up to date, then computes every result it holds in a new engine with the same
+    inputs, and returns a line for each that differs. With [~flat:true] the new engine has no bases
+    and is given their inputs too, which checks the bases' results as well as its own. An empty list
+    means every result is what a fresh computation gives. *)
+
+val auditing : bool ref
+(** When set, every engine made is remembered, weakly, for {!audit_all}. *)
+
+val audit_all : unit -> string list
+(** Audits every remembered engine that did work since its last audit. *)
+
+val skip_audit : t -> unit
+(** Leaves an engine out of {!audit_all}: one whose queries are, for a test, not functions of what
+    they read. *)

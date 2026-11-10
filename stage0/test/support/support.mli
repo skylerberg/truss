@@ -7,10 +7,10 @@ val module_of : string -> Path.module_
 val setup : (string * string) list -> Query.context
 (** A database with the standard library and the given modules, each a module path and its text.
     Each package's manifest grants nothing and lists no dependencies. The standard library is a
-    frozen layer that every test shares. *)
+    fixed base that every test shares. *)
 
 val standard : Engine.t Lazy.t
-(** That layer. *)
+(** That base. *)
 
 val parse_errors : Query.context -> Path.module_ -> string list
 val codes : Diagnostic.t list -> string list

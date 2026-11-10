@@ -1,7 +1,4 @@
-(* The code database's store. See store.mli and DATABASE.md, "Content hashes
-   and the store".
-
-   A segment is a header followed by records. A record is a kind byte, a
+(* A segment is a header followed by records. A record is a kind byte, a
    32-byte key, the value's length in 4 bytes, the value, and an 8-byte
    checksum of everything before it in the record. A value's key is the hash
    of its bytes, and a result's is the hash of its kind and key, so every key
@@ -15,16 +12,20 @@ let entry_width = key_width + 8 + 4
 let seal_size = 64 * 1024 * 1024
 
 (* FNV-1a, 64 bits: a checksum against torn and damaged records, which need
-   no cryptographic strength. The values' names are BLAKE3 hashes. *)
-let checksum bytes =
-  let hash = ref 0xcbf29ce484222325L in
-  String.iter
-    (fun c ->
-      hash := Int64.logxor !hash (Int64.of_int (Char.code c));
-      hash := Int64.mul !hash 0x100000001b3L)
-    bytes;
+   no cryptographic strength. *)
+let fnv hash bytes =
+  let hash = ref hash in
+  for index = 0 to String.length bytes - 1 do
+    hash :=
+      Int64.mul
+        (Int64.logxor !hash (Int64.of_int (Char.code (String.unsafe_get bytes index))))
+        0x100000001b3L
+  done;
+  !hash
+
+let checksum parts =
   let buffer = Bytes.create 8 in
-  Bytes.set_int64_le buffer 0 !hash;
+  Bytes.set_int64_le buffer 0 (List.fold_left fnv 0xcbf29ce484222325L parts);
   Bytes.to_string buffer
 
 type location = { offset : int; length : int }
@@ -37,11 +38,17 @@ type segment = {
   mutable channel : in_channel option;
 }
 
-type writer = { segment : segment; descriptor : Unix.file_descr; mutable size : int }
+type writer = {
+  segment : segment;
+  descriptor : Unix.file_descr;
+  mutable size : int;  (** The segment's length once [pending] is written *)
+  pending : Buffer.t;  (** Records not yet written to the file *)
+}
 
 type t = {
   root : string;
   mutable segments : segment list;  (** Others', newest first *)
+  mutable refreshed : float;  (** When other processes' segments were last looked for *)
   mutable writer : writer option;
   used : (string, unit) Hashtbl.t;  (** Results this process read or added *)
 }
@@ -93,7 +100,7 @@ let read_record channel ~offset =
     else
       let value = really_input_string channel length in
       let check = really_input_string channel 8 in
-      if checksum (head ^ value) = check then Some (head.[0], String.sub head 1 key_width, value)
+      if checksum [ head; value ] = check then Some (head.[0], String.sub head 1 key_width, value)
       else None
   with End_of_file | Sys_error _ -> None
 
@@ -197,7 +204,8 @@ let refresh t =
           end
         else scan s)
     known;
-  t.segments <- fresh @ known
+  t.segments <- fresh @ known;
+  t.refreshed <- Unix.gettimeofday ()
 
 (* Writing *)
 
@@ -225,12 +233,23 @@ let new_writer t =
       channel = None;
     }
   in
-  { segment; descriptor; size = String.length header }
+  { segment; descriptor; size = String.length header; pending = Buffer.create 4096 }
+
+(* Records are gathered and written to the file together, so that adding one
+   is not a system call. *)
+let pending_limit = 1024 * 1024
+
+let drain writer =
+  if Buffer.length writer.pending > 0 then begin
+    write_all writer.descriptor (Buffer.contents writer.pending) 0;
+    Buffer.clear writer.pending
+  end
 
 (* Writes a sealed segment's index beside it, from its entries. *)
 let write_index segment =
   let entries =
-    List.sort compare
+    List.sort
+      (fun (left, _) (right, _) -> String.compare left right)
       (Hashtbl.fold (fun key location acc -> (key, location) :: acc) segment.table [])
   in
   let buffer = Buffer.create (List.length entries * entry_width) in
@@ -246,45 +265,53 @@ let write_index segment =
   Sys.rename temporary path;
   segment.index <- Some (Buffer.contents buffer)
 
+let writing : t list ref = ref []
+
 let seal t =
   match t.writer with
   | None -> ()
   | Some writer ->
+      drain writer;
       (try Unix.fsync writer.descriptor with Unix.Unix_error _ -> ());
       write_index writer.segment;
       Unix.close writer.descriptor;
       t.writer <- None;
-      t.segments <- writer.segment :: t.segments
+      t.segments <- writer.segment :: t.segments;
+      writing := List.filter (fun other -> other != t) !writing
+
+(* A process that ends seals what it added, so that the next reads an index
+   and not every record. *)
+let () =
+  at_exit (fun () ->
+      List.iter (fun t -> try seal t with Sys_error _ | Unix.Unix_error _ -> ()) !writing)
 
 let writer t =
   match t.writer with
   | Some writer when writer.size < seal_size -> writer
-  | Some _ ->
-      seal t;
+  | found ->
+      if Option.is_some found then seal t;
       let writer = new_writer t in
       t.writer <- Some writer;
-      writer
-  | None ->
-      let writer = new_writer t in
-      t.writer <- Some writer;
+      writing := t :: !writing;
       writer
 
 let append_record t kind key value =
   let writer = writer t in
-  let head = Buffer.create (1 + key_width + 4) in
-  Buffer.add_char head kind;
-  Buffer.add_string head key;
-  Buffer.add_int32_le head (Int32.of_int (String.length value));
-  let head = Buffer.contents head in
-  let record = head ^ value ^ checksum (head ^ value) in
-  let offset = writer.size in
-  write_all writer.descriptor record 0;
-  writer.size <- writer.size + String.length record;
-  Hashtbl.replace writer.segment.table key { offset; length = String.length value }
+  let head = Bytes.create (1 + key_width + 4) in
+  Bytes.set head 0 kind;
+  Bytes.blit_string key 0 head 1 key_width;
+  Bytes.set_int32_le head (1 + key_width) (Int32.of_int (String.length value));
+  let head = Bytes.unsafe_to_string head in
+  Hashtbl.replace writer.segment.table key { offset = writer.size; length = String.length value };
+  Buffer.add_string writer.pending head;
+  Buffer.add_string writer.pending value;
+  Buffer.add_string writer.pending (checksum [ head; value ]);
+  writer.size <- writer.size + record_size (String.length value);
+  if Buffer.length writer.pending >= pending_limit then drain writer
 
 let open_ root =
   make_directory root;
-  let t = { root; segments = []; writer = None; used = Hashtbl.create 64 } in
+  let t = { root; segments = []; refreshed = 0.; writer = None; used = Hashtbl.create 64 } in
   refresh t;
   t
 
@@ -292,7 +319,12 @@ let close t =
   seal t;
   List.iter close_channel t.segments
 
-let flush t = Option.iter (fun writer -> Unix.fsync writer.descriptor) t.writer
+let flush t =
+  Option.iter
+    (fun writer ->
+      drain writer;
+      Unix.fsync writer.descriptor)
+    t.writer
 
 (* Looking up *)
 
@@ -302,24 +334,17 @@ let read_from segment location =
   | None -> None
   | exception Sys_error _ -> None
 
+(* A record this process added, which is in memory until it is written. *)
+let read_own writer location =
+  let written = writer.size - Buffer.length writer.pending in
+  if location.offset >= written then
+    Some (Buffer.sub writer.pending (location.offset - written + 1 + key_width + 4) location.length)
+  else read_from writer.segment location
+
 let lookup_once t key =
   let own =
-    match t.writer with
-    | Some writer -> (
-        match Hashtbl.find_opt writer.segment.table key with
-        | Some location -> (
-            match read_record (channel writer.segment) ~offset:location.offset with
-            | Some (_, _, value) -> Some value
-            | None | (exception Sys_error _) ->
-                close_channel writer.segment;
-                Option.bind
-                  (try Some (channel writer.segment) with Sys_error _ -> None)
-                  (fun channel ->
-                    match read_record channel ~offset:location.offset with
-                    | Some (_, _, value) -> Some value
-                    | None -> None))
-        | None -> None)
-    | None -> None
+    Option.bind t.writer (fun writer ->
+        Option.bind (Hashtbl.find_opt writer.segment.table key) (read_own writer))
   in
   match own with
   | Some value -> Some value
@@ -328,12 +353,19 @@ let lookup_once t key =
         (fun segment -> Option.bind (find_in segment key) (read_from segment))
         t.segments
 
+(* A miss looks again for what other processes added, but not more often
+   than every twenty milliseconds: a build that computes everything misses
+   on every result, and a result another process added a moment ago is only
+   computed again. *)
 let lookup t key =
   match lookup_once t key with
   | Some value -> Some value
   | None ->
-      refresh t;
-      lookup_once t key
+      if Unix.gettimeofday () -. t.refreshed > 0.02 then begin
+        refresh t;
+        lookup_once t key
+      end
+      else None
 
 let present t key =
   (match t.writer with Some w -> Hashtbl.mem w.segment.table key | None -> false)
@@ -365,112 +397,100 @@ let files t name =
   make_directory path;
   path
 
-(* Journals *)
+(* Pointers *)
 
-type journal = {
+type pointer = {
   store : t;
-  journal_path : string;
+  pointer_path : string;
   mutable lock_descriptor : Unix.file_descr option;
 }
 
-let journals_directory t = Filename.concat t.root "journals"
+let pointers_directory t = Filename.concat t.root "pointers"
 
 let file_name name =
   String.map
     (fun c -> match c with 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '.' -> c | _ -> '_')
     name
 
-let journal t name =
-  make_directory (journals_directory t);
+let pointer t name =
+  make_directory (pointers_directory t);
   {
     store = t;
-    journal_path = Filename.concat (journals_directory t) (file_name name ^ ".journal");
+    pointer_path = Filename.concat (pointers_directory t) (file_name name ^ ".pointer");
     lock_descriptor = None;
   }
 
-let journals t =
-  match Sys.readdir (journals_directory t) with
+let pointers t =
+  match Sys.readdir (pointers_directory t) with
   | entries ->
       Array.to_list entries
-      |> List.filter (fun entry -> Filename.check_suffix entry ".journal")
+      |> List.filter (fun entry -> Filename.check_suffix entry ".pointer")
       |> List.map Filename.remove_extension
       |> List.sort compare
   | exception Sys_error _ -> []
 
-let lock journal =
-  match journal.lock_descriptor with
+let lock pointer =
+  match pointer.lock_descriptor with
   | Some _ -> true
   | None -> (
       let descriptor =
-        Unix.openfile (journal.journal_path ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
+        Unix.openfile (pointer.pointer_path ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
       in
       match Unix.lockf descriptor F_TLOCK 0 with
       | () ->
-          journal.lock_descriptor <- Some descriptor;
+          pointer.lock_descriptor <- Some descriptor;
           true
       | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) ->
           Unix.close descriptor;
           false)
 
-let unlock journal =
-  match journal.lock_descriptor with
+let unlock pointer =
+  match pointer.lock_descriptor with
   | Some descriptor ->
       Unix.close descriptor;
-      journal.lock_descriptor <- None
+      pointer.lock_descriptor <- None
   | None -> ()
 
+(* What a pointer holds is framed with its length and a checksum, so that
+   one cut short or damaged reads as nothing. *)
 let framed bytes =
   let length = Bytes.create 4 in
   Bytes.set_int32_le length 0 (Int32.of_int (String.length bytes));
   let head = Bytes.to_string length in
-  head ^ checksum (head ^ bytes) ^ bytes
+  head ^ checksum [ head; bytes ] ^ bytes
 
-let records journal =
-  match read_file journal.journal_path with
-  | exception Sys_error _ -> []
+let read pointer =
+  match read_file pointer.pointer_path with
+  | exception Sys_error _ -> None
   | contents ->
       let total = String.length contents in
-      let rec loop offset acc =
-        if offset + 12 > total then List.rev acc
+      if total < 12 then None
+      else
+        let length = Int32.to_int (String.get_int32_le contents 0) in
+        if length < 0 || 12 + length <> total then None
         else
-          let length = Int32.to_int (String.get_int32_le contents offset) in
-          if length < 0 || offset + 12 + length > total then List.rev acc
-          else
-            let head = String.sub contents offset 4 in
-            let check = String.sub contents (offset + 4) 8 in
-            let bytes = String.sub contents (offset + 12) length in
-            if checksum (head ^ bytes) <> check then List.rev acc
-            else loop (offset + 12 + length) (bytes :: acc)
-      in
-      loop 0 []
+          let head = String.sub contents 0 4 in
+          let check = String.sub contents 4 8 in
+          let bytes = String.sub contents 12 length in
+          if checksum [ head; bytes ] = check then Some bytes else None
 
-let durable_write path ~flags bytes =
-  let descriptor = Unix.openfile path (O_WRONLY :: O_CLOEXEC :: flags) 0o644 in
+(* Written beside the pointer and renamed over it, after the values it may
+   name are durable, so a pointer never names a value a crash lost. *)
+let point pointer bytes =
+  flush pointer.store;
+  let temporary = pointer.pointer_path ^ ".partial" in
+  let descriptor = Unix.openfile temporary [ O_WRONLY; O_CLOEXEC; O_CREAT; O_TRUNC ] 0o644 in
   Fun.protect
     ~finally:(fun () -> Unix.close descriptor)
     (fun () ->
-      write_all descriptor bytes 0;
-      Unix.fsync descriptor)
+      write_all descriptor (framed bytes) 0;
+      Unix.fsync descriptor);
+  Sys.rename temporary pointer.pointer_path
 
-let append journal bytes =
-  flush journal.store;
-  durable_write journal.journal_path ~flags:[ O_CREAT; O_APPEND ] (framed bytes)
-
-let compact journal bytes =
-  flush journal.store;
-  let temporary = journal.journal_path ^ ".partial" in
-  durable_write temporary ~flags:[ O_CREAT; O_TRUNC ] (framed bytes);
-  Sys.rename temporary journal.journal_path
-
-let journal_name journal = journal.journal_path
-
-let journal_size journal =
-  try (Unix.stat journal.journal_path).st_size with Unix.Unix_error _ -> 0
-
-let remove_journal journal =
+let remove_pointer pointer =
   List.iter
     (fun path -> try Sys.remove path with Sys_error _ -> ())
-    [ journal.journal_path; journal.journal_path ^ ".lock" ]
+    [ pointer.pointer_path; pointer.pointer_path ^ ".lock" ]
 
 (* Collection *)
 

@@ -150,12 +150,31 @@ let compile t ~optimization ?(extra = []) ~source ~output () =
   in
   match run t.compiler arguments with 0, _, _ -> Ok () | _, out, err -> Error (out ^ err)
 
+(* A path as one word of a response file, which the C compiler reads as it
+   reads a command line: in quotes, with a backslash before a quote or a
+   backslash. *)
+let response_word path =
+  let buffer = Buffer.create (String.length path + 2) in
+  Buffer.add_char buffer '"';
+  String.iter
+    (fun c ->
+      if c = '"' || c = '\\' then Buffer.add_char buffer '\\';
+      Buffer.add_char buffer c)
+    path;
+  Buffer.add_char buffer '"';
+  Buffer.contents buffer
+
 let link t ?(extra = []) ~objects ~output () =
+  (* The objects are named in a response file: a program has one for each
+     instance, and a command line holds only so many bytes. *)
+  let response = output ^ ".objects" in
+  Out_channel.with_open_bin response (fun channel ->
+      List.iter (fun path -> output_string channel (response_word path ^ "\n")) objects);
   (* [fma] can be a call into libm where the processor has no instruction
      for it, as on baseline x86-64. macOS accepts [-lm] as part of its libc. *)
-  match run t.compiler (extra @ objects @ [ "-o"; output; "-lm" ]) with
-  | 0, _, _ -> Ok ()
-  | _, out, err -> Error (out ^ err)
+  let result = run t.compiler (extra @ [ "@" ^ response; "-o"; output; "-lm" ]) in
+  (try Sys.remove response with Sys_error _ -> ());
+  match result with 0, _, _ -> Ok () | _, out, err -> Error (out ^ err)
 
 let run_attached program arguments =
   let pid =

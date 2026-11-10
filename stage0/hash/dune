@@ -1,3 +1,0 @@
-(library
- (name hash)
- (libraries query path cbor blake3 syntax syntax_walk token resolve zarith))

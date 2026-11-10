@@ -1,5 +1,5 @@
 (* [truss rename]: renames a definition, a method, or a module, and every
-   reference to it in the package. See CLI.md, "truss rename".
+   reference to it in the package.
 
    The rename is made in memory first and the package checked: if it would
    cause any diagnostic, such as a name already taken, one that breaks a
@@ -173,11 +173,11 @@ let applied (project : Project.t) plan =
       (module_, text))
     (Project.modules project)
 
-(* An engine of the worktree with the plan made, for checking it: a fork of
-   the session's, which shares every result, so only what the rename
-   changes is checked, and which is dropped after. *)
+(* An engine of the worktree with the plan made, for checking it: a trial
+   that starts from the session's state, so only what the rename changes is
+   checked, and which is dropped after. *)
 let trial (project : Project.t) after =
-  let engine = Engine.fork (Database.engine project.session) in
+  let engine = Database.trial project.session in
   List.iter
     (fun (package : Project.package) ->
       Database.load_package ~usize_bits:package.manifest.usize_bits engine ~name:package.name

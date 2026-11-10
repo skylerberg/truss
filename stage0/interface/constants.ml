@@ -1,8 +1,7 @@
 (* The values of integer constants, worked out exactly where the checker
    needs them: a [USize] in a type argument, as in [Array[UInt8, size]].
-   See TYPECHECKER.md, "Constants". Every other constant is built by code
-   generation. Constants that refer to each other in a cycle have no
-   value. *)
+   Every other constant is built by code generation. Constants that refer to
+   each other in a cycle have no value. *)
 
 open Syntax
 
@@ -49,8 +48,8 @@ and evaluate database ~visiting path =
     | _ -> None
 
 let value_of =
-  Query.query ~name:"constant_value" ~show:Path.show (fun database path ->
-      evaluate database ~visiting:[] path)
+  Query.query ~name:"constant_value" ~phase:Interfaces ~saved:true ~show:Path.show
+    (fun database path -> evaluate database ~visiting:[] path)
 
 (* Whether a constant is declared a [USize], as a type argument needs. *)
 let is_usize database path =

@@ -16,7 +16,6 @@
   engine
   workspace
   resolve
-  hash
   types
   checked
   infer

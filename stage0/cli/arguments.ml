@@ -1,5 +1,4 @@
-(* What the command line says, made ready for the parser. See CLI.md,
-   "Finding the package" and "Running and building". *)
+(* What the command line says, made ready for the parser. *)
 
 (* [truss -C DIRECTORY COMMAND ...] is read as [truss COMMAND -C DIRECTORY
    ...], as git reads it. *)

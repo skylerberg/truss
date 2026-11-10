@@ -2,8 +2,7 @@ module Names = Resolve.Names
 
 (* Lowering is a query: what each instance compiles to, for a target and
    whether the program checks what the prover would prove, kept current by
-   the code database like any other result. See DATABASE.md, "Exact keys",
-   and CODEGEN.md, "Caching".
+   the code database like any other result.
 
    Each computation makes a lowering context of its own from the query's
    reads, so a layout or a piece of glue worked out on the way is read
@@ -48,7 +47,7 @@ let rec fresh_context lowering database =
 (* A pulled method's version, with its drops elaborated. *)
 and pulled =
   lazy
-    (Query.query ~name:"pulled" ~saved:true
+    (Query.query ~name:"pulled" ~phase:Lowering ~saved:true ~portable:true
        ~show:(fun (lowering, yielding) ->
          show_lowering lowering ^ " " ^ Ground.to_string (Cursor yielding))
        (fun database (lowering, yielding) ->
@@ -94,7 +93,7 @@ let make (context : Lower.context) lowering database (key : Instance.key) : Lir.
   | Real_evidence capability -> Evidence (Lower.real_evidence context capability)
 
 let lowered =
-  Query.query ~name:"lowered_instance" ~saved:true
+  Query.query ~name:"lowered_instance" ~phase:Lowering ~saved:true ~portable:true
     ~show:(fun (lowering, key) -> show_lowering lowering ^ " " ^ Instance.to_string key)
     (fun database (lowering, key) ->
       let context = fresh_context lowering database in
@@ -102,26 +101,113 @@ let lowered =
       | compiled -> Compiled compiled
       | exception Needs_evaluation (path, ty) -> Evaluate (path, ty))
 
-(* What a test's result is kept under: what its code can reach. A constant
-   worked out by running code is keyed by the evaluator that works it out,
+(* Keys. A test's result is kept under the key of everything its code can
+   reach, which is composed from the instances' own keys, so that an edit
+   changes the keys of what can reach the edited code and of nothing else. *)
+
+let show_instance (lowering, key) = show_lowering lowering ^ " " ^ Instance.to_string key
+
+(* What an instance refers to, and the hash of its own code. A constant
+   worked out by running code refers to the evaluator that works it out,
    whose code is what decides its value. *)
+let linked =
+  Query.query ~name:"linked" ~phase:Linking ~show:show_instance (fun database (lowering, key) ->
+      match Query.demand database lowered (lowering, key) with
+      | Evaluate (path, _) ->
+          (Blake3.hash "a constant worked out by its evaluator", [ Instance.Evaluator path ])
+      | Compiled compiled ->
+          let context = fresh_context lowering database in
+          let references = Reachable.compiled_references context.env compiled in
+          (Reachable.own_hash ~references compiled, references))
+
+let own_hash =
+  Query.query ~name:"own_hash" ~phase:Linking ~saved:true ~portable:true ~show:show_instance
+    (fun database key -> fst (Query.demand database linked key))
+
+let references =
+  Query.query ~name:"references" ~phase:Linking ~saved:true ~portable:true ~show:show_instance
+    (fun database key -> snd (Query.demand database linked key))
+
+(* The tests and programs whose keys have been asked for. The instances
+   they reach are those searched for groups that reach each other, so this
+   is an input: a driver says what it wants keys for before it asks for
+   them, and nothing is lowered for a test nobody asked about. *)
+let roots : (lowering, Instance.key list) Query.input =
+  Query.input ~name:"roots" ~show:show_lowering ()
+
+(* The groups of instances that reach each other, among what the roots
+   reach. It reads what every such instance refers to, and comes out the
+   same unless a group forms or changes, so only then does it cost anything
+   after it. *)
+let recursion =
+  Query.query ~name:"recursion" ~phase:Recursion ~show:show_lowering
+    ~equal:(Reachable.Keys.equal (List.equal Instance.equal))
+    (fun database lowering ->
+      let wanted = Option.value (Query.find database roots lowering) ~default:[] in
+      let edges key =
+        match Query.demand database references (lowering, key) with
+        | found -> found
+        | exception _ -> []
+      in
+      Reachable.groups ~edges wanted)
+
+(* The group an instance is in, if it is in one. *)
+let group =
+  Query.query ~name:"group" ~phase:Keys ~saved:true ~portable:true ~show:show_instance
+    (fun database (lowering, key) ->
+      Reachable.Keys.find_opt key (Query.demand database recursion lowering))
+
+(* The key of everything an instance can reach: its own hash and the keys
+   of what it refers to, or for an instance of a group, the group as a
+   walk from the instance reaches it. *)
+let rec reach =
+  lazy
+    (Query.query ~name:"reach" ~phase:Keys ~saved:true ~portable:true ~show:show_instance
+       (fun database (lowering, key) ->
+         let reach_of other = Query.demand database (Lazy.force reach) (lowering, other) in
+         match Query.demand database group (lowering, key) with
+         | None ->
+             Reachable.unit_key
+               ~own:(Query.demand database own_hash (lowering, key))
+               (List.map reach_of (Query.demand database references (lowering, key)))
+         | Some members ->
+             Reachable.group_key
+               ~link:(fun member ->
+                 ( Query.demand database own_hash (lowering, member),
+                   Query.demand database references (lowering, member) ))
+               ~deep:reach_of ~members key))
+
+(* What a test's result is kept under: the key of everything its code can
+   reach, the version of code generation, and the target, since [USize] is
+   a [typedef] in the C, so the LIR is the same for every width while
+   results such as [USize.maximum] are not. *)
 let test_key_query =
-  Query.query ~name:"test_key" ~saved:true
+  Query.query ~name:"test_key" ~phase:Keys ~saved:true ~portable:true
     ~show:(fun (lowering, path) -> show_lowering lowering ^ " " ^ Path.show path)
     (fun database (lowering, path) ->
-      let context = fresh_context lowering database in
-      let rec lookup key =
-        match Query.demand database lowered (lowering, key) with
-        | Compiled compiled -> compiled
-        | Evaluate (path, _) -> lookup (Instance.Evaluator path)
-      in
-      match Reachable.test_key context.env ~lookup (Lower.test_key path) with
-      | key -> Some key
+      match Query.demand database (Lazy.force reach) (lowering, Lower.test_key path) with
+      | key ->
+          Some
+            (Blake3.hash
+               (Cbor.encode
+                  (Cbor.Array
+                     [
+                       Text "truss test";
+                       Cbor.int Lir.version;
+                       Cbor.Array
+                         [
+                           Cbor.int lowering.target.pointer_bytes;
+                           Cbor.int lowering.target.usize_bytes;
+                         ];
+                       Bytes key;
+                     ])))
       | exception Invalid_argument _ -> None)
 
 type t = {
   database : Query.context;
   lowering : lowering;
+  want : lowering -> Instance.key list -> unit;
+      (** Says which instances' keys are about to be asked for *)
   context : Lower.context;  (** For laying out and emitting what the queries lowered *)
   toolchain : Toolchain.t;
   cache : Build.cache;
@@ -130,6 +216,13 @@ type t = {
   mutable evaluated : (Path.t * Lir.static_value) list;
       (** Each constant worked out by running code, in this build *)
 }
+
+(* A test's key, once it has been said to be wanted. A test whose code
+   cannot be lowered has none. *)
+let key_of t test =
+  match Query.demand t.database test_key_query (t.lowering, test) with
+  | key -> key
+  | exception _ -> None
 
 let evaluate_hook : (t -> Path.t -> Ground.ty -> Lir.static_value) ref =
   ref (fun _ _ _ -> invalid_arg "Compile: no evaluator")
@@ -347,15 +440,19 @@ let external_test t test =
 let run_tests ?results ?(rerun = false) ?(progress = ignore) t ~time_limit tests =
   let roots = List.map Lower.test_key tests in
   progress Lowering;
+  let keyed test = results <> None && not (external_test t test) in
   match
+    t.want t.lowering
+      (List.filter_map
+         (fun (test, root) -> if keyed test then Some root else None)
+         (List.combine tests roots));
     List.map2
       (fun test root ->
-        match results with
-        | Some _ when not (external_test t test) -> (
-            match Query.demand t.database test_key_query (t.lowering, test) with
-            | Some key -> (root, Some key)
-            | None -> invalid_arg ("Compile: cannot lower " ^ Path.show test))
-        | _ -> (root, None))
+        if keyed test then
+          match key_of t test with
+          | Some key -> (root, Some key)
+          | None -> invalid_arg ("Compile: cannot lower " ^ Path.show test)
+        else (root, None))
       tests roots
   with
   | exception Invalid_argument message -> Error message
@@ -523,12 +620,8 @@ let unshippable t ~main ~echo =
         |> List.rev)
 
 let test_keys t tests =
-  List.filter_map
-    (fun path ->
-      Option.map
-        (fun key -> (path, key))
-        (Query.demand t.database test_key_query (t.lowering, path)))
-    tests
+  t.want t.lowering (List.map Lower.test_key tests);
+  List.filter_map (fun path -> Option.map (fun key -> (path, key)) (key_of t path)) tests
 
 let run_program ?input t ~main ~arguments =
   let root = Instance.Program_main main in
@@ -634,12 +727,16 @@ let evaluate t path ty =
         (Printf.sprintf "Compile: working out %s ended with status %d: %s" (Path.show path) status
            errors)
 
-let create ?(checks = true) ?(file_name = Workspace.file_path) database target toolchain cache
-    settings =
+let no_keys _ _ =
+  invalid_arg "Compile: keys were asked for, and nothing was given to say which are wanted"
+
+let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys) database target
+    toolchain cache settings =
   let lowering = { target; checks } in
   {
     database;
     lowering;
+    want;
     context = fresh_context lowering database;
     toolchain;
     cache;

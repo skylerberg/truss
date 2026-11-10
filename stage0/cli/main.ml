@@ -1,5 +1,5 @@
 (* The [truss] command line: its commands and arguments, and where each
-   command runs. See CLI.md.
+   command runs.
 
    A command that reads code runs where its worktree's session is: in the
    background process, which keeps sessions between commands and starts
@@ -295,9 +295,7 @@ let clean =
   command "clean" ~doc:"Stop the background process and delete the store, which costs only time."
     Term.(const (fun () -> Outcome.Exit 0) $ const ())
 
-let version =
-  Printf.sprintf "stage0 (hash format %d, code generation %d, Unicode %s)" Hash.format_version
-    Lir.version Unicode.version
+let version = Printf.sprintf "stage0 (code generation %d, Unicode %s)" Lir.version Unicode.version
 
 let truss =
   Cmd.group

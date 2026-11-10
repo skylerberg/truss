@@ -5,8 +5,7 @@
 (* Words are held in native integers, which need more than 32 bits. *)
 let () = assert (Sys.int_size >= 63)
 let mask = 0xffffffff
-let add a b = (a + b) land mask
-let rotate_right value count = (value lsr count) lor (value lsl (32 - count)) land mask
+let[@inline] rotate_right value count = (value lsr count) lor (value lsl (32 - count)) land mask
 
 let initial =
   [|
@@ -21,83 +20,143 @@ let root = 8
 let block_length = 64
 let chunk_length = 1024
 
-let mix state a b c d x y =
-  state.(a) <- add (add state.(a) state.(b)) x;
-  state.(d) <- rotate_right (state.(d) lxor state.(a)) 16;
-  state.(c) <- add state.(c) state.(d);
-  state.(b) <- rotate_right (state.(b) lxor state.(c)) 12;
-  state.(a) <- add (add state.(a) state.(b)) y;
-  state.(d) <- rotate_right (state.(d) lxor state.(a)) 8;
-  state.(c) <- add state.(c) state.(d);
-  state.(b) <- rotate_right (state.(b) lxor state.(c)) 7
-
-let round state message =
-  mix state 0 4 8 12 message.(0) message.(1);
-  mix state 1 5 9 13 message.(2) message.(3);
-  mix state 2 6 10 14 message.(4) message.(5);
-  mix state 3 7 11 15 message.(6) message.(7);
-  mix state 0 5 10 15 message.(8) message.(9);
-  mix state 1 6 11 12 message.(10) message.(11);
-  mix state 2 7 8 13 message.(12) message.(13);
-  mix state 3 4 9 14 message.(14) message.(15)
-
-(* The compression function: eight words of chaining value and sixteen of
-   block give sixteen words, of which the first eight are the next chaining
-   value. *)
-let compress chaining block ~counter ~length ~flags =
-  let state =
-    [|
-      chaining.(0);
-      chaining.(1);
-      chaining.(2);
-      chaining.(3);
-      chaining.(4);
-      chaining.(5);
-      chaining.(6);
-      chaining.(7);
-      initial.(0);
-      initial.(1);
-      initial.(2);
-      initial.(3);
-      counter land mask;
-      (counter lsr 32) land mask;
-      length;
-      flags;
-    |]
-  in
-  let message = Array.copy block in
-  for index = 1 to 7 do
-    round state message;
-    if index < 7 then begin
-      let permuted = Array.init 16 (fun position -> message.(permutation.(position))) in
-      Array.blit permuted 0 message 0 16
-    end
+(* Which of the block's words each of the seven rounds mixes in, in order,
+   sixteen to a round. The specification permutes the block's words after
+   each round; these are the same words, by their places in the block as it
+   was. *)
+let schedule =
+  let rounds = Array.make (7 * 16) 0 in
+  let current = ref (Array.init 16 Fun.id) in
+  for round = 0 to 6 do
+    Array.blit !current 0 rounds (round * 16) 16;
+    current := Array.init 16 (fun position -> !current.(permutation.(position)))
   done;
-  for index = 0 to 7 do
-    state.(index) <- state.(index) lxor state.(index + 8);
-    state.(index + 8) <- state.(index + 8) lxor chaining.(index)
+  rounds
+
+let[@inline] word (block : int array) base place =
+  Array.unsafe_get block (Array.unsafe_get schedule (base + place))
+
+(* The compression function. Nearly all of a hash's time is spent here, so
+   its sixteen words are local variables, which stay in registers, and each
+   mixing step is written out. *)
+let compress (chaining : int array) (block : int array) ~counter ~length ~flags =
+  let v0 = ref (Array.unsafe_get chaining 0) in
+  let v1 = ref (Array.unsafe_get chaining 1) in
+  let v2 = ref (Array.unsafe_get chaining 2) in
+  let v3 = ref (Array.unsafe_get chaining 3) in
+  let v4 = ref (Array.unsafe_get chaining 4) in
+  let v5 = ref (Array.unsafe_get chaining 5) in
+  let v6 = ref (Array.unsafe_get chaining 6) in
+  let v7 = ref (Array.unsafe_get chaining 7) in
+  let v8 = ref (Array.unsafe_get initial 0) in
+  let v9 = ref (Array.unsafe_get initial 1) in
+  let v10 = ref (Array.unsafe_get initial 2) in
+  let v11 = ref (Array.unsafe_get initial 3) in
+  let v12 = ref (counter land mask) in
+  let v13 = ref ((counter lsr 32) land mask) in
+  let v14 = ref length in
+  let v15 = ref flags in
+  for round = 0 to 6 do
+    let base = round * 16 in
+    (* Down the four columns *)
+    v0 := (!v0 + !v4 + word block base 0) land mask;
+    v12 := rotate_right (!v12 lxor !v0) 16;
+    v8 := (!v8 + !v12) land mask;
+    v4 := rotate_right (!v4 lxor !v8) 12;
+    v0 := (!v0 + !v4 + word block base 1) land mask;
+    v12 := rotate_right (!v12 lxor !v0) 8;
+    v8 := (!v8 + !v12) land mask;
+    v4 := rotate_right (!v4 lxor !v8) 7;
+    v1 := (!v1 + !v5 + word block base 2) land mask;
+    v13 := rotate_right (!v13 lxor !v1) 16;
+    v9 := (!v9 + !v13) land mask;
+    v5 := rotate_right (!v5 lxor !v9) 12;
+    v1 := (!v1 + !v5 + word block base 3) land mask;
+    v13 := rotate_right (!v13 lxor !v1) 8;
+    v9 := (!v9 + !v13) land mask;
+    v5 := rotate_right (!v5 lxor !v9) 7;
+    v2 := (!v2 + !v6 + word block base 4) land mask;
+    v14 := rotate_right (!v14 lxor !v2) 16;
+    v10 := (!v10 + !v14) land mask;
+    v6 := rotate_right (!v6 lxor !v10) 12;
+    v2 := (!v2 + !v6 + word block base 5) land mask;
+    v14 := rotate_right (!v14 lxor !v2) 8;
+    v10 := (!v10 + !v14) land mask;
+    v6 := rotate_right (!v6 lxor !v10) 7;
+    v3 := (!v3 + !v7 + word block base 6) land mask;
+    v15 := rotate_right (!v15 lxor !v3) 16;
+    v11 := (!v11 + !v15) land mask;
+    v7 := rotate_right (!v7 lxor !v11) 12;
+    v3 := (!v3 + !v7 + word block base 7) land mask;
+    v15 := rotate_right (!v15 lxor !v3) 8;
+    v11 := (!v11 + !v15) land mask;
+    v7 := rotate_right (!v7 lxor !v11) 7;
+    (* Along the four diagonals *)
+    v0 := (!v0 + !v5 + word block base 8) land mask;
+    v15 := rotate_right (!v15 lxor !v0) 16;
+    v10 := (!v10 + !v15) land mask;
+    v5 := rotate_right (!v5 lxor !v10) 12;
+    v0 := (!v0 + !v5 + word block base 9) land mask;
+    v15 := rotate_right (!v15 lxor !v0) 8;
+    v10 := (!v10 + !v15) land mask;
+    v5 := rotate_right (!v5 lxor !v10) 7;
+    v1 := (!v1 + !v6 + word block base 10) land mask;
+    v12 := rotate_right (!v12 lxor !v1) 16;
+    v11 := (!v11 + !v12) land mask;
+    v6 := rotate_right (!v6 lxor !v11) 12;
+    v1 := (!v1 + !v6 + word block base 11) land mask;
+    v12 := rotate_right (!v12 lxor !v1) 8;
+    v11 := (!v11 + !v12) land mask;
+    v6 := rotate_right (!v6 lxor !v11) 7;
+    v2 := (!v2 + !v7 + word block base 12) land mask;
+    v13 := rotate_right (!v13 lxor !v2) 16;
+    v8 := (!v8 + !v13) land mask;
+    v7 := rotate_right (!v7 lxor !v8) 12;
+    v2 := (!v2 + !v7 + word block base 13) land mask;
+    v13 := rotate_right (!v13 lxor !v2) 8;
+    v8 := (!v8 + !v13) land mask;
+    v7 := rotate_right (!v7 lxor !v8) 7;
+    v3 := (!v3 + !v4 + word block base 14) land mask;
+    v14 := rotate_right (!v14 lxor !v3) 16;
+    v9 := (!v9 + !v14) land mask;
+    v4 := rotate_right (!v4 lxor !v9) 12;
+    v3 := (!v3 + !v4 + word block base 15) land mask;
+    v14 := rotate_right (!v14 lxor !v3) 8;
+    v9 := (!v9 + !v14) land mask;
+    v4 := rotate_right (!v4 lxor !v9) 7
   done;
-  state
+  [|
+    !v0 lxor !v8;
+    !v1 lxor !v9;
+    !v2 lxor !v10;
+    !v3 lxor !v11;
+    !v4 lxor !v12;
+    !v5 lxor !v13;
+    !v6 lxor !v14;
+    !v7 lxor !v15;
+  |]
 
 (* The sixteen little-endian words of up to 64 bytes of [input] from
    [offset], padded with zeros. *)
 let words input offset length =
-  Array.init 16 (fun word ->
-      let byte index =
-        let position = (word * 4) + index in
-        if position < length then Char.code input.[offset + position] else 0
-      in
-      byte 0 lor (byte 1 lsl 8) lor (byte 2 lsl 16) lor (byte 3 lsl 24))
+  let block = Array.make 16 0 in
+  let whole = length / 4 in
+  for place = 0 to whole - 1 do
+    block.(place) <- Int32.to_int (String.get_int32_le input (offset + (place * 4))) land mask
+  done;
+  for position = whole * 4 to length - 1 do
+    block.(whole) <-
+      block.(whole) lor (Char.code input.[offset + position] lsl (8 * (position land 3)))
+  done;
+  block
 
 (* What finishing a chunk or a parent node needs: compressed without [root]
    it is a chaining value, and with it the digest. *)
 type output = { chaining : int array; block : int array; counter : int; length : int; flags : int }
 
-let chaining_value output =
-  Array.sub
-    (compress output.chaining output.block ~counter:output.counter ~length:output.length
-       ~flags:output.flags)
-    0 8
+let chaining_value ?(flags = 0) output =
+  compress output.chaining output.block ~counter:output.counter ~length:output.length
+    ~flags:(output.flags lor flags)
 
 (* The output of the chunk numbered [counter], which holds [length] bytes of
    [input] from [offset]. Every block but the last is compressed here. *)
@@ -105,13 +164,11 @@ let chunk_output input ~offset ~length ~counter =
   let chaining = ref initial in
   let blocks = if length = 0 then 1 else (length + block_length - 1) / block_length in
   for index = 0 to blocks - 2 do
-    let start = if index = 0 then chunk_start else 0 in
     chaining :=
-      Array.sub
-        (compress !chaining
-           (words input (offset + (index * block_length)) block_length)
-           ~counter ~length:block_length ~flags:start)
-        0 8
+      compress !chaining
+        (words input (offset + (index * block_length)) block_length)
+        ~counter ~length:block_length
+        ~flags:(if index = 0 then chunk_start else 0)
   done;
   let last_offset = (blocks - 1) * block_length in
   let last_length = length - last_offset in
@@ -162,11 +219,11 @@ let hash input =
   let output =
     List.fold_left (fun right left -> parent_output left (chaining_value right)) last !stack
   in
-  let words =
-    compress output.chaining output.block ~counter:output.counter ~length:output.length
-      ~flags:(output.flags lor root)
-  in
-  String.init 32 (fun index -> Char.chr ((words.(index / 4) lsr (8 * (index mod 4))) land 0xff))
+  let digest = Bytes.create 32 in
+  Array.iteri
+    (fun place word -> Bytes.set_int32_le digest (place * 4) (Int32.of_int word))
+    (chaining_value ~flags:root output);
+  Bytes.unsafe_to_string digest
 
 let to_hex digest =
   String.concat ""

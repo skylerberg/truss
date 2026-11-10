@@ -18,7 +18,8 @@
   capabilities_tests
   package_checks_tests
   documents_tests
-  manifest_tests)
+  manifest_tests
+  scale_tests)
  (libraries
   harness
   source
@@ -43,7 +44,6 @@
   path
   workspace
   resolve
-  hash
   standard_library
   support
   parse_support

@@ -1,5 +1,4 @@
-(* What each file defines, and finding a definition by name. See
-   TYPECHECKER.md, "Name resolution" and "Dependencies".
+(* What each file defines, and finding a definition by name.
 
    Every lookup across definitions is a query keyed by where and what name,
    so a change re-runs only the lookups it can affect: adding a definition
@@ -128,7 +127,8 @@ let last_name (module_ : Path.module_) =
 
 (* The modules a file imports, by the name code writes them with. *)
 let imports =
-  Query.query ~name:"imports" ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"imports" ~phase:Syntax ~saved:true ~show:Path.show_module
+    (fun database module_ ->
       let file = Query.demand database Workspace.file module_ in
       List.map
         (fun (item : path Syntax.item) ->
@@ -210,7 +210,7 @@ let builtin_items () =
       Intrinsic.operations
 
 let entries =
-  Query.query ~name:"entries" ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"entries" ~phase:Syntax ~show:Path.show_module (fun database module_ ->
       if module_ = Intrinsic.module_ then builtin_items ()
       else plain_items (Query.demand database Workspace.file module_).definitions)
 
@@ -219,7 +219,8 @@ module String_map = Map.Make (String)
 (* A module's entries by name, the first of each name, so that each lookup
    by name is a logarithmic one rather than a pass over the module. *)
 let entry_index =
-  Query.query ~name:"entry_index" ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"entry_index" ~phase:Declarations ~show:Path.show_module
+    (fun database module_ ->
       List.fold_left
         (fun index (entry : entry) ->
           if String_map.mem entry.name index then index else String_map.add entry.name entry index)
@@ -228,7 +229,7 @@ let entry_index =
 
 (* The first definition with that name in the module. *)
 let find =
-  Query.query ~name:"find"
+  Query.query ~name:"find" ~phase:Declarations ~saved:true
     ~show:(fun ((module_ : Path.module_), name) -> Path.show_module module_ ^ "::" ^ name)
     (fun database (module_, name) ->
       if module_exists database module_ then
@@ -312,7 +313,8 @@ let owner database ~from (head : type_head) =
   | None -> top from (spell_path head.path)
 
 let declarations =
-  Query.query ~name:"declarations" ~show:Path.show_module ~saved:true (fun database module_ ->
+  Query.query ~name:"declarations" ~phase:Declarations ~show:Path.show_module ~saved:true
+    (fun database module_ ->
       let file = Query.demand database Workspace.file module_ in
       let counts = Hashtbl.create 16 in
       let declare index (definition : definition) path kind generic =
@@ -404,7 +406,7 @@ end)
 (* A package's methods and member constants by owner and name, built in one
    pass over its declarations. *)
 let member_index =
-  Query.query ~name:"member_index" ~show:Fun.id (fun database package_name ->
+  Query.query ~name:"member_index" ~phase:Declarations ~show:Fun.id (fun database package_name ->
       match Workspace.package database package_name with
       | None -> Member_map.empty
       | Some package ->
@@ -429,7 +431,7 @@ let member_index =
    nothing about where in a file they are, so moving one changes nothing
    that looked it up. *)
 let members =
-  Query.query ~name:"members"
+  Query.query ~name:"members" ~phase:Declarations ~saved:true
     ~show:(fun (owner, name) -> Path.show owner ^ "." ^ name)
     (fun database ((owner : Path.t), name) ->
       Option.value ~default:[]
@@ -447,7 +449,8 @@ end)
 
 (* A module's declarations by path and ordinal. *)
 let declaration_index =
-  Query.query ~name:"declaration_index" ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"declaration_index" ~phase:Declarations ~show:Path.show_module
+    (fun database module_ ->
       List.fold_left
         (fun index (declaration : declaration) ->
           Declaration_map.add (declaration.path, declaration.ordinal) declaration index)
@@ -456,13 +459,13 @@ let declaration_index =
 
 (* A module's definitions, by their index in the file. *)
 let items =
-  Query.query ~name:"items" ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"items" ~phase:Syntax ~show:Path.show_module (fun database module_ ->
       Array.of_list (Query.demand database Workspace.file module_).definitions)
 
 (* Where a definition is: its module, its declaration, and its place in its
    file. *)
 let locate =
-  Query.query ~name:"locate" ~show:show_key (fun database key ->
+  Query.query ~name:"locate" ~phase:Declarations ~show:show_key (fun database key ->
       Option.map
         (fun declaration -> (key.module_, declaration))
         (Declaration_map.find_opt (key.path, key.ordinal)
@@ -471,7 +474,7 @@ let locate =
 (* A definition's tree, with positions relative to it, so that a definition
    that only moved gives the same tree and changes nothing that reads it. *)
 let definition =
-  Query.query ~name:"definition" ~show:show_key ~saved:true
+  Query.query ~name:"definition" ~phase:Declarations ~show:show_key ~saved:true
     ~about:(fun key -> Some { path = key.path; part = Some "tree" })
     (fun database key ->
       match Query.demand database locate key with
@@ -481,7 +484,7 @@ let definition =
 
 (* Where a definition starts in its file, for showing its diagnostics. *)
 let base =
-  Query.query ~name:"base" ~show:show_key ~saved:true (fun database key ->
+  Query.query ~name:"base" ~phase:Declarations ~show:show_key ~saved:true (fun database key ->
       match Query.demand database locate key with
       | None -> None
       | Some (module_, declaration) ->
@@ -504,7 +507,7 @@ let per_definition database module_ of_definition =
    its file, so that editing another definition changes nothing that reads
    it. *)
 let text =
-  Query.query ~name:"text" ~show:show_key (fun database key ->
+  Query.query ~name:"text" ~phase:Declarations ~show:show_key (fun database key ->
       match Query.demand database locate key with
       | None -> None
       | Some (module_, declaration) ->

@@ -50,6 +50,18 @@ document has no sections that list what changed, what an earlier version
 did, or which review settled what; when the design changes, the document is
 rewritten to describe the new design.
 
+A document records no measurement. A time or a size is true of one commit,
+and a document that states one gives every later change something to measure
+again. What was measured belongs in the commit message or the pull request
+it explains.
+
+### Comments
+
+A comment says what the code cannot: a reason, an invariant, or a trap. One
+that restates the code, labels a section, or retells a document is left
+out. A comment never points at a document, a section of one, or another
+file, since such a pointer goes stale when what it names moves.
+
 ### Testing
 
 Every stage of stage0 is tested the same way:
@@ -67,6 +79,11 @@ Every stage of stage0 is tested the same way:
 - **Fuzzing and benchmarks are tools, not tests.** They live in
   `stage0/tools/` and are run by hand. Each problem a fuzzer finds becomes a
   focused test of its own.
+- **Every test checks the code database too.** When a test ends, the harness
+  computes every result the test's engines hold again, in a new engine with
+  the same inputs, and fails the test if one differs. So a query that is not
+  a function of what it reads, or a result the database left stale, fails
+  whichever test met it.
 - **Checks against the documents are tests,** as long as each one states a
   single property, such as "GRAMMAR.md's keyword list matches the lexer's",
   or "every example in the documents lexes cleanly".
@@ -114,12 +131,12 @@ The full design is in [PARSER.md](PARSER.md). In short:
 
 The full design is in [TYPECHECKER.md](TYPECHECKER.md). In short:
 
-- **Name resolution, hashing, and type checking are one stage,** built as
-  queries that the code database keeps current. Signatures depend only on
-  other signatures and type shapes, so a body edit re-checks no caller.
-- **Hashes are split by what reads them:** a function's interface, its
-  contract, each default, and its body, so changing an `ensures` re-checks no
-  caller's types.
+- **Name resolution and type checking are one stage,** built as queries
+  that the code database keeps current. Signatures depend only on other
+  signatures and type shapes, so a body edit re-checks no caller.
+- **A definition's results are split by what reads them:** a function's
+  interface, its contract, each default, and its body, so changing an
+  `ensures` re-checks no caller's types.
 - **Bidirectional checking, one statement at a time.** Unification never
   spans more than one statement, and literals follow Go's rule for untyped
   constants, so no `impl` lookup ever decides a literal's type.
@@ -134,15 +151,23 @@ The full design is in [TYPECHECKER.md](TYPECHECKER.md). In short:
 
 ### Hashing and caching
 
-- **Deterministic CBOR** (RFC 8949, section 4.2) is small enough to write
-  directly, which keeps the exact byte format under the project's control. The
-  same encoder must later be written in Truss and produce the same bytes. It
-  is in `stage0/cbor`, as an encoder only, since hashing is all that reads it
-  so far.
-- **BLAKE3** for content hashes, implemented in `stage0/blake3` from the
-  specification, since `digestif` provides BLAKE2 but not BLAKE3. It is
-  tested against the official test vectors. Every hash carries a prefix
-  naming the format version and algorithm, so this can change.
+- **BLAKE3** for every hash: fingerprints, keys, and the names of values in
+  the store. It is implemented in `stage0/blake3` from the specification,
+  since `digestif` provides BLAKE2 but not BLAKE3, and tested against the
+  official test vectors. The compression function keeps its sixteen words in
+  local variables and writes each mixing step out, which is what a hash in
+  plain OCaml needs to be fast.
+- **A result's fingerprint is the hash of its marshaled bytes,** written
+  without sharing, so that the bytes follow from the value and not from
+  which of its parts are one block in memory. Marshaled bytes mean something
+  only to the compiler that wrote them, so every key of a result holds the
+  compiler's identity, the hash of its executable.
+- **Deterministic CBOR** (RFC 8949, section 4.2) is what exact keys are
+  hashed over: an instance's LIR and a test's key. It is small enough to
+  write directly, which keeps the exact byte format under the project's
+  control. The same encoder must later be written in Truss and produce the
+  same bytes. It is in `stage0/cbor`, as an encoder only, since hashing is
+  all that reads it so far.
 - **Queries** run on the code database's engine, in `stage0/incremental`,
   which stages see through `stage0/query`.
 
@@ -150,24 +175,37 @@ The full design is in [TYPECHECKER.md](TYPECHECKER.md). In short:
 
 The full design is in [DATABASE.md](DATABASE.md). In short:
 
-- **Changes are pushed, not pulled.** Each query's reads are edges in a
-  graph, and a change computes again only the results that read what
+- **Changes are pushed, not pulled, one phase at a time.** Each query's
+  reads are edges in a graph, and every query says its phase, the compiler's
+  own order. A change computes again only the results that read what really
   changed, stopping where one comes out the same. Pulling, which checks
   every result asked for, costs O(project) for a whole build.
+- **A result is a fact, kept under what it read:** its query, its key, the
+  compiler's identity, and the fingerprint of each thing it read. Any
+  worktree, branch, or process that reads the same finds it.
+- **A state is a base and a difference.** An engine holds what differs from
+  the frozen engines under it, and a state is written as a difference over
+  an earlier one, so a worktree, a commit, or a trial of a change costs what
+  it changed. The standard library is a base written once for each compiler.
 - **Three narrow interfaces:** `Query` for compiler stages, `Engine` for the
   database, and `Store` for bytes on disk. Stages never see the engine, the
   store, files, or sessions.
 - **One store per user, in `~/.cache/truss`,** shared by every project,
-  worktree, and compiler: values and results of expensive steps in
-  append-only segments with sorted indexes, and each session's graph as an
-  append-only journal. It uses only ordinary file operations, so the
-  compiler written in Truss can keep the same store. Saved results are OCaml's
-  marshaled values, since a journal belongs to the compiler that wrote it.
+  worktree, and compiler: values, facts, states, and results of expensive
+  steps in append-only segments with sorted indexes, and a pointer to each
+  worktree's current state. It uses only ordinary file operations, so the
+  compiler written in Truss can keep the same store.
 - **One background process per user and compiler** serves every worktree and
   command. It scans each worktree's file stamps before every request and each
-  second while idle, starts a new worktree from the nearest session, and finds
-  where two worktrees' changes overlap. `--no-server` answers a request in the
-  command's own process.
+  second while idle, starts a new worktree from the nearest saved state, and
+  finds where two worktrees' changes overlap. `--no-server` answers a request
+  in the command's own process.
+- **The engine is checked against a new one.** Besides the audit under every
+  test, tests compare the engine's counts of work for the same edit in a
+  small package and a large one, `stage0/tools/engine_fuzz` makes random
+  graphs and steps and audits after each, and
+  `stage0/tools/database_timing` times a first check, opening a state, and
+  edits on a package of a given size.
 
 ### Command line
 

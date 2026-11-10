@@ -1,7 +1,6 @@
 (* The tests of name resolution. Each gives a few small files and states one
    fact: what a name refers to, or the one diagnostic, with its code and the
-   text after applying its fix. See TYPECHECKER.md, "Name resolution" and
-   "Testing". *)
+   text after applying its fix. *)
 
 open Harness
 
@@ -492,90 +491,6 @@ let () =
       if List.mem "resolved(app::main::first)" (Engine.executed (Engine.of_context database)) then
         fail "resolved again")
 
-(* Hashing *)
-
-let parts_of text name =
-  let database = setup [ ("app::main", text) ] in
-  let key : Resolve.Names.key =
-    {
-      module_ = module_of "app::main";
-      path = Top { module_ = module_of "app::main"; name };
-      ordinal = 0;
-    }
-  in
-  match Query.demand database Hash.parts key with
-  | Some parts -> List.map (fun (part, digest) -> (Hash.show_part part, Hash.show digest)) parts
-  | None -> failwith ("no definition " ^ name)
-
-(* The names of the parts whose hashes differ between two versions. *)
-let changed before after name =
-  let first = parts_of before name and second = parts_of after name in
-  List.sort_uniq compare
-    (List.filter_map
-       (fun (part, digest) -> if List.assoc_opt part second = Some digest then None else Some part)
-       first
-    @ List.filter_map
-        (fun (part, _) -> if List.mem_assoc part first then None else Some part)
-        second)
-
-let expect_changed name before after expected =
-  test name (fun () ->
-      let actual = changed before after "f" in
-      if actual <> expected then fail "changed [%s]" (String.concat "; " actual))
-
-let () =
-  expect_changed "reformatting changes no hash" "fn f(count: Int64) -> Int64 {\n  count + 1\n}\n"
-    "fn f(count:Int64)->Int64{\n  count  +  1\n}\n" [];
-  expect_changed "moving a definition changes no hash" "fn f() -> Int64 { 1 }\n"
-    "\n\n\nfn f() -> Int64 { 1 }\n" [];
-  expect_changed "how a literal is written does not count" "fn f() -> Int64 { 255 }\n"
-    "fn f() -> Int64 { 0xFF }\n" [];
-  expect_changed "parentheses do not count" "fn f(a: Int64) -> Int64 { a * 2 }\n"
-    "fn f(a: Int64) -> Int64 { (a * 2) }\n" [];
-  expect_changed "an ensures changes the contract and not the interface"
-    "fn f() -> Int64\n  ensures result > 0\n{\n  1\n}\n"
-    "fn f() -> Int64\n  ensures result > 1\n{\n  1\n}\n" [ "contract" ];
-  expect_changed "renaming a local changes only the body"
-    "fn f() -> Int64 {\n  let count = 1\n  count\n}\n"
-    "fn f() -> Int64 {\n  let total = 1\n  total\n}\n" [ "body" ];
-  expect_changed "changing a default changes only that default" "fn f(count: Int64 = 1) {}\n"
-    "fn f(count: Int64 = 2) {}\n" [ "default count" ];
-  expect_changed "editing a proof block changes only that proof"
-    "fn f() -> Int64 {\n  proof {\n    assert 1 == 1\n  }\n  1\n}\n"
-    "fn f() -> Int64 {\n  proof {\n    assert 2 == 2\n  }\n  1\n}\n" [ "proof 0" ];
-  expect_changed "the order between kinds of clause does not count"
-    "fn f(a: Int64)\n  requires a > 0\n  ensures a > 0\n{\n}\n"
-    "fn f(a: Int64)\n  ensures a > 0\n  requires a > 0\n{\n}\n" [];
-  expect_changed "the order within one kind of clause counts"
-    "fn f(a: Int64)\n  requires a > 0\n  requires a < 9\n{\n}\n"
-    "fn f(a: Int64)\n  requires a < 9\n  requires a > 0\n{\n}\n" [ "contract" ];
-  test "a record's field order does not count" (fun () ->
-      let actual = changed "type T(a: Int64, b: Int64)\n" "type T(b: Int64, a: Int64)\n" "T" in
-      if actual <> [] then fail "changed [%s]" (String.concat "; " actual));
-  test "a record's field order counts when it derives Ordered" (fun () ->
-      let others = "public trait Ordered {}\n" in
-      let database text =
-        let database = setup [ ("app::main", text) ] in
-        Engine.set (Engine.of_context database) Workspace.file_text (module_of "standard::core")
-          others;
-        database
-      in
-      let hash text =
-        let database = database text in
-        let key : Resolve.Names.key =
-          {
-            module_ = module_of "app::main";
-            path = Top { module_ = module_of "app::main"; name = "T" };
-            ordinal = 0;
-          }
-        in
-        Option.get (Query.demand database Hash.parts key)
-      in
-      if
-        hash "type T(a: Int64, b: Int64)\n  derives Ordered\n"
-        = hash "type T(b: Int64, a: Int64)\n  derives Ordered\n"
-      then fail "same hash")
-
 (* What the review of resolution found *)
 
 let () =
@@ -654,35 +569,5 @@ let () =
             \  }\n\
              }\n" );
         ])
-
-let () =
-  test "methods of one name and different receivers are hashed apart" (fun () ->
-      let text = "trait Box {\n  fn get(self) -> Int64\n  fn get(mut self) -> Int64\n}\n" in
-      let parts = List.map fst (parts_of text "Box") in
-      if List.length parts <> List.length (List.sort_uniq compare parts) then
-        fail "repeated parts [%s]" (String.concat "; " parts));
-  test "a field's default is its own part" (fun () ->
-      let actual = changed "type T(a: Int64 = 1)\n" "type T(a: Int64 = 2)\n" "T" in
-      if actual <> [ "default a" ] then fail "changed [%s]" (String.concat "; " actual));
-  test "a result that reads one part is not run again when another changes" (fun () ->
-      let text body = "fn f() -> Int64 { " ^ body ^ " }\n" in
-      let database = setup [ ("app::main", text "1") ] in
-      let key : Resolve.Names.key =
-        {
-          module_ = module_of "app::main";
-          path = Top { module_ = module_of "app::main"; name = "f" };
-          ordinal = 0;
-        }
-      in
-      let reader =
-        Query.query ~name:"reader"
-          ~show:(fun () -> "")
-          (fun database () -> Query.demand database Hash.part (key, Interface))
-      in
-      ignore (Query.demand database reader ());
-      Engine.set (Engine.of_context database) Workspace.file_text (module_of "app::main") (text "2");
-      Engine.clear_log (Engine.of_context database);
-      ignore (Query.demand database reader ());
-      if List.mem "reader()" (Engine.executed (Engine.of_context database)) then fail "ran again")
 
 let () = finish ()

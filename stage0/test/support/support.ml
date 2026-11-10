@@ -5,12 +5,12 @@ let module_of text : Path.module_ =
   | package :: modules -> { package; modules }
   | [] -> invalid_arg text
 
-(* The standard library's frozen layer, shared by every test in a run, so
+(* The standard library as a fixed base, shared by every test in a run, so
    that it is checked once. *)
-let standard = lazy (Database.standard_layer ())
+let standard = lazy (Database.standard_base ())
 
 let setup files =
-  let database = Engine.context (Engine.create ~log:true ~shared:(Lazy.force standard) ()) in
+  let database = Engine.context (Engine.create ~log:true ~bases:[ Lazy.force standard ] ()) in
   let files = List.map (fun (name, text) -> (module_of name, text)) files in
   List.iter
     (fun package ->

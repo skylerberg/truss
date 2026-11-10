@@ -1,7 +1,6 @@
 (* Exhaustiveness and reachability, by Maranget's usefulness algorithm
    ("Warnings for pattern matching", 2007), over the matched values as a
-   vector, so a [match] over several values is checked as one. See
-   TYPECHECKER.md, "Exhaustiveness and reachability".
+   vector, so a [match] over several values is checked as one.
 
    Constructors are the variants of a sum type, a record's one shape,
    [true] and [false], and for integers and [Character] the intervals that
@@ -696,7 +695,8 @@ let check_definition context ~text (definition : definition) =
   Syntax_walk.definition ~statement expression definition
 
 let definition_diagnostics =
-  Query.query ~name:"pattern_diagnostics" ~show:Resolve.Names.show_key (fun database key ->
+  Query.query ~name:"pattern_diagnostics" ~phase:Bodies ~saved:true ~show:Resolve.Names.show_key
+    (fun database key ->
       match
         ( Query.demand database Resolve.Names.definition key,
           Infer.clean database key,
