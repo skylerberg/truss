@@ -26,11 +26,17 @@ let own_constant database owner name =
     (fun (key : Names.key) -> match key.path with Member_constant _ -> Some key.path | _ -> None)
     (Query.demand database Names.members (owner, name))
 
+(* A trait's versions of a method: one for each way it takes [self]. *)
 let trait_methods database trait name =
   match Query.demand database Environment.trait_interface trait with
   | Some interface ->
       List.filter (fun (method_ : T.trait_method) -> method_.method_name = name) interface.methods
   | None -> []
+
+let trait_method database trait name receiver =
+  List.find_opt
+    (fun (method_ : T.trait_method) -> method_.method_receiver = receiver)
+    (trait_methods database trait name)
 
 (* The fields of a record type, with its type arguments substituted. *)
 let substitution_for database path arguments =

@@ -251,7 +251,13 @@ let () =
       | found -> fail "found [%s]" (String.concat "; " found));
   test "a trait cannot redeclare a method of a trait it requires" (fun () ->
       one_diagnostic "trait Sorted: Ordered {\n  fn compare(self, other: Self) -> Ordering\n}\n"
-        "types.redeclared_method")
+        "types.redeclared_method");
+  test "a trait may add a version of a method of a trait it requires" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "trait Changeable: Iterable {\n  fn each(mut self) yields mut Self.Element\n}\n" );
+        ])
 
 (* Properties *)
 

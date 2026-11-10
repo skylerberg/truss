@@ -116,8 +116,11 @@ let overlap (first : T.impl_interface) (second : T.impl_interface) =
 
 (* Method names *)
 
-(* A type's own method and a method of a trait it implements cannot share
-   a name, wherever the [impl] is. *)
+(* A method is its name and how it takes [self]. In a type's own package,
+   an [impl] may give the type another version of a method it has: one name,
+   taking [self] another way. An [impl] anywhere else may not use a name the
+   type has at all, so that code added outside the type's package never
+   changes which method a call means. Neither may share a constant's name. *)
 let check_method_names database (declaration : Names.declaration) (definition : definition)
     (impl : T.impl_interface) =
   match
@@ -126,13 +129,27 @@ let check_method_names database (declaration : Names.declaration) (definition : 
   | T.Named { path; _ }, Some trait when not trait.is_capability ->
       List.filter_map
         (fun (method_ : T.trait_method) ->
-          match Query.demand database Names.members (path, method_.method_name) with
-          | [] -> None
-          | _ ->
-              at database (Names.key_of declaration) Method_name_clash (header_span definition)
-                (Printf.sprintf
-                   "`%s` has a method `%s` of its own, so it cannot also get one from `%s`."
-                   (T.show impl.for_type) method_.method_name (T.show_trait impl.implements)))
+          let own = Query.demand database Names.members (path, method_.method_name) in
+          let same_version (key : Names.key) =
+            match key.path with
+            | Method { receiver; _ } -> receiver = method_.method_receiver
+            | _ -> true
+          in
+          if own = [] then None
+          else if declaration.module_.package <> Path.package path then
+            at database (Names.key_of declaration) Method_name_clash (header_span definition)
+              (Printf.sprintf
+                 "`%s` has a `%s` of its own, so only an `impl` in its own package can give it \
+                  another."
+                 (T.show impl.for_type) method_.method_name)
+          else if List.exists same_version own then
+            at database (Names.key_of declaration) Method_name_clash (header_span definition)
+              (Printf.sprintf
+                 "`%s` has a `%s` of its own that takes %s, so it cannot also get one from `%s`."
+                 (T.show impl.for_type) method_.method_name
+                 (Path.show_receiver method_.method_receiver)
+                 (T.show_trait impl.implements))
+          else None)
         trait.methods
   | _ -> []
 

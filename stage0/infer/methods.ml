@@ -91,81 +91,78 @@ and call_named state env ?expected (value : expression) (callee : expression)
 (* [Type.name(...)]: a variant, a method without [self], or a method
    written in full with its receiver first. *)
 and static_call state env ?expected (value : expression) type_ (member : name) arguments =
+  let ambiguous (traits : T.trait_reference list) =
+    arguments_alone state env arguments
+      (error state Ambiguous_method member.span
+         (Printf.sprintf
+            "More than one trait gives `%s` a method `%s`: %s. Call it through the trait to say \
+             which."
+            (show state type_) member.text
+            (String.concat ", " (List.map (fun trait -> "`" ^ T.show_trait trait ^ "`") traits))))
+  in
+  let wrong_receiver () =
+    arguments_alone state env arguments
+      (error state Wrong_receiver member.span
+         (Printf.sprintf
+            "`%s` has no version for this receiver's mark; mark the receiver `mut` or `own` as \
+             its versions take."
+            member.text))
+  in
+  (* A method with [self], written in full: its first argument is the
+     receiver, whose mark chooses the version, as with a dot. *)
+  let wanted : Path.receiver =
+    match arguments with receiver :: _ -> marked_receiver receiver.value | [] -> Read
+  in
   match type_ with
   | T.Named { path; arguments = type_arguments } when names_variant member ->
       construct state env ?expected ~type_arguments value path (Some member.text) arguments
   | T.Named { path; _ } -> (
-      match Members.own_methods state.database path member.text with
-      | [] -> (
-          (* A trait method written through the type, as [Int64.from(count)]. *)
-          match trait_static_method state path member.text with
+      match List.assoc_opt Path.Static (Members.own_methods state.database path member.text) with
+      | Some method_path -> (
+          match function_signature state method_path with
+          | Some (Ok signature) ->
+              let instance = instantiate state value.span signature in
+              (* The type's arguments, as written or inferred, are the
+                 head's generic arguments. *)
+              let head =
+                List.filteri
+                  (fun index _ ->
+                    index
+                    < List.length
+                        (match type_ with T.Named { arguments; _ } -> arguments | _ -> []))
+                  instance.type_arguments
+              in
+              ignore
+                (Unify.unify_arguments state.unifier head
+                   (match type_ with T.Named { arguments; _ } -> arguments | _ -> []));
+              (match (expected, instance.signature.output) with
+              | Some expected, Returns output -> ignore (unify state output expected)
+              | _ -> ());
+              let matched, left_out =
+                match_arguments state value instance.signature.parameters arguments
+                  ~record:false
+              in
+              let checked =
+                check_arguments state env instance.signature.parameters matched ~offset:0
+              in
+              check_specification_call state env value signature;
+              finish_call state value
+                (C.Function { path = method_path; type_arguments = instance.type_arguments })
+                instance checked left_out
+          | Some (Error report) -> arguments_alone state env arguments (T.Error report)
+          | None -> bug "the method `%s` has no signature" (Path.show method_path))
+      | None -> (
+          (* A trait's method without [self], as [Int64.from(count)]. *)
+          match trait_static_method state path member.text Static with
           | [ (trait, method_) ] ->
               trait_method_through_type state env ?expected value type_ trait method_ arguments
-          | _ :: _ :: _ as several ->
-              arguments_alone state env arguments
-                (error state Ambiguous_method member.span
-                   (Printf.sprintf
-                      "More than one trait gives `%s` a method `%s`: %s. Call it through the trait \
-                       to say which."
-                      (show state type_) member.text
-                      (String.concat ", "
-                         (List.map
-                            (fun ((trait : T.trait_reference), _) -> "`" ^ T.show_trait trait ^ "`")
-                            several))))
-          | [] ->
-              arguments_alone state env arguments
-                (match Members.broken state.database path with
-                | Some report -> T.Error report
-                | None ->
-                    error state Unknown_member member.span
-                      (Printf.sprintf "`%s` has no method `%s`." (show state type_) member.text)))
-      | versions -> (
-          let static_version = List.assoc_opt Path.Static versions in
-          match static_version with
-          | Some method_path -> (
-              match function_signature state method_path with
-              | Some (Ok signature) ->
-                  let instance = instantiate state value.span signature in
-                  (* The type's arguments, as written or inferred, are the
-                     head's generic arguments. *)
-                  let head =
-                    List.filteri
-                      (fun index _ ->
-                        index
-                        < List.length
-                            (match type_ with T.Named { arguments; _ } -> arguments | _ -> []))
-                      instance.type_arguments
-                  in
-                  ignore
-                    (Unify.unify_arguments state.unifier head
-                       (match type_ with T.Named { arguments; _ } -> arguments | _ -> []));
-                  (match (expected, instance.signature.output) with
-                  | Some expected, Returns output -> ignore (unify state output expected)
-                  | _ -> ());
-                  let matched, left_out =
-                    match_arguments state value instance.signature.parameters arguments
-                      ~record:false
-                  in
-                  let checked =
-                    check_arguments state env instance.signature.parameters matched ~offset:0
-                  in
-                  check_specification_call state env value signature;
-                  finish_call state value
-                    (C.Function { path = method_path; type_arguments = instance.type_arguments })
-                    instance checked left_out
-              | Some (Error report) -> arguments_alone state env arguments (T.Error report)
-              | None -> bug "the method `%s` has no signature" (Path.show method_path))
-          | None -> (
-              (* A method with [self], written in full: the first argument is the receiver. *)
-              match arguments with
-              | receiver :: rest -> (
-                  (* The receiver's mark chooses the version, as with a dot. *)
-                  let wanted : Path.receiver =
-                    match receiver.value.kind with
-                    | Mode (Mut, _) -> Mut
-                    | Mode (Own, _) -> Own
-                    | _ -> Read
-                  in
+          | _ :: _ :: _ as several -> ambiguous (List.map fst several)
+          | [] -> (
+              match versions state type_ member.text with
+              | Error traits -> ambiguous traits
+              | Ok found -> (
+              match (arguments, List.assoc_opt wanted found) with
+              | receiver :: rest, Some (Own_version method_path) ->
                   let inner =
                     match receiver.value.kind with Mode (_, inner) -> inner | _ -> receiver.value
                   in
@@ -173,38 +170,59 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                   if inner != receiver.value then record state receiver.value receiver_type;
                   if not (unify state receiver_type type_) then
                     mismatch state inner.span ~expected:type_ ~found:receiver_type;
-                  match List.assoc_opt wanted versions with
-                  | Some method_path ->
-                      let mode : T.mode = match wanted with Mut -> Mut | Own -> Own | _ -> Read in
-                      check_mode state receiver.value
-                        { name = "self"; mode; type_; has_default = false }
-                        receiver_type;
-                      method_with_receiver state env ?expected value ~receiver:receiver.value
-                        ~receiver_type method_path rest
-                  | None ->
-                      error state Wrong_receiver member.span
-                        (Printf.sprintf
-                           "`%s` has no version for this receiver's mark; mark the receiver `mut` \
-                            or `own` as its versions take."
-                           member.text))
-              | [] ->
+                  let mode : T.mode = match wanted with Mut -> Mut | Own -> Own | _ -> Read in
+                  check_mode state receiver.value
+                    { name = "self"; mode; type_; has_default = false }
+                    receiver_type;
+                  method_with_receiver state env ?expected value ~receiver:receiver.value
+                    ~receiver_type method_path rest
+              | _ :: _, Some (Trait_version (trait, method_)) ->
+                  trait_method_through_type state env ?expected value type_ trait method_ arguments
+              | _ :: _, None when found <> [] -> wrong_receiver ()
+              | [], _ when found <> [] ->
                   error state Missing_argument value.span
-                    "A method written in full takes its receiver as its first argument.")))
+                    "A method written in full takes its receiver as its first argument."
+              | _ ->
+                  arguments_alone state env arguments
+                    (match Members.broken state.database path with
+                    | Some report -> T.Error report
+                    | None ->
+                        error state Unknown_member member.span
+                          (Printf.sprintf "`%s` has no method `%s`." (show state type_) member.text))
+              ))))
   | T.Parameter parameter -> (
-      match
-        List.find_map
-          (fun (bound : T.trait_reference) ->
-            List.find_map
-              (fun (method_ : T.trait_method) ->
-                if method_.method_name = member.text then Some (bound, method_) else None)
-              (Members.trait_methods state.database bound.trait member.text))
+      (* A method of a bound: the one without [self], or else the version
+         the first argument's mark names. Two bounds on one trait differ only
+         in the trait's arguments, which the call's arguments decide. *)
+      let without_self =
+        List.fold_left
+          (fun found (bound : T.trait_reference) ->
+            match Members.trait_method state.database bound.trait member.text Static with
+            | Some method_
+              when not
+                     (List.exists
+                        (fun ((other : T.trait_reference), _) ->
+                          Path.equal other.trait bound.trait)
+                        found) ->
+                found @ [ (bound, method_) ]
+            | _ -> found)
+          []
           (Properties.known_bounds state.database ~bounds:(bounds state) (T.Parameter parameter))
-      with
-      | Some (trait, method_) ->
+      in
+      match (without_self, versions state type_ member.text) with
+      | [ (trait, method_) ], _ ->
           trait_method_through_type state env ?expected value type_ trait method_ arguments
-      | None ->
-          error state Unknown_member member.span
-            (Printf.sprintf "`%s` has no method `%s`." parameter.name member.text))
+      | (_ :: _ :: _ as several), _ -> ambiguous (List.map fst several)
+      | [], Error traits -> ambiguous traits
+      | [], Ok found -> (
+          match List.assoc_opt wanted found with
+          | Some (Trait_version (trait, method_)) ->
+              trait_method_through_type state env ?expected value type_ trait method_ arguments
+          | Some (Own_version _) -> bug "a generic parameter has a method of its own"
+          | None when found <> [] -> wrong_receiver ()
+          | None ->
+              error state Unknown_member member.span
+                (Printf.sprintf "`%s` has no method `%s`." parameter.name member.text)))
   | T.Error _ | T.Hole -> arguments_alone state env arguments type_
   | _ ->
       arguments_alone state env arguments
@@ -299,20 +317,33 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
    its receiver first. *)
 and trait_call_in_full state env (value : expression) trait ~trait_arguments (member : name)
     arguments =
-  match Members.trait_methods state.database trait member.text with
-  | method_ :: _ ->
+  (* The method without [self], or else the version the receiver's mark
+     names, as with a dot. *)
+  let wanted : Path.receiver =
+    match arguments with receiver :: _ -> marked_receiver receiver.value | [] -> Read
+  in
+  let version = Members.trait_method state.database trait member.text in
+  match match version Static with None -> version wanted | found -> found with
+  | Some method_ ->
       (* [Self] is the receiver's type, which checking it as the first
          argument decides. *)
       trait_method_through_type state env ?trait_arguments value (fresh state)
         (trait_reference trait) method_ arguments
-  | [] ->
+  | None when Members.trait_methods state.database trait member.text <> [] ->
+      arguments_alone state env arguments
+        (error state Wrong_receiver member.span
+           (Printf.sprintf
+              "`%s` has no version for this receiver's mark; mark the receiver `mut` or `own` as \
+               its versions take."
+              member.text))
+  | None ->
       error state Unknown_member member.span
         (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text)
 
 (* [Clock.now()]: a call to a capability's method. *)
 and capability_call state env (value : expression) capability (member : name) arguments =
-  match Members.trait_methods state.database capability member.text with
-  | method_ :: _ ->
+  match Members.trait_method state.database capability member.text Static with
+  | Some method_ ->
       let instance = instantiate state value.span method_.method_signature in
       let matched, left_out =
         match_arguments state value instance.signature.parameters arguments ~record:false
@@ -330,7 +361,7 @@ and capability_call state env (value : expression) capability (member : name) ar
             result;
           };
       result
-  | [] ->
+  | None ->
       arguments_alone state env arguments
         (error state Unknown_member member.span
            (Printf.sprintf "`%s` has no method `%s`." (Path.show capability) member.text))
@@ -380,16 +411,11 @@ and method_call state env ?expected (value : expression) (base : expression) (me
     chosen
   in
   let wrong_receiver versions =
-    let shown = function
-      | Path.Read -> "`self`"
-      | Mut -> "`mut self`"
-      | Own -> "`own self`"
-      | Static -> "no `self`"
-    in
     error state Wrong_receiver member.span
       (Printf.sprintf "`%s` has no version that takes %s here; it has %s." member.text
-         (shown wanted)
-         (String.concat ", " (List.map (fun (receiver, _) -> shown receiver) versions)))
+         (Path.show_receiver wanted)
+         (String.concat ", "
+            (List.map (fun (receiver, _) -> Path.show_receiver receiver) versions)))
   in
   (* A place that calls a method with only a [mut] or [own] version is
      missing its mark, which the fix adds. *)
@@ -412,102 +438,80 @@ and method_call state env ?expected (value : expression) (base : expression) (me
         arguments;
       receiver_type
   | _ -> (
-      let own =
-        match receiver_type with
-        | T.Named { path; _ } ->
-            List.filter
-              (fun (receiver, _) -> receiver <> Path.Static)
-              (Members.own_methods state.database path member.text)
-        | _ -> []
-      in
-      match own with
-      | _ :: _ -> (
-          match choose_temporary own with
-          | Some (_, method_path) ->
+      match versions state receiver_type member.text with
+      | Ok [] ->
+        let candidates =
+          match receiver_type with
+          | T.Named { path; arguments } -> (
+              match Members.fields state.database path arguments with
+              | Some fields -> List.map (fun (field : T.field) -> field.field_name) fields
+              | None -> [])
+          | _ -> []
+        in
+        let broken =
+          match receiver_type with
+          | T.Named { path; _ } -> Members.broken state.database path
+          | _ -> None
+        in
+        arguments_alone state env arguments
+          (match broken with
+          | Some report -> T.Error report
+          | None ->
+              error state Unknown_member member.span
+                ~fixes:
+                  (match Resolve.closest member.text candidates with
+                  | Some candidate ->
+                      [
+                        fix
+                          (Printf.sprintf "Write `%s`." candidate)
+                          [ replace member.span candidate ];
+                      ]
+                  | None -> [])
+                (Printf.sprintf "`%s` has no method `%s`." (show state receiver_type)
+                   member.text))
+      | Ok found -> (
+          match choose_temporary found with
+          | None -> missing_receiver_mark found
+          | Some (_, Own_version method_path) ->
               method_with_receiver state env ?expected ~type_arguments value ~receiver:base
                 ~receiver_type method_path arguments
-          | None -> missing_receiver_mark own)
-      | [] -> (
-          match trait_candidates state receiver_type member.text with
-          | [ (trait, versions) ] -> (
-              match
-                choose_temporary
-                  (List.map
-                     (fun (method_ : T.trait_method) -> (method_.method_receiver, method_))
-                     versions)
-              with
-              | Some (_, method_) ->
-                  trait_method_call state env value ~receiver:base ~receiver_type trait method_
-                    ~type_arguments arguments
-              | None ->
-                  missing_receiver_mark
+          | Some (_, Trait_version (trait, method_)) ->
+              trait_method_call state env value ~receiver:base ~receiver_type trait method_
+                ~type_arguments arguments)
+      | Error traits ->
+                (* The call written in full: the receiver first, then the
+                   arguments as written. *)
+                let receiver_text = source state base.span in
+                let arguments_text =
+                  List.map
+                    (fun (argument : argument) ->
+                      let start =
+                        match argument.label with
+                        | Some label -> label.span.start
+                        | None -> argument.value.span.start
+                      in
+                      source state (Span.make start argument.value.span.stop))
+                    arguments
+                in
+                error state Ambiguous_method member.span
+                  ~fixes:
                     (List.map
-                       (fun (method_ : T.trait_method) -> (method_.method_receiver, ()))
-                       versions))
-          | [] ->
-              let candidates =
-                match receiver_type with
-                | T.Named { path; arguments } -> (
-                    match Members.fields state.database path arguments with
-                    | Some fields -> List.map (fun (field : T.field) -> field.field_name) fields
-                    | None -> [])
-                | _ -> []
-              in
-              let broken =
-                match receiver_type with
-                | T.Named { path; _ } -> Members.broken state.database path
-                | _ -> None
-              in
-              arguments_alone state env arguments
-                (match broken with
-                | Some report -> T.Error report
-                | None ->
-                    error state Unknown_member member.span
-                      ~fixes:
-                        (match Resolve.closest member.text candidates with
-                        | Some candidate ->
-                            [
-                              fix
-                                (Printf.sprintf "Write `%s`." candidate)
-                                [ replace member.span candidate ];
-                            ]
-                        | None -> [])
-                      (Printf.sprintf "`%s` has no method `%s`." (show state receiver_type)
-                         member.text))
-          | several ->
-              (* The call written in full: the receiver first, then the
-                 arguments as written. *)
-              let receiver_text = source state base.span in
-              let arguments_text =
-                List.map
-                  (fun (argument : argument) ->
-                    let start =
-                      match argument.label with
-                      | Some label -> label.span.start
-                      | None -> argument.value.span.start
-                    in
-                    source state (Span.make start argument.value.span.stop))
-                  arguments
-              in
-              error state Ambiguous_method member.span
-                ~fixes:
-                  (List.map
-                     (fun ((trait : T.trait_reference), _) ->
-                       let name =
-                         match trait.trait with Top { name; _ } -> name | path -> Path.show path
-                       in
-                       fix
-                         (Printf.sprintf "Call `%s`'s `%s`." name member.text)
-                         [
-                           replace value.span
-                             (Printf.sprintf "%s.%s(%s)" name member.text
-                                (String.concat ", " (receiver_text :: arguments_text)));
-                         ])
-                     several)
-                (Printf.sprintf
-                   "More than one trait gives `%s` a method `%s`. Write the call in full to say \
-                    which."
-                   (show state receiver_type) member.text)))
+                       (fun (trait : T.trait_reference) ->
+                         let name =
+                           match trait.trait with Top { name; _ } -> name | path -> Path.show path
+                         in
+                         fix
+                           (Printf.sprintf "Call `%s`'s `%s`." name member.text)
+                           [
+                             replace value.span
+                               (Printf.sprintf "%s.%s(%s)" name member.text
+                                  (String.concat ", " (receiver_text :: arguments_text)));
+                           ])
+                       traits)
+                  (Printf.sprintf
+                     "More than one trait gives `%s` a method `%s`. Write the call in full to say \
+                      which."
+                     (show state receiver_type) member.text))
 
 and method_with_receiver state env ?expected ?(type_arguments = []) (value : expression)
     ~(receiver : expression) ~receiver_type method_path arguments =

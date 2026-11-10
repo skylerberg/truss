@@ -634,8 +634,9 @@ checked apart, and neither waits on the other:
 
 - **A trait's members** are checked like functions, with `Self` standing for
   the implementing type and `Self.Name` for its associated types. A trait
-  may not redeclare a method of a trait it requires, and traits may not
-  require each other in a cycle.
+  may not redeclare a method of a trait it requires, though it may add a
+  version that takes `self` another way, and traits may not require each
+  other in a cycle.
 - **An `impl` conforms to its trait.** Every method without a body and every
   associated type is given, and nothing else is. Each method has the trait's
   parameter names, modes, and types, with `Self` and the associated types
@@ -897,10 +898,16 @@ type:
   the traits they require.
 - **The prelude's `copy()`,** when the type is `Copyable`.
 
-A type's own method and a trait method with one name cannot both exist,
-which a package check reports at the `impl`. Two trait methods with one name
-are an error at the call, with fixes that write it in full, one for each
-trait. A name found nowhere is an error with a fix to the closest member.
+A name's versions are found together: the type's own methods with that
+name, and those of the traits that give the type the name, each by how it
+takes `self`. One function answers this for a call with a dot, a call
+written in full, a `for` loop's `each`, and a quantifier's, and the
+receiver's mode then chooses among them once. The traits must be one family,
+each reached from another through what it requires. Two unrelated traits
+with one name are an error at the call, however each takes `self`, with
+fixes that write it in full, one for each trait. A type's own method and a
+trait's that are the same one are reported by a package check, at the
+`impl`. A name found nowhere is an error with a fix to the closest member.
 
 `Type.name` is looked up the same way among the type's static members:
 variants, constants under the type, methods without `self` such as
@@ -1357,9 +1364,11 @@ associated type without a question coming back to itself.
 
 ### Method names
 
-A type's own method and a method of any trait the type implements cannot
-share a name. The error is reported at the `impl`, wherever it is, as
-DESIGN.md says.
+A method is its name and how it takes `self`. A type's own method and a
+method of a trait the type implements cannot be the same one, and an `impl`
+outside the type's package cannot use a name the type's methods have at
+all, as DESIGN.md says. Neither can share a name with a constant of the
+type. The error is reported at the `impl`, wherever it is.
 
 ### `any`
 

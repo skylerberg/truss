@@ -24,6 +24,9 @@ type receiver =
       (** How a method takes [self]: [Static] for a method without [self], such as
           [List.with_capacity]. One name can have a version for each receiver. *)
 
+val show_receiver : receiver -> string
+(** How a method takes [self], as a message says it: [`mut self`], or [no `self`]. *)
+
 type t =
   | Top of { module_ : module_; name : string }
       (** A function, type, trait, capability, constant, or theorem. *)
