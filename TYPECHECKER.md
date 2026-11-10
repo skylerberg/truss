@@ -2204,11 +2204,17 @@ list's `each`, which only the `impl`'s method has.
   - `?`, `return`, `break`, and `continue` may leave a branch. A
     `concurrent` block has type `Never` when one of its branches does,
     since the block ends normally only when every branch does.
-  - What goes into a channel is not a view: the type argument of `Channel`
-    is never a view type.
+  - An early exit from one branch is checked as if each other branch had
+    either not started or run to any of its ends, since the code after the
+    block does not run. So what a branch moves out of a place that
+    outlives the block, that branch puts back.
+  - The type argument of `Channel` is never a view type, which leaves out
+    every function type and every `any` type.
   - At a `provide mut` whose body can use `Tasks`, the implementation's
     calls take turns, so its capability may have no method with a
-    parameter of a function type that has a `uses` clause.
+    parameter whose type can hold, at any depth, a function or an `any`
+    value that uses a capability. A body that uses a capability parameter
+    of the enclosing function counts as able to use `Tasks`.
   - The core form's shape for both is not decided.
 - **An interpolated string as calls.** It is still a node that names the
   text builder's methods and each value's `display`. It will be desugared

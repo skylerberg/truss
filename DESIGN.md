@@ -1360,6 +1360,12 @@ whoever runs the function chooses the implementation with `provide`.
   `impl`, just like a trait. An implementation with state, such as an
   in-memory file system, is a type with fields. Providing it as `mut` leaves
   the changes in the caller's variable afterward.
+- **A view never crosses into or out of an implementation's state.** A
+  capability's method keeps no view that it is given and returns no view of
+  its own state. A caller cannot see which implementation its call reaches,
+  so it could not know that a view it passed is still held. A view of the
+  implementation's storage would be left viewing what a later call
+  replaces.
 - **A capability method always returns to its caller.** It cannot jump out of
   the surrounding code, stop it partway through, or run it more than once. So
   calling a capability works exactly like calling a function, and compiles to
@@ -1985,6 +1991,10 @@ effect: code that does it declares `uses Tasks`.
   place, and a place that one branch changes cannot be used by another. A
   branch hands its result to the code after the block through a `let`, or
   through its own element of the collection it loops over.
+- **A branch leaves each place whole.** When a branch leaves early, the
+  code after the block does not run. So a branch that takes a value out of
+  a place that outlives the block gives one back itself, where a
+  `parallel` branch may leave that to the code after the block.
 - **A task never outlives the block that started it,** as with Trio's
   nurseries, Kotlin's `coroutineScope`, Swift's task groups, and Java's
   `StructuredTaskScope`. This is what lets a branch read the places around
@@ -2013,9 +2023,10 @@ effect: code that does it declares `uses Tasks`.
   Java cannot switch away from a task that waits inside foreign code.
 - **Leaving early cancels the other branches.** A `?`, `return`, or `break`
   that leaves a `concurrent` block or loop cancels every other branch,
-  waits for each to end, and then leaves. The first branch to leave decides
-  where control goes and with what value; a later one's is dropped. Kotlin,
-  Swift, Trio, and Java's scopes cancel sibling tasks the same way.
+  waits for each to end, and then leaves. A branch that has not started
+  does not start. The first branch to leave decides where control goes and
+  with what value; a later one's is dropped. Kotlin, Swift, Trio, and
+  Java's scopes cancel sibling tasks the same way.
 - **Cancellation is an error value.** In a cancelled task, the standard
   library's implementation of a call that would wait returns at once with
   the value that says it did not finish: `SystemError.Cancelled` where the
@@ -2044,12 +2055,15 @@ effect: code that does it declares `uses Tasks`.
   a queue with a fixed capacity: `send` waits while it is full, `receive`
   waits while it is empty, and `close` ends the loops of the tasks that
   receive from it. A message is owned, so sending one moves it and copies
-  nothing, and it is never a view, since what it views could be gone
-  before it is received. A channel is a token, as a file handle is: the
-  queue is held by whatever provides `Tasks`, so a channel's methods take
-  `self` read-only and every branch can use the one channel. A task that
-  waits for several kinds of message receives one sum type from one
-  channel, as an Erlang process reads one mailbox.
+  nothing. Its type is never a view type, since what a view views could be
+  gone before the message is received. A function's type and an `any` type
+  do not say what the value holds, so they are view types too (see
+  [Views](#views)), and a message is a record or a sum type of owned data.
+  A channel is a token, as a file handle is: the queue is held by whatever
+  provides `Tasks`, so a channel's methods take `self` read-only and every
+  branch can use the one channel. A task that waits for several kinds of
+  message receives one sum type from one channel, as an Erlang process
+  reads one mailbox.
 - **How many tasks run at once is bounded by a value, not by syntax.** A
   `tasks::Limiter` holds a number of permits, and `limiter.hold(work)`
   runs `work` once it has one. This is Kotlin's `Semaphore.withPermit` and
@@ -2070,7 +2084,8 @@ effect: code that does it declares `uses Tasks`.
   `synchronized` methods, and an Erlang `gen_server` work the same way. A
   check and the change that depends on it therefore go in one method.
   Within a call nothing else changes the state, and between two calls
-  anything may. An implementation provided without `mut` is only read, so
+  anything may. No task is left holding a view of the state, since a method
+  returns none. An implementation provided without `mut` is only read, so
   calls into it need no turns.
 - **Proofs already allow for it.** The prover never models an
   implementation's state: a capability call gives a value of which only
@@ -2081,12 +2096,14 @@ effect: code that does it declares `uses Tasks`.
   call only capabilities provided outside it, so tasks always take turns
   from the innermost implementation outward, and no two wait for each
   other's. One rule keeps this true: an implementation whose calls take
-  turns has no method that takes a function with a `uses` clause, since
-  that function could call an implementation further in.
+  turns has no method with a parameter that can hold a function, or an
+  `any` value, that uses a capability, since calling it could reach an
+  implementation further in.
 - **Turns cost nothing where there are no tasks.** Whether the code inside
   a `provide mut` can use `Tasks` is known where the `provide` is written,
-  from the signatures of what it calls. Only such a `provide` makes calls
-  take turns.
+  from the signatures of what it calls. Code that uses a capability
+  parameter of the function around it counts, since the parameter may stand
+  for `Tasks`. Only such a `provide` makes calls take turns.
 - **A mutex is not a value.** Rust's `Mutex` and Go's `sync.Mutex` change
   what a read-only place holds, which mutable value semantics rules out,
   and two tasks that take two of them in different orders deadlock. A task

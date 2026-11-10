@@ -2198,6 +2198,8 @@ fn profile(id: UserId) -> Result[Profile, DatabaseError]
 - A `?`, `return`, or `break` that leaves the block cancels the other
   branches, waits for them to end, and then leaves. Above, a query that
   fails cancels the other query, and `profile` returns the error.
+- The code after the block does not run when a branch leaves early, so a
+  branch that takes a value out of a place gives one back before it ends.
 - In a cancelled task, a call of the standard capabilities that would wait
   returns at once: `Err(SystemError.Cancelled)` where it returns a
   `Result`, and `None` where it returns an `Option`. `Tasks.cancelled()`
@@ -2269,7 +2271,8 @@ fn total_size(paths: Slice[Path]) -> USize
 }
 ```
 
-- A message is owned: sending it moves it, and it cannot be a view.
+- A message is owned: sending it moves it. Its type is a record or a sum
+  type of owned data, and never a view, a function, or an `any` type.
 - A channel's methods take `self` read-only, so every branch can use a
   channel that is declared before the block.
 - A task that waits for several kinds of message receives a sum type from
@@ -2318,8 +2321,10 @@ fn run(listener: network::Listener)
 
 - A check and the change that depends on it go in one method, since other
   tasks' calls can come between two calls.
-- An implementation whose calls take turns has no method that takes a
-  function with a `uses` clause.
+- An implementation whose calls take turns has no method with a parameter
+  that can hold a function, or an `any` value, that uses a capability.
+- A capability's method keeps no view that it is given and returns no view
+  of its implementation's state.
 - An implementation provided without `mut` is only read, so calls into it
   do not take turns.
 
