@@ -1578,6 +1578,14 @@ until the error is fixed.
   its capability parameters are substituted, to be available.
 - **A call through a function value** needs the capabilities of the value's
   type.
+- **A call of an intrinsic needs the capabilities that `Intrinsic.uses` lists
+  for the operation.** An intrinsic has no signature with a `uses` clause. A
+  method of an `impl` of a capability is exempt: it can call an intrinsic
+  without those capabilities. Its callers reach it only through a capability
+  call, which their signatures declare, so no code without capabilities can
+  observe what the intrinsic does. A capability is not a trait, so the method
+  cannot be called on the value, through a bound, or through `any`. A lambda, a
+  `parallel` branch, and a helper function inside the method are not exempt.
 - **A lambda's body may use what the lambda's type lists,** which is the
   function type the lambda is checked against.
 - **A capability parameter stands for a set of capabilities, which is

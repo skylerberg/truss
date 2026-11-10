@@ -213,12 +213,12 @@ and statement state env (written : statement) ~last : unit =
                 | Concurrent_loop -> Concurrent_loop);
             });
       (* Each iteration of a [concurrent for] is a task. *)
-      let around =
+      let loop : enclosing =
         match running with
         | Concurrent_loop -> Task (Iteration { loop = written.id })
         | Sequential | Parallel_loop -> Loop
       in
-      loop_body state { env with around = around :: env.around } body
+      loop_body state { env with enclosing = loop :: env.enclosing } body
   | While { condition = test; clauses; body } ->
       in_statement state env test.span (fun () -> check state env test T.bool);
       List.iter (loop_clause state env) clauses;
@@ -226,7 +226,7 @@ and statement state env (written : statement) ~last : unit =
           let condition = build_expression state test in
           let clauses = List.map (Form.loop_clause state) clauses in
           While { condition; clauses; body = build_block state body });
-      loop_body state { env with around = Loop :: env.around } body
+      loop_body state { env with enclosing = Loop :: env.enclosing } body
   | Parallel body | Concurrent body ->
       let concurrent = match written.kind with Concurrent _ -> true | _ -> false in
       register_statement state written (fun () ->
@@ -238,7 +238,7 @@ and statement state env (written : statement) ~last : unit =
         (fun index (branch : statement) ->
           let env =
             if concurrent then
-              { env with around = Task (Branch { block = written.id; index }) :: env.around }
+              { env with enclosing = Task (Branch { block = written.id; index }) :: env.enclosing }
             else env
           in
           in_statement state env branch.span (fun () -> statement state env branch ~last:false))
