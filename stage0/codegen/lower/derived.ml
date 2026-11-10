@@ -129,8 +129,8 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
           (Code { path; type_arguments = [] })
           ~signature ~substitution:[]
           ~arguments:[ (Mut, hasher_ty, hasher); (Read, Monomorphic.builtin UInt64, word) ]
-          ~mask:0
           ~destination:(temporary st (Monomorphic.builtin Unit))
+          ()
       in
       each_variant st ty self (fun variant index ->
           if variant <> None then write (constant_int UInt64 (Z.of_int index));

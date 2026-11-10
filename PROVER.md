@@ -1017,6 +1017,12 @@ plus what happens before and after:
   afterward, minus the potential on entry of each parameter it changes or
   takes `own`, is within the bound. A parameter it only reads keeps its
   potential, so the method cannot spend it.
+- **A part lent `mut` is paid for by whoever changes it.** A lending
+  method's change in potential leaves out its part's, from as it lent it
+  to as the caller left it, and the caller's statement counts that change
+  as its own, through the operations it changed the part with. So a
+  method that lends a part of `self` is amortized on what it does, and a
+  caller that raises the part's potential pays for it.
 - **A call to one** adds its bound to the caller's counter and subtracts the
   change in potential of what it changed, so a caller with a plain bound
   pays for the potential it consumed from what it was given: a function

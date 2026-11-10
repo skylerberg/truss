@@ -308,24 +308,34 @@ let check context (graph : Graph.t) =
             places;
           (* A view passed to the call may not view a place that the call
              borrows [mut]: the callee would hold the view and change what
-             it views. *)
+             it views. Two parts of one collection may be different
+             elements, which the prover decides, as for two places. *)
           List.iter
             (fun (position, viewed, view_at) ->
               let viewed = resolve context before.(index) viewed in
               List.iter
                 (fun (passed : passed) ->
-                  if
-                    passed.position <> position && passed.mode = Mut
-                    && List.exists
-                         (fun (viewed : view) -> Place.overlap viewed.place passed.place = Overlap)
-                         viewed
-                  then
-                    report context Conflicting_loan
-                      (with_mark context (span context view_at))
-                      (Printf.sprintf
-                         "`%s` is lent `mut` to this call, so the call cannot be given a view of \
-                          it too."
-                         (show context passed.place)))
+                  if passed.position <> position && passed.mode = Mut then begin
+                    let overlaps =
+                      List.map
+                        (fun (viewed : view) -> Place.overlap viewed.place passed.place)
+                        viewed
+                    in
+                    if List.mem Place.Overlap overlaps then
+                      report context Conflicting_loan
+                        (with_mark context (span context view_at))
+                        (Printf.sprintf
+                           "`%s` is lent `mut` to this call, so the call cannot be given a view of \
+                            it too."
+                           (show context passed.place))
+                    else
+                      List.iter
+                        (function
+                          | Place.Maybe_apart (first, second) ->
+                              context.disjoint <- (first, second) :: context.disjoint
+                          | Overlap | Apart -> ())
+                        overlaps
+                  end)
                 places)
             views
       | Views_temporary holder ->
