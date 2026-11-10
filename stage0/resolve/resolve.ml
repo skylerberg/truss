@@ -7,9 +7,9 @@ type cost_function = Walk.cost_function = Log | Power | Time | Calls
 type target = Walk.target =
   | Binding
   | Local of Syntax.id
-  | Type_parameter of Syntax.id
-  | Capability_parameter of Syntax.id
-  | Value_parameter of Syntax.id
+  | Type_parameter of Types.parameter
+  | Capability_parameter of Types.parameter
+  | Value_parameter of Types.parameter
   | Definition of Names.named * Path.t
   | Variant of Path.t * string
   | Module of Path.module_
@@ -26,7 +26,7 @@ type bracket = Walk.bracket = Index | Type_arguments | Method_bracket
 
 type value = Walk.value =
   | Value_local of Syntax.id
-  | Value_generic of Syntax.id
+  | Value_generic of Types.parameter
   | Value_field of string
 
 type resolved = {
@@ -84,7 +84,7 @@ let resolved =
               holes = [];
             }
           in
-          Walk.definition state definition;
+          Walk.definition state ~path:key.path definition;
           (* The prelude is the same everywhere, so no definition outside the
              module that defines a prelude name may take it. *)
           (match key.path with

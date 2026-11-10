@@ -9,8 +9,6 @@ module T = Types
 type context = {
   database : Query.context;
   resolved : Resolve.resolved;
-  parameters : (id, T.parameter) Hashtbl.t;
-      (** Generic parameters, by the id of the name that binds them. *)
   bounds : (T.parameter, T.trait_reference list) Hashtbl.t;
   self_type : T.ty option;  (** What [Self] means here. *)
   self_trait : T.trait_reference option;  (** In a trait, the trait [Self] implements. *)
@@ -23,7 +21,6 @@ let create database resolved =
   {
     database;
     resolved;
-    parameters = Hashtbl.create 8;
     bounds = Hashtbl.create 8;
     self_type = None;
     self_trait = None;
@@ -45,16 +42,9 @@ let error context code span message = T.Error (reported context code span messag
 let bug format = Compiler_bug.bug ~stage:"Interface" format
 let target context (name : name) = context.resolved.names.(name.id)
 
-(* A generic parameter resolution found, by the id of the name that binds
-   it. *)
-let declared context id (name : name) =
-  match Hashtbl.find_opt context.parameters id with
-  | Some parameter -> parameter
-  | None -> bug "the generic parameter `%s` is not declared" name.text
-
 let parameter_of context (name : name) =
   match target context name with
-  | Some (Type_parameter id) -> Ok (declared context id name)
+  | Some (Type_parameter parameter) -> Ok parameter
   | Some (Capability_parameter _) ->
       Error
         (reported context Unknown_associated_type name.span
@@ -62,11 +52,6 @@ let parameter_of context (name : name) =
               name.text))
   | Some (Unknown report) -> Error report
   | _ -> bug "`%s` is not resolved as a generic parameter" name.text
-
-let declare context owner (name : name) =
-  let parameter : T.parameter = { owner; name = name.text } in
-  Hashtbl.replace context.parameters name.id parameter;
-  parameter
 
 (* Types *)
 
@@ -195,7 +180,7 @@ and arguments context (path : path_type) =
 
 and count_name context (name : name) : T.argument =
   match target context name with
-  | Some (Value_parameter id) -> T.Value (T.Value_parameter (declared context id name))
+  | Some (Value_parameter parameter) -> T.Value (T.Value_parameter parameter)
   | Some (Definition (Constant, path)) -> (
       if not (Constants.is_usize context.database path) then
         T.Type
@@ -248,12 +233,12 @@ and check_arity context (path : path_type) shown expected =
 and path_type context (path : path_type) : T.ty =
   let shown = show_path path.path in
   match target context path.path.last with
-  | Some (Type_parameter id) ->
+  | Some (Type_parameter parameter) ->
       if path.arguments <> [] then begin
         report context Arity path.span
           (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." shown)
       end;
-      T.Parameter (declared context id path.path.last)
+      T.Parameter parameter
   | Some (Capability_parameter _) ->
       error context Not_a_type path.span
         (Printf.sprintf "`%s` is a capability parameter, not a type." shown)
@@ -311,8 +296,7 @@ and trait_bounds context paths =
 and capability context (path : path_type) : T.capability option =
   let shown = show_path path.path in
   match target context path.path.last with
-  | Some (Capability_parameter id) ->
-      Some (T.Capability_parameter (declared context id path.path.last))
+  | Some (Capability_parameter parameter) -> Some (T.Capability_parameter parameter)
   | Some (Type_parameter _) ->
       report context Not_a_capability path.span
         (Printf.sprintf
@@ -371,16 +355,17 @@ and costs clauses =
       | _ -> None)
     clauses
 
-(* Generic parameters: every parameter of the list is declared before any
-   bound is lowered, so bounds may name each other. *)
+(* Generic parameters, each named by its owner and its own name, as
+   resolution names them. *)
 let generics context owner (written : generic_parameter list) : T.generic list =
+  let parameter (name : name) : T.parameter = { owner; name = name.text } in
   let declared =
     List.filter_map
       (fun (generic : generic_parameter) ->
         match generic.kind with
-        | Type_parameter (name, bounds) -> Some (declare context owner name, `Type bounds)
-        | Value_parameter (name, type_) -> Some (declare context owner name, `Value type_)
-        | Capability_parameter name -> Some (declare context owner name, `Capability)
+        | Type_parameter (name, bounds) -> Some (parameter name, `Type bounds)
+        | Value_parameter (name, type_) -> Some (parameter name, `Value type_)
+        | Capability_parameter name -> Some (parameter name, `Capability)
         | Generic_error -> None)
       written
   in

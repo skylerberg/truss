@@ -115,6 +115,11 @@ let spell_head (head : type_head) =
   | [] -> spell_path head.path
   | _ -> Printf.sprintf "%s[%s]" (spell_path head.path) (String.concat ", " generics)
 
+(* A function's own name, which comes after the type head when it is
+   written on a type. *)
+let signature_name (signature : signature) =
+  match signature.name with Plain_name name | Member_name (_, name) -> name
+
 let receiver (parameters : parameter list) : Path.receiver =
   match parameters with
   | { kind = Self_parameter None; _ } :: _ -> Read
