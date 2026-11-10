@@ -234,6 +234,29 @@ fn main(arguments: List[String]) -> ExitCode
       if not (contains errors "minus three ran") then fail "reported %s" errors)
 
 let () =
+  test "a parallel for over a range of characters steps over the surrogates" (fun () ->
+      Unix.putenv "TRUSS_WORKERS" "8";
+      let status, _, errors =
+        run_main
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Panic
+{
+  parallel for letter in Character"\u{D700}"..=Character"\u{E001}" {
+    if letter > Character"\u{D7FF}" && letter < Character"\u{E000}" {
+      Panic.crash("a surrogate")
+    }
+    if letter == Character"\u{E001}" {
+      Panic.crash("the last character ran")
+    }
+  }
+  ExitCode.success
+}
+|}
+      in
+      expect_int ~expected:101 status;
+      if not (contains errors "the last character ran") then fail "reported %s" errors)
+
+let () =
   passes "a test runs the branches of a parallel block and of a parallel for, in order"
     (board
    ^ {|
