@@ -334,6 +334,44 @@ type signature = {
   stores_functions : string list;
 }
 
+let map_signature f (signature : signature) =
+  {
+    signature with
+    receiver = Option.map (fun (receiver, type_) -> (receiver, f type_)) signature.receiver;
+    parameters =
+      List.map
+        (fun (parameter : parameter_info) -> { parameter with type_ = f parameter.type_ })
+        signature.parameters;
+    output =
+      (match signature.output with
+      | Returns type_ -> Returns (f type_)
+      | Yields (mode, type_) -> Yields (mode, f type_)
+      | Lends (mode, type_) -> Lends (mode, f type_));
+  }
+
+let substitute_signature substitution (signature : signature) =
+  let signature = map_signature (substitute substitution) signature in
+  {
+    signature with
+    generics =
+      List.map
+        (fun (generic : generic) ->
+          match generic.kind with
+          | Type_generic bounds ->
+              { generic with kind = Type_generic (List.map (substitute_trait substitution) bounds) }
+          | Value_generic | Capability_generic -> generic)
+        signature.generics;
+    uses = substitute_capabilities substitution signature.uses;
+  }
+
+let inside ~generics ~uses (signature : signature) =
+  {
+    signature with
+    generics = generics @ signature.generics;
+    uses =
+      signature.uses @ List.filter (fun capability -> not (List.mem capability signature.uses)) uses;
+  }
+
 let function_type_of (signature : signature) =
   let receiver =
     match signature.receiver with

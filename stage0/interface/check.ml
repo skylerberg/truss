@@ -440,21 +440,6 @@ and agrees_result (left : T.result) (right : T.result) =
       left_mode = right_mode && agrees left right
   | _ -> false
 
-let map_signature f (signature : T.signature) =
-  {
-    signature with
-    receiver = Option.map (fun (receiver, type_) -> (receiver, f type_)) signature.receiver;
-    parameters =
-      List.map
-        (fun (parameter : T.parameter_info) -> { parameter with type_ = f parameter.type_ })
-        signature.parameters;
-    output =
-      (match signature.output with
-      | Returns type_ -> Returns (f type_)
-      | Yields (mode, type_) -> Yields (mode, f type_)
-      | Lends (mode, type_) -> Lends (mode, f type_));
-  }
-
 (* An [impl] as it sees its trait: the trait, what stands for the trait's
    [Self] and parameters there, and the trait's types as this [impl] sees
    them, with [Self] its type and each associated type of [Self] what this
@@ -574,7 +559,7 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
               report state Missing_member trait_path.span
                 (Printf.sprintf "This `impl` must give `%s%s`, which `%s` declares."
                    method_.method_name
-                   (show_signature (map_signature normalize method_.method_signature))
+                   (show_signature (T.map_signature normalize method_.method_signature))
                    shown_trait))
           trait.methods;
         List.iter
@@ -664,20 +649,30 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
               "A capability's implementation takes `self`, or `mut self` if it changes its own \
                state."
           else begin
-            (* The trait method's own generic parameters stand for
-                             the [impl] method's, by position. *)
-            let generic_substitution =
-              if List.length declared.method_signature.generics = List.length given.generics then
-                List.map2
-                  (fun (expected : T.generic) (actual : T.generic) ->
-                    (expected.generic, T.Type (T.Parameter actual.generic)))
-                  declared.method_signature.generics given.generics
-              else []
+            (* The method's own generic parameters and [uses], after the
+               [impl]'s, which every method written inside it has. *)
+            let given =
+              {
+                given with
+                generics =
+                  List.filteri
+                    (fun index _ -> index >= List.length impl.impl_generics)
+                    given.generics;
+                uses =
+                  List.filter
+                    (fun capability -> not (List.mem capability impl.impl_uses))
+                    given.uses;
+              }
             in
+            (* The trait method's own generic parameters stand for the
+               [impl] method's, by position. *)
             let expected =
-              map_signature
-                (fun type_ -> normalize (T.substitute generic_substitution type_))
-                declared.method_signature
+              T.map_signature normalize
+                (T.substitute_signature
+                   (Option.value ~default:[]
+                      (T.substitution_of declared.method_signature.generics
+                         (Environment.generic_arguments given.generics)))
+                   declared.method_signature)
             in
             let expected =
               if trait.is_capability then { expected with receiver = given.receiver } else expected
@@ -705,7 +700,7 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
                              List.exists
                                (fun (allowed : T.trait_reference) ->
                                  Path.equal allowed.trait bound.trait)
-                               (List.map (T.substitute_trait generic_substitution) expected_bounds))
+                               expected_bounds)
                            given_bounds
                      | left, right -> left = right)
                    expected.generics given.generics
@@ -718,21 +713,21 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
               report state Signature_mismatch name.span
                 (Printf.sprintf "`%s` must have the signature `%s%s` that `%s` declares." name.text
                    name.text (show_signature expected) shown_trait)
-            else if not trait.is_capability then
-              let allowed =
-                List.map
-                  (function
-                    | T.Capability_parameter parameter -> (
-                        match List.assoc_opt parameter generic_substitution with
-                        | Some (T.Type (T.Parameter actual)) -> T.Capability_parameter actual
-                        | _ -> T.Capability_parameter parameter)
-                    | capability -> capability)
-                  declared.method_signature.uses
-              in
+            else
+              (* Whoever calls a capability holds the capability alone, so
+                 its implementation uses what its [impl] declares and no
+                 more. *)
+              let allowed = if trait.is_capability then [] else expected.uses in
               if not (List.for_all (fun capability -> List.mem capability allowed) given.uses) then
                 report state Impl_uses name.span
-                  (Printf.sprintf "`%s` can use only the capabilities `%s` declares for it."
-                     name.text shown_trait)
+                  (if trait.is_capability then
+                     Printf.sprintf
+                       "`%s` implements a capability, so it can use only what its `impl` declares \
+                        with `uses`."
+                       name.text
+                   else
+                     Printf.sprintf "`%s` can use only the capabilities `%s` declares for it."
+                       name.text shown_trait)
           end)
 
 (* The definition *)

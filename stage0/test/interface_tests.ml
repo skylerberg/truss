@@ -197,6 +197,51 @@ let () =
             \  fn now(self) -> Instant { todo }\n\
              }\n" );
         ]);
+  test "a capability's impl method may repeat its impl's uses" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "type FixedClock(time: Instant)\n\n\
+             impl Clock for FixedClock\n\
+            \  uses Random\n\
+             {\n\
+            \  fn now(self) -> Instant\n\
+            \    uses Random\n\
+            \  {\n\
+            \    todo\n\
+            \  }\n\
+             }\n" );
+        ]);
+  test "a capability's impl method cannot add uses of its own" (fun () ->
+      one_diagnostic
+        "type FixedClock(time: Instant)\n\n\
+         impl Clock for FixedClock {\n\
+        \  fn now(self) -> Instant\n\
+        \    uses Random\n\
+        \  {\n\
+        \    todo\n\
+        \  }\n\
+         }\n"
+        "types.impl_uses");
+  test "an impl's method names its generic parameters its own way" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "trait Filler {\n\
+            \  fn fill[count: USize](self) -> Array[Int64, count]\n\n\
+            \  fn run[capability Used](self, action: (fn() uses Used))\n\
+            \    uses Used\n\
+             }\n\n\
+             type Thing()\n\n\
+             impl Filler for Thing {\n\
+            \  fn fill[size: USize](self) -> Array[Int64, size] { todo }\n\n\
+            \  fn run[capability Given](self, action: (fn() uses Given))\n\
+            \    uses Given\n\
+            \  {\n\
+            \    todo\n\
+            \  }\n\
+             }\n" );
+        ]);
   test "traits cannot require each other in a cycle" (fun () ->
       let database =
         setup [ ("app::main", "trait First: Second {}\n\ntrait Second: First {}\n") ]
@@ -410,6 +455,74 @@ let () =
              int64
              (trait "From" [ Types.builtin Int32 ]))
       then fail "no impl")
+
+(* Methods at an [impl] *)
+
+let () =
+  let text =
+    "trait Described {\n\
+    \  fn describe(self) -> Int64\n\n\
+    \  fn beside[Other](self, other: Other) -> Self { todo }\n\
+     }\n\n\
+     type One()\n\n\
+     impl Described for One {\n\
+    \  fn describe(self) -> Int64 { todo }\n\
+     }\n\n\
+     type Both[Value](first: Value, second: Value)\n\n\
+     impl Described for Both[Value: Described] {\n\
+    \  fn describe(self) -> Int64 { todo }\n\
+     }\n\n\
+     type FixedClock(time: Instant)\n\n\
+     impl Clock for FixedClock\n\
+    \  uses Random\n\
+     {\n\
+    \  fn now(self) -> Instant { todo }\n\
+     }\n"
+  in
+  let impl_of database type_ wanted : Path.t =
+    match Interface.Impls.implements database ~bounds:(fun _ -> []) type_ wanted with
+    | Some (From_impl { impl; _ }) -> impl
+    | _ -> failwith "no impl"
+  in
+  let at database type_ wanted name : Types.signature =
+    let owner = impl_of database type_ wanted in
+    match Interface.Impls.signature database (Method { owner; name; receiver = Read }) with
+    | Some signature -> signature
+    | None -> failwith "no signature"
+  in
+  let generics (signature : Types.signature) =
+    String.concat ", "
+      (List.map (fun (generic : Types.generic) -> generic.generic.name) signature.generics)
+  in
+  let both = Types.named (app "Both") [ Types.named (app "One") [] ] in
+  let described : Types.trait_reference =
+    { trait = app "Described"; trait_arguments = []; associated = [] }
+  in
+  test "a method written inside an impl is generic over the impl's parameters" (fun () ->
+      let database = setup [ ("app::main", text) ] in
+      let signature = at database both described "describe" in
+      if generics signature <> "Value" then fail "generics: %s" (generics signature));
+  test "a method an impl leaves to its trait has the trait's signature there" (fun () ->
+      let database = setup [ ("app::main", text) ] in
+      let signature = at database both described "beside" in
+      if generics signature <> "Value, Other" then fail "generics: %s" (generics signature);
+      match signature.output with
+      | Returns output when Types.show output = "Both[Value]" -> ()
+      | Returns output -> fail "output %s" (Types.show output)
+      | _ -> fail "no result");
+  test "a derived impl's method has a signature" (fun () ->
+      let database = setup [] in
+      let signature = at database (option int64) (trait "Equal" []) "equal" in
+      match (signature.generics, signature.receiver, signature.parameters) with
+      | [ _ ], Some (Read, self), [ other ] when Types.equal self other.type_ -> ()
+      | _ -> fail "generics: %s" (generics signature));
+  test "a capability's impl method uses what its impl uses" (fun () ->
+      let database = setup [ ("app::main", text) ] in
+      let clock : Types.trait_reference =
+        { trait = standard [ "capabilities" ] "Clock"; trait_arguments = []; associated = [] }
+      in
+      let signature = at database (Types.named (app "FixedClock") []) clock "now" in
+      match signature.uses with [ Capability _ ] -> () | uses -> fail "%d uses" (List.length uses))
 
 (* Incremental work *)
 

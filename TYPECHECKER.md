@@ -613,7 +613,17 @@ checked apart, and neither waits on the other:
   trait, its type, and its `uses`. This reads only its own tree.
 - **Each method is lowered with that header,** which is what `Self`, its
   associated types, and the generic parameters around the method mean, and
-  gives a signature as any function's.
+  gives a signature as any function's. An `impl`'s method is generic over
+  the `impl`'s parameters and then its own, and uses what the `impl` uses,
+  as a method written `fn List[Element].push` is generic over its head's
+  parameters first. A trait's method is generic over its own alone: `Self`
+  and the trait's parameters are given where it is called.
+- **A method an `impl` leaves to its trait has a signature too,** though it
+  is written nowhere of its own, and so has one of a derived `impl`: the
+  trait's method's, with `Self` and the trait's parameters replaced by what
+  the `impl` gives them, generic over the `impl`'s parameters and then its
+  own. Code generation and the prover compile and prove a method at an
+  `impl`, so they ask for this one.
 - **Its interface is put together** from the header and the signature of
   each method written inside it. A trait's method is provided when it has a
   body, and one whose own signature is broken is listed as broken.
@@ -641,8 +651,10 @@ checked apart, and neither waits on the other:
   under conditions no stronger than the `impl`'s.
 - **A capability `impl`'s methods** take the capability's parameters plus a
   receiver, `self` or `mut self`. Only a capability `impl` may have a
-  `uses` clause; a trait `impl`'s methods can use only what the trait's
-  methods declare. Implementing `Panic` is an error.
+  `uses` clause, and its methods use what it declares and no more: whoever
+  calls a capability holds the capability alone, so a method there has no
+  `uses` of its own to add. A trait `impl`'s methods can use only what the
+  trait's methods declare. Implementing `Panic` is an error.
 - **Methods that replace a provided method** must have its exact signature,
   and the provided method must be pure, have a `time` clause, and change
   none of its arguments, which is what lets its body be its definition.
@@ -1200,12 +1212,13 @@ another branch uses, with disjointness obligations for indexes as above. A
 At each point in a body, a set of capabilities is *available*: the
 function's `uses`, its capability parameters, and the capabilities provided
 by each enclosing `provide`. Inside a capability `impl`'s methods, it is the
-`impl`'s `uses`. A call there through a function value may also use the
-capability itself, which means this implementation, so a method can hand
-it on, as `write_with` passes `FileWrite` to the function it lends the
-writer to; code generation passes the implementation's own evidence. A
-direct call of the capability would call the implementation itself, so it
-still needs the capability among the `impl`'s `uses`, from outside.
+`impl`'s `uses`, which are each method's own. A call there through a
+function value may also use the capability itself, which means this
+implementation, so a method can hand it on, as `write_with` passes
+`FileWrite` to the function it lends the writer to; code generation passes
+the implementation's own evidence. A direct call of the capability would
+call the implementation itself, so it still needs the capability among the
+`impl`'s `uses`, from outside.
 
 - **A capability call,** such as `Clock.now()`, needs its capability
   available.
