@@ -2342,6 +2342,34 @@ let () =
         \  tree is Leaf\n\
          }\n")
 
+(* Diagnostics *)
+
+let () =
+  test "a counterexample gives the values of the locals where it fails" (fun () ->
+      let text =
+        message
+          "fn f(items: List[Int64], value: USize) -> Int64 {\n\
+          \  var at: USize = 0\n\
+          \  if value > 5 {\n\
+          \    at = value\n\
+          \  }\n\
+          \  items[at]\n\
+           }\n"
+      in
+      if not (contains text "`at` is") then fail "%s" text);
+  test "the same failure on another path is reported once" (fun () ->
+      let found =
+        codes
+          "fn f(items: List[Int64], index: USize) -> Int64 {\n\
+          \  if index > 3 {\n\
+          \    items[index]\n\
+          \  } else {\n\
+          \    items[index]\n\
+          \  }\n\
+           }\n"
+      in
+      if found <> [ "prover.requires" ] then fail "%s" (String.concat ", " found))
+
 (* What is not proven yet *)
 
 let () =

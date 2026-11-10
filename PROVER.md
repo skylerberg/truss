@@ -1100,10 +1100,16 @@ Each obligation the prover could not prove is an error, with the shared
   steps means it may be true but needs help, and the message says so.
 - **The values.** With a counterexample, the solver's model gives the
   values of the definition's parameters, written as Truss writes them:
-  "For example, when `count` is 255." A float is the shortest decimal that
+  "For example, when `count` is 255." It gives the values of the locals in
+  scope where the obligation is, and of `result`, too, which the query is
+  asked for only once it has a counterexample, so that a query that proves
+  is keyed by what it proves. A float is the shortest decimal that
   reads back as the same bits, and a record or a variant is its name with
   its fields. An agent can turn these values into a test, which then fails
   at its run-time check if the code is wrong.
+- **One report for one failure.** An obligation whose kind and message are
+  another's that failed in the same definition, such as a second index into
+  the same list with the same index on another path, is not reported again.
 - **Code the prover cannot read** is an error of its own,
   `prover.unsupported`, that says what stopped it, and none of the
   definition's obligations count as proven.
@@ -1198,14 +1204,11 @@ sanitized runs, test the trusted base against real executions.
   `prover.unsupported`: a loop over a cursor, or a `mut` loop over a
   place, that is not a local or a field of one.
 - **More in a diagnostic.** A note at the clause an obligation comes from,
-  the branches a counterexample's path takes, listed by position, the
-  values of locals, and a fix that adds an obligation about parameters
-  alone to the function as a `requires`. DESIGN.md's other fixes, checking
-  it with an `if`, using the checked version of the operation, and
-  `uses Panic`, change what the code means, so the message is to name them
-  without applying them. An obligation that the same failure makes
-  unprovable on another path, such as a second index into the same list
-  with the same index, is to be reported once.
+  the branches a counterexample's path takes, listed by position, and a
+  fix that adds an obligation about parameters alone to the function as a
+  `requires`. DESIGN.md's other fixes, checking it with an `if`, using the
+  checked version of the operation, and `uses Panic`, change what the code
+  means, so the message is to name them without applying them.
 - **Proof programs as a data structure of their own,** made from a body
   and then turned into verification conditions by weakest preconditions,
   which would keep reading Truss apart from the logic. One walk does both.

@@ -59,6 +59,9 @@ type obligation = {
           the query runs out of steps, since a callee's contract can be enough where its definition
           is too much for the solver. *)
   values : (string * string) list;  (** Each prover symbol a counterexample shows, with its name. *)
+  locals : (string * string) list;
+      (** The locals whose values are symbols where the obligation is made, with their names: asked
+          for only once the query has a counterexample, so the query's key stays its own. *)
   constants : Costs.constants list;
       (** The constants of each [O(...)] bound the query mentions, which each try pins. *)
   evaluation : evaluation option;  (** Running code that decides it, where there is any. *)
@@ -192,6 +195,7 @@ type context = {
   mutable obligations : obligation list;  (** Reversed. *)
   mutable fresh : int;
   mutable values : (string * string) list;  (** For counterexamples. *)
+  local_names : (Core.local, string) Hashtbl.t;  (** Each local's name, as its pattern binds it. *)
   mutable returns : (frame * L.term option) list;
   mutable instantiating : Path.t list;  (** Contracts being assumed, to stop at recursion. *)
   disjoint : (int * int) list;
@@ -384,6 +388,19 @@ and make_obligation ?evaluation context frame code span message goal =
     query;
     contracts_alone;
     values = context.values;
+    locals =
+      Locals.fold
+        (fun local term shown ->
+          match (term, Hashtbl.find_opt context.local_names local) with
+          | L.Symbol symbol, Some name
+            when not (List.mem_assoc symbol context.values || List.mem_assoc symbol shown) ->
+              (symbol, name) :: shown
+          | _ -> shown)
+        frame.locals
+        (match frame.result with
+        | Some (L.Symbol symbol) when not (List.mem_assoc symbol context.values) ->
+            [ (symbol, "result") ]
+        | _ -> []);
     constants;
     evaluation;
     known_calls;
@@ -4154,7 +4171,9 @@ and pattern_match context frame (pattern : pattern) term ty : L.term * frame =
   let span = at frame { id = pattern.id; origin = pattern.origin; type_ = ty; kind = Todo } in
   match pattern.kind with
   | Wildcard -> (L.Boolean true, frame)
-  | Bind { local; _ } -> (L.Boolean true, bind frame local ty term)
+  | Bind { local; name; _ } ->
+      Hashtbl.replace context.local_names local name;
+      (L.Boolean true, bind frame local ty term)
   | Literal literal ->
       let frame, expected = value context frame literal in
       (L.equal term expected, frame)
@@ -7196,6 +7215,7 @@ let new_context database ~home ~current ~terminates ~measures =
     obligations = [];
     fresh = 0;
     values = [];
+    local_names = Hashtbl.create 16;
     returns = [];
     instantiating = [];
     hands_out = None;
