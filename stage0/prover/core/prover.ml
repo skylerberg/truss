@@ -419,7 +419,11 @@ let query_with ?query running (obligation : Translate.obligation) choice =
         Costs.pin constants (List.assoc constants.factor choice))
       obligation.constants
   in
-  { query with facts = query.facts @ pins @ given running obligation }
+  (* The same query, not a copy, when nothing is added, so the solver finds
+     what it made of it before. *)
+  match pins @ given running obligation with
+  | [] -> query
+  | added -> { query with facts = query.facts @ added }
 
 (* Every choice of a pair of constants for each bound the obligations
    mention, in the order they are tried. *)
