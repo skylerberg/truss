@@ -195,8 +195,8 @@ let () =
     \    let _ = item\n\
     \  }\n\
      }\n"
-    "{ for item in each standard::list::List.each[Int64](app::main::make()) { let _ = place item } \
-     }"
+    "{ for item in each standard::list::impl Iterable for \
+     List[Element].each[Int64](app::main::make()) { let _ = place item } }"
 
 (* Specifications *)
 
