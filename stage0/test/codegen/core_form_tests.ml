@@ -1203,6 +1203,107 @@ test "a value moved out of a place lent mut, which is then given another" {
 }
 |}
 
+let () =
+  passes "quantifiers over ranges, which run as loops that stop at the first answer"
+    {|fn all_positive(items: List[Int64]) -> Bool {
+  forall i in 0..items.length() => items[i] > 0
+}
+
+fn any_long(names: List[String], over: USize) -> Bool {
+  exists i in 0..names.length() => names[i].length() > over
+}
+
+fn sorted(items: List[Int64]) -> Bool {
+  forall i in 1..items.length() => items[i - 1] <= items[i]
+}
+
+fn first_long(names: List[String]) -> Int64 {
+  var looked: Int64 = 0
+  for name in names {
+    looked += 1
+    if exists i in 0..=name.length() => i > 3 {
+      return looked
+    }
+  }
+  0
+}
+
+test "quantifiers over ranges run as loops that stop at the first answer" {
+  assert all_positive([3, 1, 2])
+  assert !all_positive([3, 0, 2])
+  assert all_positive([])
+  let names = ["${1}a", "${2}bcdefgh", "${3}c"]
+  assert any_long(names, over: 5)
+  assert !any_long(names, over: 50)
+  assert !any_long([], over: 0)
+  assert sorted([1, 2, 2, 5])
+  assert !sorted([1, 3, 2])
+  assert sorted([7])
+  assert first_long(names) == 2
+  assert (forall i in 0..3 => exists j in 0..3 => i + j == 2)
+  assert !(forall i in 0..3 => exists j in 0..3 => i + j == 3)
+  assert !(exists i in 0..3 => forall j in 0..3 => i * j > 0)
+}
+|}
+
+let () =
+  passes "quantifiers over a list, a slice, and a type with an each of its own"
+    {|type Shelf(titles: List[String])
+
+impl Iterable for Shelf {
+  type Element = String
+
+  fn each(self) yields String {
+    let label = "${self.titles.length()} titles on the shelf"
+    for title in self.titles {
+      if label.length() > 0 {
+        yield title
+      }
+    }
+  }
+}
+
+fn any_negative(items: List[Int64]) -> Bool {
+  exists item in items => item < 0
+}
+
+fn all_short(names: Slice[String], under: USize) -> Bool {
+  forall name in names => name.length() < under
+}
+
+fn has_long(shelf: Shelf) -> Bool {
+  exists title in shelf => title.length() > 3
+}
+
+fn first_with_a_long(shelves: List[Shelf]) -> Int64 {
+  var looked: Int64 = 0
+  for shelf in shelves {
+    looked += 1
+    if exists title in shelf => exists i in 0..title.length() => i >= 5 {
+      return looked
+    }
+  }
+  0
+}
+
+test "quantifiers over collections run as loops that stop at the first answer" {
+  assert any_negative([1, -1, 2])
+  assert !any_negative([1, 2])
+  assert !any_negative([])
+  let names = ["${1}a", "${2}bcdefgh", "${3}c"]
+  assert all_short(names, under: 20)
+  assert !all_short(names, under: 5)
+  assert all_short(names[0..1], under: 5)
+  let shelf = Shelf(titles: ["${1}ab", "${2}abcdef", "${3}a"])
+  assert has_long(shelf)
+  assert !has_long(Shelf(titles: ["${1}"]))
+  assert !has_long(Shelf(titles: []))
+  let shelves = [Shelf(titles: ["${1}"]), Shelf(titles: ["${2}", "${3}abcdef"]), Shelf(titles: [])]
+  assert first_with_a_long(shelves) == 2
+  assert (forall item in [1, 2, 3] => exists other in [3, 2, 1] => item + other == 4)
+}
+|}
+
 (* Checks which of a module's constants fold and which are worked out by
    running their evaluators, and that the module's test passes. *)
 let folds what ~folded ~run source =
