@@ -87,17 +87,11 @@ public fn String.slice(self) -> StringSlice
   StringSlice(bytes: intrinsic::storage_view(self.storage))
 }
 
-public fn String.trim(self) -> StringSlice {
-  let bytes = intrinsic::storage_view(self.storage)
-  var start: USize = 0
-  var stop = intrinsic::view_length(bytes)
-  while start < stop && is_space(intrinsic::view_at(bytes, index: start)) {
-    start += 1
-  }
-  while stop > start && is_space(intrinsic::view_at(bytes, index: stop - 1)) {
-    stop -= 1
-  }
-  StringSlice(bytes: intrinsic::view_slice(intrinsic::storage_view(self.storage), start, stop))
+public fn String.trim(self) -> StringSlice
+  ensures result.length() <= self.length()
+  cost time O(self.length())
+{
+  self.slice().trim()
 }
 
 internal fn String.from_bytes(bytes: own intrinsic::Storage[UInt8]) -> String {
@@ -166,10 +160,6 @@ fn utf8_sequence(bytes: intrinsic::View[UInt8], at: USize) -> USize
     let overlong = (length == 2 && code < 128) || (length == 3 && code < 2048) || (length == 4 && code < 65536)
     if !continued || overlong || code > 1114111 || (code >= 55296 && code <= 57343) { 0 } else { length }
   }
-}
-
-fn is_space(byte: UInt8) -> Bool {
-  byte == 32 || byte == 9 || byte == 10 || byte == 13
 }
 
 public fn StringSlice.length(self) -> USize
@@ -414,7 +404,7 @@ public fn String.to_bytes(own self) -> List[UInt8]
   cost time O(1)
   cost allocations == 0
 {
-  todo
+  List(storage: own self.storage)
 }
 
 public fn TextBuilder.with_capacity(capacity: USize) -> TextBuilder {
