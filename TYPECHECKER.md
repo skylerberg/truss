@@ -974,6 +974,18 @@ type of a bound.
   `mut self` method, a field or an element of one of these, or a part that
   a call lends `mut`. A constant, a `let`, a read-only or `own` parameter,
   and a local that a lambda captures are not mutable.
+- **An assignment through an index can add a key.** For
+  `collection[key] = value`, if the collection's type implements the prelude
+  trait `IndexAssign`, the statement is a call of its
+  `assign(mut self, key: own Self.Key, value: own Self.Output)`, as Swift's
+  subscript setter and Kotlin's `set` are. `Map` implements it, so
+  `ports[own name] = 8080` inserts `name` or replaces its value. The
+  collection keeps the key, so the key is checked as an `own` argument: a
+  place that is not `Plain` is given up with `own` or copied. For any other
+  type, the statement assigns to the place that `collection[key]` denotes,
+  which must exist: `scores[i] = 0` needs `i` in bounds. A compound
+  assignment such as `ports[name] += 1` reads the place first, so it never
+  goes through `assign`.
 - **A block's value is its last expression.** Every other statement must
   have type `Unit` or `Never`; any other value is an error with a fix that
   writes `let _ =`, as DESIGN.md requires. An `if` without an `else` has type

@@ -461,6 +461,21 @@ let () =
      leaving an iteration of #93 { break } } diverges; if (item > 4) { continue } diverges; if \
      (item > 3) { leaving an iteration of #93 { return Result[Int64, Int64].Err(error: item) } } \
      diverges }; Result[Int64, Int64].Ok(value: 0) }";
+  expect_body "an assignment through an index calls `assign` where the type has it"
+    "fn g(name: own String) {\n\
+    \  var ports: Map[String, Int64] = [\"http\": 80]\n\
+    \  var scores: List[Int64] = [1]\n\
+    \  ports[own name] = 8080\n\
+    \  scores[0] = 5\n\
+     }\n"
+    "{ let var own ports = { let var own map = standard::map::Map.with_capacity[String, Int64](1); \
+     standard::map::Map.insert_absent(mut self)[String, Int64](mut place map, own \"http\", own \
+     80); map }; let var own scores = { let var own storage = intrinsic::storage_with_capacity(1); \
+     intrinsic::storage_push(mut place storage, own 1); \
+     standard::list::List.from_storage[Int64](own storage) }; IndexAssign.assign for Map[String, \
+     Int64] by standard::map::impl core::IndexAssign for Map[Key, Value](mut place ports, own \
+     name, own 8080); lent Index.at for List[Int64] by standard::list::impl Index for \
+     List[Element](mut place scores, 0) lends mut = 5 }";
   expect_body "patterns of constants, ranges, and strings"
     "let limit: Int64 = 10\n\n\
      fn g(count: Int64, name: String) -> Int64 {\n\
