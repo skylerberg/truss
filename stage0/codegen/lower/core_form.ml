@@ -51,8 +51,6 @@ let expression_kind : Core.kind -> string = function
   | Slice _ -> "a slice"
   | Cursor_next _ -> "a cursor's next value"
   | Convert _ -> "a conversion"
-  | To_any _ -> "a conversion to an any value"
-  | Provide _ -> "a provide"
   | _ -> "a specification-only expression"
 
 let statement_kind : Core.statement_kind -> string = function
@@ -261,6 +259,36 @@ and into st (value : Core.expression) (destination : Lir.place) =
            });
       start st.b (block st.b)
   | Unreachable -> unreachable_block st
+  | Provide { implementations; body } ->
+      (* The body runs with the evidence of each implementation added. *)
+      let enclosing = st.evidence in
+      let added =
+        List.concat_map
+          (fun (implementation : Core.implementation) ->
+            let place = operand_place st implementation.value in
+            let pointer =
+              if zero_size st (ground st implementation.type_) then Lir.Constant Null
+              else Address { place; writable = true }
+            in
+            provided_evidence st ~implementation:pointer
+              (List.map
+                 (fun (provided : Core.provided) ->
+                   (provided.capability, provided.impl, provided.arguments))
+                 implementation.provides))
+          implementations
+      in
+      st.evidence <- added @ enclosing;
+      block_into st body (Some destination);
+      st.evidence <- enclosing
+  | To_any { value = inner; trait; evidence = core_evidence } ->
+      let inner_ty = ground st inner.type_ in
+      let impl, type_arguments =
+        resolve_impl st ~trait ~self_type:inner.type_ ~evidence:(evidence core_evidence)
+      in
+      (* The value is evaluated before its block is allocated, so that
+         leaving early during the evaluation leaves no block behind. *)
+      let value = value_place st inner in
+      any_into st ~any_ty:ty ~inner_ty ~impl ~type_arguments ~value destination
   | Echo inner ->
       into st inner destination;
       Values.echo st destination ty (spans st).(value.origin)
@@ -341,7 +369,40 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
       with
       | Some _ -> bug "a lending intrinsic that is not a lent place"
       | None -> ())
-  | None, Capability_method _ -> unhandled "a call of a capability method"
+  | None, Capability_method { capability; name } ->
+      let slot, signature = capability_method st.context capability name in
+      if List.mem Core.Default call.arguments then
+        Compiler_bug.unsupported
+          ~at:(at_site (site_of st value.origin))
+          "a capability method called with an argument omitted";
+      let arguments, _ =
+        evaluate_arguments st { signature with receiver = None } [] call.arguments
+      in
+      if Path.equal capability panic_path then
+        (* [Panic.crash] has no evidence: it ends the process at once. *)
+        match arguments with
+        | [ (_, _, message) ] ->
+            ignore
+              (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types Crash
+                 ~type_arguments:[] [ Intrinsics.Place message ] ~destination:None
+                 ~site:(site_of st value.origin))
+        | _ -> bug "Panic.crash takes one message"
+      else begin
+        let lir_signature, result = entry_signature st.context signature in
+        let target =
+          Lir.Evidence_call
+            { evidence = evidence_of st capability; capability; slot; signature = lir_signature }
+        in
+        emit st.b
+          (Call
+             {
+               target;
+               arguments =
+                 List.filter_map (fun (mode, ty, place) -> pass st mode ty place) arguments;
+               result = Convention.destination result destination;
+             });
+        if not lir_signature.returns then unreachable_block st
+      end
   | None, _ -> unhandled "a call through a function value"
 
 (* Lowers a call of an intrinsic. Returns the place it lends, for one that

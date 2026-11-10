@@ -198,23 +198,11 @@ and provide st (e : S.expression) implementations body destination =
           if zero_size st ty then Lir.Constant Null
           else Address { place = expression st implementation; writable = true }
         in
-        List.map
-          (fun (provided : C.provided) ->
-            let interface = impl_interface st.context provided.impl in
-            let type_arguments =
-              List.map
-                (fun (g : T.generic) ->
-                  match List.assoc_opt g.generic provided.arguments with
-                  | Some a ->
-                      Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution
-                        a
-                  | None -> bug "an unbound parameter of %s" (Path.show provided.impl))
-                interface.impl_generics
-            in
-            ( provided.capability,
-              implementation_evidence st ~impl:provided.impl ~type_arguments ~implementation:pointer
-            ))
-          (provided_by implementation))
+        provided_evidence st ~implementation:pointer
+          (List.map
+             (fun (provided : C.provided) ->
+               (provided.capability, provided.impl, provided.arguments))
+             (provided_by implementation)))
       implementations
   in
   st.evidence <- added @ around;
@@ -483,37 +471,10 @@ and any_value st (e : S.expression) (inner : S.expression) destination =
         | None -> bug "an unbound parameter of %s" (Path.show impl))
       interface.impl_generics
   in
-  (* The value is worked out before its block is made, so that leaving
-     early on the way leaves no block behind. *)
+  (* The value is evaluated before its block is allocated, so that leaving
+     early during the evaluation leaves no block behind. *)
   let value = expression st inner in
-  let block = local st.b (Raw (Pointer Opaque)) in
-  if zero_size st inner_ty then emit st.b (Assign (at block, Use (Constant (Bytes ""))))
-  else begin
-    emit st.b
-      (Call
-         {
-           target = Intrinsic Allocate;
-           arguments = [ Constant (Size_of inner_ty); Constant (Alignment_of inner_ty) ];
-           result = Returned (at block);
-         });
-    let typed = local st.b (Pointer { target = Value inner_ty; writable = true }) in
-    emit st.b (Assign (at typed, Use (Copy (at block))));
-    emit st.b
-      (Assign ({ root = Local typed; projections = [ Deref ] }, Use (owned st value inner_ty)))
-  end;
-  emit st.b
-    (Assign
-       ( destination,
-         Build
-           {
-             ty = any_ty;
-             variant = None;
-             fields =
-               [
-                 ("value", Copy (at block));
-                 ("vtable", Constant (Symbol_address (Any_table { impl; type_arguments })));
-               ];
-           } ))
+  any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~value destination
 
 and is_built_in st (e : S.expression) =
   match st.frame.code.checked.calls.(e.id) with

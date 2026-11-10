@@ -477,4 +477,90 @@ test "lends and yields" {
 }
 |}
 
+let () =
+  lowers "a capability method call, a provide, and a crash on a path not taken" ~tests:true
+    [ ("record", []); ("counted", []); ("checked", []) ]
+    {|capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+}
+
+type Counter(sum: Int64)
+
+impl Tally for Counter {
+  fn add(mut self, amount: Int64) {
+    self.sum += amount
+  }
+
+  fn total(self) -> Int64 {
+    self.sum
+  }
+}
+
+fn record(amount: Int64) -> Int64
+  uses Tally
+{
+  Tally.add(amount)
+  Tally.total()
+}
+
+fn counted() -> Int64 {
+  var counter = Counter(sum: 1)
+  let last = provide mut counter {
+    let first = record(2)
+    first + record(3)
+  }
+  last + counter.sum
+}
+
+fn checked(value: Int64) -> Int64
+  uses Panic
+{
+  if value < 0 {
+    Panic.crash("negative")
+  }
+  value
+}
+
+test "counts" {
+  assert counted() == 15
+  assert checked(3) == 3
+}
+|};
+  lowers "a value converted to an any value, from an impl and from a bound"
+    [ ("boxed", []); ("boxed_from", [ Ground.Type (Monomorphic.builtin Int64) ]) ]
+    {|trait Named {
+  fn name(self) -> String
+}
+
+type Square(side: Int64)
+
+impl Named for Square {
+  fn name(self) -> String {
+    "square"
+  }
+}
+
+impl Named for Int64 {
+  fn name(self) -> String {
+    "integer"
+  }
+}
+
+fn boxed(side: Int64) -> any Named {
+  any Square(side: side)
+}
+
+fn boxed_from[Value: Named](value: own Value) -> any Named {
+  any value
+}
+
+test "boxes" {
+  let first = boxed(2)
+  let second = boxed_from(7)
+  assert first.name() == "square"
+  assert second.name() == "integer"
+}
+|}
+
 let () = Harness.finish ()

@@ -26,8 +26,9 @@ type inference.
 The move to the core form is in progress. Lowering uses the core form for a
 body when every node in the body is of a supported kind:
 
-- calls to functions, trait methods, and intrinsics
+- calls to functions, trait methods, capability methods, and intrinsics
 - indexing and other calls of lending methods, and `yield`
+- `provide`, and `any` conversions
 - operators, comparisons, `&&`, `||`, and `!`
 - `if`, `match`, `while`, `for` over an integer range or a yielding call,
   `break`, `continue`, and `return`
@@ -1532,9 +1533,9 @@ a command line can hold.
   Truss so that it is the same on every system. The loop is Truss; the
   digits are `snprintf`'s and the check `strtod`'s.
 - **Core-form lowering for every body.** These still fall back to the
-  syntax-tree lowering: calls through a function value, capability method
-  calls, lambdas, array, set, and map literals, interpolated and tagged
-  strings, `with` updates, slices, constructor calls that rely on a field
+  syntax-tree lowering: calls through a function value or an `any` value,
+  lambdas, array, set, and map literals, interpolated and tagged strings,
+  `with` updates, slices, constructor calls that rely on a field
   default, cursors (a yielding call outside a loop, `for` over a cursor,
   and a loop over a recursive yielding method), and the pulled version of
   a yielding method. Once all of them are supported, the syntax-tree
