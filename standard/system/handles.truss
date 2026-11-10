@@ -5,6 +5,7 @@ use standard::network
 use standard::processes
 use standard::streams
 use standard::system::calls
+use standard::system::clock
 
 internal fn file_error(number: Int32) -> SystemError {
   if number == intrinsic::libc_enoent() {
@@ -65,6 +66,60 @@ internal fn file_offset(position: UInt64) -> Result[Int64, SystemError] {
     let offset: Int64 = intrinsic::convert(position)
     Ok(offset)
   }
+}
+
+fn signed(bits: UInt64) -> Int64 {
+  if bits > 9223372036854775807 {
+    let below_zero: Int64 = intrinsic::convert(18446744073709551615 - bits)
+    -below_zero - 1
+  } else {
+    intrinsic::convert(bits)
+  }
+}
+
+fn time_at(status: intrinsic::View[UInt8], offset: USize) -> Instant {
+  let length = intrinsic::view_length(status)
+  if offset > length {
+    return Instant.epoch
+  }
+  let time = intrinsic::view_slice(status, start: offset, stop: length)
+  clock::instant_from(
+    signed(calls::number_at(time, offset: 0, size: 8)),
+    nanoseconds: signed(calls::number_at(time, offset: 8, size: 8)),
+  )
+}
+
+internal fn metadata_from(status: intrinsic::View[UInt8]) -> files::Metadata {
+  let mode = calls::number_at(
+    status,
+    offset: intrinsic::libc_stat_mode_offset(),
+    size: intrinsic::libc_stat_mode_size(),
+  )
+  let kind_bits = mode & intrinsic::libc_s_ifmt()
+  let kind = if kind_bits == intrinsic::libc_s_ifreg() {
+    files::FileKind.File
+  } else if kind_bits == intrinsic::libc_s_ifdir() {
+    files::FileKind.Directory
+  } else if kind_bits == intrinsic::libc_s_iflnk() {
+    files::FileKind.SymbolicLink
+  } else {
+    files::FileKind.Other
+  }
+  let permission_bits = mode & 0o7777
+  let permissions = if permission_bits > 0o7777 {
+    files::Permissions.from_mode(0)
+  } else {
+    files::Permissions.from_mode(intrinsic::convert(permission_bits))
+  }
+  let created_offset = intrinsic::libc_stat_created_offset()
+  files::Metadata(
+    kind: kind,
+    length: calls::number_at(status, offset: intrinsic::libc_stat_length_offset(), size: 8),
+    permissions: permissions,
+    modified: time_at(status, offset: intrinsic::libc_stat_modified_offset()),
+    accessed: Some(time_at(status, offset: intrinsic::libc_stat_accessed_offset())),
+    created: if created_offset == 0 { None } else { Some(time_at(status, offset: created_offset)) },
+  )
 }
 
 internal fn open_with(file: Path, flags: Int32) -> Result[streams::Handle, SystemError] {
@@ -161,7 +216,8 @@ impl Handles for SystemHandles {
   }
 
   fn metadata(self, handle: streams::Handle) -> Result[files::Metadata, SystemError] {
-    todo
+    let status = with_file_error(calls::status_of_descriptor(descriptor_of(handle)))?
+    Ok(metadata_from(intrinsic::storage_view(status)))
   }
 
   fn close(self, handle: own streams::Handle) -> Result[Unit, SystemError] {

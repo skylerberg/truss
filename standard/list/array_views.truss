@@ -44,7 +44,7 @@ public fn Array[Element, count: USize].split_at(self, index: USize) -> core::Pai
   ensures result.second.length() == self.length() - index
   cost time O(1)
 {
-  todo
+  self.slice().split_at(index)
 }
 
 public fn Array[Element: Equal, count: USize].contains(self, item: Element) -> Bool

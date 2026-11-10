@@ -3,10 +3,15 @@
     system; its symbol, its C types, and a number's value are the system's. *)
 
 type os = Linux | Macos
+type architecture = X86_64 | Arm64
+
+type system = { os : os; architecture : architecture }
+(** A system stage0 builds for. *)
 
 val os_name : os -> string
+val system_name : system -> string
 
-val host : os option
+val host : system option
 (** The system this compiler was built for, which is the one it runs on and builds programs for, or
     [None] where that is a system it knows no C library of. *)
 
@@ -77,6 +82,9 @@ type function_ =
   | Lseek
   | Ftruncate
   | Fsync
+  | Fstat
+  | Stat
+  | Lstat
 
 val functions : function_ list
 
@@ -84,7 +92,7 @@ val function_name : function_ -> string
 (** The name the standard library calls it by. *)
 
 val signature : function_ -> signature
-val declaration : os -> function_ -> declaration
+val declaration : system -> function_ -> declaration
 
 val prototype : declaration -> string
 (** What a C file that includes no header writes before it calls the function. *)
@@ -133,6 +141,17 @@ type number =
   | Etimedout
   | Econnrefused
   | Ehostunreach
+  | Stat_size  (** How many bytes a [struct stat] takes *)
+  | Stat_mode_offset  (** Where in a [struct stat] the file's mode is, and next how many bytes *)
+  | Stat_mode_size
+  | Stat_length_offset
+  | Stat_accessed_offset
+  | Stat_modified_offset
+  | Stat_created_offset  (** 0 where the structure has no time of creation *)
+  | S_ifmt
+  | S_ifreg
+  | S_ifdir
+  | S_iflnk
 
 val numbers : number list
 
@@ -140,9 +159,9 @@ val number_name : number -> string
 (** Its name in C. *)
 
 val number_type : number -> scalar
-val value : os -> number -> int
+val value : system -> number -> int
 
-val check : os -> string
+val check : system -> string
 (** A C file that includes the system's own headers and compiles only if every number has the value
     given here, every prototype is the one the headers declare, and every structure a function takes
     is laid out as the storage passed for it. *)

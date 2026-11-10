@@ -67,18 +67,17 @@ internal fn read_at_onto_end(
   while got < 0 && interrupted_by_signal()
     invariant intrinsic::storage_length(buffer) == length
     invariant intrinsic::storage_capacity(buffer) >= length + count
+    invariant got <= count
   {
     got = intrinsic::libc_pread(descriptor, buffer: mut buffer, count: count, offset: offset)
   }
   if got < 0 {
-    return Err(intrinsic::libc_errno())
+    Err(intrinsic::libc_errno())
+  } else {
+    let read: USize = intrinsic::convert(got)
+    intrinsic::storage_lengthen(mut buffer, by: read)
+    Ok(read)
   }
-  let read: USize = intrinsic::convert(got)
-  if read > count {
-    return Err(intrinsic::libc_eio())
-  }
-  intrinsic::storage_lengthen(mut buffer, by: read)
-  Ok(read)
 }
 
 internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[USize, Int32] {
@@ -137,6 +136,72 @@ internal fn close(handle: own intrinsic::Handle) -> Result[Unit, Int32] {
   } else {
     Ok(Unit)
   }
+}
+
+internal fn status_of_descriptor(descriptor: Int32) -> Result[intrinsic::Storage[UInt8], Int32] {
+  let size = intrinsic::libc_stat_size()
+  var status: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(size)
+  var outcome = intrinsic::libc_fstat(descriptor, status: mut status)
+  while outcome < 0 && interrupted_by_signal()
+    invariant intrinsic::storage_length(status) == 0
+    invariant intrinsic::storage_capacity(status) == size
+  {
+    outcome = intrinsic::libc_fstat(descriptor, status: mut status)
+  }
+  if outcome < 0 {
+    return Err(intrinsic::libc_errno())
+  }
+  intrinsic::storage_lengthen(mut status, by: size)
+  Ok(own status)
+}
+
+fn status_into(name: intrinsic::View[UInt8], follow_links: Bool, status: mut intrinsic::Storage[UInt8]) -> Int32
+  ensures intrinsic::storage_length(status) == old(intrinsic::storage_length(status))
+  ensures intrinsic::storage_capacity(status) == old(intrinsic::storage_capacity(status))
+{
+  if follow_links {
+    intrinsic::libc_stat(name, status: mut status)
+  } else {
+    intrinsic::libc_lstat(name, status: mut status)
+  }
+}
+
+internal fn status_of_path(
+  path: intrinsic::View[UInt8],
+  follow_links: Bool,
+) -> Result[intrinsic::Storage[UInt8], Int32] {
+  let name = ended_with_zero_byte(path)?
+  let size = intrinsic::libc_stat_size()
+  var status: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(size)
+  var outcome = status_into(intrinsic::storage_view(name), follow_links: follow_links, status: mut status)
+  while outcome < 0 && interrupted_by_signal()
+    invariant intrinsic::storage_length(status) == 0
+    invariant intrinsic::storage_capacity(status) == size
+  {
+    outcome = status_into(intrinsic::storage_view(name), follow_links: follow_links, status: mut status)
+  }
+  if outcome < 0 {
+    return Err(intrinsic::libc_errno())
+  }
+  intrinsic::storage_lengthen(mut status, by: size)
+  Ok(own status)
+}
+
+internal fn number_at(bytes: intrinsic::View[UInt8], offset: USize, size: USize) -> UInt64 {
+  let length = intrinsic::view_length(bytes)
+  if size > 8 || offset > length || size > length - offset {
+    return 0
+  }
+  var value: UInt64 = 0
+  var index = size
+  while index > 0
+    invariant index <= size
+  {
+    index -= 1
+    let byte: UInt64 = intrinsic::convert(intrinsic::view_at(bytes, index: offset + index))
+    value = (value << 8) | byte
+  }
+  value
 }
 
 internal fn ended_with_zero_byte(bytes: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32] {
