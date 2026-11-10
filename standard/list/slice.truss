@@ -281,15 +281,41 @@ public fn Slice[Element].partition_point(self, before: (fn(Element) -> Bool cost
 }
 
 public fn Slice[Element: Ordered].minimum(self) lends Option[Element]
-  cost time O(self.length())
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(Element.compare))
 {
-  todo
+  if self.length() == 0 {
+    yield None
+  } else {
+    var best: USize = 0
+    for index in 1..self.length()
+      invariant best < self.length()
+    {
+      if self[index] < self[best] {
+        best = index
+      }
+    }
+    yield Some(self[best])
+  }
 }
 
 public fn Slice[Element: Ordered].maximum(self) lends Option[Element]
-  cost time O(self.length())
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(Element.compare))
 {
-  todo
+  if self.length() == 0 {
+    yield None
+  } else {
+    var best: USize = 0
+    for index in 1..self.length()
+      invariant best < self.length()
+    {
+      if self[index] > self[best] {
+        best = index
+      }
+    }
+    yield Some(self[best])
+  }
 }
 
 public fn Slice[Element: Copyable].to_list(self) -> List[Element]
@@ -336,9 +362,24 @@ public fn Slice[Element: Ordered + Copyable].sorted(self) -> List[Element]
 
 public fn Slice[Element: Copyable].repeated(self, times: USize) -> List[Element]
   ensures result.length() == self.length() * times
-  cost time O(self.length() * times)
+  cost time O(self.length() * times * time(Element.copy))
 {
-  todo
+  if self.length() == 0 || times == 0 {
+    return []
+  }
+  match self.length().checked_multiply(times) {
+    Some(total) => {
+      var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(total)
+      for position in 0..total
+        invariant intrinsic::storage_length(elements) == yielded.length()
+        invariant intrinsic::storage_capacity(elements) == total
+      {
+        intrinsic::storage_push(mut elements, value: self[position % self.length()].copy())
+      }
+      List(storage: own elements)
+    }
+    None => intrinsic::crash("a list cannot hold that many elements".slice())
+  }
 }
 
 public fn Slice[Element: Display].join(self, separator: StringSlice) -> String
@@ -446,9 +487,24 @@ public fn Slice[Element].chunks(self, size: USize) yields Slice[Element]
 }
 
 public fn Slice[Element: Equal].split(self, separator: Element) yields Slice[Element]
-  cost time O(self.length())
+  ensures yielded.length() <= self.length() + 1
+  cost time O(self.length() * time(Element.equal))
 {
-  todo
+  var start: USize = 0
+  var index: USize = 0
+  while index < self.length()
+    invariant start <= index
+    invariant index <= self.length()
+    invariant yielded.length() <= index
+    decreases self.length() - index
+  {
+    if self[index] == separator {
+      yield self.slice_range(start, stop: index)
+      start = index + 1
+    }
+    index += 1
+  }
+  yield self.slice_range(start, stop: self.length())
 }
 
 public fn Slice[Element].zip[Other](self, other: Slice[Other]) yields core::Pair[Element, Other]

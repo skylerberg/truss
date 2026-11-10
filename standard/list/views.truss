@@ -163,15 +163,41 @@ public fn List[Element: Ordered].binary_search(self, target: Element) -> Option[
 }
 
 public fn List[Element: Ordered].minimum(self) lends Option[Element]
-  cost time O(self.length())
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(Element.compare))
 {
-  todo
+  if self.length() == 0 {
+    yield None
+  } else {
+    var best: USize = 0
+    for index in 1..self.length()
+      invariant best < self.length()
+    {
+      if self[index] < self[best] {
+        best = index
+      }
+    }
+    yield Some(self[best])
+  }
 }
 
 public fn List[Element: Ordered].maximum(self) lends Option[Element]
-  cost time O(self.length())
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(Element.compare))
 {
-  todo
+  if self.length() == 0 {
+    yield None
+  } else {
+    var best: USize = 0
+    for index in 1..self.length()
+      invariant best < self.length()
+    {
+      if self[index] > self[best] {
+        best = index
+      }
+    }
+    yield Some(self[best])
+  }
 }
 
 public fn List[Element: Copyable].to_list(self) -> List[Element]
@@ -199,7 +225,7 @@ public fn List[Element: Ordered + Copyable].sorted(self) -> List[Element]
 
 public fn List[Element: Copyable].repeated(self, times: USize) -> List[Element]
   ensures result.length() == self.length() * times
-  cost time O(self.length() * times)
+  cost time O(self.length() * times * time(Element.copy))
 {
   self.slice().repeated(times)
 }
@@ -295,9 +321,11 @@ public fn List[Element].chunks(self, size: USize) yields Slice[Element]
 }
 
 public fn List[Element: Equal].split(self, separator: Element) yields Slice[Element]
-  cost time O(self.length())
+  cost time O(self.length() * time(Element.equal))
 {
-  todo
+  for part in self.slice().split(separator) {
+    yield part
+  }
 }
 
 public fn List[Element].zip[Other](self, other: Slice[Other]) yields core::Pair[Element, Other]
