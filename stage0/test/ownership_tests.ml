@@ -1611,6 +1611,24 @@ let () =
           \  }\n\
            }\n"
       in
+      if found <> 1 then fail "%d obligations" found);
+  test "a slice lent `mut` beside a slice that is viewed leaves an obligation" (fun () ->
+      let found =
+        disjoint_obligations
+          "fn f(first: mut Slice[Int64], other: Slice[Int64]) {}\n\n\
+           fn g(items: mut List[Int64]) {\n\
+          \  f(mut items[0..2], other: items[0..2])\n\
+           }\n"
+      in
+      if found <> 1 then fail "%d obligations" found);
+  test "an element lent `mut` beside a slice that is viewed leaves an obligation" (fun () ->
+      let found =
+        disjoint_obligations
+          "fn f(first: mut Int64, other: Slice[Int64]) {}\n\n\
+           fn g(items: mut List[Int64]) {\n\
+          \  f(mut items[0], other: items[1..2])\n\
+           }\n"
+      in
       if found <> 1 then fail "%d obligations" found)
 
 (* Lending: a call of a lending method is a part, lent for the rest of the
