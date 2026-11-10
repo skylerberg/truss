@@ -1184,7 +1184,7 @@ safe, it reports an error and suggests four fixes:
    first.
 2. **Require it from the caller** with a `requires` clause.
 3. **Use the checked version**, which returns an `Option` or `Result`, such as
-   `items.get(index)` or `checked_div`.
+   `items.get(index)` or `checked_divide`.
 4. **Declare `uses Panic`**, which allows a runtime failure and shows it in the
    signature.
 

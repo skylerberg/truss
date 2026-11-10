@@ -1352,7 +1352,7 @@ A yielding method gives out parts one after another:
 - A method that yields `mut` access cannot be pulled, because a cursor would
   have to store the access. To change two collections side by side, use
   indexes, or the standard `zip` for indexable collections:
-  `for (name, age) in mut names.zip(mut ages)`.
+  `for (first, second) in mut names.zip(mut ages)`.
 - A method whose yields go through a recursive call, such as a tree's `each`
   that runs `for item in left { yield item }`, works in `for` loops but
   cannot be pulled, because its cursor would need room for every level of
@@ -1551,7 +1551,7 @@ that returns a `Result` and matches on it.
 |---|---|
 | `0..count` | From 0 up to `count`, not including `count` |
 | `0..=UInt8.maximum` | From 0 up to and including the end |
-| `(0..count).reverse()` | The same values, in reverse order |
+| `(0..count).reversed()` | The same values, in reverse order |
 | `(0..count).step_by(2)` | Every second value |
 
 A range whose start is at or past its end is empty, not an error. The inclusive
@@ -1794,7 +1794,7 @@ flags |= Permission.write
 
 - `/` on integers rounds toward zero, and `%` gives a result with the sign of
   the left operand, so `-7 / 2` is `-3` and `-7 % 3` is `-1`.
-  `value.floor_div(divisor)` and `value.floor_mod(divisor)` round down
+  `value.floor_divide(divisor)` and `value.floor_modulo(divisor)` round down
   instead.
 - `>>` on a signed integer copies the sign bit. On an unsigned integer it
   shifts in zeros.
