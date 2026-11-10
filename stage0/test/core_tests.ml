@@ -366,6 +366,61 @@ let () =
      }\n"
     "{ app::main::sort_part(mut items[..2]) }"
 
+(* Holes *)
+
+let () =
+  expect_body
+    "a use of a local whose type is a hole is a Todo, and a pattern on a hole is a Wildcard"
+    "fn g() -> Int64 {\n  let value = todo\n  value\n}\n" "{ let _ = todo; todo } diverges";
+  expect_body "an operation on a hole evaluates its operands and ends in a Todo"
+    "fn g(count: Int64) -> Int64 {\n  let value = todo\n  value.method(count) + 1\n}\n"
+    "{ let _ = todo; { let _ = todo; let _ = place count; let _ = 1; todo } diverges } diverges";
+  List.iter
+    (fun statement ->
+      test (Printf.sprintf "`%s` on a hole has a core form" statement) (fun () ->
+          no_diagnostics
+            ~check:(fun database module_ ->
+              Resolve.diagnostics database module_
+              @ Interface.diagnostics database module_
+              @ Infer.diagnostics database module_)
+            [
+              ( "app::main",
+                "type Config(port: Int64)\n\n\
+                 fn take(count: Int64) -> Int64 {\n\
+                \  count\n\
+                 }\n\n\
+                 fn g(items: List[Int64], config: Config) -> Int64 {\n\
+                \  var hole = todo\n\
+                \  " ^ statement ^ "\n  config.port\n}\n" );
+            ]))
+    [
+      "let member = hole.field";
+      "let called = hole(1, items)";
+      "let result = hole.method(items)";
+      "let mapped = items.map(fn(item) { item + hole })";
+      "let indexed = hole[0]";
+      "let sliced = hole[1..]";
+      "let sum = hole + 1";
+      "let negated = -hole";
+      "let same = hole == 1";
+      "let less = 1 < hole";
+      "let tried = hole?";
+      "let updated = hole with (port: 1)";
+      "let text = \"${hole} and ${items.length()}\"";
+      "let listed = [hole, hole]";
+      "let passed = take(hole)";
+      "let chosen = if hole is Some(inner) { inner } else { 0 }";
+      "let matched = match hole {\n    Some(inner) if inner > 0 => inner\n    _ => 0\n  }";
+      "let Some(bound) = hole else { return 0 }";
+      "for item in hole {\n    let _ = item\n  }";
+      "hole.field = 1";
+      "hole += 1";
+      "hole = 2";
+      "while hole is Some(inner) {\n    let _ = inner\n  }";
+      "let shown = echo hole";
+      "let field = Config(port: hole)";
+    ]
+
 (* Capabilities *)
 
 let () =

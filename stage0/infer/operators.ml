@@ -115,7 +115,7 @@ and with_ state env (value : expression) (base : expression) updates =
                         | Some new_value, _ -> build_expression state new_value
                         | None, Some (Local id) ->
                             synthetic_expression state ~origin:update.id (Form.local_type state id)
-                              (Use (Form.named_local state id))
+                              (Form.local_use state id)
                         | None, _ -> bug "`with (%s)` names no local" first.text )
                 | Update_error -> None)
               updates;
@@ -171,7 +171,8 @@ and prefix state env ?expected (value : expression) operator (inner : expression
       | _ ->
           let type_ = expression state env ?expected inner in
           let resolved = normalize state type_ in
-          if T.is_integer_type resolved && not (T.is_signed resolved) then begin
+          if resolved = T.Hole then T.Hole
+          else if T.is_integer_type resolved && not (T.is_signed resolved) then begin
             report state Negated_unsigned value.span
               (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (T.show resolved));
             type_

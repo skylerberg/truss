@@ -36,7 +36,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Local id -> (
       state.references <- id :: state.references;
       state.tables.meanings.(value.id) <- Some (Local_value id);
-      register_expression state value (fun () -> Use (Form.named_local state id));
+      register_expression state value (fun () -> Form.local_use state id);
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
       | None -> bug "the local `%s` has no type" text)

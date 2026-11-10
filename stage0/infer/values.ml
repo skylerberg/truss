@@ -266,8 +266,12 @@ and lambda state env ?expected (value : expression) parameters body =
         {
           parameters;
           captures =
-            List.map
-              (fun id : Core.local -> if id = state.definition.id then Self else Named id)
+            List.filter_map
+              (fun id : Core.capture option ->
+                if id = state.definition.id then
+                  Some { local = Self; type_ = Form.self_type state env }
+                else if was_hole state (fun tables -> tables.local_types) id then None
+                else Some { local = Named id; type_ = Form.local_type state id })
               captures;
           body = build_block state body;
           result =

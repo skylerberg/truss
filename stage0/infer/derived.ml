@@ -254,7 +254,8 @@ let form database (path : Path.t) : Core.t option =
             | "Hash", "hash" ->
                 let hasher, hasher_type =
                   match List.rev parameters with
-                  | ({ local; type_; _ } : Core.parameter) :: _ -> (Core.Local { local; type_ }, type_)
+                  | ({ local; type_; _ } : Core.parameter) :: _ ->
+                      (Core.Local { local; type_ }, type_)
                   | [] -> bug "`hash` takes a hasher"
                 in
                 let hasher_path =

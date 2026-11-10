@@ -222,7 +222,11 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           | Function_value { type_arguments; _ } ->
               List.iter (argument "a function value's type argument") type_arguments
           | Value_parameter named -> parameter "a value" named
-          | Lambda { result; _ } -> type_ "a lambda's result" result
+          | Lambda { result; captures; _ } ->
+              type_ "a lambda's result" result;
+              List.iter
+                (fun ({ local; type_ } : Core.capture) -> place (Local { local; type_ }))
+                captures
           | To_any { trait = reference; _ } -> trait "a conversion to `any`" reference
           | Provide { implementations; _ } ->
               List.iter

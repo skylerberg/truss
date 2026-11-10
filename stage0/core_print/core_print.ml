@@ -53,7 +53,10 @@ let rec expression names (node : expression) =
   | Lambda { parameters; captures; body; _ } ->
       Printf.sprintf "lambda(%s)%s %s"
         (list (pattern names) parameters)
-        (match captures with [] -> "" | captures -> " capturing " ^ list (local names) captures)
+        (match captures with
+        | [] -> ""
+        | captures ->
+            " capturing " ^ list (fun (capture : capture) -> local names capture.local) captures)
         (block names body)
   | Construct { variant; fields } ->
       Printf.sprintf "%s%s(%s)" (T.show node.type_)

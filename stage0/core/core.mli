@@ -104,8 +104,8 @@ and operand =
 and place =
   | Local of { local : local; type_ : Types.ty }
   | Constant of { path : Path.t; type_ : Types.ty }
-      (** The static data of a constant. It is read-only. A constant used as a value is a {!Use}
-          of this place. *)
+      (** The static data of a constant. It is read-only. A constant used as a value is a {!Use} of
+          this place. *)
   | Field of { base : place; field : string; type_ : Types.ty }
       (** A field of a record. [type_] is the field's type. The fields of a sum type's variant are
           never places of this kind: they are only reachable through pattern bindings. *)
@@ -152,8 +152,9 @@ and kind =
   | Value_parameter of Types.parameter  (** A use of a [USize] generic parameter as a value. *)
   | Lambda of {
       parameters : pattern list;
-      captures : local list;
-          (** The locals of the enclosing function that the body reads, in order of first use. *)
+      captures : capture list;
+          (** The locals of the enclosing function that the body reads, in order of first use. The
+              lambda borrows them. *)
       body : block;
       result : Types.ty;
     }
@@ -228,6 +229,7 @@ and kind =
       (** A cost function inside a [cost] bound: [log(count)], [power(base, exponent)],
           [time(visit)], or [calls(visit)]. *)
 
+and capture = { local : local; type_ : Types.ty }
 and cost_function = Log | Power | Time | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
 

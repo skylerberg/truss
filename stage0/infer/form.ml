@@ -270,11 +270,18 @@ let local_type state (id : id) =
 let named_local state (id : id) : Core.place =
   Local { local = Named id; type_ = local_type state id }
 
-(* The place of [self]. *)
-let self_local state (env : env) : Core.place =
+(* A use of a parameter or a pattern binding. A local whose type is a hole
+   is never bound, so a use of it is a [Todo]. *)
+let local_use state (id : id) : Core.kind =
+  if was_hole state (fun tables -> tables.local_types) id then Todo else Use (named_local state id)
+
+let self_type state (env : env) =
   match env.self with
-  | Some type_ -> Local { local = Self; type_ = final state type_ }
+  | Some type_ -> final state type_
   | None -> bug "`self` is used outside a method"
+
+(* The place of [self]. *)
+let self_local state (env : env) : Core.place = Local { local = Self; type_ = self_type state env }
 
 (* The place of a constant's static data. *)
 let constant_place state (path : Path.t) : Core.place =
@@ -618,9 +625,9 @@ let operation_of : binary -> Intrinsic.operation = function
   | Equal | Not_equal | Less | Less_equal | Greater | Greater_equal | And | Or | Implies ->
       bug "this operator is not an arithmetic operation"
 
-(* An arithmetic operator on built-in types, or on a hole left by a
-   [todo]. If the result type is [Integer], which happens only in a
-   specification, built-in integer operands are converted to [Integer]. *)
+(* An arithmetic operator on built-in types. If the result type is
+   [Integer], which happens only in a specification, built-in integer
+   operands are converted to [Integer]. *)
 let operator state (value : expression) operation (operands : expression list) : Core.kind =
   let arguments = List.map (build_expression state) operands in
   Operator

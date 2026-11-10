@@ -155,6 +155,9 @@ type t = {
 val create : int -> t
 (** Empty tables for a definition with that many nodes. *)
 
+val copy : t -> t
+(** Tables with the same entries, in new arrays. *)
+
 val type_of : t -> Syntax.expression -> Types.ty
 (** The type of an expression of a body that checked, where every expression has one. One without is
     a bug in the compiler, raised as one: the stages after checking run on what it decided, and
