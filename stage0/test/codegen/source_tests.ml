@@ -121,6 +121,20 @@ test "lists" {
   assert total(items) == 10
 }
 |};
+  passes "a list splits into two slices that view its elements"
+    {|test "split" {
+  let items: List[Int64] = [1, 2, 3, 4, 5]
+  let halves = items.split_at(2)
+  assert halves.first.length() == 2
+  assert halves.second.length() == 3
+  assert halves.first[1] == 2
+  assert halves.second[0] == 3
+  assert halves.second[2] == 5
+  let ends = items.split_at(5)
+  assert ends.first.length() == 5
+  assert ends.second.length() == 0
+}
+|};
   passes "a question mark returns an error early"
     {|type ParseError = Empty | TooLarge
   derives Equal

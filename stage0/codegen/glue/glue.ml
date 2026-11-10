@@ -107,7 +107,7 @@ let drop t ty =
       emit b
         (Call
            {
-             target = Foreign (Libc.declaration (Memory_layout.target t.env).os Close);
+             target = Foreign (Libc.declaration (Memory_layout.target t.env).system Close);
              arguments = [ Copy (value / Field "descriptor") ];
              result = Discarded;
            })

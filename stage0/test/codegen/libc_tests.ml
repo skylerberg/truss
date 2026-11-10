@@ -70,6 +70,8 @@ let compiles text =
   Toolchain.compile (Lazy.force compiler) ~optimization:O1 ~extra:strict ~source
     ~output:(source ^ ".o") ()
 
+let linux : Libc.system = { os = Linux; architecture = X86_64 }
+
 let () =
   test "the C library's numbers, prototypes, and structures are what this system's headers give"
     (fun () ->
@@ -77,16 +79,20 @@ let () =
       | Ok () -> ()
       | Error message -> fail "the table disagrees with the headers:\n%s" message);
   test "another system's numbers do not pass for this one's" (fun () ->
-      let other : Libc.os = match host with Linux -> Macos | Macos -> Linux in
+      let other : Libc.system =
+        { host with os = (match host.os with Linux -> Macos | Macos -> Linux) }
+      in
       match compiles (Libc.check other) with
-      | Ok () -> fail "the check takes %s's table on %s" (Libc.os_name other) (Libc.os_name host)
+      | Ok () ->
+          fail "the check takes the table of %s on %s" (Libc.system_name other)
+            (Libc.system_name host)
       | Error _ -> ());
   test "a function that takes a structure is declared with no header" (fun () ->
       expect_string ~expected:"struct timespec;\nint clock_gettime(int, struct timespec *);\n"
-        (Libc.prototype (Libc.declaration Linux Clock_gettime)));
+        (Libc.prototype (Libc.declaration linux Clock_gettime)));
   test "a function with arguments C passes through ... is declared so" (fun () ->
       expect_string ~expected:"int open(const char *, int, ...);\n"
-        (Libc.prototype (Libc.declaration Linux Open)));
+        (Libc.prototype (Libc.declaration linux Open)));
   test "a number whose name in C starts with an underscore is named without it" (fun () ->
       expect_string ~expected:"libc_sc_nprocessors_onln"
         (Intrinsic.operation_name (Libc_number Sc_nprocessors_onln)));

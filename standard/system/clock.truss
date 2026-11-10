@@ -1,5 +1,11 @@
 use standard::intrinsic
 
+internal fn instant_from(seconds: Int64, nanoseconds: Int64) -> Instant {
+  let whole = if seconds > 9223372035 { 9223372035 } else if seconds < -9223372035 { -9223372035 } else { seconds }
+  let part = if nanoseconds < 0 { 0 } else if nanoseconds > 999999999 { 999999999 } else { nanoseconds }
+  Instant(nanoseconds: whole * 1000000000 + part)
+}
+
 internal type SystemClock()
 
 impl Clock for SystemClock {
@@ -11,9 +17,7 @@ impl Clock for SystemClock {
       seconds: mut seconds,
       nanoseconds: mut nanoseconds,
     )
-    let whole = if seconds > 9223372035 { 9223372035 } else if seconds < -9223372035 { -9223372035 } else { seconds }
-    let part = if nanoseconds < 0 { 0 } else if nanoseconds > 999999999 { 999999999 } else { nanoseconds }
-    Instant(nanoseconds: whole * 1000000000 + part)
+    instant_from(seconds, nanoseconds: nanoseconds)
   }
 
   fn monotonic(self) -> Duration {

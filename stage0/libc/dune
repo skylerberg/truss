@@ -4,4 +4,5 @@
 (rule
  (with-stdout-to
   built_for.ml
-  (echo "let system = \"%{system}\"\n")))
+  (echo
+   "let system = \"%{system}\"\nlet architecture = \"%{architecture}\"\n")))
