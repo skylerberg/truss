@@ -2473,6 +2473,19 @@ let () =
          \  zero(mut items[..2])\n\
           }\n")
         "prover.ensures");
+  test "an unsigned left shift that fits multiplies by a power of two" (fun () ->
+      proven
+        "fn f(value: UInt8) -> UInt8\n\
+        \  requires value < 16\n\
+        \  ensures result == value * 16\n\
+         {\n\
+        \  value << 4\n\
+         }\n");
+  test "an unsigned right shift divides by a power of two" (fun () ->
+      proven "fn f(value: UInt64) -> UInt64\n  ensures result == value / 4\n{\n  value >> 2\n}\n");
+  test "a left shift that may not fit is not known to multiply" (fun () ->
+      not_proven "fn f(value: UInt8) -> UInt8\n  ensures result == value * 16\n{\n  value << 4\n}\n"
+        "prover.ensures");
   test "a loop that changes a slice of any elements under a cost clause" (fun () ->
       proven
         "fn swap_each[Element](part: mut Slice[Element])\n\

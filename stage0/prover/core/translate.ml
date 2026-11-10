@@ -1517,7 +1517,21 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
               L.(Apply ("<", [ right; int bits ]))
         | None -> unsupported span "a shift of `%s`" (T.show ty));
         let name = match operation with Shift_left -> "shift_left" | _ -> "shift_right" in
-        (frame, opaque_operation context frame ty name [ left; right ])
+        let shifted = opaque_operation context frame ty name [ left; right ] in
+        (* An unsigned shift multiplies or divides by a power of two: to the
+           left exactly, where the product fits. *)
+        (match bounds ty with
+        | Some (low, high) when Z.equal low Z.zero && not (L.mentions frame.bound right) ->
+            let scale = power_of context frame (L.int 2) right in
+            assume context frame
+              (match operation with
+              | Shift_left ->
+                  L.(
+                    Apply ("<=", [ Apply ("*", [ left; scale ]); Integer high ])
+                    ==> equal shifted (Apply ("*", [ left; scale ])))
+              | _ -> L.equal shifted (L.truncated_divide left scale))
+        | _ -> ());
+        (frame, shifted)
     | (Bit_and | Bit_or | Bit_xor), [ left; right ] ->
         let name = match operation with Bit_and -> "and" | Bit_or -> "or" | _ -> "xor" in
         let term = opaque_operation context frame ty name [ left; right ] in
@@ -2285,6 +2299,23 @@ and integer_intrinsic context frame (operation : Intrinsic.operation) types oper
   | Convert, Some _, [ _; target ], [ value ] when bounds target <> None ->
       assume context frame L.(in_range target value ==> equal known value);
       known
+  | (Leading_zeros | Trailing_zeros | Count_ones), Some (low, _), ty :: _, [ value ] -> (
+      (* A count of bits is at most the width; and a nonzero unsigned value
+         lies between the powers of two that its leading zeros give. *)
+      match width ty with
+      | Some bits ->
+          assume context frame
+            L.(Apply ("<=", [ int 0; known ]) &&& Apply ("<=", [ known; int bits ]));
+          (if operation = Leading_zeros && Z.equal low Z.zero && not (L.mentions frame.bound value)
+           then
+             let power exponent = power_of context frame (L.int 2) exponent in
+             assume context frame
+               L.(
+                 not_ (equal value (int 0))
+                 ==> (Apply ("<=", [ power (Apply ("-", [ int (bits - 1); known ])); value ])
+                     &&& Apply ("<", [ value; power (Apply ("-", [ int bits; known ])) ]))));
+          known
+      | None -> known)
   | _ -> known
 
 (* Lambdas and callbacks *)
