@@ -1069,7 +1069,8 @@ body, and needs only the body and the interfaces of what it calls.
 ### Places
 
 A place is a local, a parameter, `self`, or a constant, followed by fields
-and by indexes of a `List`, a `Slice`, or an `Array`. An index whose value
+and by indexes of a `List`, a `Slice`, or an `Array`. A constant that a type
+declares, such as `UInt8.maximum`, is a place like any other constant. An index whose value
 the checker cannot compare, such as `items[i]`, stands for *some element* of
 `items`. An index of any other collection is not a place: it is a call of
 the collection's `at`, a lending call (see

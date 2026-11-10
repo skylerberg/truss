@@ -726,6 +726,13 @@ let mismatch state span ~expected ~found = ignore (mismatched state span ~expect
 
 (* Whether an expression is a place: a local, a parameter, [self], or a
    constant, followed by fields and indexes. *)
+(* Whether an expression is a constant that a type declares, such as
+   [UInt8.maximum]. *)
+let is_member_constant state (value : expression) =
+  match state.tables.meanings.(value.id) with
+  | Some (Global { path = Member_constant _; _ }) -> true
+  | _ -> false
+
 let rec is_place state (value : expression) =
   match value.kind with
   | Name path -> (
@@ -733,7 +740,7 @@ let rec is_place state (value : expression) =
       | Some (Local _ | Field _ | Definition (Constant, _)) -> true
       | _ -> false)
   | Self_value -> true
-  | Member (base, _) -> is_place state base
+  | Member (base, _) -> is_place state base || is_member_constant state value
   | Bracket (base, _) -> (
       match state.resolved.brackets.(value.id) with
       | Some Index -> is_place state base
@@ -1325,6 +1332,15 @@ let mutate state env ~(by : mutation) (value : expression) =
 
 (* Arguments and modes *)
 
+(* Whether a place is a constant, or a field or an element of one. *)
+let rec is_part_of_constant state (value : expression) =
+  match value.kind with
+  | Name path -> (
+      match target state path.last with Some (Definition (Constant, _)) -> true | _ -> false)
+  | Member (base, _) -> is_member_constant state value || is_part_of_constant state base
+  | Bracket (base, _) | Parenthesized base -> is_part_of_constant state base
+  | _ -> false
+
 type argument_form = Marked of T.mode * expression | Place | Lent of T.mode | Temporary
 
 let argument_form state (value : expression) =
@@ -1391,6 +1407,16 @@ let check_mode state env (value : expression) (parameter : T.parameter_info) typ
             ]
           (Printf.sprintf "`%s` copies implicitly, so it needs no `own`." (show state type_))
   | Own, Temporary -> ()
+  | Own, Place when is_part_of_constant state value ->
+      if not (plain state type_) then
+        report state Missing_mark value.span
+          ~fixes:
+            (if copyable state type_ then
+               [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
+             else [])
+          (Printf.sprintf
+             "`%s` takes ownership of its argument, and a constant cannot be given up. Pass a copy."
+             name)
   | Own, Place ->
       if not (plain state type_) then
         report state Missing_mark value.span
