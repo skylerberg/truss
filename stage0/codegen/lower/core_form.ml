@@ -519,11 +519,16 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
              });
         if not lir_signature.returns then unreachable_block st
       end
-  | None, Trait_method { trait; name; _ } -> (
+  | None, Trait_method { trait; name; self_type; _ } -> (
       (* Through an [any] value, which is the receiver. *)
+      let any_type =
+        match T.substitute st.frame.code.substitution self_type with
+        | T.Any reference -> reference
+        | receiver -> bug "a call through any on %s" (T.show receiver)
+      in
       match List.map (argument_place st) call.arguments with
       | (_, _, any) :: arguments ->
-          call_through_any st ~trait:trait.trait ~name ~any ~arguments destination
+          call_through_any st ~any_type ~trait:trait.trait ~name ~any ~arguments destination
       | [] -> bug "a call through any with no receiver")
   | None, Indirect function_value ->
       let function_type =
