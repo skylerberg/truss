@@ -923,6 +923,10 @@ compile iterators:
    is live across the outer `yield`s, so it becomes a field of the outer
    cursor.
 
+A `for` over a value of a type that implements `Cursor` is the same loop
+with the type's own `next`: it is called until it gives `None`, and the
+loop owns each value it gives.
+
 A cursor's drop function runs the `stop` path of the `yield` it is stopped
 at, which drop elaboration has already filled with the drops of what the
 method owns there. That is what DESIGN.md means by a dropped cursor ending
@@ -1522,8 +1526,6 @@ a command line can hold.
   digits are `snprintf`'s and the check `strtod`'s.
 - **A slice of a range of elements,** `items[1..3]`. The type checker
   accepts it, and lowering reports it as unsupported.
-- **`for` over a value of a type that implements `Cursor`.** Only the
-  cursor of a yielding method's call can be looped over.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.

@@ -844,6 +844,64 @@ test "cursors" {
 }
 |}
 
+let () =
+  passes "a loop over a value of a type that implements Cursor"
+    {|type Countdown(left: Int64)
+
+impl Cursor for Countdown {
+  type Element = Int64
+
+  fn next(mut self) -> Option[Int64] {
+    if self.left == 0 {
+      return None
+    }
+    self.left -= 1
+    Some(self.left + 1)
+  }
+}
+
+type Words(remaining: List[String])
+
+impl Cursor for Words {
+  type Element = String
+
+  fn next(mut self) -> Option[String] {
+    mut self.remaining.pop()
+  }
+}
+
+fn total(from: Int64) -> Int64 {
+  var sum = 0
+  var countdown = Countdown(left: from)
+  for number in mut countdown {
+    if number == 2 {
+      continue
+    }
+    sum += number
+  }
+  sum
+}
+
+fn longest(words: own List[String]) -> USize {
+  var most: USize = 0
+  var cursor = Words(remaining: own words)
+  for word in mut cursor {
+    if word == "stop" {
+      break
+    }
+    if word.length() > most {
+      most = word.length()
+    }
+  }
+  most
+}
+
+test "cursors" {
+  assert total(4) == 8
+  assert longest(["abcd", "stop", "ab", "abc"]) == 3
+}
+|}
+
 (* Checks which of a module's constants fold and which are worked out by
    running their evaluators, and that the module's test passes. *)
 let folds what ~folded ~run source =
