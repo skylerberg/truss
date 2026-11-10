@@ -6,6 +6,7 @@ use standard::processes
 use standard::streams
 use standard::system::calls
 use standard::system::clock
+use standard::system::sockets
 use standard::system::terminals
 
 internal fn file_error(number: Int32) -> SystemError {
@@ -25,7 +26,7 @@ internal fn file_error(number: Int32) -> SystemError {
     SystemError.InvalidInput
   } else if number == intrinsic::libc_eintr() {
     SystemError.Interrupted
-  } else if number == intrinsic::libc_etimedout() {
+  } else if number == intrinsic::libc_etimedout() || number == intrinsic::libc_eagain() {
     SystemError.TimedOut
   } else if number == intrinsic::libc_epipe() {
     SystemError.BrokenPipe
@@ -291,7 +292,7 @@ impl Handles for SystemHandles {
   }
 
   fn shut_down(self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {
-    todo
+    with_file_error(sockets::shut_down(descriptor_of(handle), direction: direction))
   }
 
   fn set_timeout(
@@ -300,11 +301,11 @@ impl Handles for SystemHandles {
     direction: network::Direction,
     timeout: Option[Duration],
   ) -> Result[Unit, SystemError] {
-    todo
+    with_file_error(sockets::set_timeout(descriptor_of(handle), direction: direction, timeout: timeout))
   }
 
   fn accept(self, listener: streams::Handle) -> Result[network::Accepted, SystemError] {
-    todo
+    with_file_error(sockets::accept(descriptor_of(listener)))
   }
 
   fn send_to(
@@ -313,7 +314,7 @@ impl Handles for SystemHandles {
     bytes: Slice[UInt8],
     address: network::SocketAddress,
   ) -> Result[USize, SystemError] {
-    todo
+    with_file_error(sockets::send_to(descriptor_of(socket), bytes: bytes.elements, address: address))
   }
 
   fn receive_from(
@@ -322,7 +323,7 @@ impl Handles for SystemHandles {
     buffer: mut List[UInt8],
     limit: USize,
   ) -> Result[network::Datagram, SystemError] {
-    todo
+    with_file_error(sockets::receive_from(descriptor_of(socket), buffer: mut buffer.storage, limit: limit))
   }
 
   fn wait(self, process: streams::Handle) -> Result[processes::ExitStatus, SystemError] {

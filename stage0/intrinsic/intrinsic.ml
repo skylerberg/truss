@@ -81,6 +81,7 @@ let builtin_of_path = function
 let libc_builtin : Libc.scalar -> builtin = function
   | UInt8 -> UInt8
   | Int32 -> Int32
+  | UInt32 -> UInt32
   | Int64 -> Int64
   | UInt64 -> UInt64
   | USize -> USize

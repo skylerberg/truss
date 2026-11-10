@@ -18,7 +18,7 @@ val host : system option
     [None] where that is a system it knows no C library of. *)
 
 (** A number that Truss and C both have. *)
-type scalar = UInt8 | Int32 | Int64 | UInt64 | USize | ISize | Float64
+type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | USize | ISize | Float64
 
 type number =
   | O_rdonly
@@ -124,6 +124,30 @@ type number =
   | Cs8
   | Sigset_size  (** How many bytes a [sigset_t] takes *)
   | Sig_block
+  | Af_inet
+  | Af_inet6
+  | Sock_stream
+  | Sock_dgram
+  | Sol_socket
+  | So_reuseaddr
+  | So_rcvtimeo
+  | So_sndtimeo
+  | So_error
+  | Shut_rd
+  | Shut_wr
+  | Shut_rdwr
+  | Ipproto_ipv6
+  | Ipv6_v6only
+  | O_nonblock
+  | F_getfl
+  | F_setfl
+  | Einprogress
+  | Eagain
+  | Pollout
+  | Sockaddr_family_offset
+      (** Where the family of a socket's address is, and how many bytes it takes: two from the start
+          on Linux; one, after a byte for the address's length, on macOS *)
+  | Sockaddr_family_size
 
 (** How many elements a function reads or writes through an address it is given. The prover holds
     every call to it: a view has that many elements, and storage has room for that many. *)
@@ -149,8 +173,10 @@ type passes =
       (** Storage: the address of its first element, for a function that reads the elements the
           storage has and writes some of them *)
   | Written of scalar * string list
-      (** A structure of numbers of one type that the function writes: the address of one, whose
-          numbers then go to [mut] arguments of these names, one each *)
+      (** A structure of numbers of one type that the function writes: the address of one, which
+          holds the values of [mut] arguments of these names, one each, and whose numbers go to
+          those arguments afterwards. A function that reads a number there too, as [accept] reads
+          how much room an address has, finds the argument's value. *)
   | Always of int
       (** A number that is no argument of the Truss call: the function always gets it *)
   | Fixed of number
@@ -241,6 +267,20 @@ type function_ =
   | Sigaddset
   | Sigprocmask_block  (** [sigprocmask] with [SIG_BLOCK] *)
   | Sigwait
+  | Socket
+  | Bind
+  | Connect
+  | Listen
+  | Accept
+  | Getsockname
+  | Getpeername
+  | Shutdown
+  | Setsockopt
+  | Getsockopt
+  | Sendto
+  | Recvfrom
+  | Fcntl_getfl  (** [fcntl] with [F_GETFL], and then with [F_SETFL] *)
+  | Fcntl_setfl
 
 val functions : function_ list
 

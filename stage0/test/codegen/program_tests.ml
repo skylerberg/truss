@@ -917,6 +917,99 @@ fn main(arguments: List[String]) -> ExitCode
       expect_string ~expected:"sent true\nfirst user 1\nsent true\nsecond terminate\n" output)
 
 let () =
+  test "a program listens, connects, accepts, and sends datagrams, on the loopback address"
+    (fun () ->
+      let status, output, _ =
+        run_main
+          {|use standard::network
+
+fn say(text: String) uses Console {
+  Console.print_line(text.slice())
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, NetworkServer, NetworkClient, Handles
+{
+  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  var unused: UInt16 = 0
+  if NetworkServer.listen(loopback) is Ok(opened) {
+    var listener = own opened
+    let at = listener.local_address()
+    unused = at.port
+    say("listening on a port ${at.port > 0}")
+    if NetworkClient.connect(at, timeout: Some(Duration.nanoseconds(2000000000))) is Ok(made) {
+      var client = own made
+      say("connected to the port ${client.peer_address().port == at.port}")
+      if mut listener.accept() is Ok(taken) {
+        var server = own taken
+        say("accepted from the client ${server.peer_address().port == client.local_address().port}")
+        let request: List[UInt8] = [112, 105, 110, 103]
+        let _ = mut client.write(request.slice())
+        var heard: List[UInt8] = []
+        if mut server.read(mut heard, limit: 100) is Ok(count) {
+          say("the server read ${count}, first ${heard[0]}")
+        }
+        let _ = mut server.write(heard.slice())
+        let _ = mut server.shut_down(network::Direction.Sending)
+        var answer: List[UInt8] = []
+        if mut client.read(mut answer, limit: 100) is Ok(count) {
+          say("the client read ${count}")
+        }
+        if mut client.read(mut answer, limit: 100) is Ok(count) {
+          say("and then the end ${count}")
+        }
+        let _ = mut server.set_read_timeout(Some(Duration.nanoseconds(50000000)))
+        if mut server.read(mut heard, limit: 10) is Err(error) {
+          say("nothing more in time ${error == SystemError.TimedOut}")
+        }
+      }
+    }
+  }
+  let closed = network::SocketAddress(address: network::IpAddress.loopback, port: unused)
+  if NetworkClient.connect(closed, timeout: None) is Err(error) {
+    say("refused ${error == SystemError.ConnectionRefused}")
+  }
+  if NetworkServer.bind_datagram(loopback) is Ok(bound) && NetworkClient.open_datagram() is Ok(opened) {
+    var receiver = own bound
+    var sender = own opened
+    let message: List[UInt8] = [1, 2, 3]
+    if mut sender.send_to(message.slice(), address: receiver.local_address()) is Ok(sent) {
+      say("sent ${sent}")
+    }
+    var packet: List[UInt8] = []
+    if mut receiver.receive_from(mut packet, limit: 100) is Ok(datagram) {
+      say("received ${datagram.length} from loopback ${datagram.from.address == network::IpAddress.loopback}")
+    }
+    let _ = mut receiver.set_read_timeout(Some(Duration.nanoseconds(50000000)))
+    if mut receiver.receive_from(mut packet, limit: 100) is Err(error) {
+      say("no second packet ${error == SystemError.TimedOut}")
+    }
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               "listening on a port true";
+               "connected to the port true";
+               "accepted from the client true";
+               "the server read 4, first 112";
+               "the client read 4";
+               "and then the end 0";
+               "nothing more in time true";
+               "refused true";
+               "sent 3";
+               "received 3 from loopback true";
+               "no second packet true";
+               "";
+             ])
+        output)
+
+let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"
     (fun () ->
       let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in
