@@ -330,8 +330,13 @@ impl Index for Slice[Element] {
     yield intrinsic::view_at(self.elements, index: key)
   }
 
-  fn at(mut self, key: USize) lends mut Element {
-    todo
+  fn at(mut self, key: USize) lends mut Element
+    requires key < self.length()
+    ensures identical(result, old(self.model())[key])
+    ensures identical(self.model(), old(self.model()).update(key, value: yielded[0]))
+    cost time O(1)
+  {
+    yield intrinsic::view_at_mut(mut self.elements, index: key)
   }
 }
 
