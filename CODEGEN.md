@@ -1126,7 +1126,12 @@ storage's room the storage's own. A row can also fix an argument, which
 the Truss call then does not have: `libc_getentropy(mut value)` always
 asks for the eight bytes of the `UInt64` it fills, and
 `libc_posix_spawnp` always gives the program it starts the environment
-this process was started with. A list of addresses, such as the arguments
+this process was started with. A function that reads its arguments by a
+request, as `fcntl` and `ioctl` do, has a row for each request the
+standard library makes, and the row fixes the request:
+`libc_fcntl_dupfd_cloexec(descriptor, least: 3)`. Another request would
+read the next argument as an address, so the request is not Truss's to
+choose. A list of addresses, such as the arguments
 of a program to run, is a `View[USize]` that Truss fills with
 `view_address`, which gives the address of a view's elements as a number;
 nothing turns a number back into an address.
@@ -1214,6 +1219,14 @@ on after a signal interrupts a call; and turning an error number into a
 `SystemClock` reads `clock_gettime`, and `SystemRandom` reads
 `getentropy`. `SystemConsole` and `FileReader` each hold a reader of
 lines, which reads a block at a time and keeps what it has not given out.
+The console's input and its two outputs as streams are each a new
+descriptor for the same open file, made with `fcntl`, so that a stream
+owns the descriptor it closes and the process keeps its first three. The
+console's terminal is `/dev/tty`, the terminal the process is controlled
+from, whatever its input and output were redirected to. `SystemLog`
+writes each record to standard error as one line and with one `write`,
+`level=warning message="..."` and then each field as `name=value`, with
+text in quotes.
 `SystemHandles` reads onto the end of a list and writes a slice with
 `read` and `write`, does the same at an offset with `pread` and `pwrite`,
 and moves, shortens, flushes, and closes a file with `lseek`, `ftruncate`,

@@ -80,6 +80,7 @@ type number =
   | At_fdcwd
   | Utime_omit
   | Path_max
+  | F_dupfd_cloexec
 
 type extent =
   | Counted of { by : string; each : int }
@@ -94,6 +95,7 @@ type passes =
   | Elements_to_change of scalar * extent
   | Written of scalar * string list
   | Always of int
+  | Fixed of number
   | Environment
 
 type result = Returns of scalar | Points_at of scalar | Text | Never
@@ -147,6 +149,7 @@ type function_ =
   | Gethostname
   | Getpid
   | Proc_pidpath
+  | Fcntl_dupfd_cloexec
 
 let functions =
   [
@@ -190,6 +193,7 @@ let functions =
     Gethostname;
     Getpid;
     Proc_pidpath;
+    Fcntl_dupfd_cloexec;
   ]
 
 let function_name = function
@@ -233,6 +237,7 @@ let function_name = function
   | Gethostname -> "gethostname"
   | Getpid -> "getpid"
   | Proc_pidpath -> "proc_pidpath"
+  | Fcntl_dupfd_cloexec -> "fcntl_dupfd_cloexec"
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
@@ -600,6 +605,18 @@ let describe function_ =
           ("size", Value USize, everywhere "unsigned int");
         ]
         ~headers:[ "libproc.h" ]
+  | Fcntl_dupfd_cloexec ->
+      (* A new descriptor for the same open file, the lowest free one that
+         is not less than [least], closed in programs the process runs.
+         The request is the row's, since another request reads its third
+         argument as an address. *)
+      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "fcntl") ~variadic_from:2
+        [
+          ("descriptor", Value Int32, everywhere "int");
+          ("request", Fixed F_dupfd_cloexec, everywhere "int");
+          ("least", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "fcntl.h" ]
 
 let available system function_ = (describe function_).on system.os
 
@@ -719,6 +736,7 @@ let numbers =
     At_fdcwd;
     Utime_omit;
     Path_max;
+    F_dupfd_cloexec;
   ]
 
 let number_name = function
@@ -779,6 +797,7 @@ let number_name = function
   | At_fdcwd -> "AT_FDCWD"
   | Utime_omit -> "UTIME_OMIT"
   | Path_max -> "PATH_MAX"
+  | F_dupfd_cloexec -> "F_DUPFD_CLOEXEC"
 
 (* A size or an offset in a structure is a [USize], and the bits of a
    file's mode are compared with a number read out of the structure. *)
@@ -807,7 +826,7 @@ let number_headers = function
   | Stat_modified_offset | Stat_created_offset | S_ifmt | S_ifreg | S_ifdir | S_iflnk | Utime_omit
     ->
       [ "sys/stat.h" ]
-  | At_fdcwd -> [ "fcntl.h" ]
+  | At_fdcwd | F_dupfd_cloexec -> [ "fcntl.h" ]
   | Path_max -> [ "limits.h" ]
 
 (* The C expression that a number is the value of, which the check compares
@@ -919,6 +938,8 @@ let value (system : system) number =
   | Utime_omit, Macos -> -2
   | Path_max, Linux -> 4096
   | Path_max, Macos -> 1024
+  | F_dupfd_cloexec, Linux -> 1030
+  | F_dupfd_cloexec, Macos -> 67
 
 (* How many bytes a number the function reaches through an address takes,
    which the C type it is declared with must take too. [USize] has no one
@@ -990,7 +1011,7 @@ let check system =
                 | Written (scalar, names) when not (is_void (c system)) ->
                     Some (reached declaration.symbol (c system) (List.length names) scalar)
                 | Written _ | Value _ | Elements _ | Room _ | Elements_to_change _ | Always _
-                | Environment ->
+                | Fixed _ | Environment ->
                     None)
               row.parameters)
         functions)
