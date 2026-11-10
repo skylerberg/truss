@@ -5454,7 +5454,8 @@ and potential context frame (ty : T.ty) term =
           (* A buffer's potential is what it saved for growing, as a
              doubling array saves it: twice its length less its capacity,
              and never below zero, so at most two units for each element;
-             and its elements' potentials. *)
+             and its elements' potentials. A view cannot grow, so it saves
+             nothing of its own. *)
           match buffer_elements context ty with
           | Some (element, model) -> (
               let sequence = model term in
@@ -5474,6 +5475,8 @@ and potential context frame (ty : T.ty) term =
                   in
                   fact context frame
                     (L.equal slack (L.ite (L.Apply (">=", [ saved; L.int 0 ])) saved (L.int 0)))
+              | Named { path; _ } when Intrinsic.builtin_of_path path = Some View ->
+                  fact context frame (L.equal slack (L.int 0))
               | _ -> ());
               let elements =
                 if has_potential context element then
@@ -5535,6 +5538,9 @@ and buffer_elements context (ty : T.ty) =
   | Named { path; arguments = [ T.Type element ] }
     when Intrinsic.builtin_of_path path = Some Storage ->
       Some (element, fun term -> buffer_model context Storage element term)
+  | Named { path; arguments = [ T.Type element ] } when Intrinsic.builtin_of_path path = Some View
+    ->
+      Some (element, fun term -> buffer_model context View element term)
   | Named { path; arguments } when builtin ty = None -> (
       match Query.demand context.database Interface.Environment.interface path with
       | Some (Interface.Environment.Type_interface { shape = Record [ field ]; type_generics; _ })
@@ -5548,7 +5554,8 @@ and buffer_elements context (ty : T.ty) =
           in
           match T.substitute substitution field.field_type with
           | Named { path = field_path; arguments = [ T.Type element ] }
-            when Intrinsic.builtin_of_path field_path = Some Storage ->
+            when Intrinsic.builtin_of_path field_path = Some Storage
+                 || Intrinsic.builtin_of_path field_path = Some View ->
               Option.map
                 (fun model_of -> (element, model_of))
                 (model_function context ty ~model:(sequence_type element))
