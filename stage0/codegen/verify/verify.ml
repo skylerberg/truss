@@ -94,6 +94,21 @@ let function_ env (instance : Lir.t) what (f : Lir.function_) =
           built statement;
           match statement with
           | Call { target; arguments; result } ->
+              (* Every pointer a callee is given is [restrict], so the place
+                 it writes its result to is none it is also given to read. *)
+              (match result with
+              | Written { root = Local written; _ } ->
+                  List.iter
+                    (fun (argument : Lir.operand) ->
+                      match argument with
+                      | Address { place = { root = Local passed; _ }; _ }
+                      | Moved_address { root = Local passed; _ }
+                        when passed = written ->
+                          bug "a call that writes its result to local %d, which it is also given"
+                            written
+                      | _ -> ())
+                    arguments
+              | _ -> ());
               Option.iter
                 (fun (signature : Lir.signature) ->
                   let given = passed env instance f target arguments result in

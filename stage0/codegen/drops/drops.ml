@@ -104,7 +104,26 @@ type analysis = {
 }
 
 let path_type a path = Lir.place_type a.env ~environment:a.environment a.f (place_of_path path)
-let owns a path = match path_type a path with Some (Value ty) -> a.needs_drop ty | _ -> false
+
+let owns a path =
+  (not a.f.locals.(path.local).borrowed)
+  && match path_type a path with Some (Value ty) -> a.needs_drop ty | _ -> false
+
+(* A path as a message names it: its local, by number and name, and its
+   steps. *)
+let describe a path =
+  let local =
+    match a.f.locals.(path.local).name with
+    | Some name -> Printf.sprintf "local %d (%s)" path.local name
+    | None -> Printf.sprintf "local %d" path.local
+  in
+  List.fold_left
+    (fun text step ->
+      match step with
+      | Field name -> text ^ "." ^ name
+      | Variant (variant, field) -> text ^ "." ^ variant ^ "." ^ field
+      | Deref -> "*" ^ text)
+    local path.steps
 
 let fields_of (layout : Memory_layout.t) =
   match layout.form with Struct fields -> fields | _ -> []
@@ -257,14 +276,17 @@ let apply a s statement =
 
 (* At the start, what the parameters hold has a value, except where the
    result is to be written. *)
+let holds_at_entry a i =
+  let path = a.paths.(i) in
+  List.mem path.local a.f.parameters
+  && not (a.f.written_result = Some path.local && path.steps <> [])
+
 let entry_state a =
   let n = Array.length a.paths in
-  let parameter i =
-    let path = a.paths.(i) in
-    List.mem path.local a.f.parameters
-    && not (a.f.written_result = Some path.local && path.steps <> [])
-  in
-  { maybe_init = Array.init n parameter; maybe_uninit = Array.init n (fun i -> not (parameter i)) }
+  {
+    maybe_init = Array.init n (holds_at_entry a);
+    maybe_uninit = Array.init n (fun i -> not (holds_at_entry a i));
+  }
 
 (* The state at the start of each block, by iterating to a fixed point. *)
 let solve a =
@@ -298,7 +320,7 @@ let solve a =
         end)
       blocks
   done;
-  states
+  (states, reached)
 
 type status = Yes | No | Maybe
 
@@ -388,8 +410,18 @@ and open_ops a s ~flag path =
       | _ -> [ Statement (Drop (place_of_path path)) ])
   | _ -> []
 
-(* Whether any part of a place may hold a value. *)
-let may_own a s place = List.exists (fun i -> s.maybe_init.(i)) (affected a place)
+(* A part of a place that may hold a value, if any does. *)
+let may_own a s place = List.find_opt (fun i -> s.maybe_init.(i)) (affected a place)
+
+(* What a function made is the function's to give away or drop: where it
+   returns, none of its locals owns a value still. What a pointer points at
+   is not looked at, since it may be the caller's, or a block's. *)
+let check_nothing_owned a s =
+  Array.iteri
+    (fun i (path : path) ->
+      if s.maybe_init.(i) && not (List.mem Deref path.steps) then
+        bug "%s may still own a value where the function returns" (describe a path))
+    a.paths
 
 (* Rewriting *)
 
@@ -397,8 +429,6 @@ type builder = {
   mutable blocks : Lir.basic_block array;
   mutable current : int;
   mutable statements : Lir.statement list;  (** Of the current block, most recent first *)
-  mutable locals : Lir.local_info list;  (** Added locals, most recent first *)
-  base_locals : int;
 }
 
 let new_block builder =
@@ -411,11 +441,6 @@ let finish builder terminator =
   builder.statements <- []
 
 let push builder statement = builder.statements <- statement :: builder.statements
-
-let new_local builder ty =
-  let local = builder.base_locals + List.length builder.locals in
-  builder.locals <- { Lir.ty; name = None } :: builder.locals;
-  local
 
 let rec emit_ops builder ops =
   List.iter
@@ -462,20 +487,12 @@ let flag_place local : Lir.place = { root = Local local; projections = [] }
 
 let elaborate env ~needs_drop ~environment (f : Lir.function_) =
   let a = analyse env ~needs_drop ~environment f in
-  let states = solve a in
+  let states, reached = solve a in
   (* The rewrite runs twice: first only to learn which paths need a drop
      flag, then for real, keeping each flag up to date wherever its path is
      given a value or moved. *)
   let rewrite ~flags ~flag =
-    let builder =
-      {
-        blocks = Array.copy f.blocks;
-        current = 0;
-        statements = [];
-        locals = [];
-        base_locals = Array.length f.locals + List.length flags;
-      }
-    in
+    let builder = { blocks = Array.copy f.blocks; current = 0; statements = [] } in
     let update s_before s_after =
       List.iter
         (fun (i, local) ->
@@ -493,10 +510,7 @@ let elaborate env ~needs_drop ~environment (f : Lir.function_) =
         if b = 0 then
           List.iter
             (fun (i, local) ->
-              push builder
-                (Assign
-                   ( flag_place local,
-                     Use (Constant (Bool (List.mem a.paths.(i).local f.parameters))) )))
+              push builder (Assign (flag_place local, Use (Constant (Bool (holds_at_entry a i))))))
             flags;
         let s = copy_state states.(b) in
         List.iter
@@ -515,40 +529,21 @@ let elaborate env ~needs_drop ~environment (f : Lir.function_) =
                     (* An element reached through an index, which always
                        holds a value, since elements are never moved out. *)
                     push builder statement)
-            | Assign _ | Call _ -> (
+            | Assign _ | Call _ ->
+                (* A write gives a place a value and drops nothing, so
+                   whatever replaces a value drops it first. *)
                 let moved = copy_state s in
                 List.iter (set_uninit a moved) ownership.moves;
-                match ownership.init with
-                | Some destination when may_own a moved destination -> (
-                    match
-                      (path_of_place destination, Lir.place_type env ~environment f destination)
-                    with
-                    | Some path, Some ty ->
-                        let temporary = new_local builder ty in
-                        let temporary_place = flag_place temporary in
-                        (match statement with
-                        | Assign (_, rvalue) -> push builder (Assign (temporary_place, rvalue))
-                        | Call call ->
-                            let result : Lir.destination =
-                              match call.result with
-                              | Written _ -> Written temporary_place
-                              | _ -> Returned temporary_place
-                            in
-                            push builder (Call { call with result })
-                        | _ -> ());
-                        update before moved;
-                        emit_ops builder (drop_ops a moved ~flag path);
-                        let dropped = copy_state moved in
-                        set_uninit a dropped destination;
-                        update moved dropped;
-                        push builder (Assign (destination, Use (Move temporary_place)));
-                        apply a s statement;
-                        update dropped s
-                    | _ -> bug "an assignment to a place that may own a value but has no path")
-                | _ ->
-                    push builder statement;
-                    apply a s statement;
-                    update before s)
+                Option.iter
+                  (fun destination ->
+                    Option.iter
+                      (fun i ->
+                        bug "a write over %s, which may still own a value" (describe a a.paths.(i)))
+                      (may_own a moved destination))
+                  ownership.init;
+                push builder statement;
+                apply a s statement;
+                update before s
             | Free_block _ | Echo _ ->
                 push builder statement;
                 apply a s statement;
@@ -557,6 +552,9 @@ let elaborate env ~needs_drop ~environment (f : Lir.function_) =
         let before = copy_state s in
         List.iter (set_uninit a s) (terminator_moves block.terminator);
         update before s;
+        (match block.terminator with
+        | Return _ when reached.(b) -> check_nothing_owned a s
+        | _ -> ());
         finish builder block.terminator)
       f.blocks;
     builder
@@ -574,10 +572,7 @@ let elaborate env ~needs_drop ~environment (f : Lir.function_) =
         | Some local -> local
         | None -> bug "a flag nobody asked for")
   in
-  let flag_infos = List.map (fun _ -> { Lir.ty = Raw Bool; name = Some "owned" }) flag_locals in
-  {
-    f with
-    locals =
-      Array.concat [ f.locals; Array.of_list flag_infos; Array.of_list (List.rev builder.locals) ];
-    blocks = builder.blocks;
-  }
+  let flag_infos =
+    List.map (fun _ -> { Lir.ty = Raw Bool; name = Some "owned"; borrowed = false }) flag_locals
+  in
+  { f with locals = Array.append f.locals (Array.of_list flag_infos); blocks = builder.blocks }

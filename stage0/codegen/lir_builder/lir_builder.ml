@@ -7,8 +7,8 @@ type t = {
 
 let create () = { locals = []; blocks = [||]; current = 0; statements = [] }
 
-let local b ?name ty =
-  b.locals <- { Lir.ty; name } :: b.locals;
+let local b ?name ?(borrowed = false) ty =
+  b.locals <- { Lir.ty; name; borrowed } :: b.locals;
   List.length b.locals - 1
 
 let local_count b = List.length b.locals

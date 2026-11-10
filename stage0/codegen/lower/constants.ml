@@ -186,12 +186,12 @@ let write_output st =
   let call intrinsic arguments result =
     emit b (Call { target = Intrinsic intrinsic; arguments; result = Returned result })
   in
-  let bytes = local b (Raw (Pointer Opaque)) and length = new_local st st.context.types.usize in
+  let bytes = local b (Raw (Pointer Opaque)) and length = temporary st st.context.types.usize in
   call Debug_bytes [] (at bytes);
   call Debug_length [] length;
   call System_write
     [ Constant (Integer (Int32, Z.one)); Copy (at bytes); Copy length ]
-    (new_local st st.context.types.isize)
+    (temporary st st.context.types.isize)
 
 (* Code run while compiling: works out a constant's value and writes its
    binary form to standard output. *)
@@ -199,9 +199,8 @@ let evaluator context path : Lir.t =
   let st, value, ty = constant_state context path in
   start st.b (block st.b);
   in_scope st (fun () ->
-      let place = new_local st ty in
+      let place = temporary st ty in
       into st value place;
-      if not (trivial st ty) then own_in_scope st place;
       begin_output st;
       Glue.encode_call context.glue st.b ty place;
       write_output st);

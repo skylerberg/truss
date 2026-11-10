@@ -18,7 +18,7 @@ let generated_state context ~anchor ~substitution =
 (* Where a generated function's result goes when it is another function's,
    passed on as it came: the slot, or a local for a result of no size. *)
 let passed_on st result_ty =
-  match result_place st with Some place -> place | None -> new_local st result_ty
+  match result_place st with Some place -> place | None -> temporary st result_ty
 
 (* The capability an [impl] implements, and the capabilities its own
    methods use, in path order, which its evidence captures. *)
@@ -52,7 +52,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
     List.map
       (fun (info : T.parameter_info) ->
         let ty = Monomorphic.ground context.monomorphic substitution info.type_ in
-        (parameter st (Monomorphic.mode info.mode) ty, info.mode, ty))
+        (parameter st ~owned:(info.mode = Own) (Monomorphic.mode info.mode) ty, info.mode, ty))
       capability_signature.parameters
   in
   start b (block b);
@@ -171,6 +171,7 @@ let program_main context (key : Instance.key) main_path : Lir.t =
   let b = st.b in
   let count = local b ~name:"count" (Raw (Integer Int32)) in
   let arguments_pointer = local b ~name:"arguments" (Raw (Pointer Opaque)) in
+  result_slot st (Returned (Raw (Integer Int32)));
   start b (block b);
   let signature = signature_of context main_path in
   let list_ty, list_mode =
@@ -187,7 +188,7 @@ let program_main context (key : Instance.key) main_path : Lir.t =
     | _ -> bug "main's arguments are not a List"
   in
   ignore storage_ty;
-  let list = new_local st list_ty in
+  let list = temporary st list_ty in
   let lower operation type_arguments arguments destination =
     ignore
       (Intrinsics.lower ~checks:context.checks context.env b context.types operation ~type_arguments
@@ -221,7 +222,7 @@ let program_main context (key : Instance.key) main_path : Lir.t =
            ];
          result = Returned (at bytes);
        });
-  let text = new_local st string_ty in
+  let text = temporary st string_ty in
   (match Monomorphic.shape context.monomorphic string_ty with
   | Record [ (field, Typed storage) ] ->
       emit b
@@ -247,26 +248,17 @@ let program_main context (key : Instance.key) main_path : Lir.t =
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
     | _ -> bug "main yields"
   in
-  let exit = new_local st exit_ty in
+  let exit = temporary st exit_ty in
   call_instance st
     (Code { path = main_path; type_arguments = [] })
     ~signature ~substitution:[]
     ~arguments:[ (list_mode, list_ty, list) ]
     ~mask:0 ~destination:exit;
-  emit b (Drop list);
-  let status = local b (Raw (Integer Int32)) in
-  (match Monomorphic.shape context.monomorphic exit_ty with
-  | Record [ (field, _) ] ->
-      emit b (Assign (at status, Convert (Copy (exit / Field field), Integer Int32)))
+  (match (Monomorphic.shape context.monomorphic exit_ty, result_place st) with
+  | Record [ (field, _) ], Some status ->
+      emit b (Assign (status, Convert (Copy (exit / Field field), Integer Int32)))
   | _ -> bug "an ExitCode that is not a record of one field");
-  finish b (Return (Some (Copy (at status))));
-  {
-    key;
-    main =
-      Lir_builder.build b ~parameters:[ count; arguments_pointer ]
-        ~result:(Some (Raw (Integer Int32)));
-    nested = [||];
-  }
+  { key; main = finish_function st ~first:[ count; arguments_pointer ] ~rest:[] (); nested = [||] }
 
 (* A named function as a value of a function type. *)
 let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Ground.function_type) :
@@ -289,7 +281,7 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
     List.map
       (fun ((mode : Ground.mode), ty) ->
         let types_mode : T.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
-        (parameter st mode ty, types_mode, ty))
+        (parameter st ~owned:(mode = Own) mode ty, types_mode, ty))
       ty.parameters
   in
   let evidence = evidence_parameters st ty.uses in
@@ -333,7 +325,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
     List.map
       (fun (info : T.parameter_info) ->
         let ty = Monomorphic.ground context.monomorphic substitution info.type_ in
-        (parameter st (Monomorphic.mode info.mode) ty, info.mode, ty))
+        (parameter st ~owned:(info.mode = Own) (Monomorphic.mode info.mode) ty, info.mode, ty))
       method_signature.parameters
   in
   let evidence = evidence_parameters st (evidence_for [] trait_signature.uses) in

@@ -28,6 +28,12 @@ val cursor_next :
 
 (* The cursor's drop function: in each state, the [stop] path of the
    [yield] the method stopped at; before it starts, a drop of each
-   parameter in [owned]; once it has ended, nothing. *)
+   parameter in [owned]; once it has ended, nothing. A parameter in
+   [owned] with a mask's local and a bit is one with a default: its
+   argument is there, to drop, only when the mask has that bit. *)
 val cursor_drop :
-  Memory_layout.env -> cursor:Ground.ty -> owned:Lir.local list -> Lir.function_ -> Lir.function_
+  Memory_layout.env ->
+  cursor:Ground.ty ->
+  owned:(Lir.local * (Lir.local * int) option) list ->
+  Lir.function_ ->
+  Lir.function_

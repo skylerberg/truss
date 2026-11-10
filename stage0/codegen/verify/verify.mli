@@ -11,7 +11,8 @@
    - a function with a result returns one on every [return], and one
      without returns none
    - a call gives its target as many arguments as the target's signature
-     takes
+     takes, and writes a large result to a place it does not also pass by
+     address, since every pointer a callee is given is [restrict]
    - a value that has a size is built as a record or a variant its type
      has, with fields the type has
    - a call of a nested function, or a function value made of one, names it

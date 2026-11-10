@@ -63,14 +63,16 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
     List.map (fun (mode, t) -> (mode, ground st t)) (interface_parameters signature)
   in
   let taken =
-    List.map (fun (mode, t) -> parameter st (Monomorphic.mode mode) t) ground_parameters
+    List.map
+      (fun (mode, t) -> parameter st ~owned:(mode = T.Own) (Monomorphic.mode mode) t)
+      ground_parameters
   in
   let places = List.map snd taken in
   let result_ty =
     match signature.output with Returns t -> ground st t | _ -> bug "a derived method that yields"
   in
   let result_place =
-    match result_place st with Some place -> place | None -> new_local st result_ty
+    match result_place st with Some place -> place | None -> temporary st result_ty
   in
   start b (block b);
   let field_place place variant field =
@@ -101,7 +103,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
             (fun () ->
               List.iter
                 (fun (field, field_ty) ->
-                  let equal = new_local st bool in
+                  let equal = temporary st bool in
                   trait_call st ~trait:(core "Equal") ~name:"equal" ~receiver:Read ~self:field_ty
                     ~arguments:
                       [
@@ -117,14 +119,14 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
       let write value =
         let path = Path.Method { owner = hasher_path; name = "write"; receiver = Mut } in
         let signature = signature_of context path in
-        let word = new_local st (Monomorphic.builtin UInt64) in
+        let word = temporary st (Monomorphic.builtin UInt64) in
         emit b (Assign (word, Use value));
         call_instance st
           (Code { path; type_arguments = [] })
           ~signature ~substitution:[]
           ~arguments:[ (Mut, hasher_ty, hasher); (Read, Monomorphic.builtin UInt64, word) ]
           ~mask:0
-          ~destination:(new_local st (Monomorphic.builtin Unit))
+          ~destination:(temporary st (Monomorphic.builtin Unit))
       in
       each_variant st ty self (fun variant index ->
           if variant <> None then write (constant_int UInt64 (Z.of_int index));
@@ -133,7 +135,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
               trait_call st ~trait:(core "Hash") ~name:"hash" ~receiver:Read ~self:field_ty
                 ~arguments:
                   [ (Read, field_ty, field_place self variant field); (Mut, hasher_ty, hasher) ]
-                ~destination:(new_local st (Monomorphic.builtin Unit)))
+                ~destination:(temporary st (Monomorphic.builtin Unit)))
             (typed_fields (shape_fields st ty variant)))
   | "Ordered", "compare", [ self; other ] ->
       let ordering = result_ty in
@@ -188,7 +190,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
           let fields =
             List.map
               (fun (field, field_ty) ->
-                let value = new_local st field_ty in
+                let value = temporary st field_ty in
                 trait_call st ~trait:(core "Default") ~name:"default" ~receiver:Static
                   ~self:field_ty ~arguments:[] ~destination:value;
                 (field, Lir.Move value))

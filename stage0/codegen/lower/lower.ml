@@ -74,26 +74,38 @@ let trait_provides context ~trait ~name ~receiver =
         members
   | _ -> false
 
-(* Binds the parameters of the code being lowered, each as [how] passes it,
-   and has the function's scope own each [own] one. Gives each one's local,
-   if it has one, with its mode and type. *)
+(* Binds the parameters of the code being lowered, each as [how] passes it.
+   The function owns each [own] one, apart from one with a default, which
+   may arrive holding nothing: [fill_defaults] gives that one an owner.
+   Gives each one's local, if it has one, with its mode, its type, and for
+   one with a default, its bit in the mask of defaults passed. *)
 let bind_parameters ?how st =
+  let defaults = ref 0 in
   List.map
     (fun (mode, ty, (written : S.parameter)) ->
       let ty = ground st ty in
-      let arrives, place = parameter st ?how (Monomorphic.mode mode) ty in
+      let bit =
+        match written.kind with
+        | Named_parameter { default = Some _; _ } ->
+            incr defaults;
+            Some (!defaults - 1)
+        | _ -> None
+      in
+      let arrives, place =
+        parameter st ?how ~owned:(mode = T.Own && bit = None) (Monomorphic.mode mode) ty
+      in
       (match written.kind with
       | Self_parameter _ -> st.frame.self_place <- Some place
       | Named_parameter { name; _ } -> Hashtbl.replace st.frame.bindings name.id place
       | Parameter_error -> ());
-      if mode = T.Own && not (trivial st ty) then own_in_scope st place;
-      (arrives, mode, ty))
+      (arrives, mode, ty, bit))
     st.frame.code.parameter_types
 
 (* The start every function from source shares, after its result's slot:
    its parameters, the mask of defaults passed, and the evidence it is
    given, with its defaults filled in and its [requires] clauses checked.
-   Gives the parameters bound, and every parameter's local in order. *)
+   Gives the parameters bound, the mask, and every parameter's local in
+   order. *)
 let begin_body ?how st =
   let code = st.frame.code in
   let bound = bind_parameters ?how st in
@@ -106,18 +118,36 @@ let begin_body ?how st =
   start st.b (block st.b);
   Option.iter (fill_defaults st) mask;
   check_requires st;
-  (bound, List.filter_map (fun (arrives, _, _) -> arrives) bound @ Option.to_list mask @ evidence)
+  ( bound,
+    mask,
+    List.filter_map (fun (arrives, _, _, _) -> arrives) bound @ Option.to_list mask @ evidence )
 
 (* The pulled version of a yielding method: lowered as the method is, but
    holding its arguments as a cursor does, and with its own [yield]s left
-   for yield lowering. *)
-let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list =
+   for yield lowering. With it, what a cursor that has not started owns:
+   each [own] argument's local, and for a parameter with a default, the
+   mask's local and the parameter's bit in it, since the argument is there
+   only when the bit is set. *)
+let pulled context (yielding : Ground.yielding) :
+    Lir.function_ * (Lir.local * (Lir.local * int) option) list =
   let code = code_of context yielding.method_ yielding.type_arguments in
   let st = enter context ~pulling:true (frame_of code ~inlined:[ yielding.method_ ]) in
-  let bound, parameters = begin_body st ~how:(Convention.held context.env) in
+  let bound, mask, parameters = begin_body st ~how:(Convention.held context.env) in
   let owned =
     List.filter_map
-      (fun (arrives, mode, ty) -> if mode = T.Own && not (trivial st ty) then arrives else None)
+      (fun (arrives, mode, ty, bit) ->
+        if mode = T.Own && not (trivial st ty) then
+          Option.map
+            (fun local ->
+              ( local,
+                Option.map
+                  (fun bit ->
+                    match mask with
+                    | Some mask -> (mask, bit)
+                    | None -> bug "a default with no mask")
+                  bit ))
+            arrives
+        else None)
       bound
   in
   block_into st code.body None;
@@ -147,7 +177,6 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
       | [ (_, ty, (parameter : S.parameter)) ] -> (
           let ty = ground st ty in
           let built = Values.template_value st ty texts ~span:code.body.span ~parts:[] in
-          if not (trivial st ty) then own_in_scope st built;
           match parameter.kind with
           | Named_parameter { name; _ } -> Hashtbl.replace st.frame.bindings name.id built
           | _ -> bug "a from_template without a named parameter")
@@ -156,7 +185,7 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
       List.iter
         (fun clause ->
           if executable st clause then begin
-            let holds = new_local st context.bool in
+            let holds = temporary st context.bool in
             into st clause holds;
             Glue.encode_call context.glue st.b context.bool holds
           end)
@@ -182,7 +211,7 @@ let instance context (key : Instance.key) : Lir.t =
       let st = enter context (frame_of code ~inlined:[ path ]) in
       let convention, returns = result_of context code.substitution code.result in
       result_slot st convention;
-      let _, parameters = begin_body st in
+      let _, _, parameters = begin_body st in
       block_into st code.body (result_place st);
       {
         key;

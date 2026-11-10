@@ -102,7 +102,7 @@ let describe ?target ?extra ty = to_string (layout ?target ?extra ty)
 
 let int32 = named "Int32"
 let usize = named "USize"
-let local ?name ty : Lir.local_info = { ty; name }
+let local ?name ?(borrowed = false) ty : Lir.local_info = { ty; name; borrowed }
 let value ty = Lir.Value ty
 let at ?(projections = []) local : Lir.place = { root = Local local; projections }
 let copy ?projections local = Lir.Copy (at ?projections local)

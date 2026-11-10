@@ -88,13 +88,39 @@ let () =
                ]
                (Return None);
            ]));
-  test "an assignment drops the value it replaces" (fun () ->
+  test "a drop before a write is kept where the place holds a value" (fun () ->
       expect_lir
-        ~expected:
-          [ "fn(_0: Text, _1: Text)"; "b0: _2 = move _1; drop _0; _0 = move _2; drop _0; return" ]
+        ~expected:[ "fn(_0: Text, _1: Text)"; "b0: drop _0; _0 = move _1; drop _0; return" ]
         (function_ ~parameters:[ 0; 1 ]
            [ local (value text); local (value text) ]
-           [ block [ Assign (at 0, Use (Move (at 1))); Drop (at 0) ] (Return None) ]));
+           [ block [ Drop (at 0); Assign (at 0, Use (Move (at 1))); Drop (at 0) ] (Return None) ]));
+  test "a write over a value that was not dropped is a compiler bug" (fun () ->
+      match
+        elaborated
+          (function_ ~parameters:[ 0; 1 ]
+             [ local (value text); local (value text) ]
+             [ block [ Assign (at 0, Use (Move (at 1))); Drop (at 0) ] (Return None) ])
+      with
+      | _ -> fail "expected a compiler bug"
+      | exception Compiler_bug.Bug bug ->
+          if bug.message <> "a write over local 0, which may still own a value" then
+            fail "got %s" bug.message);
+  test "a local that still owns a value where the function returns is a compiler bug" (fun () ->
+      match
+        elaborated
+          (function_ ~parameters:[ 0 ]
+             [ local (value text); local (value text) ]
+             [ block [ Assign (at 1, Use (Move (at 0))) ] (Return None) ])
+      with
+      | _ -> fail "expected a compiler bug"
+      | exception Compiler_bug.Bug bug ->
+          if bug.message <> "local 1 may still own a value where the function returns" then
+            fail "got %s" bug.message);
+  test "a borrowed local is neither dropped nor counted as owning" (fun () ->
+      expect_lir ~expected:[ "fn(_0: Text)"; "b0: return" ]
+        (function_ ~parameters:[ 0 ]
+           [ local ~borrowed:true (value text) ]
+           [ block [ Drop (at 0) ] (Return None) ]));
   test "an assignment that moves out of its own place first drops nothing" (fun () ->
       let rebuild = call "rebuild" ~result:(Some (value text)) ~parameters:[ value text ] in
       expect_lir

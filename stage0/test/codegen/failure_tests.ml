@@ -1,6 +1,7 @@
 (* How code generation fails: the verifier's checks of the LIR, the
    programs stage0 cannot build yet, and a compiler bug's report. *)
 
+open Memory_layout
 open Codegen_support
 
 let expect_bug ~saying f =
@@ -54,6 +55,28 @@ let () =
                    ]
                    (Return (Some (constant_int32 0)));
                ])));
+  test "a call that writes its result to a place it is also given is a bug" (fun () ->
+      let quad = named "Quad" in
+      let pointer writable = Lir.Pointer { target = value quad; writable } in
+      let swapped : Lir.statement =
+        Call
+          {
+            target =
+              Direct
+                {
+                  function_ = Instance (key "swapped");
+                  signature =
+                    { parameters = [ pointer true; pointer false ]; result = None; returns = true };
+                };
+            arguments = [ Address { place = at 0; writable = false } ];
+            result = Written (at 0);
+          }
+      in
+      let four = Record (List.map (fun name -> field name int64) [ "a"; "b"; "c"; "d" ]) in
+      expect_bug ~saying:"writes its result to local 0, which it is also given" (fun () ->
+          Verify.instance
+            (shape_env ~extra:[ ("Quad", four) ] ())
+            (entry [ local (value quad) ] [ block [ swapped ] (Return (Some (constant_int32 0))) ])));
   test "an instance whose calls fit their targets passes" (fun () ->
       Verify.instance env (caller [ constant_int32 1 ]));
   let find units key =

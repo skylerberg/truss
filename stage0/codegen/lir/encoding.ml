@@ -2,7 +2,7 @@
 
 open Ir
 
-let version = 10
+let version = 11
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -263,7 +263,12 @@ let encode_function instance (f : function_) =
       Bool f.returns;
       list
         (fun (local : local_info) ->
-          Cbor.Array [ encode_ty instance local.ty; option (fun n -> Cbor.Text n) local.name ])
+          Cbor.Array
+            [
+              encode_ty instance local.ty;
+              option (fun n -> Cbor.Text n) local.name;
+              Bool local.borrowed;
+            ])
         (Array.to_list f.locals);
       list
         (fun (b : basic_block) ->
