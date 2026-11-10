@@ -25,7 +25,9 @@ let name_of (path : Path.t) =
 
 let () =
   let loaded = ref None in
-  test "the library's test modules check cleanly" (fun () -> loaded := Some (load_modules modules));
+  let load () = loaded := Some (load_modules modules) in
+  let checking = "the library's test modules check cleanly" in
+  if wanted checking then test checking load else load ();
   match !loaded with
   | None -> ()
   | Some (database, compile) -> (
