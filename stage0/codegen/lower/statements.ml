@@ -193,22 +193,6 @@ and let_ st ~mutable_ (pattern : S.pattern) (value : S.expression) =
       let place, made = scrutinee st value in
       bind_pattern st pattern place ty ~owned:(made || mutable_)
 
-(* A place whose indexes are fixed now, so a view of it means the same
-   element however the index variables change later. *)
-and snapshot st (place : Lir.place) =
-  {
-    place with
-    projections =
-      List.map
-        (function
-          | Lir.Index (Copy index_place) ->
-              let fixed = binding st st.context.types.usize in
-              emit st.b (Assign (fixed, Use (Copy index_place)));
-              Lir.Index (Copy fixed)
-          | projection -> projection)
-        place.projections;
-  }
-
 and for_ st (s : S.statement) ~pattern ~iterable ~body =
   match st.frame.code.checked.loops.(s.id) with
   | Some (Integer_range { element; inclusive }) -> (
@@ -308,43 +292,12 @@ and for_ st (s : S.statement) ~pattern ~iterable ~body =
       | None -> bug "a loop over something that is not a method")
   | Some (Pulled { cursor }) -> (
       match ground st cursor with
-      | Cursor yielding -> pull_loop st yielding (expression st iterable) ~pattern ~body
+      | Cursor yielding ->
+          pull_loop st yielding (expression st iterable) ~body:(fun value ->
+              bind_pattern st pattern value (cursor_element st.context yielding) ~owned:true;
+              block_into st body None)
       | cursor_ty -> bug "a pulled loop over %s" (Ground.to_string cursor_ty))
   | None -> bug "a for loop with no meaning"
-
-(* Runs [f], the body of a loop whose [continue] and [break] each leave
-   every scope inside the [depth] outermost. *)
-and looping st ~continue_ ~break_ ~depth f =
-  st.loops <- { continue_; continue_depth = depth; break_; break_depth = depth } :: st.loops;
-  f ();
-  st.loops <- List.tl st.loops
-
-(* Pulls a cursor until it ends, running the body with each value it gives.
-   The loop owns the value [next] gave, so whatever the body did not take
-   is dropped before the next is asked for, and on every way out. *)
-and pull_loop st (yielding : Ground.yielding) cursor ~pattern ~body =
-  let option = cursor_result st.context yielding in
-  let element = cursor_element st.context yielding in
-  in_scope st (fun () ->
-      let next = binding st option in
-      let depth = List.length st.scopes in
-      let test = block st.b and inside = block st.b and after = block st.b in
-      finish st.b (Goto test);
-      start st.b test;
-      if not (trivial st option) then emit st.b (Drop next);
-      call_next st yielding cursor next;
-      let more = local st.b (Raw Bool) in
-      emit st.b (Assign (at more, Is_variant (next, "Some")));
-      finish st.b
-        (Switch { value = Copy (at more); cases = [ (Z.one, inside) ]; default = Some after });
-      start st.b inside;
-      in_scope st (fun () ->
-          bind_pattern st pattern
-            (next / Variant_field { variant = "Some"; field = "value" })
-            element ~owned:true;
-          looping st ~continue_:test ~break_:after ~depth (fun () -> block_into st body None));
-      finish st.b (Goto test);
-      start st.b after)
 
 (* A loop over a yielding method already inlined around it, which yields
    through recursion: inlining it again would never end, so the loop pulls a
@@ -355,23 +308,13 @@ and pull_loop st (yielding : Ground.yielding) cursor ~pattern ~body =
 and recursive_loop st (s : S.statement) call_ ~expressions ~arguments ~path ~type_arguments ~pattern
     ~body =
   let yielding : Ground.yielding = { method_ = path; type_arguments } in
-  let cursor_ty = Ground.Cursor yielding in
   in_scope st (fun () ->
-      let boxed =
-        local st.b ~name:"cursor" (Pointer { target = Value cursor_ty; writable = true })
-      in
-      emit st.b
-        (Call
-           {
-             target = Intrinsic Allocate;
-             arguments = [ Constant (Size_of cursor_ty); Constant (Alignment_of cursor_ty) ];
-             result = Returned (at boxed);
-           });
-      free_in_scope st (at boxed);
-      let cursor = { Lir.root = Local boxed; projections = [ Deref ] } in
+      let cursor = boxed_cursor st yielding in
       call_with st call_ ~expressions ~arguments cursor ~span:s.span;
       own_in_scope st cursor;
-      pull_loop st yielding cursor ~pattern ~body)
+      pull_loop st yielding cursor ~body:(fun value ->
+          bind_pattern st pattern value (cursor_element st.context yielding) ~owned:true;
+          block_into st body None))
 
 and if_ st ~condition ~then_ ~else_ destination =
   let yes = block st.b and no = block st.b and after = block st.b in

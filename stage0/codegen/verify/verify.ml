@@ -8,6 +8,24 @@ let each_function (instance : Lir.t) f =
 let each_statement (f : Lir.function_) visit =
   Array.iter (fun (block : Lir.basic_block) -> List.iter visit block.statements) f.blocks
 
+(* Whether two places may share memory. Places under different roots do
+   not. Under one root they do not if their paths part at different fields
+   of a record or of one variant, or if one path is the other followed by a
+   dereference, which leads to another object. Two elements are assumed to
+   overlap unless their indexes are written the same way. *)
+let may_overlap (first : Lir.place) (second : Lir.place) =
+  let rec overlap (first : Lir.projection list) (second : Lir.projection list) =
+    match (first, second) with
+    | [], rest | rest, [] -> not (List.mem Lir.Deref rest)
+    | Field a :: first, Field b :: second -> a = b && overlap first second
+    | Variant_field a :: first, Variant_field b :: second ->
+        a.variant <> b.variant || (a.field = b.field && overlap first second)
+    | Deref :: first, Deref :: second -> overlap first second
+    | Index a :: first, Index b :: second -> a <> b || overlap first second
+    | (Field _ | Variant_field _ | Deref | Index _) :: _, _ -> true
+  in
+  first.root = second.root && overlap first.projections second.projections
+
 (* How many arguments a call passes: what its target is given first, the
    pointer a large result is written through, and each argument that has a
    size. *)
@@ -101,15 +119,14 @@ let function_ env (instance : Lir.t) what (f : Lir.function_) =
               (* Every pointer a callee is given is [restrict], so the place
                  it writes its result to is none it is also given to read. *)
               (match result with
-              | Written { root = Local written; _ } ->
+              | Written ({ root = Local local; _ } as written) ->
                   List.iter
                     (fun (argument : Lir.operand) ->
                       match argument with
-                      | Address { place = { root = Local passed; _ }; _ }
-                      | Moved_address { root = Local passed; _ }
-                        when passed = written ->
+                      | (Address { place = passed; _ } | Moved_address passed)
+                        when may_overlap written passed ->
                           bug "a call that writes its result to local %d, which it is also given"
-                            written
+                            local
                       | _ -> ())
                     arguments
               | _ -> ());

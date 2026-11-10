@@ -201,6 +201,27 @@ let evidence_of st capability =
           implementation_evidence st ~impl ~type_arguments ~implementation
       | _ -> missing ())
 
+(* Writes a cursor over a yielding method to [destination]. The cursor holds
+   the call's arguments, in the order of the pulled method's parameters:
+   its own, then the mask of defaults passed, then the evidence. *)
+let cursor_into st ~path ~type_arguments ~(signature : T.signature) ~substitution
+    ~(arguments : (T.mode * Ground.ty * Lir.place) list) ~mask destination =
+  let held = List.filter_map (fun (mode, ty, place) -> hold st mode ty place) arguments in
+  let mask = if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [] in
+  let evidence = List.map (evidence_of st) (evidence_for substitution signature.uses) in
+  let fields =
+    List.mapi (fun i operand -> (Convention.cursor_parameter i, operand)) (held @ mask @ evidence)
+  in
+  emit st.b
+    (Assign
+       ( destination,
+         Build
+           {
+             ty = Cursor { method_ = path; type_arguments };
+             variant = None;
+             fields = (Convention.cursor_state, Constant (Integer (UInt32, Z.zero))) :: fields;
+           } ))
+
 (* Writes an [any] value to [destination]: the value at [value], moved into
    a heap block of its own, with the method table of its type's [impl]. *)
 let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lir.place) destination =
@@ -325,6 +346,62 @@ let cursor_result context yielding : Ground.ty =
       path = Top { module_ = { package = "standard"; modules = [ "option" ] }; name = "Option" };
       arguments = [ Type (cursor_element context yielding) ];
     }
+
+(* Calls [next] on a cursor: the pulled method's state machine. *)
+let call_next st (yielding : Ground.yielding) cursor destination =
+  let option = cursor_result st.context yielding in
+  let cursor_pointer = Lir.Pointer { target = Value (Cursor yielding); writable = true } in
+  let target signature = Lir.Direct { function_ = Instance (Cursor_next yielding); signature } in
+  let self = Lir.Address { place = cursor; writable = true } in
+  let convention = Convention.result st.context.env option in
+  emit st.b
+    (Call
+       {
+         target = target (Convention.signature [ cursor_pointer ] convention);
+         arguments = [ self ];
+         result = Convention.destination convention destination;
+       })
+
+(* Pulls a cursor until it ends, running [body] with the place of each
+   value. The loop owns the value that [next] gave, so whatever the body
+   did not take is dropped before the next value is asked for, and on every
+   way out. *)
+let pull_loop st (yielding : Ground.yielding) cursor ~(body : Lir.place -> unit) =
+  let option = cursor_result st.context yielding in
+  in_scope st (fun () ->
+      let next = binding st option in
+      let depth = List.length st.scopes in
+      let test = block st.b and inside = block st.b and after = block st.b in
+      finish st.b (Goto test);
+      start st.b test;
+      if not (trivial st option) then emit st.b (Drop next);
+      call_next st yielding cursor next;
+      let more = local st.b (Raw Bool) in
+      emit st.b (Assign (at more, Is_variant (next, "Some")));
+      finish st.b
+        (Switch { value = Copy (at more); cases = [ (Z.one, inside) ]; default = Some after });
+      start st.b inside;
+      in_scope st (fun () ->
+          looping st ~continue_:test ~break_:after ~depth (fun () ->
+              body (next / Variant_field { variant = "Some"; field = "value" })));
+      finish st.b (Goto test);
+      start st.b after)
+
+(* A heap block for a cursor, which the current scope frees. A loop over a
+   recursive yielding method keeps its cursor there, so that a cursor over
+   the method can hold another. *)
+let boxed_cursor st (yielding : Ground.yielding) : Lir.place =
+  let cursor_ty = Ground.Cursor yielding in
+  let boxed = local st.b ~name:"cursor" (Pointer { target = Value cursor_ty; writable = true }) in
+  emit st.b
+    (Call
+       {
+         target = Intrinsic Allocate;
+         arguments = [ Constant (Size_of cursor_ty); Constant (Alignment_of cursor_ty) ];
+         result = Returned (at boxed);
+       });
+  free_in_scope st (at boxed);
+  { root = Local boxed; projections = [ Deref ] }
 
 (* Calls a trait's method on a value of a ground type, through the [impl]
    the type has, with arguments that are places. *)

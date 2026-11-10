@@ -28,6 +28,9 @@ body when every node in the body is of a supported kind:
 
 - calls to functions, trait methods, capability methods, and intrinsics
 - indexing and other calls of lending methods, and `yield`
+- a yielding call outside a loop, which makes a cursor, and a loop over a
+  recursive yielding method, which pulls one
+- a named function used as a value
 - `provide`, and `any` conversions
 - operators, comparisons, `&&`, `||`, and `!`
 - `if`, `match`, `while`, `for` over an integer range or a yielding call,
@@ -46,7 +49,8 @@ A body with any other node falls back to the older lowering, which walks the
 syntax tree and the checked form's tables. A function's parameter defaults
 and `requires` checks are lowered from the same source as its body, and so
 is every lending or yielding method inlined into it. An unsupported node in
-any of those also falls back.
+any of those also falls back. The pulled version of a yielding method is
+lowered the same way, from its core form first.
 
 Code generation:
 
@@ -1418,8 +1422,11 @@ Each instance is checked as it is lowered, once its passes have run:
 - a function with a result returns one on every `return`, and one without
   returns none
 - a call gives its target as many arguments as the target's signature
-  takes, and writes a large result to a place it does not also pass by
-  address
+  takes, and writes a large result to a place that shares no memory with a
+  place it also passes by address. Two places under one local share memory
+  unless their paths part at different fields, or one path continues
+  through a pointer. The pulled version of a yielding method keeps its
+  locals in one cursor, so the check compares paths and not only locals.
 - a value that has a size is built as a record or a variant its type has,
   with fields the type has, since the emitter leaves out a field it does
   not find in the layout, as it must for a field of no size
@@ -1541,10 +1548,9 @@ a command line can hold.
   digits are `snprintf`'s and the check `strtod`'s.
 - **Core-form lowering for every body.** These still fall back to the
   syntax-tree lowering: calls through a function value or an `any` value,
-  lambdas, cursors (a yielding call outside a loop, `for` over a cursor,
-  and a loop over a recursive yielding method), and the pulled version of
-  a yielding method. Once all of them are supported, the syntax-tree
-  lowering is deleted.
+  lambdas, `next` on a cursor, and `for` over a cursor. Each needs the
+  type of a place, which the core form does not give yet. Once all of them
+  are supported, the syntax-tree lowering is deleted.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.

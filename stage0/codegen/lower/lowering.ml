@@ -380,6 +380,29 @@ let take st (place : Lir.place) ty ~destination =
       Glue.copy_into st.context.glue st.b ~destination ~source:place ty
   | Static _ | Local _ -> emit st.b (Assign (destination, Use (owned st place ty)))
 
+(* A place whose indexes are fixed now, so that an alias of it refers to the
+   same element however the index variables change later. *)
+let snapshot st (place : Lir.place) =
+  {
+    place with
+    projections =
+      List.map
+        (function
+          | Lir.Index (Copy index_place) ->
+              let fixed = binding st st.context.types.usize in
+              emit st.b (Assign (fixed, Use (Copy index_place)));
+              Lir.Index (Copy fixed)
+          | projection -> projection)
+        place.projections;
+  }
+
+(* Runs [f], the body of a loop whose [continue] and [break] each leave
+   every scope inside the [depth] outermost. *)
+let looping st ~continue_ ~break_ ~depth f =
+  st.loops <- { continue_; continue_depth = depth; break_; break_depth = depth } :: st.loops;
+  f ();
+  st.loops <- List.tl st.loops
+
 (* Replaces the value at a place the program names with one worked out
    beforehand: what the place still owns is dropped, and the new value moved
    in. *)

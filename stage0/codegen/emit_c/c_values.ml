@@ -261,7 +261,9 @@ let is_variant_c context text sum variant =
       | _ -> bug "a niche in a type without one")
 
 (* A record's or a variant's fields as C designated initializers, leaving out
-   the fields of zero size. *)
+   the fields of zero size. A field's pointer type is never [const], so a
+   read-only pointer stored in one, as a cursor keeps a read-only argument,
+   is cast to the plain pointer type. *)
 let initializers context fc prefix (fields : Memory_layout.field list)
     (values : (string * Lir.operand) list) =
   String.concat ", "
@@ -271,6 +273,11 @@ let initializers context fc prefix (fields : Memory_layout.field list)
          | None -> None
          | Some _ -> (
              match operand_c context fc operand with
+             | Some (text, Lir.Pointer { target; writable = false }) ->
+                 Some
+                   (Printf.sprintf "%s.f_%s = ((%s)%s)" prefix name
+                      (c_ty context fc.symbol (Pointer { target; writable = true }))
+                      text)
              | Some (text, _) -> Some (Printf.sprintf "%s.f_%s = %s" prefix name text)
              | None -> None))
        values)
