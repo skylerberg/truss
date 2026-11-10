@@ -2199,6 +2199,22 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
                     &&& equal (buffer_capacity context element storage) count);
                 storage
             | _ -> arrive context frame "storage" result_type)
+        | Array_from_storage, [ storage ] -> (
+            (* The storage's elements, moved into an array, which must be
+               exactly as many as the array's count. *)
+            match result_type with
+            | Named { arguments = [ T.Type element; T.Value count ]; _ } ->
+                let elements = buffer_model context Storage element storage.term in
+                let count = value_term context frame count in
+                oblige context frame Requires (at frame node)
+                  (Printf.sprintf "`%s` may not have as many elements as the array's count."
+                     (quote frame.source node.origin))
+                  (L.equal (sequence_length context element elements) count);
+                let array = arrive context frame "array" result_type in
+                assume context frame
+                  (L.equal (array_model context frame result_type array) elements);
+                array
+            | _ -> arrive context frame "array" result_type)
         | _ -> intrinsic context frame ~node operation types operands ~changed result_type
       in
       let frame = spend context frame (step_amount context frame call_ values) in
