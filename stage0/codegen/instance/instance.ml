@@ -15,8 +15,6 @@ type key =
           method on its implementation with the evidence that implementation captured *)
   | Table of { impl : Path.t; type_arguments : Ground.argument list }
       (** A capability [impl]'s table of entries, one for each of the capability's methods *)
-      (** The evidence for the real implementation of a standard capability, which a program's
-          [main] is given *)
   | Program_main of Path.t  (** The C [main]'s Truss side: it calls the program's [main] *)
   | Any_entry of key
       (** The entry for an [impl]'s method in an [any] table: takes a pointer to the value *)
@@ -63,8 +61,7 @@ let rec compare a b =
   | Table a, Table b ->
       Path.compare a.impl b.impl >>= fun () ->
       Ground.compare_arguments a.type_arguments b.type_arguments
-  | Program_main a, Program_main b | Evaluator a, Evaluator b ->
-      Path.compare a b
+  | Program_main a, Program_main b | Evaluator a, Evaluator b -> Path.compare a b
   | Template_check a, Template_check b ->
       Path.compare a.from_template b.from_template >>= fun () ->
       List.compare String.compare a.texts b.texts
