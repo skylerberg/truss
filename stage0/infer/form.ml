@@ -729,12 +729,13 @@ let drive state (written : statement) (iterable : expression) : Core.drive =
       let start = built state start in
       Count { start; stop = built state stop; inclusive }
   | Some (Yielding { call; mode }), _ -> (
-      match (State.called iterable, call.arguments) with
-      | Some written_call, _ :: _ -> Each (built state written_call)
-      | Some written_call, [] when Option.is_some state.tables.calls.(written_call.id) ->
-          Each (built state written_call)
+      match (State.called iterable, type_of state iterable) with
+      (* The iterable is itself a call of a yielding method, which makes a
+         cursor: the loop iterates over that call. *)
+      | Some written_call, T.Cursor _ -> Each (built state written_call)
       | _ ->
-          (* The loop names a value, whose [each] it calls. *)
+          (* The iterable is a value, even if a call computes it: the loop
+             calls the value's [each]. *)
           let receiver = built state iterable in
           Each
             (make state ~origin:iterable.id (cursor call)

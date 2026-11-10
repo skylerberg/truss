@@ -170,6 +170,23 @@ let form_holds database (key : Resolve.Names.key) (form : Core.t) =
           once node.id;
           match node.kind with
           | Assign { target; _ } | Update { target; _ } -> place target
+          | For { drive = Each { kind = Call { callee = called; _ }; _ }; _ } -> (
+              let output =
+                match called with
+                | Function { path; _ } ->
+                    Option.map
+                      (fun (signature : T.signature) -> signature.output)
+                      (Interface.Impls.signature database path)
+                | Trait_method { trait = reference; name; receiver; _ } ->
+                    Option.map
+                      (fun (method_ : T.trait_method) -> method_.method_signature.output)
+                      (Infer.Members.trait_method database reference.trait name receiver)
+                | Capability_method _ | Intrinsic _ | Through _ -> None
+              in
+              match output with
+              | Some (Yields _) -> ()
+              | _ -> wrong "a `for` loop iterates over a call of a method that does not yield")
+          | For { drive = Each _; _ } -> wrong "a `for` loop iterates over what is not a call"
           | _ -> ());
       pattern =
         (fun (node : Core.pattern) ->

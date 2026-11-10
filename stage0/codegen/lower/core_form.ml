@@ -320,10 +320,12 @@ and block_into st (inner : Core.block) destination =
 and statement st (written : Core.statement) =
   in_statement st (fun () ->
       match written.kind with
-      | Evaluate { kind = Use _; _ } -> ()
+      | Evaluate { kind = Use found; _ } -> ignore (place st found)
       | Evaluate value -> ignore (value_place st value)
       | Let { pattern = { kind = Anything; _ }; value; otherwise = None } -> (
-          match value with Place _ -> () | Value value -> ignore (value_place st value))
+          match value with
+          | Place found -> ignore (place st found)
+          | Value value -> ignore (value_place st value))
       | Let
           {
             pattern = { kind = Bind { local; name; mutable_; _ }; type_; _ };
