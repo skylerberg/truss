@@ -969,12 +969,13 @@ It proves, with one canonical, numbered, hashed query per obligation:
   datatypes with their variants and fields sorted by name: building them,
   with fields defaulted, reading fields, variants with no fields,
   constants, `with`, `match` with guards and every pattern but alternatives
-  that bind, with a string pattern matching text by its bytes, `is`, `?` on a `Result` or an `Option`, and `==`
-  as the solver's equality for types with structural equality. Each field
+  that bind, with a string pattern matching text by its bytes, `is`, `?`
+  on a `Result` or an `Option`, and `==` as the solver's equality for
+  types with structural equality. Each field
   read is in its type's range, and a counterexample shows a value by its
   variant and fields.
-- `while` loops, `for` loops over ranges of integers, and `for` loops over
-  an `each` method; with invariants on entry and after
+- `while` loops, `for` loops over ranges of integers, over an `each`
+  method, and over a cursor; with invariants on entry and after
   each iteration, and, in a function with a `time` clause, termination by
   `decreases`, the one measure the prover tries itself, or the `time`
   clause of the `each` a loop calls
@@ -1035,8 +1036,7 @@ It proves, with one canonical, numbered, hashed query per obligation:
   else.
 - views: a `List` passed as a `Slice`, or a `String` as a `StringSlice`,
   is a view with the same model, and a slice, `items[a..b]`, must be
-  within its collection and has that run of its model; two slices, or a
-  slice and an index, lent together reach different elements
+  within its collection and has that run of its model
 - strings: `String`, `StringSlice`, and a template's `Literal` are modeled
   by their UTF-8 bytes. A plain string literal is a `String` with those
   bytes, which costs nothing; one with interpolations is a new `String`
@@ -1070,8 +1070,8 @@ It proves, with one canonical, numbered, hashed query per obligation:
   two elements of one collection lent together, or one changed by a
   `parallel` branch and used by another, are at different indexes, read as
   each is evaluated. A slice is some elements of its collection, so two
-  slices lent together are obligations too, which wait for slices to be
-  read.
+  slices, or a slice and an index, lent together reach different elements
+  too.
 - holes, as [Holes](#holes) describes
 - pruning: each query keeps only the facts that share a symbol with its
   goal, directly or through other kept facts
