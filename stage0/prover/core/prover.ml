@@ -279,14 +279,15 @@ let truss_value members text =
   in
   fst (one tokens)
 
-let counterexample members (values : (string * string) list) answer_values =
+(* The parameters' values, in order, then the locals'. *)
+let counterexample members (obligation : Translate.obligation) answer_values =
   let shown =
     List.filter_map
       (fun (symbol, name) ->
         Option.map
           (fun value -> Printf.sprintf "`%s` is %s" name (truss_value members value))
           (List.assoc_opt symbol answer_values))
-      (List.rev values)
+      (List.rev obligation.values @ List.rev obligation.locals)
   in
   match shown with [] -> "" | shown -> " For example, when " ^ String.concat ", " shown ^ "."
 
@@ -517,6 +518,14 @@ let answers ?(running = not_running) solver (obligations : Translate.obligation 
             match asked (query_with ~query running obligation choice) with
             | Solver.Proven -> Solved Proven
             | _ -> Solved Out_of_steps)
+        | Solver.Counterexample _, _ when obligation.locals <> [] -> (
+            (* Where a counterexample is, the values of the locals there too,
+               asked for only now, so that a query that proves keeps its
+               key. *)
+            let values = values @ List.map fst obligation.locals in
+            match Solver.solve solver ~values query with
+            | Solver.Counterexample _ as answer -> Solved answer
+            | _ -> Solved (asked query))
         | answer, _ -> Solved answer)
   in
   let bounded =
@@ -546,6 +555,22 @@ let definition_diagnostics ?running database solver (key : Names.key) =
              what);
       ]
   | Obligations outcome ->
+      (* The same failure on another path, as a second index into the same
+         list with the same index is, is reported once. *)
+      let failed =
+        List.fold_left
+          (fun failed ((obligation : Translate.obligation), answer) ->
+            if
+              answer = Solved Proven
+              || List.exists
+                   (fun ((other : Translate.obligation), _) ->
+                     other.code = obligation.code && other.message = obligation.message)
+                   failed
+            then failed
+            else failed @ [ (obligation, answer) ])
+          []
+          (answers ?running solver outcome.obligations)
+      in
       List.filter_map
         (fun ((obligation : Translate.obligation), (answer : answer)) ->
           match answer with
@@ -564,14 +589,14 @@ let definition_diagnostics ?running database solver (key : Names.key) =
               Some
                 (diagnostic obligation.code (source_span obligation.span)
                    (obligation.message
-                   ^ counterexample (Logic.members obligation.query) obligation.values values))
+                   ^ counterexample (Logic.members obligation.query) obligation values))
           | Solved Out_of_steps ->
               Some
                 (diagnostic obligation.code (source_span obligation.span)
                    (obligation.message
                   ^ " The solver ran out of steps, so it may hold but needs help: a `proof` block \
                      or a theorem.")))
-        (answers ?running solver outcome.obligations)
+        failed
 
 (* The queries of every definition of the modules, solved together,
    several at once, so that reading each definition's answers after finds
