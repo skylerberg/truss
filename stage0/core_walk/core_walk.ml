@@ -20,6 +20,15 @@ type visit = {
 
 let ignore_all = { expression = ignore; statement = ignore; pattern = ignore; callee = ignore }
 
+(* A visitor that calls [found] on every callee: the callee of each [Call],
+   and each callee that is stored in another node. *)
+let callees found =
+  {
+    ignore_all with
+    expression = (fun node -> match node.kind with Call { callee; _ } -> found callee | _ -> ());
+    callee = found;
+  }
+
 let place_type : place -> Types.ty = function
   | Local { type_; _ } | Constant { type_; _ } | Field { type_; _ } -> type_
   | Lent value | Temporary value -> value.type_

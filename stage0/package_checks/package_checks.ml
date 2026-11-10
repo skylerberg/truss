@@ -341,9 +341,9 @@ let check_recursion database (declaration : Names.declaration) (definition : def
    inside a type constructor, which makes the arguments grow around a
    cycle. *)
 let instantiation_edges database (key : Names.key) =
-  match Query.demand database Infer.checked key with
+  match Query.demand database Infer.core key with
   | None -> []
-  | Some result ->
+  | Some form ->
       let grows = function
         | T.Type (T.Named { arguments; _ }) ->
             let rec mentions = function
@@ -355,14 +355,15 @@ let instantiation_edges database (key : Names.key) =
             List.exists (function T.Type type_ -> mentions type_ | _ -> false) arguments
         | _ -> false
       in
-      List.filter_map
-        (fun call ->
-          match call with
-          | Some ({ callee = Function { path; type_arguments }; _ } : Checked.call)
+      let edges = ref [] in
+      Core_walk.definition
+        (Core_walk.callees (function
+          | Function { path; type_arguments }
             when Path.package path = key.module_.package && type_arguments <> [] ->
-              Some (path, List.exists grows type_arguments)
-          | _ -> None)
-        (Array.to_list result.checked.calls)
+              edges := (path, List.exists grows type_arguments) :: !edges
+          | _ -> ()))
+        form.definition;
+      List.rev !edges
 
 let check_instantiation database (package : string) =
   let generic =
@@ -562,20 +563,20 @@ let used_packages =
               (Array.to_list resolved.names)
         | None -> []
       in
-      let checked =
-        match Query.demand database Infer.checked key with
-        | Some { checked; evidence; _ } ->
-            evidence
-            @ List.concat_map
-                (function
-                  | Some ({ callee = Trait_method { trait; evidence; _ }; _ } : Checked.call) ->
-                      Path.package trait.trait
-                      :: (match evidence with Impl { impl; _ } -> [ Path.package impl ] | _ -> [])
-                  | _ -> [])
-                (Array.to_list checked.calls)
-        | None -> []
-      in
-      List.sort_uniq compare (named @ checked))
+      let called = ref (Query.demand database Infer.evidence key) in
+      Option.iter
+        (fun (form : Core.t) ->
+          Core_walk.definition
+            (Core_walk.callees (function
+              | Trait_method { trait; evidence; _ } ->
+                  called :=
+                    Path.package trait.trait
+                    :: (match evidence with Impl { impl; _ } -> [ Path.package impl ] | _ -> [])
+                    @ !called
+              | _ -> ()))
+            form.definition)
+        (Query.demand database Infer.core key);
+      List.sort_uniq compare (named @ !called))
 
 (* The packages a package's code uses, its tests apart. A dependency that is
    not among them is one only its tests use, which a project that uses the
@@ -616,7 +617,7 @@ let manifest_problems =
     (fun database package_name ->
       let package = package_name in
       let keys = List.map Names.key_of (declarations database package) in
-      let checks = List.for_all (fun key -> Infer.clean database key <> None) keys in
+      let checks = List.for_all (Infer.is_clean database) keys in
       let used = List.concat_map (Query.demand database used_packages) keys in
       List.concat_map
         (fun (dependency : Workspace.dependency) ->

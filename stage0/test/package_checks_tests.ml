@@ -117,7 +117,7 @@ let () =
         setup
           [
             ( "app::main",
-              "fn grow[Element](value: own Element) -> Int64 {\n  grow(Some(value))\n}\n" );
+              "fn grow[Element](value: own Element) -> Int64 {\n  grow(Some(own value))\n}\n" );
           ]
       in
       if
