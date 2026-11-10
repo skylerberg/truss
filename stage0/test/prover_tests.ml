@@ -1158,6 +1158,18 @@ let () =
          }\n");
   test "a list literal has its length" (fun () ->
       proven "fn f() -> List[Int64]\n  ensures result.length() == 3\n{\n  [1, 2, 3]\n}\n");
+  test "an array literal has its elements" (fun () ->
+      proven
+        "fn f() -> Int64\n\
+        \  ensures result == 2\n\
+         {\n\
+        \  let numbers: Array[Int64, 3] = [1, 2, 3]\n\
+        \  numbers[1]\n\
+         }\n");
+  test "an index below an array's count is within it" (fun () ->
+      proven "fn f(numbers: Array[Int64, 4]) -> Int64 {\n  numbers[3]\n}\n");
+  test "an index at an array's count is not" (fun () ->
+      not_proven "fn f(numbers: Array[Int64, 4]) -> Int64 {\n  numbers[4]\n}\n" "prover.requires");
   test "a non-empty list literal is one allocation" (fun () ->
       proven "fn f() -> List[Int64]\n  cost allocations == 1\n{\n  [1, 2, 3]\n}\n");
   test "sequences with the same elements are identical" (fun () ->
@@ -2213,7 +2225,18 @@ let () =
 
 let () =
   test "a construct the prover cannot read yet" (fun () ->
-      not_proven "fn f() -> Array[Int64, 3] {\n  [1, 2, 3]\n}\n" "prover.unsupported");
+      not_proven
+        "fn run(task: (fn() cost time finite))\n\
+        \  cost time finite\n\
+         {\n\
+        \  task()\n\
+         }\n\n\
+         fn f(quick: (fn() cost time O(1)))\n\
+        \  cost time finite\n\
+         {\n\
+        \  run(quick)\n\
+         }\n"
+        "prover.unsupported");
   test "alternatives bind each name to the part that matched" (fun () ->
       proven
         "type Side =\n\
