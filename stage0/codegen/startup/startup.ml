@@ -19,6 +19,7 @@ let headers =
 #include <time.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/random.h>
 #include <sys/wait.h>
 |}
 
@@ -230,10 +231,18 @@ void t_runtime_install(void) {
 
 let allocation =
   {|
-/* How many blocks are allocated and not yet freed. A test must end with as
-   many as it started with: Truss frees every block it allocates, so a test
-   that leaves one is a compiler bug. */
+/* In a test program, how many blocks are allocated and not yet freed. A
+   test must end with as many as it started with: Truss frees every block
+   it allocates, so a test that leaves one is a compiler bug. A program
+   that is not a test program counts nothing. */
+#ifdef T_TESTS
 static t_usize t_live_blocks = 0;
+#define t_block_allocated() (t_live_blocks += 1)
+#define t_block_freed() (t_live_blocks -= 1)
+#else
+#define t_block_allocated() ((void)0)
+#define t_block_freed() ((void)0)
+#endif
 
 void *t_runtime_allocate(t_usize size, t_usize alignment) {
   void *pointer = NULL;
@@ -244,12 +253,12 @@ void *t_runtime_allocate(t_usize size, t_usize alignment) {
     pointer = NULL;
   }
   if (pointer == NULL) t_out_of_memory();
-  t_live_blocks += 1;
+  t_block_allocated();
   return pointer;
 }
 
 void t_runtime_free(void *pointer) {
-  t_live_blocks -= 1;
+  t_block_freed();
   free(pointer);
 }
 
@@ -406,8 +415,16 @@ int64_t t_runtime_clock_now(void) {
   return (int64_t)now.tv_sec * 1000000000 + now.tv_nsec;
 }
 
+/* [getentropy] is in both glibc and macOS's libc, and gives at most 256
+   bytes a call. It fails only if the system has no source of randomness,
+   which nothing can go on from. */
 void t_runtime_random_fill(uint8_t *bytes, t_usize count) {
-  arc4random_buf(bytes, count);
+  while (count > 0) {
+    t_usize part = count < 256 ? count : 256;
+    if (getentropy(bytes, part) != 0) abort();
+    bytes += part;
+    count -= part;
+  }
 }
 
 /* Debug output: generated debug functions append a value's text here, and
@@ -825,16 +842,17 @@ int t_runtime_run_tests(uint32_t count, const t_test *tests, uint32_t time_limit
 }
 |}
 
-let runtime (target : Memory_layout.target) =
+let runtime (target : Memory_layout.target) ~tests =
   String.concat ""
     [
+      (if tests then "#define T_TESTS 1\n" else "");
       headers;
       (if target.usize_bytes = 8 then "typedef uint64_t t_usize;\ntypedef int64_t t_isize;\n"
        else "typedef uint32_t t_usize;\ntypedef int32_t t_isize;\n");
       Emit_c.anchor_struct;
       failing;
       allocation;
-      runner;
+      (if tests then runner else "");
     ]
 
 let main_calling entry =

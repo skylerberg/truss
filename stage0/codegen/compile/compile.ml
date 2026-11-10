@@ -349,7 +349,7 @@ let decode t ty text : Lir.static_value =
 
 (* Builds what the roots reach into a program at [output], with the given
    startup code, once the instances agree with one another. *)
-let rec build ?progress t ~roots ~startup ~output =
+let rec build ?progress ?tests t ~roots ~startup ~output =
   let units = Reachable.reachable t.context.env ~lookup:(compiled t) roots in
   let found =
     List.fold_left
@@ -369,7 +369,7 @@ let rec build ?progress t ~roots ~startup ~output =
   let target = Memory_layout.target t.context.env in
   let sources = [ ("startup", startup); ("anchors", Positions.anchors_file target anchors) ] in
   match
-    Build.program ?progress t.toolchain t.cache t.context.env t.settings
+    Build.program ?progress ?tests t.toolchain t.cache t.context.env t.settings
       ~files:(List.map (fun unit -> [ unit ]) units)
       ~sources ~output
   with
@@ -627,7 +627,7 @@ let run_tests ?results ?(rerun = false) ?(progress = ignore) t ~time_limit tests
       Filename.concat (Filename.get_temp_dir_name ())
         (Printf.sprintf "truss-tests-%d" (Unix.getpid ()))
     in
-    build t ~roots
+    build t ~tests:true ~roots
       ~startup:(Startup.tests_calling ~time_limit (List.map Instance.symbol roots))
       ~output
       ~progress:(fun compiled total -> progress (Compiling { compiled; total }));
