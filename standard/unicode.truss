@@ -1,0 +1,53 @@
+public type Form = Composed | Decomposed | CompatibilityComposed | CompatibilityDecomposed
+  derives Equal
+
+public type Category =
+  | Letter
+  | Mark
+  | Number
+  | Punctuation
+  | Symbol
+  | Separator
+  | Control
+  | Format
+  | Surrogate
+  | PrivateUse
+  | Unassigned
+  derives Equal, Hash
+
+public fn normalize(text: StringSlice, form: Form = Form.Composed) -> String
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn is_normalized(text: StringSlice, form: Form = Form.Composed) -> Bool
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn fold_case(text: StringSlice) -> String
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn equal_ignoring_case(first: StringSlice, second: StringSlice) -> Bool
+  cost time O(first.length() + second.length())
+{
+  todo
+}
+
+public fn category(character: Character) -> Category
+  cost time O(1)
+{
+  todo
+}
+
+public fn display_width(character: Character) -> USize
+  ensures result <= 2
+  cost time O(1)
+{
+  todo
+}

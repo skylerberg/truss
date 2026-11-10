@@ -15,4 +15,12 @@ impl Clock for SystemClock {
     let part = if nanoseconds < 0 { 0 } else if nanoseconds > 999999999 { 999999999 } else { nanoseconds }
     Instant(nanoseconds: whole * 1000000000 + part)
   }
+
+  fn monotonic(self) -> Duration {
+    todo
+  }
+
+  fn sleep(self, duration: Duration) {
+    todo
+  }
 }

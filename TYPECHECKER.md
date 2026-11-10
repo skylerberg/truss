@@ -1243,9 +1243,8 @@ function's `uses`, its capability parameters, and the capabilities provided
 by each enclosing `provide`. Inside a capability `impl`'s methods, it is the
 `impl`'s `uses`, which are each method's own. A call there through a
 function value may also use the capability itself, which means this
-implementation, so a method can hand it on, as `write_with` passes
-`FileWrite` to the function it lends the writer to; code generation passes
-the implementation's own evidence. A direct call of the capability would
+implementation, so a method can hand it on to a function it is given; code
+generation passes the implementation's own evidence. A direct call of the capability would
 call the implementation itself, so it still needs the capability among the
 `impl`'s `uses`, from outside.
 
@@ -1829,10 +1828,24 @@ the compiler. The prelude holds:
 - `List`, `Slice`, `String`, `StringSlice`, `Map`, and `Set`
 - `Equal`, `Ordered`, `Ordering`, `Hash`, `Hasher`, `Default`, `Display`,
   `TextBuilder`, `From`, `TryFrom`, `Copyable`, `Plain`, `Add`, `Subtract`,
-  `Multiply`, `Divide`, `Remainder`, `Negate`, `Index`, `Iterable`,
-  `Cursor`, `FromTemplate`, `Template`, and `ExitCode`
-- the standard capabilities, and the types their methods take and return:
-  `Instant`, `Duration`, `Path`, `Bytes`, and `FileError`
+  `Multiply`, `Divide`, `Remainder`, `Negate`, `Index`, `Model`, `Iterable`,
+  `Cursor`, `Range`, `FromTemplate`, `Template`, and `ExitCode`
+- `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`
+- the standard capabilities, `Console`, `FileRead`, `FileWrite`,
+  `NetworkClient`, `NetworkServer`, `Handles`, `Clock`, `Random`,
+  `Environment`, `Processes`, `Signals`, `Tasks`, `Log`, and `Panic`, and
+  the types signatures everywhere are written with: `Instant`, `Duration`,
+  `Path`, and `SystemError`
+
+`Storage`, `View`, and the descriptor type `Handle` are not in the prelude.
+The standard library names them through `standard::intrinsic`, so another
+package may have a type called `View`.
+
+When a call to a trait's yielding method resolves to a known `impl` that
+defines the method, the checker records the callee as the `impl`'s method,
+not the trait's. `List` gets `each(self)` from `impl Iterable`. The type of
+the cursor and the contract of a loop over a list must then come from the
+list's `each`, which only the `impl`'s method has.
 
 ## Not built
 
@@ -1855,7 +1868,4 @@ the compiler. The prelude holds:
   type's fields rebuilds nothing. A shape keeps its fields in the order they
   are written, so reordering them re-checks what reads the shape. Code
   generation's layout already ignores the order.
-- **How `write_with` combines errors** is not decided. A writer's lambda may
-  fail with its own error type as well as a `FileError`. The standard
-  library needs a result type that holds either, and a name for it.
 

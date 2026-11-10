@@ -1,0 +1,771 @@
+use standard::core
+use standard::text
+
+public opaque type Duration(nanoseconds: Int64)
+  derives Plain, Equal, Hash, Ordered
+
+public let Duration.zero: Duration = Duration(nanoseconds: 0)
+
+public let Duration.maximum: Duration = Duration(nanoseconds: 9223372036854775807)
+
+public let Duration.minimum: Duration = Duration(nanoseconds: -9223372036854775808)
+
+public fn Duration.nanoseconds(count: Int64) -> Duration
+  cost time O(1)
+{
+  Duration(nanoseconds: count)
+}
+
+public fn Duration.microseconds(count: Int64) -> Duration
+  requires -9223372036854775 <= count && count <= 9223372036854775
+  cost time O(1)
+{
+  todo
+}
+
+public fn Duration.milliseconds(count: Int64) -> Duration
+  requires -9223372036854 <= count && count <= 9223372036854
+  cost time O(1)
+{
+  todo
+}
+
+public fn Duration.seconds(count: Int64) -> Duration
+  requires -9223372036 <= count && count <= 9223372036
+  cost time O(1)
+{
+  todo
+}
+
+public fn Duration.minutes(count: Int64) -> Duration
+  requires -153722867 <= count && count <= 153722867
+  cost time O(1)
+{
+  todo
+}
+
+public fn Duration.hours(count: Int64) -> Duration
+  requires -2562047 <= count && count <= 2562047
+  cost time O(1)
+{
+  todo
+}
+
+public fn Duration.days(count: Int64) -> Duration
+  requires -106751 <= count && count <= 106751
+  cost time O(1)
+{
+  todo
+}
+
+public fn Duration.from_seconds(seconds: Float64) -> Option[Duration]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Duration.total_nanoseconds(self) -> Int64
+  cost time O(1)
+{
+  self.nanoseconds
+}
+
+public fn Duration.total_microseconds(self) -> Int64
+  cost time O(1)
+{
+  self.nanoseconds / 1000
+}
+
+public fn Duration.total_milliseconds(self) -> Int64
+  cost time O(1)
+{
+  self.nanoseconds / 1000000
+}
+
+public fn Duration.total_seconds(self) -> Int64
+  cost time O(1)
+{
+  self.nanoseconds / 1000000000
+}
+
+public fn Duration.subsecond_nanoseconds(self) -> Int32
+  ensures -1000000000 < result && result < 1000000000
+  cost time O(1)
+{
+  todo
+}
+
+public fn Duration.to_seconds(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Duration.is_zero(self) -> Bool
+  cost time O(1)
+{
+  self.nanoseconds == 0
+}
+
+public fn Duration.is_negative(self) -> Bool
+  cost time O(1)
+{
+  self.nanoseconds < 0
+}
+
+public fn Duration.absolute(self) -> Duration
+  cost time O(1)
+{
+  todo
+}
+
+public fn Duration.checked_add(self, other: Duration) -> Option[Duration]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Duration.checked_subtract(self, other: Duration) -> Option[Duration]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Duration.checked_multiply(self, factor: Int64) -> Option[Duration]
+  cost time O(1)
+{
+  todo
+}
+
+impl Add[Duration] for Duration {
+  type Output = Duration
+
+  fn add(self, right: Duration) -> Duration {
+    Duration(nanoseconds: self.nanoseconds.saturating_add(right.nanoseconds))
+  }
+}
+
+impl Subtract[Duration] for Duration {
+  type Output = Duration
+
+  fn subtract(self, right: Duration) -> Duration {
+    Duration(nanoseconds: self.nanoseconds.saturating_subtract(right.nanoseconds))
+  }
+}
+
+impl Multiply[Int64] for Duration {
+  type Output = Duration
+
+  fn multiply(self, right: Int64) -> Duration {
+    Duration(nanoseconds: self.nanoseconds.saturating_multiply(right))
+  }
+}
+
+impl Divide[Int64] for Duration {
+  type Output = Option[Duration]
+
+  fn divide(self, right: Int64) -> Option[Duration] {
+    todo
+  }
+}
+
+impl Negate for Duration {
+  type Output = Duration
+
+  fn negate(self) -> Duration {
+    todo
+  }
+}
+
+impl Default for Duration {
+  fn default() -> Duration {
+    Duration.zero
+  }
+}
+
+impl Display for Duration {
+  fn display(self, output: mut TextBuilder) {
+    self.nanoseconds.display(mut output)
+    mut output.write("ns")
+  }
+}
+
+impl text::Parse for Duration {
+  type Error = ParseTimeError
+
+  fn parse(text: StringSlice) -> Result[Duration, ParseTimeError] {
+    todo
+  }
+}
+
+public opaque type Instant(nanoseconds: Int64)
+  derives Plain, Equal, Hash, Ordered
+
+public let Instant.epoch: Instant = Instant(nanoseconds: 0)
+
+public fn Instant.from_unix_nanoseconds(nanoseconds: Int64) -> Instant
+  cost time O(1)
+{
+  Instant(nanoseconds: nanoseconds)
+}
+
+public fn Instant.from_unix_milliseconds(milliseconds: Int64) -> Option[Instant]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Instant.from_unix_seconds(seconds: Int64) -> Option[Instant]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Instant.unix_nanoseconds(self) -> Int64
+  cost time O(1)
+{
+  self.nanoseconds
+}
+
+public fn Instant.unix_milliseconds(self) -> Int64
+  cost time O(1)
+{
+  self.nanoseconds.floor_divide(1000000)
+}
+
+public fn Instant.unix_seconds(self) -> Int64
+  cost time O(1)
+{
+  self.nanoseconds.floor_divide(1000000000)
+}
+
+public fn Instant.duration_since(self, earlier: Instant) -> Duration
+  cost time O(1)
+{
+  Duration(nanoseconds: self.nanoseconds.saturating_subtract(earlier.nanoseconds))
+}
+
+public fn Instant.checked_add(self, duration: Duration) -> Option[Instant]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Instant.checked_subtract(self, duration: Duration) -> Option[Instant]
+  cost time O(1)
+{
+  todo
+}
+
+impl Add[Duration] for Instant {
+  type Output = Instant
+
+  fn add(self, right: Duration) -> Instant {
+    Instant(nanoseconds: self.nanoseconds.saturating_add(right.nanoseconds))
+  }
+}
+
+impl Subtract[Duration] for Instant {
+  type Output = Instant
+
+  fn subtract(self, right: Duration) -> Instant {
+    Instant(nanoseconds: self.nanoseconds.saturating_subtract(right.nanoseconds))
+  }
+}
+
+impl Subtract[Instant] for Instant {
+  type Output = Duration
+
+  fn subtract(self, right: Instant) -> Duration {
+    self.duration_since(right)
+  }
+}
+
+impl Display for Instant {
+  fn display(self, output: mut TextBuilder) {
+    self.nanoseconds.display(mut output)
+  }
+}
+
+impl text::Parse for Instant {
+  type Error = ParseTimeError
+
+  fn parse(text: StringSlice) -> Result[Instant, ParseTimeError] {
+    todo
+  }
+}
+
+public type ParseTimeError =
+  | Empty
+  | Malformed(offset: USize)
+  | OutOfRange
+  derives Equal
+
+impl Display for ParseTimeError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type Month =
+  | January
+  | February
+  | March
+  | April
+  | May
+  | June
+  | July
+  | August
+  | September
+  | October
+  | November
+  | December
+  derives Equal, Hash, Ordered
+
+public fn Month.number(self) -> UInt8
+  ensures 1 <= result && result <= 12
+  cost time O(1)
+{
+  todo
+}
+
+public fn Month.from_number(number: UInt8) -> Option[Month]
+  ensures (result is Some(_)) == (1 <= number && number <= 12)
+  cost time O(1)
+{
+  todo
+}
+
+public fn Month.days(self, leap_year: Bool) -> UInt8
+  ensures 28 <= result && result <= 31
+  cost time O(1)
+{
+  todo
+}
+
+impl Display for Month {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type Weekday = Monday | Tuesday | Wednesday | Thursday | Friday | Saturday | Sunday
+  derives Equal, Hash, Ordered
+
+public fn Weekday.number_from_monday(self) -> UInt8
+  ensures 1 <= result && result <= 7
+  cost time O(1)
+{
+  todo
+}
+
+public fn Weekday.is_weekend(self) -> Bool
+  cost time O(1)
+{
+  self is Saturday | Sunday
+}
+
+impl Display for Weekday {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public opaque type Date(days_since_epoch: Int32)
+  derives Plain, Equal, Hash, Ordered
+
+public fn Date.new(year: Int32, month: UInt8, day: UInt8) -> Option[Date]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Date.from_day_of_year(year: Int32, day_of_year: UInt16) -> Option[Date]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Date.is_leap_year(year: Int32) -> Bool
+  cost time O(1)
+{
+  (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+public fn Date.year(self) -> Int32
+  cost time O(1)
+{
+  todo
+}
+
+public fn Date.month(self) -> Month
+  cost time O(1)
+{
+  todo
+}
+
+public fn Date.day(self) -> UInt8
+  ensures 1 <= result && result <= 31
+  cost time O(1)
+{
+  todo
+}
+
+public fn Date.weekday(self) -> Weekday
+  cost time O(1)
+{
+  todo
+}
+
+public fn Date.day_of_year(self) -> UInt16
+  ensures 1 <= result && result <= 366
+  cost time O(1)
+{
+  todo
+}
+
+public fn Date.week_of_year(self) -> UInt8
+  ensures 1 <= result && result <= 53
+  cost time O(1)
+{
+  todo
+}
+
+public fn Date.plus_days(self, days: Int32) -> Option[Date]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Date.plus_months(self, months: Int32) -> Option[Date]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Date.plus_years(self, years: Int32) -> Option[Date]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Date.days_until(self, other: Date) -> Int64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Date.at(self, time: TimeOfDay) -> DateTime
+  cost time O(1)
+{
+  DateTime(date: self, time: time)
+}
+
+impl Display for Date {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl text::Parse for Date {
+  type Error = ParseTimeError
+
+  fn parse(text: StringSlice) -> Result[Date, ParseTimeError] {
+    todo
+  }
+}
+
+impl core::Countable for Date {
+  fn successor(self) -> Option[Date]
+    cost time O(1)
+  {
+    self.plus_days(1)
+  }
+
+  fn predecessor(self) -> Option[Date]
+    cost time O(1)
+  {
+    self.plus_days(-1)
+  }
+
+  fn advanced(self, by: USize) -> Option[Date]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn retreated(self, by: USize) -> Option[Date]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn steps_to(self, other: Date) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+public opaque type TimeOfDay(nanoseconds_since_midnight: UInt64)
+  derives Plain, Equal, Hash, Ordered
+
+public let TimeOfDay.midnight: TimeOfDay = TimeOfDay(nanoseconds_since_midnight: 0)
+
+public let TimeOfDay.noon: TimeOfDay = TimeOfDay(nanoseconds_since_midnight: 43200000000000)
+
+public fn TimeOfDay.new(hour: UInt8, minute: UInt8, second: UInt8 = 0, nanosecond: UInt32 = 0) -> Option[TimeOfDay]
+  cost time O(1)
+{
+  todo
+}
+
+public fn TimeOfDay.hour(self) -> UInt8
+  ensures result < 24
+  cost time O(1)
+{
+  todo
+}
+
+public fn TimeOfDay.minute(self) -> UInt8
+  ensures result < 60
+  cost time O(1)
+{
+  todo
+}
+
+public fn TimeOfDay.second(self) -> UInt8
+  ensures result < 60
+  cost time O(1)
+{
+  todo
+}
+
+public fn TimeOfDay.nanosecond(self) -> UInt32
+  ensures result < 1000000000
+  cost time O(1)
+{
+  todo
+}
+
+public fn TimeOfDay.since_midnight(self) -> Duration
+  cost time O(1)
+{
+  todo
+}
+
+impl Display for TimeOfDay {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl text::Parse for TimeOfDay {
+  type Error = ParseTimeError
+
+  fn parse(text: StringSlice) -> Result[TimeOfDay, ParseTimeError] {
+    todo
+  }
+}
+
+public type DateTime(date: Date, time: TimeOfDay)
+  derives Equal, Hash, Ordered
+
+public fn DateTime.plus(self, duration: Duration) -> Option[DateTime]
+  cost time O(1)
+{
+  todo
+}
+
+public fn DateTime.format(self, layout: Layout) -> String
+  cost time finite
+{
+  todo
+}
+
+impl Display for DateTime {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl text::Parse for DateTime {
+  type Error = ParseTimeError
+
+  fn parse(text: StringSlice) -> Result[DateTime, ParseTimeError] {
+    todo
+  }
+}
+
+public type LocalInstant =
+  | Unique(instant: Instant)
+  | Ambiguous(earlier: Instant, later: Instant)
+  | Skipped(before: Instant, after: Instant)
+  derives Equal
+
+public opaque type TimeZone(name: String, rules: List[UInt8], fixed_offset: Option[Duration])
+  derives Copyable
+
+public fn TimeZone.utc() -> TimeZone
+  cost time O(1)
+{
+  todo
+}
+
+public fn TimeZone.fixed(offset: Duration) -> Option[TimeZone]
+  cost time O(1)
+{
+  todo
+}
+
+public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[TimeZone, ZoneError]
+  cost time O(rules.length() + name.length())
+{
+  todo
+}
+
+public fn TimeZone.name(self) -> StringSlice
+  cost time O(1)
+{
+  self.name.slice()
+}
+
+public fn TimeZone.offset_at(self, instant: Instant) -> Duration
+  cost time O(log(self.rules.length()))
+{
+  todo
+}
+
+public fn TimeZone.to_local(self, instant: Instant) -> DateTime
+  cost time O(log(self.rules.length()))
+{
+  todo
+}
+
+public fn TimeZone.to_instant(self, local: DateTime) -> LocalInstant
+  cost time O(log(self.rules.length()))
+{
+  todo
+}
+
+public fn TimeZone.format(self, instant: Instant) -> String
+  cost time finite
+{
+  todo
+}
+
+public type ZoneError =
+  | UnknownZone
+  | MalformedRules
+  derives Equal
+
+impl Display for ZoneError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public fn local_zone() -> TimeZone
+  uses Environment
+{
+  todo
+}
+
+public fn zone(name: StringSlice) -> Result[TimeZone, ZoneError]
+  uses Environment
+{
+  todo
+}
+
+public opaque type Layout(parts: List[LayoutPart])
+  derives Copyable
+
+type LayoutPart =
+  | Text(text: String)
+  | Year
+  | Month
+  | Day
+  | Hour
+  | Minute
+  | Second
+  | Fraction(digits: UInt8)
+  | Weekday
+  | Offset
+
+impl FromTemplate for Layout {
+  type Part = Never
+
+  fn from_template(template: Template[Never]) -> Layout
+    requires is_valid_layout(template.literals)
+  {
+    todo
+  }
+}
+
+public fn is_valid_layout(literals: Slice[text::Literal]) -> Bool
+  cost time finite
+{
+  todo
+}
+
+public fn Layout.parse_date_time(self, text: StringSlice) -> Result[DateTime, ParseTimeError]
+  cost time O(text.length())
+{
+  todo
+}
+
+public opaque type Stopwatch(started: Duration)
+  derives Plain
+
+public fn Stopwatch.start() -> Stopwatch
+  uses Clock
+{
+  Stopwatch(started: Clock.monotonic())
+}
+
+public fn Stopwatch.elapsed(self) -> Duration
+  uses Clock
+{
+  Clock.monotonic() - self.started
+}
+
+public type FixedClock(time: Instant)
+
+impl Clock for FixedClock {
+  fn now(self) -> Instant {
+    self.time
+  }
+
+  fn monotonic(self) -> Duration {
+    Duration.zero
+  }
+
+  fn sleep(self, duration: Duration) {}
+}
+
+public opaque type ManualClock(time: Instant, elapsed: Duration)
+
+public fn ManualClock.new(start: Instant) -> ManualClock {
+  ManualClock(time: start, elapsed: Duration.zero)
+}
+
+public fn ManualClock.advance(mut self, by: Duration)
+  requires !by.is_negative()
+{
+  self.time = self.time + by
+  self.elapsed = self.elapsed + by
+}
+
+impl Clock for ManualClock {
+  fn now(self) -> Instant {
+    self.time
+  }
+
+  fn monotonic(self) -> Duration {
+    self.elapsed
+  }
+
+  fn sleep(mut self, duration: Duration) {
+    todo
+  }
+}

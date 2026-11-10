@@ -2179,10 +2179,35 @@ let () =
       in
       proven text;
       if holes text <> 1 then fail "%d holes" (holes text));
-  test "a todo in code is no hole" (fun () ->
+  test "a contract on a body that is not written waits for it, and is no hole" (fun () ->
       let text = "fn f(value: Int64) -> Int64\n  ensures result > value\n{\n  todo\n}\n" in
-      not_proven text "prover.ensures";
-      if holes text <> 0 then fail "%d holes" (holes text))
+      proven text;
+      if holes text <> 0 then fail "%d holes" (holes text));
+  test "what is before a todo in code is still proven" (fun () ->
+      not_proven
+        "fn f(items: List[Int64], index: USize) -> Int64\n\
+        \  ensures result > 0\n\
+         {\n\
+        \  let first = items[index]\n\
+        \  first + todo\n\
+         }\n"
+        "prover.requires");
+  test "an impl's laws wait while one of its methods is not written" (fun () ->
+      proven
+        "type Meters(value: Int64)\n\n\
+         impl Equal for Meters {\n\
+        \  fn equal(self, other: Meters) -> Bool {\n\
+        \    todo\n\
+        \  }\n\
+         }\n");
+  test "a type that contains itself through a map's values is read" (fun () ->
+      proven
+        "type Tree =\n\
+        \  | Leaf\n\
+        \  | Branch(children: Map[String, Tree])\n\n\
+         fn is_leaf(tree: Tree) -> Bool {\n\
+        \  tree is Leaf\n\
+         }\n")
 
 (* What is not proven yet *)
 

@@ -508,6 +508,14 @@ invariants and the validity of its fields.
 - **Functions in an invariant are definitions or contracts like any
   others,** so a type's validity may unfold `is_sorted` or rely on its
   contract.
+- **Validity is not computed twice for one type on one path.** A type can
+  contain itself through a type that has an invariant. `type Tree = Leaf |
+  Branch(children: Map[String, Tree])` does: `Map`'s invariant calls
+  functions on its entries, the prover assumes each entry is valid, and an
+  entry holds a `Tree`. While the prover is computing the validity of a
+  type, a nested request for the validity of the same type is `true`. The
+  same rule already applied to a type that contains itself directly in a
+  field.
 - **Another package's opaque type** has a validity that is a predicate the
   prover never unfolds there: a value of the type comes from its own
   package, which shows the invariant, so elsewhere validity is assumed
@@ -914,6 +922,15 @@ regardless, with their run-time checks.
   through a hole ends there for the prover, as an `assume false` would,
   and the obligations after it hold trivially. That is sound because a
   hole is never in a program that is built.
+- **A `todo` in code also ends its path.** The contracts of a function
+  whose body is `todo` are not checked against the body, and none of them
+  is reported. DESIGN.md has a package's signatures and contracts written
+  before its code. A `todo` in the middle of a body leaves the obligations
+  before it checked, and skips the ones after it on that path. It is not
+  recorded as a hole, because `truss holes` already lists every `todo`.
+- **An `impl`'s laws are skipped while the `impl` is unfinished.** A law
+  constrains what the `impl`'s methods return. If a method the `impl`
+  defines contains a `todo`, the laws of that `impl` are not obligations.
 - **Holes are not errors.** Truss has no warnings, so a hole is not a
   diagnostic: each definition's outcome lists its holes, `truss holes`
   lists every `todo` with what it blocks, and `truss build` refuses a

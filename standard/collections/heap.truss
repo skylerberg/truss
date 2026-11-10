@@ -1,0 +1,108 @@
+use standard::collections
+
+public fn collections::Heap[Element: Ordered].smallest_first() -> collections::Heap[Element]
+  ensures result.length() == 0
+  cost time O(1)
+  cost allocations == 0
+{
+  collections::Heap(items: [], largest_first: false)
+}
+
+public fn collections::Heap[Element: Ordered].largest_first() -> collections::Heap[Element]
+  ensures result.length() == 0
+  cost time O(1)
+  cost allocations == 0
+{
+  collections::Heap(items: [], largest_first: true)
+}
+
+public fn collections::Heap[Element: Ordered].smallest_first_of(items: own List[Element]) -> collections::Heap[Element]
+  ensures result.length() == items.length()
+  cost time O(items.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::Heap[Element: Ordered].largest_first_of(items: own List[Element]) -> collections::Heap[Element]
+  ensures result.length() == items.length()
+  cost time O(items.length())
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::Heap[Element: Ordered].length(self) -> USize
+  cost time O(1)
+{
+  self.items.length()
+}
+
+public fn collections::Heap[Element: Ordered].is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
+  cost time O(1)
+{
+  self.length() == 0
+}
+
+public fn collections::Heap[Element: Ordered].push(mut self, item: own Element)
+  ensures self.length() == old(self.length()) + 1
+  cost amortized time O(log(self.length()))
+{
+  todo
+}
+
+public fn collections::Heap[Element: Ordered].pop(mut self) -> Option[Element]
+  ensures (result is None) == (old(self.length()) == 0)
+  cost time O(log(old(self.length())))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::Heap[Element: Ordered].peek(self) lends Option[Element]
+  cost time O(1)
+{
+  todo
+}
+
+public fn collections::Heap[Element: Ordered].replace_first(mut self, item: own Element) -> Option[Element]
+  ensures self.length() == (if old(self.length()) == 0 { 1 } else { old(self.length()) })
+  cost time O(log(self.length()))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::Heap[Element: Ordered].clear(mut self)
+  ensures self.length() == 0
+  cost time O(old(self.length()))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::Heap[Element: Ordered].reserve(mut self, additional: USize)
+  ensures self.length() == old(self.length())
+{
+  todo
+}
+
+public fn collections::Heap[Element: Ordered].extend[Source: Cursor[Element = Element]](mut self, items: own Source) {
+  todo
+}
+
+public fn collections::Heap[Element: Ordered].to_sorted_list(own self) -> List[Element]
+  ensures result.length() == self.length()
+  cost time O(self.length() * log(self.length()))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn collections::Heap[Element: Ordered].each(own self) yields own Element
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length() * log(self.length()))
+{
+  todo
+}

@@ -1,0 +1,241 @@
+use standard::streams
+use standard::text
+
+public type IpAddress =
+  | Version4(octets: Array[UInt8, 4])
+  | Version6(octets: Array[UInt8, 16])
+  derives Equal, Hash, Ordered
+
+public let IpAddress.loopback: IpAddress = IpAddress.Version4([127, 0, 0, 1])
+
+public let IpAddress.unspecified: IpAddress = IpAddress.Version4([0, 0, 0, 0])
+
+public fn IpAddress.is_loopback(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn IpAddress.is_private(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn IpAddress.is_unspecified(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn IpAddress.is_multicast(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+impl Display for IpAddress {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl text::Parse for IpAddress {
+  type Error = AddressError
+
+  fn parse(text: StringSlice) -> Result[IpAddress, AddressError] {
+    todo
+  }
+}
+
+public type SocketAddress(address: IpAddress, port: UInt16)
+  derives Equal, Hash, Ordered
+
+impl Display for SocketAddress {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl text::Parse for SocketAddress {
+  type Error = AddressError
+
+  fn parse(text: StringSlice) -> Result[SocketAddress, AddressError] {
+    todo
+  }
+}
+
+public type AddressError(offset: USize)
+  derives Equal
+
+impl Display for AddressError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public opaque type IpNetwork(address: IpAddress, prefix_length: UInt8)
+  derives Plain, Equal, Hash
+
+public fn IpNetwork.new(address: IpAddress, prefix_length: UInt8) -> Option[IpNetwork]
+  cost time O(1)
+{
+  todo
+}
+
+public fn IpNetwork.contains(self, address: IpAddress) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+impl text::Parse for IpNetwork {
+  type Error = AddressError
+
+  fn parse(text: StringSlice) -> Result[IpNetwork, AddressError] {
+    todo
+  }
+}
+
+public type Direction = Receiving | Sending | Both
+  derives Equal
+
+public opaque type Connection(handle: streams::Handle, local: SocketAddress, peer: SocketAddress)
+
+public fn Connection.from_handle(handle: own streams::Handle, local: SocketAddress, peer: SocketAddress) -> Connection {
+  Connection(handle: own handle, local: local, peer: peer)
+}
+
+public fn Connection.local_address(self) -> SocketAddress
+  cost time O(1)
+{
+  self.local
+}
+
+public fn Connection.peer_address(self) -> SocketAddress
+  cost time O(1)
+{
+  self.peer
+}
+
+public fn Connection.set_read_timeout(mut self, timeout: Option[Duration]) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn Connection.set_write_timeout(mut self, timeout: Option[Duration]) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn Connection.shut_down(mut self, direction: Direction) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+impl streams::Reader for Connection {
+  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles
+  {
+    todo
+  }
+}
+
+impl streams::Writer for Connection {
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+    uses Handles
+  {
+    todo
+  }
+
+  fn flush(mut self) -> Result[Unit, SystemError]
+    uses Handles
+  {
+    Ok(Unit)
+  }
+}
+
+public type Accepted(handle: streams::Handle, peer: SocketAddress)
+
+public opaque type Listener(handle: streams::Handle, local: SocketAddress)
+
+public fn Listener.from_handle(handle: own streams::Handle, local: SocketAddress) -> Listener {
+  Listener(handle: own handle, local: local)
+}
+
+public fn Listener.local_address(self) -> SocketAddress
+  cost time O(1)
+{
+  self.local
+}
+
+public fn Listener.accept(mut self) -> Result[Connection, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn Listener.connections(mut self) yields own Result[Connection, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public type Datagram(length: USize, from: SocketAddress)
+
+public opaque type DatagramSocket(handle: streams::Handle, local: SocketAddress)
+
+public fn DatagramSocket.from_handle(handle: own streams::Handle, local: SocketAddress) -> DatagramSocket {
+  DatagramSocket(handle: own handle, local: local)
+}
+
+public fn DatagramSocket.local_address(self) -> SocketAddress
+  cost time O(1)
+{
+  self.local
+}
+
+public fn DatagramSocket.send_to(mut self, bytes: Slice[UInt8], address: SocketAddress) -> Result[USize, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn DatagramSocket.receive_from(mut self, buffer: mut List[UInt8], limit: USize) -> Result[Datagram, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn DatagramSocket.set_read_timeout(mut self, timeout: Option[Duration]) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn connect(host: StringSlice, port: UInt16, timeout: Option[Duration] = None) -> Result[Connection, SystemError]
+  uses NetworkClient
+{
+  todo
+}
+
+public type HostsAllowed(hosts: Set[String])
+
+impl NetworkClient for HostsAllowed
+  uses NetworkClient
+{
+  fn resolve(self, host: StringSlice) -> Result[List[IpAddress], SystemError] {
+    todo
+  }
+
+  fn connect(self, address: SocketAddress, timeout: Option[Duration]) -> Result[Connection, SystemError] {
+    todo
+  }
+
+  fn open_datagram(self) -> Result[DatagramSocket, SystemError] {
+    Err(SystemError.PermissionDenied)
+  }
+}

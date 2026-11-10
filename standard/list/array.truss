@@ -1,0 +1,114 @@
+public fn Array[Element: Copyable, count: USize].filled(value: Element) -> Array[Element, count]
+  cost time O(count)
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Array[Element, count: USize].generate(
+  make: (fn(index: USize) -> Element requires index < count cost time finite),
+) -> Array[Element, count]
+  cost calls(make) == count
+  cost time O(count * time(make))
+  cost allocations == 0
+{
+  todo
+}
+
+public fn Array[Element, count: USize].length(self) -> USize
+  ensures result == count
+  cost time O(1)
+{
+  count
+}
+
+public fn Array[Element, count: USize].slice(self) -> Slice[Element]
+  ensures result.length() == count
+  cost time O(1)
+{
+  todo
+}
+
+impl Index for Array[Element, count: USize] {
+  type Key = USize
+  type Output = Element
+
+  fn contains_key(self, key: USize) -> Bool
+    cost time O(1)
+  {
+    key < count
+  }
+
+  fn at(self, key: USize) lends Element
+    requires key < count
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn at(mut self, key: USize) lends mut Element
+    requires key < count
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+impl Iterable for Array[Element, count: USize] {
+  type Element = Element
+
+  fn each(self) yields Element
+    ensures finished ==> yielded.length() == count
+    cost time O(count)
+  {
+    todo
+  }
+}
+
+public fn Array[Element, count: USize].each(mut self) yields mut Element
+  cost time O(count)
+{
+  todo
+}
+
+public fn Array[Element, count: USize].each(own self) yields own Element
+  cost time O(count)
+{
+  todo
+}
+
+public fn Array[Element, count: USize].map_each[Output, capability Granted](
+  own self,
+  transform: (fn(own Element) -> Output uses Granted cost time finite),
+) -> Array[Output, count]
+  uses Granted
+  cost calls(transform) == count
+  cost time O(count * time(transform))
+  cost allocations == 0
+{
+  todo
+}
+
+impl Equal for Array[Element: Equal, count: USize] {
+  fn equal(self, other: Array[Element, count]) -> Bool {
+    todo
+  }
+}
+
+impl Ordered for Array[Element: Ordered, count: USize] {
+  fn compare(self, other: Array[Element, count]) -> Ordering {
+    todo
+  }
+}
+
+impl Hash for Array[Element: Hash, count: USize] {
+  fn hash(self, hasher: mut Hasher) {
+    todo
+  }
+}
+
+impl Display for Array[Element: Display, count: USize] {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}

@@ -1,0 +1,79 @@
+use standard::core
+
+public opaque type Skip[Source: Cursor](source: Source, left: USize)
+
+impl Cursor for Skip[Source: Cursor] {
+  type Element = Source.Element
+
+  fn next(mut self) -> Option[Source.Element] {
+    todo
+  }
+}
+
+public opaque type Take[Source: Cursor](source: Source, left: USize)
+
+impl Cursor for Take[Source: Cursor] {
+  type Element = Source.Element
+
+  fn next(mut self) -> Option[Source.Element] {
+    todo
+  }
+}
+
+public opaque type StepBy[Source: Cursor](source: Source, step: USize, started: Bool)
+
+impl Cursor for StepBy[Source: Cursor] {
+  type Element = Source.Element
+
+  fn next(mut self) -> Option[Source.Element] {
+    todo
+  }
+}
+
+public opaque type Chain[First: Cursor, Second: Cursor[Element = First.Element]](
+  first: First,
+  second: Second,
+  first_ended: Bool,
+)
+
+impl Cursor for Chain[First: Cursor, Second: Cursor[Element = First.Element]] {
+  type Element = First.Element
+
+  fn next(mut self) -> Option[First.Element] {
+    todo
+  }
+}
+
+public opaque type Zip[First: Cursor, Second: Cursor](first: First, second: Second)
+
+impl Cursor for Zip[First: Cursor, Second: Cursor] {
+  type Element = core::Pair[First.Element, Second.Element]
+
+  fn next(mut self) -> Option[core::Pair[First.Element, Second.Element]] {
+    todo
+  }
+}
+
+public opaque type Enumerate[Source: Cursor](source: Source, index: USize)
+
+impl Cursor for Enumerate[Source: Cursor] {
+  type Element = core::Indexed[Source.Element]
+
+  fn next(mut self) -> Option[core::Indexed[Source.Element]] {
+    todo
+  }
+}
+
+public opaque type Peekable[Source: Cursor](source: Source, peeked: Option[Option[Source.Element]])
+
+impl Cursor for Peekable[Source: Cursor] {
+  type Element = Source.Element
+
+  fn next(mut self) -> Option[Source.Element] {
+    todo
+  }
+}
+
+public fn Peekable[Source: Cursor].peek(mut self) lends Option[Source.Element] {
+  todo
+}

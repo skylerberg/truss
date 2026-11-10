@@ -8,6 +8,7 @@
   types
   checked
   core
+  core_walk
   syntax
   syntax_walk
   query

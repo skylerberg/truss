@@ -476,10 +476,28 @@ and versions state receiver_type name :
              (List.assoc_opt receiver (own @ from_traits)))
          [ Read; Mut; Own ])
 
+(* When a call to a trait's yielding method resolves to a known [impl]
+   that defines the method, the callee is the [impl]'s method. The cursor's
+   type and a loop's contract then come from that method, which a trait's
+   method cannot give: it does not know what [Self.Element] is. *)
+and impl_method_if_resolved state type_ (version : version) =
+  match version with
+  | Trait_version (trait, ({ method_signature = { output = Yields _; _ }; _ } as method_)) -> (
+      match implements state type_ trait with
+      | Some (Impls.From_impl { impl; _ }) ->
+          let path : Path.t =
+            Method { owner = impl; name = method_.method_name; receiver = method_.method_receiver }
+          in
+          if Option.is_some (Query.demand state.database Environment.signature path) then
+            Own_version path
+          else version
+      | _ -> version)
+  | _ -> version
+
 and each_call state (span : span) type_ mode =
   let receiver : Path.receiver = match mode with T.Read -> Read | Mut -> Mut | Own -> Own in
   let found = match versions state type_ "each" with Ok found -> found | Error _ -> [] in
-  match List.assoc_opt receiver found with
+  match Option.map (impl_method_if_resolved state type_) (List.assoc_opt receiver found) with
   | Some (Own_version method_path) -> (
       match function_signature state method_path with
       | Some (Ok signature) -> (

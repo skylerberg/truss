@@ -1,0 +1,230 @@
+use standard::text
+
+public opaque type Regex(pattern: String, program: List[UInt32], group_names: List[String])
+  derives Copyable
+
+public type PatternErrorKind =
+  | UnbalancedParenthesis
+  | UnbalancedBracket
+  | InvalidEscape
+  | InvalidRepetition
+  | InvalidRange
+  | UnsupportedSyntax
+  | TooLarge
+  derives Equal
+
+public type PatternError(kind: PatternErrorKind, offset: USize)
+  derives Equal
+
+impl Display for PatternError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type Match(start: USize, end: USize)
+  derives Equal
+  invariant start <= end
+
+public fn Match.length(self) -> USize
+  cost time O(1)
+{
+  self.end - self.start
+}
+
+public fn Match.slice(self, text: StringSlice) -> StringSlice
+  requires self.end <= text.length()
+  requires text.is_boundary(self.start)
+  requires text.is_boundary(self.end)
+  ensures result.length() == self.length()
+  cost time O(1)
+{
+  text.substring(from: self.start, to: self.end)
+}
+
+public opaque type Captures(groups: List[Option[Match]], names: List[String])
+  derives Copyable
+
+public fn Captures.whole(self) -> Match
+  cost time O(1)
+{
+  todo
+}
+
+public fn Captures.length(self) -> USize
+  cost time O(1)
+{
+  self.groups.length()
+}
+
+public fn Captures.get(self, index: USize) -> Option[Match]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Captures.named(self, name: StringSlice) -> Option[Match]
+  cost time O(self.names.length())
+{
+  todo
+}
+
+public fn escape(text: StringSlice) -> String
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn is_valid_pattern(literals: Slice[text::Literal]) -> Bool
+  cost time finite
+{
+  todo
+}
+
+public opaque type Part(source: String)
+
+impl From[StringSlice] for Part {
+  fn from(value: own StringSlice) -> Part {
+    Part(source: escape(value))
+  }
+}
+
+impl From[String] for Part {
+  fn from(value: own String) -> Part {
+    Part(source: escape(value.slice()))
+  }
+}
+
+impl From[Character] for Part {
+  fn from(value: own Character) -> Part {
+    todo
+  }
+}
+
+impl From[Regex] for Part {
+  fn from(value: own Regex) -> Part {
+    todo
+  }
+}
+
+impl FromTemplate for Regex {
+  type Part = Part
+
+  fn from_template(template: Template[Part]) -> Regex
+    requires is_valid_pattern(template.literals)
+  {
+    todo
+  }
+}
+
+public fn Regex.pattern(self) -> StringSlice
+  cost time O(1)
+{
+  self.pattern.slice()
+}
+
+public fn Regex.size(self) -> USize
+  cost time O(1)
+{
+  self.program.length()
+}
+
+public fn Regex.group_count(self) -> USize
+  cost time O(1)
+{
+  self.group_names.length()
+}
+
+public fn Regex.is_match(self, text: StringSlice) -> Bool
+  cost time O(text.length() * self.size())
+{
+  todo
+}
+
+public fn Regex.is_full_match(self, text: StringSlice) -> Bool
+  cost time O(text.length() * self.size())
+{
+  todo
+}
+
+public fn Regex.find(self, text: StringSlice) -> Option[Match]
+  ensures match result {
+    Some(found) => found.end <= text.length()
+    None => !self.is_match(text)
+  }
+  cost time O(text.length() * self.size())
+{
+  todo
+}
+
+public fn Regex.find_from(self, text: StringSlice, offset: USize) -> Option[Match]
+  requires offset <= text.length()
+  ensures match result {
+    Some(found) => offset <= found.start && found.end <= text.length()
+    None => true
+  }
+  cost time O(text.length() * self.size())
+{
+  todo
+}
+
+public fn Regex.find_all(self, text: StringSlice) -> List[Match]
+  cost time O(text.length() * self.size())
+{
+  todo
+}
+
+public fn Regex.captures(self, text: StringSlice) -> Option[Captures]
+  ensures (result is Some(_)) == self.is_match(text)
+  cost time O(text.length() * self.size())
+{
+  todo
+}
+
+public fn Regex.replace_first(self, text: StringSlice, replacement: StringSlice) -> String
+  cost time O(text.length() * self.size() + replacement.length())
+{
+  todo
+}
+
+public fn Regex.replace_all(self, text: StringSlice, replacement: StringSlice) -> String
+  cost time O(text.length() * (self.size() + replacement.length() + 1))
+{
+  todo
+}
+
+public fn Regex.replace_all_with(
+  self,
+  text: StringSlice,
+  replace: (fn(Captures) -> String cost time finite),
+) -> String
+  cost time finite
+{
+  todo
+}
+
+public fn Regex.split(self, text: StringSlice) -> List[StringSlice]
+  cost time O(text.length() * self.size())
+{
+  todo
+}
+
+impl Equal for Regex {
+  fn equal(self, other: Regex) -> Bool {
+    self.pattern == other.pattern
+  }
+}
+
+impl Display for Regex {
+  fn display(self, output: mut TextBuilder) {
+    mut output.write(self.pattern.slice())
+  }
+}
+
+impl text::Parse for Regex {
+  type Error = PatternError
+
+  fn parse(text: StringSlice) -> Result[Regex, PatternError] {
+    todo
+  }
+}

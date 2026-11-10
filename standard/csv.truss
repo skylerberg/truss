@@ -1,0 +1,92 @@
+use standard::streams
+
+public type Options(delimiter: Character = Character",", quote: Character = Character"\"", trim: Bool = false)
+
+public type ParseErrorKind = UnterminatedQuote | UnexpectedQuote
+  derives Equal
+
+public type ParseError(kind: ParseErrorKind, line: USize, column: USize)
+  derives Equal
+
+impl Display for ParseError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type ReadError =
+  | System(error: SystemError)
+  | Parse(error: ParseError)
+  derives Equal
+
+impl Display for ReadError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public fn parse(text: StringSlice, options: Options = Options()) -> Result[List[List[String]], ParseError]
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn format(rows: Slice[List[String]], options: Options = Options()) -> String
+  cost time finite
+{
+  todo
+}
+
+public fn format_row(fields: Slice[String], output: mut TextBuilder, options: Options = Options())
+  cost time finite
+{
+  todo
+}
+
+public type Table(header: List[String], rows: List[List[String]])
+
+public fn parse_table(text: StringSlice, options: Options = Options()) -> Result[Table, ParseError]
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn Table.column(self, name: StringSlice) -> Option[USize]
+  ensures match result {
+    Some(index) => index < self.header.length()
+    None => true
+  }
+  cost time O(self.header.length())
+{
+  todo
+}
+
+public fn Table.cell(self, row: USize, name: StringSlice) -> Option[StringSlice]
+  cost time O(self.header.length())
+{
+  todo
+}
+
+public fn Table.format(self, options: Options = Options()) -> String
+  cost time finite
+{
+  todo
+}
+
+public opaque type RowReader[Source: streams::Reader](source: streams::BufferedReader[Source], options: Options)
+
+public fn RowReader[Source: streams::Reader].new(source: own Source, options: Options = Options()) -> RowReader[Source] {
+  todo
+}
+
+public fn RowReader[Source: streams::Reader].next_row(mut self) -> Result[Option[List[String]], ReadError]
+  uses Handles
+{
+  todo
+}
+
+public fn RowReader[Source: streams::Reader].rows(mut self) yields own Result[List[String], ReadError]
+  uses Handles
+{
+  todo
+}

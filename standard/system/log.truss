@@ -1,0 +1,13 @@
+use standard::log
+
+internal type SystemLog()
+
+impl Log for SystemLog {
+  fn record(self, record: log::Record) {
+    todo
+  }
+
+  fn enabled(self, level: log::Level) -> Bool {
+    level >= log::Level.Information
+  }
+}

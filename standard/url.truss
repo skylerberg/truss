@@ -1,0 +1,248 @@
+use standard::network
+use standard::text
+
+public type Host =
+  | Domain(name: String)
+  | Address(address: network::IpAddress)
+  derives Equal, Hash
+
+impl Display for Host {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public opaque type Url(
+  scheme: String,
+  user_information: Option[String],
+  host: Option[Host],
+  port: Option[UInt16],
+  path: String,
+  query: Option[String],
+  fragment: Option[String],
+)
+  derives Copyable
+
+public type ParseError =
+  | MissingScheme
+  | InvalidScheme
+  | InvalidHost
+  | InvalidPort
+  | InvalidCharacter(offset: USize)
+  | InvalidPercentEncoding(offset: USize)
+  derives Equal
+
+impl Display for ParseError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type Parameter(name: String, value: String)
+  derives Equal
+
+public fn parse(text: StringSlice) -> Result[Url, ParseError]
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn encode_component(text: StringSlice) -> String
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn decode_component(text: StringSlice) -> Result[String, ParseError]
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn encode_query(parameters: Slice[Parameter]) -> String
+  cost time finite
+{
+  todo
+}
+
+public fn decode_query(text: StringSlice) -> Result[List[Parameter], ParseError]
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn Url.scheme(self) -> StringSlice
+  cost time O(1)
+{
+  self.scheme.slice()
+}
+
+public fn Url.user_information(self) -> Option[StringSlice]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Url.host(self) lends Option[Host]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Url.port(self) -> Option[UInt16]
+  cost time O(1)
+{
+  self.port
+}
+
+public fn Url.port_or_default(self) -> Option[UInt16]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Url.path(self) -> StringSlice
+  cost time O(1)
+{
+  self.path.slice()
+}
+
+public fn Url.path_segments(self) -> List[String]
+  cost time O(self.path.length())
+{
+  todo
+}
+
+public fn Url.query(self) -> Option[StringSlice]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Url.query_parameters(self) -> List[Parameter]
+  cost time finite
+{
+  todo
+}
+
+public fn Url.query_parameter(self, name: StringSlice) -> Option[String]
+  cost time finite
+{
+  todo
+}
+
+public fn Url.fragment(self) -> Option[StringSlice]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
+  cost time finite
+{
+  todo
+}
+
+public fn Url.with_path(own self, path: StringSlice) -> Url
+  cost time finite
+{
+  todo
+}
+
+public fn Url.with_path_segment(own self, segment: StringSlice) -> Url
+  cost time finite
+{
+  todo
+}
+
+public fn Url.with_query(own self, parameters: Slice[Parameter]) -> Url
+  cost time finite
+{
+  todo
+}
+
+public fn Url.with_query_parameter(own self, name: StringSlice, value: StringSlice) -> Url
+  cost time finite
+{
+  todo
+}
+
+public fn Url.with_fragment(own self, fragment: Option[String]) -> Url
+  cost time O(1)
+{
+  todo
+}
+
+public fn Url.with_port(own self, port: Option[UInt16]) -> Url
+  cost time O(1)
+{
+  todo
+}
+
+impl Equal for Url {
+  fn equal(self, other: Url) -> Bool {
+    todo
+  }
+}
+
+impl Hash for Url {
+  fn hash(self, hasher: mut Hasher) {
+    todo
+  }
+}
+
+impl Display for Url {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl text::Parse for Url {
+  type Error = ParseError
+
+  fn parse(text: StringSlice) -> Result[Url, ParseError] {
+    todo
+  }
+}
+
+public opaque type Component(text: String)
+
+impl From[StringSlice] for Component {
+  fn from(value: own StringSlice) -> Component {
+    Component(text: encode_component(value))
+  }
+}
+
+impl From[String] for Component {
+  fn from(value: own String) -> Component {
+    Component(text: encode_component(value.slice()))
+  }
+}
+
+impl From[Int64] for Component {
+  fn from(value: own Int64) -> Component {
+    Component(text: "${value}")
+  }
+}
+
+impl From[UInt64] for Component {
+  fn from(value: own UInt64) -> Component {
+    Component(text: "${value}")
+  }
+}
+
+impl FromTemplate for Url {
+  type Part = Component
+
+  fn from_template(template: Template[Component]) -> Url
+    requires is_valid_template(template.literals)
+  {
+    todo
+  }
+}
+
+public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
+  cost time finite
+{
+  todo
+}

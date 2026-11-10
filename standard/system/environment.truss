@@ -1,3 +1,4 @@
+use standard::environment
 use standard::intrinsic
 use standard::system::calls
 
@@ -13,5 +14,29 @@ impl Environment for SystemEnvironment {
       }
       Err(_) => None
     }
+  }
+
+  fn variables(self) -> List[environment::Variable] {
+    todo
+  }
+
+  fn current_directory(self) -> Result[Path, SystemError] {
+    todo
+  }
+
+  fn platform(self) -> environment::Platform {
+    todo
+  }
+
+  fn location(self, location: environment::Location) -> Option[Path] {
+    todo
+  }
+
+  fn local_zone(self) -> Option[String] {
+    todo
+  }
+
+  fn zone_rules(self, name: StringSlice) -> Option[List[UInt8]] {
+    todo
   }
 }

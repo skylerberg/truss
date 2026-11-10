@@ -193,6 +193,11 @@ type context = {
   mutable proving : bool;
       (** In a theorem, a [proof] block, or a law's proof, where a [todo] is a hole. *)
   mutable holes : (Names.key * span) list;  (** Reversed. *)
+  mutable validating : T.ty list;
+      (** The types whose validity is being computed. Computing validity evaluates the type's
+          invariant, and a call in the invariant assumes the validity of its arguments and result.
+          For a type that contains itself through a type with such an invariant, such as a tree
+          whose children are a [Map], that recursion would not terminate. *)
   mutable call_targets : (L.term * C.local) list;
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
 }
@@ -1102,14 +1107,14 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
       oblige context frame Unreachable written.span "This `unreachable` may be reached."
         (L.Boolean false);
       None
-  | Todo when context.proving ->
-      (* A hole in a proof: what follows it on this path is not shown, and
-         a build refuses what can reach it. *)
-      context.holes <- (source.key, written.span) :: context.holes;
+  | Todo ->
+      (* A [todo] ends its path: obligations after it are not checked. This
+         is sound because a program that can reach a [todo] is never built.
+         A [todo] in a proof is also recorded as a hole. *)
+      if context.proving then context.holes <- (source.key, written.span) :: context.holes;
       Some
         ( { frame with condition = L.Boolean false },
           arrive context frame "todo" (type_of context frame written) )
-  | Todo -> Some (frame, arrive context frame "todo" (type_of context frame written))
   | Break -> (
       match frame.loop with
       | Some exits ->
@@ -4161,8 +4166,12 @@ and invariants_of context (ty : T.ty) =
    here it is assumed where a value arrives and shown where one leaves, and
    never unfolded. *)
 and validity context frame ~assuming ?(deep = true) ?(seen = []) ty term =
-  if List.exists (T.equal ty) seen then L.Boolean true
+  if List.exists (T.equal ty) seen || List.exists (T.equal ty) context.validating then
+    L.Boolean true
   else
+    let validating = context.validating in
+    context.validating <- ty :: validating;
+    Fun.protect ~finally:(fun () -> context.validating <- validating) @@ fun () ->
     let own =
       match invariants_of context ty with
       | Some _ when constructors context ty = None ->
@@ -6903,6 +6912,7 @@ let new_context database ~home ~current ~terminates ~measures checked =
     cursors = [];
     proving = false;
     holes = [];
+    validating = [];
     call_targets = [];
     fits =
       List.filter_map

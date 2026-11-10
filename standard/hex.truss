@@ -1,0 +1,29 @@
+public type DecodeError =
+  | InvalidCharacter(offset: USize)
+  | OddLength
+  derives Equal
+
+impl Display for DecodeError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public fn encode(bytes: Slice[UInt8], uppercase: Bool = false) -> String
+  ensures result.length() == 2 * bytes.length()
+  cost time O(bytes.length())
+  cost allocations <= 1
+{
+  todo
+}
+
+public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError]
+  ensures match result {
+    Ok(bytes) => 2 * bytes.length() == text.length()
+    Err(_) => true
+  }
+  cost time O(text.length())
+  cost allocations <= 1
+{
+  todo
+}

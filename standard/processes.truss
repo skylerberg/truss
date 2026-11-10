@@ -1,0 +1,243 @@
+use standard::streams
+use standard::text
+
+public opaque type Command(
+  program: String,
+  arguments: List[String],
+  variables: List[Variable],
+  clear_variables: Bool,
+  directory: Option[Path],
+  input: Redirect,
+  output: Redirect,
+  error_output: Redirect,
+)
+
+public type Variable(name: String, value: String)
+
+public type Redirect = Inherit | Capture | Discard | Pipe
+  derives Equal
+
+public opaque type Argument(text: String)
+
+impl From[String] for Argument {
+  fn from(value: own String) -> Argument {
+    Argument(text: own value)
+  }
+}
+
+impl From[StringSlice] for Argument {
+  fn from(value: own StringSlice) -> Argument {
+    Argument(text: value.to_string())
+  }
+}
+
+impl From[Path] for Argument {
+  fn from(value: own Path) -> Argument {
+    todo
+  }
+}
+
+impl From[Int64] for Argument {
+  fn from(value: own Int64) -> Argument {
+    todo
+  }
+}
+
+impl FromTemplate for Command {
+  type Part = Argument
+
+  fn from_template(template: Template[Argument]) -> Command
+    requires is_valid_command(template.literals)
+  {
+    todo
+  }
+}
+
+public fn is_valid_command(literals: Slice[text::Literal]) -> Bool
+  cost time finite
+{
+  todo
+}
+
+public fn Command.new(program: StringSlice) -> Command {
+  Command(
+    program: program.to_string(),
+    arguments: [],
+    variables: [],
+    clear_variables: false,
+    directory: None,
+    input: Redirect.Inherit,
+    output: Redirect.Inherit,
+    error_output: Redirect.Inherit,
+  )
+}
+
+public fn Command.argument(own self, argument: StringSlice) -> Command {
+  var command = own self
+  mut command.arguments.push(argument.to_string())
+  command
+}
+
+public fn Command.arguments(own self, arguments: Slice[String]) -> Command {
+  todo
+}
+
+public fn Command.variable(own self, name: StringSlice, value: StringSlice) -> Command {
+  todo
+}
+
+public fn Command.without_inherited_variables(own self) -> Command {
+  todo
+}
+
+public fn Command.directory(own self, directory: own Path) -> Command {
+  todo
+}
+
+public fn Command.input(own self, input: Redirect) -> Command {
+  todo
+}
+
+public fn Command.output(own self, output: Redirect) -> Command {
+  todo
+}
+
+public fn Command.error_output(own self, error_output: Redirect) -> Command {
+  todo
+}
+
+public fn Command.program(self) -> StringSlice
+  cost time O(1)
+{
+  self.program.slice()
+}
+
+public fn Command.argument_list(self) -> Slice[String]
+  cost time O(1)
+{
+  self.arguments.slice()
+}
+
+public type ExitStatus =
+  | Exited(code: UInt8)
+  | Signaled(signal: Signal)
+  derives Equal
+
+public fn ExitStatus.is_success(self) -> Bool
+  cost time O(1)
+{
+  self is Exited(0)
+}
+
+public type Signal =
+  | Interrupt
+  | Terminate
+  | Kill
+  | HangUp
+  | Quit
+  | User1
+  | User2
+  | Other(number: Int32)
+  derives Equal, Hash
+
+public fn Signal.from_number(number: Int32) -> Signal
+  cost time O(1)
+{
+  if number == 1 {
+    Signal.HangUp
+  } else if number == 2 {
+    Signal.Interrupt
+  } else if number == 3 {
+    Signal.Quit
+  } else if number == 9 {
+    Signal.Kill
+  } else if number == 15 {
+    Signal.Terminate
+  } else {
+    Signal.Other(number: number)
+  }
+}
+
+public type Output(status: ExitStatus, output: List[UInt8], error_output: List[UInt8])
+
+public fn Output.text(self) -> Result[String, text::Utf8Error]
+  cost time O(self.output.length())
+{
+  todo
+}
+
+public opaque type Child(
+  handle: streams::Handle,
+  identifier: UInt32,
+  input: Option[ChildInput],
+  output: Option[ChildOutput],
+  error_output: Option[ChildOutput],
+)
+
+public fn Child.identifier(self) -> UInt32
+  cost time O(1)
+{
+  self.identifier
+}
+
+public fn Child.take_input(mut self) -> Option[ChildInput]
+  cost time O(1)
+{
+  mut self.input.take()
+}
+
+public fn Child.take_output(mut self) -> Option[ChildOutput]
+  cost time O(1)
+{
+  mut self.output.take()
+}
+
+public fn Child.take_error_output(mut self) -> Option[ChildOutput]
+  cost time O(1)
+{
+  mut self.error_output.take()
+}
+
+public fn Child.wait(mut self) -> Result[ExitStatus, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn Child.signal(mut self, signal: Signal) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public opaque type ChildInput(handle: streams::Handle)
+
+impl streams::Writer for ChildInput {
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+    uses Handles
+  {
+    todo
+  }
+
+  fn flush(mut self) -> Result[Unit, SystemError]
+    uses Handles
+  {
+    Ok(Unit)
+  }
+}
+
+public fn ChildInput.close(own self) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public opaque type ChildOutput(handle: streams::Handle)
+
+impl streams::Reader for ChildOutput {
+  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles
+  {
+    todo
+  }
+}

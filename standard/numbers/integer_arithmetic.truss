@@ -1,0 +1,1911 @@
+use standard::core
+
+public let Int8.bits: USize = 8
+
+public fn Int8.checked_divide(self, other: Int8) -> Option[Int8]
+  ensures (result is None) == (other == 0 || (self == Int8.minimum && other == -1))
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.checked_remainder(self, other: Int8) -> Option[Int8]
+  ensures (result is None) == (other == 0 || (self == Int8.minimum && other == -1))
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.checked_power(self, exponent: UInt32) -> Option[Int8]
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn Int8.wrapping_power(self, exponent: UInt32) -> Int8
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn Int8.saturating_power(self, exponent: UInt32) -> Int8
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn Int8.saturating_subtract(self, other: Int8) -> Int8
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.saturating_multiply(self, other: Int8) -> Int8
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.floor_divide(self, divisor: Int8) -> Int8
+  requires divisor != 0
+  requires self != Int8.minimum || divisor != -1
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.floor_modulo(self, divisor: Int8) -> Int8
+  requires divisor != 0
+  requires self != Int8.minimum || divisor != -1
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.absolute_difference(self, other: Int8) -> UInt8
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.to_float64(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.to_float32(self) -> Float32
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.saturating_from(value: Float64) -> Int8
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.total(items: Slice[Int8]) -> Integer
+  cost time finite
+{
+  todo
+}
+
+public fn Int8.sum(items: Slice[Int8]) -> Int8
+  requires Int8.minimum <= Int8.total(items) && Int8.total(items) <= Int8.maximum
+  ensures result == Int8.total(items)
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int8.checked_sum(items: Slice[Int8]) -> Option[Int8]
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int8.saturating_sum(items: Slice[Int8]) -> Int8
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int8.wrapping_sum(items: Slice[Int8]) -> Int8
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int8.absolute(self) -> Int8
+  requires self != Int8.minimum
+  ensures result >= 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.checked_absolute(self) -> Option[Int8]
+  ensures (result is None) == (self == Int8.minimum)
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.unsigned_absolute(self) -> UInt8
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.checked_negate(self) -> Option[Int8]
+  ensures (result is None) == (self == Int8.minimum)
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.wrapping_negate(self) -> Int8
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.sign(self) -> Int8
+  ensures -1 <= result && result <= 1
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int8.is_negative(self) -> Bool
+  cost time O(1)
+{
+  self < 0
+}
+
+public fn Int8.is_positive(self) -> Bool
+  cost time O(1)
+{
+  self > 0
+}
+
+impl core::Countable for Int8 {
+  fn successor(self) -> Option[Int8]
+    cost time O(1)
+  {
+    self.checked_add(1)
+  }
+
+  fn predecessor(self) -> Option[Int8]
+    cost time O(1)
+  {
+    self.checked_subtract(1)
+  }
+
+  fn advanced(self, by: USize) -> Option[Int8]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn retreated(self, by: USize) -> Option[Int8]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn steps_to(self, other: Int8) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+public let Int16.bits: USize = 16
+
+public fn Int16.checked_divide(self, other: Int16) -> Option[Int16]
+  ensures (result is None) == (other == 0 || (self == Int16.minimum && other == -1))
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.checked_remainder(self, other: Int16) -> Option[Int16]
+  ensures (result is None) == (other == 0 || (self == Int16.minimum && other == -1))
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.checked_power(self, exponent: UInt32) -> Option[Int16]
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn Int16.wrapping_power(self, exponent: UInt32) -> Int16
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn Int16.saturating_power(self, exponent: UInt32) -> Int16
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn Int16.saturating_subtract(self, other: Int16) -> Int16
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.saturating_multiply(self, other: Int16) -> Int16
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.floor_divide(self, divisor: Int16) -> Int16
+  requires divisor != 0
+  requires self != Int16.minimum || divisor != -1
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.floor_modulo(self, divisor: Int16) -> Int16
+  requires divisor != 0
+  requires self != Int16.minimum || divisor != -1
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.absolute_difference(self, other: Int16) -> UInt16
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.to_float64(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.to_float32(self) -> Float32
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.saturating_from(value: Float64) -> Int16
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.total(items: Slice[Int16]) -> Integer
+  cost time finite
+{
+  todo
+}
+
+public fn Int16.sum(items: Slice[Int16]) -> Int16
+  requires Int16.minimum <= Int16.total(items) && Int16.total(items) <= Int16.maximum
+  ensures result == Int16.total(items)
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int16.checked_sum(items: Slice[Int16]) -> Option[Int16]
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int16.saturating_sum(items: Slice[Int16]) -> Int16
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int16.wrapping_sum(items: Slice[Int16]) -> Int16
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int16.absolute(self) -> Int16
+  requires self != Int16.minimum
+  ensures result >= 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.checked_absolute(self) -> Option[Int16]
+  ensures (result is None) == (self == Int16.minimum)
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.unsigned_absolute(self) -> UInt16
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.checked_negate(self) -> Option[Int16]
+  ensures (result is None) == (self == Int16.minimum)
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.wrapping_negate(self) -> Int16
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.sign(self) -> Int16
+  ensures -1 <= result && result <= 1
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int16.is_negative(self) -> Bool
+  cost time O(1)
+{
+  self < 0
+}
+
+public fn Int16.is_positive(self) -> Bool
+  cost time O(1)
+{
+  self > 0
+}
+
+impl core::Countable for Int16 {
+  fn successor(self) -> Option[Int16]
+    cost time O(1)
+  {
+    self.checked_add(1)
+  }
+
+  fn predecessor(self) -> Option[Int16]
+    cost time O(1)
+  {
+    self.checked_subtract(1)
+  }
+
+  fn advanced(self, by: USize) -> Option[Int16]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn retreated(self, by: USize) -> Option[Int16]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn steps_to(self, other: Int16) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+public let Int32.bits: USize = 32
+
+public fn Int32.checked_divide(self, other: Int32) -> Option[Int32]
+  ensures (result is None) == (other == 0 || (self == Int32.minimum && other == -1))
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.checked_remainder(self, other: Int32) -> Option[Int32]
+  ensures (result is None) == (other == 0 || (self == Int32.minimum && other == -1))
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.checked_power(self, exponent: UInt32) -> Option[Int32]
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn Int32.wrapping_power(self, exponent: UInt32) -> Int32
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn Int32.saturating_power(self, exponent: UInt32) -> Int32
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn Int32.saturating_subtract(self, other: Int32) -> Int32
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.saturating_multiply(self, other: Int32) -> Int32
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.floor_divide(self, divisor: Int32) -> Int32
+  requires divisor != 0
+  requires self != Int32.minimum || divisor != -1
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.floor_modulo(self, divisor: Int32) -> Int32
+  requires divisor != 0
+  requires self != Int32.minimum || divisor != -1
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.absolute_difference(self, other: Int32) -> UInt32
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.to_float64(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.to_float32(self) -> Float32
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.saturating_from(value: Float64) -> Int32
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.total(items: Slice[Int32]) -> Integer
+  cost time finite
+{
+  todo
+}
+
+public fn Int32.sum(items: Slice[Int32]) -> Int32
+  requires Int32.minimum <= Int32.total(items) && Int32.total(items) <= Int32.maximum
+  ensures result == Int32.total(items)
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int32.checked_sum(items: Slice[Int32]) -> Option[Int32]
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int32.saturating_sum(items: Slice[Int32]) -> Int32
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int32.wrapping_sum(items: Slice[Int32]) -> Int32
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int32.absolute(self) -> Int32
+  requires self != Int32.minimum
+  ensures result >= 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.checked_absolute(self) -> Option[Int32]
+  ensures (result is None) == (self == Int32.minimum)
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.unsigned_absolute(self) -> UInt32
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.checked_negate(self) -> Option[Int32]
+  ensures (result is None) == (self == Int32.minimum)
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.wrapping_negate(self) -> Int32
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.sign(self) -> Int32
+  ensures -1 <= result && result <= 1
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int32.is_negative(self) -> Bool
+  cost time O(1)
+{
+  self < 0
+}
+
+public fn Int32.is_positive(self) -> Bool
+  cost time O(1)
+{
+  self > 0
+}
+
+impl core::Countable for Int32 {
+  fn successor(self) -> Option[Int32]
+    cost time O(1)
+  {
+    self.checked_add(1)
+  }
+
+  fn predecessor(self) -> Option[Int32]
+    cost time O(1)
+  {
+    self.checked_subtract(1)
+  }
+
+  fn advanced(self, by: USize) -> Option[Int32]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn retreated(self, by: USize) -> Option[Int32]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn steps_to(self, other: Int32) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+public let Int64.bits: USize = 64
+
+public fn Int64.checked_divide(self, other: Int64) -> Option[Int64]
+  ensures (result is None) == (other == 0 || (self == Int64.minimum && other == -1))
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.checked_remainder(self, other: Int64) -> Option[Int64]
+  ensures (result is None) == (other == 0 || (self == Int64.minimum && other == -1))
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.checked_power(self, exponent: UInt32) -> Option[Int64]
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn Int64.wrapping_power(self, exponent: UInt32) -> Int64
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn Int64.saturating_power(self, exponent: UInt32) -> Int64
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn Int64.saturating_subtract(self, other: Int64) -> Int64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.saturating_multiply(self, other: Int64) -> Int64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.floor_divide(self, divisor: Int64) -> Int64
+  requires divisor != 0
+  requires self != Int64.minimum || divisor != -1
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.floor_modulo(self, divisor: Int64) -> Int64
+  requires divisor != 0
+  requires self != Int64.minimum || divisor != -1
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.absolute_difference(self, other: Int64) -> UInt64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.to_float64(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.to_float32(self) -> Float32
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.saturating_from(value: Float64) -> Int64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.total(items: Slice[Int64]) -> Integer
+  cost time finite
+{
+  todo
+}
+
+public fn Int64.sum(items: Slice[Int64]) -> Int64
+  requires Int64.minimum <= Int64.total(items) && Int64.total(items) <= Int64.maximum
+  ensures result == Int64.total(items)
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int64.checked_sum(items: Slice[Int64]) -> Option[Int64]
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int64.saturating_sum(items: Slice[Int64]) -> Int64
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int64.wrapping_sum(items: Slice[Int64]) -> Int64
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Int64.absolute(self) -> Int64
+  requires self != Int64.minimum
+  ensures result >= 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.checked_absolute(self) -> Option[Int64]
+  ensures (result is None) == (self == Int64.minimum)
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.unsigned_absolute(self) -> UInt64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.checked_negate(self) -> Option[Int64]
+  ensures (result is None) == (self == Int64.minimum)
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.wrapping_negate(self) -> Int64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.sign(self) -> Int64
+  ensures -1 <= result && result <= 1
+  cost time O(1)
+{
+  todo
+}
+
+public fn Int64.is_negative(self) -> Bool
+  cost time O(1)
+{
+  self < 0
+}
+
+public fn Int64.is_positive(self) -> Bool
+  cost time O(1)
+{
+  self > 0
+}
+
+impl core::Countable for Int64 {
+  fn successor(self) -> Option[Int64]
+    cost time O(1)
+  {
+    self.checked_add(1)
+  }
+
+  fn predecessor(self) -> Option[Int64]
+    cost time O(1)
+  {
+    self.checked_subtract(1)
+  }
+
+  fn advanced(self, by: USize) -> Option[Int64]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn retreated(self, by: USize) -> Option[Int64]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn steps_to(self, other: Int64) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+public let ISize.bits: USize = 64
+
+public fn ISize.checked_divide(self, other: ISize) -> Option[ISize]
+  ensures (result is None) == (other == 0 || (self == ISize.minimum && other == -1))
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.checked_remainder(self, other: ISize) -> Option[ISize]
+  ensures (result is None) == (other == 0 || (self == ISize.minimum && other == -1))
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.checked_power(self, exponent: UInt32) -> Option[ISize]
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn ISize.wrapping_power(self, exponent: UInt32) -> ISize
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn ISize.saturating_power(self, exponent: UInt32) -> ISize
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn ISize.saturating_subtract(self, other: ISize) -> ISize
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.saturating_multiply(self, other: ISize) -> ISize
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.floor_divide(self, divisor: ISize) -> ISize
+  requires divisor != 0
+  requires self != ISize.minimum || divisor != -1
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.floor_modulo(self, divisor: ISize) -> ISize
+  requires divisor != 0
+  requires self != ISize.minimum || divisor != -1
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.absolute_difference(self, other: ISize) -> USize
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.to_float64(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.to_float32(self) -> Float32
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.saturating_from(value: Float64) -> ISize
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.total(items: Slice[ISize]) -> Integer
+  cost time finite
+{
+  todo
+}
+
+public fn ISize.sum(items: Slice[ISize]) -> ISize
+  requires ISize.minimum <= ISize.total(items) && ISize.total(items) <= ISize.maximum
+  ensures result == ISize.total(items)
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn ISize.checked_sum(items: Slice[ISize]) -> Option[ISize]
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn ISize.saturating_sum(items: Slice[ISize]) -> ISize
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn ISize.wrapping_sum(items: Slice[ISize]) -> ISize
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn ISize.absolute(self) -> ISize
+  requires self != ISize.minimum
+  ensures result >= 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.checked_absolute(self) -> Option[ISize]
+  ensures (result is None) == (self == ISize.minimum)
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.unsigned_absolute(self) -> USize
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.checked_negate(self) -> Option[ISize]
+  ensures (result is None) == (self == ISize.minimum)
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.wrapping_negate(self) -> ISize
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.sign(self) -> ISize
+  ensures -1 <= result && result <= 1
+  cost time O(1)
+{
+  todo
+}
+
+public fn ISize.is_negative(self) -> Bool
+  cost time O(1)
+{
+  self < 0
+}
+
+public fn ISize.is_positive(self) -> Bool
+  cost time O(1)
+{
+  self > 0
+}
+
+impl core::Countable for ISize {
+  fn successor(self) -> Option[ISize]
+    cost time O(1)
+  {
+    self.checked_add(1)
+  }
+
+  fn predecessor(self) -> Option[ISize]
+    cost time O(1)
+  {
+    self.checked_subtract(1)
+  }
+
+  fn advanced(self, by: USize) -> Option[ISize]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn retreated(self, by: USize) -> Option[ISize]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn steps_to(self, other: ISize) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+public let UInt8.bits: USize = 8
+
+public fn UInt8.checked_divide(self, other: UInt8) -> Option[UInt8]
+  ensures (result is None) == (other == 0)
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt8.checked_remainder(self, other: UInt8) -> Option[UInt8]
+  ensures (result is None) == (other == 0)
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt8.checked_power(self, exponent: UInt32) -> Option[UInt8]
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn UInt8.wrapping_power(self, exponent: UInt32) -> UInt8
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn UInt8.saturating_power(self, exponent: UInt32) -> UInt8
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn UInt8.saturating_subtract(self, other: UInt8) -> UInt8
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt8.saturating_multiply(self, other: UInt8) -> UInt8
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt8.floor_divide(self, divisor: UInt8) -> UInt8
+  requires divisor != 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt8.floor_modulo(self, divisor: UInt8) -> UInt8
+  requires divisor != 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt8.absolute_difference(self, other: UInt8) -> UInt8
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt8.to_float64(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt8.to_float32(self) -> Float32
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt8.saturating_from(value: Float64) -> UInt8
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt8.total(items: Slice[UInt8]) -> Integer
+  cost time finite
+{
+  todo
+}
+
+public fn UInt8.sum(items: Slice[UInt8]) -> UInt8
+  requires UInt8.minimum <= UInt8.total(items) && UInt8.total(items) <= UInt8.maximum
+  ensures result == UInt8.total(items)
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt8.checked_sum(items: Slice[UInt8]) -> Option[UInt8]
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt8.saturating_sum(items: Slice[UInt8]) -> UInt8
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt8.wrapping_sum(items: Slice[UInt8]) -> UInt8
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt8.is_power_of_two(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt8.next_power_of_two(self) -> Option[UInt8]
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt8.greatest_common_divisor(self, other: UInt8) -> UInt8
+  cost time O(8)
+{
+  todo
+}
+
+public fn UInt8.least_common_multiple(self, other: UInt8) -> Option[UInt8]
+  cost time O(8)
+{
+  todo
+}
+
+public fn UInt8.integer_square_root(self) -> UInt8
+  ensures result * result <= self
+  cost time O(8)
+{
+  todo
+}
+
+impl core::Countable for UInt8 {
+  fn successor(self) -> Option[UInt8]
+    cost time O(1)
+  {
+    self.checked_add(1)
+  }
+
+  fn predecessor(self) -> Option[UInt8]
+    cost time O(1)
+  {
+    self.checked_subtract(1)
+  }
+
+  fn advanced(self, by: USize) -> Option[UInt8]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn retreated(self, by: USize) -> Option[UInt8]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn steps_to(self, other: UInt8) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+public let UInt16.bits: USize = 16
+
+public fn UInt16.checked_divide(self, other: UInt16) -> Option[UInt16]
+  ensures (result is None) == (other == 0)
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt16.checked_remainder(self, other: UInt16) -> Option[UInt16]
+  ensures (result is None) == (other == 0)
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt16.checked_power(self, exponent: UInt32) -> Option[UInt16]
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn UInt16.wrapping_power(self, exponent: UInt32) -> UInt16
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn UInt16.saturating_power(self, exponent: UInt32) -> UInt16
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn UInt16.saturating_subtract(self, other: UInt16) -> UInt16
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt16.saturating_multiply(self, other: UInt16) -> UInt16
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt16.floor_divide(self, divisor: UInt16) -> UInt16
+  requires divisor != 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt16.floor_modulo(self, divisor: UInt16) -> UInt16
+  requires divisor != 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt16.absolute_difference(self, other: UInt16) -> UInt16
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt16.to_float64(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt16.to_float32(self) -> Float32
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt16.saturating_from(value: Float64) -> UInt16
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt16.total(items: Slice[UInt16]) -> Integer
+  cost time finite
+{
+  todo
+}
+
+public fn UInt16.sum(items: Slice[UInt16]) -> UInt16
+  requires UInt16.minimum <= UInt16.total(items) && UInt16.total(items) <= UInt16.maximum
+  ensures result == UInt16.total(items)
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt16.checked_sum(items: Slice[UInt16]) -> Option[UInt16]
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt16.saturating_sum(items: Slice[UInt16]) -> UInt16
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt16.wrapping_sum(items: Slice[UInt16]) -> UInt16
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt16.is_power_of_two(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt16.next_power_of_two(self) -> Option[UInt16]
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt16.greatest_common_divisor(self, other: UInt16) -> UInt16
+  cost time O(16)
+{
+  todo
+}
+
+public fn UInt16.least_common_multiple(self, other: UInt16) -> Option[UInt16]
+  cost time O(16)
+{
+  todo
+}
+
+public fn UInt16.integer_square_root(self) -> UInt16
+  ensures result * result <= self
+  cost time O(16)
+{
+  todo
+}
+
+impl core::Countable for UInt16 {
+  fn successor(self) -> Option[UInt16]
+    cost time O(1)
+  {
+    self.checked_add(1)
+  }
+
+  fn predecessor(self) -> Option[UInt16]
+    cost time O(1)
+  {
+    self.checked_subtract(1)
+  }
+
+  fn advanced(self, by: USize) -> Option[UInt16]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn retreated(self, by: USize) -> Option[UInt16]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn steps_to(self, other: UInt16) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+public let UInt32.bits: USize = 32
+
+public fn UInt32.checked_divide(self, other: UInt32) -> Option[UInt32]
+  ensures (result is None) == (other == 0)
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt32.checked_remainder(self, other: UInt32) -> Option[UInt32]
+  ensures (result is None) == (other == 0)
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt32.checked_power(self, exponent: UInt32) -> Option[UInt32]
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn UInt32.wrapping_power(self, exponent: UInt32) -> UInt32
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn UInt32.saturating_power(self, exponent: UInt32) -> UInt32
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn UInt32.saturating_subtract(self, other: UInt32) -> UInt32
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt32.saturating_multiply(self, other: UInt32) -> UInt32
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt32.floor_divide(self, divisor: UInt32) -> UInt32
+  requires divisor != 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt32.floor_modulo(self, divisor: UInt32) -> UInt32
+  requires divisor != 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt32.absolute_difference(self, other: UInt32) -> UInt32
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt32.to_float64(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt32.to_float32(self) -> Float32
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt32.saturating_from(value: Float64) -> UInt32
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt32.total(items: Slice[UInt32]) -> Integer
+  cost time finite
+{
+  todo
+}
+
+public fn UInt32.sum(items: Slice[UInt32]) -> UInt32
+  requires UInt32.minimum <= UInt32.total(items) && UInt32.total(items) <= UInt32.maximum
+  ensures result == UInt32.total(items)
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt32.checked_sum(items: Slice[UInt32]) -> Option[UInt32]
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt32.saturating_sum(items: Slice[UInt32]) -> UInt32
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt32.wrapping_sum(items: Slice[UInt32]) -> UInt32
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt32.is_power_of_two(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt32.next_power_of_two(self) -> Option[UInt32]
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt32.greatest_common_divisor(self, other: UInt32) -> UInt32
+  cost time O(32)
+{
+  todo
+}
+
+public fn UInt32.least_common_multiple(self, other: UInt32) -> Option[UInt32]
+  cost time O(32)
+{
+  todo
+}
+
+public fn UInt32.integer_square_root(self) -> UInt32
+  ensures result * result <= self
+  cost time O(32)
+{
+  todo
+}
+
+impl core::Countable for UInt32 {
+  fn successor(self) -> Option[UInt32]
+    cost time O(1)
+  {
+    self.checked_add(1)
+  }
+
+  fn predecessor(self) -> Option[UInt32]
+    cost time O(1)
+  {
+    self.checked_subtract(1)
+  }
+
+  fn advanced(self, by: USize) -> Option[UInt32]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn retreated(self, by: USize) -> Option[UInt32]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn steps_to(self, other: UInt32) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+public let UInt64.bits: USize = 64
+
+public fn UInt64.checked_divide(self, other: UInt64) -> Option[UInt64]
+  ensures (result is None) == (other == 0)
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt64.checked_remainder(self, other: UInt64) -> Option[UInt64]
+  ensures (result is None) == (other == 0)
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt64.checked_power(self, exponent: UInt32) -> Option[UInt64]
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn UInt64.wrapping_power(self, exponent: UInt32) -> UInt64
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn UInt64.saturating_power(self, exponent: UInt32) -> UInt64
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn UInt64.saturating_subtract(self, other: UInt64) -> UInt64
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt64.saturating_multiply(self, other: UInt64) -> UInt64
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt64.floor_divide(self, divisor: UInt64) -> UInt64
+  requires divisor != 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt64.floor_modulo(self, divisor: UInt64) -> UInt64
+  requires divisor != 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt64.absolute_difference(self, other: UInt64) -> UInt64
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt64.to_float64(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt64.to_float32(self) -> Float32
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt64.saturating_from(value: Float64) -> UInt64
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt64.total(items: Slice[UInt64]) -> Integer
+  cost time finite
+{
+  todo
+}
+
+public fn UInt64.sum(items: Slice[UInt64]) -> UInt64
+  requires UInt64.minimum <= UInt64.total(items) && UInt64.total(items) <= UInt64.maximum
+  ensures result == UInt64.total(items)
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt64.checked_sum(items: Slice[UInt64]) -> Option[UInt64]
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt64.saturating_sum(items: Slice[UInt64]) -> UInt64
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt64.wrapping_sum(items: Slice[UInt64]) -> UInt64
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn UInt64.is_power_of_two(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt64.next_power_of_two(self) -> Option[UInt64]
+  cost time O(1)
+{
+  todo
+}
+
+public fn UInt64.greatest_common_divisor(self, other: UInt64) -> UInt64
+  cost time O(64)
+{
+  todo
+}
+
+public fn UInt64.least_common_multiple(self, other: UInt64) -> Option[UInt64]
+  cost time O(64)
+{
+  todo
+}
+
+public fn UInt64.integer_square_root(self) -> UInt64
+  ensures result * result <= self
+  cost time O(64)
+{
+  todo
+}
+
+impl core::Countable for UInt64 {
+  fn successor(self) -> Option[UInt64]
+    cost time O(1)
+  {
+    self.checked_add(1)
+  }
+
+  fn predecessor(self) -> Option[UInt64]
+    cost time O(1)
+  {
+    self.checked_subtract(1)
+  }
+
+  fn advanced(self, by: USize) -> Option[UInt64]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn retreated(self, by: USize) -> Option[UInt64]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn steps_to(self, other: UInt64) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+}
+
+public let USize.bits: USize = 64
+
+public fn USize.checked_divide(self, other: USize) -> Option[USize]
+  ensures (result is None) == (other == 0)
+  cost time O(1)
+{
+  todo
+}
+
+public fn USize.checked_remainder(self, other: USize) -> Option[USize]
+  ensures (result is None) == (other == 0)
+  cost time O(1)
+{
+  todo
+}
+
+public fn USize.checked_power(self, exponent: UInt32) -> Option[USize]
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn USize.wrapping_power(self, exponent: UInt32) -> USize
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn USize.saturating_power(self, exponent: UInt32) -> USize
+  cost time O(log(exponent))
+{
+  todo
+}
+
+public fn USize.saturating_subtract(self, other: USize) -> USize
+  cost time O(1)
+{
+  todo
+}
+
+public fn USize.saturating_multiply(self, other: USize) -> USize
+  cost time O(1)
+{
+  todo
+}
+
+public fn USize.floor_divide(self, divisor: USize) -> USize
+  requires divisor != 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn USize.floor_modulo(self, divisor: USize) -> USize
+  requires divisor != 0
+  cost time O(1)
+{
+  todo
+}
+
+public fn USize.absolute_difference(self, other: USize) -> USize
+  cost time O(1)
+{
+  todo
+}
+
+public fn USize.to_float64(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+public fn USize.to_float32(self) -> Float32
+  cost time O(1)
+{
+  todo
+}
+
+public fn USize.saturating_from(value: Float64) -> USize
+  cost time O(1)
+{
+  todo
+}
+
+public fn USize.total(items: Slice[USize]) -> Integer
+  cost time finite
+{
+  todo
+}
+
+public fn USize.sum(items: Slice[USize]) -> USize
+  requires USize.minimum <= USize.total(items) && USize.total(items) <= USize.maximum
+  ensures result == USize.total(items)
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn USize.checked_sum(items: Slice[USize]) -> Option[USize]
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn USize.saturating_sum(items: Slice[USize]) -> USize
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn USize.wrapping_sum(items: Slice[USize]) -> USize
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn USize.is_power_of_two(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn USize.next_power_of_two(self) -> Option[USize]
+  cost time O(1)
+{
+  todo
+}
+
+public fn USize.greatest_common_divisor(self, other: USize) -> USize
+  cost time O(64)
+{
+  todo
+}
+
+public fn USize.least_common_multiple(self, other: USize) -> Option[USize]
+  cost time O(64)
+{
+  todo
+}
+
+public fn USize.integer_square_root(self) -> USize
+  ensures result * result <= self
+  cost time O(64)
+{
+  todo
+}
+
+impl core::Countable for USize {
+  fn successor(self) -> Option[USize]
+    cost time O(1)
+  {
+    self.checked_add(1)
+  }
+
+  fn predecessor(self) -> Option[USize]
+    cost time O(1)
+  {
+    self.checked_subtract(1)
+  }
+
+  fn advanced(self, by: USize) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn retreated(self, by: USize) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+
+  fn steps_to(self, other: USize) -> Option[USize]
+    cost time O(1)
+  {
+    todo
+  }
+}

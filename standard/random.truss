@@ -1,0 +1,137 @@
+public opaque type Generator(state: Array[UInt64, 4])
+  derives Plain
+
+public fn Generator.seeded(seed: UInt64) -> Generator
+  cost time O(1)
+{
+  todo
+}
+
+public fn Generator.new() -> Generator
+  uses Random
+{
+  todo
+}
+
+public fn Generator.next(mut self) -> UInt64
+  cost time O(1)
+{
+  todo
+}
+
+public fn Generator.split(mut self) -> Generator
+  cost time O(1)
+{
+  todo
+}
+
+public fn Generator.below(mut self, bound: UInt64) -> UInt64
+  requires bound > 0
+  ensures result < bound
+  cost time finite
+{
+  todo
+}
+
+public fn Generator.integer(mut self, range: Range[Int64]) -> Int64
+  requires !range.is_empty()
+  ensures range.contains(result)
+  cost time finite
+{
+  todo
+}
+
+public fn Generator.index(mut self, length: USize) -> USize
+  requires length > 0
+  ensures result < length
+  cost time finite
+{
+  todo
+}
+
+public fn Generator.unit(mut self) -> Float64
+  ensures 0.0 <= result && result < 1.0
+  cost time O(1)
+{
+  todo
+}
+
+public fn Generator.fraction(mut self, low: Float64, high: Float64) -> Float64
+  requires low < high
+  cost time O(1)
+{
+  todo
+}
+
+public fn Generator.normal(mut self, mean: Float64 = 0.0, deviation: Float64 = 1.0) -> Float64
+  requires deviation >= 0.0
+  cost time finite
+{
+  todo
+}
+
+public fn Generator.chance(mut self, probability: Float64) -> Bool
+  requires 0.0 <= probability && probability <= 1.0
+  cost time O(1)
+{
+  todo
+}
+
+public fn Generator.fill(mut self, buffer: mut Slice[UInt8])
+  ensures buffer.length() == old(buffer.length())
+  cost time O(buffer.length())
+{
+  todo
+}
+
+public fn Generator.shuffle[Element](mut self, items: mut Slice[Element])
+  ensures items.length() == old(items.length())
+  cost time O(items.length())
+{
+  todo
+}
+
+public fn Generator.choose[Element](mut self, items: Slice[Element]) -> Option[USize]
+  ensures match result {
+    Some(index) => index < items.length()
+    None => items.length() == 0
+  }
+  cost time finite
+{
+  todo
+}
+
+public fn Generator.sample(mut self, population: USize, count: USize) -> List[USize]
+  requires count <= population
+  ensures result.length() == count
+  cost time O(count)
+{
+  todo
+}
+
+public fn bytes(count: USize) -> List[UInt8]
+  uses Random
+  ensures result.length() == count
+{
+  todo
+}
+
+public fn below(bound: UInt64) -> UInt64
+  uses Random
+  requires bound > 0
+  ensures result < bound
+{
+  todo
+}
+
+public type SeededRandom(generator: Generator)
+
+public fn SeededRandom.new(seed: UInt64) -> SeededRandom {
+  SeededRandom(generator: Generator.seeded(seed))
+}
+
+impl Random for SeededRandom {
+  fn next(mut self) -> UInt64 {
+    mut self.generator.next()
+  }
+}

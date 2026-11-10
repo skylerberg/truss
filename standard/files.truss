@@ -1,0 +1,763 @@
+use standard::console
+use standard::intrinsic
+use standard::network
+use standard::processes
+use standard::streams
+use standard::system::handles
+use standard::system::lines
+use standard::text
+
+public opaque type Path(text: String)
+  derives Copyable
+
+public fn Path.new(text: StringSlice) -> Path {
+  Path(text: text.to_string())
+}
+
+public fn Path.from_bytes(bytes: own List[UInt8]) -> Option[Path]
+  cost time O(bytes.length())
+{
+  todo
+}
+
+public fn Path.text(self) -> Option[StringSlice]
+  cost time O(1)
+{
+  Some(self.text.slice())
+}
+
+public fn Path.bytes(self) -> Slice[UInt8]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Path.is_absolute(self) -> Bool
+  cost time O(1)
+{
+  todo
+}
+
+public fn Path.join(self, part: StringSlice) -> Path
+  cost time O(self.text.length() + part.length())
+{
+  todo
+}
+
+public fn Path.join_path(self, other: Path) -> Path
+  cost time O(self.text.length() + other.text.length())
+{
+  todo
+}
+
+public fn Path.join_within(self, part: Path) -> Result[Path, SystemError]
+  ensures match result {
+    Ok(joined) => joined.starts_with(self)
+    Err(_) => true
+  }
+  cost time O(self.text.length() + part.text.length())
+{
+  todo
+}
+
+public fn Path.parent(self) -> Option[Path]
+  cost time O(self.text.length())
+{
+  todo
+}
+
+public fn Path.file_name(self) -> Option[StringSlice]
+  cost time O(self.text.length())
+{
+  todo
+}
+
+public fn Path.stem(self) -> Option[StringSlice]
+  cost time O(self.text.length())
+{
+  todo
+}
+
+public fn Path.extension(self) -> Option[StringSlice]
+  cost time O(self.text.length())
+{
+  todo
+}
+
+public fn Path.with_extension(self, extension: StringSlice) -> Path
+  cost time O(self.text.length() + extension.length())
+{
+  todo
+}
+
+public fn Path.with_file_name(self, name: StringSlice) -> Path
+  cost time O(self.text.length() + name.length())
+{
+  todo
+}
+
+public fn Path.components(self) yields StringSlice
+  cost time O(self.text.length())
+{
+  todo
+}
+
+public fn Path.normalized(self) -> Path
+  cost time O(self.text.length())
+{
+  todo
+}
+
+public fn Path.starts_with(self, base: Path) -> Bool
+  cost time O(self.text.length() + base.text.length())
+{
+  todo
+}
+
+public fn Path.relative_to(self, base: Path) -> Option[Path]
+  cost time O(self.text.length() + base.text.length())
+{
+  todo
+}
+
+impl Equal for Path {
+  fn equal(self, other: Path) -> Bool {
+    self.text == other.text
+  }
+}
+
+impl Ordered for Path {
+  fn compare(self, other: Path) -> Ordering {
+    self.text.compare(other.text)
+  }
+}
+
+impl Hash for Path {
+  fn hash(self, hasher: mut Hasher) {
+    self.text.hash(mut hasher)
+  }
+}
+
+impl Display for Path {
+  fn display(self, output: mut TextBuilder) {
+    mut output.write(self.text.slice())
+  }
+}
+
+public type FileKind = File | Directory | SymbolicLink | Other
+  derives Equal, Hash
+
+public opaque type Permissions(mode: UInt32)
+  derives Plain, Equal, Hash
+  invariant mode <= 0o7777
+
+public fn Permissions.from_mode(mode: UInt32) -> Permissions
+  requires mode <= 0o7777
+  cost time O(1)
+{
+  Permissions(mode: mode)
+}
+
+public fn Permissions.mode(self) -> UInt32
+  ensures result <= 0o7777
+  cost time O(1)
+{
+  self.mode
+}
+
+public fn Permissions.is_read_only(self) -> Bool
+  cost time O(1)
+{
+  (self.mode & 0o222) == 0
+}
+
+public fn Permissions.is_executable(self) -> Bool
+  cost time O(1)
+{
+  (self.mode & 0o111) != 0
+}
+
+public type Metadata(
+  kind: FileKind,
+  length: UInt64,
+  permissions: Permissions,
+  modified: Instant,
+  accessed: Option[Instant],
+  created: Option[Instant],
+)
+
+public fn Metadata.is_file(self) -> Bool
+  cost time O(1)
+{
+  self.kind == FileKind.File
+}
+
+public fn Metadata.is_directory(self) -> Bool
+  cost time O(1)
+{
+  self.kind == FileKind.Directory
+}
+
+public type DirectoryEntry(name: String, kind: FileKind)
+
+public type WriteMode =
+  | Replace
+  | Append
+  | CreateNew
+  | Update
+  derives Equal
+
+public type LinkKind = Symbolic | Hard
+  derives Equal
+
+public opaque type FileReader(handle: intrinsic::Handle, input: lines::LineInput)
+
+public fn FileReader.read_line(mut self) -> Result[Option[String], SystemError]
+  uses Handles
+{
+  match mut self.input.next_line(intrinsic::handle_descriptor(self.handle)) {
+    Ok(line) => Ok(own line)
+    Err(number) => Err(handles::file_error(number))
+  }
+}
+
+public fn FileReader.lines(mut self) yields own Result[String, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn FileReader.metadata(self) -> Result[Metadata, SystemError]
+  uses Handles
+{
+  todo
+}
+
+impl streams::Reader for FileReader {
+  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles
+  {
+    todo
+  }
+}
+
+impl streams::Seek for FileReader {
+  fn seek(mut self, to: streams::Position) -> Result[UInt64, SystemError]
+    uses Handles
+  {
+    todo
+  }
+}
+
+public opaque type FileWriter(file: File)
+
+public fn FileWriter.write(mut self, text: StringSlice) -> Result[Unit, SystemError]
+  uses Handles
+{
+  handles::write_all(mut self.file.handle.descriptor, bytes: text.bytes)
+}
+
+public fn FileWriter.write_line(mut self, text: StringSlice) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn FileWriter.write_bytes(mut self, bytes: Slice[UInt8]) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn FileWriter.flush(mut self) -> Result[Unit, SystemError]
+  uses Handles
+{
+  Ok(Unit)
+}
+
+public opaque type File(handle: streams::Handle)
+
+public fn File.read_at(mut self, offset: UInt64, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn File.write_at(mut self, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn File.set_length(mut self, length: UInt64) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn File.synchronize(mut self) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn File.metadata(self) -> Result[Metadata, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn File.close(own self) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+impl streams::Reader for File {
+  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles
+  {
+    todo
+  }
+}
+
+impl streams::Writer for File {
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+    uses Handles
+  {
+    todo
+  }
+
+  fn flush(mut self) -> Result[Unit, SystemError]
+    uses Handles
+  {
+    Ok(Unit)
+  }
+}
+
+impl streams::Seek for File {
+  fn seek(mut self, to: streams::Position) -> Result[UInt64, SystemError]
+    uses Handles
+  {
+    todo
+  }
+}
+
+public fn is_present(path: Path) -> Bool
+  uses FileRead
+{
+  FileRead.metadata(path, follow_links: true).is_ok()
+}
+
+public fn write_with[Output, capability Granted](
+  file: Path,
+  write: (fn(mut FileWriter) -> Result[Output, SystemError] uses Granted),
+  mode: WriteMode = WriteMode.Replace,
+) -> Result[Output, SystemError]
+  uses FileWrite, Handles, Granted
+{
+  let opened = FileWrite.open(file, mode: mode)?
+  var writer = FileWriter(file: own opened)
+  let output = write(mut writer)?
+  mut writer.flush()?
+  Ok(own output)
+}
+
+public fn write_atomically(file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError]
+  uses FileWrite, Handles, Random
+{
+  todo
+}
+
+public fn append(file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError]
+  uses FileWrite, Handles
+{
+  todo
+}
+
+public fn append_text(file: Path, contents: StringSlice) -> Result[Unit, SystemError]
+  uses FileWrite, Handles
+{
+  todo
+}
+
+public fn copy(from: Path, to: Path) -> Result[UInt64, SystemError]
+  uses FileRead, FileWrite, Handles
+{
+  todo
+}
+
+public fn create_directories(directory: Path) -> Result[Unit, SystemError]
+  uses FileRead, FileWrite
+{
+  todo
+}
+
+public fn remove_all(path: Path) -> Result[Unit, SystemError]
+  uses FileRead, FileWrite
+{
+  todo
+}
+
+public fn create_temporary_directory(within: Path, prefix: StringSlice) -> Result[Path, SystemError]
+  uses FileWrite, Random
+{
+  todo
+}
+
+public type WalkEntry(path: Path, kind: FileKind, depth: USize)
+
+public fn walk(root: Path, follow_links: Bool = false) -> Result[List[WalkEntry], SystemError]
+  uses FileRead
+{
+  todo
+}
+
+public opaque type Glob(parts: List[String])
+  derives Copyable
+
+impl FromTemplate for Glob {
+  type Part = Never
+
+  fn from_template(template: Template[Never]) -> Glob
+    requires is_valid_glob(template.literals)
+  {
+    todo
+  }
+}
+
+public fn is_valid_glob(literals: Slice[text::Literal]) -> Bool
+  cost time finite
+{
+  todo
+}
+
+public fn Glob.parse(pattern: StringSlice) -> Result[Glob, GlobError]
+  cost time O(pattern.length())
+{
+  todo
+}
+
+public fn Glob.matches(self, path: Path) -> Bool
+  cost time finite
+{
+  todo
+}
+
+public fn Glob.find(self, root: Path) -> Result[List[Path], SystemError]
+  uses FileRead
+{
+  todo
+}
+
+public type GlobError(offset: USize)
+  derives Equal
+
+impl Display for GlobError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type FilesWithin(root: Path)
+
+impl FileRead for FilesWithin
+  uses FileRead
+{
+  fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
+    FileRead.read(self.root.join_within(file)?)
+  }
+
+  fn read_text(self, file: Path) -> Result[String, SystemError] {
+    FileRead.read_text(self.root.join_within(file)?)
+  }
+
+  fn open(self, file: Path) -> Result[FileReader, SystemError] {
+    FileRead.open(self.root.join_within(file)?)
+  }
+
+  fn metadata(self, path: Path, follow_links: Bool) -> Result[Metadata, SystemError] {
+    FileRead.metadata(self.root.join_within(path)?, follow_links: follow_links)
+  }
+
+  fn list(self, directory: Path) -> Result[List[DirectoryEntry], SystemError] {
+    FileRead.list(self.root.join_within(directory)?)
+  }
+
+  fn read_link(self, link: Path) -> Result[Path, SystemError] {
+    FileRead.read_link(self.root.join_within(link)?)
+  }
+
+  fn resolve(self, path: Path) -> Result[Path, SystemError] {
+    todo
+  }
+}
+
+impl FileWrite for FilesWithin
+  uses FileWrite
+{
+  fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
+    FileWrite.write(self.root.join_within(file)?, contents: contents)
+  }
+
+  fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
+    FileWrite.write_text(self.root.join_within(file)?, contents: contents)
+  }
+
+  fn open(self, file: Path, mode: WriteMode) -> Result[File, SystemError] {
+    FileWrite.open(self.root.join_within(file)?, mode: mode)
+  }
+
+  fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
+    FileWrite.create_directory(self.root.join_within(directory)?)
+  }
+
+  fn remove(self, path: Path) -> Result[Unit, SystemError] {
+    FileWrite.remove(self.root.join_within(path)?)
+  }
+
+  fn rename(self, from: Path, to: Path) -> Result[Unit, SystemError] {
+    FileWrite.rename(self.root.join_within(from)?, to: self.root.join_within(to)?)
+  }
+
+  fn link(self, target: Path, link: Path, kind: LinkKind) -> Result[Unit, SystemError] {
+    FileWrite.link(self.root.join_within(target)?, link: self.root.join_within(link)?, kind: kind)
+  }
+
+  fn set_permissions(self, path: Path, permissions: Permissions) -> Result[Unit, SystemError] {
+    FileWrite.set_permissions(self.root.join_within(path)?, permissions: permissions)
+  }
+
+  fn set_modified(self, path: Path, time: Instant) -> Result[Unit, SystemError] {
+    FileWrite.set_modified(self.root.join_within(path)?, time: time)
+  }
+}
+
+public type ReadOnlyFiles()
+
+impl FileWrite for ReadOnlyFiles {
+  fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
+    Err(SystemError.PermissionDenied)
+  }
+
+  fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
+    Err(SystemError.PermissionDenied)
+  }
+
+  fn open(self, file: Path, mode: WriteMode) -> Result[File, SystemError] {
+    Err(SystemError.PermissionDenied)
+  }
+
+  fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
+    Err(SystemError.PermissionDenied)
+  }
+
+  fn remove(self, path: Path) -> Result[Unit, SystemError] {
+    Err(SystemError.PermissionDenied)
+  }
+
+  fn rename(self, from: Path, to: Path) -> Result[Unit, SystemError] {
+    Err(SystemError.PermissionDenied)
+  }
+
+  fn link(self, target: Path, link: Path, kind: LinkKind) -> Result[Unit, SystemError] {
+    Err(SystemError.PermissionDenied)
+  }
+
+  fn set_permissions(self, path: Path, permissions: Permissions) -> Result[Unit, SystemError] {
+    Err(SystemError.PermissionDenied)
+  }
+
+  fn set_modified(self, path: Path, time: Instant) -> Result[Unit, SystemError] {
+    Err(SystemError.PermissionDenied)
+  }
+}
+
+public opaque type MemoryFiles(files: Map[Path, List[UInt8]], directories: Set[Path], next_handle: UInt64)
+
+public fn MemoryFiles.new() -> MemoryFiles {
+  MemoryFiles(files: [:], directories: [], next_handle: 0)
+}
+
+public fn MemoryFiles.with_text(own self, file: Path, contents: StringSlice) -> MemoryFiles {
+  todo
+}
+
+public fn MemoryFiles.with_bytes(own self, file: Path, contents: Slice[UInt8]) -> MemoryFiles {
+  todo
+}
+
+public fn MemoryFiles.contents(self, file: Path) lends Option[List[UInt8]] {
+  todo
+}
+
+public fn MemoryFiles.text(self, file: Path) -> Option[String] {
+  todo
+}
+
+public fn MemoryFiles.paths(self) -> List[Path] {
+  todo
+}
+
+impl FileRead for MemoryFiles {
+  fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
+    todo
+  }
+
+  fn read_text(self, file: Path) -> Result[String, SystemError] {
+    todo
+  }
+
+  fn open(self, file: Path) -> Result[FileReader, SystemError] {
+    todo
+  }
+
+  fn metadata(self, path: Path, follow_links: Bool) -> Result[Metadata, SystemError] {
+    todo
+  }
+
+  fn list(self, directory: Path) -> Result[List[DirectoryEntry], SystemError] {
+    todo
+  }
+
+  fn read_link(self, link: Path) -> Result[Path, SystemError] {
+    todo
+  }
+
+  fn resolve(self, path: Path) -> Result[Path, SystemError] {
+    todo
+  }
+}
+
+impl FileWrite for MemoryFiles {
+  fn write(mut self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn write_text(mut self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn open(mut self, file: Path, mode: WriteMode) -> Result[File, SystemError] {
+    todo
+  }
+
+  fn create_directory(mut self, directory: Path) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn remove(mut self, path: Path) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn rename(mut self, from: Path, to: Path) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn link(mut self, target: Path, link: Path, kind: LinkKind) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn set_permissions(mut self, path: Path, permissions: Permissions) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn set_modified(mut self, path: Path, time: Instant) -> Result[Unit, SystemError] {
+    todo
+  }
+}
+
+impl Handles for MemoryFiles {
+  fn read(mut self, handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn write(mut self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn read_at(
+    mut self,
+    handle: streams::Handle,
+    offset: UInt64,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn write_at(mut self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn seek(mut self, handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError] {
+    todo
+  }
+
+  fn set_length(mut self, handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn synchronize(mut self, handle: streams::Handle) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn metadata(mut self, handle: streams::Handle) -> Result[Metadata, SystemError] {
+    todo
+  }
+
+  fn close(mut self, handle: own streams::Handle) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn shut_down(mut self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn set_timeout(
+    mut self,
+    handle: streams::Handle,
+    direction: network::Direction,
+    timeout: Option[Duration],
+  ) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn accept(mut self, listener: streams::Handle) -> Result[network::Accepted, SystemError] {
+    todo
+  }
+
+  fn send_to(
+    mut self,
+    socket: streams::Handle,
+    bytes: Slice[UInt8],
+    address: network::SocketAddress,
+  ) -> Result[USize, SystemError] {
+    todo
+  }
+
+  fn receive_from(
+    mut self,
+    socket: streams::Handle,
+    buffer: mut List[UInt8],
+    limit: USize,
+  ) -> Result[network::Datagram, SystemError] {
+    todo
+  }
+
+  fn wait(mut self, process: streams::Handle) -> Result[processes::ExitStatus, SystemError] {
+    todo
+  }
+
+  fn signal(mut self, process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
+    todo
+  }
+
+  fn terminal_size(mut self, terminal: streams::Handle) -> Result[console::Size, SystemError] {
+    todo
+  }
+
+  fn set_raw_mode(mut self, terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError] {
+    todo
+  }
+}

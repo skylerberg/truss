@@ -486,7 +486,12 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                     | None -> [])
                   (Printf.sprintf "`%s` has no method `%s`." (show state receiver_type) member.text))
       | Ok found -> (
-          match choose_temporary found with
+          match
+            Option.map
+              (fun (chosen, version) ->
+                (chosen, impl_method_if_resolved state receiver_type version))
+              (choose_temporary found)
+          with
           | None -> missing_receiver_mark found
           | Some (_, Own_version method_path) ->
               method_with_receiver state env ?expected ~type_arguments value ~receiver:base

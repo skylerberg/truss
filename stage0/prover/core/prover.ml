@@ -73,9 +73,29 @@ let law_proofs database package trait (for_type : Types.ty) =
         (Query.demand database Names.declarations module_))
     modules
 
-(* An [impl]'s obligation to keep each law of its trait. *)
+(* Whether any method the [impl] defines contains a [todo]. *)
+let has_todo_method database (impl : Path.t) (interface : Types.impl_interface) =
+  List.exists
+    (fun (name, receiver, (_ : Types.signature)) ->
+      match Interface.Summary.definition database (Method { owner = impl; name; receiver }) with
+      | Some (_, { kind = Function { body; _ }; _ }) ->
+          let found = ref false in
+          let rec visit (value : expression) =
+            if value.kind = Todo then found := true else Syntax_walk.children visit value
+          in
+          Syntax_walk.block visit body;
+          !found
+      | _ -> false)
+    interface.impl_methods
+
+(* The obligations that an [impl] satisfies each law of its trait. An
+   [impl] with a [todo] method has none: a law constrains what the methods
+   return, so it cannot be checked until they are written. *)
 let impl_laws database (key : Names.key) source (definition : definition) =
   match (Query.demand database Interface.Environment.interface key.path, definition.kind) with
+  | Some (Interface.Environment.Impl_interface interface), Impl _
+    when has_todo_method database key.path interface ->
+      []
   | Some (Interface.Environment.Impl_interface interface), Impl { trait_; _ } ->
       [
         Translate.laws database source ~impl:key.path ~trait:interface.implements.trait

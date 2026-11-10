@@ -16,17 +16,37 @@ expression, the exact method, variant, field, `impl`, or associated type
 each name means, the mode of every argument, and which places each statement
 moves. Every proof obligation has been discharged by then.
 
-Lowering reads a body from its core form, which TYPECHECKER.md describes: a
-tree in which a call names what it calls and lists an argument for each
-parameter in the callee's order, each a place that is lent or a value that
-is taken, an operator is the operation or the call it means, and every type
-is decided. Of a body read that way lowering asks nothing again. It reads
-so each body that holds only calls, operators, comparisons, conditions,
-`if`, a `let` of a name, assignment, `return`, `assert`, literals,
-constants, and records and variants built with every field given. A body
-that holds anything else is lowered whole from the syntax tree and the
-checked form's tables, as every function's parameters and `requires`
-clauses are.
+Lowering takes function bodies from the core form, which TYPECHECKER.md
+describes. In the core form every call has a resolved callee and one
+argument per parameter, each argument is marked as a place or a value,
+every operator is resolved to an intrinsic operation or a call, and every
+type is fully inferred. Lowering from it needs no name resolution and no
+type inference.
+
+The move to the core form is in progress. Lowering uses the core form for a
+body when every node in the body is of a supported kind:
+
+- calls to functions, trait methods, capability methods, and intrinsics
+- indexing and other calls of lending methods, and `yield`
+- `provide`, and `any` conversions
+- operators, comparisons, `&&`, `||`, and `!`
+- `if`, `match`, `while`, `for` over an integer range or a yielding call,
+  `break`, `continue`, and `return`
+- `let`, with or without a pattern and an `else`, assignment, and compound
+  assignment
+- `is` tests and every kind of pattern
+- `assert`, `todo`, `unreachable`, `echo`, `proof` blocks, and `parallel`
+  blocks
+- literals, constants, and generic value parameters
+- plain, interpolated, and tagged strings
+- array, set, and map literals
+- constructor calls, `with` updates, and `copy`
+
+A body with any other node falls back to the older lowering, which walks the
+syntax tree and the checked form's tables. A function's parameter defaults
+and `requires` checks are lowered from the same source as its body, and so
+is every lending or yielding method inlined into it. An unsupported node in
+any of those also falls back.
 
 Code generation:
 
@@ -695,6 +715,15 @@ and its siblings. Full-width multiplication, used by hashing and
 - **A guard sees views** of what its arm binds, so a guard that fails leaves
   the value whole for the next arm. The body then binds the parts again,
   owning them.
+- **Alternatives that bind a name are tested as separate patterns.**
+  `Circle(radius: n) | Square(side: n)` is two patterns, and `n` is bound
+  from the part that the matching one found. The code after the pattern is
+  emitted once, so each name is kept in a slot that every alternative
+  fills: a local of the name's type where the name owns the part or copies
+  it, and a pointer to the part otherwise. Alternatives that bind nothing
+  stay one pattern. The syntax-tree lowering reports alternatives that bind
+  a name as unsupported, because it would bind every name from the first
+  alternative.
 - **`while` and `for`** become blocks and gotos. A `for` over anything but a
   range of built-in integers calls `each` (see
   [Lending and yielding methods](#lending-and-yielding-methods)).
@@ -878,6 +907,10 @@ Where nothing is left, as for an index into a `List`, whose method ends at
 its `yield` owning nothing, the method simply ends there and the lend costs
 nothing.
 
+A lending method with no `yield`, such as one whose body is `todo`, never
+returns. Its body is inlined as usual, and the caller's code after the call
+is unreachable.
+
 A loop over a yielding method that is already inlined around it, as a
 tree's `each` loops over its subtrees, would be inlined forever. Stage0
 pulls a cursor over the inner call instead, in a heap block the loop frees
@@ -968,8 +1001,7 @@ for `parallel` code.
 - **Inside an `impl` of a capability,** a function value that uses the
   capability means the implementation itself, as the type checker rules,
   so its evidence is the implementation's own, made on the stack like a
-  `provide`'s. This is how `FileWrite.write_with` hands its callback the
-  file system it writes to.
+  `provide`'s.
 - **`Panic` has no evidence.** It cannot be provided, so `Panic.crash` is a
   direct call into the runtime.
 
@@ -1122,7 +1154,7 @@ The standard library's real implementations are Truss on the C library's
 functions: opening a file, with its path given a zero byte at its end and
 refused if it holds one; reading into storage; writing every byte; going
 on after a signal interrupts a call; and turning an error number into a
-`FileError`. `SystemFileRead`, `SystemFileWrite`, `FileReader`, and
+`SystemError`. `SystemFileRead`, `SystemFileWrite`, `FileReader`, and
 `FileWriter` are written on those, `SystemConsole` writes with them,
 `SystemClock` reads `clock_gettime`, and `SystemRandom` reads
 `getentropy`. `SystemConsole` and `FileReader` each hold a reader of
@@ -1507,14 +1539,12 @@ a command line can hold.
 - **A float's text without the C library.** DESIGN.md has it written in
   Truss so that it is the same on every system. The loop is Truss; the
   digits are `snprintf`'s and the check `strtod`'s.
-- **Every body from its core form.** A body with a loop, a `match` or
-  another test against a pattern, a part that a call lends, a call through
-  a function value or of a capability's method, a lambda, a collection
-  literal, an interpolated or tagged string, a conversion, or a field left
-  to its default is lowered from the syntax tree, as are parameters and
-  `requires` clauses. Once each is lowered from the core form, lowering
-  reads nothing else, and what works a call's meaning out again from the
-  tree goes.
+- **Core-form lowering for every body.** These still fall back to the
+  syntax-tree lowering: calls through a function value or an `any` value,
+  lambdas, cursors (a yielding call outside a loop, `for` over a cursor,
+  and a loop over a recursive yielding method), and the pulled version of
+  a yielding method. Once all of them are supported, the syntax-tree
+  lowering is deleted.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.

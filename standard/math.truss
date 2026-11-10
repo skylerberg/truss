@@ -1,0 +1,447 @@
+use standard::core
+use standard::text
+
+public let pi: Float64 = 3.141592653589793
+
+public let tau: Float64 = 6.283185307179586
+
+public let euler: Float64 = 2.718281828459045
+
+public let golden_ratio: Float64 = 1.618033988749895
+
+public let square_root_of_two: Float64 = 1.4142135623730951
+
+public let natural_logarithm_of_two: Float64 = 0.6931471805599453
+
+public let natural_logarithm_of_ten: Float64 = 2.302585092994046
+
+public fn factorial(number: UInt64) -> Option[UInt64]
+  ensures (result is Some(_)) == (number <= 20)
+  cost time O(number)
+{
+  todo
+}
+
+public fn binomial(total: UInt64, chosen: UInt64) -> Option[UInt64]
+  cost time O(chosen)
+{
+  todo
+}
+
+public fn mean(values: Slice[Float64]) -> Option[Float64]
+  ensures (result is None) == (values.length() == 0)
+  cost time O(values.length())
+{
+  todo
+}
+
+public fn median(values: Slice[Float64]) -> Option[Float64]
+  ensures (result is None) == (values.length() == 0)
+  cost time O(values.length() * log(values.length()))
+{
+  todo
+}
+
+public fn variance(values: Slice[Float64]) -> Option[Float64]
+  ensures (result is None) == (values.length() < 2)
+  cost time O(values.length())
+{
+  todo
+}
+
+public fn standard_deviation(values: Slice[Float64]) -> Option[Float64]
+  ensures (result is None) == (values.length() < 2)
+  cost time O(values.length())
+{
+  todo
+}
+
+public type Division[Number](quotient: Number, remainder: Number)
+
+public opaque type BigInteger(negative: Bool, magnitude: List[UInt64])
+  derives Copyable, Equal, Hash
+
+public fn BigInteger.zero() -> BigInteger
+  cost time O(1)
+{
+  BigInteger(negative: false, magnitude: [])
+}
+
+public fn BigInteger.from_big_endian_bytes(bytes: Slice[UInt8], negative: Bool = false) -> BigInteger
+  cost time O(bytes.length())
+{
+  todo
+}
+
+public fn BigInteger.to_big_endian_bytes(self) -> List[UInt8]
+  cost time O(self.bit_length())
+{
+  todo
+}
+
+public fn BigInteger.parse_radix(text: StringSlice, radix: UInt32) -> Result[BigInteger, core::ParseIntegerError]
+  requires 2 <= radix && radix <= 36
+  cost time O(text.length() * text.length())
+{
+  todo
+}
+
+public fn BigInteger.format(self, radix: UInt32 = 10) -> String
+  requires 2 <= radix && radix <= 36
+  cost time O(self.bit_length() * self.bit_length())
+{
+  todo
+}
+
+public fn BigInteger.is_zero(self) -> Bool
+  cost time O(1)
+{
+  self.magnitude.is_empty()
+}
+
+public fn BigInteger.is_negative(self) -> Bool
+  cost time O(1)
+{
+  self.negative
+}
+
+public fn BigInteger.sign(self) -> Int64
+  ensures -1 <= result && result <= 1
+  cost time O(1)
+{
+  todo
+}
+
+public fn BigInteger.bit_length(self) -> USize
+  cost time O(1)
+{
+  todo
+}
+
+public fn BigInteger.absolute(self) -> BigInteger
+  ensures !result.is_negative()
+  cost time O(self.bit_length())
+{
+  todo
+}
+
+public fn BigInteger.quotient(self, divisor: BigInteger) -> BigInteger
+  requires !divisor.is_zero()
+  cost time O(self.bit_length() * divisor.bit_length())
+{
+  todo
+}
+
+public fn BigInteger.remainder(self, divisor: BigInteger) -> BigInteger
+  requires !divisor.is_zero()
+  cost time O(self.bit_length() * divisor.bit_length())
+{
+  todo
+}
+
+public fn BigInteger.quotient_and_remainder(self, divisor: BigInteger) -> Division[BigInteger]
+  requires !divisor.is_zero()
+  cost time O(self.bit_length() * divisor.bit_length())
+{
+  todo
+}
+
+public fn BigInteger.floor_divide(self, divisor: BigInteger) -> BigInteger
+  requires !divisor.is_zero()
+  cost time O(self.bit_length() * divisor.bit_length())
+{
+  todo
+}
+
+public fn BigInteger.floor_modulo(self, divisor: BigInteger) -> BigInteger
+  requires !divisor.is_zero()
+  cost time O(self.bit_length() * divisor.bit_length())
+{
+  todo
+}
+
+public fn BigInteger.power(self, exponent: UInt32) -> BigInteger
+  cost time finite
+{
+  todo
+}
+
+public fn BigInteger.modular_power(self, exponent: BigInteger, modulus: BigInteger) -> BigInteger
+  requires !exponent.is_negative()
+  requires !modulus.is_zero()
+  cost time finite
+{
+  todo
+}
+
+public fn BigInteger.greatest_common_divisor(self, other: BigInteger) -> BigInteger
+  ensures !result.is_negative()
+  cost time finite
+{
+  todo
+}
+
+public fn BigInteger.to_float64(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+impl From[Int64] for BigInteger {
+  fn from(value: own Int64) -> BigInteger {
+    todo
+  }
+}
+
+impl From[UInt64] for BigInteger {
+  fn from(value: own UInt64) -> BigInteger {
+    todo
+  }
+}
+
+impl TryFrom[BigInteger] for Int64 {
+  type Error = core::ConversionError
+
+  fn try_from(value: own BigInteger) -> Result[Int64, core::ConversionError] {
+    todo
+  }
+}
+
+impl TryFrom[BigInteger] for UInt64 {
+  type Error = core::ConversionError
+
+  fn try_from(value: own BigInteger) -> Result[UInt64, core::ConversionError] {
+    todo
+  }
+}
+
+impl Add[BigInteger] for BigInteger {
+  type Output = BigInteger
+
+  fn add(self, right: BigInteger) -> BigInteger {
+    todo
+  }
+}
+
+impl Subtract[BigInteger] for BigInteger {
+  type Output = BigInteger
+
+  fn subtract(self, right: BigInteger) -> BigInteger {
+    todo
+  }
+}
+
+impl Multiply[BigInteger] for BigInteger {
+  type Output = BigInteger
+
+  fn multiply(self, right: BigInteger) -> BigInteger {
+    todo
+  }
+}
+
+impl Negate for BigInteger {
+  type Output = BigInteger
+
+  fn negate(self) -> BigInteger {
+    todo
+  }
+}
+
+impl Ordered for BigInteger {
+  fn compare(self, other: BigInteger) -> Ordering {
+    todo
+  }
+}
+
+impl Default for BigInteger {
+  fn default() -> BigInteger {
+    BigInteger.zero()
+  }
+}
+
+impl Display for BigInteger {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl text::Parse for BigInteger {
+  type Error = core::ParseIntegerError
+
+  fn parse(text: StringSlice) -> Result[BigInteger, core::ParseIntegerError] {
+    BigInteger.parse_radix(text, radix: 10)
+  }
+}
+
+public type Rounding =
+  | HalfToEven
+  | HalfAwayFromZero
+  | HalfTowardZero
+  | AwayFromZero
+  | TowardZero
+  | Up
+  | Down
+  derives Equal
+
+public opaque type Decimal(coefficient: BigInteger, scale: Int32)
+  derives Copyable
+
+public fn Decimal.new(coefficient: own BigInteger, scale: Int32) -> Decimal
+  cost time O(1)
+{
+  Decimal(coefficient: own coefficient, scale: scale)
+}
+
+public fn Decimal.zero() -> Decimal
+  cost time O(1)
+{
+  Decimal(coefficient: BigInteger.zero(), scale: 0)
+}
+
+public fn Decimal.coefficient(self) -> BigInteger
+  cost time O(self.coefficient.bit_length())
+{
+  todo
+}
+
+public fn Decimal.scale(self) -> Int32
+  cost time O(1)
+{
+  self.scale
+}
+
+public fn Decimal.is_zero(self) -> Bool
+  cost time O(1)
+{
+  self.coefficient.is_zero()
+}
+
+public fn Decimal.is_negative(self) -> Bool
+  cost time O(1)
+{
+  self.coefficient.is_negative()
+}
+
+public fn Decimal.absolute(self) -> Decimal
+  cost time finite
+{
+  todo
+}
+
+public fn Decimal.rounded(self, decimals: Int32, rounding: Rounding = Rounding.HalfToEven) -> Decimal
+  cost time finite
+{
+  todo
+}
+
+public fn Decimal.quotient(
+  self,
+  divisor: Decimal,
+  decimals: Int32,
+  rounding: Rounding = Rounding.HalfToEven,
+) -> Decimal
+  requires !divisor.is_zero()
+  cost time finite
+{
+  todo
+}
+
+public fn Decimal.to_float64(self) -> Float64
+  cost time finite
+{
+  todo
+}
+
+public fn Decimal.from_float64(value: Float64) -> Option[Decimal]
+  cost time finite
+{
+  todo
+}
+
+public fn Decimal.truncated(self) -> BigInteger
+  cost time finite
+{
+  todo
+}
+
+impl From[Int64] for Decimal {
+  fn from(value: own Int64) -> Decimal {
+    Decimal(coefficient: BigInteger.from(value), scale: 0)
+  }
+}
+
+impl From[BigInteger] for Decimal {
+  fn from(value: own BigInteger) -> Decimal {
+    Decimal(coefficient: own value, scale: 0)
+  }
+}
+
+impl Add[Decimal] for Decimal {
+  type Output = Decimal
+
+  fn add(self, right: Decimal) -> Decimal {
+    todo
+  }
+}
+
+impl Subtract[Decimal] for Decimal {
+  type Output = Decimal
+
+  fn subtract(self, right: Decimal) -> Decimal {
+    todo
+  }
+}
+
+impl Multiply[Decimal] for Decimal {
+  type Output = Decimal
+
+  fn multiply(self, right: Decimal) -> Decimal {
+    todo
+  }
+}
+
+impl Negate for Decimal {
+  type Output = Decimal
+
+  fn negate(self) -> Decimal {
+    todo
+  }
+}
+
+impl Equal for Decimal {
+  fn equal(self, other: Decimal) -> Bool {
+    todo
+  }
+}
+
+impl Ordered for Decimal {
+  fn compare(self, other: Decimal) -> Ordering {
+    todo
+  }
+}
+
+impl Hash for Decimal {
+  fn hash(self, hasher: mut Hasher) {
+    todo
+  }
+}
+
+impl Default for Decimal {
+  fn default() -> Decimal {
+    Decimal.zero()
+  }
+}
+
+impl Display for Decimal {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl text::Parse for Decimal {
+  type Error = core::ParseFloatError
+
+  fn parse(text: StringSlice) -> Result[Decimal, core::ParseFloatError] {
+    todo
+  }
+}

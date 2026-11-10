@@ -1,0 +1,342 @@
+use standard::core
+
+public fn StringSlice.is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
+  cost time O(1)
+{
+  self.length() == 0
+}
+
+public fn StringSlice.bytes(self) -> Slice[UInt8]
+  ensures result.length() == self.length()
+  cost time O(1)
+{
+  todo
+}
+
+public fn StringSlice.is_ascii(self) -> Bool
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.is_boundary(self, offset: USize) -> Bool
+  cost time O(1)
+{
+  offset == self.length() || (offset < self.length() && (self.byte(offset) & 0xC0) != 0x80)
+}
+
+public fn StringSlice.characters(self) yields Character
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.characters_with_offsets(self) yields core::Indexed[Character]
+  ensures result.index < self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.character_count(self) -> USize
+  ensures result <= self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.first_character(self) -> Option[Character]
+  ensures (result is None) == self.is_empty()
+  cost time O(1)
+{
+  todo
+}
+
+public fn StringSlice.last_character(self) -> Option[Character]
+  ensures (result is None) == self.is_empty()
+  cost time O(1)
+{
+  todo
+}
+
+public fn StringSlice.graphemes(self) yields StringSlice
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.lines(self) yields StringSlice
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.substring(self, from: USize, to: USize) -> StringSlice
+  requires from <= to
+  requires to <= self.length()
+  requires self.is_boundary(from)
+  requires self.is_boundary(to)
+  ensures result.length() == to - from
+  cost time O(1)
+{
+  todo
+}
+
+public fn StringSlice.get_substring(self, from: USize, to: USize) -> Option[StringSlice]
+  cost time O(1)
+{
+  todo
+}
+
+public fn StringSlice.split_at(self, offset: USize) -> core::Pair[StringSlice, StringSlice]
+  requires offset <= self.length()
+  requires self.is_boundary(offset)
+  ensures result.first.length() == offset
+  ensures result.second.length() == self.length() - offset
+  cost time O(1)
+{
+  todo
+}
+
+public fn StringSlice.contains(self, pattern: StringSlice) -> Bool
+  cost time O(self.length() + pattern.length())
+{
+  todo
+}
+
+public fn StringSlice.find(self, pattern: StringSlice) -> Option[USize]
+  ensures match result {
+    Some(offset) => offset + pattern.length() <= self.length() && self.is_boundary(offset)
+    None => !self.contains(pattern)
+  }
+  cost time O(self.length() + pattern.length())
+{
+  todo
+}
+
+public fn StringSlice.find_last(self, pattern: StringSlice) -> Option[USize]
+  ensures match result {
+    Some(offset) => offset + pattern.length() <= self.length() && self.is_boundary(offset)
+    None => !self.contains(pattern)
+  }
+  cost time O(self.length() + pattern.length())
+{
+  todo
+}
+
+public fn StringSlice.find_character(
+  self,
+  matching: (fn(Character) -> Bool cost time finite),
+) -> Option[USize]
+  ensures match result {
+    Some(offset) => offset < self.length() && self.is_boundary(offset)
+    None => true
+  }
+  cost time O(self.length() * time(matching))
+{
+  todo
+}
+
+public fn StringSlice.occurrences(self, pattern: StringSlice) -> USize
+  requires pattern.length() > 0
+  cost time O(self.length() + pattern.length())
+{
+  todo
+}
+
+public fn StringSlice.starts_with(self, prefix: StringSlice) -> Bool
+  cost time O(prefix.length())
+{
+  todo
+}
+
+public fn StringSlice.ends_with(self, suffix: StringSlice) -> Bool
+  cost time O(suffix.length())
+{
+  todo
+}
+
+public fn StringSlice.strip_prefix(self, prefix: StringSlice) -> Option[StringSlice]
+  ensures (result is Some(_)) == self.starts_with(prefix)
+  cost time O(prefix.length())
+{
+  todo
+}
+
+public fn StringSlice.strip_suffix(self, suffix: StringSlice) -> Option[StringSlice]
+  ensures (result is Some(_)) == self.ends_with(suffix)
+  cost time O(suffix.length())
+{
+  todo
+}
+
+public fn StringSlice.trim(self) -> StringSlice
+  ensures result.length() <= self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.trim_start(self) -> StringSlice
+  ensures result.length() <= self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.trim_end(self) -> StringSlice
+  ensures result.length() <= self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.trim_matching(self, matching: (fn(Character) -> Bool cost time finite)) -> StringSlice
+  ensures result.length() <= self.length()
+  cost time O(self.length() * time(matching))
+{
+  todo
+}
+
+public fn StringSlice.split(self, separator: StringSlice) yields StringSlice
+  requires separator.length() > 0
+  cost time O(self.length() + separator.length())
+{
+  todo
+}
+
+public fn StringSlice.split_at_most(self, separator: StringSlice, parts: USize) yields StringSlice
+  requires separator.length() > 0
+  requires parts > 0
+  ensures yielded.length() < parts
+  cost time O(self.length() + separator.length())
+{
+  todo
+}
+
+public fn StringSlice.split_matching(self, matching: (fn(Character) -> Bool cost time finite)) yields StringSlice
+  cost time O(self.length() * time(matching))
+{
+  todo
+}
+
+public fn StringSlice.split_whitespace(self) yields StringSlice
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.split_once(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
+  requires separator.length() > 0
+  ensures (result is Some(_)) == self.contains(separator)
+  cost time O(self.length() + separator.length())
+{
+  todo
+}
+
+public fn StringSlice.split_once_last(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
+  requires separator.length() > 0
+  ensures (result is Some(_)) == self.contains(separator)
+  cost time O(self.length() + separator.length())
+{
+  todo
+}
+
+public fn StringSlice.replace(self, pattern: StringSlice, replacement: StringSlice) -> String
+  requires pattern.length() > 0
+  cost time O(self.length() + result.length())
+{
+  todo
+}
+
+public fn StringSlice.replace_first(self, pattern: StringSlice, replacement: StringSlice) -> String
+  requires pattern.length() > 0
+  cost time O(self.length() + replacement.length())
+{
+  todo
+}
+
+public fn StringSlice.repeated(self, times: USize) -> String
+  ensures result.length() == self.length() * times
+  cost time O(self.length() * times)
+{
+  todo
+}
+
+public fn StringSlice.reversed(self) -> String
+  ensures result.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.to_uppercase(self) -> String
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.to_lowercase(self) -> String
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.to_ascii_uppercase(self) -> String
+  ensures result.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.to_ascii_lowercase(self) -> String
+  ensures result.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.equal_ignoring_ascii_case(self, other: StringSlice) -> Bool
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.pad_start(self, width: USize, fill: Character = Character" ") -> String
+  cost time O(self.length() + width)
+{
+  todo
+}
+
+public fn StringSlice.pad_end(self, width: USize, fill: Character = Character" ") -> String
+  cost time O(self.length() + width)
+{
+  todo
+}
+
+public fn StringSlice.to_bytes(self) -> List[UInt8]
+  ensures result.length() == self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+public fn StringSlice.to_utf16(self) -> List[UInt16]
+  ensures result.length() <= self.length()
+  cost time O(self.length())
+{
+  todo
+}
+
+impl Ordered for StringSlice {
+  fn compare(self, other: StringSlice) -> Ordering {
+    todo
+  }
+}
+
+impl Hash for StringSlice {
+  fn hash(self, hasher: mut Hasher) {
+    mut hasher.write_bytes(self.bytes())
+  }
+}

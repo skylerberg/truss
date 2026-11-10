@@ -1,0 +1,145 @@
+public type Level = Debug | Information | Warning | Error
+  derives Equal, Hash, Ordered
+
+impl Display for Level {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type Value =
+  | String(value: String)
+  | Integer(value: Int64)
+  | Float(value: Float64)
+  | Bool(value: Bool)
+  | Duration(value: Duration)
+  | Instant(value: Instant)
+
+public type Field(name: String, value: Value)
+
+public fn Field.string(name: StringSlice, value: StringSlice) -> Field {
+  Field(name: name.to_string(), value: Value.String(value.to_string()))
+}
+
+public fn Field.integer(name: StringSlice, value: Int64) -> Field {
+  Field(name: name.to_string(), value: Value.Integer(value))
+}
+
+public fn Field.float(name: StringSlice, value: Float64) -> Field {
+  Field(name: name.to_string(), value: Value.Float(value))
+}
+
+public fn Field.bool(name: StringSlice, value: Bool) -> Field {
+  Field(name: name.to_string(), value: Value.Bool(value))
+}
+
+public fn Field.duration(name: StringSlice, value: Duration) -> Field {
+  Field(name: name.to_string(), value: Value.Duration(value))
+}
+
+public fn Field.display[Shown: Display](name: StringSlice, value: Shown) -> Field {
+  Field(name: name.to_string(), value: Value.String("${value}"))
+}
+
+public type Record(level: Level, message: String, fields: List[Field])
+
+public fn debug(message: StringSlice, fields: own List[Field] = [])
+  uses Log
+{
+  if Log.enabled(Level.Debug) {
+    Log.record(Record(level: Level.Debug, message: message.to_string(), fields: own fields))
+  }
+}
+
+public fn information(message: StringSlice, fields: own List[Field] = [])
+  uses Log
+{
+  if Log.enabled(Level.Information) {
+    Log.record(Record(level: Level.Information, message: message.to_string(), fields: own fields))
+  }
+}
+
+public fn warning(message: StringSlice, fields: own List[Field] = [])
+  uses Log
+{
+  if Log.enabled(Level.Warning) {
+    Log.record(Record(level: Level.Warning, message: message.to_string(), fields: own fields))
+  }
+}
+
+public fn error(message: StringSlice, fields: own List[Field] = [])
+  uses Log
+{
+  if Log.enabled(Level.Error) {
+    Log.record(Record(level: Level.Error, message: message.to_string(), fields: own fields))
+  }
+}
+
+public type DiscardLog()
+
+impl Log for DiscardLog {
+  fn record(self, record: Record) {}
+
+  fn enabled(self, level: Level) -> Bool {
+    false
+  }
+}
+
+public type CapturedLog(records: List[Record] = [])
+
+impl Log for CapturedLog {
+  fn record(mut self, record: Record) {
+    mut self.records.push(record.copy())
+  }
+
+  fn enabled(mut self, level: Level) -> Bool {
+    true
+  }
+}
+
+public type Format = Lines | Json
+  derives Equal
+
+public type ConsoleLog(minimum: Level = Level.Information, format: Format = Format.Lines)
+
+impl Log for ConsoleLog
+  uses Console, Clock
+{
+  fn record(self, record: Record) {
+    todo
+  }
+
+  fn enabled(self, level: Level) -> Bool {
+    level >= self.minimum
+  }
+}
+
+public type AtLeast(minimum: Level)
+
+impl Log for AtLeast
+  uses Log
+{
+  fn record(self, record: Record) {
+    if record.level >= self.minimum {
+      Log.record(record)
+    }
+  }
+
+  fn enabled(self, level: Level) -> Bool {
+    level >= self.minimum && Log.enabled(level)
+  }
+}
+
+public type WithFields(fields: List[Field])
+
+impl Log for WithFields
+  uses Log
+{
+  fn record(self, record: Record) {
+    todo
+  }
+
+  fn enabled(self, level: Level) -> Bool {
+    Log.enabled(level)
+  }
+}

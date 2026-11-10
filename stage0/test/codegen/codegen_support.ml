@@ -206,11 +206,14 @@ let expect_status ?extra ?anchors expected instances =
 
 let example : Path.module_ = { package = "example"; modules = [ "main" ] }
 
+(* The standard library as a fixed base, shared by every test in a run, so
+   that it is read and checked once and not for each test. *)
+let checked_standard = lazy (Database.standard_base ())
+
 (* A module of Truss source with the standard library, which must check
    cleanly, ready to compile. *)
 let load text =
-  let database = Engine.context (Engine.create ()) in
-  Database.load_standard (Engine.of_context database);
+  let database = Engine.context (Engine.create ~bases:[ Lazy.force checked_standard ] ()) in
   Database.load_package (Engine.of_context database) ~name:"example" ~dependencies:[]
     [ (example, text) ];
   let source = (Query.demand database Workspace.file example).source in

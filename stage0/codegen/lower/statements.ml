@@ -281,7 +281,8 @@ and for_ st (s : S.statement) ~pattern ~iterable ~body =
           let depth = List.length st.scopes in
           let after = block st.b in
           let call_site = site st s.span in
-          inline st path type_arguments ~arguments ~call_site ~on_yield:(fun place ~resume ~stop ->
+          inline st path type_arguments ~source:syntax_tree ~arguments ~call_site
+            ~on_yield:(fun place ~resume ~stop ->
               let inner = st.frame in
               st.frame <- caller;
               let element_ty = yielded_type st path type_arguments in
@@ -371,14 +372,6 @@ and recursive_loop st (s : S.statement) call_ ~expressions ~arguments ~path ~typ
       call_with st call_ ~expressions ~arguments cursor ~span:s.span;
       own_in_scope st cursor;
       pull_loop st yielding cursor ~pattern ~body)
-
-(* The type a yielding method yields, in this instance. *)
-and yielded_type st path type_arguments =
-  let signature = signature_of st.context path in
-  match signature.output with
-  | Yields (_, ty) | Lends (_, ty) ->
-      Monomorphic.ground st.context.monomorphic (bind signature.generics type_arguments) ty
-  | Returns _ -> bug "%s does not yield" (Path.show path)
 
 and if_ st ~condition ~then_ ~else_ destination =
   let yes = block st.b and no = block st.b and after = block st.b in
