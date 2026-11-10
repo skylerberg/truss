@@ -201,13 +201,13 @@ public fn Child.take_error_output(mut self) -> Option[ChildOutput]
 public fn Child.wait(mut self) -> Result[ExitStatus, SystemError]
   uses Handles
 {
-  todo
+  Handles.wait(self.handle)
 }
 
 public fn Child.signal(mut self, signal: Signal) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Handles.signal(self.handle, signal: signal)
 }
 
 public opaque type ChildInput(handle: streams::Handle)
@@ -216,7 +216,7 @@ impl streams::Writer for ChildInput {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
     uses Handles
   {
-    todo
+    Handles.write(self.handle, bytes: bytes)
   }
 
   fn flush(mut self) -> Result[Unit, SystemError]
@@ -229,7 +229,7 @@ impl streams::Writer for ChildInput {
 public fn ChildInput.close(own self) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Handles.close(own self.handle)
 }
 
 public opaque type ChildOutput(handle: streams::Handle)
@@ -238,6 +238,6 @@ impl streams::Reader for ChildOutput {
   fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
     uses Handles
   {
-    todo
+    Handles.read(self.handle, buffer: mut buffer, limit: limit)
   }
 }

@@ -10,7 +10,7 @@ impl streams::Reader for Input {
   fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
     uses Handles
   {
-    todo
+    Handles.read(self.handle, buffer: mut buffer, limit: limit)
   }
 }
 
@@ -24,7 +24,7 @@ impl streams::Writer for Output {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
     uses Handles
   {
-    todo
+    Handles.write(self.handle, bytes: bytes)
   }
 
   fn flush(mut self) -> Result[Unit, SystemError]
@@ -52,13 +52,13 @@ public fn Terminal.is_interactive(self) -> Bool
 public fn Terminal.size(self) -> Result[Size, SystemError]
   uses Handles
 {
-  todo
+  Handles.terminal_size(self.handle)
 }
 
 public fn Terminal.set_raw_mode(mut self, enabled: Bool) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Handles.set_raw_mode(self.handle, enabled: enabled)
 }
 
 public fn with_raw_mode[Returned, capability Granted](
