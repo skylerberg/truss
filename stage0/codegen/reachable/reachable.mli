@@ -24,6 +24,16 @@ val reached :
   Instance.key list ->
   (Lir.compiled * Instance.key list) list
 
+(* Every instance that running the roots can reach, each with the first way
+   to it. It is what [reached] gives, but for the entries of a capability's
+   table: a build compiles them all, and running reaches one only where code
+   that runs calls that method of the capability, whose way it is given. *)
+val running :
+  Memory_layout.env ->
+  lookup:(Instance.key -> Lir.compiled) ->
+  Instance.key list ->
+  (Lir.compiled * Instance.key list) list
+
 (* What a unit refers to, and its key. *)
 val compiled_key : Lir.compiled -> Instance.key
 val compiled_references : Memory_layout.env -> Lir.compiled -> Instance.key list

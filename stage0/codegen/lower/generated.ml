@@ -129,7 +129,7 @@ let table context (key : Instance.key) : Lir.table =
             (Instance.Entry method_key, fst (entry_signature context m.method_signature)))
           capability_interface.methods
       in
-      { table_key = key; entries }
+      { table_key = key; capability = Some capability; entries }
   | _ -> bug "not a table: %s" (Instance.to_string key)
 
 (* The [impl] of a standard capability by its real implementation: the
@@ -406,7 +406,11 @@ let any_table context (key : Instance.key) : Lir.table =
             (Instance.Any_entry method_key, fst (any_entry_signature context m.method_signature)))
           (any_methods context trait)
       in
-      { table_key = key; entries = (Instance.Any_drop self_ty, drop_signature) :: entries }
+      {
+        table_key = key;
+        capability = None;
+        entries = (Instance.Any_drop self_ty, drop_signature) :: entries;
+      }
   | _ -> bug "not an any table: %s" (Instance.to_string key)
 
 (* Whether a method of a derived [impl] is the trait's own, written in the

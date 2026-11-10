@@ -467,7 +467,7 @@ and call_with ?evaluated st (call_ : C.call) ~(expressions : S.expression list)
         let lir_signature, result = entry_signature st.context signature in
         let passed = List.filter_map (fun (_, mode, ty, place) -> pass st mode ty place) in_order in
         let evidence = evidence_of st capability in
-        let target = Lir.Evidence_call { evidence; slot; signature = lir_signature } in
+        let target = Lir.Evidence_call { evidence; capability; slot; signature = lir_signature } in
         emit st.b
           (Call { target; arguments = passed; result = Convention.destination result destination });
         if not lir_signature.returns then unreachable_block st

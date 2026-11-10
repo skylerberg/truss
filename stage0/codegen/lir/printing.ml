@@ -145,8 +145,8 @@ let target_to_string = function
   | Indirect { value; _ } -> "(" ^ operand_to_string value ^ ")"
   | Intrinsic intrinsic -> "intrinsic " ^ intrinsic_name intrinsic
   | Foreign declaration -> "foreign " ^ declaration.symbol
-  | Evidence_call { evidence; slot; _ } ->
-      Printf.sprintf "(%s table %d)" (operand_to_string evidence) slot
+  | Evidence_call { evidence; capability; slot; _ } ->
+      Printf.sprintf "(%s %s %d)" (operand_to_string evidence) (Ground.path_name capability) slot
   | Table_call { table; value; slot; _ } ->
       Printf.sprintf "(%s[%d] %s)" (operand_to_string table) slot (operand_to_string value)
 
