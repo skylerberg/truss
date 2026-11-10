@@ -1,0 +1,160 @@
+use standard::streams
+
+public opaque type Input(handle: streams::Handle)
+
+impl streams::Reader for Input {
+  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles
+  {
+    todo
+  }
+}
+
+public opaque type Output(handle: streams::Handle)
+
+impl streams::Writer for Output {
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+    uses Handles
+  {
+    todo
+  }
+
+  fn flush(mut self) -> Result[Unit, SystemError]
+    uses Handles
+  {
+    Ok(Unit)
+  }
+}
+
+public type Size(columns: UInt16, rows: UInt16)
+  derives Equal
+
+public opaque type Terminal(handle: streams::Handle)
+
+public fn Terminal.size(self) -> Result[Size, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn Terminal.set_raw_mode(mut self, enabled: Bool) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+public fn with_raw_mode[Output, capability Granted](
+  run: (fn() -> Output uses Granted),
+) -> Result[Output, SystemError]
+  uses Console, Handles, Granted
+{
+  todo
+}
+
+public fn read_secret(prompt: StringSlice) -> Result[Option[String], SystemError]
+  uses Console, Handles
+{
+  todo
+}
+
+public type Color =
+  | Black
+  | Red
+  | Green
+  | Yellow
+  | Blue
+  | Magenta
+  | Cyan
+  | White
+  | BrightBlack
+  | BrightRed
+  | BrightGreen
+  | BrightYellow
+  | BrightBlue
+  | BrightMagenta
+  | BrightCyan
+  | BrightWhite
+  | Indexed(index: UInt8)
+  | TrueColor(red: UInt8, green: UInt8, blue: UInt8)
+  derives Equal
+
+public type Style(
+  foreground: Option[Color] = None,
+  background: Option[Color] = None,
+  bold: Bool = false,
+  dim: Bool = false,
+  italic: Bool = false,
+  underline: Bool = false,
+)
+
+public fn Style.apply(self, text: StringSlice) -> String
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn strip_styles(text: StringSlice) -> String
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn display_width(text: StringSlice) -> USize
+  cost time O(text.length())
+{
+  todo
+}
+
+public opaque type CapturedConsole(input: List[String], next_line: USize, output: String, errors: String)
+
+public fn CapturedConsole.new(input: own List[String] = []) -> CapturedConsole {
+  CapturedConsole(input: own input, next_line: 0, output: "", errors: "")
+}
+
+public fn CapturedConsole.output(self) -> StringSlice
+  cost time O(1)
+{
+  self.output
+}
+
+public fn CapturedConsole.errors(self) -> StringSlice
+  cost time O(1)
+{
+  self.errors
+}
+
+impl Console for CapturedConsole {
+  fn print(mut self, text: StringSlice) {
+    mut self.output.push(text)
+  }
+
+  fn print_line(mut self, text: StringSlice) {
+    mut self.output.push(text)
+    mut self.output.push("\n")
+  }
+
+  fn print_error(mut self, text: StringSlice) {
+    mut self.errors.push(text)
+    mut self.errors.push("\n")
+  }
+
+  fn read_line(mut self) -> Option[String] {
+    todo
+  }
+
+  fn input(mut self) -> Input {
+    todo
+  }
+
+  fn output(mut self) -> Output {
+    todo
+  }
+
+  fn error_output(mut self) -> Output {
+    todo
+  }
+
+  fn terminal(mut self) -> Option[Terminal] {
+    None
+  }
+}

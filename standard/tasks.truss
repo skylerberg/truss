@@ -1,0 +1,114 @@
+public opaque type Group(identifier: UInt64)
+
+public fn group[Output, capability Granted](run: (fn(mut Group) -> Output uses Granted)) -> Output
+  uses Tasks, Granted
+{
+  todo
+}
+
+public fn Group.spawn[Input, capability Granted](
+  mut self,
+  input: own Input,
+  work: (fn(own Input) uses Granted),
+)
+  uses Tasks, Granted
+{
+  todo
+}
+
+public fn Group.spawn_returning[Input, Output, capability Granted](
+  mut self,
+  input: own Input,
+  work: (fn(own Input) -> Output uses Granted),
+) -> Task[Output]
+  uses Tasks, Granted
+{
+  todo
+}
+
+public opaque type Task[Output](identifier: UInt64, result: Option[Output])
+
+public fn Task[Output].join(own self) -> Output
+  uses Tasks
+{
+  todo
+}
+
+public fn Task[Output].is_finished(self) -> Bool
+  uses Tasks
+{
+  todo
+}
+
+public type Closed()
+  derives Equal
+
+impl Display for Closed {
+  fn display(self, output: mut TextBuilder) {
+    mut output.write("the channel is closed")
+  }
+}
+
+public opaque type Channel[Message](identifier: UInt64)
+
+public fn Channel[Message].new(capacity: USize = 0) -> Channel[Message]
+  uses Tasks
+{
+  todo
+}
+
+public fn Channel[Message].handle(self) -> Channel[Message]
+  cost time O(1)
+{
+  Channel(identifier: self.identifier)
+}
+
+public fn Channel[Message].send(self, message: own Message) -> Result[Unit, Closed]
+  uses Tasks
+{
+  todo
+}
+
+public fn Channel[Message].receive(self) -> Option[Message]
+  uses Tasks
+{
+  todo
+}
+
+public fn Channel[Message].try_receive(self) -> Option[Message]
+  uses Tasks
+{
+  todo
+}
+
+public fn Channel[Message].receive_within(self, timeout: Duration) -> Option[Message]
+  uses Tasks, Clock
+{
+  todo
+}
+
+public fn Channel[Message].close(self)
+  uses Tasks
+{
+  todo
+}
+
+public fn Channel[Message].messages(self) yields own Message
+  uses Tasks
+{
+  todo
+}
+
+public fn receive_any[Message](channels: Slice[Channel[Message]]) -> Option[Indexed[Message]]
+  uses Tasks
+{
+  todo
+}
+
+public fn sleep(duration: Duration)
+  uses Tasks, Clock
+{
+  todo
+}
+
+public type SeededTasks(seed: UInt64)
