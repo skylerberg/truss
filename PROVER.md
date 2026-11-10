@@ -222,7 +222,10 @@ and `reads` clauses):
   over their buffers. Each operation reads or changes that sequence as the
   compiler makes it do: `storage_push` appends, `storage_insert` shifts
   what follows, `view_slice` is a run of its view, and `storage_lengthen`
-  makes the room a C function wrote into the storage's; `compare_bytes` is
+  makes the room a C function wrote into the storage's, `storage_shorten`
+  keeps the elements before the length it is given, which must be at most
+  the storage's, and every operation but `storage_set_capacity` keeps the
+  capacity; `compare_bytes` is
   a total lexicographic order on its views' bytes, zero exactly when they
   are the same. A C function is given only an address into a storage, so
   every storage it is lent keeps its length and its capacity; one passed
