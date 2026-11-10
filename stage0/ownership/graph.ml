@@ -52,6 +52,9 @@ type action =
       (** A value that the statement drops is viewed by what the statement binds, or by the given
           place. The origin is the dropped value. *)
   | Keeps_lent_part of T.ty  (** A [let] binds a part that a call lends only for the statement. *)
+  | Write_through of Place.t
+      (** A mutation writes through a slice that is held in this place. The mutation changes
+          everything that the slice views. *)
   | Arguments of { places : passed list; lent : (int * Place.t * T.mode * Core.origin) list }
       (** The places passed to one call, in argument order. [lent] lists the arguments that are
           parts lent by a call: the argument's position, the place that lends the part, and how. *)
@@ -434,6 +437,9 @@ and operand builder frontier (mode : T.mode) (found : Core.operand) =
   match found with
   | Place found -> (
       let frontier = place_parts builder frontier found in
+      let frontier =
+        if mode = Mut then writes_through builder frontier found ~whole:true else frontier
+      in
       match Place.of_core found with
       | Some place ->
           emit builder frontier
@@ -446,6 +452,16 @@ and operand builder frontier (mode : T.mode) (found : Core.operand) =
       | Some place -> emit builder frontier (Mutate place) slice.origin
       | None -> frontier)
   | Value value -> expression builder frontier value
+
+(* A mutation of a place may write through a slice on the way to it. *)
+and writes_through builder frontier (found : Core.place) ~whole =
+  match
+    Option.bind (Place.written_slice ~whole found) (fun slice ->
+        Option.map (fun place -> (place, slice)) (Place.of_core slice))
+  with
+  | Some (place, slice) ->
+      emit builder frontier (Write_through place) (Core_walk.place_origin slice)
+  | None -> frontier
 
 (* The expressions that are evaluated to reach a place: the keys of its
    indexes, a lending call, and the value of a temporary. *)
@@ -538,6 +554,7 @@ and statement_parts builder frontier (node : Core.statement) =
   | Assign { target; value } -> (
       let frontier = expression builder frontier value in
       let frontier = place_parts builder frontier target in
+      let frontier = writes_through builder frontier target ~whole:false in
       match Place.of_core target with
       | Some place ->
           let frontier = emit builder frontier (Assign place) (Core_walk.place_origin target) in
@@ -549,6 +566,7 @@ and statement_parts builder frontier (node : Core.statement) =
   | Compound_assign { target; value } -> (
       let frontier = expression builder frontier value in
       let frontier = place_parts builder frontier target in
+      let frontier = writes_through builder frontier target ~whole:false in
       match Place.of_core target with
       | Some place ->
           let origin = Core_walk.place_origin target in

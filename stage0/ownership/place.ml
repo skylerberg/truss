@@ -95,6 +95,37 @@ let rec of_core (place : Core.place) : t option =
       | None -> None)
   | Temporary _ -> None
 
+let slice_path : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "Slice" }
+
+let string_slice_path : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "text" ] }; name = "StringSlice" }
+
+(* A [Slice] or a [StringSlice]: a view that an owned collection converts
+   to, and through which the collection's elements can be changed. *)
+let is_slice_type (type_ : T.ty) =
+  match type_ with
+  | T.Named { path; _ } -> Path.equal path slice_path || Path.equal path string_slice_path
+  | _ -> false
+
+(* The slice that a mutation of a place writes through, if there is one:
+   the innermost place of a slice type on the way to the mutated place.
+   [whole] is true if the place itself is borrowed [mut], and false if it
+   is assigned. Assigning a slice variable replaces the view and writes
+   through nothing. *)
+let rec written_slice ~whole (place : Core.place) : Core.place option =
+  if whole && is_slice_type (Core_walk.place_type place) then Some place
+  else
+    match place with
+    | Field { base; _ } -> written_slice ~whole:false base
+    | Lent index -> (
+        match storage_index index with
+        | Some collection ->
+            if is_slice_type (Core_walk.place_type collection) then Some collection
+            else written_slice ~whole:false collection
+        | None -> None)
+    | Local _ | Constant _ | Temporary _ -> None
+
 (* The place that a slice views: some elements of its base. *)
 let of_slice (slice : Core.expression) : t option =
   match slice.kind with

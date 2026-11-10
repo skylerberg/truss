@@ -17,6 +17,7 @@ type context = {
   types : (Core.local, T.ty) Hashtbl.t;
   mutable parameters : Core.local list;
   mutable mut_parameters : Core.local list;
+  mutable variables : Core.local list;  (** The locals declared with [var]. *)
   mutable diagnostics : Diagnostic.t list;
   mutable moves : Core.id list;  (** The [Use] nodes that move a place. *)
   mutable disjoint : (Core.origin * Core.origin) list;
@@ -82,7 +83,8 @@ let collect context (definition : Core.definition) =
       pattern =
         (fun (node : Core.pattern) ->
           match node.kind with
-          | Bind { local; name; mode; _ } ->
+          | Bind { local; name; mode; mutable_ } ->
+              if mutable_ then context.variables <- local :: context.variables;
               Hashtbl.replace context.names local name;
               Hashtbl.replace context.kinds local (kind_of_mode mode);
               Hashtbl.replace context.types local node.type_
