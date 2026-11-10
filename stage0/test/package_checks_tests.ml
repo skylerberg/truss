@@ -47,6 +47,57 @@ let () =
         \  fn equal(self, other: Point) -> Bool { todo }\n\
          }\n"
         "package.method_name_clash");
+  test "a type's own method may be another version of a trait's" (fun () ->
+      fine
+        "type Bag(items: List[Int64])\n\n\
+         impl Iterable for Bag {\n\
+        \  type Element = Int64\n\
+        \  fn each(self) yields Int64 { todo }\n\
+         }\n\n\
+         fn Bag.each(mut self) yields mut Int64 { todo }\n\n\
+         fn Bag.each(own self) yields own Int64 { todo }\n");
+  test "an impl that writes a method may make it another version of the type's own" (fun () ->
+      fine
+        "trait Labelled {\n\
+        \  fn label(self) -> Int64\n\
+        \    cost time O(1)\n\
+        \  {\n\
+        \    0\n\
+        \  }\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         fn Counter.label(own self) -> Int64 { todo }\n\n\
+         impl Labelled for Counter {\n\
+        \  fn label(self) -> Int64\n\
+        \    cost time O(1)\n\
+        \  {\n\
+        \    0\n\
+        \  }\n\
+         }\n");
+  test "a method an impl leaves to its trait cannot be a version of the type's own" (fun () ->
+      one_diagnostic
+        "trait Labelled {\n\
+        \  fn label(self) -> Int64\n\
+        \    cost time O(1)\n\
+        \  {\n\
+        \    0\n\
+        \  }\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         fn Counter.label(own self) -> Int64 { todo }\n\n\
+         impl Labelled for Counter {}\n"
+        "package.method_name_clash");
+  test "a type's constant cannot share a name with a trait's method" (fun () ->
+      one_diagnostic
+        "trait Bounded {\n\
+        \  fn largest() -> Self\n\
+         }\n\n\
+         type Level(value: Int64)\n\n\
+         let Level.largest: Level = Level(9)\n\n\
+         impl Bounded for Level {\n\
+        \  fn largest() -> Level { todo }\n\
+         }\n"
+        "package.method_name_clash");
   test "a type that contains itself in place needs indirect, with a fix that adds it" (fun () ->
       one_diagnostic "type Tree =\n  | Leaf\n  | Node(left: Tree, right: Tree)\n"
         "package.needs_indirect"
@@ -176,6 +227,30 @@ let () =
         ];
       match codes (Package_checks.diagnostics database (module_of "app::main")) with
       | [ "package.overlapping_impls" ] -> ()
+      | found -> fail "found [%s]" (String.concat "; " found));
+  test "an impl in another package cannot give a type another version of its method" (fun () ->
+      let database = Engine.context (Engine.create ()) in
+      Database.load_standard (Engine.of_context database);
+      Database.load_package (Engine.of_context database) ~name:"lib" ~dependencies:[]
+        [
+          ( module_of "lib::counter",
+            "public type Counter(count: Int64)\n\npublic fn Counter.label(self) -> Int64 { todo }\n"
+          );
+        ];
+      Database.load_package (Engine.of_context database) ~name:"app"
+        ~dependencies:[ { package = "lib"; capabilities = [] } ]
+        [
+          ( module_of "app::main",
+            "use lib::counter\n\n\
+             trait Cleared {\n\
+            \  fn label(mut self) -> Int64\n\
+             }\n\n\
+             impl Cleared for counter::Counter {\n\
+            \  fn label(mut self) -> Int64 { todo }\n\
+             }\n" );
+        ];
+      match codes (Package_checks.diagnostics database (module_of "app::main")) with
+      | [ "package.method_name_clash" ] -> ()
       | found -> fail "found [%s]" (String.concat "; " found));
   test "impls whose heads unify only through an infinite type do not overlap" (fun () ->
       fine

@@ -236,12 +236,12 @@ and call_needs state scope (value : expression) (call : C.call) callee passed : 
         (Path.package callee) signature.uses
   | None, Trait_method { trait; name; receiver; evidence; _ } -> (
       (* The trait's method as declared, and the [impl]'s that runs. *)
-      (match Members.trait_methods state.database trait.trait name with
-      | method_ :: _ ->
+      (match Members.trait_method state.database trait.trait name receiver with
+      | Some method_ ->
           check_grant state value.span
             ~what:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
             (Path.package trait.trait) method_.method_signature.uses
-      | [] -> ());
+      | None -> ());
       match evidence with
       | Impl { impl; _ } -> (
           match Interface.Impls.impl_interface state.database impl with
