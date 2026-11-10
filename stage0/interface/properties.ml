@@ -139,7 +139,11 @@ let limit = 64
 let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (type_ : T.ty) =
   let each = all (conditions database ~facts_of ~resolve ~leaf ~within property) in
   match type_ with
-  | T.Error _ | T.Hole | T.Variable _ | T.Never | T.Literal _ | T.Integer | T.Function _ -> Some []
+  | T.Error _ | T.Hole | T.Variable _ | T.Never | T.Literal _ | T.Integer -> Some []
+  (* A function value may be a lambda, which views what it captures. The
+     type does not say whether it captures, so every function type is a
+     view. *)
+  | T.Function _ -> if property = View then None else Some []
   | T.Parameter _ | T.Projection _ -> leaf type_
   | T.Any trait -> (
       match property with
