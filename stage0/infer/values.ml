@@ -224,7 +224,7 @@ and lambda state env ?expected (value : expression) parameters body =
           (fun written (mode, input) -> pattern state env written input ~mode)
           parameters function_type.inputs;
         let output = output_type function_type.output in
-        let lambda_env = { env with output = Some (Returns output); around = [] } in
+        let lambda_env = { env with output = Some (Returns output); enclosing = [] } in
         let body_type = block_value state lambda_env ~expected:output body in
         ignore
           (convert state lambda_env ?expression:(block_end body) body.span ~found:body_type

@@ -73,9 +73,11 @@ type scope = {
   available : T.capability list;
   kind : scope_kind;
   implemented_capability : T.capability option;
-      (** Set in a method of an [impl] of a capability. An indirect call (a call through a function
-          value) in such a method may use that capability, because the method can pass its own
-          implementation on to the callee. *)
+      (** Set in a method of an [impl] of a capability, and not in a lambda, a [parallel] branch, or
+          a specification inside it. An indirect call (a call through a function value) in such a
+          method may use that capability, because the method can pass its own implementation on to
+          the callee. A call of an intrinsic in such a method needs no capability (see
+          [require_intrinsic_uses]). *)
 }
 
 (* The scope of a [parallel] branch: only [Panic] is available. *)
@@ -180,23 +182,41 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
     state.capability_constraints <-
       { subset = required; superset; report_missing } :: state.capability_constraints
 
+(* An intrinsic has no signature with a [uses] clause: [Intrinsic.uses] lists
+   the capabilities that a call of it requires.
+
+   A method of an [impl] of a capability is exempt. Its callers reach it
+   only through a capability call, which is an effect that their signatures
+   declare, so no code without capabilities can observe what the intrinsic
+   does. A capability is not a trait, so the method cannot be called on the
+   value, through a bound, or through [any]. A lambda, a [parallel] branch,
+   and a specification inside the method are not exempt, and neither is a
+   helper function that the method calls. *)
+let require_intrinsic_uses checking scope (origin : Core.origin) operation =
+  if Option.is_none scope.implemented_capability then
+    require_available checking scope origin
+      (List.map (fun capability -> T.Capability capability) (Intrinsic.uses operation))
+
 (* Handles a callee that is stored in a node other than a [Call] (see
    [Core_walk.visit]). It requires the [uses] of the callee's signature. *)
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
   let state = checking.state in
   check_callee_grants checking origin callee;
-  require_available checking scope origin
-    (match callee with
-    | Function { path; _ } -> (
-        match Interface.Impls.signature state.database path with
+  match callee with
+  | Function { path; _ } ->
+      require_available checking scope origin
+        (match Interface.Impls.signature state.database path with
         | Some signature -> signature.uses
         | None -> [])
-    | Trait_method { trait; name; receiver; _ } -> (
-        match Members.trait_method state.database trait.trait name receiver with
+  | Trait_method { trait; name; receiver; _ } ->
+      require_available checking scope origin
+        (match Members.trait_method state.database trait.trait name receiver with
         | Some method_ -> method_.method_signature.uses
         | None -> [])
-    | Capability_method { capability; _ } -> [ T.Capability capability ]
-    | Intrinsic _ | Indirect _ -> [])
+  | Capability_method { capability; _ } ->
+      require_available checking scope origin [ T.Capability capability ]
+  | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope origin operation
+  | Indirect _ -> ()
 
 let rec check_expression checking scope (node : Core.expression) =
   match node.kind with
@@ -214,12 +234,15 @@ let rec check_expression checking scope (node : Core.expression) =
       (* Taking a function as a value lets the holder call it, so the grants
          are checked here as they are for a call. *)
       check_callee_grants checking node.origin (Function { path; type_arguments = [] })
-  | Call call ->
+  | Call call -> (
       check_children checking scope (`Expression node);
       check_callee_grants checking node.origin call.callee;
       require_available checking scope node.origin
         ~indirect_call:(match call.callee with Indirect _ -> true | _ -> false)
-        call.uses
+        call.uses;
+      match call.callee with
+      | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope node.origin operation
+      | Function _ | Trait_method _ | Capability_method _ | Indirect _ -> ())
   | _ -> check_children checking scope (`Expression node)
 
 and check_children checking scope node =
@@ -253,7 +276,7 @@ and check_statement checking scope (statement : Core.statement) =
          does not depend on the order its branches run in. *)
       List.iter (check_statement checking (panic_only "a `parallel` branch")) branches
   | Concurrent branches ->
-      (* A branch may use what is available around the block. *)
+      (* A branch may use the capabilities that are available at the block. *)
       require_available checking scope statement.origin [ tasks ];
       List.iter (check_statement checking scope) branches
   | For { mode; pattern; iteration; clauses; body } ->
