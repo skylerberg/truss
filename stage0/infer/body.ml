@@ -1,8 +1,8 @@
-(* Checking a definition's bodies: a function's body, defaults, and
+(* Checks the bodies of a definition: a function's body, defaults, and
    clauses; a type's invariants, potential, and field defaults; a trait's
-   provided methods and laws; an [impl]'s methods; a constant's value; and
-   the bodies of tests, theorems, and proofs. A part the parser did not
-   build as written is not checked. *)
+   default methods and laws; an [impl]'s methods; a constant's value; and
+   the bodies of tests, theorems, and proofs. A part that did not parse is
+   not checked. *)
 
 open Syntax
 module T = Types
@@ -36,8 +36,8 @@ let no_output : env =
    default. *)
 let constant_expression : env = { no_output with compile_time = true }
 
-(* A body: each statement settles its own types, and the last is checked
-   against the result type. *)
+(* Checks a body. Types are inferred one statement at a time, and the last
+   expression is checked against the result type. *)
 let body state env (written : block) =
   let rec go = function
     | [] -> (
@@ -52,8 +52,9 @@ let body state env (written : block) =
         in_statement state env last.span (fun () ->
             match (last.kind, env.output) with
             | Expression value, Some (Returns output) when resolve state output = T.unit ->
-                (* A body that returns nothing ends with a statement, whose
-                   value is unused like any other's. *)
+                (* The body of a function with no result ends with a
+                   statement. Its value must be used or discarded, like the
+                   value of any statement. *)
                 statement state env last ~last:false
             | Expression value, Some (Returns output) -> check state env value output
             | _, Some (Returns output) ->
@@ -112,8 +113,9 @@ let check_clauses state env (clauses : clause list) =
           | `Cost_function -> ignore (expression state env value)))
     (clause_expressions clauses)
 
-(* The [requires] of a function-typed parameter, a specification over the
-   type's named inputs and the parameters before it. *)
+(* Checks the [requires] clauses of a function-typed parameter. They are
+   specifications over the named inputs of the function type and the
+   parameters declared before it. *)
 let check_function_type_requires state env (written : parameter list) (signature : T.signature) =
   let env = { env with specification = true } in
   List.iter
@@ -193,8 +195,8 @@ let core_contract state (clauses : clause list) : Core.contract =
         clauses;
   }
 
-(* The parameters as the body names them: [self] first when there is one,
-   and each with the mode and the type its signature gives it. *)
+(* The core parameters of a function: [self] first if there is one, each
+   with the mode and the type from the signature. *)
 let core_parameters state (written : parameter list) (signature : T.signature) : Core.parameter list
     =
   List.filter_map
@@ -248,14 +250,14 @@ let core_parameters state (written : parameter list) (signature : T.signature) :
       | Parameter_error -> None)
     written
 
-(* A function or method with its signature, as lowered. *)
+(* Checks a function or a method against its signature. *)
 let check_function state ~broken_body (written : signature) (body_block : block option)
     (signature : T.signature) =
   let env : env =
     {
       output = Some signature.output;
-      (* A function for specifications only has a specification for a
-         body: exact arithmetic, and [==>] and quantifiers over types. *)
+      (* The body of a function for specifications only is a specification:
+         it has exact arithmetic, [==>], and quantifiers over types. *)
       specification = signature.specification_only;
       self = Option.map snd signature.receiver;
       self_mode = self_mode signature;
@@ -282,7 +284,7 @@ let check_definition state (lowered : Environment.lowered) =
     match (definition.kind, lowered.interface) with
     | Function { signature; body = written }, Function_interface lowered_signature ->
         check_function state ~broken_body:(broken Body) signature (Some written) lowered_signature
-    (* A method without a body still has clauses to check. *)
+    (* A method without a body still has clauses, which are checked. *)
     | Method_declaration signature, Function_interface lowered_signature ->
         check_function state ~broken_body:true signature None lowered_signature
     | Type_definition { body = type_body; clauses; _ }, Type_interface interface -> (
@@ -472,11 +474,11 @@ let check_definition state (lowered : Environment.lowered) =
           body state { no_output with specification = true; output = Some (Returns T.unit) } written
     | _ -> ()
 
-(* The checked form holds no inference variable: every table entry is
-   given the statement's final substitution, normalized, and anything
-   still unsolved, which was reported, is [Error]. Entries recorded while a
-   statement was being checked, such as a call's type arguments, are
-   final only once it settled. *)
+(* Replaces every type in the checked tables by its final form, so that the
+   tables hold no inference variable. A variable that is still unsolved was
+   reported, and becomes the error type. An entry recorded while a statement
+   was checked, such as a call's type arguments, is final only after the
+   statement's inference finished. *)
 let finalize (state : state) =
   let final = final state and argument = final_argument state in
   let trait (reference : T.trait_reference) =
@@ -555,8 +557,9 @@ let check database (key : Names.key) =
     (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
   with
   | Some definition, Some resolved ->
-      (* The definition's module is in its key. Where it starts in its file
-         is not read, so a definition that only moved is not checked again. *)
+      (* The module comes from the definition's key. The definition's
+         position in its file is not read, so a definition that only moved
+         is not checked again. *)
       let module_ = key.module_ in
       let lowered, context = Environment.lower database key definition resolved in
       let text = Option.value ~default:"" (Query.demand database Names.text key) in
@@ -599,9 +602,9 @@ let check database (key : Names.key) =
           evidence = [];
         }
       in
-      (* What lowering reported for the interface is the interface's to
-         report; what it reports for the types written inside bodies, and
-         their bounds, are the body's. *)
+      (* Diagnostics about the types in the signature belong to the
+         interface check. Only diagnostics about the types written in the
+         body, and their bounds, are reported here. *)
       let interface_diagnostics = List.length !(context.diagnostics) in
       let interface_named = List.length !(context.named) in
       check_definition state lowered;
@@ -726,7 +729,7 @@ let checked =
     (fun database key ->
       Compiler_bug.within ~stage:"Infer" (Names.show_key key) (fun () -> check database key))
 
-(* Every body error of a file, in its offsets and in order. *)
+(* The diagnostics of every body in a file, in file offsets and in order. *)
 let diagnostics database module_ =
   Names.per_definition database module_ (fun key ->
       match Query.demand database checked key with Some result -> result.diagnostics | None -> [])
