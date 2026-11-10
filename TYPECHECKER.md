@@ -1221,10 +1221,15 @@ all read from one account of what a value views:
   `mut backup.push(9)` is rejected while the result is in use. Plain-data
   arguments, such as an index, lend nothing, so the rule rarely holds more
   than it must.
-- **A place given `mut` that can hold views takes on the same loans,** since
-  the callee may keep a view in it. After `mut views.push(data[0..2])`,
-  `views` views `data`, and `mut data.push(4)` is rejected while `views` is
-  in use.
+- **A place given `mut` that can hold views takes on the loans of the views
+  that the call is given,** since the callee may keep them in it: the loans
+  of the call's other arguments of a view type. After
+  `mut views.push(data[0..2])`, `views` views `data`, and `mut data.push(4)`
+  is rejected while `views` is in use. An argument that is only lent, such
+  as the buffer in `mut reader.read(mut buffer, limit: 2)`, is not kept: the
+  callee's check refuses that, by the rule on what the caller keeps below.
+  So `reader` does not come to view `buffer`, and the next read into the
+  same buffer is fine.
 - **The value of an `if`, a `match`, or a block views what any of its
   branches' values view.** After
   `let part = if first { items[..1] } else { items[1..] }`, `part` views
@@ -1265,6 +1270,19 @@ all read from one account of what a value views:
   by assignment or by a call that takes it `mut`, must not be of what ends
   with the function. And since the caller goes on using it, nothing it views
   may be changed in the rest of the function.
+- **A function keeps only the views that it is given.** A view put in what
+  the caller keeps must be one that the function received as a view: it
+  comes from a parameter of a view type, such as a `Slice` or a function.
+  A view of a parameter that is only lent is an error, so
+  `self.view = data[0..2]` needs `data: Slice[Int64]`, not
+  `data: List[Int64]`. Callers do not change, because a `List` passed to a
+  `Slice` parameter becomes a view of it. The signature then says what the
+  callee may keep, which is what lets the caller assume no more. Rust has
+  the same default: two borrowed parameters do not capture each other
+  unless the signature ties their lifetimes.
+- **A value cannot keep a view of its own part.** `self.recent =
+  self.items[0..1]` is an error, because the caller would not know that
+  changing `items` ends `recent`.
 
 - **Writing through a slice needs `mut` access to what it views.** A `var`
   that holds a `Slice` or a `StringSlice` can be passed `mut`, or assigned

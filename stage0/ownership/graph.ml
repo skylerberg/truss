@@ -594,8 +594,10 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
       emit builder frontier (Arguments { places; views; yielded = false }) node.origin
     else frontier
   in
-  (* A place passed [mut] that can hold views may keep a view of what the
-     call's other arguments view. *)
+  (* A place passed [mut] that can hold views may keep the views that the
+     call is given: its other arguments of a view type. It cannot keep a
+     view of an argument that is only lent, which the check of the callee
+     refuses. *)
   let frontier =
     List.fold_left
       (fun frontier (argument : Core.argument) ->
@@ -605,7 +607,9 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
             match Place.of_core found with
             | Some place ->
                 let others =
-                  List.filter (fun other -> other != kept) (lent_arguments builder call)
+                  List.filter
+                    (fun other -> other != kept && builder.is_view (operand_type other))
+                    (lent_arguments builder call)
                 in
                 keeps_views builder frontier place node.origin
                   ~views:(List.concat_map (viewed_operand builder) others)

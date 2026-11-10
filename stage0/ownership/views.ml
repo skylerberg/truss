@@ -381,7 +381,21 @@ let check context (graph : Graph.t) =
           | None -> ())
       | Store { place; views } -> (
           if kept_by_caller context place then
-            match List.find_opt (ends_with_function context) (resolve before.(index) views) with
+            let resolved = resolve before.(index) views in
+            (* The caller assumes that what it keeps views only what the
+               function was given as a view. So the function cannot put
+               there a view of a parameter that it was only lent, or a view
+               of the place itself. *)
+            let of_itself (view : view) = view.place.root = place.root && not view.taken in
+            let only_lent (view : view) =
+              match view.place.root with
+              | Local local when local = Self || List.mem local context.parameters -> (
+                  match Hashtbl.find_opt context.types local with
+                  | Some type_ -> not (is_view context type_)
+                  | None -> false)
+              | Local _ | Constant _ | Environment -> false
+            in
+            match List.find_opt (ends_with_function context) resolved with
             | Some { place = { root = Environment; _ }; _ } ->
                 report context Stores_local_view at
                   (Printf.sprintf
@@ -399,7 +413,25 @@ let check context (graph : Graph.t) =
                      (show_root context local.place.root)
                      (show_root context place.root)
                      (show_root context local.place.root))
-            | None -> ())
+            | None -> (
+                match (List.find_opt of_itself resolved, List.find_opt only_lent resolved) with
+                | Some _, _ ->
+                    report context Stores_local_view at
+                      (Printf.sprintf
+                         "This puts a view of a part of `%s` in `%s` itself. A value cannot hold a \
+                          view of its own parts: the caller would not know that changing the part \
+                          ends the view."
+                         (show_root context place.root) (show_root context place.root))
+                | None, Some lent ->
+                    let lent = show_root context lent.place.root in
+                    report context Stores_local_view at
+                      (Printf.sprintf
+                         "This puts a view of `%s` in `%s`, which the caller keeps, but `%s` is \
+                          only lent to this function. A function keeps only the views that it is \
+                          given. Take `%s` as a view type, such as a `Slice`, to keep a view of \
+                          it."
+                         lent (show_root context place.root) lent lent)
+                | None, None -> ()))
       | Write_through slice -> (
           (* Writing through a slice changes what the slice views, so every
              place it views must be mutable. A slice held in a field is
