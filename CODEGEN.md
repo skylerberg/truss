@@ -932,6 +932,17 @@ A lending method with no `yield`, such as one whose body is `todo`, never
 returns. Its body is inlined as usual, and the caller's code after the call
 is unreachable.
 
+A quantifier in code that runs, such as
+`forall i in 0..items.length() => items[i] > 0` or
+`exists item in items => item < 0`, is the same loop with another body:
+over a range it is the counted loop, and over a collection it is the call
+of `each` that a `for` loop makes, which the core form gives it. The
+answer starts as true for `forall` and false for `exists`, each value's
+body is evaluated, and the first one that decides the answer sets it and
+leaves the loop as `break` does, so an `each` that is inlined drops what
+it owns. It costs what the loop costs up to that value, and a quantifier
+inside a loop or another quantifier needs nothing more.
+
 A loop over a yielding method that is already inlined around it, as a
 tree's `each` loops over its subtrees, would be inlined forever. Stage0
 pulls a cursor over the inner call instead, in a heap block the loop frees
@@ -1750,10 +1761,6 @@ a command line can hold.
 - **The standard library and registry packages at `-O2` in development
   builds,** cached, so a project's development builds run them at full
   speed.
-- **A quantifier in code.** It is to be a loop over its range or collection,
-  through the same `each` a `for` loop calls, that stops at the first
-  element that decides the answer: `forall` at the first false body,
-  `exists` at the first true one.
 - **A lending method that lends through a call to itself.**
 - **Waiting for a signal that the system ignores unless it is asked for,**
   such as a terminal's change of size. macOS throws such a signal away

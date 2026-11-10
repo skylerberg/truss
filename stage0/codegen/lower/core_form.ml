@@ -375,8 +375,40 @@ and into st (value : Core.expression) (destination : Lir.place) =
           block_into inner body (result_place inner))
         destination
   | Slice { call; _ } -> into st call destination
-  | Implies _ | Result | Old _ | Quantified _ | Yielded | Finished | Identical _
-  | Specification_function _ | Method_time _ ->
+  | Quantified { quantifier; binder; body } ->
+      (* A loop that stops at the first value that decides the answer: one
+         the body is false of, for [forall], or true of, for [exists]. *)
+      let deciding = quantifier = Exists in
+      let pattern, iteration =
+        match binder with
+        | Over_range { pattern; start; stop; inclusive } ->
+            (pattern, Core.Integer_range { start; stop; inclusive })
+        | Over_each { pattern; call } -> (pattern, Yielding_call call)
+        | Over_collection _ | Over_type _ ->
+            bug "a quantifier that only a specification can have, in code that runs"
+      in
+      assign (Use (Constant (Bool (not deciding))));
+      for_each st ~origin:value.origin ~pattern ~iteration ~body:(fun () ->
+          let holds = temporary st st.context.bool in
+          in_statement st (fun () -> into st body holds);
+          let decided = block st.b and goes_on = block st.b in
+          finish st.b
+            (Switch
+               {
+                 value = Copy holds;
+                 cases = [ ((if deciding then Z.one else Z.zero), decided) ];
+                 default = Some goes_on;
+               });
+          start st.b decided;
+          assign (Use (Constant (Bool deciding)));
+          (match st.loops with
+          | loop :: _ ->
+              leave_to st loop.break_depth;
+              finish st.b (Goto loop.break_)
+          | [] -> bug "a quantifier's body outside its loop");
+          start st.b goes_on)
+  | Implies _ | Result | Old _ | Yielded | Finished | Identical _ | Specification_function _
+  | Method_time _ ->
       bug "a specification-only expression in code that runs"
 
 (* Evaluates a call's arguments, one for each of the callee's parameters, in
@@ -569,15 +601,118 @@ and argument_place st (argument : Core.argument) =
   | Passed { mode; value } -> (mode, ground st (operand_type value), operand_place st value)
   | Default -> bug "an omitted argument in a call that has no defaults"
 
+(* Runs [body] once for each value of an iteration, with the pattern's names
+   bound, as the innermost loop: a [break] in it leaves the loop and a
+   [continue] goes on to the next value. *)
+and for_each st ~origin ~(pattern : Core.pattern) ~(iteration : Core.iteration)
+    ~(body : unit -> unit) =
+  match iteration with
+  | Integer_range { start = low; stop = high; inclusive } ->
+      let element = ground st low.type_ in
+      let index = binding st ~name:"index" element in
+      let stop = binding st element in
+      emit st.b (Assign (index, Use (operand st low)));
+      emit st.b (Assign (stop, Use (operand st high)));
+      let test = block st.b and inside = block st.b and step = block st.b and after = block st.b in
+      let depth = List.length st.scopes in
+      finish st.b (Goto test);
+      start st.b test;
+      let going = local st.b (Raw Bool) in
+      emit st.b
+        (Assign (at going, Binary ((if inclusive then Less_equal else Less), Copy index, Copy stop)));
+      finish st.b
+        (Switch { value = Copy (at going); cases = [ (Z.one, inside) ]; default = Some after });
+      start st.b inside;
+      in_scope st (fun () ->
+          let bound = binding st element in
+          emit st.b (Assign (bound, Use (Copy index)));
+          match_patterns st [ (pattern, bound) ] ~failed:(block st.b);
+          looping st ~continue_:step ~break_:after ~depth body);
+      finish st.b (Goto step);
+      start st.b step;
+      (* An inclusive range stops after its last value without adding
+         one to it, which could overflow. *)
+      if inclusive then begin
+        let last = local st.b (Raw Bool) in
+        emit st.b (Assign (at last, Binary (Equal, Copy index, Copy stop)));
+        let next = block st.b in
+        finish st.b
+          (Switch { value = Copy (at last); cases = [ (Z.one, after) ]; default = Some next });
+        start st.b next
+      end;
+      emit st.b
+        (Assign (index, Binary (Add, Copy index, constant_int (integer_of st element) Z.one)));
+      finish st.b (Goto test);
+      start st.b after
+  | Yielding_call ({ kind = Call call; _ } as iterated) -> (
+      (* The yielding method is inlined here, with the loop body at each
+         of its [yield]s. *)
+      match resolve_callee st call.callee with
+      | None -> bug "a loop over a call that resolves to no method"
+      | Some (path, type_arguments) when List.exists (Path.equal path) st.frame.inlined ->
+          (* The method is already inlined around this loop, so inlining
+             it again would never end. The loop pulls a cursor over the
+             call instead. *)
+          let yielding : Ground.yielding = { method_ = path; type_arguments } in
+          in_scope st (fun () ->
+              let cursor = boxed_cursor st yielding in
+              call_into st iterated call cursor;
+              own_in_scope st cursor;
+              pull_cursor st yielding cursor ~pattern ~body)
+      | Some (path, type_arguments) ->
+          (match (signature_of st.context path).output with
+          | Yields _ -> ()
+          | Returns _ | Lends _ -> bug "a loop over %s, which does not yield" (Path.show path));
+          let arguments = arguments_to_inline st path type_arguments call.arguments in
+          let caller = st.frame in
+          let depth = List.length st.scopes in
+          let after = block st.b in
+          inline st path type_arguments ~arguments ~call_site:(site_of st origin)
+            ~on_yield:(fun yielded ~resume ~stop ->
+              let inner = st.frame in
+              st.frame <- caller;
+              let around = List.length st.scopes in
+              in_scope st (fun () ->
+                  match_patterns st [ (pattern, yielded) ] ~failed:(block st.b);
+                  st.loops <-
+                    {
+                      continue_ = resume;
+                      continue_depth = around;
+                      break_ = after;
+                      break_depth = depth;
+                    }
+                    :: st.loops;
+                  body ();
+                  st.loops <- List.tl st.loops);
+              finish st.b (Goto resume);
+              ignore stop;
+              st.frame <- inner);
+          finish st.b (Goto after);
+          start st.b after)
+  | Yielding_call _ -> bug "a loop over what is not a call"
+  | Cursor { cursor; next = None } -> (
+      match ground st (Core_walk.place_type cursor) with
+      | Cursor yielding -> pull_cursor st yielding (place st cursor) ~pattern ~body
+      | cursor_ty -> bug "a loop over %s, which is not a cursor" (Ground.to_string cursor_ty))
+  | Cursor { cursor; next = Some next } ->
+      (* A value of a type that implements [Cursor]: its own [next] is
+         called until it gives [None]. *)
+      let cursor = place st cursor in
+      pull_loop st ~option:(result_type st next)
+        ~call_next:(fun destination -> call_with_places st next [ cursor ] ~destination)
+        ~body:(fun value ->
+          match_patterns st [ (pattern, value) ] ~failed:(block st.b);
+          body ())
+
 (* A loop over the cursor of a yielding method's call: the pulled method's
    [next] is called until it gives [None]. *)
-and pull_cursor st (yielding : Ground.yielding) cursor ~pattern ~body =
+and pull_cursor st (yielding : Ground.yielding) cursor ~pattern ~(body : unit -> unit) =
   pull_loop st
     ~option:(cursor_result st.context yielding)
     ~call_next:(fun destination -> call_next st yielding cursor destination)
     ~body:(fun value ->
       match_patterns st [ (pattern, value) ] ~failed:(block st.b);
-      block_into st body None)
+      body ())
 
 (* The value a method yields with places lent into it.
 
@@ -939,107 +1074,8 @@ and statement st (node : Core.statement) =
           close_scope st names;
           finish st.b (Goto test);
           start st.b after
-      | For { pattern; iteration = Integer_range { start = low; stop = high; inclusive }; body; _ }
-        ->
-          let element = ground st low.type_ in
-          let index = binding st ~name:"index" element in
-          let stop = binding st element in
-          emit st.b (Assign (index, Use (operand st low)));
-          emit st.b (Assign (stop, Use (operand st high)));
-          let test = block st.b
-          and inside = block st.b
-          and step = block st.b
-          and after = block st.b in
-          let depth = List.length st.scopes in
-          finish st.b (Goto test);
-          start st.b test;
-          let going = local st.b (Raw Bool) in
-          emit st.b
-            (Assign
-               (at going, Binary ((if inclusive then Less_equal else Less), Copy index, Copy stop)));
-          finish st.b
-            (Switch { value = Copy (at going); cases = [ (Z.one, inside) ]; default = Some after });
-          start st.b inside;
-          in_scope st (fun () ->
-              let bound = binding st element in
-              emit st.b (Assign (bound, Use (Copy index)));
-              match_patterns st [ (pattern, bound) ] ~failed:(block st.b);
-              looping st ~continue_:step ~break_:after ~depth (fun () -> block_into st body None));
-          finish st.b (Goto step);
-          start st.b step;
-          (* An inclusive range stops after its last value without adding
-             one to it, which could overflow. *)
-          if inclusive then begin
-            let last = local st.b (Raw Bool) in
-            emit st.b (Assign (at last, Binary (Equal, Copy index, Copy stop)));
-            let next = block st.b in
-            finish st.b
-              (Switch { value = Copy (at last); cases = [ (Z.one, after) ]; default = Some next });
-            start st.b next
-          end;
-          emit st.b
-            (Assign (index, Binary (Add, Copy index, constant_int (integer_of st element) Z.one)));
-          finish st.b (Goto test);
-          start st.b after
-      | For { pattern; iteration = Yielding_call ({ kind = Call call; _ } as iterated); body; _ }
-        -> (
-          (* The yielding method is inlined here, with the loop body at each
-             of its [yield]s. *)
-          match resolve_callee st call.callee with
-          | None -> bug "a loop over a call that resolves to no method"
-          | Some (path, type_arguments) when List.exists (Path.equal path) st.frame.inlined ->
-              (* The method is already inlined around this loop, so inlining
-                 it again would never end. The loop pulls a cursor over the
-                 call instead. *)
-              let yielding : Ground.yielding = { method_ = path; type_arguments } in
-              in_scope st (fun () ->
-                  let cursor = boxed_cursor st yielding in
-                  call_into st iterated call cursor;
-                  own_in_scope st cursor;
-                  pull_cursor st yielding cursor ~pattern ~body)
-          | Some (path, type_arguments) ->
-              (match (signature_of st.context path).output with
-              | Yields _ -> ()
-              | Returns _ | Lends _ -> bug "a loop over %s, which does not yield" (Path.show path));
-              let arguments = arguments_to_inline st path type_arguments call.arguments in
-              let caller = st.frame in
-              let depth = List.length st.scopes in
-              let after = block st.b in
-              inline st path type_arguments ~arguments ~call_site:(site_of st node.origin)
-                ~on_yield:(fun yielded ~resume ~stop ->
-                  let inner = st.frame in
-                  st.frame <- caller;
-                  let around = List.length st.scopes in
-                  in_scope st (fun () ->
-                      match_patterns st [ (pattern, yielded) ] ~failed:(block st.b);
-                      st.loops <-
-                        {
-                          continue_ = resume;
-                          continue_depth = around;
-                          break_ = after;
-                          break_depth = depth;
-                        }
-                        :: st.loops;
-                      block_into st body None;
-                      st.loops <- List.tl st.loops);
-                  finish st.b (Goto resume);
-                  ignore stop;
-                  st.frame <- inner);
-              finish st.b (Goto after);
-              start st.b after)
-      | For { iteration = Yielding_call _; _ } -> bug "a loop over what is not a call"
-      | For { pattern; iteration = Cursor { cursor; next = None }; body; _ } -> (
-          match ground st (Core_walk.place_type cursor) with
-          | Cursor yielding -> pull_cursor st yielding (place st cursor) ~pattern ~body
-          | cursor_ty -> bug "a loop over %s, which is not a cursor" (Ground.to_string cursor_ty))
-      | For { pattern; iteration = Cursor { cursor; next = Some next }; body; _ } ->
-          (* A value of a type that implements [Cursor]: its own [next] is
-             called until it gives [None]. *)
-          let cursor = place st cursor in
-          pull_loop st ~option:(result_type st next)
-            ~call_next:(fun destination -> call_with_places st next [ cursor ] ~destination)
-            ~body:(fun value ->
-              match_patterns st [ (pattern, value) ] ~failed:(block st.b);
+      | For { pattern; iteration; body; _ } ->
+          for_each st ~origin:node.origin ~pattern ~iteration ~body:(fun () ->
               block_into st body None)
       | Yield { mode; part } -> (
           let lends =
