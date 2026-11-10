@@ -2,7 +2,7 @@
 
 open Ir
 
-let version = 14
+let version = 15
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -148,6 +148,9 @@ let intrinsic_tag = function
   | Program_argument -> 42
   | Evidence_fill -> 44
   | Environment -> 49
+  | Run_test -> 51
+  | Report_tests_to -> 52
+  | Live_blocks -> 53
   | Terminated_length -> 50
 
 let encode_rvalue instance rvalue =

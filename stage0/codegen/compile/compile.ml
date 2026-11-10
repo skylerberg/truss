@@ -404,10 +404,30 @@ let small_callees ~find ~worked_on (instance : Lir.t) =
         (called instance)
   | _ -> []
 
+(* The standard library's test runner, which a test program's [main]
+   calls. *)
+let test_runner : Instance.key =
+  Code
+    {
+      path =
+        Top
+          {
+            module_ = { package = "standard"; modules = [ "system"; "test_runner" ] };
+            name = "run";
+          };
+      type_arguments = [];
+    }
+
 (* Builds what the roots reach into a program at [output], with the given
-   startup code, once the instances agree with one another. *)
-let rec build ?progress ?tests t ~roots ~startup ~output =
-  let units = Reachable.reachable t.context.env ~lookup:(compiled t) roots in
+   startup code, once the instances agree with one another. An instance
+   among [made] is itself, and no query's. *)
+let rec build ?progress ?tests ?(made = []) t ~roots ~startup ~output =
+  let lookup key =
+    match List.find_opt (fun (instance : Lir.t) -> Instance.equal instance.key key) made with
+    | Some instance -> Lir.Code instance
+    | None -> compiled t key
+  in
+  let units = Reachable.reachable t.context.env ~lookup roots in
   let found =
     List.fold_left
       (fun found unit -> Reachable.Keys.add (Reachable.compiled_key unit) unit found)
@@ -438,6 +458,15 @@ let rec build ?progress ?tests t ~roots ~startup ~output =
   with
   | Ok () -> ()
   | Error message -> raise (Cannot_build message)
+
+(* Builds the program that runs the tests at [roots], in that order, with
+   the standard library's runner. *)
+and build_test_program ?progress ?made t ~time_limit ~roots ~output =
+  build ?progress ?made t ~tests:true ~roots:(test_runner :: roots)
+    ~startup:
+      (Startup.tests_calling ~time_limit ~runner:(Instance.symbol test_runner)
+         (List.map Instance.symbol roots))
+    ~output
 
 (* Builds what the roots reach into a temporary program and runs it with
    [arguments], then removes it. *)
@@ -690,10 +719,8 @@ let run_tests ?results ?(rerun = false) ?(progress = ignore) t ~time_limit tests
       Filename.concat (Filename.get_temp_dir_name ())
         (Printf.sprintf "truss-tests-%d" (Unix.getpid ()))
     in
-    build t ~tests:true ~roots
-      ~startup:(Startup.tests_calling ~time_limit (List.map Instance.symbol roots))
-      ~output
-      ~progress:(fun compiled total -> progress (Compiling { compiled; total }));
+    build_test_program t ~time_limit ~roots ~output ~progress:(fun compiled total ->
+        progress (Compiling { compiled; total }));
     progress (Running { tests = Array.length missing });
     let index_of number =
       if number < 0 || number >= Array.length missing then
@@ -733,6 +760,12 @@ let run_tests ?results ?(rerun = false) ?(progress = ignore) t ~time_limit tests
               record
           | [] -> bug "fewer results than tests"))
     known
+
+let build_made_tests t ~time_limit made ~output =
+  reporting t @@ fun () ->
+  build_test_program t ~made ~time_limit
+    ~roots:(List.map (fun (instance : Lir.t) -> instance.key) made)
+    ~output
 
 (* Code that cannot ship: a [todo] or an [echo] a program can reach. *)
 type unshippable = {
