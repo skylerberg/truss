@@ -755,6 +755,11 @@ A statement here is the innermost one. The statements inside a block that is
 part of a larger expression settle their own types, and the block's last
 expression is checked against the block's expected type.
 
+The value that a `match` or an `is` tests settles its types before the
+patterns are checked, as a statement of its own, because a pattern needs to
+know the type it matches. So in `second / 0 is None`, the `0` takes its
+default and the operator's `impl` is chosen before `None` is looked up.
+
 ### Literals
 
 An integer literal has a literal type that only an integer type can fill, and
