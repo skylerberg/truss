@@ -10,11 +10,14 @@ type time =
       (** Steps in proportion to the length of the storage or view that is this argument. *)
   | Unbounded_time
 
+(** A number an operation is given: the argument at a position, or a [USize] generic argument by its
+    name. *)
+type amount = Argument of int | Generic of string
+
 (** How many blocks an operation allocates. *)
 type allocations =
   | No_allocations
-  | One_if_positive of int
-      (** One when the argument at this position is above zero, which is the room it makes. *)
+  | One_if_positive of amount  (** One when this amount is above zero, and otherwise none. *)
   | Unknown_allocations
 
 type cost = { time : time; allocations : allocations }

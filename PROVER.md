@@ -115,7 +115,7 @@ Every fact the prover must show, and where it comes from:
 | A specification is well defined | Each call's `requires`, index, and division in a function's `requires` and `ensures` and in a loop's invariants |
 | An `Integer` fits where a built-in integer is expected | Recorded by the type checker |
 | Two indexes or ranges do not overlap | Recorded by the ownership check, for places lent together and for `parallel` branches |
-| Map literal keys are distinct | Each map literal |
+| A `FiniteMap` literal's keys are distinct | Each `FiniteMap` literal in a specification |
 
 An obligation names its kind, its definition, and its position within the
 definition, as every result does. A test's obligations are proven like any
@@ -199,6 +199,11 @@ and `reads` clauses):
   have a `time` clause, so `wrapping_add`, `saturating_add`,
   `checked_add`, `try_from`, and the rest are definitions their callers
   unfold.
+- **An array is a sequence.** An `Array[Element, count]` is known by its
+  model, which `array_model`, an intrinsic for specifications only, names:
+  a `Sequence` of length `count`. A literal of one is that sequence, with
+  its elements in order, built in place, so it allocates nothing. Its `at`
+  says the element is the model's, so an index below `count` is within it.
 - **A storage and a view are sequences.** Each is known by its model, a
   `Sequence` of its elements whose length fits a `USize`, which
   `storage_model` and `view_model`, intrinsics for specifications only,
@@ -274,10 +279,13 @@ unstable proofs.
   their values. Each is stated for each two values that `identical`
   compares, rather than for every two, which would have the solver
   compare every pair it knows.
-- **A literal** of a `List` or a `Sequence` is a value whose sequence, the
-  list's model or the sequence itself, has the literal's length and
-  elements. A map literal holds each key's value and no other key, and a
-  set literal contains what it lists and nothing else.
+- **A literal** of an array or a `Sequence` is a value whose sequence, the
+  array's model or the sequence itself, has the literal's length and
+  elements. A `FiniteMap` literal holds each key's value and no other key,
+  and a `FiniteSet` literal contains what it lists and nothing else. A
+  literal of a `List`, a `Set`, or a `Map` is desugared to the calls that
+  build it, so it is known through their contracts: a map literal's keys
+  must be distinct because `Map.insert_absent` requires it.
 - **`identical(a, b)`** is the solver's equality, for every type.
 - **Each type's `model()`** is a function from its sort to its model's,
   known through the contracts of the type's methods. That is how code
@@ -1060,10 +1068,8 @@ sanitized runs, test the trusted base against real executions.
   by variant and then field by field, as a derived `Equal` is field by
   field. An ordering on a type that is not built in is known only by the
   laws of `Ordered`.
-- **Arrays and surrogates.** An `Array[Element, count]` is to be a sequence
-  of length `count`, and a `Character` is never to be a surrogate. An array
-  is a sort the solver knows nothing about, a literal of one is code the
-  prover cannot read, and a `Character` is any integer up to `0x10FFFF`.
+- **Surrogates.** A `Character` is never to be a surrogate. It is any
+  integer up to `0x10FFFF`.
 - **Ranks for a collection's elements.** An element of a standard
   collection is to be smaller than the collection, as Dafny orders its
   sequences, so that recursion over a tree whose children are a list ends

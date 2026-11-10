@@ -120,6 +120,20 @@ let signature (operation : Intrinsic.operation) : T.signature =
         [ input "view" (view element); input "start" usize; input "stop" usize ]
   | Storage_model ->
       { (with_storage ~output:(Returns (sequence element)) []) with specification_only = true }
+  | Array_model ->
+      let count = parameter operation "count" in
+      let array =
+        T.Named
+          {
+            path = Intrinsic.builtin_path Array;
+            arguments = [ T.Type element; T.Value (Value_parameter count) ];
+          }
+      in
+      {
+        (make ~generics:[ "Element" ] ~output:(Returns (sequence element)) [ input "array" array ]) with
+        generics = [ generic "Element"; { T.generic = count; kind = Value_generic } ];
+        specification_only = true;
+      }
   | View_model ->
       {
         (make ~generics:[ "Element" ]
@@ -167,7 +181,8 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Libc_number number -> make ~output:(Returns (libc_scalar (Libc.number_type number))) []
 
 type time = Constant_time | Linear_in of int | Unbounded_time
-type allocations = No_allocations | One_if_positive of int | Unknown_allocations
+type amount = Argument of int | Generic of string
+type allocations = No_allocations | One_if_positive of amount | Unknown_allocations
 type cost = { time : time; allocations : allocations }
 
 (* What each operation costs, as the prover trusts it. Arithmetic, and
@@ -186,13 +201,13 @@ let cost (operation : Intrinsic.operation) =
   | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
   | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
   | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
-  | View_slice | View_address | Storage_model | View_model | Crash | Storage_lengthen | Storage_push
-  | Handle_from | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks | Libc_number _
-    ->
+  | View_slice | View_address | Storage_model | View_model | Array_model | Crash | Storage_lengthen
+  | Storage_push | Handle_from | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks
+  | Libc_number _ ->
       { time = Constant_time; allocations = No_allocations }
   | Compare_bytes | Storage_remove | Storage_insert ->
       { time = Linear_in 0; allocations = No_allocations }
   | Storage_set_capacity -> { time = Linear_in 0; allocations = Unknown_allocations }
-  | Storage_with_capacity -> { time = Constant_time; allocations = One_if_positive 0 }
-  | Storage_from_array -> { time = Constant_time; allocations = Unknown_allocations }
+  | Storage_with_capacity -> { time = Constant_time; allocations = One_if_positive (Argument 0) }
+  | Storage_from_array -> { time = Constant_time; allocations = One_if_positive (Generic "count") }
   | Run_test | Libc _ -> { time = Unbounded_time; allocations = Unknown_allocations }

@@ -149,6 +149,7 @@ type operation =
   | View_slice
   | Storage_model
   | View_model
+  | Array_model
   | View_address
   | Crash
   | Handle_from
@@ -223,6 +224,7 @@ let operations =
     View_slice;
     Storage_model;
     View_model;
+    Array_model;
     View_address;
     Crash;
     Handle_from;
@@ -296,6 +298,7 @@ let operation_name = function
   | View_at -> "view_at"
   | View_slice -> "view_slice"
   | Storage_model -> "storage_model"
+  | Array_model -> "array_model"
   | View_model -> "view_model"
   | View_address -> "view_address"
   | Crash -> "crash"
